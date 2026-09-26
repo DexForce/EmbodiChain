@@ -37,22 +37,26 @@ from embodichain.lab.sim.atomic_actions import (
     MotionPolicy,
     ObjectSemantics,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
     clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    log_affordance_branch_diagnostics,
     make_clear_dynamics_callback,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
@@ -82,7 +86,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the AxisAlign tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate upright or horizontal AxisAlign on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--alignment",
@@ -90,7 +94,7 @@ def parse_arguments() -> argparse.Namespace:
         default="upright",
         help="Choose the object-axis alignment example.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_align_object(
@@ -105,12 +109,12 @@ def create_align_object(
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
             init_pos=init_pos,
         )
     )
@@ -150,7 +154,10 @@ def main() -> None:
     obj = create_align_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
 
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -214,8 +221,12 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan AxisAlign demo trajectory.")
         return

@@ -14,34 +14,50 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""
-This script demonstrates how to create a simulation scene using SimulationManager.
-It shows the basic setup of simulation context, adding objects, and sensors.
-"""
+"""Manipulate objects with native DexSim or browser-based Viser Gizmos."""
 
 from __future__ import annotations
 
 import argparse
 import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
+import dexsim
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.cfg import (
+    RigidBodyPhysicsCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RenderCfg
 from embodichain.lab.sim.shapes import CubeCfg
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg
 from embodichain.utils import logger
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -49,10 +65,11 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,  # Physics timestep (100 Hz)
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(
             renderer=args.renderer
         ),  # Enable ray tracing for better visuals
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
@@ -65,11 +82,15 @@ def main():
             uid="cube1",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.0, 0.0, 1.0],
         )
@@ -79,30 +100,41 @@ def main():
             uid="cube2",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="kinematic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.1,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.1,
+                    },
+                }
             ),
             init_pos=[0.3, 0.0, 1.0],
         )
     )
+    sim.prepare()
 
     native_window_opened = False
     if not args.headless:
+        entity_gizmo_config = dexsim.interaction.EntityGizmoConfig()
+        entity_gizmo_config.max_gizmos = 0
         native_window_opened = sim.open_window()
+        if native_window_opened:
+            sim.enable_entity_gizmo(entity_gizmo_config)
 
-    # Enable native-window or Viser Gizmo control.
-    if native_window_opened or args.viser:
+    # Native windows use DexSim's entity controller; Viser publishes one
+    # EmbodiChain-side transform control per object.
+    if args.viser:
         sim.enable_gizmo(
             uid="cube1",
-            enable_native=native_window_opened,
         )
         sim.enable_gizmo(
             uid="cube2",
-            enable_native=native_window_opened,
         )
+    elif native_window_opened:
+        logger.log_info("Left-click an entity and press G to attach/detach its Gizmo.")
+        logger.log_info("Multiple selected entities can keep Gizmos simultaneously.")
     else:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
@@ -111,9 +143,9 @@ def main():
     logger.log_info("Scene setup complete!")
     logger.log_info(f"Running simulation with 1 environment(s)")
     if native_window_opened or args.viser:
-        if sim.has_gizmo("cube1"):
+        if args.viser and sim.has_gizmo("cube1"):
             logger.log_info("Gizmo enabled for cube1 - you can drag it around!")
-        if sim.has_gizmo("cube2"):
+        if args.viser and sim.has_gizmo("cube2"):
             logger.log_info("Gizmo enabled for cube2 - you can drag it around!")
     logger.log_info("Press Ctrl+C to stop the simulation")
 
@@ -123,29 +155,30 @@ def main():
 
 def run_simulation(sim: SimulationManager):
     """Run the simulation loop."""
-    if sim.is_use_gpu_physics:
-        sim.init_gpu_physics()
-
     step_count = 0
     gizmo_enabled = True
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
+            frame_start = time.perf_counter()
             sim.update(step=1)
 
             step_count += 1
 
-            # Disable gizmo after 200000 steps (example)
+            # Disable Gizmo control after 200000 steps (example).
             if step_count == 200000 and gizmo_enabled:
-                logger.log_info("Disabling gizmo at step 200000")
-                sim.disable_gizmo("cube1")
-                sim.disable_gizmo("cube2")
+                logger.log_info("Disabling Gizmo control at step 200000")
+                if sim.get_world().get_entity_gizmo() is not None:
+                    sim.disable_entity_gizmo()
+                else:
+                    sim.disable_gizmo("cube1")
+                    sim.disable_gizmo("cube2")
                 gizmo_enabled = False
 
             # Print FPS every second
             if step_count % 1000 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -155,6 +188,9 @@ def run_simulation(sim: SimulationManager):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
@@ -163,4 +199,4 @@ def run_simulation(sim: SimulationManager):
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

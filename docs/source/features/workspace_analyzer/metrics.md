@@ -27,7 +27,7 @@ Computes workspace volume and coverage using voxel-based analysis.
 
 ```python
 import numpy as np
-from embodichain.lab.sim.workspace.metrics import ReachabilityMetric
+from embodichain.lab.sim.motion.workspace.metrics import ReachabilityMetric
 
 # Basic usage
 workspace_points = np.random.uniform(-1, 1, size=(1000, 3))
@@ -42,21 +42,35 @@ print(f"Coverage: {results['coverage']:.1f}%")
 
 ### 2. ManipulabilityMetric
 
-Analyzes dexterity using distance-based heuristic or Yoshikawa index (with Jacobians).
+Computes the Yoshikawa manipulability index `sqrt(det(J @ J^T))` from robot
+Jacobians (or from per-point scores precomputed with
+`embodichain.compute.kinematics.yoshikawa_manipulability`). Manipulability
+cannot be derived from Cartesian points alone, so `compute` requires either
+`jacobians` or `manipulability_scores`; called with neither it returns `{}`
+rather than fabricated statistics.
 
 ```python
 import numpy as np
-from embodichain.lab.sim.workspace.metrics import ManipulabilityMetric
+from embodichain.lab.sim.motion.workspace.metrics import ManipulabilityMetric
 
-# Basic usage (heuristic method)
+# Provide per-configuration Jacobians (N, 6, dof), e.g. from solver.get_jacobian.
+jacobians = np.random.randn(1000, 6, 7)
 workspace_points = np.random.uniform(-1, 1, size=(1000, 3))
 manipulability = ManipulabilityMetric()
-results = manipulability.compute(workspace_points)
+results = manipulability.compute(workspace_points, jacobians=jacobians)
 
 print(f"Mean manipulability: {results['mean_manipulability']:.3f}")
+print(f"Valid points: {results['num_valid_points']}")
 ```
 
-**Returns**: mean, std, min, max manipulability; condition numbers (if Jacobians provided)
+When the analyzer runs, it computes these scores from the active solver's
+Jacobian and stores them as `manipulability_scores` alongside the results, so
+callers rarely construct the metric directly.
+
+**Returns**: mean, std, min, max manipulability; `num_valid_points` (points
+above `jacobian_threshold`); condition-number statistics when isotropy is
+enabled. If no point clears the threshold, `num_valid_points` is `0` and the
+statistics are `NaN`.
 
 ### 3. DensityMetric
 
@@ -64,7 +78,7 @@ Computes local point density using radius-based neighborhood analysis.
 
 ```python
 import numpy as np
-from embodichain.lab.sim.workspace.metrics import DensityMetric
+from embodichain.lab.sim.motion.workspace.metrics import DensityMetric
 
 # Basic usage
 workspace_points = np.random.uniform(-1, 1, size=(1000, 3))
@@ -82,16 +96,17 @@ print(f"Mean density: {results['mean_density']:.2f}")
 
 ```python
 import numpy as np
-from embodichain.lab.sim.workspace.metrics import (
+from embodichain.lab.sim.motion.workspace.metrics import (
     ReachabilityMetric, ManipulabilityMetric, DensityMetric
 )
 
 # Generate sample data
 workspace_points = np.random.uniform(-1, 1, size=(5000, 3))
+jacobians = np.random.randn(5000, 6, 7)  # per-configuration spatial Jacobians
 
-# Compute all metrics
+# Compute all metrics (manipulability requires Jacobians or precomputed scores)
 reach_results = ReachabilityMetric().compute(workspace_points)
-manip_results = ManipulabilityMetric().compute(workspace_points)
+manip_results = ManipulabilityMetric().compute(workspace_points, jacobians=jacobians)
 density_results = DensityMetric().compute(workspace_points)
 
 print(f"Volume: {reach_results['volume']:.4f} m³")
@@ -102,7 +117,7 @@ print(f"Mean density: {density_results['mean_density']:.2f}")
 ### With Custom Configuration
 
 ```python
-from embodichain.lab.sim.workspace.configs import (
+from embodichain.lab.sim.motion.workspace.configs import (
     ReachabilityConfig, DensityConfig
 )
 
@@ -122,7 +137,7 @@ density_results = density.compute(workspace_points)
 All metrics can be customized using configuration classes:
 
 ```python
-from embodichain.lab.sim.workspace.configs import (
+from embodichain.lab.sim.motion.workspace.configs import (
     ReachabilityConfig, ManipulabilityConfig, DensityConfig
 )
 
@@ -163,7 +178,7 @@ manipulability = ManipulabilityMetric()
 density = DensityMetric()
 
 # Custom configuration
-from embodichain.lab.sim.workspace.configs import ReachabilityConfig
+from embodichain.lab.sim.motion.workspace.configs import ReachabilityConfig
 reach_config = ReachabilityConfig(voxel_size=0.02, compute_coverage=True)
 reachability = ReachabilityMetric(reach_config)
 ```

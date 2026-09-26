@@ -12,6 +12,14 @@ Overview
 
 The embodichain RL module is used to train agents to accomplish tasks in simulation environments. It mainly includes algorithm implementations, policy networks, data buffers, training processes, and utility tools.
 
+Training-time evaluation measures learning progress when enabled in the trainer.
+After training, ``embodichain eval-policy`` reloads a saved checkpoint and reports
+completed-episode reward, length, success signals and task metrics. Qualification
+compares those measurements with criteria for the task and deployment. See
+:doc:`/guides/policy_evaluation` for a headless locomotion example and qualification
+criteria. The bundled locomotion PPO configurations disable training-time
+evaluation, so use saved-checkpoint evaluation to assess a trained policy.
+
 Architecture Diagram Example
 ----------------------------
 
@@ -79,11 +87,13 @@ See also
     config.md
     train_script.md
     multi_gpu.md
+    locomotion.md
 
 See Also
 --------
 
 - :doc:`/tutorial/rl` — Step-by-step RL training tutorial
+- :doc:`/guides/rlinf` — Train EmbodiChain environments with the external RLinf backend
 - :doc:`/overview/gym/env` — EmbodiedEnv configuration and Action Manager
 - :doc:`/features/online_data` — Online data streaming pipeline
 - :doc:`/resources/task/index` — Available RL task environments

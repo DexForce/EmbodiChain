@@ -71,7 +71,7 @@ from embodichain.utils.logger import log_info, log_warning, log_error
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         WorkspaceAnalyzerConfig,
     )
 
@@ -297,8 +297,8 @@ def _build_asset_robot_cfg(
         ValueError: If ``--ee-link`` is missing, or a USD/non-URDF asset is
             given without ``--urdf``.
     """
-    from embodichain.lab.sim.cfg import RobotCfg
-    from embodichain.lab.sim.solvers import (
+    from embodichain.lab.sim.cfg import ArticulationRootPropertiesCfg, RobotCfg
+    from embodichain.lab.sim.motion.solvers import (
         PinkSolverCfg,
         PinocchioSolverCfg,
         PytorchSolverCfg,
@@ -344,8 +344,10 @@ def _build_asset_robot_cfg(
     cfg.fpath = asset
     cfg.init_pos = tuple(args.init_pos)
     cfg.init_rot = tuple(args.init_rot)
-    cfg.fix_base = args.fix_base
-    cfg.use_usd_properties = args.use_usd_properties
+    cfg.root_props = ArticulationRootPropertiesCfg(
+        fixed_base=args.fix_base,
+    )
+    cfg.asset_physics_mode = args.asset_physics_mode
     cfg.control_parts = {control_part: joints}
     cfg.solver_cfg = {control_part: solver_cfg}
     return cfg, control_part, solver_urdf
@@ -365,7 +367,7 @@ def build_analyzer_config(
     """
     import torch
 
-    from embodichain.lab.sim.workspace.configs import (
+    from embodichain.lab.sim.motion.workspace.configs import (
         CacheConfig,
         DimensionConstraint,
         SamplingConfig,
@@ -373,7 +375,7 @@ def build_analyzer_config(
         VisualizationConfig,
         VisualizationType,
     )
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         AnalysisMode,
         WorkspaceAnalyzerConfig,
     )
@@ -394,6 +396,10 @@ def build_analyzer_config(
         viser_point_size=getattr(args, "viser_point_size", 0.01),
         voxel_size=args.voxel_size,
         show_unreachable_points=not args.hide_unreachable,
+        manipulability_log_scale=getattr(args, "manipulability_log_scale", False),
+        manipulability_percentile_clip=tuple(
+            getattr(args, "manipulability_percentile", (2.0, 98.0))
+        ),
     )
     cache = CacheConfig(
         enabled=not args.no_cache,
@@ -419,6 +425,8 @@ def build_analyzer_config(
         constraint=constraint,
         ik_samples_per_point=args.ik_samples_per_point,
         control_part_name=control_part_name,
+        retain_diagnostics=not getattr(args, "compact_results", False),
+        sample_within_constraints=getattr(args, "sample_within_constraints", False),
     )
 
     if mode == AnalysisMode.PLANE_SAMPLING:
@@ -565,6 +573,8 @@ def _preview_points_and_colors(
         points = np.asarray(arrays["workspace_points"])
     elif "all_points" in arrays:
         points = np.asarray(arrays["all_points"])
+    elif "reachable_points" in arrays:
+        points = np.asarray(arrays["reachable_points"])
     else:
         points = np.asarray(arrays[next(iter(arrays))])
 
@@ -592,7 +602,7 @@ def preview_cache(args: argparse.Namespace, analyzer: WorkspaceAnalyzer) -> None
             ``args.hide_unreachable``.
         analyzer: Analyzer attached to the loaded robot and simulation.
     """
-    from embodichain.lab.sim.workspace.caches.results_cache import (
+    from embodichain.lab.sim.motion.workspace.caches.results_cache import (
         DEFAULT_RESULTS_CACHE_DIR,
         deserialize_results,
     )
@@ -638,7 +648,7 @@ def main(args: argparse.Namespace) -> None:
     import torch
 
     from embodichain.lab.sim.sim_manager import SimulationManager
-    from embodichain.lab.sim.workspace.analyzer import (
+    from embodichain.lab.sim.motion.workspace.analyzer import (
         WorkspaceAnalyzer,
     )
 
@@ -652,6 +662,7 @@ def main(args: argparse.Namespace) -> None:
         if robot is None:
             log_error("Failed to load robot into the simulation.")
             return
+        sim.prepare()
         control_part = _resolve_control_part(robot, control_part)
         joints_desc = (
             robot.control_parts.get(control_part) if control_part else "all joints"
@@ -864,10 +875,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fix the robot base (default: fixed).",
     )
     asset_opts.add_argument(
-        "--use-usd-properties",
-        action="store_true",
-        default=False,
-        help="Use physical properties from the USD file (USD assets only).",
+        "--asset-physics-mode",
+        choices=("preserve", "overlay"),
+        default="overlay",
+        help=(
+            "How asset physics is handled: preserve source-authored values or "
+            "overlay explicitly configured values (default: overlay for robots)."
+        ),
     )
 
     # --- Analysis -----------------------------------------------------------
@@ -904,14 +918,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--sampler",
         type=str,
         choices=["random", "sobol", "halton", "lhs", "uniform", "gaussian"],
-        default="random",
-        help="Sampling strategy (default: random).",
+        default="sobol",
+        help="Sampling strategy (default: sobol).",
     )
     sampling.add_argument(
         "--seed", type=int, default=42, help="Random seed (default: 42)."
     )
     sampling.add_argument(
         "--batch-size", type=int, default=1000, help="FK/IK batch size (default: 1000)."
+    )
+
+    sampling.add_argument(
+        "--sample-within-constraints",
+        action="store_true",
+        help="Refill samples inside the permitted domain; changes reachability denominator.",
+    )
+    sampling.add_argument(
+        "--compact-results",
+        action="store_true",
+        help="Store reachable points, qpos and aligned scores without rejected-point diagnostics.",
     )
 
     # --- Workspace / plane --------------------------------------------------
@@ -1001,9 +1026,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     viz.add_argument(
         "--vis-type",
         type=str,
-        choices=["point_cloud", "voxel", "sphere", "axis"],
+        choices=["point_cloud", "voxel", "sphere", "axis", "manipulability"],
         default="point_cloud",
-        help="Visualization type (default: point_cloud).",
+        help=(
+            "Visualization type (default: point_cloud). 'manipulability' colors "
+            "reachable points by Yoshikawa score and enables that metric; it "
+            "renders in the native viewer and in Viser."
+        ),
+    )
+    viz.add_argument(
+        "--manipulability-log-scale",
+        action="store_true",
+        help=(
+            "Color manipulability on log10(w). Scores span orders of magnitude, "
+            "so a linear ramp collapses the near-singular shell."
+        ),
+    )
+    viz.add_argument(
+        "--manipulability-percentile",
+        type=float,
+        nargs=2,
+        metavar=("LOW", "HIGH"),
+        default=(2.0, 98.0),
+        help=(
+            "Percentile window bounding the manipulability color scale "
+            "(default: 2 98). Use 0 100 for a plain min/max scale."
+        ),
     )
     viz.add_argument(
         "--point-size", type=float, default=4.0, help="Point size (default: 4.0)."
@@ -1069,7 +1117,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     # Resolve cache dir default here (after parse) to keep --help output clean.
     if args.cache_dir is None and not args.no_cache:
-        from embodichain.lab.sim.workspace.caches import (
+        from embodichain.lab.sim.motion.workspace.caches import (
             DEFAULT_RESULTS_CACHE_DIR,
         )
 

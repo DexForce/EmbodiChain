@@ -43,8 +43,10 @@ from .simulation import (
     ControlPartCommandPreset,
     ControlPartEndpointBinding,
     ControlPartResourceBinding,
+    RigidizedArticulationAntipodalGraspBinding,
     SimulationArticulationBinding,
     SimulationArticulationLinkBinding,
+    SimulationRigidizedArticulationObjectBinding,
     SimulationRigidObjectBinding,
     SimulationRobotSkillProfileBinding,
     SimulationSceneBinding,
@@ -343,6 +345,70 @@ def _decode_articulation(
     )
 
 
+def _decode_rigidized_articulation(
+    value: object,
+    *,
+    path: str,
+) -> SimulationRigidizedArticulationObjectBinding:
+    """Decode one locked native articulation exposed as a semantic object."""
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"entity_id", "locked_qpos"}),
+        optional=frozenset(
+            {
+                "simulation_uid",
+                "aliases",
+                "dynamics",
+                "collision_role",
+                "semantic_type",
+                "default_grasp_affordance",
+                "joint_position_tolerance",
+                "link_transform_tolerance",
+                "affordances",
+            }
+        ),
+    )
+    raw_locked_qpos = config["locked_qpos"]
+    if not isinstance(raw_locked_qpos, Mapping):
+        raise TypeError(f"{path}.locked_qpos must be a mapping.")
+    locked_qpos = {
+        _identifier(name, path=f"{path}.locked_qpos keys"): _real(
+            position,
+            path=f"{path}.locked_qpos.{name}",
+        )
+        for name, position in raw_locked_qpos.items()
+    }
+    if not locked_qpos:
+        raise ValueError(f"{path}.locked_qpos must not be empty.")
+    common = _decode_scene_entity_common(config, path=path)
+    if common["collision_role"] is not SceneCollisionRole.NONE:
+        raise ValueError(
+            f"{path} rigidized articulation collision_role must be 'none' in "
+            "configured integrations; no planner collision geometry is available."
+        )
+    return SimulationRigidizedArticulationObjectBinding(
+        **common,
+        locked_qpos=locked_qpos,
+        default_grasp_affordance=_optional_identifier(
+            config.get("default_grasp_affordance"),
+            path=f"{path}.default_grasp_affordance",
+        ),
+        joint_position_tolerance=_real(
+            config.get("joint_position_tolerance", 1.0e-3),
+            path=f"{path}.joint_position_tolerance",
+            minimum=0.0,
+            strict_minimum=True,
+        ),
+        link_transform_tolerance=_real(
+            config.get("link_transform_tolerance", 1.0e-5),
+            path=f"{path}.link_transform_tolerance",
+            minimum=0.0,
+            strict_minimum=True,
+        ),
+    )
+
+
 def _decode_link(
     value: object,
     *,
@@ -457,6 +523,70 @@ def _decode_antipodal_grasp(
     )
 
 
+def _decode_rigidized_articulation_antipodal_grasp(
+    value: object,
+    *,
+    object_id: str,
+    path: str,
+) -> RigidizedArticulationAntipodalGraspBinding:
+    """Decode one link-backed grasp for a rigidized articulation object."""
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"kind", "entity_id", "grasp_link"}),
+        optional=frozenset(
+            {
+                "native_name",
+                "revision",
+                "aliases",
+                "relative_pose",
+            }
+        ),
+    )
+    grasp_link = _identifier(config["grasp_link"], path=f"{path}.grasp_link")
+    identity_pose = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    return RigidizedArticulationAntipodalGraspBinding(
+        entity_id=_identifier(config["entity_id"], path=f"{path}.entity_id"),
+        object_id=object_id,
+        grasp_link=grasp_link,
+        native_name=_identifier(
+            config.get("native_name", grasp_link),
+            path=f"{path}.native_name",
+        ),
+        revision=_identifier(
+            config.get("revision", _CONFIGURED_ANTIPODAL_GRASP_REVISION),
+            path=f"{path}.revision",
+        ),
+        aliases=_identifier_tuple(config.get("aliases", ()), path=f"{path}.aliases"),
+        relative_pose=(
+            _finite_tuple(
+                config["relative_pose"],
+                path=f"{path}.relative_pose",
+                expected_length=16,
+            )
+            if "relative_pose" in config
+            else identity_pose
+        ),
+    )
+
+
 def _decode_placement_affordance(
     value: object,
     *,
@@ -518,6 +648,7 @@ def _decode_entity_affordance(
     path: str,
 ) -> (
     AntipodalGraspAffordanceBinding
+    | RigidizedArticulationAntipodalGraspBinding
     | SupportSurfaceAffordanceBinding
     | ContainerAffordanceBinding
 ):
@@ -534,6 +665,7 @@ def _decode_entity_affordance(
                 "relative_pose",
                 "mesh_env_id",
                 "internal_axis",
+                "grasp_link",
                 "object_target_pose",
                 "minimum_confidence",
                 "is_default",
@@ -542,14 +674,21 @@ def _decode_entity_affordance(
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
     if kind == "antipodal_grasp":
-        if parent_category != "rigid_objects":
-            raise ValueError(
-                f"{path}.kind {kind!r} is supported only under a rigid object."
+        if parent_category == "rigid_objects":
+            return _decode_antipodal_grasp(
+                value,
+                object_id=parent_id,
+                path=path,
             )
-        return _decode_antipodal_grasp(
-            value,
-            object_id=parent_id,
-            path=path,
+        if parent_category == "rigidized_articulations":
+            return _decode_rigidized_articulation_antipodal_grasp(
+                value,
+                object_id=parent_id,
+                path=path,
+            )
+        raise ValueError(
+            f"{path}.kind {kind!r} is supported only under a rigid object or "
+            "rigidized articulation."
         )
     if kind == "support_surface":
         return _decode_placement_affordance(
@@ -582,6 +721,7 @@ def _decode_entity_affordances(
     path: str,
 ) -> tuple[
     AntipodalGraspAffordanceBinding
+    | RigidizedArticulationAntipodalGraspBinding
     | SupportSurfaceAffordanceBinding
     | ContainerAffordanceBinding,
     ...,
@@ -615,6 +755,7 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
         optional=frozenset(
             {
                 "rigid_objects",
+                "rigidized_articulations",
                 "articulations",
                 "links",
                 "collision_world_mode",
@@ -623,6 +764,7 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
     )
 
     antipodal_grasps: list[AntipodalGraspAffordanceBinding] = []
+    rigidized_articulation_grasps: list[RigidizedArticulationAntipodalGraspBinding] = []
     support_surfaces: list[SupportSurfaceAffordanceBinding] = []
     containers: list[ContainerAffordanceBinding] = []
 
@@ -642,6 +784,11 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
             ):
                 if isinstance(affordance, AntipodalGraspAffordanceBinding):
                     antipodal_grasps.append(affordance)
+                elif isinstance(
+                    affordance,
+                    RigidizedArticulationAntipodalGraspBinding,
+                ):
+                    rigidized_articulation_grasps.append(affordance)
                 elif isinstance(affordance, SupportSurfaceAffordanceBinding):
                     support_surfaces.append(affordance)
                 elif isinstance(affordance, ContainerAffordanceBinding):
@@ -654,15 +801,21 @@ def _decode_scene(value: object) -> SimulationSceneBinding:
         return tuple(bindings)
 
     rigid_objects = decode_entities("rigid_objects", _decode_rigid_object)
+    rigidized_articulations = decode_entities(
+        "rigidized_articulations",
+        _decode_rigidized_articulation,
+    )
     articulations = decode_entities("articulations", _decode_articulation)
     links = decode_entities("links", _decode_link)
 
     return SimulationSceneBinding(
         registry_id=_identifier(config["registry_id"], path=f"{path}.registry_id"),
         rigid_objects=rigid_objects,
+        rigidized_articulations=rigidized_articulations,
         articulations=articulations,
         links=links,
         antipodal_grasps=tuple(antipodal_grasps),
+        rigidized_articulation_grasps=tuple(rigidized_articulation_grasps),
         support_surfaces=tuple(support_surfaces),
         containers=tuple(containers),
         collision_world_mode=(
@@ -1156,12 +1309,16 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         value,
         path=path,
         required=frozenset({"sample_count"}),
-        optional=frozenset({"strategy", "dynamic_collision_mode"}),
+        optional=frozenset({"strategy", "dynamic_collision_mode", "velocity_targets"}),
     )
     return MotionPolicy(
         strategy=_identifier(
             config.get("strategy", "ik_interp"),
             path=f"{path}.strategy",
+        ),
+        velocity_targets=_identifier(
+            config.get("velocity_targets", "auto"),
+            path=f"{path}.velocity_targets",
         ),
         sample_count=_integer(
             config["sample_count"],
@@ -1685,7 +1842,7 @@ def _decode_handover_pose_provider(
             {
                 "kind",
                 "final_position",
-                "final_quaternion_wxyz",
+                "final_quaternion_xyzw",
             }
         ),
     )
@@ -1701,9 +1858,9 @@ def _decode_handover_pose_provider(
             path=f"{path}.final_position",
             expected_length=3,
         ),
-        final_quaternion_wxyz=_finite_tuple(
-            config["final_quaternion_wxyz"],
-            path=f"{path}.final_quaternion_wxyz",
+        final_quaternion_xyzw=_finite_tuple(
+            config["final_quaternion_xyzw"],
+            path=f"{path}.final_quaternion_xyzw",
             expected_length=4,
         ),
     )

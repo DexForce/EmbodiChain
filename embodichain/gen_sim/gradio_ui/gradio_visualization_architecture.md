@@ -134,7 +134,7 @@ description + optional image
        → articraft view <run-dir> → Gradio iframe
 ```
 
-两种方式的本地产物均在 `ARTICRAFT_OUTPUT_ROOT` 下。Remote server 的 USDC sidecar 将单个 assembly 设为 `defaultPrim` 和 articulation root，Gradio 使用当前 Python 环境启动 `embodichain preview-asset --asset_type articulation --use_usd_properties --viser`，并把动态 Viser 端口嵌入页面；Viser 启动失败时仍保留成功 USDC，并回退到结果摘要。Local Codex 继续使用隔离的 Articraft Conda 环境和原生 USDZ Viewer。
+两种方式的本地产物均在 `ARTICRAFT_OUTPUT_ROOT` 下。Remote server 的 USDC sidecar 将单个 assembly 设为 `defaultPrim` 和 articulation root，Gradio 使用当前 Python 环境启动 `embodichain preview-asset --asset_type articulation --asset-physics-mode preserve --viser`，并把动态 Viser 端口嵌入页面；Viser 启动失败时仍保留成功 USDC，并回退到结果摘要。Local Codex 继续使用隔离的 Articraft Conda 环境和原生 USDZ Viewer。
 
 `Reset Articulation` 会清空当前会话的描述、参考图、记录与下载结果，终止该会话的 Articraft 生成、Articraft/Viser Viewer 进程组，并请求取消仍在运行的远程任务。新请求替换旧请求时也执行相同的会话级取消。
 

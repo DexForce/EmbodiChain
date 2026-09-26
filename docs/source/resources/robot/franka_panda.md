@@ -104,5 +104,5 @@ See :doc:`dual_arm` for the available mount presets and configuration options.
 
 ## See Also
 
-- :doc:`/overview/sim/solvers/index` - IK solver reference
+- :doc:`/overview/sim/motion/solvers/index` - IK solver reference
 - :doc:`/guides/add_robot` - Adding a new robot (quick reference)

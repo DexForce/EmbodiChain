@@ -39,11 +39,13 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.robots import CobotMagicCfg
 
-config = SimulationManagerCfg(headless=False, sim_device="cpu", num_envs=2)
+config = SimulationManagerCfg(headless=False, device="cpu", num_envs=2)
 sim = SimulationManager(config)
-sim.set_manual_update(False)
 
 robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
+
+# Explicitly advance physics when the application is ready.
+sim.update(step=1)
 ```
 
 ---
@@ -56,7 +58,7 @@ robot = sim.add_robot(cfg=CobotMagicCfg().from_dict({}))
 - **urdf_cfg**: URDF configuration, supports multi-component assembly (e.g., dual arms)
 - **control_parts**: Control groups for independent control of each arm and gripper
 - **solver_cfg**: Inverse kinematics solver configuration, customizable end-effector and base
-- **drive_pros**: Joint drive properties (stiffness, damping, max effort, etc.)
+- **joint_drive_props**: Joint drive properties (stiffness, damping, max effort, etc.)
 - **attrs**: Rigid body physical attributes (mass, friction, damping, etc.)
 
 ### 2. Custom Usage Example

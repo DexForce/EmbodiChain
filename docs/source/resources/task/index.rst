@@ -2,89 +2,57 @@ Supported Tasks
 ===============
 
 The official task environments are bundled in the ``embodichain`` wheel under
-the ``embodichain_tasks`` import package. Import-backed tasks register during
-package discovery; configuration-defined Task Program tasks register when
-their gym config is loaded. No second package installation is needed.
+the ``embodichain_tasks`` import package. This section follows the task-first
+layout under ``embodichain_tasks/configs/tasks`` so that documentation,
+configuration paths, and ``list-task`` output use the same hierarchy.
 
-Run a task by passing one of its gym configuration files to the unified CLI:
+Use the catalog commands to inspect the installed task set:
 
 .. code-block:: bash
 
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
+   embodichain list-task
+   embodichain list-task --category manipulation
+   embodichain show-task embodichain_tasks:repeated_pick_place
 
-Use ``--preview`` to inspect a configured environment without starting a data
-generation run. See :doc:`/guides/run_env` for all launch options and
-:doc:`/tutorial/data_generation` for the dataset workflow.
+Configuration-backed environments run through ``embodichain run-env``. Tasks
+that exist only as learning environments or Python registrations are identified
+on their category page. See :doc:`/guides/task_catalog` for catalog metadata and
+static gallery export, and :doc:`/guides/run_env` for launch options.
 
-Environment catalog
--------------------
+Task hierarchy
+--------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 28 54
+   :widths: 22 30 48
 
    * - Domain
-     - Environment ID
-     - Example gym config
-   * - Classic control
-     - ``CartPoleRL``
-     - ``embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml``
-   * - Manipulation
-     - ``PushCubeRL``
-     - ``embodichain_tasks/configs/tasks/manipulation/push_cube/env.json``
-   * - Manipulation
-     - ``TaskProgramRepeatedPickPlace-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``
-   * - Manipulation
-     - ``TaskProgramRepeatedPickPlace-Franka-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``
-   * - Special
-     - ``SimpleTask-v1``
-     - ``embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json``
-   * - Special
-     - ``StayStillSave-v1``
-     - ``embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json``
-   * - Tableware
-     - ``BlocksRankingRGB-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/env.json``
-   * - Tableware
-     - ``BlocksRankingSize-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_size/env.json``
-   * - Tableware
-     - ``MatchObjectContainer-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/match_object_container/env.json``
-   * - Manipulation
-     - ``TaskProgramOpenDrawer-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml``
-   * - Manipulation
-     - ``TaskProgramOpenDrawer-Franka-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/open_drawer/task.franka.yaml``
-   * - Manipulation
-     - ``HandOver-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml``
-   * - Tableware
-     - ``PlaceObjectDrawer-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/place_object_drawer/env.json``
-   * - Tableware
-     - ``PourWater-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml``
-   * - Tableware
-     - ``ScoopIce-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/scoop_ice/env.json``
-   * - Tableware
-     - ``StackBlocksTwo-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json``
-   * - Tableware
-     - ``StackCups-v1``
-     - ``embodichain_tasks/configs/tasks/manipulation/tableware/stack_cups/env.json``
+     - Configuration hierarchy
+     - Scope
+   * - :doc:`Classic control <classic_control>`
+     - ``classic_control/``
+     - Compact control and learning environments.
+   * - :doc:`Locomotion <locomotion/index>`
+     - ``locomotion/velocity/``
+     - Velocity-tracking tasks for legged robots.
+   * - :doc:`Manipulation <manipulation/index>`
+     - ``manipulation/`` and ``manipulation/tableware/``
+     - RL, Task Program, and environment-only manipulation tasks.
+   * - :doc:`Special <special>`
+     - ``special/``
+     - Standalone examples and specialized differentiable environments.
 
-The value of ``id`` inside a conventional gym config must match a registered
-environment ID. A supported configuration-defined Task Program deployment
-declares ``environment.component``,
-``task_program.{program,integration,execution_policy}``, and
-``embodiment.component``; loading it registers its free ``id`` against the
-common ``EmbodiedEnv``. A pure ``env.yaml`` component has ``environment_id``
-but no runnable ``id``, so task discovery does not list it. Discovery is based
-on the top-level ``id`` schema rather than an ``env*`` filename prefix.
-When adding a task, update this catalog together with its runnable config.
+The top-level ``id`` in a runnable JSON or YAML configuration is the Gym
+environment ID. A reusable ``env.yaml`` component may instead expose only
+``environment_id`` and is not runnable by itself. Import-backed tasks register
+during package discovery; configuration-defined Task Program tasks register
+when their runnable task configuration is loaded.
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+
+   classic_control
+   locomotion/index
+   manipulation/index
+   special

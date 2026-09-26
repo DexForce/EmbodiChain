@@ -25,9 +25,10 @@ dynamic = ["version"]
 
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
-  "dexsim_engine==0.4.3",
+  "dexsim_engine==0.5.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
+  "huggingface_hub>=0.35.3,<1.0",
   "langchain",
   "langchain-openai",
   "toppra==0.6.3",
@@ -52,6 +53,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+policy-deploy = [
+  # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
+  "onnxruntime-gpu>=1.20,<1.27",
+]
 gensim = [
   "bpy",
   "gradio>=6.17.3,<6.18",

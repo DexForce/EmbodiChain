@@ -26,17 +26,17 @@ Configuring the simulation
 
 The first step is to configure the simulation environment. This is done using the :class:`SimulationManagerCfg` data class, which allows you to specify various parameters like window dimensions, headless mode, physics timestep, simulation device (CPU/GPU), and rendering options like ray tracing.
 
-Command-line arguments are parsed using ``argparse`` to allow for easy customization of the simulation from the terminal. In addition to the common launcher flags, including ``--viser`` and its update-rate/server options, this tutorial adds ``--record-steps``, ``--record-fps``, and ``--record-save-path`` for headless recording.
+Command-line arguments are parsed using ``argparse`` to allow for easy customization of the simulation from the terminal. In addition to the common launcher flags, including ``--viser`` and its update-rate/server options, this tutorial adds ``--max_steps``, ``--record-fps``, and ``--record-save-path`` for headless recording. The script registers the underscore spelling ``--max_steps``.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
    :start-at: # Parse command line arguments
    :end-at: sim = SimulationManager(sim_cfg)
 
-There are two kinds of physics mode in :class:`SimulationManager`:
-
-- `manual`: The physics updates only when the user calls the :meth:`SimulationManager.update` function. This mode is used for robot learning tasks where precise control over simulation steps is required. Enabled by setting :meth:`SimulationManager.set_manual_update` to True.
-- `auto`: The physics updates in a standalone thread, which enable asynchronous rendering and physics stepping. This mode is suitable for visualizations and demos for digital twins applications. This is the default mode.
+Physics advances only when the caller invokes :meth:`SimulationManager.update`.
+Each call executes the requested number of physics steps; sleeping, waiting for
+input, and refreshing visualization do not advance simulation time. Interactive
+applications use an explicit update loop with optional wall-clock pacing.
 
 Adding objects to the scene
 ---------------------------
@@ -53,12 +53,12 @@ Headless recording
 
 When the script runs with ``--headless`` without ``--viser``, it uses :meth:`SimulationManager.start_window_record` with a fixed ``look_at`` camera pose. This is the same public recorder API used for viewer recording, but it now also supports headless execution without depending on a live window.
 
-The example starts recording before the simulation loop, runs for ``--record-steps`` physics steps, then stops the recorder and waits for the video export to finish before destroying the simulation.
+The example starts recording before the simulation loop, runs for ``--max_steps`` physics steps, then stops the recorder and waits for the video export to finish before destroying the simulation.
 
 .. literalinclude:: ../../../scripts/tutorials/sim/create_scene.py
    :language: python
    :start-at: if args.headless and not args.viser:
-   :end-at:         print(f"[INFO]: Running {args.record_steps} steps before exporting the video")
+   :end-at:         print(f"[INFO]: Running {args.max_steps} steps before exporting the video")
 
 Browser visualization
 ---------------------
@@ -134,7 +134,7 @@ In headless mode, the script records a video and saves it under ``outputs/videos
 
    python scripts/tutorials/sim/create_scene.py \
        --headless \
-       --record-steps 1000 \
+       --max_steps 1000 \
        --record-fps 20 \
        --record-save-path outputs/videos/my_scene.mp4
 

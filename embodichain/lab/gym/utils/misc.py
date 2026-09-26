@@ -138,10 +138,10 @@ def is_pose_flip(
 ):
     pose = np.asarray(pose)
     ref_pose = np.asarray(ref_pose)
-    axis_idx = axis_idx(axis_str)
-    if axis_idx is None:
+    axis_id = axis_idx(axis_str)
+    if axis_id is None:
         log_error(f'Axis {axis_str} is not among ["x", "y", "z"]')
-    relative_angle = np.abs(np.arccos(pose[:3, axis_idx].dot(ref_pose[:3, axis_idx])))
+    relative_angle = np.abs(np.arccos(pose[:3, axis_id].dot(ref_pose[:3, axis_id])))
     valid_ret = relative_angle > np.pi / 2
 
     if return_inverse:
@@ -610,7 +610,7 @@ def get_changed_qpos(
     Returns:
         qpos_to_change (np.ndarray): The changed qpos.
     """
-    if isinstance(qpos_to_change, torch.tensor):
+    if isinstance(qpos_to_change, torch.Tensor):
         qpos_to_change = np.asarray(qpos_to_change)
 
     for qpos_change_name, qpos_change_value in qpos_changes:
@@ -629,17 +629,17 @@ def get_changed_qpos(
             )
 
         if change_mode == "replace":
-            qpos_to_change = get_offset_qpos(
+            qpos_to_change = get_replaced_qpos(
                 qpos_to_change,
                 replace_value=qpos_change_value,
-                replace_joint_list=joint_list_change,
+                joint_list_replace=joint_list_change,
             )
         elif change_mode == "offset":
             qpos_to_change = get_offset_qpos(
                 qpos_to_change,
                 offset_value=qpos_change_value,
-                offset_joint_list=joint_list_change,
-                degrees=change_partition[2],
+                joint_list_offset=joint_list_change,
+                degrees=change_partition[2] if len(change_partition) > 2 else None,
             )
         else:
             log_error(f"The {change_mode} change mode haven't realized yet!")

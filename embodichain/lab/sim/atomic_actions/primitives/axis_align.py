@@ -32,6 +32,10 @@ from embodichain.utils.math import (
 )
 
 from embodichain.lab.sim.atomic_actions.affordance import AxisAlignAffordance
+from embodichain.lab.sim.atomic_actions.affordance_sampling import (
+    AffordancePoseCandidates,
+    AffordanceSample,
+)
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
@@ -50,6 +54,7 @@ from embodichain.lab.sim.atomic_actions.goals import (
 from embodichain.lab.sim.atomic_actions.invocation import ResolvedActionRequest
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
@@ -58,6 +63,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    resample_planned_trajectory,
     require_shared_task_state_key,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
@@ -233,7 +239,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         # motion.  The antipodal pose has a 180-degree symmetric alternative;
         # after choosing the sample, select whichever symmetric orientation is
         # closer to the arm's currently observed FK pose.
-        grasp_success, grasp_xpos = self._resolve_grasp_pose(
+        grasp_sample = self._resolve_grasp_pose(
             target,
             affordance,
             object_pose,
@@ -243,7 +249,10 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             rotation_angle,
             end_effector.target_id,
             object_part=options.pick_object_part,
+            sample_key=(request.invocation_id or self.skill_id) + ":grasp",
         )
+        grasp_success = grasp_sample.success
+        grasp_xpos = grasp_sample.poses
         grasp_xpos = self._find_symmetric_nearest_xpos(
             grasp_xpos,
             reference_xpos=self.robot.compute_fk(
@@ -406,6 +415,14 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 held_object_updates={task_state_key: held_object},
                 coordinated_held_object_updates=coordinated_updates,
             ),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata=(
+                    {}
+                    if target.grasp_xpos is not None
+                    else {"affordance_sample": {"grasp": grasp_sample.metadata}}
+                ),
+            ),
             segment_lengths=segment_lengths,
         )
 
@@ -421,7 +438,8 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         grasp_target_id: str,
         *,
         object_part: str,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sample_key: str,
+    ) -> AffordanceSample:
         """Resolve an explicit grasp or select the lowest-cost sampled grasp."""
         if goal.grasp_xpos is not None:
             grasp_xpos = resolve_pose_target(
@@ -429,9 +447,10 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 num_envs=self.num_envs,
                 device=self.device,
             )
-            return (
-                torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
-                grasp_xpos,
+            return AffordanceSample(
+                success=torch.ones(self.num_envs, dtype=torch.bool, device=self.device),
+                poses=grasp_xpos,
+                metadata={"source": "explicit"},
             )
 
         obj_longest_axis = None
@@ -444,51 +463,40 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             )
             is_positive_part = object_part == "top"
         generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-        sampled = generator.get_valid_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=object_pose,
-            approach_direction=approach_direction,
+        candidates = affordance.get_grasp_candidates(
+            generator,
+            object_pose,
+            approach_direction,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
         )
-        poses: list[torch.Tensor] = []
-        success: list[bool] = []
-        for env_index, (candidates, costs) in enumerate(sampled):
-            candidates = candidates.to(device=self.device, dtype=torch.float32)
-            costs = costs.to(device=self.device, dtype=torch.float32)
-            valid = candidates.shape[0] > 0 and bool(torch.isfinite(costs).any())
-            if valid:
-                finite_cost = torch.isfinite(costs)
-                if rotation_angle[env_index] > 1.0e-6:
-                    grasp_y_axis = torch.nn.functional.normalize(
-                        candidates[:, :3, 1], dim=1
-                    )
-                    perpendicularity_error = torch.abs(
-                        torch.matmul(grasp_y_axis, rotation_axis[env_index])
-                    )
-                    best_error = perpendicularity_error[finite_cost].min()
-                    preferred = finite_cost & torch.isclose(
-                        perpendicularity_error,
-                        best_error,
-                        atol=1.0e-6,
-                        rtol=1.0e-5,
-                    )
-                    ranked_costs = torch.where(
-                        preferred,
-                        costs,
-                        torch.full_like(costs, torch.inf),
-                    )
-                    best_index = int(torch.argmin(ranked_costs).item())
-                else:
-                    best_index = int(torch.argmin(costs).item())
-                poses.append(candidates[best_index])
-            else:
-                poses.append(torch.eye(4, device=self.device, dtype=torch.float32))
-            success.append(valid)
-        return (
-            torch.tensor(success, dtype=torch.bool, device=self.device),
-            torch.stack(poses),
+        valid = candidates.valid.clone()
+        for env_index in range(len(object_pose)):
+            if rotation_angle[env_index] <= 1.0e-6 or not valid[env_index].any():
+                continue
+            grasp_y_axis = torch.nn.functional.normalize(
+                candidates.poses[env_index, :, :3, 1], dim=1
+            )
+            perpendicularity_error = torch.abs(
+                torch.matmul(grasp_y_axis, rotation_axis[env_index])
+            )
+            best_error = perpendicularity_error[valid[env_index]].min()
+            valid[env_index] &= torch.isclose(
+                perpendicularity_error,
+                best_error,
+                atol=1.0e-6,
+                rtol=1.0e-5,
+            )
+        return affordance.sample_candidates(
+            AffordancePoseCandidates(
+                poses=candidates.poses,
+                costs=candidates.costs,
+                valid=valid,
+            ),
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=sample_key,
+            reference_poses=object_pose,
         )
 
     def _plan_pose_phase(
@@ -512,7 +520,9 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
     def _axis_alignment_eef_keyframes(
         self,

@@ -1,172 +1,98 @@
 # Robot System
 
-## Entry Points
+## Find the owner
 
-| What | Path |
+| Change or question | Start here |
 |---|---|
-| Robot runtime class | `embodichain/lab/sim/objects/robot.py` → `Robot` |
-| RobotCfg base config | `embodichain/lab/sim/cfg.py` → `RobotCfg` (line ~1455) |
-| ArticulationCfg parent | `embodichain/lab/sim/cfg.py` → `ArticulationCfg` (line ~1345) |
-| JointDrivePropertiesCfg | `embodichain/lab/sim/cfg.py` → `JointDrivePropertiesCfg` (line ~654) |
-| Robot registry (all robots) | `embodichain/lab/sim/robots/__init__.py` |
-| DexforceW1 config package | `embodichain/lab/sim/robots/dexforce_w1/` |
-| CobotMagic config | `embodichain/lab/sim/robots/cobotmagic.py` |
-| Add-robot tutorial | `docs/source/tutorial/add_robot.rst` |
-| Add-robot quick-reference | `docs/source/guides/add_robot.rst` |
+| Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
+| Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
+| Available robot configs | `embodichain/lab/sim/robots/__init__.py` |
+| W1 variants and serialization | `embodichain/lab/sim/robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
+| Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
-## Overview
+`Robot` extends `Articulation` with named control parts, per-part solvers and
+runtime workspace access. Robot configs own asset/kinematic assembly; the
+manager owns creation and backend binding. For a new config use
+[add-robot](../../../.agents/skills/add-robot/SKILL.md); for reusable robot/sensor
+suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
 
-`Robot` extends `Articulation` (which extends `BatchEntity`). It adds:
-- **Control parts** — named groups of joints (e.g. `left_arm`, `right_eef`) that can be driven independently.
-- **IK solvers** — per-part solver config (`solver_cfg` dict keyed by control-part name).
-- **Planners** — motion planner attachment point.
+## Configuration resolution
 
-A `Robot` is instantiated with a `RobotCfg` and a list of DexSim `Articulation` entities.
+Specified configs build variant defaults before applying user overrides through
+`merge_robot_cfg` in `embodichain/lab/sim/utility/cfg_utils.py`. Keep
+`_build_defaults()` and the base `RobotCfg.from_dict()` separate: the merge
+helper calls the base decoder, so routing it back through the subclass build/
+merge sequence recurses. The skill owns the scaffold; inspect a neighboring
+robot config for the current implementation pattern.
 
-## RobotCfg Pattern
+Keep the simulation asset and `build_pk_serial_chain()` source aligned. The
+specified configs use `_pk_urdf_path` as the kinematic source; validate chain
+DOFs against the selected control parts after changing assets or variants.
 
-Inheritance chain:
+Serialization must round-trip without changing components or applying derived
+transforms twice. W1 is the important exception to plain inherited
+serialization: runtime hand attachments and solver TCPs include a body-revision
+offset, while serialized values remain raw. Its `to_dict()` removes the offset
+and `from_dict()` restores it. Body and hand versions have independent registries;
+do not infer one from the other. `DexforceW1Cfg` represents a complete dual-arm
+robot; inspect its decoder for rejected structural options.
 
-```
-ObjectBaseCfg          uid, init_pos, init_rot, init_local_pose
-  └─ ArticulationCfg   fpath, drive_pros, attrs, link_attrs, fix_base,
-  │                     disable_self_collision, enable_gravity, init_qpos,
-  │                     body_scale,
-  │                     build_pk_chain, use_usd_properties
-      └─ RobotCfg      control_parts, urdf_cfg, solver_cfg, drive_pros (override default to "force")
-          ├─ DexforceW1Cfg   version, hand_versions, with_default_eef
-          └─ CobotMagicCfg   (dual-arm defaults)
-```
+`DualArmRobotCfg.build_pk_serial_chain()` resolves each solver's root/end
+frames against that arm's source URDF. It translates assembled names back to
+source link names, keeps chains arm-local, and rejects opposite-arm/unknown
+frames. Mount transforms belong to assembly, not the serial chain.
 
-Key fields on `RobotCfg`:
+## Joint and solver boundaries
 
-| Field | Type | Purpose |
-|---|---|---|
-| `control_parts` | `Dict[str, List[str]] \| None` | Part name → joint names (supports regex like `JOINT[1-6]`) |
-| `urdf_cfg` | `URDFCfg \| None` | Multi-component URDF assembly (e.g. left_arm + right_arm) |
-| `solver_cfg` | `SolverCfg \| Dict[str, SolverCfg] \| None` | IK solver config; dict keys must match `control_parts` keys |
-| `drive_pros` | `JointDrivePropertiesCfg` | Default drive type is `"force"` (overrides Articulation's `"none"`) |
-| `attrs` | `RigidBodyAttributesCfg` | Rigid-body physics attributes (mass, friction, damping, ...) |
-| variant fields | `enum \| str \| bool` | Optional subclass fields (e.g. `version`, `with_default_eef`) |
-| `_pk_urdf_path` | `property \| method → str` | URDF for the FK/IK serial chain (one source, so it can't drift from sim) |
+`control_parts` expands joint-name patterns at initialization. For Spawn-bound
+robots, part IDs resolve by name against the final batch `qpos` order, not
+native source traversal order. Source-ordered `init_qpos` is remapped on reset.
+Mimic IDs and parents use that same final state order; select active-only IDs
+explicitly when needed. Shared mimic/actuator lowering belongs to
+[simulation](../simulation-system/simulation-system.md).
 
-## The robot config protocol
+With control parts, solver configuration is a dictionary whose keys resolve
+against part names (including patterns); it need not configure every part.
+`Robot.init_solver()` fills absent solver joint names from the selected part
+and synchronizes effective robot limits. Check the resolved part and joint
+order before diagnosing an IK algorithm.
 
-Every robot config subclasses `RobotCfg` and overrides the construction hooks.
-The default `from_dict` implementation is this 3-line template:
+Robot owns arena/root frame conversion; solvers consume chain-root poses.
+`RobotCfg.from_dict()` resolves configured solver types through
+`embodichain.lab.sim.motion.solvers`. For batch/candidate shapes and continuous
+IK support, read [IK contracts](../ik-solvers/ik-solvers.md). Pose conventions
+are owned by [simulation](../simulation-system/simulation-system.md); external
+library adapters own conversions.
 
-```python
-@classmethod
-def from_dict(cls, init_dict):
-    cfg = cls()
-    cfg._build_defaults(init_dict)
-    return merge_robot_cfg(cfg, init_dict)
-```
+## Physics and motion integration
 
-- **`_build_defaults(self, init_dict=None)`** — read variant fields from `init_dict`,
-  set them on `self`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`,
-  `drive_pros` and `attrs`. (Base `RobotCfg._build_defaults` is a no-op.)
-- **`build_pk_serial_chain(self, device=...)`** — return `{control_part: pk.SerialChain}`,
-  reading the PK URDF from a single `_pk_urdf_path` source (a property for
-  constant-path robots, a method when the path depends on a variant).
+Keep portable intent in an ordinary `RobotCfg`; joint-property and root/body
+physics ownership is defined in [simulation](../simulation-system/simulation-system.md).
+Use `RobotPresetCfg` only for a complete alternative asset/actuator definition.
+`SimulationManager.add_robot()` selects one deep-copied alternative from the
+active backend/solver, falling back to `default`; it never merges alternatives.
+`EmbodiedEnvCfg.robot` delegates to that same selection boundary.
 
-Serialization (`to_dict` / `to_string` / `save_to_file`) is inherited from
-`RobotCfg` unless the config stores version-derived runtime transforms.
-`DexforceW1Cfg` is the current exception: serialized hand transforms and solver
-TCPs are raw end-effector values, while the in-memory values include the selected
-W1 revision offset. Its `to_dict` removes that derived offset and `from_dict`
-restores it. Every config, including this exception, must satisfy
-`type(cfg).from_dict(cfg.to_dict())` without changing the selected components or
-applying a derived transform twice.
+Motion subpackages and offline workspace exports must remain lazy so Robot
+initialization does not import planners or analyzers. `RobotCfg.workspace_cfg`
+selects per-part caches; `get_workspace()` loads them on first access, while
+`attach_workspace()` accepts an existing cache on the robot device. Follow
+[robot workspace](../robot-workspace/robot-workspace.md) for cache ownership and
+[motion planning](../motion-planning/motion-planning.md) for planner integration.
 
-W1 robot and hand releases use separate types and registries:
+## Focused validation
 
-- `DexforceW1Version` selects body/arm assets, kinematics, and flange calibration
-  through `specs.py`.
-- `DexforceW1HandVersion` selects external hand/gripper assets, joint metadata,
-  and raw mounting transforms through `hand_specs.py`.
-- The current default is hand V021 for every W1 robot version. Never infer a
-  hand version from `DexforceW1Version`.
-- `DexforceW1Cfg` always represents a complete dual-arm W1. Structural
-  `include_*`, `arm_sides`, and mixed `component_versions` options are not part
-  of its public protocol.
+| Changed boundary | Existing coverage |
+|---|---|
+| Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
+| Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
+| Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |
+| Spawn binding and joint order | `tests/sim/spawn/test_create_robot_integration.py` |
+| Lazy motion imports and batch conversion | `tests/sim/motion/test_motion_imports.py`, `tests/sim/motion/solvers/test_analytic_batching.py` |
 
-.. note::
-    `merge_robot_cfg` calls the base `RobotCfg.from_dict` internally, so the
-    subclass `from_dict` template must stay the 3-line form above — making
-    `RobotCfg.from_dict` itself call `_build_defaults` → `merge_robot_cfg` would
-    infinite-recurse.
-
-## Control Parts
-
-`control_parts` maps a human-readable part name to a list of joint names:
-
-```python
-control_parts = {
-    "left_arm": ["LEFT_JOINT1", ..., "LEFT_JOINT6"],
-    "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
-    "right_arm": ["RIGHT_JOINT1", ..., "RIGHT_JOINT6"],
-    "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
-}
-```
-
-- Joint names support **regex patterns** (e.g. `"JOINT[1-6]"`) — expanded at init.
-- When `control_parts` is set, `solver_cfg` **must** be a dict with matching keys.
-- `Robot.get_joint_ids(name)` returns joint IDs for a part; `None` returns all joints.
-- `Robot.get_link_names(name)` returns child link names for a part.
-- Internal `ControlGroup` dataclass stores `joint_names`, `joint_ids`, `link_names` per part.
-
-## Drive Properties
-
-`JointDrivePropertiesCfg` controls the physics drive for joints:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `drive_type` | `"force" \| "acceleration" \| "none"` | `"force"` (on RobotCfg) | `"none"` means no applied force |
-| `stiffness` | `float \| Dict[str, float]` | `1e4` | Per-joint via dict; keys support regex |
-| `damping` | `float \| Dict[str, float]` | `1e3` | Same |
-| `max_effort` | `float \| Dict[str, float]` | `1e10` | Max torque/force |
-| `max_velocity` | `float \| Dict[str, float]` | `1e10` | rad/s or m/s |
-| `friction` | `float \| Dict[str, float]` | `0.0` | Joint friction |
-
-When using a dict, keys are joint names or regex patterns matching joint names. Control-part names can also be used as keys (resolved via `ArticulationCfg` logic).
-
-## Adding a New Robot
-
-Full guide: `docs/source/tutorial/add_robot.rst` · Quick reference: `docs/source/guides/add_robot.rst`
-
-Minimal checklist:
-1. Create a `@configclass` inheriting `RobotCfg`.
-2. Override `_build_defaults(self, init_dict=None)` — read variant fields from `init_dict`, then populate `urdf_cfg`, `control_parts`, `solver_cfg`, `drive_pros` and `attrs`.
-3. Keep `from_dict` as the 3-line template (`cls()` → `_build_defaults` → `merge_robot_cfg`) unless version-derived state requires an explicitly documented post-merge step.
-4. Define `control_parts` mapping part names to joint name lists.
-5. Configure `solver_cfg` (one `SolverCfg` per control part).
-6. Implement `build_pk_serial_chain` reading from `_pk_urdf_path` (property for constant paths, method for variant-dependent).
-7. For robots with variants, use a sub-package with `types.py` (enums + `__all__`), `cfg.py` (variant-aware `_build_defaults`), optional `params.py` / `utils.py` helpers (see `dexforce_w1/` as example).
-8. Export from `embodichain/lab/sim/robots/__init__.py` and set `__all__`.
-9. Add robot docs in `docs/source/resources/robot/` and update `docs/source/resources/robot/index.rst`.
-10. Test — a `__main__` smoke test + the DOF drift guard + `preview-asset` CLI.
-
-Serialization (`to_dict` / `save_to_file`) is normally inherited. A robot-specific
-override requires documented raw/final semantics and regression tests for default,
-custom-transform, component-version, and public-builder round-trips.
-
-## Available Robots
-
-| Robot | Config Class | Module | Structure | Notes |
-|---|---|---|---|---|
-| DexForce W1 | `DexforceW1Cfg` | `embodichain/lab/sim/robots/dexforce_w1/` | Package (`cfg.py`, `types.py`, `specs.py`, `hand_specs.py`, `params.py`, `utils.py`) | Humanoid; robot and hand versions are independently registered |
-| CobotMagic | `CobotMagicCfg` | `embodichain/lab/sim/robots/cobotmagic.py` | Single file | Dual-arm; 6-DOF arms + 2-DOF grippers; uses OPW solver |
-
-## Common Failure Modes
-
-- **`solver_cfg` keys don't match `control_parts` keys** — solver init silently uses wrong part or errors at IK time.
-- **Regex joint names not expanded** — if robot is not properly initialized, regex patterns like `JOINT[1-6]` remain unexpanded. Always construct via `from_dict()` or let `Robot.__init__` handle expansion.
-- **`drive_type="none"` inherited from ArticulationCfg** — if you inherit `ArticulationCfg` directly instead of `RobotCfg`, the default drive type is `"none"` (no forces applied). Override to `"force"`.
-- **Missing `urdf_cfg` for multi-component robots** — single-file robots use `fpath`; multi-component robots (e.g. dual-arm) require `urdf_cfg` with component transforms.
-- **Mimic joints not excluded** — `get_joint_ids(remove_mimic=False)` includes mimic joints by default. Pass `remove_mimic=True` for active-only joints.
-- **`init_qpos` shape mismatch** — must be `(num_joints,)`. A wrong-length array causes silent truncation or index errors at sim start.
-- **`all` instead of `__all__`** — lowercase `all` does not work with `from module import *`; use `__all__`.
-- **`solver_cfg` set in multiple places** — set it once in `_build_defaults` only; setting it elsewhere (e.g. a build helper) gets overwritten and is dead code.
-- **PK URDF drifts from the sim URDF** — route `build_pk_serial_chain` through `_pk_urdf_path` and keep the DOF drift-guard test so silent drift is caught.
-- **Reimplementing `from_dict` without a serialization protocol** — keep the 3-line template by default. If derived version state requires post-merge processing, document the raw/final values and test round-trips. (Making the base `RobotCfg.from_dict` call `merge_robot_cfg` would infinite-recurse, since `merge_robot_cfg` calls `RobotCfg.from_dict`.)
+For drive or mimic failures, first inspect resolved articulation properties and
+backend binding rather than adding robot-specific post-bind fixes. For missing
+IK, inspect configured solver coverage; a gripper control part need not have a
+solver. For asset changes, validate round-trip and chain DOF/frame agreement
+before using executable robot smoke programs.

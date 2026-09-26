@@ -15,13 +15,16 @@ The simulation is configured using the {class}`SimulationManagerCfg` class.
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DefaultPhysicsCfg
 
 sim_config = SimulationManagerCfg(
     width=1920,               # Window width
     height=1080,              # Window height
     num_envs=10,              # Number of parallel environments
-    physics_dt=0.01,          # Physics time step
-    sim_device="cpu",         # Simulation device ("cpu" or "cuda:0", etc.)
+    device="cpu",             # Simulation device ("cpu" or "cuda:0", etc.)
+    physics_cfg=DefaultPhysicsCfg(
+        physics_dt=0.01,      # Physics time step
+    ),
     arena_space=5.0           # Spacing between environments
 )
 ```
@@ -33,86 +36,52 @@ sim_config = SimulationManagerCfg(
 | `width` | `int` | `1920` | The width of the simulation window. |
 | `height` | `int` | `1080` | The height of the simulation window. |
 | `headless` | `bool` | `False` | Whether to run the simulation in headless mode (no Window). |
+| `scene_node_capacity` | `int` \| `None` | `None` | Optional DexSim scene-node allocation capacity; `None` keeps the native default. |
 | `render_cfg` | `RenderCfg` | `RenderCfg()` | The rendering configuration parameters. |
-| `gpu_id` | `int` | `0` | The gpu index that the simulation engine will be used. Affects gpu physics device. |
+| `gpu_id` | `int` | `0` | Rendering GPU index; also resolves an unindexed CUDA compute device. |
 | `thread_mode` | `ThreadMode` | `RENDER_SHARE_ENGINE` | The threading mode for the simulation engine. |
 | `cpu_num` | `int` | `1` | The number of CPU threads to use for the simulation engine. |
 | `num_envs` | `int` | `1` | The number of parallel environments (arenas) to simulate. |
 | `arena_space` | `float` | `5.0` | The distance between each arena when building multiple arenas. |
-| `physics_dt` | `float` | `0.01` | The time step for the physics simulation. |
+| `device` | `str` \| `torch.device` \| `None` | `None` | Optional explicit compute-device override. When omitted, the selected physics config keeps its backend default. |
+| `physics_cfg` | `DefaultPhysicsCfg` \| `NewtonPhysicsCfg` | `DefaultPhysicsCfg()` | Physics backend configuration (class selects default vs Newton). |
 | `profiler` | `ProfilerCfg` \| `None` | `None` | Optional hierarchical wall-time profiler for simulation updates. |
-| `sim_device` | `str` \| `torch.device` | `"cpu"` | The device for the physics simulation. |
-| `physics_config` | `PhysicsCfg` | `PhysicsCfg()` | The physics configuration parameters. |
-| `gpu_memory_config` | `GPUMemoryCfg` | `GPUMemoryCfg()` | The GPU memory configuration parameters. |
 | `visualization` | `VisualizationCfg` | `VisualizationCfg()` | Browser visualization, opt-in Gizmo commands, and Viser server settings. |
 
-### Physics Configuration
+Large articulated batches can set `scene_node_capacity: 262144` in the training
+configuration, or pass `scene_node_capacity=262144` to `SimulationManagerCfg`.
+The value reaches `WorldConfig.scene_node_capacity` and leaves physics parameters
+unchanged.
 
-The {class}`~cfg.PhysicsCfg` class controls the global physics simulation parameters.
+### Material reuse
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `gravity` | `np.ndarray` | `[0, 0, -9.81]` | Gravity vector for the simulation environment. |
-| `bounce_threshold` | `float` | `2.0` | The speed threshold below which collisions will not produce bounce effects. |
-| `enable_ccd` | `bool` | `False` | Enable continuous collision detection (CCD) for fast-moving objects. |
-| `length_tolerance` | `float` | `0.05` | The length tolerance for the simulation. Larger values increase speed. |
-| `speed_tolerance` | `float` | `0.25` | The speed tolerance for the simulation. Larger values increase speed. |
+Set `DefaultPhysicsCfg(cache_material=True)` to reuse identical physics materials
+across objects and environment clones. Training configuration uses
+`physics: default` and `physics_config: {cache_material: true}`. The default is
+`False`, preserving the existing allocation behavior.
 
-PCM and TGS remain enabled, enhanced determinism remains disabled, and friction
-is evaluated on every solver iteration. These solver implementation details use
-fixed defaults and are not exposed by `PhysicsCfg`.
+### Physics
 
-### Render Configuration
+Physics backend selection, capability comparisons, shared device settings, and
+time stepping are covered in {doc}`sim_manager/physics/index`. See
+{doc}`sim_manager/physics/default` and {doc}`sim_manager/physics/newton` for
+backend-specific settings.
 
-The {class}`~cfg.RenderCfg` class controls the rendering backend and quality settings.
+### Rendering
 
-| Parameter | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend to use. Options are `'auto'` (pick a default based on the detected GPU), `'hybrid'` (ray tracing for shadows/reflections + rasterization), `'fast-rt'` (full ray tracing), and `'rt'` (offline ray-traced renderer for maximum visual fidelity). |
-| `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least 1. |
-| `tone_mapping_enabled` | `bool` | `False` | Whether to map HDR RGB output with the modified Reinhard curve. |
-| `tone_mapping_exposure` | `float` | `1.0` | Non-negative fixed linear exposure multiplier applied before tone mapping. |
+Rendering configuration and advanced renderer features live in the dedicated
+{doc}`sim_manager/rendering/index` section. Start with
+{doc}`sim_manager/rendering/configuration` for renderer selection and common
+image-quality settings, then see {doc}`sim_manager/rendering/dlss` for DLSS
+behavior, quality modes, frame timing, and
+availability/fallback notes.
 
-Ray-traced output always uses DexSim's default OptiX denoiser. Tone mapping
-affects RGB output only; depth, segmentation masks, normals, and position
-buffers remain unchanged.
+```{toctree}
+:maxdepth: 2
 
-#### Automatic Renderer Selection
-
-By default (`renderer="auto"`), EmbodiChain selects the renderer based on the GPU detected at the configured `gpu_id` when the {class}`SimulationManager` is constructed:
-
-| GPU class | Examples | Selected renderer |
-| :--- | :--- | :--- |
-| RTX-series (consumer/workstation) | RTX 4090, RTX 6000 Ada | `hybrid` |
-| Datacenter accelerators | A100, A800, H100, H800, H200, H20 | `fast-rt` |
-| No CUDA device / unknown GPU | — | `hybrid` (fallback) |
-
-You can override the global default at runtime — useful for forcing a renderer across all simulations regardless of hardware:
-
-```python
-from embodichain.lab.sim import SimulationManager
-
-# Resolve the default from the current GPU, or force a specific backend.
-SimulationManager.set_default_renderer("auto")       # auto-detect from GPU
-SimulationManager.set_default_renderer("fast-rt")    # force full ray tracing
+sim_manager/physics/index
+sim_manager/rendering/index
 ```
-
-Setting `render_cfg.renderer` explicitly always takes precedence over auto-selection:
-
-```python
-from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
-
-sim_config = SimulationManagerCfg(
-    render_cfg=RenderCfg(
-        renderer="fast-rt",         # Override automatic renderer selection
-        spp=4,                      # Render four samples per pixel
-        tone_mapping_enabled=True,  # Convert HDR RGB to display-referred RGB
-        tone_mapping_exposure=1.0,  # Fixed exposure for reproducible frames
-    )
-)
-```
-
 
 ## Initialization
 
@@ -125,6 +94,29 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 sim_config = SimulationManagerCfg()
 sim = SimulationManager(sim_config)
 ```
+
+### Declare, prepare, then step
+
+Use the same readiness boundary with both physics backends:
+
+1. Construct the manager and declare the initial assets and sensors.
+2. Register any Newton trajectory or contact-material schedules.
+3. Call `sim.prepare()` before reading asset state, joint/link metadata, or
+   native handles.
+4. Apply controls and advance time with `sim.update(step=1)`.
+5. Release resources when the simulation finishes.
+
+Newton defers physical model construction until preparation; Default may
+materialize assets earlier, but its CUDA buffers also require preparation.
+`prepare()` is idempotent for an unchanged scene and binds declared facades in
+place. It publishes initial render state without advancing simulation time.
+Declare all deformables before the first preparation. After supported topology
+changes, prepare again before consuming state and reacquire native views.
+
+The compatibility methods `init_gpu_physics()` and
+`finalize_newton_physics()` delegate to `prepare()`; new examples should use
+the shared method. See {doc}`sim_manager/physics/default` for a complete minimal loop and
+{doc}`sim_manager/physics/newton` for the matching backend configuration.
 
 ## Profiling simulation updates
 
@@ -144,7 +136,7 @@ sim.profiler.report()
 ```
 
 Each standalone {meth}`SimulationManager.update` call creates a `sim_update`
-root. The `manual_update` section contains one `gizmo_update` and one
+root. The `physics_steps` section contains one `gizmo_update` and one
 `world_update` sample per physics substep, plus optional
 `window_record_capture` and `visualization_capture` samples when those features
 are enabled. Consequently, `world_update.calls` is the total number of physics
@@ -239,14 +231,14 @@ EmbodiChain supports importing USD files (`.usd`, `.usda`, `.usdc`) for both rig
 # Import rigid object with USD properties
 rigid_cfg = RigidObjectCfg(
     shape=MeshCfg(fpath=get_data_path("path/to/object.usd")),
-    use_usd_properties=True  # Use properties from USD file
+    asset_physics_mode="preserve",
 )
 obj = sim.add_rigid_object(cfg=rigid_cfg)
 
 # Import articulation with USD properties
 robot_cfg = ArticulationCfg(
     fpath=get_data_path("path/to/robot.usd"),
-    use_usd_properties=True  # Use joint drive properties from USD
+    asset_physics_mode="preserve",
 )
 robot = sim.add_articulation(cfg=robot_cfg)
 ```
@@ -269,36 +261,34 @@ See `scripts/tutorials/sim/export_usd.py` for a complete example.
 
 ## Simulation Loop
 
-### Manual Update mode
+Physics advances only through explicit {meth}`~SimulationManager.update` calls.
+Each call applies pending Gizmo controls before every physics step, then updates
+simulation time, recording, and browser visualization. Gym environments own this
+sequence through `env.step(action)`.
 
-In this mode, the physics simulation should be explicitly stepped by calling {meth}`~SimulationManager.update()` method, which provides precise control over the simulation timing. 
-
-The use case for manual update mode includes:
-- Data generation with openai gym environments, in which the observation and action must be synchronized with the physics simulation.
-- Applications that require precise dynamic control over the simulation timing.
+Interactive applications can pace the same fixed-step loop against wall time:
 
 ```python
-while True:
-    # Step physics simulation.
-    sim.update(step=1)
+import time
 
-    # Perform other tasks such as get data from the scene or apply sensor update.
+while True:
+    step_start = time.perf_counter()
+    sim.update(step=1)
+    # Read sensors or process application state here.
+    time.sleep(max(0.0, sim.sim_config.physics_dt - (time.perf_counter() - step_start)))
 ```
 
-> The default mode is manual update mode. To switch to automatic update mode, call `set_manual_update(False)`. 
+Wall-clock pacing limits playback speed without changing the configured physics
+timestep. Waiting at a REPL or breakpoint pauses physics. Drawing markers and
+calling `capture_visualization(force=True)` publish visual changes without
+advancing physics.
 
-### Automatic Update mode
-
-In this mode, the physics simulation stepping is automatically handling by the physics thread running in dexsim engine, which makes it easier to use for visualization and interactive applications.
-
-> When in automatic update mode, user are recommanded to use CPU `sim_device` for simulation.
-
+Pure IK/FK queries do not require a physics loop.
 
 ## Mainly used methods
 
-- **`SimulationManager.update(physics_dt=None, step=1)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
+- **`SimulationManager.update(physics_dt=None, step=10)`**: Steps the physics simulation with optional custom time step and number of steps. If `physics_dt` is None, uses the configured physics time step.
 - **`SimulationManager.enable_physics(enable: bool)`**: Enable or disable physics simulation.
-- **`SimulationManager.set_manual_update(enable: bool)`**: Set manual update mode for physics.
 - **`SimulationManager.start_visualization()`**: Start or return the configured visualization runtime.
 - **`SimulationManager.refresh_visualization()`**: Immediately republish scene topology.
 - **`SimulationManager.capture_visualization(force=False)`**: Capture the current scene state.

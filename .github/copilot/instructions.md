@@ -15,6 +15,7 @@ follow the canonical routing rules in `.agents/skills/project-dev-context/`.
 - Add Semantic Calls: `.github/copilot/add-semantic-call.md`
 - Add functors: `.github/copilot/add-functor.md`
 - Add atomic actions: `.github/copilot/add-atomic-action.md`
+- Add solvers: `.github/copilot/add-solver.md`
 - Add robots: `.github/copilot/add-robot.md`
 - Add tests: `.github/copilot/add-test.md`
 - Update public API docs: `.github/copilot/update-api-docs.md`

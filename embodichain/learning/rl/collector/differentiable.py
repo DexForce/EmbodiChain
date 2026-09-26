@@ -28,7 +28,12 @@ from embodichain.learning.rl.env import (
     DifferentiableObservation,
     DifferentiableVecEnv,
 )
+from embodichain.learning.rl.gradients import (
+    BatchedGradientNormStats,
+    clip_batched_gradient_norm,
+)
 from embodichain.learning.rl.models import Policy
+from embodichain.learning.rl.normalization import RunningObservationNormalizer
 from embodichain.learning.rl.utils import flatten_dict_observation
 
 __all__ = [
@@ -67,6 +72,7 @@ class DifferentiableRollout:
 
     initial_observation: torch.Tensor
     transitions: tuple[DifferentiableTransition, ...]
+    action_gradient_stats: BatchedGradientNormStats | None = None
 
     @property
     def num_steps(self) -> int:
@@ -89,6 +95,39 @@ class DifferentiableRollout:
             )
         return torch.stack([transition.reward for transition in self.transitions])
 
+    @property
+    def observations(self) -> torch.Tensor:
+        """Stack the raw policy observations.
+
+        Returns:
+            Tensor shaped ``[time, num_envs, features]``.
+        """
+        if not self.transitions:
+            return self.initial_observation.new_empty(
+                (0,) + tuple(self.initial_observation.shape)
+            )
+        return torch.stack([transition.observation for transition in self.transitions])
+
+    @property
+    def alive_mask(self) -> torch.Tensor:
+        """Return rows active before each step, stopping after the first done.
+
+        Returns:
+            Boolean tensor shaped ``[time, num_envs]``.
+        """
+        if not self.transitions:
+            return torch.empty(
+                (0, self.initial_observation.shape[0]),
+                dtype=torch.bool,
+                device=self.initial_observation.device,
+            )
+        alive = torch.ones_like(self.transitions[0].done, dtype=torch.bool)
+        masks = []
+        for transition in self.transitions:
+            masks.append(alive)
+            alive = alive & ~transition.done
+        return torch.stack(masks)
+
 
 class DifferentiableCollector:
     """Collect graph-preserving rollouts without a preallocated buffer."""
@@ -98,11 +137,38 @@ class DifferentiableCollector:
         env: DifferentiableVecEnv,
         policy: Policy,
         device: torch.device,
+        *,
+        observation_normalizer: RunningObservationNormalizer | None = None,
+        clip_actions_to_space: bool = False,
+        action_adjoint_max_norm: float = 0.0,
     ) -> None:
+        if action_adjoint_max_norm < 0.0:
+            raise ValueError("action_adjoint_max_norm cannot be negative.")
         self.env = env
         self.policy = policy
         self.device = device
+        self.observation_normalizer = observation_normalizer
+        self.clip_actions_to_space = bool(clip_actions_to_space)
+        self.action_adjoint_max_norm = float(action_adjoint_max_norm)
         self._observation: DifferentiableObservation | None = None
+        self._action_lower: torch.Tensor | None = None
+        self._action_upper: torch.Tensor | None = None
+        if self.clip_actions_to_space:
+            action_space = self.env.single_action_space
+            if not hasattr(action_space, "low") or not hasattr(action_space, "high"):
+                raise TypeError(
+                    "clip_actions_to_space requires an action space with low/high bounds."
+                )
+            self._action_lower = torch.as_tensor(
+                action_space.low,
+                device=self.device,
+                dtype=torch.float32,
+            )
+            self._action_upper = torch.as_tensor(
+                action_space.high,
+                device=self.device,
+                dtype=torch.float32,
+            )
 
     def reset(
         self, *, seed: int | None = None
@@ -138,11 +204,21 @@ class DifferentiableCollector:
 
         initial_observation = self._flatten_observation(self._observation)
         transitions: list[DifferentiableTransition] = []
+        gradient_stats = (
+            BatchedGradientNormStats(self.device)
+            if self.action_adjoint_max_norm > 0.0
+            else None
+        )
 
         for _ in range(num_steps):
             observation = self._flatten_observation(self._observation)
+            policy_observation = (
+                self.observation_normalizer.normalize(observation)
+                if self.observation_normalizer is not None
+                else observation
+            )
             policy_input = TensorDict(
-                {"obs": observation},
+                {"obs": policy_observation},
                 batch_size=[self.env.num_envs],
                 device=self.device,
             )
@@ -150,8 +226,25 @@ class DifferentiableCollector:
                 policy_input,
                 deterministic=deterministic,
             )
+            action = policy_output["action"]
+            if self.clip_actions_to_space:
+                assert self._action_lower is not None
+                assert self._action_upper is not None
+                action = torch.maximum(
+                    torch.minimum(action, self._action_upper),
+                    self._action_lower,
+                )
+                policy_output["action"] = action
+            if gradient_stats is not None and action.requires_grad:
+                action.register_hook(
+                    lambda gradient, stats=gradient_stats: clip_batched_gradient_norm(
+                        gradient,
+                        self.action_adjoint_max_norm,
+                        stats,
+                    )
+                )
             next_observation, reward, terminated, truncated, info = self.env.step(
-                policy_output["action"]
+                action
             )
             transition = DifferentiableTransition(
                 observation=observation,
@@ -171,6 +264,7 @@ class DifferentiableCollector:
         return DifferentiableRollout(
             initial_observation=initial_observation,
             transitions=tuple(transitions),
+            action_gradient_stats=gradient_stats,
         )
 
     def detach_state(self) -> torch.Tensor:

@@ -73,15 +73,13 @@ def main(
             # Keep the native window closed while planning so renderer/window
             # lifecycle events cannot terminate or perturb timed CUDA IK calls.
             headless=True,
-            sim_device=device,
+            device=device,
             width=2200,
             height=1200,
             visualization=visualization or VisualizationCfg(),
         )
     )
-    # Keep pose conversion, IK, and FK error measurement deterministic. In automatic
-    # mode the engine thread may advance the robot base between these operations.
-    sim.set_manual_update(True)
+    # Keep physics paused during pose conversion, IK, and FK error measurement.
 
     try:
         arm_name = "left_arm"
@@ -93,6 +91,7 @@ def main(
             [2.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0]
         )
         robot: Robot = sim.add_robot(cfg=robot_cfg)
+        sim.prepare()
         joint_ids = robot.get_joint_ids(arm_name)
         qpos_seed = torch.tensor(
             [[np.pi / 6, 0.0, 0.0, -np.pi / 2, 0.0, 0.0, np.pi / 6]],

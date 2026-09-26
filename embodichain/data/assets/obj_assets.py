@@ -257,6 +257,20 @@ class MicrowaveOven(EmbodiChainDataset):
         super().__init__(prefix, data_descriptor, path)
 
 
+class Microwave(EmbodiChainDataset):
+    """get_data_path("Microwave/microwave.urdf")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Microwave.zip"),
+            "9a5de27af5632ab6f5082b383c86acb4",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
 class PlasticTray(EmbodiChainDataset):
     """get_data_path("PlasticTray/plastic_tray.glb")"""
 
@@ -292,6 +306,48 @@ class Drawer(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Drawer.zip"),
             "3981636db1f4188146fce25d54084612",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class Cow(EmbodiChainDataset):
+    """get_data_path("COW/cow.obj")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "Cow.zip"),
+            "f93d371574187fdb74b26e9270ca52ff",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class BakeTextureObj(EmbodiChainDataset):
+    """get_data_path("BakeTextureObj/hdr_color_mesh.ply")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "BakeTextureObj.zip"),
+            "4f10d5ce1f4cd051a2dfb1c19445d5a9",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class DrawerUSD(EmbodiChainDataset):
+    """get_data_path("DrawerUSD/drawer_001.usdc")"""
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, obj_assets, "DrawerUSD.zip"),
+            "47ca77e3e87e7c891606a7cb56b44ea0",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

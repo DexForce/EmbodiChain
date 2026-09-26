@@ -1,137 +1,93 @@
 # Sensor System
 
-## Entry Points
+## Find the owner
 
-| What | Path |
+| Change or question | Start here |
 |---|---|
-| Sensor registry | `embodichain/lab/sim/sensors/__init__.py` |
-| Base sensor class & config | `embodichain/lab/sim/sensors/base_sensor.py` → `BaseSensor`, `SensorCfg` |
-| Camera | `embodichain/lab/sim/sensors/camera.py` → `Camera`, `CameraCfg` |
-| Stereo camera | `embodichain/lab/sim/sensors/stereo.py` → `StereoCamera`, `StereoCameraCfg` |
-| Contact sensor | `embodichain/lab/sim/sensors/contact_sensor.py` → `ContactSensor`, `ContactSensorCfg` |
+| Sensor config decoding and buffer interface | `embodichain/lab/sim/sensors/base_sensor.py` → `SensorCfg`, `BaseSensor` |
+| Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
+| Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
+| Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
+| Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
+| Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
+| Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
+| Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
 
-## Overview
+Sensors inherit `BaseSensor`/`BatchEntity` and expose per-environment data through
+a TensorDict buffer. `SensorCfg.from_dict()` resolves `sensor_type + "Cfg"`
+from the sensor registry, so names are case-sensitive. Read concrete config
+classes for image dimensions, enabled outputs, intrinsics and filter defaults;
+these are source-owned values.
 
-All sensors inherit from `BaseSensor`, which extends `BatchEntity`. Each sensor:
-- Is configured via a `SensorCfg` subclass (uses `@configclass`).
-- Maintains a `TensorDict` data buffer (`_data_buffer`) sized `[num_envs]`.
-- Must implement `update()` and `get_data()`.
-- Supports dynamic instantiation via `SensorCfg.from_dict()`, which resolves the config class from `sensor_type` string.
+## Ownership and resolution
 
-## Sensor Hierarchy
+Create sensors through `SimulationManager.add_sensor()`. The explicit manager
+owns the World, ordered Arenas, preparation and semantic parent resolution;
+sensors must not rediscover a singleton manager. Cameras are render features
+on both physics backends. Contact availability is a backend capability checked
+before preparation and again after Newton AutoSolver selection.
 
-```
-ObjectBaseCfg
-  └─ SensorCfg            sensor_type, OffsetCfg, from_dict(), get_data_types()
-      ├─ CameraCfg         width, height, intrinsics, extrinsics, enable_* flags
-      │   └─ StereoCameraCfg   intrinsics_right, left_to_right_pos/rot, enable_disparity
-      └─ ContactSensorCfg  rigid_uid_list, articulation_cfg_list, max_contacts_per_env
+Componentized Gym deployments select the robot and its sensor suite together
+through an embodiment component. The component/inline exclusion rules and
+resolver belong to [environment configuration](../env-framework/configuration.md),
+not sensor classes. Use
+[add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md)
+when changing a reusable mounted sensor suite.
 
-BatchEntity
-  └─ BaseSensor            _data_buffer (TensorDict), SUPPORTED_DATA_TYPES
-      ├─ Camera
-      │   └─ StereoCamera
-      └─ ContactSensor
-```
+Shared pose and backend contracts belong to
+[simulation](../simulation-system/simulation-system.md). Camera offsets are
+parent-relative; `parent=None` leaves manager-created views in arena space.
+The camera's extrinsics decoder owns look-at versus explicit-pose precedence.
 
-## Available Sensors
+## Camera attachment boundary
 
-| Sensor | Config | `sensor_type` string | Data Types | Notes |
-|---|---|---|---|---|
-| Camera | `CameraCfg` | `"Camera"` | color, depth, mask, normal, position | Single RGB-D camera; configurable intrinsics/extrinsics |
-| StereoCamera | `StereoCameraCfg` | `"StereoCamera"` | color/depth/mask/normal/position (left + right), disparity | Extends Camera; adds right camera with baseline transform |
-| ContactSensor | `ContactSensorCfg` | `"ContactSensor"` | contact data tensors | Collision detection between rigid bodies and articulation links; uses Warp kernels |
+`resolve_parent_nodes()` parses a canonical link name or
+`<asset_uid>/<link_name>`, disambiguates registered assets, and checks instance
+counts. It queries public `Articulation.get_link_render_nodes()`; neither the
+resolver nor camera should inspect private entity lists, guess clone suffixes,
+or search global native nodes.
 
-## Sensor Configuration
+Cameras attach only to concrete per-environment render nodes and report success
+after applying parent-relative extrinsics. Stereo attachment covers both eyes.
+Direct camera construction requires explicit attachment. A manager topology
+rebuild must detach old views before native skeletons are removed, then resolve
+and attach the new nodes after binding. See
+[sensor lifecycle contracts](lifecycle.md#camera-rebuilds) when changing rebuild
+ordering or supporting another parent type.
 
-### SensorCfg.OffsetCfg
+## Contact boundary
 
-Defines the sensor pose relative to its parent frame:
+`ContactSensor` consumes one Spawn `ContactQuery` after manager preparation.
+It uses arena-frame positions, explicit environment IDs and a per-environment
+quota; native actor ordering does not determine environment assignment.
+`user_ids` are query actor identities, resolved through `get_actor_info()`;
+render user IDs are not interchangeable. Consumers must honor `is_valid` and
+per-environment counts because unused fixed-buffer values are unspecified.
 
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `pos` | `Tuple[float, float, float]` | `(0, 0, 0)` | Position in parent frame |
-| `quat` | `Tuple[float, float, float, float]` | `(1, 0, 0, 0)` | Orientation as `(w, x, y, z)` quaternion |
-| `parent` | `str \| None` | `None` | Parent frame name (e.g. robot link); `None` = arena frame |
+For substep histories and control-interval accumulation, read
+[contact history](contact-history.md).
 
-The `transformation` property returns a `4×4 torch.Tensor` homogeneous matrix.
+Read [contact lifecycle and capabilities](lifecycle.md#contact-queries) before
+changing filtering, force assumptions, topology handling or actor metadata.
+Geometry-only contacts and multiple backend-emitted rows per actor pair are
+valid; sensor adaptation does not synthesize a common contact manifold.
 
-### Dynamic Sensor Creation
+The contact scatter kernel remains sensor-owned because its columns, IDs and
+quota are integration contracts. Generic image tiling belongs to
+`embodichain/compute/image/_warp/tiling.py`; compatibility exports under
+`utils.warp.kernels` do not change those owners.
 
-`SensorCfg.from_dict(init_dict)` creates the correct config class by looking up `init_dict["sensor_type"] + "Cfg"` in the sensors module. Nested configclass fields are recursively initialized via their own `from_dict()`.
+## Focused validation
 
-### Embodiment ownership in Gym deployments
+| Changed boundary | Existing coverage |
+|---|---|
+| Parent parsing and instance validation | `tests/sim/sensors/test_attachment.py` |
+| Native render-node query | `tests/sim/objects/test_articulation.py` |
+| Camera/stereo attachment and buffers | `tests/sim/sensors/test_camera.py`, `test_stereo.py` in that directory |
+| Manager coordination and rebuilds | `tests/sim/test_sim_manager.py` |
+| Query IDs, frames, quota and scatter | `tests/sim/sensors/test_contact_query_sensor.py`, `test_contact_kernels.py` in that directory |
+| Backend contact behavior | `tests/sim/sensors/test_contact_default_e2e.py`, `test_contact_newton_e2e.py` in that directory |
 
-For any componentized Gym environment, sensors are declared in
-`configs/components/embodiments/<embodiment>.yaml` beside the embodiment's
-`simulation` robot mapping. The deployment selects that file with
-`embodiment.component`; task-local `env.yaml` does not own a `sensor` field.
-`config_to_cfg()` resolves the embodiment and passes its `sensor` list through
-the same `SensorCfg.from_dict()` boundary used by ordinary environment configs.
-Changing embodiments therefore changes the robot and its mounted sensor suite
-as one unit. Handwritten and Task Program tasks use the same physical resolver;
-only Task Program deployments additionally require the component's semantic
-`skill_profile` metadata. Inline `robot` and `sensor` fields remain valid when
-`embodiment.component` is absent.
-
-## Camera System
-
-### CameraCfg
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `width` | `int` | `640` | Image width in pixels |
-| `height` | `int` | `480` | Image height in pixels |
-| `near` | `float` | `0.005` | Near clipping plane (meters) |
-| `far` | `float` | `100.0` | Far clipping plane (meters) |
-| `intrinsics` | `Tuple[float, float, float, float]` | `(600, 600, 320, 240)` | `(fx, fy, cx, cy)` |
-| `enable_color` | `bool` | `True` | Enable RGBA output |
-| `enable_depth` | `bool` | `False` | Enable depth output |
-| `enable_mask` | `bool` | `False` | Enable instance segmentation mask |
-| `enable_normal` | `bool` | `False` | Enable surface normal output |
-| `enable_position` | `bool` | `False` | Enable 3D position output |
-
-### CameraCfg.ExtrinsicsCfg
-
-Extends `SensorCfg.OffsetCfg` with look-at support:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `eye` | `Tuple[float,float,float] \| None` | `None` | Camera position |
-| `target` | `Tuple[float,float,float] \| None` | `None` | Look-at target |
-| `up` | `Tuple[float,float,float] \| None` | `None` | Up vector; defaults to `(0, 0, 1)` if `eye` is set |
-
-When `eye` is provided, the transformation is computed via `look_at_to_pose()`. Otherwise falls back to `pos`/`quat`.
-
-### StereoCameraCfg
-
-Extends `CameraCfg` with stereo-specific fields:
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `intrinsics_right` | `Tuple[float,float,float,float]` | `(600, 600, 320, 240)` | Right camera intrinsics |
-| `left_to_right_pos` | `Tuple[float,float,float]` | `(0.05, 0, 0)` | Baseline translation (5cm default) |
-| `left_to_right_rot` | `Tuple[float,float,float]` | `(0, 0, 0)` | Rotation in degrees |
-| `enable_disparity` | `bool` | `False` | Enable disparity map output |
-
-Properties `left_to_right` and `right_to_left` return `4×4` transform tensors. All enabled data types are duplicated for left and right (e.g. `color`, `color_right`).
-
-### ContactSensorCfg
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `rigid_uid_list` | `List[str]` | `[]` | UIDs of rigid bodies to monitor |
-| `articulation_cfg_list` | `List[ArticulationContactFilterCfg]` | `[]` | Articulation link filters |
-| `filter_need_both_actor` | `bool` | `True` | Require both actors in filter list |
-| `max_contacts_per_env` | `int` | `64` | Max contacts per environment |
-
-`ArticulationContactFilterCfg` specifies `articulation_uid` and `link_name_list` to filter which links report contacts.
-
-## Common Failure Modes
-
-- **`sensor_type` string mismatch** — `SensorCfg.from_dict()` looks up `sensor_type + "Cfg"` in the sensors module. A typo (e.g. `"camera"` instead of `"Camera"`) causes `AttributeError`.
-- **Depth not enabled** — `enable_depth` defaults to `False`. Accessing depth data without enabling it returns empty tensors.
-- **Parent frame not found** — `OffsetCfg.parent` must exactly match a link name in the scene. A wrong name silently places the sensor at the arena origin.
-- **Stereo baseline sign** — `left_to_right_pos` defines translation from left to right camera. Flipping the sign inverts the disparity.
-- **Contact sensor buffer overflow** — `max_contacts_per_env` caps the contact count. Exceeding it silently drops contacts; increase if the scene has dense collisions.
-- **View attribute flags** — `Camera.get_view_attrib()` computes `dr.ViewFlags` from enabled booleans. Adding a new data type requires both the `enable_*` flag and the corresponding `ViewFlags` bit.
+For missing camera output, inspect enabled fields and `ViewFlags` together.
+For missing contacts, inspect backend capabilities, the query filter and quota
+before changing buffer allocation. Pure resolver tests do not require a renderer.

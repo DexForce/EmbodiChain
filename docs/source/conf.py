@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 os.environ.setdefault(
     "AZURE_OPENAI_ENDPOINT", "https://mock-endpoint.openai.azure.com/"
@@ -35,6 +36,7 @@ os.environ.setdefault(
 os.environ.setdefault("AZURE_OPENAI_API_KEY", "mock-api-key-for-docs-build")
 
 sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 
 project = "EmbodiChain"
@@ -52,6 +54,7 @@ with open(os.path.join(os.path.dirname(__file__), "..", "..", "VERSION")) as f:
 
 
 extensions = [
+    "architecture_sphinx",
     "autodocsumm",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
@@ -60,6 +63,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",  # optional, shows type hints
     "sphinx_design",
+    "sphinxcontrib.mermaid",
     "myst_parser",  # if you prefer Markdown pages
     "sphinx_copybutton",
 ]
@@ -80,6 +84,7 @@ autodoc_default_options = {
 # If using MyST and writing .md API stubs:
 myst_enable_extensions = ["colon_fence", "deflist", "html_admonition"]
 myst_heading_anchors = 4
+myst_fence_as_directive = ["mermaid"]
 
 
 templates_path = ["_templates"]

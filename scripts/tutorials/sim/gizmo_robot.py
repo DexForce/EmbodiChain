@@ -13,41 +13,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""
-Gizmo-Robot Example: Test Gizmo class on a robot (UR10)
-"""
+"""Control a UR10 end effector with a Gizmo and explicit physics stepping."""
 
 from __future__ import annotations
 
 import time
+import argparse
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create a simulation scene with SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import torch
 import numpy as np
-import argparse
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.sim.objects import GizmoCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 from embodichain.lab.sim.cfg import (
     RenderCfg,
+    physics_cfg_for_backend,
     RobotCfg,
     URDFCfg,
     JointDrivePropertiesCfg,
 )
 
-from embodichain.lab.sim.solvers import PinkSolverCfg
+from embodichain.lab.sim.motion.solvers import PinkSolverCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to create and run the simulation scene."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create a simulation scene with SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -55,13 +69,14 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
+        robot_ik_gizmo=GizmoCfg(ik_start_enabled=True),
     )
 
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     # Get UR10 URDF path
     urdf_path = get_data_path("UniversalRobots/UR10/UR10.urdf")
@@ -84,39 +99,35 @@ def main():
                 dt=0.1,
             )
         },
-        drive_pros=JointDrivePropertiesCfg(
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
             stiffness={"Joint[1-6]": 1e4},
             damping={"Joint[1-6]": 1e3},
         ),
     )
     robot = sim.add_robot(cfg=robot_cfg)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
 
     # Set initial joint positions
     initial_qpos = torch.tensor(
         [[0, -np.pi / 2, np.pi / 2, 0.0, np.pi / 2, 0.0]],
         dtype=torch.float32,
-        device="cpu",
+        device=sim.device,
     )
+
+    sim.prepare()
     joint_ids = robot.get_joint_ids("arm")
+    robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids, target=False)
     robot.set_qpos(qpos=initial_qpos, joint_ids=joint_ids)
 
-    time.sleep(0.2)  # Wait for a moment to ensure everything is set up
+    sim.update(step=1)  # Refresh link poses before creating the IK target.
 
     native_window_opened = False
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo using the new API
-    if native_window_opened or args.viser:
-        sim.enable_gizmo(
-            uid="ur10_gizmo_test",
-            control_part="arm",
-            enable_native=native_window_opened,
-        )
-        if not sim.has_gizmo("ur10_gizmo_test", control_part="arm"):
-            logger.log_error("Failed to enable gizmo!")
-            return
-    else:
+    if not native_window_opened and not args.viser:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
         )
@@ -124,25 +135,29 @@ def main():
     logger.log_info("Gizmo-Robot example started!")
     if native_window_opened or args.viser:
         logger.log_info("Use the gizmo to drag the robot end-effector (EE)")
+    if native_window_opened:
+        logger.log_info(
+            "Native robot IK Gizmo starts enabled; press I to show or hide it"
+        )
     logger.log_info("Press Ctrl+C to stop the simulation")
 
     run_simulation(sim)
 
 
-def run_simulation(sim: SimulationManager):
+def run_simulation(sim: SimulationManager) -> None:
+    """Advance physics; the manager owns native and Viser IK interaction."""
     step_count = 0
     try:
-        last_time = time.time()
+        last_time = time.perf_counter()
         last_step = 0
         while True:
-            time.sleep(0.033)  # 30Hz
-            # Update all gizmos managed by sim
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            frame_start = time.perf_counter()
+            # update() owns IK interaction, physics stepping, and Viser capture.
+            sim.update(step=1)
             step_count += 1
 
             if step_count % 100 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -152,6 +167,9 @@ def run_simulation(sim: SimulationManager):
                 logger.log_info(f"Simulation step: {step_count}, FPS: {fps:.2f}")
                 last_time = current_time
                 last_step = step_count
+
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
@@ -160,4 +178,4 @@ def run_simulation(sim: SimulationManager):
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

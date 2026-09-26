@@ -150,7 +150,7 @@ def _run_case(
             settle_steps=2,
         )
         initial_obj_position = object_position_tuple(obj)
-        hand_open, hand_close = get_hand_open_close_qpos(robot, sim.device)
+        hand_open, hand_close = get_hand_open_close_qpos(robot)
         initialize_pre_pick_robot_pose(robot, obj, hand_open)
         case_args = _make_pickup_args(args, approach, object_preset, profile)
         approach_direction = resolve_pickup_approach_direction(
@@ -470,8 +470,11 @@ def run_all_benchmarks(args: argparse.Namespace | None = None) -> Path:
 
     ensure_repo_root()
     ensure_torch()
-    from embodichain.lab.sim.planners import MotionGenerator, MotionGenCfg
-    from embodichain.lab.sim.planners import ToppraPlannerCfg
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenCfg,
+    )
+    from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
     from scripts.tutorials.atomic_action.pickup import (
         create_robot,
         initialize_simulation,
@@ -592,7 +595,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from scripts.tutorials.atomic_action.tutorial_utils import run_tutorial
+
+    run_tutorial(main)
 
 
 __all__ = ["add_benchmark_args", "run_all_benchmarks"]

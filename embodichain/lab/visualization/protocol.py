@@ -39,6 +39,7 @@ __all__ = [
     "JointControlSpec",
     "JointControlState",
     "MeshGeometry",
+    "PickCommand",
     "PointCloudOverlay",
     "SceneFrame",
     "SceneManifest",
@@ -129,8 +130,9 @@ def pose_to_position_wxyz(pose: object) -> tuple[np.ndarray, np.ndarray]:
     """Split pose arrays into positions and normalized wxyz quaternions.
 
     The accepted layouts are ``(..., 7)`` in EmbodiChain's
-    ``(x, y, z, qw, qx, qy, qz)`` convention or homogeneous ``(..., 4, 4)``
-    matrices. This is the single conversion boundary used by scene exporters.
+    ``(x, y, z, qx, qy, qz, qw)`` convention or homogeneous ``(..., 4, 4)``
+    matrices. Viser uses ``wxyz``, so this is the single conversion boundary
+    used by scene exporters.
 
     Args:
         pose: Pose or batch of poses.
@@ -144,11 +146,12 @@ def pose_to_position_wxyz(pose: object) -> tuple[np.ndarray, np.ndarray]:
     array = _array(pose, np.float32)
     if array.ndim >= 1 and array.shape[-1] == 7:
         position = array[..., :3].copy()
-        wxyz = array[..., 3:7].copy()
-        norms = np.linalg.norm(wxyz, axis=-1, keepdims=True)
+        xyzw = array[..., 3:7].copy()
+        norms = np.linalg.norm(xyzw, axis=-1, keepdims=True)
         if np.any(norms <= np.finfo(np.float32).eps):
             raise ValueError("Pose contains a degenerate quaternion.")
-        return position, wxyz / norms
+        xyzw = xyzw / norms
+        return position, np.roll(xyzw, 1, axis=-1)
 
     if array.ndim >= 2 and array.shape[-2:] == (4, 4):
         position = array[..., :3, 3].copy()
@@ -161,6 +164,22 @@ def pose_to_position_wxyz(pose: object) -> tuple[np.ndarray, np.ndarray]:
     raise ValueError(
         f"Expected pose shape (..., 7) or (..., 4, 4), received {array.shape}."
     )
+
+
+def _normalize_position_wxyz(
+    position: object, quaternion: object
+) -> tuple[np.ndarray, np.ndarray]:
+    """Validate one protocol-native position and Viser ``wxyz`` quaternion."""
+    position_array = _array(position, np.float32).copy()
+    quaternion_array = _array(quaternion, np.float32).copy()
+    if position_array.shape != (3,):
+        raise ValueError(f"position must have shape (3,), got {position_array.shape}.")
+    if quaternion_array.shape != (4,):
+        raise ValueError(f"wxyz must have shape (4,), got {quaternion_array.shape}.")
+    norm = np.linalg.norm(quaternion_array)
+    if norm <= np.finfo(np.float32).eps:
+        raise ValueError("Pose contains a degenerate quaternion.")
+    return position_array, quaternion_array / norm
 
 
 @dataclass(frozen=True)
@@ -310,11 +329,7 @@ class GizmoState:
     visible: bool = True
 
     def __post_init__(self) -> None:
-        position, wxyz = pose_to_position_wxyz(
-            np.concatenate(
-                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
-            )
-        )
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "wxyz", wxyz)
 
@@ -346,13 +361,34 @@ class GizmoCommand:
             raise ValueError("Gizmo command phase must be 'start', 'update', or 'end'.")
         if not self.client_id:
             raise ValueError("Gizmo command client_id must not be empty.")
-        position, wxyz = pose_to_position_wxyz(
-            np.concatenate(
-                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
-            )
-        )
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "wxyz", wxyz)
+
+
+@dataclass(frozen=True)
+class PickCommand:
+    """Immutable browser click-pick command consumed on the simulation thread.
+
+    A non-empty ``node_id`` requests a Gizmo on the clicked scene node; a
+    ``None`` ``node_id`` (clicking empty space) clears the picker-owned Gizmo.
+    """
+
+    run_id: str
+    scene_revision: int
+    client_id: str
+    node_id: str | None
+    schema_version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.run_id:
+            raise ValueError("Pick command run_id must not be empty.")
+        if self.scene_revision < 0:
+            raise ValueError("Pick command scene_revision must be non-negative.")
+        if not self.client_id:
+            raise ValueError("Pick command client_id must not be empty.")
+        if self.node_id is not None and not self.node_id:
+            raise ValueError("Pick command node_id must be None or non-empty.")
 
 
 @dataclass(frozen=True)
@@ -534,11 +570,7 @@ class FrameOverlay:
     visible: bool = True
 
     def __post_init__(self) -> None:
-        position, wxyz = pose_to_position_wxyz(
-            np.concatenate(
-                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
-            )
-        )
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "wxyz", wxyz)
 
@@ -554,11 +586,7 @@ class TargetOverlay:
     visible: bool = True
 
     def __post_init__(self) -> None:
-        position, wxyz = pose_to_position_wxyz(
-            np.concatenate(
-                (_array(self.position, np.float32), _array(self.wxyz, np.float32))
-            )
-        )
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "wxyz", wxyz)
 

@@ -6,6 +6,7 @@
 :hidden:
 
 builtin_actions
+affordance_sampling
 ```
 
 ```{currentmodule} embodichain.lab.sim.atomic_actions
@@ -193,6 +194,15 @@ from leaking into an Action Agent schema.
 
 `MotionPolicy.strategy` accepts exactly `"motion_gen"` or `"ik_interp"`; the
 same value is forwarded to `MotionGenOptions.strategy` without an adapter layer.
+`motion_gen` invokes the configured backend, including when waypoint preparation
+uses IK or interpolation. `ik_interp` requires the integration's explicit
+control cadence and rejects `plan_opts`. Skill segments that preserve a supplied
+Cartesian path (`cartesian_linear=True`, including Press, Slide, PushObject,
+and OpenDoor) currently require `ik_interp`; selecting `motion_gen` raises an
+error instead of bypassing the backend. See
+{doc}`MotionGenerator <../motion/motion_generator>` for sampling and constraint
+semantics.
+
 Every planner result that contains positions must also contain per-waypoint
 `dt`; its per-environment `duration` is derived from those intervals. Every
 action passes a `TimedTrajectory` to `build_plan()`; raw position tensors are
@@ -926,7 +936,7 @@ See {doc}`builtin_actions` for the shipped skill catalog and visual demos, and
   robot profiles, and effects
 - {doc}`../../task_program/robot_profiles` — embodiment resources and presets
 - {doc}`../../task_program/index` — semantic task compilation and execution
-- {doc}`../planners/motion_generator` — the motion generator owned by the engine
+- {doc}`../motion/motion_generator` — the motion generator owned by the engine
 - {doc}`../sim_robot` — robot control parts and kinematic configuration
 - {doc}`/tutorial/atomic_actions` — static, closed-loop, and recovery examples
 - `scripts/tutorials/atomic_action/moving_target_recovery.py` — runnable runner

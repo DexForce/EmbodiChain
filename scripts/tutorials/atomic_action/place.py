@@ -37,7 +37,7 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
@@ -50,14 +50,25 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
     make_clear_dynamics_callback,
     prepare_tutorial_scene,
+    expand_tutorial_trajectory_variants,
+    log_trajectory_variant_diagnostics,
+    parse_trajectory_variant_arguments,
     replay_trajectory,
     run_tutorial,
+    save_tool_path_view,
+    save_variant_joint_plot,
+    trajectory_variant_rows,
+)
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    compute_pick_close_end_step,
+    initialize_benchmark_simulation,
 )
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
@@ -73,9 +84,9 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Place tutorial."""
     parser = create_tutorial_argument_parser(
         "Pick up a cube and place it at a target pose.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("grasp_sampling", "trajectory_variants", "visualize_axes"),
     )
-    return parser.parse_args()
+    return parse_trajectory_variant_arguments(parser)
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -84,16 +95,18 @@ def create_pick_object(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
-                enable_ccd=True,
+                linear_damping=0.2,
+                angular_damping=0.2,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
             init_pos=[*OBJECT_XY, 0.5 * OBJECT_SIZE[2]],
         )
     )
+    sim.prepare()
     sim.update(step=10)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
@@ -125,7 +138,11 @@ def main() -> None:
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
-    motion_gen = create_curobo_motion_generator(robot)
+    sim.prepare()
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
 
@@ -201,13 +218,44 @@ def main() -> None:
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 
+    # Each row replays a different way of executing the same plan. Only the
+    # free motion changes: the grasp and the release keep their planned
+    # waypoints, so every row picks and places the cube identically.
+    variants = expand_tutorial_trajectory_variants(
+        compiled,
+        robot,
+        args,
+        phase_kinds=(
+            {"approach": "free", "close": "contact", "lift": "free"},
+            {"approach": "free", "release": "contact", "retract": "free"},
+        ),
+        # Retiming anything before the lift would move the step index at which
+        # the executor clears the cube's dynamics.
+        retimable=(("lift",), ("approach", "retract")),
+    )
+    log_trajectory_variant_diagnostics(variants, args.trajectory_variants)
+
+    if args.variant_plot_dir:
+        # Capture before replay so the still shows the starting scene and the
+        # paths the variants are about to take.
+        save_variant_joint_plot(
+            variants, robot, f"{args.variant_plot_dir}/place_variant_joints.png"
+        )
+        save_tool_path_view(
+            robot,
+            variants,
+            f"{args.variant_plot_dir}/place_variant_tool_paths.png",
+            target_object=obj,
+            object_size=OBJECT_SIZE,
+        )
+
     if wait_for_user:
         input("Press Enter to replay the Place demo...")
     clear_after_step = compiled.segment(0, "lift").start
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory,
+        trajectory_variant_rows(variants, args.num_envs),
         args,
         video_prefix="place_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,
@@ -219,3 +267,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     run_tutorial(main)
+
+
+def initialize_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation for interactive or benchmark runs."""
+    return initialize_benchmark_simulation(args)
+
+
+def create_robot(sim: "SimulationManager") -> "Robot":
+    """Add the default Place tutorial robot."""
+    robot = add_tutorial_robot(sim, "ur5", tcp_z=0.15)
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot

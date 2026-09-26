@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -49,22 +50,27 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-KNOB_LINK_NAME = "cap_1"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+KNOB_LINK_NAME = "knob_link"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
-TWIST_SAMPLE_INTERVAL = 140
-HAND_INTERP_STEPS = 12
-POST_TRAJECTORY_STEPS = 240
+TWIST_SAMPLE_INTERVAL = 256
+HAND_INTERP_STEPS = 20
+POST_TRAJECTORY_STEPS = 256
 RIGID_KNOB_POSITION = (-0.7, -0.00, 0.70)
 RIGID_KNOB_SIZE = (0.05, 0.05, 0.05)
 KNOB_SCENE_ENTITY_ID = "twist-target"
@@ -74,7 +80,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Twist tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate Twist on an articulation-link or rigid knob.",
-        features=("visualize_axes",),
+        features=("affordance_sampling", "visualize_axes"),
     )
     parser.add_argument("--twist_angle", type=float, default=-0.7853981634)
     parser.add_argument(
@@ -82,23 +88,31 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use a standalone rigid knob instead of the microwave link.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim) -> Articulation:
     """Create the fixed-base microwave articulation used by the demo."""
-    microwave = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="microwave",
-            fpath=get_data_path(MICROWAVE_ASSET),
-            init_pos=MICROWAVE_POSITION,
-            init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(
-                stiffness=1e-3, damping=1e2, max_effort=1e-2
-            ),
-            fix_base=True,
-        )
+    microwave_cfg = ArticulationCfg(
+        uid="microwave",
+        fpath=get_data_path(MICROWAVE_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=MICROWAVE_POSITION,
+        init_rot=MICROWAVE_ORIENTATION,
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1e-3,
+            damping=1e2,
+            max_effort=1e-2,
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        microwave_cfg,
+        group_name="newton_knob_contacts",
+        link_names_expr=[KNOB_LINK_NAME],
+    )
+    microwave = sim.add_articulation(cfg=microwave_cfg)
     sim.update(step=10)
     return microwave
 
@@ -109,6 +123,9 @@ def create_rigid_knob(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="rigid_knob",
             shape=CubeCfg(size=list(RIGID_KNOB_SIZE)),
+            attrs=create_tutorial_rigid_body_physics(
+                newton_contact=sim.is_newton_backend,
+            ),
             body_type="static",
             init_pos=RIGID_KNOB_POSITION,
         )
@@ -119,8 +136,19 @@ def create_rigid_knob(sim) -> RigidObject:
 
 def create_knob_semantics(
     target: Articulation | RigidObject,
+    *,
+    grasp_roll_range: tuple[float, float] | None = None,
 ) -> tuple[ObjectSemantics, torch.Tensor]:
-    """Create twist semantics for an articulation-link or rigid knob."""
+    """Create twist semantics for an articulation-link or rigid knob.
+
+    Args:
+        target: Knob entity whose geometry defines the grasp and rotation axis.
+        grasp_roll_range: Allowed local-z grasp rolls in radians, or ``None``
+            to retain the nominal grasp.
+
+    Returns:
+        Knob semantics and its current batched target pose.
+    """
     if isinstance(target, Articulation):
         vertices, _ = target.get_link_vert_face(KNOB_LINK_NAME)
         target_pose = target.get_link_pose(KNOB_LINK_NAME, to_matrix=True)
@@ -132,6 +160,7 @@ def create_knob_semantics(
             body_scale=target.cfg.body_scale,
         ).to_object_geometry()
         affordance = TwistAffordance(
+            grasp_roll_range=grasp_roll_range,
             grasp_position=_mesh_center(vertices),
         )
         label = "microwave_power_knob"
@@ -141,6 +170,7 @@ def create_knob_semantics(
         geometry = {}
         mesh_center = _mesh_center(vertices)
         affordance = TwistAffordance(
+            grasp_roll_range=grasp_roll_range,
             grasp_position=mesh_center,
             axis_origin=mesh_center,
             twist_axis=torch.tensor([-1.0, 0.0, 0.0], device=target.device),
@@ -171,9 +201,16 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
     target = create_rigid_knob(sim) if args.rigid_object else create_microwave(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
-    motion_gen = create_toppra_motion_generator(robot)
-    semantics, target_pose = create_knob_semantics(target)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
+    semantics, target_pose = create_knob_semantics(
+        target,
+        grasp_roll_range=(-math.pi, math.pi) if args.affordance_branches > 1 else None,
+    )
 
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
@@ -199,7 +236,10 @@ def main() -> None:
                     target_pose,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=TWIST_SAMPLE_INTERVAL),
+                motion_policy=MotionPolicy(
+                    strategy="motion_gen",
+                    sample_count=TWIST_SAMPLE_INTERVAL,
+                ),
                 skill_options=TwistOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     pre_grasp_distance=0.12,
@@ -207,8 +247,12 @@ def main() -> None:
                 ),
             ),
         ),
-        context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        context=engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Twist demo trajectory.")
         return

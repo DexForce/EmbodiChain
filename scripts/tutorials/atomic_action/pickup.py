@@ -35,25 +35,33 @@ from embodichain.lab.sim.atomic_actions import (
     PickUpOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_tutorial_robot,
     clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_curobo_motion_generator,
     create_parallel_jaw_grasp_pose_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
     initialize_pre_pick_robot_pose,
+    log_affordance_branch_diagnostics,
     make_clear_dynamics_callback,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
+)
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    compute_pick_close_end_step,
+    initialize_benchmark_simulation,
 )
 
 OBJECT_SIZE = (0.05, 0.05, 0.05)
@@ -72,13 +80,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the PickUp tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate PickUp on a cube.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--approach", choices=[*APPROACH_DIRECTIONS, "custom"], default="top"
     )
     parser.add_argument("--custom_approach_direction", type=float, nargs=3)
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -87,15 +95,16 @@ def create_pick_object(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="cube",
             shape=CubeCfg(size=list(OBJECT_SIZE)),
-            attrs=RigidBodyAttributesCfg(
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.05,
                 dynamic_friction=0.97,
                 static_friction=0.99,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
             init_pos=[*OBJECT_XY, OBJECT_SIZE[2]],
         )
     )
+    sim.prepare()
     sim.update(step=10)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
@@ -124,13 +133,18 @@ def resolve_approach_direction(
 def main() -> None:
     """Plan and replay a sampled antipodal PickUp trajectory."""
     args = parse_arguments()
+    sampling = create_affordance_sampling_context(args)
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    motion_gen = create_curobo_motion_generator(robot)
-
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        use_cuda_graph=args.physics != "newton",
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
         scene_entities=(obj,),
@@ -175,8 +189,12 @@ def main() -> None:
                 ),
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=sampling,
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan PickUp demo trajectory.")
         return
@@ -199,3 +217,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     run_tutorial(main)
+
+
+def initialize_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation for interactive or benchmark runs."""
+    return initialize_benchmark_simulation(args)
+
+
+def create_robot(sim: "SimulationManager") -> "Robot":
+    """Add the default PickUp tutorial robot."""
+    robot = add_tutorial_robot(sim, "ur5", tcp_z=0.15)
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot

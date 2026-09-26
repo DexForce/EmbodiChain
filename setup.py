@@ -101,11 +101,9 @@ def get_package_dir() -> dict[str, str]:
 
 
 def get_version() -> str:
-    """Read the normalized package version from the repository version file."""
+    """Read the complete package version from the repository version file."""
     with open(os.path.join(os.path.dirname(__file__), "VERSION")) as f:
-        full_version = f.read().strip()
-        version = ".".join(full_version.split(".")[:3])
-    return version
+        return f.read().strip()
 
 
 def main():
@@ -134,7 +132,12 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
-            "embodichain_tasks.configs": ["**/*.json", "**/*.yaml", "**/*.yml"],
+            "embodichain_tasks.configs": [
+                "**/*.json",
+                "**/*.yaml",
+                "**/*.yml",
+                "**/README.md",
+            ],
         },
         cmdclass=cmdclass,
         include_package_data=False,

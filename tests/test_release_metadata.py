@@ -16,13 +16,18 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 from packaging.requirements import Requirement
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+
+import setup as package_setup
 from scripts.validate_wheel_metadata import WheelMetadataError, validate_wheel
 from setup import get_package_dir, get_packages
 
@@ -115,3 +120,13 @@ def test_wheel_metadata_rejects_direct_dependencies(tmp_path: Path) -> None:
 
     with pytest.raises(WheelMetadataError, match="nvidia-curobo"):
         validate_wheel(wheel_path)
+
+
+@pytest.mark.parametrize("version", ["0.2.4", "0.2.4.post1", "0.2.4.post10"])
+def test_setup_preserves_full_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    (tmp_path / "VERSION").write_text(f"{version}\n", encoding="utf-8")
+    monkeypatch.setattr(package_setup, "__file__", str(tmp_path / "setup.py"))
+
+    assert package_setup.get_version() == version

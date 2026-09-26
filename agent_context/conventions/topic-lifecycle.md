@@ -1,52 +1,39 @@
-# Agent Context Topic Lifecycle
+# Context lifecycle
 
-Use these rules when a request changes project context, adds a new topic, or updates an existing topic.
+When a change affects an entry point, loader, lifecycle, public configuration,
+serialization contract or resource boundary, review the affected context in the
+same PR. `affected --base REF --explain` identifies candidates and why they
+matched; neither a path match nor a behavior change alone requires a prose edit.
 
-## When code behavior changes
+Choose one outcome and briefly record it in the PR or task result:
 
-If a change affects an existing routed topic, update the matching files under `agent_context/topics/...` in the same change.
+| Outcome | When | Action |
+|---|---|---|
+| No update | Existing guidance remains accurate and sufficient | State why; internal optimizations, fixes restoring an existing contract, and tutorial tuning usually belong in code/tests |
+| Revise | An existing fact or boundary becomes inaccurate | Replace the owning passage and remove superseded claims; adjust consumers' boundary summaries only as needed |
+| Add | A new durable constraint changes future navigation, implementation or validation decisions | Extend the owning detail; add a topic only for a recurring/requested domain |
 
-Typical triggers:
+To refresh, resolve the topic, verify relevant `source_of_truth` symbols and
+tests, update the owning overview/details, and repair metadata or incoming links.
+Preserve useful constraints rather than replacing facts with background prose.
+Review the containing section, not just the appended paragraph: consolidate
+duplicate explanations and remove obsolete exceptions, migration notes whose
+compatibility path is gone, and implementation inventories recoverable from code.
+Keep repair history and one-off tuning results in the PR rather than context.
 
-- entry-point changes
-- lifecycle/state-machine changes
-- config field changes
-- manager or functor signature changes
-- new solver, sensor, or robot added
+To add a recurring/requested domain, choose a stable id, verify current code,
+write its overview and only necessary details, and register routing phrases,
+source pointers, watch scopes and related topics in MAP.
 
-## How to refresh an existing topic
+Run `context.py check` and the focused context tests after maintenance. Use
+`context.py stats --base REF` to compare default reading size and total content;
+splitting a page should also remove repetition, not merely relocate it. Size and
+growth flags request editorial review, not mandatory cuts or a CI failure. Routing
+changes also need representative read/navigation exercises, including Chinese,
+explicit ids, ambiguous symbols and unmatched requests. Validate real behavior
+and broken-reference cases; do not enforce exact headings or prose lengths.
 
-1. Identify the topic in `agent_context/MAP.yaml`
-2. Re-read the current source-of-truth files listed in that topic entry
-3. Rewrite the topic markdown so it reflects the current implementation, not old intent
-4. Keep the file concise and operational:
-   - entry points
-   - invariants
-   - common failure modes
-
-Explicit refresh requests such as `refresh <topic> context` or
-`根据当前实现重写 <topic> 上下文` should follow this exact flow.
-
-## How to create a new topic from current code
-
-1. Pick a stable kebab-case topic id
-2. Write one Markdown file under `agent_context/topics/<topic-id>/`
-3. Summarize the current behavior from source files, not from stale notes
-4. Add a topic entry to `agent_context/MAP.yaml` with:
-   - `id`
-   - `title`
-   - `aliases`
-   - `keywords`
-   - `paths`
-   - `source_of_truth`
-   - `related_topics`
-   - `status`
-5. If the routing rule or recommended usage changed, update:
-   - `AGENTS.md`
-   - `.agents/skills/project-dev-context/`
-   - `.claude/skills/project-dev-context/SKILL.md`
-   - `.github/copilot/project-dev-context.md`
-
-## Rule
-
-Do not let topic markdown drift from the code. If the routed context becomes stale, treat that as part of the same maintenance task.
+Use `status: deprecated` with `replaced_by` for a redirect, or remove the entry
+and repair all links together. Update the canonical skill when routing rules or
+workflow change; alias/keyword edits alone do not require skill prose changes.
+Thin adapters do not carry duplicate routing rules.

@@ -17,8 +17,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
+import sys
 from collections.abc import Sequence
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -32,7 +37,9 @@ EXPECTED_COMMANDS = {
     "benchmark",
     "data",
     "decompose-urdf",
+    "eval-policy",
     "list-task",
+    "show-task",
     "preview-asset",
     "preview_lerobot_data",
     "run-env",
@@ -123,18 +130,101 @@ def test_run_task_alias_dispatches_to_run_env(
     assert received == ["--gym_config", "task.yaml", "--headless"]
 
 
+def test_list_task_table_matches_startup_summary_style(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List-task uses the same framed summary style as environment startup."""
+    list_task._print_environment_entries(
+        [
+            list_task._EnvironmentListEntry(
+                "PickPlace-v1",
+                ("manipulation", "pick_place"),
+                {list_task._TASK_PROGRAM},
+                {"ur5"},
+                {"task.ur5.yaml"},
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith("╭")
+    assert "EmbodiChain · Task Catalog · 1 task · 1 environment" in output
+    assert output.rstrip().endswith("╯")
+
+
+@pytest.mark.parametrize(
+    ("terminal_width", "expected_width"),
+    [(40, 80), (80, 80), (100, 100), (140, 120)],
+)
+def test_list_task_table_is_bounded_to_terminal_width(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_width: int,
+    expected_width: int,
+) -> None:
+    """Long catalog values wrap instead of widening the terminal table."""
+    monkeypatch.setattr(
+        shutil,
+        "get_terminal_size",
+        lambda fallback=(100, 24): os.terminal_size((terminal_width, 24)),
+    )
+    output = list_task._format_environment_entries(
+        [
+            list_task._EnvironmentListEntry(
+                "TaskProgramOpenDrawerWithAnIntentionallyLongEnvironmentName-v1",
+                ("manipulation", "open_drawer_with_a_long_task_name"),
+                {list_task._TASK_PROGRAM},
+                {"dual_ur5_dh_pgi_140_80_with_additional_sensors"},
+                {"task.dual_ur5_dh_pgi_140_80.with_additional_sensors.yaml"},
+            )
+        ]
+    )
+
+    assert max(len(line) for line in output.splitlines()) == expected_width
+
+
+def test_list_task_table_uses_tty_color_without_changing_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TTY styling colors key columns and NO_COLOR disables those escapes."""
+    entries = [
+        list_task._EnvironmentListEntry(
+            "PickPlace-v1",
+            ("manipulation", "pick_place"),
+            {list_task._TASK_PROGRAM},
+            {"ur5"},
+            {"task.ur5.yaml"},
+        )
+    ]
+    monkeypatch.setattr(
+        sys,
+        "stdout",
+        SimpleNamespace(isatty=lambda: True),
+    )
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    colored = list_task._format_environment_entries(entries)
+    assert "\033[1;36m" in colored
+    assert "\033[1;32m" in colored
+    assert "\033[1;33m" in colored
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    plain = list_task._format_environment_entries(entries)
+    assert "\033[" not in plain
+    assert re.sub(r"\033\[[0-9;]*m", "", colored) == plain
+
+
 def test_list_task_discovers_and_prints_task_tree(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """List-task renders folder hierarchy and precise task capabilities."""
-    from embodichain.lab.gym.utils import registration
-
     discovery_calls: list[None] = []
-    monkeypatch.setattr(
+    registration = ModuleType("embodichain.lab.gym.utils.registration")
+    registration.discover_task_packages = lambda: discovery_calls.append(None)
+    monkeypatch.setitem(
+        sys.modules,
+        "embodichain.lab.gym.utils.registration",
         registration,
-        "discover_task_packages",
-        lambda: discovery_calls.append(None),
     )
     monkeypatch.setattr(
         list_task,
@@ -182,31 +272,52 @@ def test_list_task_discovers_and_prints_task_tree(
             ),
         ],
     )
+    monkeypatch.setattr(
+        shutil,
+        "get_terminal_size",
+        lambda fallback=(100, 24): os.terminal_size((120, 24)),
+    )
 
     cli.main(["list-task"])
 
     assert discovery_calls == [None]
-    assert capsys.readouterr().out == """\
-+------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|                                                                Tasks (5) / Environments (6)                                                                |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-| Task                   | Environment ID                  | Embodiment             | Capability                          | Config                           |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-| classic_control/       |                                 |                        |                                     |                                  |
-|   cart_pole            | CartPoleRL                      | Cart                   | RL                                  | env.json, env.yaml               |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-| manipulation/          |                                 |                        |                                     |                                  |
-|   hand_over            | HandOver-v1                     | dual_ur5_dh_pgi_140_80 | Expert Demo: Task Program           | task.dual_ur5_dh_pgi_140_80.yaml |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-|   open_drawer          | TaskProgramOpenDrawer-Franka-v1 | franka_panda           | Expert Demo: Task Program           | task.franka.yaml                 |
-|                        | TaskProgramOpenDrawer-v1        | ur5_dh_pgi_140_80      | Expert Demo: Task Program           | task.ur5.yaml                    |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-|   tableware/           |                                 |                        |                                     |                                  |
-|     blocks_ranking_rgb | BlocksRankingRGB-v1             | cobotmagic             | Expert Demo: Handwritten Trajectory | env.json                         |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-|     stack_cups         | StackCups-v1                    | -                      | Environment Only                    | -                                |
-+------------------------+---------------------------------+------------------------+-------------------------------------+----------------------------------+
-"""
+    output = capsys.readouterr().out
+    assert output.startswith("╭")
+    assert "EmbodiChain · Task Catalog · 5 tasks · 6 environments" in output
+    assert output.rstrip().endswith("╯")
+    assert max(len(line) for line in output.splitlines()) <= 120
+
+    rows = [
+        line.split("│") for line in output.splitlines() if len(line.split("│")) == 7
+    ]
+    task_column = "".join(row[1].strip() for row in rows)
+    environment_column = "".join(row[2].strip() for row in rows)
+    capability_column = "".join(row[4].strip() for row in rows)
+    for value in (
+        "classic_control/",
+        "cart_pole",
+        "manipulation/",
+        "hand_over",
+        "open_drawer",
+        "tableware/",
+        "blocks_ranking_rgb",
+        "stack_cups",
+    ):
+        assert value in task_column
+    for value in (
+        "CartPoleRL",
+        "HandOver-v1",
+        "TaskProgramOpenDrawer-Franka-v1",
+        "TaskProgramOpenDrawer-v1",
+        "BlocksRankingRGB-v1",
+        "StackCups-v1",
+    ):
+        assert value in environment_column
+    for value in (
+        "Expert Demo: Handwritten Trajectory",
+        "Environment Only",
+    ):
+        assert re.sub(r"\s+", "", value) in re.sub(r"\s+", "", capability_column)
 
 
 def test_list_task_help_explains_environment_only_label(
@@ -243,7 +354,7 @@ def test_config_environment_entries_use_task_paths_and_artifacts(
         encoding="utf-8",
     )
     (expert_task / "env.yaml").write_text(
-        "environment_id: pick_place\nsimulation: {}\nenv: {}\n",
+        "environment_id: pick_place\nphysics: default\nsimulation: {}\nenv: {}\n",
         encoding="utf-8",
     )
     (expert_task / "notes.yaml").write_text(

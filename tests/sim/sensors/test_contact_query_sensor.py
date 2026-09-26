@@ -1,0 +1,197 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import torch
+import warp as wp
+
+from dexsim.scene import ContactActorInfo, ContactBuffer, ContactQueryCapabilities
+from embodichain.lab.sim.sensors import ContactSensor, ContactSensorCfg
+
+
+class _FakeQuery:
+    def __init__(self) -> None:
+        self.capabilities = ContactQueryCapabilities(True, True, True)
+        self.selected_actor_ids = (4, 7)
+        self._actors = {
+            4: ContactActorInfo(4, "arena_0/cube", None, "arena_0", 0),
+            7: ContactActorInfo(7, "arena_1/cube", None, "arena_1", 1),
+        }
+        self.actors = tuple(self._actors.values())
+        self.actor_info_calls = 0
+        self.buffer = ContactBuffer.allocate(4, "cpu")
+        self.buffer.count = 2
+        self.buffer.data[0] = torch.tensor(
+            [1.0, 2.0, 3.0, 0.0, 0.0, 1.0, 0.1, 0.2, 0.3, 0.4, -0.01]
+        )
+        self.buffer.data[1] = torch.tensor(
+            [4.0, 5.0, 6.0, 0.0, 1.0, 0.0, 0.4, 0.5, 0.6, 0.7, -0.02]
+        )
+        self.buffer.actor_ids[:2] = torch.tensor([[4, -1], [-1, 7]], dtype=torch.int32)
+        self.buffer.env_ids[:2] = torch.tensor([0, 1], dtype=torch.int32)
+
+    def actor_info(self, actor_id: int) -> ContactActorInfo:
+        self.actor_info_calls += 1
+        return self._actors[actor_id]
+
+    def fetch(self) -> ContactBuffer:
+        return self.buffer
+
+
+def test_contact_sensor_consumes_scene_query_and_explicit_env_ids() -> None:
+    wp.init()
+    query = _FakeQuery()
+    captured = {}
+    result = SimpleNamespace()
+
+    def create_contact_query(targets, **kwargs):
+        captured["targets"] = tuple(targets)
+        captured.update(kwargs)
+        return query
+
+    result.create_contact_query = create_contact_query
+    handles = (
+        SimpleNamespace(path="arena_0/cube"),
+        SimpleNamespace(path="arena_1/cube"),
+    )
+    owner = SimpleNamespace(
+        num_envs=2,
+        spawn_result=result,
+        _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
+        arena_offsets=torch.zeros((2, 3)),
+    )
+    cfg = ContactSensorCfg(
+        uid="contacts",
+        rigid_uid_list=["cube"],
+        filter_need_both_actor=False,
+        max_contacts_per_env=2,
+    )
+
+    sensor = ContactSensor(cfg, torch.device("cpu"), owner=owner)
+    sensor.update()
+    original_ids = sensor.item_user_ids
+    original_env_ids = sensor.item_env_ids
+    assert query.actor_info_calls == len(query.selected_actor_ids)
+    sensor.update()
+    assert sensor.item_user_ids is original_ids
+    assert sensor.item_env_ids is original_env_ids
+    assert query.actor_info_calls == len(query.selected_actor_ids)
+    data = sensor.get_data()
+
+    assert captured["targets"] == handles
+    assert captured["match"] == "any"
+    assert captured["frame"] == "arena"
+    assert captured["capacity"] == 4
+    assert captured["capacity_per_env"] == 2
+    assert sensor.total_current_contacts == 2
+    assert data["is_valid"][:, 0].all()
+    assert data["position"][0, 0].tolist() == [1.0, 2.0, 3.0]
+    assert data["position"][1, 0].tolist() == [4.0, 5.0, 6.0]
+    assert data["user_ids"][1, 0].tolist() == [-1, 7]
+    assert sensor.get_actor_info(7).path == "arena_1/cube"
+    assert sensor.contact_capabilities.impulse
+
+
+def test_contact_metadata_refreshes_when_actor_table_changes() -> None:
+    """A topology refresh may change environment IDs while retaining actor IDs."""
+    query = _FakeQuery()
+    sensor = ContactSensor.__new__(ContactSensor)
+    sensor.device = torch.device("cpu")
+    sensor._query = query
+    sensor._metadata_actor_table = None
+    sensor._metadata_selected_ids = None
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_user_env_ids_map[7].item() == 1
+
+    query._actors[7] = ContactActorInfo(7, "arena_0/other", None, "arena_0", 0)
+    query.actors = tuple(query._actors.values())
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_env_ids.tolist() == [0, 0]
+    assert sensor.item_user_env_ids_map[7].item() == 0
+
+    query.selected_actor_ids = (7,)
+    sensor._sync_filter_actor_metadata()
+    assert sensor.item_user_ids.tolist() == [7]
+    assert sensor.item_user_env_ids_map[4].item() == -1
+
+
+def _sensor_for_query(query, capacity=2):
+    handles = (
+        SimpleNamespace(path="arena_0/cube"),
+        SimpleNamespace(path="arena_1/cube"),
+    )
+    owner = SimpleNamespace(
+        num_envs=2,
+        arena_offsets=torch.zeros((2, 3)),
+        _spawn_scene=SimpleNamespace(handles=lambda uid: handles),
+        spawn_result=SimpleNamespace(
+            create_contact_query=lambda *args, **kwargs: query
+        ),
+    )
+    return ContactSensor(
+        ContactSensorCfg(
+            uid="contacts", rigid_uid_list=["cube"], max_contacts_per_env=capacity
+        ),
+        owner=owner,
+    )
+
+
+def test_default_history_enables_substep_sampling_and_preserves_interval_drops():
+    query = _FakeQuery()
+    sensor = _sensor_for_query(query)
+    history = sensor.create_history("feet", torch.tensor([[4], [7]]))
+    assert sensor.requires_substep_update
+    sensor.begin_control_step()
+    query.buffer.dropped_count = 3
+    sensor.update_physics_step(0.01)
+    assert history.found.all()
+    query.buffer.count = 0
+    query.buffer.dropped_count = 0
+    sensor.update_physics_step(0.01)
+    assert not history.contact.any()
+    assert history.found.all()
+    assert sensor.dropped_contacts == 3
+    sensor.update()  # Observation refresh must not replace interval diagnostics.
+    assert sensor.dropped_contacts == 3
+    sensor.begin_control_step()
+    assert sensor.dropped_contacts == 0
+
+
+def test_scatter_overflow_is_counted_separately_and_reset_by_selected_row():
+    query = _FakeQuery()
+    query.buffer.count = 3
+    query.buffer.env_ids[:3] = torch.tensor([0, 0, 1])
+    query.buffer.actor_ids[:3] = torch.tensor([[4, -1], [4, -1], [7, -1]])
+    query.buffer.data[2] = query.buffer.data[1]
+    sensor = _sensor_for_query(query, capacity=1)
+    sensor.create_history("feet", torch.tensor([[4], [7]]))
+    sensor.begin_control_step()
+    query.buffer.dropped_count = 2
+    sensor.update_physics_step(0.01)
+    assert sensor.total_current_contacts == 2
+    assert sensor._scatter_dropped_count.tolist() == [1, 0]
+    assert sensor.dropped_contacts == 3
+    query.buffer.count = 0
+    query.buffer.dropped_count = 0
+    sensor.update_physics_step(0.01)
+    assert sensor.dropped_contacts == 3
+    sensor.reset([1])
+    assert sensor.dropped_contacts == 3
+    sensor.reset()
+    assert sensor.dropped_contacts == 0

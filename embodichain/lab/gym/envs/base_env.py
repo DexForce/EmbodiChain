@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import zlib
+
 import math
 from collections.abc import Mapping
 from numbers import Integral, Real
@@ -30,6 +32,11 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.sim import SimulationManagerCfg, SimulationManager
+from embodichain.lab.sim._startup_summary import (
+    format_summary,
+    scene_rows,
+    simulation_rows,
+)
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, Camera
 from embodichain.lab.gym.utils import gym_utils
@@ -128,7 +135,6 @@ class BaseEnv(gym.Env):
     # EmbodiedEnv defers the summary until all managers and recording buffers
     # have been initialized.
     _defer_initialization_summary: bool = False
-    _initialization_summary_label_width: int = 22
 
     def __init__(
         self,
@@ -136,6 +142,7 @@ class BaseEnv(gym.Env):
         **kwargs,
     ):
         self.cfg = cfg
+        self._initialization_summary_logged = False
 
         # the number of envs to be simulated in parallel.
         self._num_envs = self.cfg.num_envs
@@ -161,49 +168,105 @@ class BaseEnv(gym.Env):
 
         self._configure_timing()
 
-        self._setup_scene(**kwargs)
+        try:
+            # Phase 1 only declares scene topology. Spawn-backed assets intentionally
+            # remain metadata-light until the single prepare boundary below.
+            self._setup_scene(**kwargs)
 
-        # Keep the established env._profiler API while sharing the single
-        # profiler instance owned by SimulationManager.
-        self._profiler = self.sim.profiler
+            # Keep the established env._profiler API while sharing the single
+            # profiler instance owned by SimulationManager.
+            self._profiler = self.sim.profiler
 
-        # TODO: To be removed.
-        if self.device.type == "cuda":
-            self.sim.init_gpu_physics()
+            # Materialize every physical declaration in one transaction. DexSim's
+            # articulation adapter parses each source while finalizing, then the
+            # resulting handles bind the existing EmbodiChain facades in place.
+            self.sim.prepare()
 
-        if not self.sim_cfg.headless:
-            self.sim.open_window()
+            # Phase 2 may now consume link/joint metadata, construct action spaces,
+            # and create render-only resources such as CameraGroup instances.
+            configured_robot = self._setup_robot(**kwargs)
+            if configured_robot is not None:
+                self.robot = configured_robot
 
-        self._elapsed_steps = torch.zeros(
-            self._num_envs, dtype=torch.int32, device=self.sim_cfg.sim_device
-        )
+            if self.robot is None:
+                logger.log_error(
+                    f"The robot instance must be initialized in :meth:`_setup_robot` function."
+                )
+            if len(self.active_joint_ids) == 0:
+                self.active_joint_ids = self.robot.active_joint_ids
+            if self.single_action_space is None:
+                logger.log_error(
+                    f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
+                )
 
-        # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
-        self.max_episode_steps = (
-            self.cfg.max_episode_steps if self.cfg.max_episode_steps > 0 else 2**31 - 1
-        )
+            self.sensors = self._setup_sensors(**kwargs)
+            self._camera_group_ids = [
+                sensor.group_id
+                for sensor in self.sensors.values()
+                if isinstance(sensor, Camera)
+            ]
 
-        self._task_success = torch.zeros(
-            self._num_envs, dtype=torch.bool, device=self.device
-        )
-        # The UIDs of objects that are detached from automatic reset.
-        self._detached_uids_for_reset: List[str] = []
+            if not self.sim_cfg.headless:
+                self.sim.open_window()
 
-        self._init_sim_state(**kwargs)
+            self._elapsed_steps = torch.zeros(
+                self._num_envs, dtype=torch.int32, device=self.sim_cfg.device
+            )
 
-        self.sim.capture_visualization_safely(force=True)
+            # -1 means no limit on episode length, and the episode will only end when the task is successfully completed or failed.
+            self.max_episode_steps = (
+                self.cfg.max_episode_steps
+                if self.cfg.max_episode_steps > 0
+                else 2**31 - 1
+            )
 
-        self._init_raw_obs: Dict = self.get_obs(**kwargs)
+            self._task_success = torch.zeros(
+                self._num_envs, dtype=torch.bool, device=self.device
+            )
+            # The UIDs of objects that are detached from automatic reset.
+            self._detached_uids_for_reset: List[str] = []
 
-        if not self._defer_initialization_summary:
-            self._log_initialization_summary()
+            self._init_sim_state(**kwargs)
+
+            self.sim.capture_visualization_safely(force=True)
+
+            self._init_raw_obs: Dict = self.get_obs(**kwargs)
+
+            if not self._defer_initialization_summary:
+                self._log_initialization_summary()
+        except Exception:
+            self._cleanup_failed_initialization()
+            raise
+
+    def _cleanup_failed_initialization(self) -> None:
+        """Queue owned simulator teardown without masking the constructor error."""
+        # A constructor failure gives the caller no environment to close.
+        if self.sim is None:
+            return
+        try:
+            # The traceback can retain unregistered native resources. Let the
+            # caller drain the queue after unwinding, as with ordinary destroy.
+            self.sim.destroy(exit_process=False)
+        except Exception as cleanup_error:
+            logger.log_warning(
+                f"Failed to clean up after environment initialization: {cleanup_error!r}"
+            )
 
     def _log_initialization_summary(self) -> None:
-        """Log the environment initialization summary without log prefixes."""
+        """Log the complete startup table once after the environment is ready."""
+        if self.sim_cfg.startup_summary == "off" or getattr(
+            self, "_initialization_summary_logged", False
+        ):
+            return
         logger.log_info("\n".join(self._initialization_summary_lines()), prefix=False)
+        self._initialization_summary_logged = True
+        self.sim._startup_summary_logged = True
+        self.sim._scene_summary_logged = True
 
     def _initialization_summary_lines(self) -> list[str]:
-        """Build a compact, structured summary of the initialized environment."""
+        """Combine the shared simulation snapshot with environment details."""
+        if self.sim_cfg.startup_summary == "off":
+            return []
         robot_description = type(self.robot).__name__
         robot_uid = getattr(self.robot, "uid", None)
         if robot_uid:
@@ -220,65 +283,47 @@ class BaseEnv(gym.Env):
             if self.cfg.max_episode_steps > 0
             else "unlimited"
         )
-
-        lines = [
-            f"╭─ Environment initialized: {type(self).__name__}",
-            "├─ Runtime",
-            self._format_initialization_summary_row("Config", type(self.cfg).__name__),
-            self._format_initialization_summary_row("Device", self.device),
-            self._format_initialization_summary_row(
-                "Parallel environments", self.num_envs
-            ),
-            self._format_initialization_summary_row(
-                "Seed", self.cfg.seed if self.cfg.seed is not None else "not set"
-            ),
-            self._format_initialization_summary_row(
-                "Headless", str(bool(self.sim_cfg.headless)).lower()
-            ),
-            self._format_initialization_summary_row("Robot", robot_description),
-            self._format_initialization_summary_row("Sensors", sensor_description),
-            "├─ Timing",
-            self._format_initialization_summary_row(
-                "Physics",
-                f"{self.physics_dt:g} s ({self.physics_frequency:g} Hz)",
-            ),
-            self._format_initialization_summary_row(
-                "Control",
-                f"{self.step_dt:g} s ({self.control_frequency:g} Hz, "
-                f"{self.cfg.sim_steps_per_control} physics steps)",
-            ),
-            self._format_initialization_summary_row("Episode limit", episode_limit),
-        ]
-
+        rows = simulation_rows(self.sim) + scene_rows(self.sim)
+        rows.extend(
+            [
+                ("Environment", "Config", type(self.cfg).__name__),
+                (
+                    "Environment",
+                    "Seed",
+                    str(self.cfg.seed) if self.cfg.seed is not None else "not set",
+                ),
+                ("Environment", "Robot", robot_description),
+                ("Environment", "Sensors", sensor_description),
+                (
+                    "Environment",
+                    "Control timestep",
+                    f"{self.step_dt:g} s ({self.control_frequency:g} Hz, "
+                    f"{self.cfg.sim_steps_per_control} physics steps)",
+                ),
+                ("Environment", "Episode limit", episode_limit),
+            ]
+        )
         summary_metadata = [
             (name, value)
             for name, value in self.metadata.items()
             if name != "render_fps"
         ]
-        if summary_metadata:
-            lines.append("├─ Metadata")
-            for name, value in sorted(summary_metadata, key=lambda item: str(item[0])):
-                lines.append(
-                    self._format_initialization_summary_row(
-                        str(name), self._format_initialization_metadata_value(value)
-                    )
+        for name, value in sorted(summary_metadata, key=lambda item: str(item[0])):
+            rows.append(
+                (
+                    "Metadata",
+                    str(name),
+                    self._format_initialization_metadata_value(value),
                 )
+            )
+        rows.extend(self._extra_initialization_summary_rows())
+        return format_summary(
+            f"Environment initialized: {type(self).__name__}", rows
+        ).splitlines()
 
-        lines.extend(self._extra_initialization_summary_lines())
-        lines.append("╰─ Ready")
-        return lines
-
-    def _extra_initialization_summary_lines(self) -> list[str]:
-        """Return subclass-specific initialization summary lines."""
+    def _extra_initialization_summary_rows(self) -> list[tuple[str, str, str]]:
+        """Return subclass-specific startup table rows."""
         return []
-
-    @classmethod
-    def _format_initialization_summary_row(
-        cls, label: str, value: object, indent: int = 0
-    ) -> str:
-        """Format an aligned key-value row inside the initialization tree."""
-        label_width = max(1, cls._initialization_summary_label_width - 2 * indent)
-        return f"│  {'  ' * indent}{label:<{label_width}} {value}"
 
     @staticmethod
     def _format_initialization_metadata_value(value: object) -> str:
@@ -483,46 +528,47 @@ class BaseEnv(gym.Env):
         self._camera_group_ids.append(group_id)
 
     def _setup_scene(self, **kwargs):
-        # Init sim manager.
-        # we want to open gui window when the scene is setup, so init sim manager in headless mode first.
+        """Declare physical scene topology without consuming runtime metadata."""
+        # Init sim manager. We want to open the GUI window after the scene is
+        # materialized, so construct the manager in headless mode first.
         headless = self.sim_cfg.headless
         self.sim_cfg.headless = True
-        self.sim = SimulationManager(self.sim_cfg)
+        self.sim = SimulationManager(self.sim_cfg, defer_startup_summary=True)
         self.sim_cfg.headless = headless
 
         logger.log_info(
-            f"Initializing {self.num_envs} environments on {self.sim_cfg.sim_device}."
+            f"Initializing {self.num_envs} environments on {self.sim_cfg.device}."
         )
 
-        self.robot = self._setup_robot(**kwargs)
-        if len(self.active_joint_ids) == 0:
-            self.active_joint_ids = self.robot.active_joint_ids
-
-        if self.robot is None:
-            logger.log_error(
-                f"The robot instance must be initialized in :meth:`_setup_robot` function."
-            )
-        if self.single_action_space is None:
-            logger.log_error(
-                f":attr:`single_action_space` must be defined in the :meth:`_setup_robot` function."
-            )
+        # Config-driven environments can declare their robot here while
+        # deferring all link/joint queries until the post-prepare phase. Generic
+        # BaseEnv subclasses may keep returning None and add a runtime robot in
+        # _setup_robot() for backwards compatibility.
+        self.robot = self._declare_robot(**kwargs)
 
         self._prepare_scene(**kwargs)
 
-        self.sensors = self._setup_sensors(**kwargs)
+    def _declare_robot(self, **kwargs) -> Robot | None:
+        """Optionally declare a robot before the scene prepare boundary.
 
-        # Setup camera groups for rendering.
-        self._camera_group_ids: List[int] = []
-        for sensor in self.sensors.values():
-            if isinstance(sensor, Camera):
-                self._camera_group_ids.append(sensor.group_id)
+        Config-driven environments should override this hook and call
+        :meth:`SimulationManager.add_robot` without querying link/joint data.
+        The returned facade is bound in place by :meth:`SimulationManager.prepare`.
+
+        Generic subclasses that only implement the historical
+        :meth:`_setup_robot` hook remain supported: their robot is added after
+        the initial prepare boundary and is prepared immediately by the manager.
+        """
+        del kwargs
+        return None
 
     def _setup_robot(self, **kwargs) -> Robot:
-        """Load the robot agent, setup the controller and action space.
+        """Configure the bound robot, controller, and action space.
 
         Note:
-            1. The fuction must return the robot instance.
-            2. The self.single_action_space should be defined.
+            This hook runs after :meth:`SimulationManager.prepare`, so link,
+            joint, and limit metadata are available. It must return the robot
+            instance and define ``self.single_action_space``.
         """
 
         # TODO: single_action_space may be configured in config?
@@ -549,6 +595,32 @@ class BaseEnv(gym.Env):
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
         pass
+
+    def _advance_physics(self) -> None:
+        """Advance physics and sample opted-in sensors after each substep."""
+        sensors = [
+            sensor for sensor in self.sensors.values() if sensor.requires_substep_update
+        ]
+        if not sensors:
+            self.sim.update(
+                self.physics_dt,
+                self.cfg.sim_steps_per_control,
+                render_final_step=False,
+            )
+            return
+        for sensor in sensors:
+            sensor.begin_control_step()
+
+        def sample_substep(dt: float) -> None:
+            for sensor in sensors:
+                sensor.update_physics_step(dt)
+
+        self.sim.update(
+            self.physics_dt,
+            self.cfg.sim_steps_per_control,
+            after_substep=sample_substep,
+            render_final_step=False,
+        )
 
     def _update_sim_state(self, **kwargs):
         """Update the simulation state at each step.
@@ -613,7 +685,8 @@ class BaseEnv(gym.Env):
         with self._profiler.section("sensor_fetch"):
             for sensor_name, sensor in self.sensors.items():
                 with self._profiler.section(f"sensor_update.{sensor_name}"):
-                    sensor.update(fetch_only=fetch_only)
+                    if not sensor.requires_substep_update:
+                        sensor.update(fetch_only=fetch_only)
                 with self._profiler.section(f"sensor_get_data.{sensor_name}"):
                     obs[sensor_name] = sensor.get_data()
         return obs
@@ -854,19 +927,48 @@ class BaseEnv(gym.Env):
                     env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
                 )
 
+            for sensor in self.sensors.values():
+                sensor.reset(env_ids=reset_ids)
+
             # Reset hook for user to perform any custom reset logic.
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
             self._elapsed_steps[reset_ids] = 0
 
-            self.sim.capture_visualization_safely(force=True)
-
-            with self._profiler.section("get_obs"):
-                obs = self.get_obs(**options)
+            with self.sim.render_frame(force_visualization=True):
+                with self._profiler.section("get_obs"):
+                    obs = self.get_obs(**options)
             with self._profiler.section("get_info"):
                 info = self.get_info(**options)
 
         return obs, info
+
+    @staticmethod
+    def _component_seed(name: str, seed: int) -> int:
+        return (seed + zlib.crc32(name.encode("utf-8"))) % (2**63 - 1)
+
+    def get_generator(self, name: str) -> torch.Generator:
+        """Return a named component RNG rewound by explicit reset seeds.
+
+        Each name has its own stream on the environment device. Ordinary
+        selective resets consume the existing stream without rewinding it.
+
+        Args:
+            name: Stable name identifying the owning component.
+
+        Returns:
+            Persistent Torch generator for this component.
+        """
+        if not hasattr(self, "_component_generators"):
+            self._component_generators: dict[str, torch.Generator] = {}
+        if name not in self._component_generators:
+            generator = torch.Generator(device=self.device)
+            if self.cfg.seed is None:
+                generator.seed()
+            else:
+                generator.manual_seed(self._component_seed(name, self.cfg.seed))
+            self._component_generators[name] = generator
+        return self._component_generators[name]
 
     def _set_seed(self, seed: int) -> int:
         """Set the effective environment seed and rewind seeded managers."""
@@ -880,6 +982,8 @@ class BaseEnv(gym.Env):
             torch.backends.cudnn.benchmark = cudnn_benchmark
             torch.backends.cudnn.deterministic = cudnn_deterministic
         self.cfg.seed = effective_seed
+        for name, generator in getattr(self, "_component_generators", {}).items():
+            generator.manual_seed(self._component_seed(name, effective_seed))
         event_manager = getattr(self, "event_manager", None)
         if event_manager is not None:
             event_manager.set_seed(effective_seed)
@@ -904,12 +1008,13 @@ class BaseEnv(gym.Env):
                 action = self._step_action(action=action)
 
             with self._profiler.section("sim_update"):
-                self.sim.update(self.physics_dt, self.cfg.sim_steps_per_control)
+                self._advance_physics()
             with self._profiler.section("update_sim_state"):
                 self._update_sim_state(**kwargs)
 
-            with self._profiler.section("get_obs"):
-                obs = self.get_obs(**kwargs)
+            with self.sim.render_frame():
+                with self._profiler.section("get_obs"):
+                    obs = self.get_obs(**kwargs)
             with self._profiler.section("get_info"):
                 info = self.get_info(**kwargs)
             with self._profiler.section("reward"):

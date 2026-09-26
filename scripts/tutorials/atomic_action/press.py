@@ -49,22 +49,27 @@ from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-BUTTON_LINK_NAME = "button_cap"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+BUTTON_LINK_NAME = "button_link"
 MICROWAVE_POSITION = (-1.0, -0.30, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90)  # degrees
-PRESS_SAMPLE_INTERVAL = 140
+PRESS_SAMPLE_INTERVAL = 256
 HAND_INTERP_STEPS = 12
-POST_TRAJECTORY_STEPS = 240
+POST_TRAJECTORY_STEPS = 256
 RIGID_BUTTON_POSITION = (-0.7, -0.00, 0.70)
 RIGID_BUTTON_SIZE = (0.04, 0.02, 0.04)
 BUTTON_SCENE_ENTITY_ID = "press-target"
@@ -74,7 +79,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Press tutorial."""
     parser = create_tutorial_argument_parser(
         "Demonstrate Press on an articulation-link or rigid button.",
-        features=("visualize_axes",),
+        features=("affordance_sampling", "visualize_axes"),
     )
     parser.add_argument("--press_distance", type=float, default=0.03)
     parser.add_argument(
@@ -90,24 +95,32 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use a standalone rigid button instead of the microwave link.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim) -> Articulation:
     """Create the fixed-base microwave articulation used by the demo."""
-    microwave = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="microwave",
-            fpath=get_data_path(MICROWAVE_ASSET),
-            init_pos=MICROWAVE_POSITION,
-            init_qpos=(0, 0, 0, 0),
-            init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(
-                stiffness=1e-3, damping=1e2, max_effort=1e-2
-            ),
-            fix_base=True,
-        )
+    microwave_cfg = ArticulationCfg(
+        uid="microwave",
+        fpath=get_data_path(MICROWAVE_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=MICROWAVE_POSITION,
+        init_qpos=(0, 0, 0, 0),
+        init_rot=MICROWAVE_ORIENTATION,
+        joint_drive_props=JointDrivePropertiesCfg(
+            drive_type="force",
+            stiffness=1e-3,
+            damping=1e2,
+            max_effort=1e-2,
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        microwave_cfg,
+        group_name="newton_button_contacts",
+        link_names_expr=[BUTTON_LINK_NAME],
+    )
+    microwave = sim.add_articulation(cfg=microwave_cfg)
     sim.update(step=10)
     return microwave
 
@@ -118,6 +131,9 @@ def create_rigid_button(sim) -> RigidObject:
         cfg=RigidObjectCfg(
             uid="rigid_button",
             shape=CubeCfg(size=list(RIGID_BUTTON_SIZE)),
+            attrs=create_tutorial_rigid_body_physics(
+                newton_contact=sim.is_newton_backend,
+            ),
             body_type="static",
             init_pos=RIGID_BUTTON_POSITION,
         )
@@ -184,8 +200,12 @@ def main() -> None:
         sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0]
     )
     target = create_rigid_button(sim) if args.rigid_object else create_microwave(sim)
+    sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.040)
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
     semantics, target_pose = create_button_semantics(target)
     affordance = semantics.affordance
     assert isinstance(affordance, PressAffordance)
@@ -214,7 +234,11 @@ def main() -> None:
                     target_pose,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=PRESS_SAMPLE_INTERVAL),
+                motion_policy=MotionPolicy(
+                    # Contact/path segments require exact Cartesian samples.
+                    strategy="ik_interp",
+                    sample_count=PRESS_SAMPLE_INTERVAL,
+                ),
                 skill_options=PressOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     approach_distance=0.12,
@@ -227,8 +251,12 @@ def main() -> None:
                 ),
             ),
         ),
-        context=engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        context=engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the Press demo trajectory.")
         return

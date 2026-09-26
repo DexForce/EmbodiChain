@@ -6,6 +6,7 @@
 |------|------|
 | Unified CLI | `embodichain train-rl --config <train.yaml-or-json>` |
 | CLI implementation | `embodichain/learning/rl/train.py` → `cli()` |
+| Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |
 | Algorithm registry | `embodichain/learning/rl/algo/__init__.py` |
 | Policy registry | `embodichain/learning/rl/models/__init__.py` |
@@ -20,7 +21,10 @@ The compatibility module entry point is:
 python -m embodichain.learning.rl.train --config <train.yaml-or-json>
 ```
 
-Prefer the unified `embodichain train-rl` command.
+Prefer the unified `embodichain train-rl` command. Pretrained evaluation resolves
+a downloaded RUN before using the same native runtime and checkpoint loader;
+model-cache and repository revision ownership belong to
+[data assets](../data-assets/data-assets.md#pretrained-policy-bundles).
 
 ## Configuration Resolution
 
@@ -64,9 +68,9 @@ Select this path with `trainer.gym_config`.
 
 Simulator environments use standard rollouts. A differentiable algorithm on
 this path is rejected. Simulator tasks with a supported training configuration
-declare `supports_rl=True` in `@register_env`; `embodichain list-task` displays
-them with `[Simulator, RL]` instead of treating the simulator registry as a
-mutually exclusive capability group.
+declare `supports_rl=True` in `@register_env`. Task listing is implemented
+in `embodichain/cli/list_task.py`; capability and config discovery belong to
+[environment configuration](../env-framework/configuration.md).
 
 Direct callers of `train_from_config()` that bypass `cli()` must ensure
 task packages and init hooks needed by a simulator environment have already
@@ -83,10 +87,30 @@ as a mapping with `name` and `cfg`.
 `DifferentiableVecEnv.detach_state()` as the truncated-backpropagation
 boundary.
 
+Variable-horizon APG environments may also implement
+`ScheduledDifferentiableVecEnv.prepare_differentiable_rollout()`. Its
+`DifferentiableRolloutSpec` selects the next reset's complete horizon,
+per-environment objective scale, and scalar rollout metadata.
+
 This path supports both standard algorithms and differentiable algorithms,
 but currently rejects distributed training and environment profiling.
 
 ## Rollout and Trainer Routing
+
+### Native locomotion tasks
+
+Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Humanoid Run lives under `classic_control/humanoid/`. Matching task config
+directories own default/Newton environment and PPO files. The package init hook
+registers locomotion observations and rewards; joint actions and root-velocity
+randomization use the standard manager components.
+
+Contact sampling and selective history reset follow the sensor-owned
+[contact history contract](../sensor-system/contact-history.md). Root-velocity
+writes use `Articulation.set_root_velocity()`; asset resolution belongs to
+[data assets](../data-assets/data-assets.md).
+
+### Algorithm selection
 
 `BaseAlgorithm.rollout_kind` is the routing contract:
 
@@ -114,9 +138,11 @@ use it as padding. The collector writes into the preallocated rollout and the
 algorithm consumes it after collection.
 
 The differentiable path does not copy transitions into the standard buffer.
-It preserves the action-to-reward autograd graph across short segments.
-`segment_length` sets TBPTT boundaries, while `update_horizon` controls
-how many environment steps contribute to one optimizer update.
+It supports explicitly configured `segmented` TBPTT rollouts and `complete`
+rollouts that reset before each independent microbatch, retain the full
+environment-provided horizon, mask post-terminal rewards, and accumulate full
+trajectory gradients before one optimizer step. Read the training detail for
+the complete-rollout safety and normalization contracts.
 
 ## Component Ownership
 
@@ -127,9 +153,13 @@ how many environment steps contribute to one optimizer update.
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
 | Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Running observation statistics | `normalization.py` |
+| Batched action-adjoint stabilization | `gradients.py` |
+| Actor and critic observation statistics | `models/normalizer.py` |
 | Standard collect/update loop | `utils/trainer.py` |
 | Differentiable TBPTT/update loop | `differentiable_trainer.py` |
 | Shared completed-episode evaluation | `evaluation.py` |
+| Saved-checkpoint CLI and native Viewer adapter | `policy_evaluation/cli.py`, `policy_evaluation/viewer.py` |
 | Learning environment protocol and registry | `env.py` |
 | End-to-end config and runtime assembly | `train.py` |
 
@@ -138,74 +168,34 @@ consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
 
-## Training and Evaluation Lifecycle
+For actor-critic policies, `policy.obs_groups.actor` and `.critic` select ordered
+observation groups. The collector and standard buffer preserve separate
+`critic_obs` when configured; evaluation applies the same selection. The PPO
+collector also records the old Gaussian mean and standard deviation for KL
+measurement. These rollout fields have explicit dimensions in the buffer.
 
-The standard trainer repeats:
+Read [training and extension](training.md) for evaluation, checkpoints,
+distributed ownership, official examples and adding algorithms/policies/envs.
 
-1. start and collect a rollout;
-2. update the algorithm;
-3. log train metrics;
-4. evaluate when the configured step boundary is reached;
-5. save periodic and best-evaluation checkpoints.
+## Native policy Viewer
 
-Evaluation uses an independent environment and
-`evaluate_episodes()`. It counts completed asynchronous episodes, reports
-terminal metrics, temporarily switches the policy to evaluation mode, and
-restores its prior mode.
+`embodichain eval-policy --viewer` supplies `EmbodiChainTaskEnvironment` to
+DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
+observation and action path. Supplying an Environment means the adapter owns
+its camera lifecycle; Kit's default flat-ground camera is not applied to it.
 
-Checkpoints include policy parameters, trainer counters, best-evaluation
-state, and optimizer or LR-scheduler state when present.
+Tasks opt in through `PolicyViewerCameraCfg` and
+`get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat
+velocity tasks own their presets; `policy_evaluation/_viewer_camera.py` owns
+reset framing, X-Y translation and tracking/free-view transitions. Other tasks
+retain their existing camera. Use native window operations so manual orbit and
+zoom persist and the existing `SimulationManager` window recorder sees the
+same view. Window camera operations are queued to the render thread; reading a
+pose immediately after an update can still return the preceding rendered pose.
 
-On the simulator path, distributed mode initializes NCCL, assigns one CUDA
-device per local rank, wraps the policy in
-`DistributedDataParallel`, aggregates step and episode statistics, and
-keeps logging, evaluation, and checkpoint ownership on rank zero.
-Differentiable algorithms and lightweight learning environments do not
-currently support this distributed path.
-
-## Official Examples
-
-| Example | Environment path | Config location |
-|---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
-| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
-| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
-| Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
-
-`PointMassRL` is the reference environment for comparing standard and
-differentiable training over the same task dynamics. The Newton planar-reach
-example is an experimental gradient reference, not a general simulator task.
-
-## Extension Points
-
-### Add an Algorithm
-
-1. Implement a `BaseAlgorithm` subclass and config under `algo/`.
-2. Declare the correct `RolloutKind`.
-3. Register the config/class pair in `algo/__init__.py`.
-4. Add focused algorithm, routing, and rollout-contract tests.
-
-### Add a Policy
-
-1. Implement the `Policy` contract under `models/`.
-2. Register it in `models/__init__.py`.
-3. Ensure its outputs satisfy every intended algorithm.
-4. Provide graph-preserving sampling if used with differentiable rollouts.
-
-### Add a Lightweight Environment
-
-1. Implement `LearningVecEnv`, or `DifferentiableVecEnv` for APG.
-2. Register the factory with `@register_learning_env`.
-3. Ensure finished rows auto-reset while returning terminal reward/done with
-   the next initial observation.
-4. Add an official config under
-   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
-   bundled task.
-
-Use `add-task-env` for simulator-backed task environments and
-`manager-functor` for their observation, reward, event, and action
-components.
+Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
+an actual native Viewer run. User controls and recording are described in the
+[policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
 
 ## Invariants
 
@@ -217,6 +207,10 @@ components.
 - The standard buffer holds at most one unconsumed rollout.
 - APG must retain differentiable rewards until its optimizer boundary;
   `detach_state()` must not reset or resample the task.
+- Complete APG must reset once per independent rollout, detach only after
+  backward, and exclude post-terminal auto-reset rewards from its objective.
+- Observation statistics stay frozen during each complete rollout; semantic
+  mask/type fields remain unnormalized.
 - GRPO environment count must satisfy its grouping contract.
 - Evaluation must use completed episodes and an independent environment.
 - Only rank zero owns external logging and checkpoints in distributed runs.
@@ -232,6 +226,8 @@ components.
 | Policy dimension mismatch | Policy config disagrees with the built environment's observation or action space |
 | Standard buffer is already full | A rollout was started before the previous one was consumed with `get()` |
 | APG gradients disappear | Actions were sampled under `no_grad`, transitions were copied/detached, or the state was detached too early |
+| Long-horizon APG accuracy is lower than the reference | `rollout_mode` is still segmented, the scheduled horizon was truncated, return scaling is missing, or observation normalization differs |
+| One environment poisons every APG row | Action-adjoint clipping is disabled or non-finite row filtering is bypassed |
 | GRPO reshape or grouping fails | `num_envs` is not divisible by `group_size` |
 | Evaluation never completes | The environment does not emit completed asynchronous episodes or terminal metrics correctly |
 | Output/checkpoint directories diverge across ranks | Distributed run metadata was not coordinated through rank zero |

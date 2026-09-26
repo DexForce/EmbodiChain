@@ -16,15 +16,22 @@
 from __future__ import annotations
 
 import enum
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim.cfg import (
+    ArticulationRootPropertiesCfg,
+    CollisionPropertiesCfg,
     JointDrivePropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
 )
-from embodichain.lab.sim.workspace import RobotWorkspaceCfg
+from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
 from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
 from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
 from embodichain.lab.sim.robots.dexforce_w1.types import (
@@ -43,7 +50,7 @@ from embodichain.lab.sim.robots.dexforce_w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
-from embodichain.lab.sim.solvers import SRSSolverCfg
+from embodichain.lab.sim.motion.solvers import SRSSolverCfg
 from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
@@ -64,11 +71,15 @@ def _mock_w1_asset_paths(monkeypatch, tmp_path):
 
 def test_dexforce_w1_roundtrip():
     cfg = DexforceW1Cfg.from_dict({"uid": "dexforce_w1", "version": "v021"})
+    assert type(cfg.root_props) is ArticulationRootPropertiesCfg
+    assert cfg.root_props.min_position_iters == 32
+    assert cfg.root_props.min_velocity_iters == 8
     d = cfg.to_dict()
     assert d["uid"] == "dexforce_w1"
     cfg2 = DexforceW1Cfg.from_dict(d)
     assert cfg2.uid == "dexforce_w1"
     assert cfg2.version == DexforceW1Version.V021
+    assert type(cfg2.root_props) is ArticulationRootPropertiesCfg
 
 
 def test_dexforce_w1_solver_cfg_is_srs_and_set_once():
@@ -409,7 +420,7 @@ class _RoundTripCfg(RobotCfg):
         self.uid = "roundtrip"
         self.variant = _RoundTripVariant(init_dict.get("variant", "a"))
         self.control_parts = {"arm": ["J1", "J2"]}
-        self.drive_pros = JointDrivePropertiesCfg(
+        self.joint_drive_props = JointDrivePropertiesCfg(
             stiffness={"J[1-2]": 1e4}, damping={"J[1-2]": 1e3}
         )
 
@@ -426,11 +437,116 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.uid == "roundtrip"
     assert cfg2.variant == _RoundTripVariant.B
     assert cfg2.control_parts == {"arm": ["J1", "J2"]}
-    assert cfg2.drive_pros.stiffness == {"J[1-2]": 1e4}
+    assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
-from embodichain.lab.sim.solvers import OPWSolverCfg
+from embodichain.lab.sim.robots import AlohaMiniCfg
+from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain.lab.sim.robots.ur_robot import URRobotCfg
+from embodichain.lab.sim.motion.solvers import OPWSolverCfg
+
+
+def test_aloha_mini_control_parts_match_source_joints():
+    cfg = AlohaMiniCfg.from_dict({})
+    assert cfg.uid == "AlohaMini"
+    assert cfg.urdf_cfg is None
+    assert cfg.fpath.endswith("AlohaMini/alohamini2pro.urdf")
+    assert {part: len(joints) for part, joints in cfg.control_parts.items()} == {
+        "left_arm": 6,
+        "right_arm": 6,
+        "left_hand": 1,
+        "right_hand": 1,
+        "torso": 1,
+    }
+    assert cfg.control_parts["torso"] == ["vertical_move"]
+    assert cfg.control_parts["left_hand"] == ["left_gripper"]
+    assert cfg.control_parts["right_hand"] == ["right_gripper"]
+    source = ET.parse(cfg.fpath).getroot()
+    movable_joints = {
+        joint.get("name")
+        for joint in source.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    controlled = [joint for joints in cfg.control_parts.values() for joint in joints]
+    assert len(controlled) == len(set(controlled))
+    assert set(controlled) <= movable_joints
+    assert movable_joints - set(controlled) == {
+        "root_x_axis_joint",
+        "root_y_axis_joint",
+        "root_z_rotation_joint",
+        "wheel1_joint",
+        "wheel2_joint",
+        "wheel3_joint",
+    }
+
+
+def test_aloha_mini_overrides_and_roundtrip():
+    cfg = AlohaMiniCfg.from_dict(
+        {
+            "uid": "aloha_mini",
+            "init_pos": [0.0, 0.0, 0.2],
+            "joint_drive_props": {"stiffness": {"torso": 2e4}},
+            "solver_cfg": {"left_arm": {"num_samples": 8}},
+        }
+    )
+    assert cfg.uid == "aloha_mini"
+    assert cfg.joint_drive_props.stiffness["torso"] == 2e4
+    assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
+    assert cfg.solver_cfg["left_arm"].num_samples == 8
+    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+def test_aloha_mini_serial_chains_match_control_joint_order():
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(chains) == set(cfg.control_parts)
+    for part, chain in chains.items():
+        assert chain.get_joint_parameter_names() == cfg.control_parts[part]
+
+    # Torso motion is local +Z and must not contain the planar base joints.
+    torso = chains["torso"]
+    poses = torso.forward_kinematics(torch.tensor([[0.0], [0.1]])).get_matrix()
+    torch.testing.assert_close(
+        poses[1, :3, 3] - poses[0, :3, 3], torch.tensor([0.0, 0.0, 0.1])
+    )
+
+
+def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
+    for part, solver_cfg in cfg.solver_cfg.items():
+        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert solver_cfg.is_only_position_constraint == (part == "torso")
+        if part.endswith("_arm"):
+            side = part.removesuffix("_arm")
+            assert solver_cfg.root_link_name == f"{side}_Base"
+            assert solver_cfg.end_link_name == f"{side}_tcp"
+        solver_cfg.urdf_path = cfg.fpath
+        solver_cfg.joint_names = cfg.control_parts[part]
+        solver = solver_cfg.init_solver(device=torch.device("cpu"))
+        assert solver.dof == len(cfg.control_parts[part])
+        qpos = torch.zeros((1, solver.dof))
+        torch.testing.assert_close(
+            solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
+        )
+
+
+def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
+    cfg = AlohaMiniCfg.from_dict({})
+    source = ET.parse(cfg.fpath)
+    torso_joint = source.getroot().find("joint[@name='vertical_move']")
+    torso_joint.find("origin").set("xyz", "0 0 0.25")
+    overridden_path = tmp_path / "aloha_mini.urdf"
+    source.write(overridden_path)
+    cfg = AlohaMiniCfg.from_dict({"fpath": str(overridden_path)})
+    chain = cfg.build_pk_serial_chain()["torso"]
+    pose = chain.forward_kinematics(torch.zeros((1, 1))).get_matrix()
+    assert pose[0, 2, 3].item() == pytest.approx(0.25)
 
 
 def test_cobotmagic_from_dict_and_roundtrip():
@@ -444,6 +560,13 @@ def test_cobotmagic_from_dict_and_roundtrip():
     }
     assert isinstance(cfg.solver_cfg["left_arm"], OPWSolverCfg)
     assert isinstance(cfg.solver_cfg["right_arm"], OPWSolverCfg)
+    assert isinstance(cfg.attrs, RigidBodyPhysicsCfg)
+    assert type(cfg.attrs.collision_props) is CollisionPropertiesCfg
+    assert cfg.attrs.collision_props.contact_offset == pytest.approx(0.001)
+    assert cfg.attrs.collision_props.rest_offset == pytest.approx(0.0)
+    assert type(cfg.root_props) is ArticulationRootPropertiesCfg
+    assert cfg.root_props.min_position_iters == 8
+    assert cfg.root_props.min_velocity_iters == 2
 
     d = cfg.to_dict()
     assert d["uid"] == "CobotMagic"
@@ -451,6 +574,41 @@ def test_cobotmagic_from_dict_and_roundtrip():
     assert cfg2.uid == "CobotMagic"
     assert cfg2.control_parts == cfg.control_parts
     assert isinstance(cfg2.solver_cfg["left_arm"], OPWSolverCfg)
+
+
+@pytest.mark.parametrize(
+    ("cfg_type", "init_dict"),
+    [
+        (CobotMagicCfg, {}),
+        (FrankaPandaCfg, {}),
+        (URRobotCfg, {}),
+        (DexforceW1Cfg, {}),
+    ],
+)
+def test_specified_robots_use_portable_joint_drive_semantics(
+    cfg_type: type[RobotCfg],
+    init_dict: dict,
+) -> None:
+    cfg = cfg_type.from_dict(init_dict)
+
+    assert type(cfg.joint_drive_props) is JointDrivePropertiesCfg
+    assert cfg.joint_drive_props.drive_type == "force"
+    assert cfg.joint_drive_props.target_mode is None
+    assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
+
+
+def test_franka_panda_owns_newton_fingertip_contact_defaults() -> None:
+    cfg = FrankaPandaCfg.from_dict({})
+
+    group = cfg.link_attrs["newton_gripper_contacts"]
+    assert group.link_names_expr == ["fr3_leftfinger|fr3_rightfinger"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.condim == 4
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(400.0)
+    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_robotcfg_save_to_file(tmp_path):
@@ -523,8 +681,7 @@ def test_cobotmagic_pk_dof_matches_control_parts():
 # URRobotCfg -- UR family (ur3 / ur3e / ur5 / ur5e / ur10 / ur10e)
 # --------------------------------------------------------------------------- #
 
-from embodichain.lab.sim.robots.ur_robot import URRobotCfg
-from embodichain.lab.sim.solvers import URSolverCfg
+from embodichain.lab.sim.motion.solvers import URSolverCfg
 
 UR_TYPES = ["ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"]
 
@@ -562,7 +719,7 @@ def test_ur_robot_max_effort_scales_with_size():
     ur3 = URRobotCfg.from_dict({"robot_type": "ur3"})
     ur5 = URRobotCfg.from_dict({"robot_type": "ur5"})
     ur10 = URRobotCfg.from_dict({"robot_type": "ur10"})
-    eff = lambda c: c.drive_pros.max_effort["arm"]  # noqa: E731
+    eff = lambda c: c.joint_drive_props.max_effort["arm"]  # noqa: E731
     assert eff(ur3) < eff(ur5) < eff(ur10)
 
 

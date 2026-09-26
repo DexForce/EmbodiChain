@@ -44,12 +44,12 @@ from typing import Callable
 import psutil
 import torch
 
-from embodichain.lab.sim.planners.curobo.curobo_planner import (
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboPlanner,
     _CuroboBackend,
     _CuroboProfile,
 )
-from embodichain.lab.sim.planners.utils import PlanResult
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 # =============================================================================
 # OLD (HEAD) implementations - verbatim loop logic, parameterized by device.
@@ -99,7 +99,7 @@ def old_extract_dt(
     if dt.shape[-1] == 1:
         interval = dt[:, 0].to(device, dtype=torch.float32)
         for b in range(B):
-            length = min(int(last_tstep[b].item()) + 1, max_len)
+            length = min(int(last_tstep[b].item()), max_len)
             if length > 1:
                 out[b, 1:length] = interval[b]
         return out
@@ -130,12 +130,12 @@ def old_extract_segment(
         last_tstep = last_tstep.squeeze(-1)
 
     B, T, _ = position.shape
-    max_len = max(int((last_tstep + 1).max().item()), 1)
+    max_len = max(min(int(last_tstep.max().item()), T), 1)
     full = torch.zeros(
         B, max_len, position.shape[-1], device=device, dtype=torch.float32
     )
     for b in range(B):
-        length = min(int(last_tstep[b].item()) + 1, T, max_len)
+        length = max(min(int(last_tstep[b].item()), T, max_len), 1)
         full[b, :length] = position[b, :length].float().to(device)
         if length < max_len:
             full[b, length:] = position[b, length - 1].float().to(device)

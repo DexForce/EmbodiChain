@@ -21,12 +21,14 @@ from typing import List
 
 from embodichain.utils.logger import log_error, log_warning
 from embodichain.lab.gym.utils.misc import mul_linear_expand
-from embodichain.lab.sim.planners import (
-    MoveType,
-    PlanState,
+from embodichain.lab.sim.motion.motion_generator import (
     MotionGenerator,
     MotionGenCfg,
     MotionGenOptions,
+)
+from embodichain.lab.sim.motion.planners import (
+    MoveType,
+    PlanState,
     ToppraPlanOptions,
     ToppraPlannerCfg,
 )
@@ -197,7 +199,11 @@ def plan_trajectory(
         ee_state_list_select: List to append gripper states to (modified in-place).
     """
     motion_generator = MotionGenerator(
-        cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+        cfg=MotionGenCfg(
+            planner_cfg=ToppraPlannerCfg(
+                robot_uid=env.robot.uid, sim_instance_id=env.sim.instance_id
+            )
+        )
     )
 
     plan_state = [

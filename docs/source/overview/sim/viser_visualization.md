@@ -101,7 +101,7 @@ The browser scene currently includes:
 - `RigidObject`, including multi-segment render meshes;
 - each constituent object in a `RigidObjectGroup`;
 - every visible link of `Robot` and `Articulation`;
-- dynamic `SoftObject` and `ClothObject` geometry;
+- dynamic `VolumeDeformableObject` and `SurfaceDeformableObject` geometry;
 - camera frustums and low-frequency RGB previews, including the primary (left)
   RGB view of stereo sensors;
 - read-only Gizmo frames, or interactive transform controls when commands are
@@ -126,7 +126,7 @@ each Gizmo through `SimulationManager.enable_gizmo`; a pure browser process can
 omit the DexSim handle:
 
 ```python
-sim.enable_gizmo("cube", enable_native=False)
+sim.enable_gizmo("cube")
 ```
 
 Viser and DexSim use the same deferred target-control path:
@@ -136,9 +136,11 @@ Viser and DexSim use the same deferred target-control path:
 - robot drags invoke FK/IK for the selected `control_part`.
 
 Viser callbacks only enqueue immutable pose commands. `update_gizmos()` drains
-and applies them on the simulation thread; manual `SimulationManager.update()`
-does this automatically. Automatic-update loops must continue calling
-`update_gizmos()` and `capture_visualization_safely()`.
+and applies them on the simulation thread. `SimulationManager.update()`
+performs this work before each explicit physics step and then publishes the
+resulting state. Interactive applications must keep calling `update(step=1)`.
+For editing while physics is paused, call `update_gizmos()` and
+`capture_visualization_safely()` directly.
 
 Only one client owns a Gizmo from drag start through drag end or disconnect.
 Other clients are returned to the latest authoritative simulation pose. Gizmo
@@ -177,7 +179,7 @@ sampled independently from rigid-body poses:
 
 - **Cloth** uses the physical cloth vertices and a welded mapping of the source
   render triangles. Its browser topology matches the simulated surface.
-- **Soft bodies** expose live PhysX collision vertices through DexSim, but
+- **Soft bodies** expose live DexSim collision vertices, but
   DexSim does not expose the collision triangle connectivity. EmbodiChain
   therefore visualizes a stable convex-hull surface over those vertices. The
   preview follows deformation but omits concave render-mesh details.
@@ -314,7 +316,7 @@ Viser port behind an authenticated gateway.
 
 - {doc}`sim_manager`
 - {doc}`sim_assets`
-- {doc}`sim_sensor`
+- {doc}`sensors/index`
 - {doc}`/features/interaction/gizmo`
 - {doc}`/guides/preview_asset`
 - {doc}`/tutorial/create_scene`

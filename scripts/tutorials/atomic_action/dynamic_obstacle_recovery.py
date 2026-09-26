@@ -49,10 +49,10 @@ from embodichain.lab.sim.atomic_actions import (
     TimedCommandSequence,
     TrackingPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg
+from embodichain.lab.sim.cfg import CollisionPropertiesCfg, RigidBodyPhysicsCfg
 from embodichain.lab.sim.objects import RigidObject, RigidObjectCfg, Robot
-from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.planners.curobo.curobo_planner import (
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboAutoGenCfg,
     CuroboPlannerCfg,
     CuroboWorldCfg,
@@ -77,22 +77,56 @@ OBSTACLE_UID = "dynamic_obstacle"
 CONTROL_PART = "arm"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
-COLLISION_SPHERE_FIT_TYPE = "morphit"
 COLLISION_SPHERE_FIT_DENSITY = 0.3
+# Keep the fitted sphere set unpadded: extra padding makes the initial pose
+# infeasible for this compact tutorial scene.
 ROBOT_COLLISION_BUFFER = 0.0
 MOVE_AFTER_COMMAND = 12
 OBSTACLE_SIZE = (0.08, 0.08, 0.10)
 OBSTACLE_START_POSITION = (0.59, -0.20, 0.455)
 BLOCKING_PATH_FRACTION = 0.50
+OBSTACLE_TRIGGER_PATH_FRACTION = 0.10
 OBSTACLE_MOVE_DURATION = 0.6
 AUTO_PLAY_LEAD_IN_DURATION = 0.75
 POST_EXECUTION_HOLD_DURATION = 1.0
 TRACKING_ERROR_THRESHOLD = 0.1
+# Keep cuRobo's optimizer active before the robot's fitted collision spheres
+# reach the obstacle.  The default 10 mm activation distance can still produce
+# a sampled TCP path with only ~7 mm geometric clearance around this cuboid.
+REPLAN_COLLISION_ACTIVATION_DISTANCE = 0.02
 MINIMUM_REPLAN_DETOUR = 0.04
 MAXIMUM_BLOCKED_PATH_CLEARANCE = 0.0
-MINIMUM_REPLAN_CLEARANCE = 0.01
+# The replanned trajectory is sampled at control waypoints; 5 mm leaves a
+# positive geometric margin without rejecting valid paths due to interpolation
+# between those samples.
+MINIMUM_REPLAN_CLEARANCE = 0.005
 MAXIMUM_FINAL_EEF_ERROR = 0.04
 TRAJECTORY_MARKER_STRIDE = 8
+
+
+def _obstacle_motion_trigger_command(
+    path_segment_count: int,
+    *,
+    configured_trigger: int = MOVE_AFTER_COMMAND,
+    path_fraction: float = BLOCKING_PATH_FRACTION,
+) -> int:
+    """Choose an in-flight obstacle trigger for the planned path.
+
+    The trigger is derived from the path instead of assuming that every
+    planner emits the same number of control commands.  It remains bounded by
+    the tutorial's configured trigger so longer trajectories keep the original
+    pacing, while short trajectories still move the obstacle before completion.
+    """
+    if path_segment_count < 1:
+        raise ValueError("path_segment_count must be at least one.")
+    if configured_trigger < 1:
+        raise ValueError("configured_trigger must be at least one.")
+    if not math.isfinite(path_fraction) or not 0.0 < path_fraction < 1.0:
+        raise ValueError("path_fraction must be finite and lie in (0, 1).")
+    return min(
+        configured_trigger,
+        max(1, round(path_segment_count * path_fraction)),
+    )
 
 
 def _animate_obstacle_to_pose(
@@ -391,7 +425,8 @@ def _publish_path_overlays(
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the dynamic-obstacle tutorial."""
     parser = create_tutorial_argument_parser(
-        "Demonstrate collision-world revision recovery with cuRobo."
+        "Demonstrate collision-world revision recovery with cuRobo.",
+        default_planner="curobo",
     )
     parser.add_argument(
         "--no_obstacle_motion",
@@ -404,6 +439,11 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     """Move an obstacle during execution and replan from the latest snapshot."""
     args = parse_arguments()
+    if getattr(args, "planner", "curobo") != "curobo":
+        raise ValueError(
+            "dynamic_obstacle_recovery requires --planner curobo because "
+            "the demo updates a live collision world during execution."
+        )
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
     obstacle = sim.add_rigid_object(
@@ -418,12 +458,19 @@ def main() -> None:
                     roughness=0.35,
                 ),
             ),
-            attrs=RigidBodyAttributesCfg(),
+            # The obstacle remains in cuRobo's collision world, but its visual
+            # animation must not generate a physical impulse that knocks the
+            # robot out of its planned trajectory before replanning observes
+            # the scene revision.
+            attrs=RigidBodyPhysicsCfg(
+                collision_props=CollisionPropertiesCfg(collision_enabled=False)
+            ),
             body_type="kinematic",
             init_pos=list(OBSTACLE_START_POSITION),
             init_rot=[0.0, 0.0, 0.0],
         )
     )
+    sim.prepare()
     # Initialize GPU physics before planning or recording so the first visible
     # frame and the initial planning context share the same settled state.
     sim.update(step=10)
@@ -431,17 +478,24 @@ def main() -> None:
         MotionGenCfg(
             planner_cfg=CuroboPlannerCfg(
                 robot_uid=robot.uid,
+                collision_activation_distance=REPLAN_COLLISION_ACTIVATION_DISTANCE,
+                # Newton physics captures CUDA graphs on the same device.
+                use_cuda_graph=args.physics != "newton",
                 # The coarse default voxel fit under-covers the hand and
                 # fingertips. Keep the denser morphit fit, but no extra radius
                 # padding: 5 mm makes this tutorial's initial pose infeasible.
                 auto_gen=CuroboAutoGenCfg(
-                    fit_type=COLLISION_SPHERE_FIT_TYPE,
                     sphere_density=COLLISION_SPHERE_FIT_DENSITY,
                     collision_sphere_buffer=ROBOT_COLLISION_BUFFER,
                 ),
                 world=CuroboWorldCfg(
                     rigid_objects=[obstacle],
-                    obstacle_representation="cuboid",
+                    # Keep the authored cube analytic in cuRobo.  The Newton
+                    # facade exposes primitive geometry through its retained
+                    # descriptor; auto mode would voxelize the fallback mesh
+                    # and can produce a path inside the tutorial's strict
+                    # 10-mm clearance contract.
+                    overrides={OBSTACLE_UID: "cuboid"},
                     dynamic_obstacle_names=[OBSTACLE_UID],
                     multi_env=args.num_envs > 1,
                 ),
@@ -495,6 +549,15 @@ def main() -> None:
         robot,
         session.active_commands,
         control_part=CONTROL_PART,
+    )
+    move_after_command = _obstacle_motion_trigger_command(
+        initial_eef_path.shape[1] - 1,
+        path_fraction=OBSTACLE_TRIGGER_PATH_FRACTION,
+    )
+    logger.log_info(
+        "Obstacle motion trigger set to "
+        f"command {move_after_command} for {initial_eef_path.shape[1] - 1} "
+        "planned path segments."
     )
     blocking_obstacle_pose, blocking_waypoint_index = _blocking_obstacle_pose(
         obstacle.get_local_pose(to_matrix=True),
@@ -566,12 +629,13 @@ def main() -> None:
         if (
             not args.no_obstacle_motion
             and not obstacle_moved
-            and step.command_count >= MOVE_AFTER_COMMAND
+            and step.command_count >= move_after_command
         ):
             start_pose = obstacle.get_local_pose(to_matrix=True).clone()
             logger.log_warning(
                 f"Moving the collision obstacle over {OBSTACLE_MOVE_DURATION:.2f} s "
-                f"after {step.command_count} accepted commands; start XYZ="
+                f"after {step.command_count} accepted commands (trigger at "
+                f"{move_after_command}); start XYZ="
                 f"{start_pose[:, :3, 3].detach().cpu().tolist()}."
             )
             moved_pose = _animate_obstacle_to_pose(

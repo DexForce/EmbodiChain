@@ -1,14 +1,29 @@
-# Agent Context Writing Style
+# Writing agent context
 
-Use these rules when adding or updating files under `agent_context/`:
+Put operational facts first: owning entry points, resolution/lifecycle,
+invariants, likely failures, change sites and focused validation. Use only the
+sections the topic needs; avoid reproducing entire API reference tables.
 
-1. Keep each context file topic-focused. One file should answer one class of request.
-2. Put actionable engineering facts first:
-   - entry points
-   - source-of-truth files
-   - invariants
-   - common failure modes
-3. Prefer short sections over narrative prose.
-4. Record behavior, ownership, and workflow constraints; avoid long background history.
-5. If a topic depends on existing Sphinx documentation, reference its path under `docs/source/` instead of copying the full document.
-6. If the context changes the working route for an agent, update `agent_context/MAP.yaml` in the same change.
+The MAP `paths` entry is a short navigation overview: scope, owning entry points,
+essential resolution/lifecycle, high-risk invariants, change sites and validation.
+Link specialized details by the question they answer. A lookup for one entry
+point should not require reading backend tuning or an algorithm implementation.
+Do not list all details in `paths` or preload related topics.
+
+Details retain durable cross-file knowledge that changes a future decision.
+Exact field inventories/defaults, local algorithms, example parameters and fix
+narratives belong in source, tests, tutorials or the PR. Link those owners when
+needed. Before adding a paragraph, identify the decision it supports and check
+whether an existing owner already explains it. Edit that passage in place.
+
+Give each cross-cutting contract one owner. Other topics retain a short local
+boundary constraint and link to the full rule; they do not repeat its defaults,
+conversion tables or exceptions. A brief frame/unit warning at a consumer can
+remain useful. Skills own procedural scaffolds, AGENTS owns global rules, and
+topics own implementation facts. Do not copy skill templates into topic prose.
+
+Distinguish defaults from examples, optional dependencies from unconditional
+requirements, and concrete tensor/frame contracts from abstract interfaces.
+Avoid approximate source line numbers and unqualified benchmark claims.
+Keep illustrative snippets minimal; verify behavioral examples against source.
+Link human-facing Sphinx docs instead of copying them.

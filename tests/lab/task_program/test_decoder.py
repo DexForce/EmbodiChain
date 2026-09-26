@@ -62,15 +62,15 @@ def _program_data() -> dict[str, object]:
                 "values": [
                     {
                         "position": [0.45, -0.20, 0.20],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     },
                     {
                         "position": [0.45, 0.00, 0.20],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     },
                     {
                         "position": [0.45, 0.20, 0.20],
-                        "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
                     },
                 ],
             }

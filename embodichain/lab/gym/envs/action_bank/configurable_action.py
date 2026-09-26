@@ -1267,12 +1267,14 @@ class GeneralActionBank(ActionBank):
         vis: bool = False,
         **kwargs,
     ) -> np.ndarray:
-        from embodichain.lab.sim.planners import (
-            MoveType,
-            PlanState,
+        from embodichain.lab.sim.motion.motion_generator import (
             MotionGenerator,
             MotionGenCfg,
             MotionGenOptions,
+        )
+        from embodichain.lab.sim.motion.planners import (
+            MoveType,
+            PlanState,
             ToppraPlanOptions,
             ToppraPlannerCfg,
         )
@@ -1328,7 +1330,11 @@ class GeneralActionBank(ActionBank):
 
         else:
             mo_gen = MotionGenerator(
-                cfg=MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=env.robot.uid))
+                cfg=MotionGenCfg(
+                    planner_cfg=ToppraPlannerCfg(
+                        robot_uid=env.robot.uid, sim_instance_id=env.sim.instance_id
+                    )
+                )
             )
 
             if len(ref_poses) == 0:

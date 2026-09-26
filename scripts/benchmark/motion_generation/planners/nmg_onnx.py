@@ -1,0 +1,174 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""NMG ONNX benchmark adapter."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+from embodichain.lab.sim.motion.motion_generator import (
+    MotionGenCfg,
+    MotionGenOptions,
+    MotionGenerator,
+)
+from embodichain.lab.sim.motion.planners import (
+    MoveType,
+    NeuralPlanOptions,
+    NeuralPlannerCfg,
+    PlanResult,
+    PlanState,
+)
+
+from ..config import PlannerSpecCfg
+from ..models import BenchmarkCase
+from ..registry import register_planner_adapter
+from .base import PlannerAdapter, PlannerContext
+
+__all__ = ["NmgOnnxAdapter"]
+
+
+class NmgOnnxAdapter(PlannerAdapter):
+    """Run a standalone NMG ONNX policy through :class:`NeuralPlanner`."""
+
+    capabilities = frozenset(
+        {
+            "eef_waypoint",
+            "joint_waypoint",
+            "batched",
+            "empty_world",
+            "atomic_action",
+        }
+    )
+
+    def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
+        super().__init__(spec, context)
+        self.motion_generator: MotionGenerator | None = None
+
+    def _resolved_model_revision(self) -> str:
+        """Use an explicit revision or derive one from the runtime ONNX path."""
+        configured = self.spec.config.get("model_revision")
+        if configured:
+            return str(configured)
+        model_path = self.spec.config.get("onnx_model_path")
+        if model_path:
+            return Path(str(model_path)).expanduser().stem
+        return super()._resolved_model_revision()
+
+    def availability(self) -> tuple[bool, str | None]:
+        """Require ONNX Runtime and a resolved standalone policy path."""
+        if importlib.util.find_spec("onnxruntime") is None:
+            return False, "onnxruntime is not installed."
+        model_path = self.spec.config.get("onnx_model_path")
+        if not model_path:
+            return False, "NMG requires config.onnx_model_path or --nmg-onnx-path."
+        path = Path(str(model_path)).expanduser()
+        if not path.is_file():
+            return False, f"NMG ONNX policy does not exist: {path}."
+        if path.suffix.lower() != ".onnx":
+            return False, f"NMG requires a standalone .onnx policy, got {path}."
+        return True, None
+
+    def supports_case(self, case: BenchmarkCase) -> tuple[bool, str | None]:
+        """Reject unsupported modalities or sequences beyond policy capacity."""
+        supported, reason = super().supports_case(case)
+        if not supported:
+            return supported, reason
+        capacity = int(self.spec.config.get("num_waypoints", 5))
+        if case.num_waypoints > capacity:
+            return (
+                False,
+                f"NMG policy supports at most {capacity} waypoints; case has "
+                + f"{case.num_waypoints} and was not truncated or split.",
+            )
+        return True, None
+
+    def _case_max_steps(self, case: BenchmarkCase) -> int:
+        """Match NMG's training/evaluation budget of 30 steps per waypoint."""
+        steps_per_waypoint = int(self.spec.config.get("steps_per_waypoint", 30))
+        configured_max = int(self.spec.config.get("max_steps", 150))
+        return min(configured_max, int(case.num_waypoints) * steps_per_waypoint)
+
+    @property
+    def motion_policy_planner(self) -> str:
+        """Select EmbodiChain's neural MotionGenerator backend."""
+        return "neural"
+
+    def build(self) -> None:
+        """Construct the ONNX-backed MotionGenerator."""
+        values = self.spec.config
+        model_path = str(Path(str(values["onnx_model_path"])).expanduser())
+        providers = values.get("onnx_providers")
+        planner_cfg = NeuralPlannerCfg(
+            robot_uid=self.context.robot.uid,
+            onnx_model_path=model_path,
+            control_part=self.context.control_part,
+            max_steps=int(values.get("max_steps", 150)),
+            action_scale=float(values.get("action_scale", 0.2)),
+            num_arm_joints=int(values.get("num_arm_joints", 7)),
+            num_waypoints=int(values.get("num_waypoints", 5)),
+            use_relative_obs=bool(values.get("use_relative_obs", True)),
+            canonicalize_quat_obs=bool(values.get("canonicalize_quat_obs", True)),
+            intermediate_orientation=bool(values.get("intermediate_orientation", True)),
+            pos_eps=float(values.get("pos_eps", 0.01)),
+            rot_eps=float(values.get("rot_eps", 0.1)),
+            joint_eps=float(values.get("joint_eps", 0.01)),
+            onnx_providers=list(providers) if providers is not None else None,
+            policy_frame_from_world=values.get("policy_frame_from_world"),
+            runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
+            dt=float(values.get("dt", 0.01)),
+        )
+        self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
+
+    def plan(self, case: BenchmarkCase) -> PlanResult:
+        """Plan all ordered constraints in one closed-loop rollout."""
+        if self.motion_generator is None:
+            raise RuntimeError("NMG adapter must be built before plan().")
+        motion_validity = case.case_parameters.get(
+            "motion_validity", "ordered_cartesian_waypoints"
+        )
+        if motion_validity == "ordered_joint_waypoints":
+            targets = [
+                PlanState.from_qpos(
+                    case.reference_qpos[:, index], move_type=MoveType.JOINT_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
+        elif motion_validity == "ordered_cartesian_waypoints":
+            targets = [
+                PlanState.from_xpos(
+                    case.target_waypoints[:, index], move_type=MoveType.EEF_MOVE
+                )
+                for index in range(case.num_waypoints)
+            ]
+        else:
+            raise ValueError(f"Unsupported motion_validity mode {motion_validity!r}.")
+        return self.motion_generator.generate(
+            targets,
+            MotionGenOptions(
+                start_qpos=case.start_qpos,
+                control_part=self.context.control_part,
+                plan_opts=NeuralPlanOptions(max_steps=self._case_max_steps(case)),
+            ),
+        )
+
+    def close(self) -> None:
+        """Release the adapter-owned MotionGenerator."""
+        self._close_motion_generator()
+
+
+register_planner_adapter("nmg_onnx", NmgOnnxAdapter)

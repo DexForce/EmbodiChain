@@ -43,25 +43,29 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     JointDrivePropertiesCfg,
-    RigidBodyAttributesCfg,
+    RigidBodyPhysicsCfg,
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
     add_ur5_gripper_robot,
+    configure_newton_link_contacts,
+    create_affordance_sampling_context,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
     create_tutorial_simulation,
     draw_axis_marker,
     get_hand_open_close_qpos,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     replay_trajectory,
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-HANDLE_LINK_NAME = "door_handle"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+HANDLE_LINK_NAME = "handle_link"
 MICROWAVE_SCENE_ENTITY_ID = "microwave"
 MICROWAVE_POSITION = (-1.0, 0.20, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
@@ -75,7 +79,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the door-opening tutorial."""
     parser = create_tutorial_argument_parser(
         "Grasp a microwave handle and open its door with OpenDoor.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("affordance_sampling", "grasp_sampling", "visualize_axes"),
     )
     parser.add_argument(
         "--open_angle",
@@ -86,34 +90,38 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--approach_distance", type=float, default=0.10)
     parser.add_argument("--retract_distance", type=float, default=0.10)
     parser.add_argument("--door_waypoint_count", type=int, default=50)
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_microwave(sim: SimulationManager) -> Articulation:
     """Create the fixed-base microwave with an unactuated door hinge."""
-    microwave = sim.add_articulation(
-        cfg=ArticulationCfg(
-            uid="microwave",
-            fpath=get_data_path(MICROWAVE_ASSET),
-            init_pos=MICROWAVE_POSITION,
-            init_rot=MICROWAVE_ORIENTATION,
-            drive_pros=JointDrivePropertiesCfg(drive_type="none"),
-            attrs=RigidBodyAttributesCfg(
-                static_friction=1.0,
-                dynamic_friction=1.0,
-            ),
-            fix_base=True,
-        )
+    microwave_cfg = ArticulationCfg(
+        uid="microwave",
+        fpath=get_data_path(MICROWAVE_ASSET),
+        asset_physics_mode="overlay",
+        init_pos=MICROWAVE_POSITION,
+        init_rot=MICROWAVE_ORIENTATION,
+        joint_drive_props=JointDrivePropertiesCfg(drive_type="none"),
+        attrs=RigidBodyPhysicsCfg.from_dict(
+            {"material_props": {"static_friction": 1.0, "dynamic_friction": 1.0}}
+        ),
     )
+    configure_newton_link_contacts(
+        sim,
+        microwave_cfg,
+        group_name="newton_handle_contacts",
+        link_names_expr=[HANDLE_LINK_NAME],
+    )
+    microwave = sim.add_articulation(cfg=microwave_cfg)
     sim.update(step=10)
     return microwave
 
 
 def create_door_handle_semantics(microwave: Articulation) -> ObjectSemantics:
-    """Resolve the first parent revolute joint from ``door_handle``.
+    """Resolve the parent door hinge from ``handle_link``.
 
-    Only the handle link is configured. ``OpenDoorAffordance`` traverses the
-    fixed ``door_to_door_handle_fixed`` joint and resolves ``door_hinge``.
+    For ``Microwave/microwave.urdf``, ``OpenDoorAffordance`` traverses the
+    fixed ``door_handle_fixed_joint`` and resolves ``door_hinge``.
     """
     affordance = OpenDoorAffordance.from_articulation(
         microwave,
@@ -161,7 +169,10 @@ def main() -> None:
         draw_axis_marker(sim, "door_handle_link_pose", handle_pose)
 
     engine = AtomicActionEngine(
-        motion_generator=create_toppra_motion_generator(robot),
+        motion_generator=create_toppra_motion_generator(
+            robot,
+            planner=getattr(args, "planner", "trapezoidal"),
+        ),
         control_profiles={
             "hand": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
@@ -190,7 +201,11 @@ def main() -> None:
                     open_fraction=open_fraction,
                 ),
                 control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
-                motion_policy=MotionPolicy(sample_count=TRAJECTORY_SAMPLE_COUNT),
+                motion_policy=MotionPolicy(
+                    # Contact/path segments require exact Cartesian samples.
+                    strategy="ik_interp",
+                    sample_count=TRAJECTORY_SAMPLE_COUNT,
+                ),
                 skill_options=OpenDoorOptions(
                     hand_interp_steps=HAND_INTERP_STEPS,
                     door_waypoint_count=args.door_waypoint_count,
@@ -211,8 +226,10 @@ def main() -> None:
                 },
             ),
             control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
         ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     if not compiled.plan_success.all():
         logger.log_warning("Failed to plan the OpenDoor tutorial trajectory.")
         return

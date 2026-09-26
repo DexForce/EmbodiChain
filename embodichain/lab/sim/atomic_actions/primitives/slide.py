@@ -45,13 +45,17 @@ from embodichain.lab.sim.atomic_actions.invocation import (
 )
 from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
+    PlannerDiagnostics,
     TimedTrajectory,
     normalize_success_mask,
 )
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resample_planned_trajectory,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
@@ -183,13 +187,20 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=link_pose,
-            approach_direction=translation_axis_world,
+        candidates = affordance.get_grasp_candidates(
+            grasp_generator,
+            link_pose,
+            translation_axis_world,
         )
-        grasp_xpos = grasp_xpos.to(device=self.device, dtype=torch.float32)
+        grasp_sample = affordance.sample_candidates(
+            candidates,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=(request.invocation_id or self.skill_id) + ":grasp",
+            reference_poses=link_pose,
+        )
+        grasp_success = grasp_sample.success
+        grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
         grasp_success = normalize_success_mask(
             grasp_success,
             num_envs=self.num_envs,
@@ -340,6 +351,10 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata={"affordance_sample": {"grasp": grasp_sample.metadata}},
+            ),
             segment_lengths=segment_lengths,
             # Once reach completes, contact or the commanded slide may move the
             # articulated target. That self-induced motion must not recover.
@@ -402,7 +417,9 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
 
 __all__ = [

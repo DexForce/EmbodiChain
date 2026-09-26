@@ -53,6 +53,66 @@ Recording hotkey registration is controlled by `SimConfig.window_record.enable_h
 
 The camera-pose hotkey is controlled by `SimulationManagerCfg.window_camera_pose.enable_hotkey` and prints look-at form by default. Set `SimulationManagerCfg.window_camera_pose.convert_to_look_at=False` to print the raw 4x4 pose matrix instead. The same output can be requested programmatically with `SimulationManager.print_window_camera_pose()`.
 
+### Entity Gizmo Control
+
+DexSim owns native entity selection and manipulation. EmbodiChain enables it
+automatically when the first native window opens, including a window created
+with `SimulationManagerCfg(headless=False)`. Pure headless and Viser runs do not
+automatically create native entity gizmos.
+
+To start with native interaction disabled, use
+`SimulationManagerCfg(enable_entity_gizmo=False)`. Gym JSON/YAML deployments
+accept the top-level field `enable_entity_gizmo: false` as well. At runtime,
+`sim.disable_entity_gizmo()` disables interaction and cancels automatic
+enablement even before the first window opens. Closing and reopening a window
+preserves the controller's current enabled state and custom configuration.
+
+For custom DexSim settings, enable or reconfigure the controller explicitly:
+
+```python
+import dexsim
+
+gizmo_config = dexsim.interaction.EntityGizmoConfig()
+gizmo_config.max_gizmos = 0  # Unlimited simultaneous bindings.
+sim.open_window()
+sim.enable_entity_gizmo(gizmo_config)
+```
+
+While enabled, left-click a render mesh, dynamic/kinematic rigid body, or
+articulation link and press **G** to attach or detach its root gizmo. The
+controller supports multiple simultaneous bindings and owns selection,
+temporary physics-state changes, and cleanup. No `sim.update_gizmos()` call is
+needed for this world-level controller.
+
+EmbodiChain's built-in `default_plane` is registered as an immovable target and
+cannot receive an entity gizmo. Other supported scene entities remain
+selectable normally.
+
+`sim.enable_entity_gizmo(config)` is a thin helper that also excludes
+EmbodiChain's render-only default plane. Query the controller through DexSim's
+world object; use the manager's disable helper to preserve your preference
+across future window opens:
+
+```python
+controller = sim.get_world().get_entity_gizmo()
+sim.disable_entity_gizmo()
+```
+
+Robot TCP IK controls are registered automatically for parts with configured
+IK chain/TCP metadata. By default, the first **I** press activates them; later
+presses show or hide their targets. **G** continues to control entity roots. Normal
+`sim.update()` calls handle IK updates; no controller-specific call is needed.
+
+For immediate activation, set
+`SimulationManagerCfg(robot_ik_gizmo=GizmoCfg(ik_start_enabled=True))`. The
+controller starts on the first update with an open window. The robot Gizmo
+tutorial enables this option after preparing its initial joint pose.
+
+The entity gizmo is native-window only. The Viser backend offers an analogous
+**click-to-pick** flow (an *Enable click-to-pick Gizmo* checkbox instead of the
+**G** hotkey, since browsers do not expose keyboard events); see
+:doc:`tutorial/gizmo` for details.
+
 ## Customizing Window Events
 
 Users can create their own custom window interaction controls by subclassing the `ObjectManipulator` class (provided by `dexsim`). This allows for the implementation of specific behaviors and responses to user inputs.

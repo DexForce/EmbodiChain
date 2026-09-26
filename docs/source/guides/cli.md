@@ -82,7 +82,15 @@ demo or RL capabilities:
 
 ```bash
 embodichain list-task
+embodichain list-task --category manipulation
+embodichain show-task embodichain_tasks:repeated_pick_place
 ```
+
+`show-task` displays a logical task's named deployments, launch commands and
+available validation records. `list-task --export-html task-gallery.html`
+exports the same catalog as a static gallery. For simulator-free discovery,
+pass `--config-root PACKAGE=PATH` with a `configs/tasks` directory.
+See {doc}`task_catalog` for catalog authoring and gallery export.
 
 ---
 
@@ -159,9 +167,10 @@ embodichain run-env --gym_config config.yaml \
 | ``--gym_config`` | *(required)* | Path to a runnable gym config with ``id`` (``.json``, ``.yaml``, or ``.yml``) |
 | ``--action_config`` | ``None`` | Path to action config file (``.json``, ``.yaml``, or ``.yml``) |
 | ``--num_envs`` | ``1`` | Number of parallel environments |
-| ``--device`` | ``cpu`` | Device (``cpu`` or ``cuda``) |
+| ``--device`` | *(config/backend default)* | Explicit device override (for example ``cpu`` or ``cuda:0``); omission preserves the configured or selected-backend default |
+| ``--physics`` | *(from config)* | File-owned physics backend (``default`` or ``newton``); this option may confirm the same value but cannot switch a Gym config to another backend |
 | ``--headless`` | ``False`` | Run in headless mode |
-| ``--renderer`` | ``auto`` | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
+| ``--renderer`` | *(config; ``auto`` if absent)* | Renderer backend: ``auto``, ``hybrid``, ``fast-rt`` or ``rt`` |
 | ``--arena_space`` | ``5.0`` | Arena space size |
 | ``--gpu_id`` | ``0`` | GPU ID to use |
 | ``--preview`` | ``False`` | Enter interactive preview mode |
@@ -310,7 +319,7 @@ Standalone updates are reported below ``sim_update``. When an environment owns
 the manager, it reuses the same instance and simulation sections stay below the
 existing ``step.sim_update`` path. The legacy ``EnvProfiler`` and
 ``EnvProfilerCfg`` imports remain aliases of ``Profiler`` and ``ProfilerCfg``.
-Within ``manual_update``, ``gizmo_update`` and ``world_update`` are sampled once
+Within ``physics_steps``, ``gizmo_update`` and ``world_update`` are sampled once
 per physics substep. Optional window recording and Viser publication are
 reported separately as ``window_record_capture`` and
 ``visualization_capture``, so they are not attributed to physics time.
@@ -385,6 +394,94 @@ python -m embodichain.learning.rl.train --config embodichain_tasks/configs/tasks
 | ``--profile_output`` | ``None`` | Dump the profiling report as JSON on ``env.close()`` (requires ``--profile``). |
 
 See the Profiling section under Run Env for report format. Outputs are written to ``./outputs/<exp_name>_<timestamp>/`` (TensorBoard logs and checkpoints). See the :doc:`../tutorial/rl` tutorial for config structure and training workflow.
+
+---
+
+## Policy Evaluation
+
+### Pretrained policies
+
+Download an official policy and open its simulator task:
+
+```bash
+embodichain eval-policy --pretrained g1-flat-ppo-newton \
+    --viewer --command 0.3 0 0 --device cuda:0 --sim-device gpu
+```
+
+Model IDs are directory names under `policies/` in
+[DexForceAI/embodichain_model](https://huggingface.co/DexForceAI/embodichain_model).
+The shipped default selects a tested HF commit. `--revision <commit-or-tag>`
+can select another repository snapshot; named revisions resolve to one commit
+before the index and model are downloaded. That snapshot must use a supported
+model format and an installed task package.
+
+The first run downloads only the selected model bundle, then resolves robot
+assets through the existing asset downloader. Later runs reuse downloaded
+files. The published locomotion configs default to `fast-rt`; `--duration 20`
+bounds a Viewer run. Omit `--viewer` and use `--episodes 1 --num-envs 1` for
+Headless evaluation.
+
+`--cache-dir` changes the model cache root, which defaults to
+`~/.cache/embodichain/policies`. Robot assets still use `EMBODICHAIN_DATA_ROOT`.
+Reports default to `./outputs/policy_eval/<model-id>/` and record the actual HF
+repository, commit and model ID. `--output` overrides that output location.
+
+`--pretrained` cannot be combined with RUN, `--profile`, `--checkpoint`,
+`--config` or `--gym-config`: each published bundle supplies its matching
+weights and configuration. `--offline` remains an external Profile option.
+
+### Local checkpoints
+
+Evaluate the latest checkpoint from an EmbodiChain training run:
+
+```bash
+embodichain eval-policy outputs/my_policy_<timestamp>
+```
+
+Open a simulator task in the Viewer:
+
+```bash
+embodichain eval-policy outputs/my_policy_<timestamp> \
+    --checkpoint best \
+    --viewer \
+    --renderer hybrid
+```
+
+Evaluate an explicit EmbodiChain checkpoint:
+
+```bash
+embodichain eval-policy \
+    --checkpoint /path/to/policy.pt \
+    --config /path/to/train.yaml \
+    --gym-config /path/to/gym.yaml
+```
+
+### Main arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| ``RUN`` | *(optional)* | Training run containing ``run-manifest.json`` |
+| ``--pretrained`` | *(optional)* | Official pretrained model ID; supplies a complete RUN |
+| ``--revision`` | Tested HF commit | Repository revision for ``--pretrained`` |
+| ``--cache-dir`` | Model or Profile cache | Cache root for ``--pretrained`` or external Profiles |
+| ``--checkpoint`` | ``latest`` with RUN | ``latest``, ``best``, or a checkpoint path |
+| ``--config`` | RUN manifest | Training configuration override |
+| ``--gym-config`` | RUN manifest | Simulator task configuration override |
+| ``--episodes`` | Training configuration | Number of completed task episodes |
+| ``--num-envs`` | Training configuration | Number of parallel Headless environments |
+| ``--viewer`` | Headless | Open the original simulator task in the DexSim Viewer |
+| ``--control-steps`` | Viewer runs continuously | Exact number of Policy actions |
+| ``--duration`` | *(optional)* | Duration converted to integer control steps |
+| ``--command`` | Task default | Native velocity command ``vx vy yaw_rate`` or external Profile command |
+| ``--keymap`` | ``wasd`` | Viewer command keys: ``wasd`` or ``arrows`` |
+| ``--renderer`` | Training configuration or ``hybrid`` | Viewer renderer |
+| ``--device`` | Training configuration | PyTorch inference device |
+| ``--sim-device`` | Inference device | Simulation device |
+| ``--output`` | RUN/checkpoint evaluations; ``outputs/policy_eval/<model-id>`` for pretrained | Evaluation output parent directory |
+
+External Motion Profiles use the same command with `--profile`. See
+{doc}`policy_evaluation` for training-run layout, execution paths, Viewer
+controls, output reports, and the complete ANYmal-C example.
 
 ---
 

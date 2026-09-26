@@ -28,6 +28,7 @@ import torch
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     Affordance,
+    AffordanceSample,
     AntipodalAffordance,
     AtomicActionEngine,
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -720,7 +721,7 @@ def test_curated_analysis_selects_monitors_per_semantic_call() -> None:
             Pick(object=SceneObjectRef("cube")),
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.5, 0.0, 0.3), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.5, 0.0, 0.3), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -915,7 +916,7 @@ def test_place_effect_spec_binds_source_and_verified_detach_baseline() -> None:
                 object=SceneObjectRef("cube"),
                 at=SemanticPose(
                     (0.5, -0.2, 0.4),
-                    (1.0, 0.0, 0.0, 0.0),
+                    (0.0, 0.0, 0.0, 1.0),
                 ),
             ),
         )
@@ -1166,7 +1167,7 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
 
     workflow = compiler.analyze(
         (
@@ -1194,6 +1195,52 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_pick_preserves_rigidized_articulation_root_frame_geometry() -> None:
+    object_ref = SceneObjectRef("rubiks_cube")
+    grasp_ref = SceneAffordanceRef("rubiks_cube_grasp")
+    root_frame_vertices = torch.tensor(
+        ((0.1, -0.2, 0.3), (0.2, -0.2, 0.3), (0.1, -0.1, 0.3)),
+        dtype=torch.float32,
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=object_ref,
+                state_provider=_PoseProvider(torch.eye(4).repeat(2, 1, 1)),
+                default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp_ref},
+            ),
+            SceneEntityRegistration(
+                ref=grasp_ref,
+                parent=object_ref,
+                native_name="lower_two_layers",
+                affordance=AntipodalAffordance(
+                    mesh_vertices=root_frame_vertices,
+                    mesh_triangles=torch.tensor(((0, 1, 2),), dtype=torch.int64),
+                ),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    compiler, _ = _compiler(registry)
+    workflow = compiler.analyze(
+        (Pick(object=SceneObjectRef("rubiks_cube")),),
+        workflow_id="pick_rubiks_cube",
+    )
+
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    goal = grounded.invocation.goal
+    assert isinstance(goal, GraspGoal)
+    assert goal.semantics.entity_id == "rubiks_cube"
+    assert isinstance(goal.semantics.affordance, AntipodalAffordance)
+    assert torch.allclose(
+        goal.semantics.affordance.mesh_vertices,
+        root_frame_vertices,
+    )
+
+
 def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
     """Pickup feasibility must screen the object pose that Place will use."""
     registry, providers = _scene_registry()
@@ -1214,7 +1261,7 @@ def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.4, 0.2, 0.3), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.4, 0.2, 0.3), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze(
         (
             Pick(object=SceneObjectRef("cube")),
@@ -1327,14 +1374,26 @@ def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:
         grasp_target_id: str,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        del self, semantics, start_qpos, manipulator, approach_direction
+        context: PlanningContext,
+        *,
+        sample_key: str,
+    ) -> AffordanceSample:
+        del (
+            self,
+            semantics,
+            start_qpos,
+            manipulator,
+            approach_direction,
+            context,
+            sample_key,
+        )
         target = options.downstream_object_target_poses[0]
         assert isinstance(target, torch.Tensor)
         captured.append(target.clone())
-        return (
-            torch.zeros(2, dtype=torch.bool),
-            object_pose.clone(),
+        return AffordanceSample(
+            success=torch.zeros(2, dtype=torch.bool),
+            poses=object_pose.clone(),
+            metadata={},
         )
 
     action._resolve_grasp_pose = MethodType(  # type: ignore[method-assign]
@@ -1450,7 +1509,7 @@ def test_place_uses_verified_object_to_eef_transform() -> None:
             preset=_preset("safe", action_option_templates=templates),
         ),
     )
-    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
     pick_workflow = compiler.analyze((Pick(object=SceneObjectRef("cube")),))
     semantics = compiler.ground(
@@ -1498,7 +1557,7 @@ def test_place_can_keep_observed_object_orientation_at_target() -> None:
     object_to_eef = torch.eye(4).repeat(2, 1, 1)
     object_to_eef[:, 2, 3] = 0.12
     context = _held_context(registry, semantics, object_to_eef)
-    drop = SemanticPose((0.5, -0.2, 0.4), (1.0, 0.0, 0.0, 0.0))
+    drop = SemanticPose((0.5, -0.2, 0.4), (0.0, 0.0, 0.0, 1.0))
     workflow = compiler.analyze((Place(object=SceneObjectRef("cube"), at=drop),))
 
     grounded = compiler.ground(workflow, 0, context)
@@ -1548,7 +1607,7 @@ def test_place_rejects_wrong_or_inactive_verified_holder() -> None:
         (
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -1618,7 +1677,7 @@ def test_registered_lowerer_is_explicit_and_opaque_to_lookahead() -> None:
             registered,
             Place(
                 object=SceneObjectRef("cube"),
-                at=SemanticPose((0.3, 0.0, 0.2), (1.0, 0.0, 0.0, 0.0)),
+                at=SemanticPose((0.3, 0.0, 0.2), (0.0, 0.0, 0.0, 1.0)),
             ),
         )
     )
@@ -1635,11 +1694,11 @@ def test_registered_lowerer_can_certify_retained_object_lookahead() -> None:
     registry, _ = _scene_registry()
     registered_target = SemanticPose(
         (0.25, 0.1, 0.4),
-        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
     place_target = SemanticPose(
         (0.3, 0.0, 0.2),
-        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
     )
     compiler, _ = _compiler(
         registry,

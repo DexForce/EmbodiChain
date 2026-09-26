@@ -53,9 +53,9 @@ class CobotMagicArm(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV3.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "CobotMagicArmV4.zip"
             ),
-            "12a249e231bfc2faf0fd55f9e2646b8d",
+            "8cc54c240c2f26e84e22250c8364b0ec",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
@@ -306,9 +306,9 @@ class UniversalRobots(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(
-                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots_v2.zip"
+                EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "UniversalRobots_v3.zip"
             ),
-            "4dd4ee5a86125364a9e8cbcd4aafc31a",
+            "08af8f2d80f1c3c4280e9747082a5a2b",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
@@ -553,6 +553,35 @@ class ARX5(EmbodiChainDataset):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "ARX5_2.zip"),
             "6fc1d6a5a35b7926ba6325c0d20f5bc3",
+        )
+        prefix = type(self).__name__
+        path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
+
+        super().__init__(prefix, data_descriptor, path)
+
+
+class AlohaMini(EmbodiChainDataset):
+    """Dataset class for the Aloha Mini robot.
+
+    Reference:
+        https://github.com/annncatto/alohamini_ros2/tree/main/src/alohamini_description
+
+    Directory structure:
+        AlohaMini/
+            alohamini2pro.urdf
+
+    Example usage:
+        >>> from embodichain.data.robot_dataset import AlohaMini
+        >>> dataset = AlohaMini()
+        or
+        >>> from embodichain.data import get_data_path
+        >>> print(get_data_path("AlohaMini/alohamini2pro.urdf"))
+    """
+
+    def __init__(self, data_root: str = None):
+        data_descriptor = o3d.data.DataDescriptor(
+            os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "AlohaMini.zip"),
+            "9727759a9276dcb2ee89eaa5319808c4",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

@@ -1,46 +1,56 @@
-# EmbodiChain Agent Context System
+# Context registry schema and maintenance
 
-EmbodiChain keeps agent-facing context in `agent_context/`, indexed by
-`agent_context/MAP.yaml`. Agent skills are stored under `.agents/skills/`.
-Claude Code project adapters use `.claude/skills/<skill>/SKILL.md`, and
-GitHub Copilot adapters under `.github/copilot/` should stay thin.
+Read this for context maintenance. The routing procedure lives only in
+`../SKILL.md`; the executable checker/router is `../scripts/context.py`.
 
-## Operation Modes
+`agent_context/MAP.yaml` uses schema `version: 1`:
 
-- `navigate`: locate current files, symbols, configs, defaults, entry points,
-  registration paths, and recommended change sites.
-- `read`: load an existing topic without changing it.
-- `refresh`: rebuild an existing topic from its current source of truth.
-- `add`: create and register a new topic from current source code.
+| Field | Contract |
+|---|---|
+| `defaults.write_contexts` | Convention Markdown paths relative to `agent_context/`, read for writing only |
+| `topics[].id` | Unique stable kebab-case id |
+| `title` | Nonempty human-readable title |
+| `aliases`, `keywords` | Lists of matching phrases; intentional ambiguity is allowed |
+| `paths` | Default overview Markdown paths relative to `agent_context/` |
+| `source_of_truth` | Prioritized repository-relative implementation files or narrow search directories |
+| `watch_paths` (optional) | Repository-relative files/directories for change impact, without increasing read load |
+| `related_topics` | Registered topic ids; never auto-load them |
+| `status` | `active` or `deprecated` |
+| `replaced_by` | Required active topic id when deprecated |
 
-## Routing Rules
+Paths must exist and stay inside their base, including resolved symlinks.
+`paths` and `write_contexts` point to Markdown files. Detail pages under
+`agent_context/topics/` must be reachable by local Markdown links from an
+overview. Keep code paths in backticks and document links as Markdown links.
 
-1. Read `agent_context/MAP.yaml` first.
-2. Resolve the requested topic by exact `id`, then `aliases`, then `keywords`.
-3. For read requests, load only the matched Markdown files listed in `paths`.
-4. For navigation requests, verify the relevant mapped facts against the
-   current `source_of_truth`.
-5. If navigation does not match a topic, search the working tree with
-   `rg --files` and `rg -n`. Inspect package exports, config loaders,
-   registries, tests, `pyproject.toml`, and `embodichain/__main__.py` as
-   relevant.
-6. Do not create a topic for a one-off unmatched lookup unless the user asks
-   for it.
-7. Do not read `docs/source/` unless the user explicitly asks for Sphinx
-   documentation.
+The checker validates schema, relations, paths, local Markdown links and orphan
+topic pages. It does not prove source facts, frames, tensor dimensions, examples
+or freshness. Review those against the owning implementation and focused tests.
 
-Navigation answers should identify the owning entry point, the call or config
-resolution path, the recommended change site, and the focused validation
-surface when those details are relevant.
+`affected --base REF --explain` compares the merge base with the checkout,
+including staged, unstaged and untracked files. Impact uses both baseline and
+current `source_of_truth`/`watch_paths`, so deleted or renamed paths still identify
+their former owners after metadata is updated. Context edits identify their
+owning topic. Reasons distinguish source, watch, context and registry changes;
+they identify review candidates, not required prose edits. Omit `--explain` to
+retain the topic-ID-only output.
 
-## Update Rules
+MAP changes compare parsed entries by stable id: additions, removals and updates
+select those entries; comments, formatting and topic-list order do not. Global
+MAP settings, conventions and routing skill/adapter changes select all active
+topics. Removed entries remain in the report so incoming links can be repaired.
+Without `--base` (or when the baseline has no MAP), a MAP path match conservatively
+selects all active topics; `--explain` reports the missing baseline. An unreadable
+or malformed baseline is an error, not an empty impact report.
 
-When behavior covered by a context topic changes, update the topic Markdown and
-`agent_context/MAP.yaml` metadata in the same change. If routing behavior itself
-changes, update:
+`stats [--base REF]` reports total context Markdown files/lines/whitespace words
+and per-overview word counts, including checkout additions/deletions. With a
+base, deltas compare against the merge base. These are not model token counts.
+Overviews above 1,200 words, or growing by more than 25% and at least 100 words,
+are flagged for review without failing the command. Use the flags to inspect
+reading cost and duplication, not to remove necessary invariants or enforce
+fixed prose lengths. Check total content as well as overview size after splits.
 
-- `.agents/skills/project-dev-context/SKILL.md`
-- `.agents/skills/project-dev-context/references/context-system.md`
-- `AGENTS.md`
-- `.claude/skills/project-dev-context/SKILL.md`
-- `.github/copilot/project-dev-context.md`
+Add/delete/move topics atomically with their MAP entries and incoming links.
+Deprecation keeps a redirect until callers migrate. No timestamp field is used
+as proof of freshness; maintain relevant source changes and context together.

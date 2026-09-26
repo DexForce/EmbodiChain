@@ -15,34 +15,116 @@ drive properties, and the per-entity configs consumed by
 factory in :mod:`embodichain.lab.sim.utility.sim_utils`.
 
 Entity configs form a small inheritance hierarchy rooted at ``ObjectBaseCfg``
-(``LightCfg``, ``RigidObjectCfg``, ``SoftObjectCfg``, ``ClothObjectCfg``,
+(``LightCfg``, ``RigidObjectCfg``, ``VolumeDeformableObjectCfg``, ``SurfaceDeformableObjectCfg``,
 ``ArticulationCfg`` and its ``RobotCfg`` subclass), while ``URDFCfg`` and
 ``RigidConstraintCfg`` describe multi-component assembly and constraints.
+``RobotPresetCfg`` provides replace-only complete robot alternatives when a
+backend-specific asset or actuator definition is unavoidable.
+Public backend selectors use only ``default`` and ``newton``. Nested physical
+property groups may additionally use ``common`` for backend-neutral intent;
+DexSim names belong to the runtime and Spawn SDK adapter boundary.
+Surface deformables may keep a stable low-resolution simulation topology in
+``shape`` while binding an independently indexed ``visual_shape`` for authored
+UV seams and render detail.
+
+.. rubric:: Type aliases
+
+.. autosummary::
+
+   AssetPhysicsMode
+   MeshCollisionApproximation
 
 .. rubric:: Classes
 
 .. autosummary::
 
    RenderCfg
-   PhysicsCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonPhysicsCfg
+   NewtonCollisionPipelineCfg
    MarkerCfg
    WindowRecordCfg
    WindowCameraPoseCfg
    GPUMemoryCfg
-   RigidBodyAttributesCfg
-   RigidBodyAttributesOverrideCfg
+   MassPropertiesCfg
+   DefaultRigidBodyPropertiesCfg
+   CollisionPropertiesCfg
+   DefaultCollisionPropertiesCfg
+   NewtonCollisionPropertiesCfg
+   RigidBodyMaterialCfg
+   NewtonRigidBodyMaterialCfg
+   MeshCollisionCfg
+   RigidBodyPhysicsCfg
+   ArticulationRootPropertiesCfg
    LinkPhysicsOverrideCfg
-   SoftbodyVoxelAttributesCfg
-   SoftbodyPhysicalAttributesCfg
-   ClothPhysicalAttributesCfg
+   VolumeDeformableMeshingCfg
+   VolumeDeformablePhysicsCfg
+   SurfaceDeformablePhysicsCfg
+   SurfaceElementPropertiesCfg
    JointDrivePropertiesCfg
+   NewtonJointDrivePropertiesCfg
    ObjectBaseCfg
    LightCfg
    RigidObjectCfg
-   SoftObjectCfg
-   ClothObjectCfg
    RigidObjectGroupCfg
    RigidConstraintCfg
    URDFCfg
    ArticulationCfg
    RobotCfg
+   RobotPresetCfg
+
+Deformable physics and meshing
+-----------------------------
+
+Like ``RigidObjectCfg.attrs``, deformable objects group physical intent under
+``attrs``. Volume objects keep mesh generation under ``meshing``. Both physics
+configs share the seven Newton surface-element parameters through
+``attrs.surface_props``; volume coefficients default to zero, while cloth
+coefficients default to ``None`` (Newton defaults). Density remains topology
+specific: kg/m³ for volumes and kg/m² for surfaces.
+
+.. autoclass:: VolumeDeformablePhysicsCfg
+   :members:
+   :no-index:
+
+.. autoclass:: SurfaceDeformablePhysicsCfg
+   :members:
+   :no-index:
+
+.. autoclass:: SurfaceElementPropertiesCfg
+   :members:
+   :no-index:
+
+.. autoclass:: VolumeDeformableMeshingCfg
+   :members:
+   :no-index:
+
+Constructors and ``from_dict()`` accept only the current fields. Surface-element
+properties are grouped under ``attrs.surface_props``. Volume elasticity uses
+``youngs`` and ``poissons``. Configuration dictionaries serialize this same
+schema; no legacy aliases or field migration are provided.
+
+World-level configuration module
+--------------------------------
+
+The same world-level configuration types and backend selectors are available
+from ``embodichain.lab.sim.cfg.simulation``. For manager-owned Newton steps,
+``sync_to_renderer=None`` or ``False`` publishes only for visual consumers;
+``True`` additionally requests publication on steps without consumers. An open
+window remains a consumer regardless of this automatic policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.simulation
+
+.. autosummary::
+
+   DLSSCfg
+   RenderCfg
+   GPUMemoryCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonCollisionPipelineCfg
+   NewtonPhysicsCfg
+   physics_cfg_for_backend
+   physics_backend_from_cfg
+   validate_physics_cfg

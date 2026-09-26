@@ -18,7 +18,7 @@ Write tests following EmbodiChain's conventions and patterns.
 Tests mirror the source tree under `tests/`:
 
 ```
-embodichain/lab/sim/solvers/pytorch_solver.py  →  tests/sim/solvers/test_pytorch_solver.py
+embodichain/lab/sim/motion/solvers/pytorch_solver.py  →  tests/sim/motion/solvers/test_pytorch_solver.py
 embodichain/lab/gym/envs/managers/rewards.py    →  tests/gym/envs/managers/test_reward_functors.py
 embodichain/toolkits/graspkit/pg_grasp/foo.py   →  tests/toolkits/test_pg_grasp.py
 embodichain_tasks/embodichain_tasks/manipulation/push_cube.py → tests/gym/envs/tasks/test_push_cube.py
@@ -83,7 +83,7 @@ from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
 class TestMySimComponent:
     def setup_method(self):
-        config = SimulationManagerCfg(headless=True, sim_device="cpu")
+        config = SimulationManagerCfg(headless=True, device="cpu")
         self.sim = SimulationManager(config)
         # ... setup ...
 

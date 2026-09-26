@@ -19,9 +19,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.demo import execute_demo_episode
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -44,6 +46,9 @@ from embodichain.lab.sim.atomic_actions.execution import (
     ExecutionEvent,
     ExecutionEventKind,
 )
+from embodichain.lab.sim.atomic_actions.policies import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUpOptions
+from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
 from embodichain.lab.sim.atomic_actions.runner import ExecutionRunnerCfg
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
     EndpointCommand,
@@ -57,7 +62,13 @@ from embodichain.lab.sim.atomic_actions.state import (
     SceneSnapshot,
     TaskState,
 )
-from embodichain.lab.task_program.semantics.calls import RegisteredSemanticCall
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.task_program.semantics.calls import (
+    Pick,
+    Place,
+    RegisteredSemanticCall,
+)
+from embodichain.lab.task_program.semantics.scene import SceneObjectRef
 from embodichain.lab.task_program.runtime.parallel import ParallelTimingPolicy
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
@@ -69,11 +80,16 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelSemanticExecutionResult,
     ParallelSemanticExecutor,
 )
-from embodichain.lab.task_program.semantics.profiles import ResourceClaim
+from embodichain.lab.task_program.semantics.profiles import (
+    EffectAssurance,
+    ResourceClaim,
+    SkillPolicyPreset,
+)
 
 STEP_DT = 0.02
 BATCH_SIZE = 2
 ROBOT_DOF = 5
+PROGRESS_SAMPLE_COUNT = 40
 
 
 class _QposProvider:
@@ -111,6 +127,7 @@ def _joint_frame(
     duration: float,
     active_mask: torch.Tensor | None = None,
     positions: torch.Tensor | None = None,
+    velocities: torch.Tensor | None = None,
 ) -> RuntimeCommandFrame:
     active_mask = torch.tensor([True, True]) if active_mask is None else active_mask
     positions = (
@@ -123,7 +140,10 @@ def _joint_frame(
                     control_part="arm",
                     joint_ids=(1, 3),
                 ),
-                payload=JointPositionPayload(positions=positions),
+                payload=JointPositionPayload(
+                    positions=positions,
+                    velocities=velocities,
+                ),
             ),
         ),
         active_mask=active_mask,
@@ -896,6 +916,55 @@ def _bridge(
     return bridge, runtime, clock
 
 
+@pytest.mark.parametrize(
+    "overrides, expected_total",
+    [
+        ({}, 2 * PROGRESS_SAMPLE_COUNT),
+        ({"motion_policy": MotionPolicy(strategy="motion_gen")}, None),
+        ({"recovery_policy": RecoveryPolicy()}, None),
+        ({"tracking_policy": TrackingPolicy.joint_position()}, None),
+        ({"tracking_policy": TrackingPolicy.timed(settle_duration=STEP_DT)}, None),
+    ],
+)
+def test_bridge_progress_counts_only_fixed_pick_place_calls(
+    overrides, expected_total
+) -> None:
+    """Only fixed paths expose a total, without starting or analyzing a workflow."""
+    cube = SceneObjectRef("cube")
+    calls = (Pick(cube), Place(cube, on=SceneObjectRef("table")))
+    bridge, runtime, _ = _bridge(
+        duration=STEP_DT,
+        segment=_FakeSegment(
+            calls=tuple(_FakeCompiledCall(i, call) for i, call in enumerate(calls))
+        ),
+        runner_cfg=ExecutionRunnerCfg(
+            minimum_cycle_time=0.0,
+            hold_on_completion=False,
+            hold_during_effect_verification=False,
+        ),
+    )
+    policies = {
+        "motion_policy": MotionPolicy(sample_count=PROGRESS_SAMPLE_COUNT),
+        "recovery_policy": RecoveryPolicy(max_replans=0, max_action_retries=0),
+        "tracking_policy": TrackingPolicy.timed(),
+        **overrides,
+    }
+    compiler = Mock()
+    compiler.integration.link_call.return_value.preset = SkillPolicyPreset(
+        "progress",
+        effect_assurance=EffectAssurance.PROJECTED,
+        action_option_templates={"pick": PickUpOptions(), "place": PlaceOptions()},
+        **policies,
+    )
+    runtime.compiler = compiler
+
+    demo_segment = next(bridge.iter_segments())
+
+    assert demo_segment.progress_total_steps == expected_total
+    compiler.analyze.assert_not_called()
+    assert runtime.start_count == 0
+
+
 def test_bridge_snapshots_runner_cfg_before_lazy_parallel_creation() -> None:
     """Later advanced-path config mutation cannot change lazy bridge policy."""
     runner_cfg = ExecutionRunnerCfg(command_timeout=0.25)
@@ -954,6 +1023,60 @@ def test_joint_encoder_emits_full_qpos_and_holds_inactive_rows() -> None:
     assert torch.equal(action[0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0]))
     assert torch.equal(action[0, torch.tensor([0, 2, 4])], qpos[0, [0, 2, 4]])
     assert torch.equal(action[1], qpos[1])
+
+
+def test_joint_encoder_emits_full_qpos_qvel_and_zeros_inactive_rows() -> None:
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(qpos),
+        joint_command_mode="position_velocity",
+    )
+    frame = _joint_frame(
+        duration=STEP_DT,
+        active_mask=torch.tensor([True, False]),
+        velocities=torch.tensor([[1.0, 3.0], [11.0, 13.0]]),
+    )
+
+    action = encoder.encode(frame)
+
+    assert isinstance(action, TensorDict)
+    assert torch.equal(
+        action["qpos"][0, torch.tensor([1, 3])], torch.tensor([10.0, 30.0])
+    )
+    assert torch.equal(action["qpos"][1], qpos[1])
+    assert torch.equal(action["qvel"][0], torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0]))
+    assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+
+def test_position_velocity_joint_encoder_rejects_missing_velocity() -> None:
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF)),
+        joint_command_mode="position_velocity",
+    )
+
+    with pytest.raises(ValueError, match="velocities"):
+        encoder.encode(_joint_frame(duration=STEP_DT))
+
+
+def test_position_velocity_hold_uses_observed_qpos_and_zero_qvel() -> None:
+    qpos = torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+        BATCH_SIZE, ROBOT_DOF
+    )
+    encoder = RuntimeCommandFrameEncoder(
+        _QposProvider(qpos),
+        joint_command_mode="position_velocity",
+    )
+
+    action = encoder.encode_hold(
+        _joint_frame(duration=STEP_DT).targets,
+        _context(qpos=qpos),
+    )
+
+    assert isinstance(action, TensorDict)
+    assert torch.equal(action["qpos"], qpos)
+    assert torch.equal(action["qvel"], torch.zeros_like(qpos))
 
 
 def test_frame_encoder_supports_registered_future_transport() -> None:

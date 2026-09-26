@@ -23,6 +23,7 @@ from typing import Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
+from .affordance_sampling import AffordanceSamplingContext
 from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
@@ -36,7 +37,7 @@ from .tracking import TrackingPolicy, TrackingRuntime
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
@@ -404,6 +405,7 @@ class AtomicActionEngine:
         scene: SceneSnapshot | None = None,
         timestamp: float = 0.0,
         control_dt: float | None = None,
+        affordance_sampling: AffordanceSamplingContext | None = None,
     ) -> PlanningContext:
         """Capture the robot state needed to start offline compilation.
 
@@ -414,6 +416,7 @@ class AtomicActionEngine:
                 are absent.
             timestamp: Timestamp assigned to the captured robot observation.
             control_dt: Explicit command period for action-owned interpolation.
+            affordance_sampling: Optional reproducible Affordance sampling stream.
 
         Returns:
             Planning context containing owned robot tensors.
@@ -446,6 +449,7 @@ class AtomicActionEngine:
             scene=scene,
             env_ids=env_ids,
             control_dt=control_dt,
+            affordance_sampling=affordance_sampling,
         )
 
     def compile(
@@ -491,9 +495,18 @@ class AtomicActionEngine:
                     f"Skill {plan.skill_id!r} emits non-joint runtime commands and "
                     "cannot be used with offline joint-trajectory compilation."
                 )
-            trajectory = plan.joint_trajectory.hold_rows(
-                step_success,
-                previous_qpos,
+            preserve_failed_positions = (
+                getattr(
+                    self.motion_generator.planner,
+                    "preserve_failed_plan_positions",
+                    False,
+                )
+                is True
+            )
+            trajectory = (
+                plan.joint_trajectory
+                if preserve_failed_positions
+                else plan.joint_trajectory.hold_rows(step_success, previous_qpos)
             )
             plans.append(plan)
             trajectories.append(trajectory)

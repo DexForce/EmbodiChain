@@ -48,6 +48,7 @@ embodichain.lab.sim.atomic_actions
       ArticulationAffordanceGeometry
       ArticulationGeometryProvider
       ArticulationJointGeometry
+      create_rigidized_articulation_antipodal_affordance
       sample_initial_articulation_geometry
 
    .. rubric:: Semantic resource contracts
@@ -82,6 +83,8 @@ embodichain.lab.sim.atomic_actions
       CommandOperation
       ExecutionClock
       create_simulation_atomic_action_engine
+      create_rigidized_articulation_antipodal_semantics
+      SceneEntity
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
@@ -172,6 +175,8 @@ geometry keys.
 
 .. autoclass:: ArticulationAffordanceGeometry
    :members:
+
+.. autofunction:: create_rigidized_articulation_antipodal_affordance
 
 .. autofunction:: sample_initial_articulation_geometry
 
@@ -337,6 +342,11 @@ Engine and execution
    :members:
 
 .. autofunction:: create_simulation_atomic_action_engine
+
+.. autofunction:: create_rigidized_articulation_antipodal_semantics
+
+.. autoclass:: SceneEntity
+   :members:
 
 .. autoclass:: SimulationExecutionAdapter
    :members:

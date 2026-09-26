@@ -14,7 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""OpenDoor atomic action implementation."""
+"""OpenDoor atomic action implementation.
+
+The ``scripts/tutorials/atomic_action/open_door.py`` example loads
+``Microwave/microwave.urdf`` and resolves the ``handle_link`` target through
+``door_handle_fixed_joint`` to ``door_hinge``. Its invocation requests
+``MotionPolicy.sample_count=300``, ``hand_interp_steps=30``, and
+``door_waypoint_count=50`` as tutorial-specific sampling overrides. The
+tutorial host performs 240 final-pose updates after replay, with two physics
+steps per update.
+"""
 
 from __future__ import annotations
 
@@ -53,7 +62,10 @@ from embodichain.lab.sim.atomic_actions.plans import (
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
     make_manipulation_slot,
 )
-from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
+from embodichain.lab.sim.atomic_actions.primitives._helpers import (
+    arm_qpos_from_state,
+    resample_planned_trajectory,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     SkillBindingContract,
@@ -256,13 +268,20 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         grasp_generator = self.planning_services.grasp_pose_generator(
             grasp_target.target_id
         )
-        grasp_success, grasp_xpos, _ = grasp_generator.get_best_grasp_poses(
-            mesh_vertices=affordance.mesh_vertices,
-            mesh_triangles=affordance.mesh_triangles,
-            obj_poses=link_pose,
-            approach_direction=approach_direction_world,
+        candidates = affordance.get_grasp_candidates(
+            grasp_generator,
+            link_pose,
+            approach_direction_world,
         )
-        grasp_xpos = grasp_xpos.to(device=self.device, dtype=torch.float32)
+        grasp_sample = affordance.sample_candidates(
+            candidates,
+            sampling=context.affordance_sampling,
+            env_ids=context.env_ids,
+            key=(request.invocation_id or self.skill_id) + ":grasp",
+            reference_poses=link_pose,
+        )
+        grasp_success = grasp_sample.success
+        grasp_xpos = grasp_sample.poses.to(device=self.device, dtype=torch.float32)
         grasp_success = normalize_success_mask(
             grasp_success,
             num_envs=self.num_envs,
@@ -277,6 +296,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 success=already_open,
                 segment_lengths=segment_lengths,
                 diagnostics_message="Failed to resolve a door-handle grasp pose.",
+                affordance_sample=grasp_sample.metadata,
             )
 
         approach_xpos = translate_pose_world(
@@ -403,7 +423,10 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 step_dt=interpolation_dt,
             ),
             expected_effects=StateDelta(),
-            diagnostics=self._semantic_diagnostics(semantic_valid),
+            diagnostics=self._semantic_diagnostics(
+                semantic_valid,
+                affordance_sample=grasp_sample.metadata,
+            ),
             segment_lengths=segment_lengths,
             scene_dependency_end_segment=(
                 "reach" if self._scene_dependencies(request) else None
@@ -569,6 +592,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         success: torch.Tensor,
         segment_lengths: dict[str, int],
         diagnostics_message: str | None,
+        affordance_sample: dict[str, object] | None = None,
     ) -> ActionPlan:
         """Return a segmented full-robot hold for reached and failed rows."""
         frame_count = sum(segment_lengths.values())
@@ -576,6 +600,11 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         diagnostics = PlannerDiagnostics(
             backend=self.planning_services.planner_name,
             messages=(() if diagnostics_message is None else (diagnostics_message,)),
+            metadata=(
+                {}
+                if affordance_sample is None
+                else {"affordance_sample": {"grasp": affordance_sample}}
+            ),
         )
         return self.build_plan(
             request,
@@ -596,6 +625,8 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
     def _semantic_diagnostics(
         self,
         semantic_valid: torch.Tensor,
+        *,
+        affordance_sample: dict[str, object] | None = None,
     ) -> PlannerDiagnostics:
         """Describe row-local semantic rejection without changing success masking."""
         messages = ()
@@ -607,6 +638,11 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         return PlannerDiagnostics(
             backend=self.planning_services.planner_name,
             messages=messages,
+            metadata=(
+                {}
+                if affordance_sample is None
+                else {"affordance_sample": {"grasp": affordance_sample}}
+            ),
         )
 
     @staticmethod
@@ -663,7 +699,9 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, result.positions
+        return result.success, resample_planned_trajectory(
+            result.positions, sample_count
+        )
 
     def _opened_link_and_eef_poses(
         self,

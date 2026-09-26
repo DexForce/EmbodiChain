@@ -1,0 +1,650 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+from __future__ import annotations
+
+from abc import ABCMeta, abstractmethod
+from dataclasses import fields
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
+
+import numpy as np
+import torch
+
+from embodichain.utils import configclass, logger
+
+if TYPE_CHECKING:
+    from typing import Self
+
+from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
+
+from ._buffers import _IKBuffers
+
+__all__ = ["BaseSolver", "SolverCfg"]
+
+
+@configclass
+class SolverCfg:
+    """Configuration for the kinematic solver used in the robot simulation."""
+
+    class_type: str = "BaseSolver"
+    """The class type of the solver to be used."""
+
+    urdf_path: str | None = None
+    """The file path to the URDF model of the robot."""
+
+    joint_names: list[str] | None = None
+    """List of joint names for the solver.
+    
+    If None, all joints in the URDF will be used.
+    If specified, only these named joints will be included in the kinematic chain.
+    """
+
+    end_link_name: str = None
+    """The name of the end-effector link for the solver.
+
+    This defines the target link for forward/inverse kinematics calculations.
+    Must match a link name in the URDF file.
+    """
+
+    root_link_name: str = None
+    """The name of the root/base link for the solver.
+
+    This defines the starting point of the kinematic chain.
+    Must match a link name in the URDF file.
+    """
+
+    # TODO: may be support pos and rot separately for easier manipulation.
+    tcp: torch.Tensor | np.ndarray = np.eye(4)
+    """The tool center point (TCP) position as a 4x4 homogeneous matrix.
+
+    This represents the position and orientation of the tool in the robot's end-effector frame.
+    """
+
+    ik_nearest_weight: List[float] | None = None
+    """Weights for the inverse kinematics nearest calculation.
+    
+    The weights influence how the solver prioritizes closeness to the seed position
+    when multiple solutions are available.
+    """
+
+    user_qpos_limits: List[float] | None = None
+    """
+        User defined Joint position limits [2, DOF] for the solver. 
+        If not provided (None), this value will replace by joint limits defined in urdf when solver init from robot.
+        If provided, the solver will use the intersection of user defined limits and urdf limits as the final joint limits.
+    """
+
+    @abstractmethod
+    def init_solver(self, device: torch.device, **kwargs) -> "BaseSolver":
+        pass
+
+    def _get_tcp_as_numpy(self) -> np.ndarray:
+        """Convert TCP to numpy array.
+
+        This helper method handles the conversion of TCP from torch.Tensor to numpy
+        if needed. Used by subclass init_solver methods to set TCP on the solver.
+
+        Returns:
+            np.ndarray: The TCP as a numpy array.
+        """
+        if isinstance(self.tcp, torch.Tensor):
+            return self.tcp.cpu().numpy()
+        return self.tcp
+
+    @classmethod
+    def from_dict(cls, init_dict: Dict[str, Any]) -> "SolverCfg":
+        """Initialize the concrete solver configuration from a dictionary.
+
+        The concrete config receives all recognized dataclass init fields in its
+        constructor so initialization and ``__post_init__`` observe the final
+        inputs exactly once. Legacy unannotated config attributes are applied
+        afterward. Unknown fields preserve the historical behavior: they are
+        ignored with a warning.
+        """
+        from embodichain.utils.utility import get_class_instance
+
+        if "class_type" not in init_dict:
+            logger.log_error("class type must be specified in the configuration.")
+
+        cfg_type = get_class_instance(
+            "embodichain.lab.sim.motion.solvers", init_dict["class_type"] + "Cfg"
+        )
+        concrete_fields = {field.name: field for field in fields(cfg_type)}
+        kwargs: Dict[str, Any] = {}
+        deferred: Dict[str, Any] = {}
+        for key, value in init_dict.items():
+            field = concrete_fields.get(key)
+            if field is not None and field.init:
+                kwargs[key] = value
+            elif field is not None or hasattr(cfg_type, key):
+                # A few legacy solver configs expose configurable class
+                # attributes without dataclass annotations. They cannot be
+                # constructor arguments, but remain valid serialized fields.
+                deferred[key] = value
+            else:
+                logger.log_warning(f"Key '{key}' not found in {cfg_type.__name__}.")
+        cfg = cfg_type(**kwargs)
+        for key, value in deferred.items():
+            setattr(cfg, key, value)
+        return cfg
+
+
+class BaseSolver(metaclass=ABCMeta):
+    """Base interface shared by robot forward and inverse kinematics solvers."""
+
+    def __init__(self, cfg: SolverCfg = None, device: str = None, **kwargs):
+        r"""Initializes the kinematics solver with a robot model.
+
+        Args:
+            cfg (SolverCfg): The configuration for the solver.
+            device (str or torch.device, optional): The device to run the solver on. Defaults to "cuda" if available, otherwise "cpu".
+            **kwargs: Additional keyword arguments for customization.
+        """
+        self.cfg = cfg
+
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        elif isinstance(device, str):
+            self.device = torch.device(device)
+        else:
+            self.device = device
+
+        self._ik_buffers = _IKBuffers(self.device)
+
+        self.urdf_path = cfg.urdf_path
+
+        self.joint_names = cfg.joint_names
+
+        self.end_link_name = cfg.end_link_name
+
+        self.root_link_name = cfg.root_link_name
+
+        # TODO: Check whether the joint name is revolute or prismatic
+        # Degrees of freedom of robot joints
+        self.dof = len(self.joint_names) if self.joint_names else 0
+
+        # Weight for nearest neighbor search in IK (Inverse Kinematics) algorithms
+        if cfg.ik_nearest_weight is not None:
+            if len(cfg.ik_nearest_weight) != self.dof:
+                logger.log_error(
+                    f"Length of ik_nearest_weight ({len(cfg.ik_nearest_weight)}) does not match the number of DOF ({self.dof})."
+                )
+            self.ik_nearest_weight = torch.tensor(
+                cfg.ik_nearest_weight, dtype=torch.float32, device=self.device
+            )
+        else:
+            self.ik_nearest_weight = torch.ones(
+                self.dof, dtype=torch.float32, device=self.device
+            )
+
+        self.tcp_xpos = np.eye(4)
+
+        self.pk_serial_chain = kwargs.get("pk_serial_chain", None)
+        if self.pk_serial_chain is None:
+            self.pk_serial_chain = create_pk_serial_chain(
+                urdf_path=self.urdf_path,
+                end_link_name=self.end_link_name,
+                root_link_name=self.root_link_name,
+                device=self.device,
+            )
+
+            self.compiled_fk = self.pk_serial_chain.forward_kinematics_tensor
+            try:
+                compiled_fk = torch.compile(
+                    self.pk_serial_chain.forward_kinematics_tensor,
+                    fullgraph=True,
+                    dynamic=True,
+                )
+                # Warm up on the solver device so Dynamo guards match CUDA/CPU at init
+                # instead of on the first get_fk call (avoids recompile_limit hits in CI).
+                if self.dof > 0:
+                    with torch.no_grad():
+                        warmup_qpos = torch.zeros(
+                            1, self.dof, device=self.device, dtype=torch.float32
+                        )
+                        compiled_fk(warmup_qpos)
+                self.compiled_fk = compiled_fk
+            except Exception as exc:
+                error_message = str(exc).splitlines()[0] if str(exc) else repr(exc)
+                logger.log_warning(
+                    "Failed to compile FK for "
+                    f"{self.root_link_name}->{self.end_link_name}; "
+                    f"falling back to eager FK. Error: {error_message}"
+                )
+
+        self._init_qpos_limits()
+
+    def prepare_buffers(self, max_batch: int) -> None:
+        """Reserve reusable analytic IK scratch capacity.
+
+        Args:
+            max_batch: Maximum flattened target count, including IK seeds.
+                Storage is allocated lazily by analytic backends and grows when
+                necessary. Returned FK/IK tensors remain owned by the caller.
+        """
+        self._ik_buffers.reserve(max_batch)
+
+    def get_fk_batch(self, qpos: torch.Tensor) -> torch.Tensor:
+        """Compute chain-root FK while preserving arbitrary leading batch axes.
+
+        Args:
+            qpos: Joint positions with shape ``(..., dof)`` on the solver device.
+
+        Returns:
+            TCP transforms with shape ``(..., 4, 4)``.
+        """
+        if qpos.ndim < 2 or qpos.shape[-1] != self.dof:
+            raise ValueError(f"Expected batched qpos ending in {self.dof} joints")
+        shape = qpos.shape[:-1]
+        return self.get_fk(qpos.reshape(-1, self.dof)).reshape(*shape, 4, 4)
+
+    def get_ik_batch(
+        self, target_xpos: torch.Tensor, qpos_seed: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute nearest-solution IK with a uniform batch result contract.
+
+        Args:
+            target_xpos: Chain-root TCP transforms with shape ``(..., 4, 4)``.
+            qpos_seed: Optional seeds with matching leading axes and ``dof`` joints.
+
+        Returns:
+            Boolean success ``(...)`` and joint positions ``(..., dof)``. No
+            candidate axis is exposed; concrete ``get_ik`` APIs stay unchanged.
+        """
+        if target_xpos.ndim < 3 or target_xpos.shape[-2:] != (4, 4):
+            raise ValueError("Expected batched target poses ending in (4, 4)")
+        shape = target_xpos.shape[:-2]
+        if qpos_seed is not None:
+            if qpos_seed.shape != (*shape, self.dof):
+                raise ValueError("Joint seed batch axes must match target poses")
+            qpos_seed = qpos_seed.reshape(-1, self.dof)
+        success, qpos = self.get_ik(
+            target_xpos=target_xpos.reshape(-1, 4, 4),
+            qpos_seed=qpos_seed,
+            return_all_solutions=False,
+        )
+        return success.bool().reshape(shape), qpos.reshape(*shape, self.dof)
+
+    def set_ik_nearest_weight(
+        self, ik_weight: np.ndarray, joint_ids: np.ndarray | None = None
+    ) -> bool:
+        r"""Sets the inverse kinematics nearest weight.
+
+        Args:
+            ik_weight (np.ndarray): A numpy array representing the nearest weights for inverse kinematics.
+            joint_ids (np.ndarray, optional): A numpy array representing the indices of the joints to which the weights apply.
+                                            If None, defaults to all joint indices.
+
+        Returns:
+            bool: True if the weights are set successfully, False otherwise.
+        """
+        ik_weight = np.array(ik_weight)
+
+        # Set joint_ids to all joint indices if it is None
+        if joint_ids is None:
+            joint_ids = np.arange(self.dof)
+
+        joint_ids = np.array(joint_ids)
+
+        # Check if joint_ids has valid indices
+        if np.any(joint_ids >= self.dof) or np.any(joint_ids < 0):
+            logger.log_warning(
+                "joint_ids must contain valid indices between 0 and {}.".format(
+                    self.dof - 1
+                )
+            )
+            return False
+
+        # Check if ik_weight and joint_ids have the same length
+        if ik_weight.shape[0] != joint_ids.shape[0]:
+            logger.log_warning("ik_weight and joint_ids must have the same length.")
+            return False
+
+        # Initialize the weights
+        if self.ik_nearest_weight is None:
+            # If ik_nearest_weight is None, set all weights to 1
+            self.ik_nearest_weight = np.ones(self.dof)
+
+            # Set specific weights for joint_ids to the provided ik_weight
+            for i, joint_id in enumerate(joint_ids):
+                self.ik_nearest_weight[joint_id] = ik_weight[i]
+        else:
+            # If ik_nearest_weight is not None, only fill joint_ids
+            for i, joint_id in enumerate(joint_ids):
+                self.ik_nearest_weight[joint_id] = ik_weight[i]
+
+        return True
+
+    def get_ik_nearest_weight(self):
+        r"""Gets the inverse kinematics nearest weight.
+
+        Returns:
+            np.ndarray: A numpy array representing the nearest weights for inverse kinematics.
+        """
+        return self.ik_nearest_weight
+
+    def get_default_qpos_seed(self) -> torch.Tensor:
+        """Get the feasibility-safe default IK seed: the joint-range midpoint.
+
+        A zero configuration violates the joint limits of some robots (for
+        example Franka FR3, whose joints 4 and 6 exclude zero), which wastes a
+        multi-start slot, biases nearest-solution selection toward the limits,
+        and can start iterative solvers from an infeasible configuration. The
+        midpoint is inside the limits by construction and maximises the
+        distance to both bounds.
+
+        Returns:
+            torch.Tensor: Default joint seed with shape (dof,) on the solver
+            device.
+
+        Raises:
+            ValueError: If the solver joint limits are not initialized.
+        """
+        if self.lower_qpos_limits is None or self.upper_qpos_limits is None:
+            logger.log_error(
+                "Cannot derive a default qpos seed: solver joint limits are "
+                "not initialized.",
+                ValueError,
+            )
+        return (self.lower_qpos_limits + self.upper_qpos_limits) / 2
+
+    def _init_qpos_limits(self):
+        self.lower_qpos_limits = None
+        self.upper_qpos_limits = None
+        if self.cfg.user_qpos_limits is not None:
+            # robot qpos limits from config, expected shape [DOF, 2]
+            user_qpos_limits = torch.tensor(
+                self.cfg.user_qpos_limits, dtype=torch.float32, device=self.device
+            )
+            if user_qpos_limits.shape == (2, self.dof):
+                self.set_qpos_limits(
+                    lower_qpos_limits=user_qpos_limits[0],
+                    upper_qpos_limits=user_qpos_limits[1],
+                )
+            elif user_qpos_limits.shape == (self.dof, 2):
+                self.set_qpos_limits(
+                    lower_qpos_limits=user_qpos_limits[:, 0],
+                    upper_qpos_limits=user_qpos_limits[:, 1],
+                )
+            else:
+                logger.log_error(
+                    f"user_qpos_limits must have shape (2, {self.dof}) or ({self.dof}, 2), but got {user_qpos_limits.shape}."
+                )
+        elif self.pk_serial_chain is not None:
+            self.set_qpos_limits(
+                lower_qpos_limits=self.pk_serial_chain.low,
+                upper_qpos_limits=self.pk_serial_chain.high,
+            )
+
+    def update_with_robot_limit(self, robot_qpos_limits: torch.Tensor):
+        """Intersect solver joint limits with the robot's effective qpos limits.
+
+        Robot-side articulation limits are the hard physical bound. Solver-specific
+        limits from ``SolverCfg.user_qpos_limits`` may be even tighter for planning.
+        The final solver limits must satisfy both constraints.
+
+        Args:
+            robot_qpos_limits (torch.Tensor): [DOF, 2] tensor of joint limits from
+                the robot data.
+        """
+        robot_lower_limits = robot_qpos_limits[:, 0]
+        robot_upper_limits = robot_qpos_limits[:, 1]
+
+        if self.lower_qpos_limits is not None:
+            if torch.any(self.lower_qpos_limits < robot_lower_limits):
+                logger.log_warning(
+                    "Solver lower_qpos_limits are smaller than robot limits. Clamping to robot limits."
+                )
+                self.lower_qpos_limits = torch.max(
+                    self.lower_qpos_limits, robot_lower_limits
+                )
+        else:
+            self.lower_qpos_limits = robot_lower_limits
+
+        if self.upper_qpos_limits is not None:
+            if torch.any(self.upper_qpos_limits > robot_upper_limits):
+                logger.log_warning(
+                    "Solver upper_qpos_limits are larger than robot limits. Clamping to robot limits."
+                )
+                self.upper_qpos_limits = torch.min(
+                    self.upper_qpos_limits, robot_upper_limits
+                )
+        else:
+            self.upper_qpos_limits = robot_upper_limits
+
+    def set_qpos_limits(
+        self,
+        lower_qpos_limits: List[float],
+        upper_qpos_limits: List[float],
+    ) -> bool:
+        r"""Sets the upper and lower joint position limits.
+
+        Parameters:
+            lower_qpos_limits (List[float]): A list of lower limits for each joint.
+            upper_qpos_limits (List[float]): A list of upper limits for each joint.
+
+        Returns:
+            bool: True if limits are successfully set, False if the input is invalid.
+        """
+
+        if any(
+            lower > upper for lower, upper in zip(lower_qpos_limits, upper_qpos_limits)
+        ):
+            logger.log_warning(
+                "Each lower limit must be less than or equal to the corresponding upper limit."
+            )
+            return False
+
+        if isinstance(lower_qpos_limits, list) or isinstance(
+            lower_qpos_limits, np.ndarray
+        ):
+            self.lower_qpos_limits = torch.tensor(
+                lower_qpos_limits, dtype=float, device=self.device
+            )
+        elif isinstance(lower_qpos_limits, torch.Tensor):
+            self.lower_qpos_limits = lower_qpos_limits.clone().to(device=self.device)
+        else:
+            logger.log_error(
+                f"Invalid type for lower_qpos_limits: {type(lower_qpos_limits)}. Must be list, np.ndarray, or torch.Tensor."
+            )
+
+        if isinstance(upper_qpos_limits, list) or isinstance(
+            upper_qpos_limits, np.ndarray
+        ):
+            self.upper_qpos_limits = torch.tensor(
+                upper_qpos_limits, dtype=float, device=self.device
+            )
+        elif isinstance(upper_qpos_limits, torch.Tensor):
+            self.upper_qpos_limits = upper_qpos_limits.clone().to(device=self.device)
+        else:
+            logger.log_error(
+                f"Invalid type for upper_qpos_limits: {type(upper_qpos_limits)}. Must be list, np.ndarray, or torch.Tensor."
+            )
+
+        return True
+
+    def get_qpos_limits(self) -> dict:
+        r"""Returns the current joint position limits.
+
+        Returns:
+            dict: A dictionary containing:
+                - lower_qpos_limits (List[float]): The current lower limits for each joint.
+                - upper_qpos_limits (List[float]): The current upper limits for each joint.
+        """
+        return {
+            "lower_qpos_limits": self.lower_qpos_limits.tolist(),
+            "upper_qpos_limits": self.upper_qpos_limits.tolist(),
+        }
+
+    def set_tcp(self, xpos: np.ndarray):
+        r"""Sets the TCP position with the given 4x4 homogeneous matrix.
+
+        Args:
+            xpos (np.ndarray): The 4x4 homogeneous matrix to be set as the TCP position.
+
+        Raises:
+            ValueError: If the input is not a 4x4 numpy array.
+        """
+        xpos = np.array(xpos)
+        if xpos.shape != (4, 4):
+            raise ValueError("Input must be a 4x4 homogeneous matrix")
+        self.tcp_xpos = xpos
+
+    def get_tcp(self) -> np.ndarray:
+        r"""Returns the current TCP position.
+
+        Returns:
+            np.ndarray: The current TCP position.
+
+        Raises:
+            ValueError: If the TCP position has not been set.
+        """
+        return self.tcp_xpos
+
+    @property
+    def supports_continuous_batch_ik(self) -> bool:
+        """Whether all-candidate IK and temporally continuous selection are supported.
+
+        Supporting solvers return candidate validity shaped (M, K) and joint
+        positions shaped (M, K, DOF) from ``get_ik(return_all_solutions=True)``.
+        They must also implement :meth:`_select_continuous_ik_path`.
+        """
+        return False
+
+    def _select_continuous_ik_path(
+        self,
+        candidate_qpos: torch.Tensor,
+        candidate_valid: torch.Tensor,
+        qpos_seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Select a joint path from solver-specific candidate branches.
+
+        Args:
+            candidate_qpos: Candidates shaped (B, N, K, DOF).
+            candidate_valid: Boolean candidate validity shaped (B, N, K).
+            qpos_seed: Initial path seeds shaped (B, DOF).
+
+        Returns:
+            Per-sample validity (B, N) and selected positions (B, N, DOF).
+
+        Raises:
+            NotImplementedError: If continuous selection is unsupported.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support continuous batch IK."
+        )
+
+    @abstractmethod
+    def get_ik(
+        self,
+        target_pose: torch.Tensor,
+        qpos_seed: torch.Tensor | None = None,
+        num_samples: int | None = None,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        r"""Computes the inverse kinematics for a given target pose.
+
+        This method generates random joint configurations within the specified limits,
+        including the provided qpos_seed, and attempts to find valid inverse kinematics solutions.
+        It then identifies the joint position that is closest to the qpos_seed.
+
+        Args:
+            target_pose (torch.Tensor): The target pose represented as a 4x4 transformation matrix.
+            qpos_seed (torch.Tensor | None): The initial joint positions used as a seed.
+            num_samples (int | None): The number of random joint seeds to generate.
+            **kwargs: Additional keyword arguments for customization.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - success (torch.Tensor): Boolean tensor indicating IK solution validity for each environment, shape (num_envs,).
+                - target_joints (torch.Tensor): Computed target joint positions, shape (num_envs, num_joints).
+        """
+        pass
+
+    def get_fk(self, qpos: torch.tensor, **kwargs) -> torch.Tensor:
+        r"""
+        Computes the forward kinematics for the end-effector link.
+
+        Args:
+            qpos (torch.Tensor): Joint positions. Can be a single configuration (dof,) or a batch (batch_size, dof).
+            **kwargs: Additional keyword arguments for customization.
+
+        Returns:
+            torch.Tensor: The homogeneous transformation matrix of the end link with TCP applied.
+                        Shape is (4, 4) for single input, or (batch_size, 4, 4) for batch input.
+        """
+        tcp_xpos = torch.as_tensor(
+            self.tcp_xpos, device=self.device, dtype=torch.float32
+        )
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+        if qpos.dim() == 1:
+            qpos = qpos.unsqueeze(0)
+        if self.pk_serial_chain is None:
+            logger.log_error("Kinematic chain is not initialized.")
+            return torch.eye(4, device=self.device)
+        # Compute forward kinematics
+        ee_link_xpos = self.compiled_fk(qpos)[-1, :, :, :]
+
+        # Ensure batch format for TCP
+        batch_size = qpos.shape[0]
+        tcp_xpos_batch = tcp_xpos.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Apply TCP transformation
+        return torch.bmm(ee_link_xpos, tcp_xpos_batch)
+
+    def get_jacobian(
+        self,
+        qpos: torch.Tensor,
+        locations: torch.Tensor | np.ndarray | None = None,
+        jac_type: str = "full",
+    ) -> torch.Tensor:
+        r"""Compute the Jacobian matrix for the given joint positions.
+
+        Args:
+            qpos (torch.Tensor): The joint positions. Shape: (dof,) or (batch_size, dof).
+            locations (torch.Tensor | np.ndarray | None): The offset points (relative to the end-effector coordinate system). Shape: (batch_size, 3) or (3,) for a single offset.
+            jac_type (str): 'full', 'trans', or 'rot' for full, translational, or rotational Jacobian. Defaults to 'full'.
+
+        Returns:
+            torch.Tensor: The Jacobian matrix. Shape:
+                        - (batch_size, 6, dof) for 'full'
+                        - (batch_size, 3, dof) for 'trans' or 'rot'
+        """
+        if qpos is None:
+            qpos = torch.zeros(self.dof, device=self.device)
+
+        # Ensure qpos is a tensor
+        qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
+
+        # Ensure locations is a tensor if provided
+        if locations is not None:
+            locations = torch.as_tensor(
+                locations, dtype=torch.float32, device=self.device
+            )
+
+        # Compute the Jacobian using the kinematics chain
+        J = self.pk_serial_chain.jacobian(th=qpos, locations=locations)
+
+        # Handle jac_type to return the desired part of the Jacobian
+        if jac_type == "trans":
+            return J[:, :3, :] if J.dim() == 3 else J[:3, :]
+        elif jac_type == "rot":
+            return J[:, 3:, :] if J.dim() == 3 else J[3:, :]
+        elif jac_type == "full":
+            return J
+        else:
+            raise ValueError(
+                f"Invalid jac_type '{jac_type}'. Must be 'full', 'trans', or 'rot'."
+            )

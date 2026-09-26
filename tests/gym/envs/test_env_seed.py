@@ -39,13 +39,23 @@ class _ResetEnv(BaseEnv):
     """BaseEnv reset surface without constructing a simulator."""
 
     def __init__(self) -> None:
+        self.reset_events: list[str] = []
         self.cfg = SimpleNamespace(seed=None)
         self._num_envs = 1
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
-            reset_objects_state=MagicMock(),
-            capture_visualization_safely=MagicMock(),
+            is_window_opened=False,
+            reset_objects_state=MagicMock(
+                side_effect=lambda **_: self.reset_events.append("reset_objects")
+            ),
+            sync_render_state=MagicMock(
+                side_effect=lambda: self.reset_events.append("sync_render")
+            ),
+            capture_visualization_safely=MagicMock(
+                side_effect=lambda **_: self.reset_events.append("capture")
+            ),
         )
+        self.sim.render_frame = self._render_frame
         self._profiler = _ProfilerStub()
         self._task_success = torch.zeros(1, dtype=torch.bool)
         self._detached_uids_for_reset: list[str] = []
@@ -53,16 +63,25 @@ class _ResetEnv(BaseEnv):
         self.event_manager = MagicMock()
         self.initial_random_value = 0.0
 
+    @contextmanager
+    def _render_frame(self, *, force_visualization: bool = False):
+        if self.sim.is_window_opened:
+            self.sim.sync_render_state()
+        yield
+        self.sim.capture_visualization_safely(force=force_visualization)
+
     def is_task_success(self, **kwargs) -> torch.Tensor:
         del kwargs
         return torch.zeros(1, dtype=torch.bool)
 
     def _initialize_episode(self, env_ids: torch.Tensor, **kwargs) -> None:
         del env_ids, kwargs
+        self.reset_events.append("initialize_episode")
         self.initial_random_value = float(self.np_random.random())
 
     def get_obs(self, **kwargs) -> dict[str, float]:
         del kwargs
+        self.reset_events.append("get_obs")
         return {"random": self.initial_random_value}
 
     def get_info(self, **kwargs) -> dict:
@@ -92,3 +111,66 @@ def test_reset_seed_replays_gym_rng_and_reseeds_event_manager(monkeypatch) -> No
     env.event_manager.set_seed.assert_called_with(2027)
     assert torch.backends.cudnn.benchmark is False
     assert torch.backends.cudnn.deterministic is True
+
+
+def test_reset_publishes_episode_state_before_visual_observation() -> None:
+    """Reset state must reach render consumers before capture and observations."""
+    env = _ResetEnv()
+    env.sim.is_window_opened = True
+
+    env.reset()
+
+    assert env.reset_events == [
+        "reset_objects",
+        "initialize_episode",
+        "sync_render",
+        "get_obs",
+        "capture",
+    ]
+
+
+def test_headless_reset_leaves_publication_to_visual_consumers() -> None:
+    """State-only training resets must not publish the entire render scene."""
+    env = _ResetEnv()
+
+    env.reset()
+
+    env.sim.sync_render_state.assert_not_called()
+    assert env.reset_events == [
+        "reset_objects",
+        "initialize_episode",
+        "get_obs",
+        "capture",
+    ]
+
+
+def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():
+    env = _ResetEnv()
+    command = env.get_generator("commands")
+    noise = env.get_generator("noise")
+    env.reset(seed=42)
+    first = torch.rand(6, generator=command)
+    torch.rand(17, generator=noise)
+    env.reset(seed=42)
+    assert env.get_generator("commands") is command
+    assert torch.equal(first, torch.rand(6, generator=command))
+    env.reset()
+    continued = torch.rand(6, generator=command)
+    env.reset(seed=42)
+    torch.rand(6, generator=command)
+    assert torch.equal(continued, torch.rand(6, generator=command))
+
+
+def test_unseeded_component_streams_do_not_share_a_fixed_seed():
+    first, second = _ResetEnv(), _ResetEnv()
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert a.initial_seed() != b.initial_seed()
+    assert not torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))
+    assert first.get_generator("commands") is a
+
+
+def test_explicit_zero_seed_is_reproducible():
+    first, second = _ResetEnv(), _ResetEnv()
+    first.cfg.seed = second.cfg.seed = 0
+    a, b = first.get_generator("commands"), second.get_generator("commands")
+    assert torch.equal(torch.rand(8, generator=a), torch.rand(8, generator=b))

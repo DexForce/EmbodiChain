@@ -46,6 +46,9 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     replay_trajectory,
     run_tutorial,
 )
+from scripts.tutorials.atomic_action.tutorial_utils import (
+    initialize_benchmark_simulation,
+)
 
 MOVE_SAMPLE_INTERVAL = 80
 POST_TRAJECTORY_STEPS = 120
@@ -65,7 +68,11 @@ def main() -> None:
     args = parse_arguments()
     sim = create_tutorial_simulation(args)
     robot = add_tutorial_robot(sim, args.robot)
-    motion_gen = create_curobo_motion_generator(robot)
+    sim.prepare()
+    motion_gen = create_curobo_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
 
     engine = AtomicActionEngine(motion_generator=motion_gen)
 
@@ -124,3 +131,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     run_tutorial(main)
+
+
+def initialize_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation for interactive or benchmark runs."""
+    return initialize_benchmark_simulation(args)
+
+
+def create_robot(sim: "SimulationManager") -> "Robot":
+    """Add the default MoveEndEffector tutorial robot."""
+    robot = add_tutorial_robot(sim, "ur5")
+    # DexSim binds body_data (and therefore get_qpos) only after prepare().
+    sim.prepare()
+    return robot

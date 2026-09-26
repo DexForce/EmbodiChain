@@ -6,12 +6,11 @@ embodichain.data_pipeline.depth_video
 Overview
 --------
 
-Compressed depth-sidecar storage for LeRobot datasets on Python 3.10/3.11.
+Compressed depth-sidecar storage for LeRobot datasets on Python 3.10--3.12.
 The package stores camera depth as ``gray12le``/HEVC sidecar videos alongside
-a LeRobot dataset, without modifying the installed LeRobot package and without
-requiring Python 3.12. Depth quantization math is vendored from lerobot v0.6.0
-so that sidecar videos stay binary-compatible with the official reader once the
-project upgrades to Python 3.12.
+a LeRobot dataset without modifying the installed LeRobot package. Depth
+quantization math is vendored from lerobot v0.6.0 so that sidecar videos stay
+binary-compatible with the official reader.
 
 The main entry points are :class:`DepthVideoWriter` and
 :class:`DepthSidecarManager` for writing, :class:`DepthVideoReader` for

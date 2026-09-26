@@ -33,7 +33,15 @@ from embodichain.lab.gym.envs.demo import (
     execute_demo_episode,
 )
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
+from embodichain.lab.gym.envs.expert_trajectory import build_expert_action_spec
 from embodichain.lab.gym.envs.types import ControllerAction
+from embodichain_tasks.manipulation.tableware.stack_blocks_two import (
+    SETTLE_STEPS,
+    StackBlocksTwoEnv,
+)
+
+HANDWRITTEN_TRAJECTORY_STEPS = 7
+HANDWRITTEN_TRAJECTORY_DOF = 3
 
 
 def test_demo_segment_result_owns_json_safe_lifecycle_metadata() -> None:
@@ -218,6 +226,36 @@ def test_embodied_env_preserves_controller_action_auxiliary_fields() -> None:
     assert torch.equal(controller["ik_success"], torch.tensor([True, False]))
 
 
+def test_position_velocity_trajectory_recording_captures_effective_targets() -> None:
+    env = _controller_action_env()
+    env._traj_buffer = object()
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_0", "joint_1", "joint_2"],
+        joint_command_mode="position_velocity",
+    )
+    action = ControllerAction(
+        value=TensorDict(
+            {
+                "qpos": torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+                "qvel": torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
+            },
+            batch_size=[2],
+        )
+    )
+
+    env._preprocess_action(action)
+
+    torch.testing.assert_close(
+        env._traj_raw_action,
+        torch.tensor(
+            [
+                [1.0, 2.0, 3.0, 0.1, 0.2, 0.3],
+                [4.0, 5.0, 6.0, 0.4, 0.5, 0.6],
+            ]
+        ),
+    )
+
+
 class _SegmentedEnv:
     """Small environment stub that supports lazy two-segment planning."""
 
@@ -281,6 +319,63 @@ def test_execute_demo_episode_runs_lazy_segments_as_one_episode() -> None:
     assert [item.target_uid for item in result.segments] == ["object_a", "object_b"]
     assert all(env.no_auto_reset_during_steps)
     assert not env._demo_no_auto_reset
+
+
+@pytest.mark.parametrize("total", [None, 3])
+def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions(
+    total,
+) -> None:
+    """A progress wrapper can render a total without consuming a generator."""
+
+    class _ProgressTotalEnv(_SegmentedEnv):
+        def create_demo_segments(self):
+            def actions():
+                for action in (1, 2, 3):
+                    assert self.state == action - 1
+                    yield action
+
+            return (
+                DemoSegment(
+                    actions=actions(),
+                    name="move_cube",
+                    progress_total_steps=total,
+                ),
+            )
+
+    def progress(actions, description: str):
+        assert description == "Ep 0 · Seg #1 · move_cube"
+        assert env.actions == []
+        if total is None:
+            with pytest.raises(TypeError):
+                len(actions)
+        else:
+            assert len(actions) == total
+        return actions
+
+    env = _ProgressTotalEnv()
+    result = execute_demo_episode(env, progress=progress)
+
+    assert result.all_success
+
+
+def test_handwritten_motion_generator_segment_declares_exact_progress_total() -> None:
+    """A fixed trajectory and fixed settle phase share the tqdm total contract."""
+
+    trajectory = torch.zeros(
+        1, HANDWRITTEN_TRAJECTORY_STEPS, HANDWRITTEN_TRAJECTORY_DOF
+    )
+    pose = torch.eye(4).unsqueeze(0)
+    env = Mock(spec=StackBlocksTwoEnv)
+    env._stack_block = Mock()
+    env._plan_stack.return_value = torch.tensor([True]), trajectory, pose, pose
+    env._iter_segment_actions.side_effect = (
+        lambda value: StackBlocksTwoEnv._iter_segment_actions(env, value)
+    )
+    segment = StackBlocksTwoEnv.create_demo_segments(env)[0]
+
+    assert segment.progress_total_steps == HANDWRITTEN_TRAJECTORY_STEPS + SETTLE_STEPS
+    assert len(tuple(segment.actions)) == segment.progress_total_steps
+    env._stack_block.clear_dynamics.assert_called_once()
 
 
 class _LifecycleMetadataEnv:
@@ -980,6 +1075,42 @@ def test_expert_rollout_writer_freezes_inactive_demo_row() -> None:
     assert env.rollout_steps.tolist() == [0, 3]
     assert not env.rollout_buffer["valid"][0].any()
     assert env.rollout_buffer["valid"][1, 2]
+
+
+def test_expert_rollout_writer_stores_position_and_velocity_targets() -> None:
+    env = _RolloutWriterStub()
+    env.active_joint_ids = [1, 3]
+    env.expert_action_spec = build_expert_action_spec(
+        joint_names=["joint_1", "joint_3"],
+        joint_command_mode="position_velocity",
+    )
+    env.rollout_buffer["actions"] = torch.zeros(2, 5, 4)
+    obs = TensorDict({"state": torch.tensor([[1.0, 1.0], [2.0, 2.0]])}, batch_size=[2])
+    action = TensorDict(
+        {
+            "qpos": torch.tensor([[5.0, 10.0, 7.0, 20.0], [6.0, 11.0, 8.0, 21.0]]),
+            "qvel": torch.tensor([[0.0, 1.0, 0.0, 2.0], [0.0, 1.1, 0.0, 2.1]]),
+        },
+        batch_size=[2],
+    )
+
+    EmbodiedEnv._write_episode_rollout_step(
+        env,
+        obs=obs,
+        action=action,
+        rewards=torch.tensor([0.5, 1.0]),
+        terminateds=torch.zeros(2, dtype=torch.bool),
+        truncateds=torch.zeros(2, dtype=torch.bool),
+    )
+
+    torch.testing.assert_close(
+        env.rollout_buffer["actions"][0, 0],
+        torch.tensor([10.0, 20.0, 1.0, 2.0]),
+    )
+    torch.testing.assert_close(
+        env.rollout_buffer["actions"][1, 2],
+        torch.tensor([11.0, 21.0, 1.1, 2.1]),
+    )
 
 
 class _RobotQposStub:

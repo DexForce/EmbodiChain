@@ -12,7 +12,7 @@ and samplers that stream trajectories from a running simulation),
 :mod:`~embodichain.data_pipeline.engine` (a process-safe shared buffer that
 decouples simulation producers from training consumers), and
 :mod:`~embodichain.data_pipeline.depth_video` (compressed depth-sidecar
-storage for LeRobot datasets on Python 3.10/3.11).
+storage for LeRobot datasets on Python 3.10--3.12).
 
    .. rubric:: Submodules
 

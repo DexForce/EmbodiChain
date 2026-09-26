@@ -31,6 +31,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionInvocation,
     ActionOptions,
     ActionPlan,
+    AffordanceSamplingContext,
     AtomicAction,
     AtomicActionEngine,
     BUILTIN_ACTION_TYPES,
@@ -253,6 +254,16 @@ def test_initial_context_explicit_scene_overrides_configured_provider() -> None:
     assert provider.calls == []
 
 
+def test_initial_context_accepts_direct_affordance_sampling() -> None:
+    engine = _engine()
+    sampling = AffordanceSamplingContext(count=2, seed=11, attempt_id=4)
+
+    context = engine.initial_context(affordance_sampling=sampling)
+
+    assert context.affordance_sampling is sampling
+    assert torch.equal(context.env_ids, torch.tensor([0, 1]))
+
+
 def test_engine_rejects_invalid_scene_provider() -> None:
     with pytest.raises(TypeError, match="scene_provider must implement SceneProvider"):
         AtomicActionEngine(
@@ -332,6 +343,21 @@ def test_engine_compile_holds_failed_rows_for_remaining_actions() -> None:
     assert first_trajectory is not None
     assert torch.all(first_trajectory.positions[1] == 0.0)
     assert torch.all(compiled.trajectory.positions[1] == 0.0)
+
+
+def test_engine_compile_preserves_opted_in_failed_trajectory_for_diagnostics() -> None:
+    engine = _engine()
+    engine.motion_generator.planner.preserve_failed_plan_positions = True
+    engine.register(StubAction())
+    target = torch.tensor([[1.0, 1.0, 1.0], [float("nan"), 2.0, 2.0]])
+
+    compiled = engine.compile((_invocation(engine, target),))
+
+    assert compiled.plan_success.tolist() == [True, False]
+    assert torch.equal(
+        compiled.trajectory.positions[1, -1], torch.tensor([0.0, 2.0, 2.0])
+    )
+    assert torch.all(compiled.projected_context.robot.qpos[1] == 0.0)
 
 
 def test_engine_compile_empty_sequence_is_successful_noop() -> None:

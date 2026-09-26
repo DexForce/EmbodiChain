@@ -22,12 +22,12 @@ A `Robot` must be spawned within a `SimulationManager`.
 import torch
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot, RobotCfg
-from embodichain.lab.sim.solvers import SolverCfg
+from embodichain.lab.sim.motion.solvers import SolverCfg
 
 # 1. Initialize Simulation Environment
-# Note: Use 'sim_device' to specify device (e.g., "cuda:0" or "cpu")
+# Note: Use 'device' to specify device (e.g., "cuda:0" or "cpu")
 device = "cuda" if torch.cuda.is_available() else "cpu"
-sim_cfg = SimulationManagerCfg(sim_device=device, physics_dt=0.01)
+sim_cfg = SimulationManagerCfg(device=device, physics_dt=0.01)
 sim = SimulationManager(sim_config=sim_cfg)
 
 # 2. Configure Robot
@@ -79,7 +79,7 @@ print(f"EE Pose: {ee_pose}")
 Compute the required joint positions to reach a target pose.
 ```python 
 # Compute IK
-# pose: Target pose (N, 7) or (N, 4, 4)
+# pose: Target pose (N, 7) as [x, y, z, qx, qy, qz, qw], or (N, 4, 4)
 target_pose = ee_pose.clone() # Example target
 target_pose[:, 2] += 0.1      # Move up 10cm
 

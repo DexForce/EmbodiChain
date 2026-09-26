@@ -41,7 +41,7 @@ from embodichain.lab.sim.atomic_actions import (
 from .effects import EffectEvidenceAddress
 
 if TYPE_CHECKING:
-    from embodichain.lab.sim.planners import MotionGenerator
+    from embodichain.lab.sim.motion.motion_generator import MotionGenerator
     from embodichain.lab.sim.sim_manager import SimulationManager
 
 
@@ -1613,6 +1613,7 @@ class SceneRegistry:
         simulation: SimulationManager,
         *,
         rigid_objects: Mapping[str, str] | None = None,
+        articulation_objects: Mapping[str, str] | None = None,
         articulations: Mapping[str, str] | None = None,
         collision_roles: Mapping[str, SceneCollisionRole] | None = None,
         geometry_providers: Mapping[str, SceneGeometryProvider] | None = None,
@@ -1620,14 +1621,18 @@ class SceneRegistry:
     ) -> SceneRegistry:
         """Opt explicitly selected simulation entities into a registry.
 
-        ``rigid_objects`` and ``articulations`` map authoritative registry IDs
-        to simulation UIDs. UIDs become aliases automatically; unlisted
-        simulation entities are never imported. Collision participation
-        defaults to :attr:`SceneCollisionRole.NONE`.
+        ``rigid_objects``, ``articulation_objects``, and ``articulations`` map
+        authoritative registry IDs to simulation UIDs. Articulation objects
+        use a native articulation for root-pose observation while publishing a
+        :class:`SceneObjectRef` without joint state. UIDs become aliases
+        automatically; unlisted simulation entities are never imported.
+        Collision participation defaults to :attr:`SceneCollisionRole.NONE`.
 
         Args:
             simulation: Simulation manager used only for explicit UID lookup.
             rigid_objects: Canonical object IDs mapped to simulation UIDs.
+            articulation_objects: Canonical object IDs backed by articulation
+                simulation UIDs.
             articulations: Canonical articulation IDs mapped to simulation UIDs.
             collision_roles: Optional collision roles keyed by canonical ID.
             geometry_providers: Optional geometry overrides keyed by canonical
@@ -1641,17 +1646,28 @@ class SceneRegistry:
             rigid_objects,
             name="rigid_objects",
         )
+        articulation_object_ids = cls._normalize_simulation_mapping(
+            articulation_objects,
+            name="articulation_objects",
+        )
         articulation_ids = cls._normalize_simulation_mapping(
             articulations,
             name="articulations",
         )
-        duplicate_ids = set(object_ids).intersection(articulation_ids)
+        root_ids = (
+            *object_ids,
+            *articulation_object_ids,
+            *articulation_ids,
+        )
+        duplicate_ids = {
+            entity_id for entity_id in root_ids if root_ids.count(entity_id) > 1
+        }
         if duplicate_ids:
             raise ValueError(
                 "Simulation registry IDs must be globally unique across entity "
                 f"types: {sorted(duplicate_ids)}."
             )
-        all_ids = set(object_ids).union(articulation_ids)
+        all_ids = set(root_ids)
         roles = dict(collision_roles or {})
         geometry = dict(geometry_providers or {})
         for mapping_name, values in (
@@ -1682,6 +1698,25 @@ class SceneRegistry:
                         registry_id,
                         _SimulationEntityGeometryProvider(entity),
                     ),
+                    collision_role=roles.get(
+                        registry_id,
+                        SceneCollisionRole.NONE,
+                    ),
+                )
+            )
+        for registry_id, uid in articulation_object_ids.items():
+            entity = cls._get_simulation_entity(
+                simulation,
+                getter_name="get_articulation",
+                registry_id=registry_id,
+                uid=uid,
+            )
+            registrations.append(
+                SceneEntityRegistration(
+                    ref=SceneObjectRef(registry_id),
+                    state_provider=_SimulationEntityStateProvider(entity),
+                    aliases=(() if uid == registry_id else (uid,)),
+                    geometry_provider=geometry.get(registry_id),
                     collision_role=roles.get(
                         registry_id,
                         SceneCollisionRole.NONE,

@@ -2,9 +2,13 @@
 
 ## 1. Install the documentation dependencies
 
-Build the docs from a source checkout in a Python 3.10 or 3.11 virtual
-environment. API generation imports EmbodiChain modules, so install the project
-runtime and the documentation toolchain from the repository root:
+Build the docs from a source checkout in a Python 3.11 virtual environment.
+API generation imports optional GenSim modules, so this setup installs the
+`gensim` extra and its ABI-specific `bpy` dependency. A Python 3.12 environment
+can run the core package, but it cannot run this full documentation setup.
+
+Install the project runtime and documentation toolchain from the repository
+root:
 
 ```bash
 pip install -e ".[gensim]" \
@@ -13,6 +17,20 @@ pip install -e ".[gensim]" \
   --extra-index-url https://download.blender.org/pypi/
 pip install -r docs/requirements.txt
 ```
+
+HTML builds also require Node.js 22.12+ and the locked Architecture Explorer
+frontend dependencies. Install these once from the repository root:
+
+```bash
+npm --prefix docs/architecture/web ci
+```
+
+Every Sphinx build generates architecture evidence from the checkout's HEAD.
+HTML builds compile the static frontend; text/PDF builders include the searchable
+module overview without running Node. Relevant source changes must be committed
+before generating their pinned evidence. Generated bundles live under
+`docs/source/_static/architecture/` and are ignored by Git. A failed generation
+stops the build before replacing the last complete bundle.
 
 The documentation requirements are pinned so local and CI builds use the same
 Sphinx toolchain.
@@ -30,7 +48,16 @@ make current-docs
 ```
 
 This target treats warnings as errors. Preview the result at
-`docs/build/html/index.html`.
+`docs/build/html/index.html`. To view the interactive Architecture Explorer,
+serve the output over HTTP (rather than opening it as a local file):
+
+```bash
+python -m http.server 4184 --bind 127.0.0.1 --directory build/html
+```
+
+Visit `http://127.0.0.1:4184/overview/architecture/index.html`. The page includes
+an embedded viewer, a full-screen link, and a searchable text reference. API
+links stay in the current documentation version; source links use its snapshot SHA.
 
 ### Multi-version docs (CI/production)
 

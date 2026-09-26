@@ -5,6 +5,8 @@ requires:
   embodiment_contract: single_arm_parallel_gripper
 
 motion:
+  strategy: ik_interp
+  velocity_targets: auto
   sample_count: 40
   dynamic_collision_mode: "off"
 

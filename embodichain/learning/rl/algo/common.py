@@ -22,6 +22,30 @@ from tensordict import TensorDict
 __all__ = ["compute_gae"]
 
 
+@torch.no_grad()
+def _update_observation_normalization(policy, rollout: TensorDict) -> None:
+    """Update policy normalizers after the rollout optimization is complete."""
+    policy_module = getattr(policy, "module", policy)
+    update_normalization = getattr(policy_module, "update_normalization", None)
+    if update_normalization is None:
+        return
+
+    fields = {}
+    for name in ("obs", "critic_obs"):
+        if name not in rollout.keys():
+            continue
+        observations = rollout[name][:, :-1]
+        fields[name] = observations.reshape(-1, observations.shape[-1])
+    observations = fields["obs"]
+    update_normalization(
+        TensorDict(
+            fields,
+            batch_size=[observations.shape[0]],
+            device=observations.device,
+        )
+    )
+
+
 def compute_gae(
     rollout: TensorDict, gamma: float, gae_lambda: float
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -37,9 +61,14 @@ def compute_gae(
     Returns:
         Tuple of `(advantages, returns)`, both shaped `[num_envs, time]`.
     """
+    values = rollout["value"].float()
     rewards = rollout["reward"][:, :-1].float()
     dones = rollout["done"][:, :-1].bool()
-    values = rollout["value"].float()
+    truncated = rollout["truncated"][:, :-1].bool()
+
+    # Bootstrap time-limit truncations with the value stored for the
+    # transition before the done mask cuts GAE recursion.
+    rewards = rewards + gamma * values[:, :-1] * truncated
 
     if rewards.ndim != 2:
         raise ValueError(

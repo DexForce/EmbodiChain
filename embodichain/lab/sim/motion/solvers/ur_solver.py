@@ -1,0 +1,342 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import torch
+import numpy as np
+import warp as wp
+from embodichain.utils import configclass
+from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
+from embodichain.data import get_data_path
+from embodichain.compute.kinematics._warp.ur import (
+    URParam,
+    ur_ik_kernel,
+    ur_ik_nearest_kernel,
+)
+import math
+from ._buffers import _with_ik_buffers
+from embodichain.utils.device_utils import standardize_device_string
+
+__all__ = ["URSolverCfg", "URSolver"]
+
+
+@configclass
+class URSolverCfg(SolverCfg):
+    class_type: str = "URSolver"
+    ur_type: str = "ur10"
+    end_link_name: str = "ee_link"
+    root_link_name: str = "base_link"
+    # DH parameters: default ur10 parameters
+    d1: float = 0.1273
+    a2: float = -0.612
+    a3: float = -0.5723
+    d4: float = 0.163941
+    d5: float = 0.1157
+    d6: float = 0.0922
+
+    alpha1: float = torch.pi * 0.5
+    alpha4: float = torch.pi * 0.5
+    alpha5: float = -torch.pi * 0.5
+
+    def __post_init__(self):
+        super().__post_init__()
+        # from https://github.com/Victorlouisdg/ur-analytic-ik/blob/main/src/ur_analytic_ik/dh_parameters.hh
+        if self.ur_type == "ur3":
+            self.d1 = 0.1519
+            self.d4 = 0.11235
+            self.d5 = 0.08535
+            self.d6 = 0.0819
+            self.a2 = -0.24365
+            self.a3 = -0.21325
+        elif self.ur_type == "ur3e":
+            self.d1 = 0.15185
+            self.d4 = 0.13105
+            self.d5 = 0.08535
+            self.d6 = 0.0921
+            self.a2 = -0.24355
+            self.a3 = -0.2132
+        elif self.ur_type == "ur5":
+            self.d1 = 0.089159
+            self.d4 = 0.10915
+            self.d5 = 0.09465
+            self.d6 = 0.0823
+            self.a2 = -0.425
+            self.a3 = -0.39225
+        elif self.ur_type == "ur5e":
+            self.d1 = 0.1625
+            self.d4 = 0.1333
+            self.d5 = 0.0997
+            self.d6 = 0.0996
+            self.a2 = -0.425
+            self.a3 = -0.3922
+        elif self.ur_type == "ur10":
+            self.d1 = 0.1273
+            self.d4 = 0.163941
+            self.d5 = 0.1157
+            self.d6 = 0.0922
+            self.a2 = -0.612
+            self.a3 = -0.5723
+        elif self.ur_type == "ur10e":
+            self.d1 = 0.1807
+            self.d4 = 0.17415
+            self.d5 = 0.11985
+            self.d6 = 0.11655
+            self.a2 = -0.612
+            self.a3 = -0.5723
+        else:
+            raise ValueError(f"Unknown UR type: {self.ur_type}")
+
+    def init_solver(
+        self, device: torch.device = torch.device("cpu"), **kwargs
+    ) -> "URSolver":
+        """Initialize the solver with the configuration.
+
+        Args:
+            device (torch.device): The device to use for the solver. Defaults to CPU.
+            **kwargs: Additional keyword arguments that may be used for solver initialization.
+
+        Returns:
+            URSolver: An initialized solver instance.
+        """
+        solver = URSolver(cfg=self, device=device, **kwargs)
+        solver.set_tcp(self._get_tcp_as_numpy())
+        return solver
+
+
+class URSolver(BaseSolver):
+    def __init__(self, cfg: URSolverCfg, device: str, **kwargs):
+        super().__init__(cfg, device, **kwargs)
+        self.dof = 6
+        self._init_warp_solver(cfg)
+
+    def _init_warp_solver(self, cfg: URSolverCfg):
+        self._ur_params = URParam()
+        self._ur_params.d1 = cfg.d1
+        self._ur_params.a2 = cfg.a2
+        self._ur_params.a3 = cfg.a3
+        self._ur_params.d4 = cfg.d4
+        self._ur_params.d5 = cfg.d5
+        self._ur_params.d6 = cfg.d6
+
+    def set_tcp(self, tcp: np.ndarray):
+        super().set_tcp(tcp)
+        self._tcp_inv = np.eye(4, dtype=float)
+        self._tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
+        self._tcp_inv[:3, 3] = -self._tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
+        self._tcp_inv_tensor = torch.tensor(
+            self._tcp_inv, dtype=torch.float32, device=self.device
+        )
+
+    @_with_ik_buffers
+    def get_ik(
+        self,
+        target_xpos: torch.Tensor,
+        qpos_seed: torch.Tensor | None = None,
+        return_all_solutions: bool = False,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute target joint positions using UR inverse kinematics.
+
+        Args:
+            target_xpos (torch.Tensor): Current end-effector pose, shape (n_sample, 4, 4).
+            qpos_seed (torch.Tensor): Current joint positions, shape (n_sample, 6)
+                or (1, 6). Defaults to the joint-limit midpoint.
+            return_all_solutions (bool, optional): Whether to return all 512
+                candidates. False uses a fused Warp selection, with bounded
+                legacy selection for distances close enough to be affected by
+                floating-point rounding.
+            **kwargs: Additional keyword arguments for future extensions.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - success (torch.Tensor): Boolean validity, shape (n_sample,)
+                  or (n_sample, 512) when all solutions are requested.
+                - target_joints (torch.Tensor): Joint positions, shape
+                  (n_sample, 6) or (n_sample, 512, 6), respectively.
+        """
+        N_SOL = 512
+        DOF = 6
+        if target_xpos.shape == (4, 4):
+            target_xpos_batch = target_xpos[None, :, :]
+        else:
+            target_xpos_batch = target_xpos
+        tcp_inv = self._tcp_inv_tensor
+        target_xpos_batch = target_xpos_batch @ tcp_inv[None, :, :]
+        n_sample = target_xpos_batch.shape[0]
+
+        if qpos_seed is None and not return_all_solutions:
+            # A missing seed previously crashed at the nearest-solution step;
+            # default to the feasibility-safe joint-range midpoint.
+            qpos_seed = (
+                self.get_default_qpos_seed()
+                .to(dtype=torch.float32)
+                .unsqueeze(0)
+                .repeat(n_sample, 1)
+            )
+
+        device = self.device
+        wp_device = standardize_device_string(self.device)
+        # Flatten target poses to a 1-D float array for the Warp kernel.
+        xpos_wp = wp.from_torch(target_xpos_batch.reshape(-1))
+        lower_qpos_limits_wp = wp.from_torch(self.lower_qpos_limits)
+        upper_qpos_limits_wp = wp.from_torch(self.upper_qpos_limits)
+
+        if not return_all_solutions:
+            # Match PyTorch's promotion in weight * (float32 candidates - seed),
+            # including double-precision seeds and broadcast/noncontiguous seeds.
+            selection_dtype = torch.promote_types(torch.float32, qpos_seed.dtype)
+            selection_dtype = torch.promote_types(
+                selection_dtype, self.ik_nearest_weight.dtype
+            )
+            seed = (
+                qpos_seed.to(device=device, dtype=selection_dtype)
+                .expand(n_sample, DOF)
+                .contiguous()
+            )
+            weights = self.ik_nearest_weight.to(
+                device=device, dtype=selection_dtype
+            ).contiguous()
+            best_qpos_wp = wp.empty((n_sample, DOF), dtype=float, device=wp_device)
+            best_valid_wp = wp.empty(n_sample, dtype=int, device=wp_device)
+            ambiguous_wp = wp.empty(n_sample, dtype=int, device=wp_device)
+            wp.launch(
+                kernel=ur_ik_nearest_kernel,
+                dim=n_sample,
+                inputs=[
+                    xpos_wp,
+                    self._ur_params,
+                    lower_qpos_limits_wp,
+                    upper_qpos_limits_wp,
+                    wp.from_torch(seed),
+                    wp.from_torch(weights),
+                ],
+                outputs=[best_qpos_wp, best_valid_wp, ambiguous_wp],
+                device=wp_device,
+            )
+            best_valid = wp.to_torch(best_valid_wp).bool()
+            best_qpos = wp.to_torch(best_qpos_wp)
+            ambiguous = wp.to_torch(ambiguous_wp).nonzero(as_tuple=True)[0]
+            legacy_seed = qpos_seed.to(device=device).expand(n_sample, DOF)
+            # Do not approximate ties with an epsilon: even a one-ULP difference
+            # in the legacy norm can choose another analytical branch. Reuse
+            # the original candidates and reduction for ambiguous targets only.
+            # Cap each candidate buffer at 128 * 512 * 6 floats (1.5 MiB), even
+            # when every target is on a branch bisector.
+            for rows in ambiguous.split(128):
+                count = rows.numel()
+                if count == 0:
+                    continue
+                candidates_wp = wp.empty(
+                    count * N_SOL * DOF, dtype=float, device=wp_device
+                )
+                validity_wp = wp.empty(count * N_SOL, dtype=int, device=wp_device)
+                wp.launch(
+                    kernel=ur_ik_kernel,
+                    dim=count,
+                    inputs=[
+                        wp.from_torch(target_xpos_batch[rows].reshape(-1)),
+                        self._ur_params,
+                        lower_qpos_limits_wp,
+                        upper_qpos_limits_wp,
+                    ],
+                    outputs=[candidates_wp, validity_wp],
+                    device=wp_device,
+                )
+                candidates = wp.to_torch(candidates_wp).view(count, N_SOL, DOF)
+                validity = wp.to_torch(validity_wp).view(count, N_SOL).bool()
+                distances = torch.norm(
+                    self.ik_nearest_weight * (candidates - legacy_seed[rows, None, :]),
+                    dim=-1,
+                )
+                distances[~validity] = float("inf")
+                nearest = distances.argmin(dim=1)
+                local_rows = torch.arange(count, device=device)
+                best_qpos[rows] = candidates[local_rows, nearest]
+                best_valid[rows] = validity[local_rows, nearest]
+            return best_valid, best_qpos
+
+        all_qpos_wp = self._ik_buffers.zeros(
+            "qpos", n_sample, N_SOL * DOF, torch.float32
+        )
+        all_ik_valid_wp = self._ik_buffers.zeros("valid", n_sample, N_SOL, torch.int32)
+        wp.launch(
+            kernel=ur_ik_kernel,
+            dim=(n_sample,),
+            inputs=[
+                xpos_wp,
+                self._ur_params,
+                lower_qpos_limits_wp,
+                upper_qpos_limits_wp,
+            ],
+            outputs=[all_qpos_wp, all_ik_valid_wp],
+            device=wp_device,
+        )
+
+        all_solutions = (
+            wp.to_torch(all_qpos_wp)
+            .reshape(n_sample, N_SOL, DOF)
+            .to(dtype=torch.float32, device=device)
+        )
+        all_solutions_validity = (
+            wp.to_torch(all_ik_valid_wp)
+            .reshape(n_sample, N_SOL)
+            .bool()
+            .to(device=device)
+        )
+
+        # Copy reusable scratch storage before releasing the buffer borrow.
+        return all_solutions_validity.clone(), all_solutions.clone()
+
+    @staticmethod
+    def dh_matrix(theta_i, d_i, a_i, alpha_i):
+        """
+        Compute the Denavit-Hartenberg transformation matrix.
+
+        Args:
+            theta_i (float): Joint angle in radians.
+            d_i (float): Link offset along the previous z-axis.
+            a_i (float): Link length along the previous x-axis.
+            alpha_i (float): Link twist angle in radians.
+
+        Returns:
+            torch.Tensor: A 4x4 transformation matrix representing the pose of the next link.
+        """
+        m = torch.zeros((4, 4), dtype=torch.float32)
+        s_ai = math.sin(alpha_i)
+        c_ai = math.cos(alpha_i)
+
+        m[0, 0] = torch.cos(theta_i)
+        m[0, 1] = -torch.sin(theta_i) * c_ai
+        m[0, 2] = torch.sin(theta_i) * s_ai
+        m[0, 3] = a_i * torch.cos(theta_i)
+
+        m[1, 0] = torch.sin(theta_i)
+        m[1, 1] = torch.cos(theta_i) * c_ai
+        m[1, 2] = -torch.cos(theta_i) * s_ai
+        m[1, 3] = a_i * torch.sin(theta_i)
+
+        m[2, 0] = 0.0
+        m[2, 1] = s_ai
+        m[2, 2] = c_ai
+        m[2, 3] = d_i
+
+        m[3, 0] = 0.0
+        m[3, 1] = 0.0
+        m[3, 2] = 0.0
+        m[3, 3] = 1.0
+
+        return m

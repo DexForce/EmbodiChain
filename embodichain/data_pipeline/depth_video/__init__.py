@@ -14,16 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compressed depth sidecar storage for LeRobot datasets on Python 3.10/3.11.
+"""Compressed depth sidecar storage for LeRobot datasets on Python 3.10--3.12.
 
 This package implements issue #424 *Path A*: an EmbodiChain-owned depth writer
 that stores camera depth as ``gray12le``/HEVC sidecar videos alongside a
-LeRobot dataset, without modifying the installed LeRobot package and without
-requiring Python 3.12.
+LeRobot dataset without modifying the installed LeRobot package.
 
 Depth quantization math is vendored from lerobot v0.6.0 so that sidecar videos
-remain binary-compatible with the official reader once the project upgrades to
-Python 3.12 (issue #424, Path B).
+remain binary-compatible with the official reader.
 """
 
 from __future__ import annotations

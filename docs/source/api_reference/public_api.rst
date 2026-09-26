@@ -22,6 +22,23 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.data.assets.demo_assets
+-----------------------------------
+
+Downloadable bundles used by standalone manipulation and deformable-body
+demos. Each class resolves one versioned archive into the configured
+EmbodiChain data cache.
+
+.. currentmodule:: embodichain.data.assets.demo_assets
+
+.. autosummary::
+
+   CoordinatedPlacementAndPickment
+   DeformableDemoData
+   MultiW1Data
+   RubiksCube
+   ScoopIceNewEnv
+
 embodichain.data.assets.planner_assets
 --------------------------------------
 
@@ -30,6 +47,21 @@ embodichain.data.assets.planner_assets
 .. autosummary::
 
    download_neural_planner_checkpoint
+
+embodichain.data.assets.policy_assets
+-------------------------------------
+
+Resolve one official model ID to a pinned repository snapshot and materialize
+its native RUN files inside the model cache. The returned provenance records
+the exact repository and revision used for evaluation.
+
+.. currentmodule:: embodichain.data.assets.policy_assets
+
+.. autosummary::
+
+   download_pretrained_policy
+
+.. autofunction:: download_pretrained_policy
 
 embodichain.data.assets.solver_assets
 -------------------------------------
@@ -296,7 +328,7 @@ embodichain.lab.gym.envs.embodied_env
    EmbodiedEnv
 
 embodichain.lab.task_program.integrations.simulation.handover
------------------------------------------------------------
+-------------------------------------------------------------
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.handover
 
@@ -493,6 +525,9 @@ embodichain.lab.sim.atomic_actions
 
    ActionPlanningServices
    Affordance
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
    AntipodalAffordance
    AssembleAffordance
    BUILTIN_ACTION_TYPES
@@ -539,6 +574,21 @@ embodichain.lab.sim.atomic_actions.affordance
    AssembleAffordance
 
 .. automodule:: embodichain.lab.sim.atomic_actions.affordance
+   :members:
+   :no-index:
+
+embodichain.lab.sim.atomic_actions.affordance_sampling
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
+
+.. autosummary::
+
+   AffordancePoseCandidates
+   AffordanceSample
+   AffordanceSamplingContext
+
+.. automodule:: embodichain.lab.sim.atomic_actions.affordance_sampling
    :members:
    :no-index:
 
@@ -777,9 +827,11 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_rigidized_articulation_antipodal_semantics
    create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
+   SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 
@@ -829,6 +881,38 @@ embodichain.lab.sim.atomic_actions.transports
    EndpointCommandRouter
    EndpointCommandTransport
 
+embodichain.lab.sim.diff
+------------------------
+
+Public bridge from task-defined Newton kinematics and Warp tapes into PyTorch
+autograd. It does not advance the Newton dynamics solver.
+
+.. currentmodule:: embodichain.lab.sim.diff
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.bridge
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.bridge
+
+.. autosummary::
+
+   NewtonStepFunc
+   tape_context
+
+embodichain.lab.sim.diff.runtime
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.diff.runtime
+
+.. autosummary::
+
+   NewtonDifferentiableRuntime
+
 embodichain.lab.sim.objects.articulation
 ----------------------------------------
 
@@ -840,16 +924,6 @@ embodichain.lab.sim.objects.articulation
    Articulation
    ArticulationJointKinematics
 
-embodichain.lab.sim.objects.cloth_object
-----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.objects.cloth_object
-
-.. autosummary::
-
-   ClothBodyData
-   ClothObject
-   ClothObjectCfg
 
 embodichain.lab.sim.objects.constraint
 --------------------------------------
@@ -865,10 +939,15 @@ embodichain.lab.sim.objects.gizmo
 
 .. currentmodule:: embodichain.lab.sim.objects.gizmo
 
+Native robot targets use DexSim's controller with Newton IK by default.
+Set ``GizmoCfg.ik_solver="embodichain"`` to reuse the robot control part's
+configured solver, including PinkSolver; Viser uses the same solver adapter.
+
 .. autosummary::
 
    Gizmo
    GizmoCfg
+   create_robot_ik_gizmo_controller
 
 embodichain.lab.sim.objects.rigid_object
 ----------------------------------------
@@ -877,6 +956,7 @@ embodichain.lab.sim.objects.rigid_object
 
 .. autosummary::
 
+   CollisionShapeDesc
    RigidBodyData
    RigidObject
    RigidObjectCfg
@@ -902,21 +982,53 @@ embodichain.lab.sim.objects.robot
    ControlGroup
    Robot
 
-embodichain.lab.sim.objects.soft_object
----------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.objects.soft_object
+embodichain.lab.sim.physics
+---------------------------
+
+Manager-level physics backend selection and lifecycle contracts for the
+Default and Newton implementations integrated through DexSim.
+
+.. currentmodule:: embodichain.lab.sim.physics
 
 .. autosummary::
 
-   SoftBodyData
-   SoftObject
-   SoftObjectCfg
+   PhysicsBackend
+   DefaultPhysicsBackend
+   NewtonPhysicsBackend
+   make_physics_backend
 
-embodichain.lab.sim.planners.base_planner
------------------------------------------
+embodichain.lab.sim.physics.base
+--------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.base_planner
+.. currentmodule:: embodichain.lab.sim.physics.base
+
+.. autosummary::
+
+   PhysicsBackend
+
+embodichain.lab.sim.physics.default
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.default
+
+.. autosummary::
+
+   DefaultPhysicsBackend
+
+embodichain.lab.sim.physics.newton
+----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.physics.newton
+
+.. autosummary::
+
+   NewtonPhysicsBackend
+
+embodichain.lab.sim.motion.planners.base_planner
+------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.base_planner
 
 .. autosummary::
 
@@ -926,10 +1038,10 @@ embodichain.lab.sim.planners.base_planner
    BasePlanner
    validate_plan_options
 
-embodichain.lab.sim.planners.curobo.curobo_planner
---------------------------------------------------
+embodichain.lab.sim.motion.planners.curobo.curobo_planner
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.curobo.curobo_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_planner
 
 .. autosummary::
 
@@ -939,31 +1051,23 @@ embodichain.lab.sim.planners.curobo.curobo_planner
    CuroboPlannerCfg
    CuroboWorldCfg
 
-embodichain.lab.sim.planners.curobo.curobo_yaml
------------------------------------------------
+embodichain.lab.sim.motion.planners.curobo.curobo_yaml
+------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.curobo.curobo_yaml
+.. currentmodule:: embodichain.lab.sim.motion.planners.curobo.curobo_yaml
 
 .. autosummary::
 
    generate_curobo_robot_yaml
-   generate_curobo_world_yaml
+   generate_curobo_world_scene
+   visualize_curobo_collision_models
+   visualize_curobo_robot_collision_model
+   visualize_curobo_world_collision_model
 
-embodichain.lab.sim.planners.motion_generator
----------------------------------------------
+embodichain.lab.sim.motion.planners.neural_planner
+--------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.motion_generator
-
-.. autosummary::
-
-   MotionGenerator
-   MotionGenCfg
-   MotionGenOptions
-
-embodichain.lab.sim.planners.neural_planner
--------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.planners.neural_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.neural_planner
 
 .. autosummary::
 
@@ -971,10 +1075,33 @@ embodichain.lab.sim.planners.neural_planner
    NeuralPlannerCfg
    NeuralPlanOptions
 
-embodichain.lab.sim.planners.toppra_planner
--------------------------------------------
+embodichain.lab.sim.motion.planners.bezier
+------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.toppra_planner
+.. currentmodule:: embodichain.lab.sim.motion.planners.bezier
+
+Differentiable quadratic and quintic Bézier geometry, including
+HolisticMotion-compatible waypoint blending and path-constraint projection.
+Use ``BezierPath.parameter_at_arc_length(distance)`` to convert a scalar
+time law's geometric distances to polynomial parameters. Reuse those parameters
+for ``evaluate``, ``arc_tangent``, and ``arc_curvature``; normalized arc length
+is generally different from the Bézier parameter. Lookup accuracy is controlled
+by ``table_count`` independently of the output sample count.
+
+.. autosummary::
+
+   BezierPath
+   bezier_arc_length
+   bezier_derivative
+   bezier_evaluate
+   sample_bezier_path
+
+.. automethod:: BezierPath.parameter_at_arc_length
+
+embodichain.lab.sim.motion.planners.toppra_planner
+--------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
 .. autosummary::
 
@@ -982,10 +1109,48 @@ embodichain.lab.sim.planners.toppra_planner
    ToppraPlannerCfg
    ToppraPlanOptions
 
-embodichain.lab.sim.planners.utils
-----------------------------------
+embodichain.lab.sim.motion.planners.se3
+---------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.planners.utils
+.. currentmodule:: embodichain.lab.sim.motion.planners.se3
+
+SE(3) screw interpolation and constrained Cartesian line trajectories with
+explicit twist, acceleration, jerk, and timing outputs.
+
+.. autosummary::
+
+   SE3LineResult
+   plan_se3_line
+
+embodichain.lab.sim.motion.planners.trapezoidal_planner
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.trapezoidal_planner
+
+.. autosummary::
+
+   TrapezoidalPlanOptions
+   TrapezoidalPlanner
+   TrapezoidalPlannerCfg
+
+embodichain.utils.warp.kinematics.trapezoidal_warp
+--------------------------------------------------
+
+.. currentmodule:: embodichain.utils.warp.kinematics.trapezoidal_warp
+
+Warp-accelerated helpers construct scalar trapezoidal or Double-S motion
+profiles and compose their sampled path derivatives into batched joint-space
+trajectories.
+
+.. autosummary::
+
+   build_profile_warp
+   compose_profile_samples_warp
+
+embodichain.lab.sim.motion.planners.utils
+-----------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.planners.utils
 
 .. autosummary::
 
@@ -1097,6 +1262,17 @@ embodichain.lab.sim.sensors.camera
 
    Camera
    CameraCfg
+
+embodichain.lab.sim.sensors.contact_sensor
+------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.sensors.contact_sensor
+
+.. autosummary::
+
+   ArticulationContactFilterCfg
+   ContactSensor
+   ContactSensorCfg
 
 embodichain.lab.sim.sim_manager
 -------------------------------
@@ -1225,44 +1401,130 @@ embodichain.lab.task_program.semantics.scene
    :members:
    :no-index:
 
-embodichain.lab.sim.solvers.neural_ik_solver
---------------------------------------------
+embodichain.lab.sim.motion.solvers.base_solver
+----------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.neural_ik_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.base_solver
+
+Shared solver configuration and runtime contracts for IK, FK, joint limits,
+and optional continuous batch IK. Continuous selection defaults to unsupported;
+implementations opt in through ``supports_continuous_batch_ik`` and implement
+the protected ``_select_continuous_ik_path`` hook for batched candidates.
+
+.. autosummary::
+
+   BaseSolver
+   SolverCfg
+
+embodichain.lab.sim.motion.solvers.neural_ik_solver
+---------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.neural_ik_solver
 
 .. autosummary::
 
    NeuralIKSolverCfg
    NeuralIKSolver
 
-embodichain.lab.sim.solvers.null_space_posture_task
----------------------------------------------------
+embodichain.lab.sim.motion.solvers.null_space_posture_task
+----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.null_space_posture_task
+.. currentmodule:: embodichain.lab.sim.motion.solvers.null_space_posture_task
 
 .. autosummary::
 
    NullSpacePostureTask
 
-embodichain.lab.sim.solvers.pink_solver
----------------------------------------
+embodichain.lab.sim.motion.solvers.opw_solver
+---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.pink_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.opw_solver
+
+Configuration and runtime solver for analytic OPW forward and inverse
+kinematics of compatible six-axis manipulators.
+
+.. autosummary::
+
+   OPWSolver
+   OPWSolverCfg
+
+embodichain.lab.sim.motion.solvers.pink_solver
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.pink_solver
 
 .. autosummary::
 
    PinkSolver
    PinkSolverCfg
 
-embodichain.lab.sim.solvers.srs_solver
---------------------------------------
+embodichain.lab.sim.motion.solvers.srs_solver
+---------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.solvers.srs_solver
+.. currentmodule:: embodichain.lab.sim.motion.solvers.srs_solver
 
 .. autosummary::
 
    SRSSolver
    SRSSolverCfg
+
+embodichain.lab.sim.spawn
+-------------------------
+
+Translation boundary from EmbodiChain object configs and singleton USD assets
+into DexSim Spawn descriptors.
+
+.. currentmodule:: embodichain.lab.sim.spawn
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   articulation_desc_from_usd
+   rigid_desc_from_cfg
+   rigid_desc_from_usd
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.descriptors
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.descriptors
+
+.. autosummary::
+
+   articulation_desc_from_cfg
+   configure_articulation_desc
+   rigid_desc_from_cfg
+   surface_deformable_desc_from_cfg
+   volume_deformable_desc_from_cfg
+
+embodichain.lab.sim.spawn.scene
+-------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.scene
+
+.. autosummary::
+
+   SpawnScene
+
+embodichain.lab.sim.spawn.source
+--------------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.source
+
+.. autosummary::
+
+   resolve_articulation_source
+
+embodichain.lab.sim.spawn.usd
+-----------------------------
+
+.. currentmodule:: embodichain.lab.sim.spawn.usd
+
+.. autosummary::
+
+   articulation_desc_from_usd
+   rigid_desc_from_usd
 
 embodichain.lab.sim.utility.render_utils
 ----------------------------------------
@@ -1273,10 +1535,10 @@ embodichain.lab.sim.utility.render_utils
 
    select_default_renderer
 
-embodichain.lab.sim.workspace.caches.cache_utils
-------------------------------------------------
+embodichain.lab.sim.motion.workspace.caches.cache_utils
+-------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.caches.cache_utils
+.. currentmodule:: embodichain.lab.sim.motion.workspace.caches.cache_utils
 
 .. autosummary::
 
@@ -1290,10 +1552,10 @@ embodichain.lab.sim.workspace.caches.cache_utils
    show_session_info
    show_total_size
 
-embodichain.lab.sim.workspace.caches.results_cache
---------------------------------------------------
+embodichain.lab.sim.motion.workspace.caches.results_cache
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.caches.results_cache
+.. currentmodule:: embodichain.lab.sim.motion.workspace.caches.results_cache
 
 .. autosummary::
 
@@ -1303,149 +1565,171 @@ embodichain.lab.sim.workspace.caches.results_cache
    serialize_results
    deserialize_results
 
-embodichain.lab.sim.workspace.constraints.base_constraint
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.constraints.base_constraint
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.constraints.base_constraint
+.. currentmodule:: embodichain.lab.sim.motion.workspace.constraints.base_constraint
 
 .. autosummary::
 
    IConstraintChecker
    BaseConstraintChecker
 
-embodichain.lab.sim.workspace.constraints.workspace_constraint
---------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.constraints.workspace_constraint
+---------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.constraints.workspace_constraint
+.. currentmodule:: embodichain.lab.sim.motion.workspace.constraints.workspace_constraint
 
 .. autosummary::
 
    WorkspaceConstraintChecker
 
-embodichain.lab.sim.workspace.samplers.base_sampler
----------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.base_sampler
+----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.base_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.base_sampler
 
 .. autosummary::
 
    ISampler
    BaseSampler
 
-embodichain.lab.sim.workspace.samplers.gaussian_sampler
--------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.gaussian_sampler
+--------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.gaussian_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.gaussian_sampler
 
 .. autosummary::
 
    GaussianSampler
 
-embodichain.lab.sim.workspace.samplers.halton_sampler
------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.halton_sampler
+------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.halton_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.halton_sampler
 
 .. autosummary::
 
    HaltonSampler
 
-embodichain.lab.sim.workspace.samplers.importance_sampler
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.importance_sampler
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.importance_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.importance_sampler
 
 .. autosummary::
 
    ImportanceSampler
 
-embodichain.lab.sim.workspace.samplers.iniform_sampler
-------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.iniform_sampler
+-------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.iniform_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.iniform_sampler
 
 .. autosummary::
 
    UniformSampler
 
-embodichain.lab.sim.workspace.samplers.lhs_sampler
---------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.lhs_sampler
+---------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.lhs_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.lhs_sampler
 
 .. autosummary::
 
    LatinHypercubeSampler
 
-embodichain.lab.sim.workspace.samplers.random_sampler
------------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.random_sampler
+------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.random_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.random_sampler
 
 .. autosummary::
 
    RandomSampler
 
-embodichain.lab.sim.workspace.samplers.sobol_sampler
-----------------------------------------------------
+embodichain.lab.sim.motion.workspace.samplers.sobol_sampler
+-----------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.samplers.sobol_sampler
+.. currentmodule:: embodichain.lab.sim.motion.workspace.samplers.sobol_sampler
 
 .. autosummary::
 
    SobolSampler
 
-embodichain.lab.sim.workspace.visualizers.axis_visualizer
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.axis_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer
 
 .. autosummary::
 
    AxisVisualizer
 
-embodichain.lab.sim.workspace.visualizers.base_visualizer
----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
+----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.base_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
 
 .. autosummary::
 
    IVisualizer
    BaseVisualizer
 
-embodichain.lab.sim.workspace.visualizers.point_cloud_visualizer
-----------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+---------------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.point_cloud_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+
+.. autosummary::
+
+   ManipulabilityColorCfg
+   ManipulabilityPointSet
+   ManipulabilityNormalization
+   ManipulabilityColorMapping
+   InspectionSelection
+   PointInspection
+   ManipulabilityVisualizer
+   align_manipulability_scores
+   normalize_manipulability
+   map_manipulability_colors
+   select_inspection_indices
+   inspect_points
+   translational_manipulability_ellipsoid
+   ellipsoid_surface
+
+embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
+-----------------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
 
 .. autosummary::
 
    PointCloudVisualizer
 
-embodichain.lab.sim.workspace.visualizers.sphere_visualizer
------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.sphere_visualizer
+------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.sphere_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.sphere_visualizer
 
 .. autosummary::
 
    SphereVisualizer
 
-embodichain.lab.sim.workspace.visualizers.visualizer_factory
-------------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.visualizer_factory
+-------------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.visualizer_factory
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.visualizer_factory
 
 .. autosummary::
 
    VisualizerFactory
    create_visualizer
 
-embodichain.lab.sim.workspace.visualizers.voxel_visualizer
-----------------------------------------------------------
+embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
+-----------------------------------------------------------------
 
-.. currentmodule:: embodichain.lab.sim.workspace.visualizers.voxel_visualizer
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.voxel_visualizer
 
 .. autosummary::
 
@@ -1499,6 +1783,22 @@ embodichain.lab.visualization.cli
    add_viser_args_to_parser
    visualization_cfg_from_args
 
+embodichain.lab.visualization.picker
+------------------------------------
+
+.. currentmodule:: embodichain.lab.visualization.picker
+
+Browser picking caches triangle geometry and returns the closest node hit by
+a world-space ray. The Viser worker pairs this geometry with poses from the
+same scene revision before producing a pick command.
+
+.. autosummary::
+
+   ScenePicker
+
+.. autoclass:: ScenePicker
+   :members:
+
 embodichain.lab.visualization.protocol
 --------------------------------------
 
@@ -1520,6 +1820,7 @@ embodichain.lab.visualization.protocol
    JointControlSpec
    JointControlState
    MeshGeometry
+   PickCommand
    PointCloudOverlay
    SceneFrame
    SceneManifest
@@ -1568,6 +1869,7 @@ embodichain.learning.rl.algo.apg
 
    APG
    APGCfg
+   complete_discounted_return
    segmented_discounted_return
 
 embodichain.learning.rl.algo.base
@@ -1668,6 +1970,18 @@ embodichain.learning.rl.experimental.newton.train_planar_reach
    NewtonPlanarReachTrainingCfg
    train_planar_reach
 
+embodichain.learning.rl.gradients
+---------------------------------
+
+Row-wise action-adjoint clipping and its rollout-level diagnostics.
+
+.. currentmodule:: embodichain.learning.rl.gradients
+
+.. autosummary::
+
+   BatchedGradientNormStats
+   clip_batched_gradient_norm
+
 embodichain.learning.rl.models.actor_critic
 -------------------------------------------
 
@@ -1694,6 +2008,15 @@ embodichain.learning.rl.models.policy
 .. autosummary::
 
    Policy
+
+embodichain.learning.rl.normalization
+-------------------------------------
+
+.. currentmodule:: embodichain.learning.rl.normalization
+
+.. autosummary::
+
+   RunningObservationNormalizer
 
 embodichain.learning.rl.utils.optimizer
 ---------------------------------------
@@ -1957,6 +2280,18 @@ embodichain_tasks.manipulation.tableware.stack_cups
 
    StackCupsEnv
 
+embodichain_tasks.special.franka_reach_apg
+-------------------------------------------
+
+Differentiable Franka FR3 reach environment that demonstrates the explicit
+kinematics route used by analytic policy-gradient experiments.
+
+.. currentmodule:: embodichain_tasks.special.franka_reach_apg
+
+.. autosummary::
+
+   FrankaReachApgEnv
+
 embodichain_tasks.special.simple_task
 -------------------------------------
 
@@ -1983,3 +2318,26 @@ embodichain_tasks.utils.importer
 .. autosummary::
 
    import_packages
+
+Standalone simulation command-line options
+-----------------------------------------
+
+``embodichain.cli.sim`` builds simulation arguments without importing the
+simulation runtime. Gym launchers compose these options with configuration
+and recording flags. Seed options are opt-in: ``resolve_seed`` resolves ``-1``
+to an effective 32-bit seed without changing random streams or deterministic
+kernel policy; callers log and apply that seed to their own generators.
+
+.. currentmodule:: embodichain.cli.sim
+
+.. autosummary::
+
+   add_sim_args_to_parser
+   add_seed_arg_to_parser
+   resolve_seed
+
+.. autofunction:: add_sim_args_to_parser
+
+.. autofunction:: add_seed_arg_to_parser
+
+.. autofunction:: resolve_seed

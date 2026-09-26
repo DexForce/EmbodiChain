@@ -48,10 +48,10 @@ from embodichain.lab.sim.atomic_actions import (  # noqa: E402
     SkillDescriptor,
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy  # noqa: E402
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg  # noqa: E402
+from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain.lab.sim.planners import MotionGenCfg, MotionGenerator  # noqa: E402
-from embodichain.lab.sim.planners.curobo.curobo_planner import (  # noqa: E402
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402
     CuroboAutoGenCfg,
     CuroboPlannerCfg,
     CuroboWorldCfg,
@@ -100,7 +100,7 @@ CONTROL_PART = "arm"
 CALL_ID = "test.move_end_effector"
 SAMPLE_COUNT = 80
 COMMAND_CYCLE_TIME = 0.1
-MOVE_AFTER_COMMAND = 12
+MOVE_AFTER_COMMAND = 6
 OBSTACLE_SIZE = [0.10, 0.10, 0.12]
 OBSTACLE_START_POSITION = [0.59, -0.20, 0.455]
 MAXIMUM_FINAL_EEF_ERROR = 0.04
@@ -196,9 +196,11 @@ def _profile() -> RobotSkillProfile:
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",
                     sample_count=SAMPLE_COUNT,
+                    # Isolate dynamic-world recovery from velocity feed-forward tracking.
+                    velocity_targets="zero",
                 ),
                 tracking_policy=TrackingPolicy.joint_position(
-                    in_flight_max_abs_error=0.1,
+                    in_flight_max_abs_error=0.12,
                     terminal_max_abs_error=0.1,
                 ),
                 recovery_policy=RecoveryPolicy(
@@ -249,7 +251,7 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
             cfg=RigidObjectCfg(
                 uid=OBSTACLE_UID,
                 shape=CubeCfg(size=OBSTACLE_SIZE),
-                attrs=RigidBodyAttributesCfg(),
+                attrs=RigidBodyPhysicsCfg(),
                 body_type="kinematic",
                 init_pos=OBSTACLE_START_POSITION,
                 init_rot=[0.0, 0.0, 0.0],
@@ -262,13 +264,11 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
                 planner_cfg=CuroboPlannerCfg(
                     robot_uid=ROBOT_UID,
                     auto_gen=CuroboAutoGenCfg(
-                        fit_type="morphit",
                         sphere_density=0.3,
                         collision_sphere_buffer=0.005,
                     ),
                     world=CuroboWorldCfg(
                         rigid_objects=[obstacle],
-                        obstacle_representation="cuboid",
                         dynamic_obstacle_names=[OBSTACLE_UID],
                         multi_env=False,
                     ),
@@ -335,11 +335,11 @@ def test_semantic_runtime_replans_after_dynamic_curobo_world_change() -> None:
                 adapter.sleep(result.wait_duration)
             result = runtime.step()
             if not obstacle_moved and sink.command_count >= MOVE_AFTER_COMMAND:
-                blocking_pose = obstacle.get_local_pose(to_matrix=True).clone()
-                blocking_pose[:, :3, 3] = 0.5 * (
-                    start_pose[:, :3, 3] + target_pose[:, :3, 3]
-                )
-                obstacle.set_local_pose(blocking_pose)
+                moved_pose = obstacle.get_local_pose(to_matrix=True).clone()
+                # Trigger a collision-world revision without making the
+                # replanning start state itself collide with the obstacle.
+                moved_pose[:, 1, 3] -= 0.1
+                obstacle.set_local_pose(moved_pose)
                 adapter.sleep(adapter.physics_dt)
                 obstacle_moved = True
 

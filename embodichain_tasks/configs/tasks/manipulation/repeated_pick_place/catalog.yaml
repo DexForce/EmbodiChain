@@ -1,0 +1,14 @@
+task_key: repeated_pick_place
+title: Repeated Pick and Place
+summary: Move a cube between two locations using a repeated Task Program.
+tags: [pick_place, single_arm, task_program]
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml
+  ur5:
+    config: task.ur5.yaml
+  franka_newton:
+    config: task.franka.newton.yaml
+  ur5_newton:
+    config: task.ur5.newton.yaml

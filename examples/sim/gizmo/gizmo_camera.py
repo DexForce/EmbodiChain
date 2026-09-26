@@ -21,9 +21,26 @@ It shows how to create a gizmo attached to a camera for real-time pose manipulat
 from __future__ import annotations
 
 import argparse
+import time
+from embodichain.cli.sim import add_sim_args_to_parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build CLI options without initializing simulation resources."""
+    parser = argparse.ArgumentParser(
+        description="Create and simulate a camera with gizmo in SimulationManager"
+    )
+    add_sim_args_to_parser(parser)
+    return parser
+
+
+if __name__ == "__main__":
+    # Parse before importing optional simulation/planning dependencies.
+    _cli_args = build_parser().parse_args()
+
+
 import cv2
 import numpy as np
-import time
 import torch
 
 torch.set_printoptions(precision=4, sci_mode=False)
@@ -31,21 +48,23 @@ torch.set_printoptions(precision=4, sci_mode=False)
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.lab.sim.sensors import Camera, CameraCfg
-from embodichain.lab.sim.cfg import RigidObjectCfg, RigidBodyAttributesCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    RigidObjectCfg,
+    RigidBodyPhysicsCfg,
+    RenderCfg,
+    physics_cfg_for_backend,
+)
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
-from embodichain.lab.gym.utils.gym_utils import add_env_launcher_args_to_parser
 
 
-def main():
+def main(args: argparse.Namespace | None = None) -> None:
     """Main function to demonstrate camera gizmo manipulation."""
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Create and simulate a camera with gizmo in SimulationManager"
-    )
-    add_env_launcher_args_to_parser(parser)
-    args = parser.parse_args()
+    parser = build_parser()
+    if args is None:
+        args = parser.parse_args()
 
     # Configure the simulation
     sim_cfg = SimulationManagerCfg(
@@ -53,14 +72,14 @@ def main():
         height=1080,
         headless=True,
         physics_dt=1.0 / 100.0,
-        sim_device=args.device,
+        device=args.device,
         render_cfg=RenderCfg(renderer=args.renderer),
+        physics_cfg=physics_cfg_for_backend(args.physics),
         visualization=visualization_cfg_from_args(args),
     )
 
     # Create simulation context
     sim = SimulationManager(sim_cfg)
-    sim.set_manual_update(False)
 
     # Add some objects to the scene for camera to observe
     for i in range(5):
@@ -68,11 +87,15 @@ def main():
             uid=f"cube_{i}",
             shape=CubeCfg(size=[0.1, 0.1, 0.1]),
             body_type="dynamic",
-            attrs=RigidBodyAttributesCfg(
-                mass=1.0,
-                dynamic_friction=0.5,
-                static_friction=0.5,
-                restitution=0.3,
+            attrs=RigidBodyPhysicsCfg.from_dict(
+                {
+                    "mass_props": {"mass": 1.0},
+                    "material_props": {
+                        "dynamic_friction": 0.5,
+                        "static_friction": 0.5,
+                        "restitution": 0.3,
+                    },
+                }
             ),
             init_pos=[0.5 + i * 0.3, 0.0, 0.5],
         )
@@ -97,30 +120,32 @@ def main():
 
     # Add camera to simulation
     camera = sim.add_sensor(sensor_cfg=camera_cfg)
+    sim.prepare()
 
-    # Wait for initialization
-    time.sleep(0.2)
+    if sim.is_use_gpu_physics:
+        sim.init_gpu_physics()
+    sim.update(step=1)
 
     native_window_opened = False
     if not args.headless:
         native_window_opened = sim.open_window()
 
-    # Enable gizmo for interactive camera control using the new unified API
-    if native_window_opened or args.viser:
+    if args.viser:
         sim.enable_gizmo(
             uid="gizmo_camera",
-            enable_native=native_window_opened,
         )
         if not sim.has_gizmo("gizmo_camera"):
             logger.log_error("Failed to enable gizmo for camera!")
             return
-    else:
+    elif not native_window_opened:
         logger.log_warning(
             "Gizmo interaction is disabled in headless mode without Viser."
         )
+    else:
+        logger.log_warning("Camera Gizmo control is available through Viser only.")
 
     logger.log_info("Gizmo-Camera tutorial started!")
-    if native_window_opened or args.viser:
+    if args.viser:
         logger.log_info(
             "Use the gizmo to interactively control the camera position and orientation"
         )
@@ -141,11 +166,11 @@ def run_simulation(
 ) -> None:
     """Run the simulation loop with gizmo updates."""
     step_count = 0
-    last_time = time.time()
+    last_time = time.perf_counter()
     last_step = 0
 
     if show_camera_window:
-        logger.log_info("Camera view window will open. Press Ctrl+C or 'q' to exit")
+        logger.log_info("Camera view window will open. Press Ctrl+C to exit")
     if sim.has_gizmo("gizmo_camera"):
         logger.log_info(
             "Use the gizmo in the 3D view to control camera position and orientation"
@@ -153,9 +178,9 @@ def run_simulation(
 
     try:
         while True:
-            # Update all gizmos managed by sim (including camera gizmo)
-            sim.update_gizmos()
-            sim.capture_visualization_safely()
+            frame_start = time.perf_counter()
+            # update() applies Gizmo commands before advancing one physics step.
+            sim.update(step=1)
 
             # Update camera to get latest sensor data
             camera.update()
@@ -177,25 +202,20 @@ def run_simulation(
                     # Convert RGB to BGR for OpenCV
                     bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
 
-                # Add text overlay
-                cv2.putText(
-                    bgr_image,
-                    "Press 'h' to toggle camera gizmo visibility",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
+                    # Add text overlay
+                    cv2.putText(
+                        bgr_image,
+                        "Camera sensor preview",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (0, 255, 0),
+                        2,
+                    )
 
-                # Display the image
-                cv2.imshow("Gizmo Camera View", bgr_image)
-
-                # Check for key press
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord("h"):
-                    # Toggle the camera gizmo visibility using SimulationManager API
-                    sim.toggle_gizmo_visibility("gizmo_camera")
+                    # Display the image
+                    cv2.imshow("Gizmo Camera View", bgr_image)
+                    cv2.waitKey(1)
 
             # Example: Destroy gizmo after certain steps to test cleanup
             if step_count == 30000 and sim.has_gizmo("gizmo_camera"):
@@ -204,7 +224,7 @@ def run_simulation(
 
             # Print simulation statistics and camera info
             if step_count % 1000 == 0:
-                current_time = time.time()
+                current_time = time.perf_counter()
                 elapsed = current_time - last_time
                 fps = (
                     sim.num_envs * (step_count - last_step) / elapsed
@@ -225,6 +245,9 @@ def run_simulation(
                 last_time = current_time
                 last_step = step_count
 
+            elapsed = time.perf_counter() - frame_start
+            time.sleep(max(0.0, sim.sim_config.physics_dt - elapsed))
+
     except KeyboardInterrupt:
         logger.log_info("\nStopping simulation...")
     finally:
@@ -239,4 +262,4 @@ def run_simulation(
 
 
 if __name__ == "__main__":
-    main()
+    main(_cli_args)

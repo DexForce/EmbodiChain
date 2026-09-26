@@ -40,6 +40,8 @@ from embodichain.utils.math import matrix_from_quat
 from embodichain.lab.sim.utility import get_dexsim_arena_num
 from embodichain.utils import configclass, is_configclass, logger
 
+__all__ = ["BaseSensor", "SensorCfg"]
+
 
 @configclass
 class SensorCfg(ObjectBaseCfg):
@@ -54,8 +56,8 @@ class SensorCfg(ObjectBaseCfg):
 
         pos: Tuple[float, float, float] = (0.0, 0.0, 0.0)
         """Position of the sensor in the parent frame. Defaults to (0.0, 0.0, 0.0)."""
-        quat: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
-        """Orientation of the sensor in the parent frame as a quaternion (w, x, y, z). Defaults to (1.0, 0.0, 0.0, 0.0)."""
+        quat: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+        """Orientation in the parent frame as ``(x, y, z, w)``. Defaults to identity."""
 
         parent: str | None = None
         """Name of the parent frame. If not specified, the sensor will be placed in the arena frame.
@@ -171,10 +173,18 @@ class BaseSensor(BatchEntity):
     SUPPORTED_DATA_TYPES = []
 
     def __init__(
-        self, config: SensorCfg, device: torch.device = torch.device("cpu")
+        self,
+        config: SensorCfg,
+        device: torch.device = torch.device("cpu"),
+        *,
+        num_instances: int | None = None,
     ) -> None:
-
-        num_envs = get_dexsim_arena_num()
+        num_envs = (
+            get_dexsim_arena_num() if num_instances is None else int(num_instances)
+        )
+        if num_envs <= 0:
+            raise ValueError("A sensor requires at least one simulation instance.")
+        self._num_instances = num_envs
         self._data_buffer: TensorDict[str, torch.Tensor] = TensorDict(
             {}, batch_size=[num_envs], device=device
         )
@@ -186,7 +196,7 @@ class BaseSensor(BatchEntity):
 
     @cached_property
     def num_instances(self) -> int:
-        return get_dexsim_arena_num()
+        return self._num_instances
 
     @abstractmethod
     def _build_sensor_from_config(
@@ -216,7 +226,8 @@ class BaseSensor(BatchEntity):
         """Get the pose of the sensor in the arena frame.
 
         Args:
-            to_matrix: If True, return the pose as a 4x4 transformation matrix.
+            to_matrix: If True, return the pose as a 4x4 transformation matrix;
+                otherwise return ``(x, y, z, qx, qy, qz, qw)``.
 
         Returns:
             A tensor representing the pose of the sensor in the arena frame.
@@ -236,3 +247,19 @@ class BaseSensor(BatchEntity):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         return super().reset(env_ids)
+
+    @property
+    def requires_substep_update(self) -> bool:
+        """Whether the environment must sample this sensor each physics substep."""
+        return False
+
+    def begin_control_step(self) -> None:
+        """Begin interval accumulation for a sensor that samples physics substeps."""
+
+    def update_physics_step(self, dt: float) -> None:
+        """Sample a sensor that opts into physics substeps.
+
+        Args:
+            dt: Elapsed physics time in seconds.
+        """
+        self.update()

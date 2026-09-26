@@ -38,6 +38,9 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
 _PROGRAMS = {
+    Path(
+        "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
+    ): "rubiks_cube_pick_place",
     Path("tasks/manipulation/repeated_pick_place/task_program/program.yaml"): (
         "repeated_cube_pick_place"
     ),
@@ -52,7 +55,17 @@ _PROGRAMS = {
     ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"): (
+        "rubiks_cube_pick_place",
+        "task_program_rubiks_cube_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
@@ -62,7 +75,17 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "franka_panda",
     ),
+    Path("tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "franka_panda",
+    ),
     Path("tasks/manipulation/open_drawer/task.ur5.yaml"): (
+        "slide_open_drawer",
+        "task_program_open_drawer",
+        "ur5_dh_pgi_140_80",
+    ),
+    Path("tasks/manipulation/open_drawer/task.ur5.newton.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
@@ -87,6 +110,12 @@ _RESOURCE_PATHS = frozenset(
     {
         *_PROGRAMS,
         *_DEPLOYMENTS,
+        Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/README.md"),
+        Path("tasks/manipulation/push_cube/catalog.yaml"),
+        Path("tasks/manipulation/push_cube/README.md"),
+        Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),
+        Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
@@ -97,9 +126,13 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/env.yaml"),
+        Path("tasks/manipulation/open_drawer/env.newton.yaml"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
+        Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
+        Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }
@@ -196,6 +229,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.json",
         "**/*.yaml",
         "**/*.yml",
+        "**/README.md",
     ]
     expected_outputs = {
         Path("embodichain_tasks") / "configs" / relative_path

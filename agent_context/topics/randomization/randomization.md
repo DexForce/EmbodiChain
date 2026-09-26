@@ -25,12 +25,20 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 
 | Function | Target | Key params |
 |---|---|---|
-| `randomize_rigid_object_mass` | `RigidObject` mass | `mass_range`, `relative` |
+| `randomize_rigid_object_mass` | Dynamic `RigidObject` mass/inertia | `mass_range`, `relative`, `recompute_inertia`, `min_mass` |
 | `randomize_rigid_object_center_of_mass` | `RigidObject` CoM offset | `com_pos_offset_range` |
-| `randomize_articulation_mass` | `Articulation` link masses | `mass_range` (uniform or per-link dict), `link_names` (regex), `relative` |
+| `randomize_articulation_mass` | `Articulation` link mass/inertia | `mass_range` (uniform or per-link dict), `link_names` (regex), `relative`, `recompute_inertia`, `min_mass` |
 
-- `relative=True` adds sampled value to the initial/default mass instead of replacing.
-- `randomize_articulation_mass` supports a `dict[str, tuple]` for per-link ranges; when used, `link_names` is ignored.
+- `relative=True` adds the sampled value to the backend-resolved initial mass
+  stored in the target object's `default_mass` snapshot; repeated calls
+  therefore do not accumulate for either rigid objects or articulations.
+- Rigid-object and articulation mass samples are clamped to positive
+  `min_mass`. By default, inertia is recomputed from the corresponding
+  initialization snapshot using the mass ratio; set `recompute_inertia=False`
+  only when inertia is managed separately.
+- Non-dynamic rigid objects are skipped with a warning.
+- `randomize_articulation_mass` supports a `dict[str, tuple]` for per-link
+  ranges; when used, `link_names` is ignored.
 - Link names are resolved via `resolve_matching_names` (regex matching).
 
 ### Visual (`visual.py`)
@@ -82,85 +90,35 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 - `shared_sample=True` → one scale sample shared across all objects in the list.
 - `_normalize_env_ids` helper: if `env_ids is None`, targets all environments.
 
-## Randomization as Events
+## Event scheduling and reproducibility
 
-Randomizers are wired into tasks using `EventCfg`, which extends `FunctorCfg`:
+Wire randomizers with named `EventCfg` entries (`mode="startup"`, `"reset"` or
+`"interval"`). `interval_step` controls the interval; `is_global=True` shares a
+counter, while the default uses per-row counters. Configuration and callable
+scaffolding are owned by [manager-functor](../manager-functor/manager-functor.md)
+and `/add-functor`.
 
-```python
-@configclass
-class EventCfg(FunctorCfg):
-    mode: Literal["startup", "interval", "reset"] = "reset"
-    interval_step: int = 10
-    is_global: bool = False
-```
+`BaseEnv` establishes the seed before scene construction. `EventManager` derives
+a stable seed from `(seed, phase, mode, functor_name, invocation)` for each
+constructor/call scope. `_scoped_random_seed()` temporarily seeds Python,
+NumPy, Torch CPU and the selected CUDA device, then restores their previous
+states, including on exceptions.
 
-### Modes
+- Class-functor construction has its own phase, separate from event calls.
+- `set_seed()` resets invocation and interval counters; a repeated seed rewinds
+  streams. `None` disables scoped seeding and uses the ambient RNG state.
+- Adding another named functor does not consume this functor's stream.
+- Renaming a functor changes its stream. Invocation order and selected row
+  batches still matter; this is not an independent RNG stream per environment row.
 
-| Mode | When applied | Use case |
-|---|---|---|
-| `startup` | Once when environment initializes | One-time scene setup (e.g., fixed material assignment) |
-| `reset` | Every environment reset | Domain randomization per episode |
-| `interval` | Every `interval_step` env steps | Continuous perturbation during episode |
+For reproducibility changes, inspect `event_manager.py` and the effective seed
+propagation in `base_env.py` / `embodied_env.py`. Run
+`tests/gym/envs/test_env_seed.py` and
+`tests/gym/envs/managers/test_event_manager_seed.py`.
 
-### `is_global`
-
-- `True` → same interval counter for all envs.
-- `False` → per-env independent interval counters.
-
-### Wiring example
-
-```python
-@configclass
-class MyTaskEventCfg:
-    randomize_obj_mass = EventCfg(
-        func=randomize_rigid_object_mass,
-        mode="reset",
-        params={
-            "entity_cfg": SceneEntityCfg(uid="target_object"),
-            "mass_range": (0.1, 0.5),
-            "relative": False,
-        },
-    )
-
-    randomize_obj_pose = EventCfg(
-        func=randomize_rigid_object_pose,
-        mode="reset",
-        params={
-            "entity_cfg": SceneEntityCfg(uid="target_object"),
-            "position_range": ([-0.05, -0.05, 0.0], [0.05, 0.05, 0.0]),
-            "rotation_range": ([0, 0, -45], [0, 0, 45]),
-        },
-    )
-```
-
-Each `EventCfg` attribute in the config class becomes a named event functor managed by `EventManager`.
-
-## How to Add a Randomizer
-
-1. Use the `/add-functor` skill to scaffold the function with correct signature.
-2. Place function-style randomizers in the appropriate file under `embodichain/lab/gym/envs/managers/randomization/` (physics, visual, spatial, or geometry).
-3. Signature: `def randomize_*(env: EmbodiedEnv, env_ids: torch.Tensor | None, entity_cfg: SceneEntityCfg, **params) -> None`.
-4. Add the function name to `__all__` in the source file.
-5. The `__init__.py` uses wildcard imports, so `__all__` membership is sufficient for export.
-6. Wire it in a task config via `EventCfg(func=your_function, mode="reset", params={...})`.
-
-For class-style randomizers (stateful), inherit from `Functor` and implement `__init__(cfg, env)` + `__call__(env, env_ids, ...)`.
-
-## Configuration
-
-### `FunctorCfg` (base)
-
-```python
-@configclass
-class FunctorCfg:
-    func: Callable | Functor = MISSING     # function or callable class
-    params: dict[str, Any] = dict()         # keyword args passed to func
-    extra: dict[str, Any] = dict()          # metadata (e.g., output shape)
-```
-
-### `SceneEntityCfg`
-
-Used in `params` to reference simulation objects by `uid`. The manager resolves the entity from `SimulationManager` at initialization.
+Workspace-aware spatial sampling uses
+[robot workspace](../robot-workspace/robot-workspace.md); validate it with
+`tests/gym/envs/managers/test_workspace_randomization.py`.
 
 ### Range conventions
 
@@ -171,13 +129,15 @@ Used in `params` to reference simulation objects by `uid`. The manager resolves 
 
 ### Sampling
 
-All randomizers use `embodichain.utils.math.sample_uniform(lower, upper, size)` for uniform sampling.
-
+Randomizers use `embodichain.utils.math.sample_uniform(...)` for uniform
+sampling where applicable. Physics samples are allocated on the target object's
+device, not assumed to share `env.device`.
 ## Common Failure Modes
 
 | Symptom | Likely cause |
 |---|---|
 | Randomizer silently does nothing | `entity_cfg.uid` not found in `sim.get_rigid_object_uid_list()` — all randomizers early-return on UID mismatch |
+| Rigid-object mass is clamped | The sampled absolute mass or relative result was below positive `min_mass` |
 | `ValueError` on link name | `mass_range` dict key doesn't match any `articulation.link_names` |
 | Camera randomization error | Extrinsics config has neither `parent` nor `eye` set — unsupported mode |
 | Light randomization not per-env | By design: `randomize_light` applies same values across all envs |
@@ -186,3 +146,20 @@ All randomizers use `embodichain.utils.math.sample_uniform(lower, upper, size)` 
 | Deprecated warning on `randomize_rigid_object_body_scale` | Migrate to `randomize_rigid_object_scale` with `scale_factor_range` parameter |
 | Pose randomization leaves residual velocity | `clear_dynamics()` is called, but if `physics_update_step` is not set, objects may still drift on next step |
 | `env_ids` is `None` at `interval` mode | `_normalize_env_ids` converts `None` to `torch.arange(env.num_envs)` — this is safe |
+
+### Component-owned Torch streams
+
+`BaseEnv.get_generator(name)` returns a persistent device-local generator for
+a named component. Explicit `reset(seed=...)` rewinds every registered stream;
+ordinary selective reset preserves stream progress. Streams are independent by
+component name, not by environment row. EventManager retains its existing scoped
+RNG contract, and environment reset now invokes stateful event reset before
+reset-mode events. Per-row interval counters reset only for selected rows.
+
+`push_articulation_by_setting_velocity` lives in `managers/randomization/physics.py`.
+It adds sampled disturbances to the selected articulation's root velocity and
+maintains independently sampled per-row timers through EventManager reset.
+
+Named component generators use nondeterministic entropy when the environment seed
+is `None`. An explicit seed, including zero, derives stable named streams; an
+ordinary reset does not rewind them.

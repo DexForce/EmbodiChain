@@ -18,9 +18,23 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+import math
+from numbers import Real
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
+
+from .affordance_sampling import (
+    AffordancePoseCandidates,
+    AffordanceSample,
+    AffordanceSamplingContext,
+    _roll_poses,
+    _sample_pose_candidates,
+    _validate_range,
+)
+
+if TYPE_CHECKING:
+    from embodichain.toolkits.graspkit.pose_generator import GraspPoseGenerator
 
 from ._articulation_geometry_keys import (
     _ARTICULATION_POINT_CLOUD_KEY,
@@ -52,6 +66,36 @@ class Affordance:
     custom_config: dict[str, Any] = field(default_factory=dict)
     """User-defined configuration payload."""
 
+    def sample_candidates(
+        self,
+        candidates: AffordancePoseCandidates,
+        *,
+        sampling: AffordanceSamplingContext | None,
+        env_ids: torch.Tensor,
+        key: str,
+        reference_poses: torch.Tensor | None = None,
+    ) -> AffordanceSample:
+        """Select poses from a legal candidate set for each logical branch.
+
+        Args:
+            candidates: Batched poses, costs, and validity produced by geometry.
+            sampling: Optional reproducible branch stream. ``None`` selects the
+                lowest-cost candidate in every row.
+            env_ids: Stable environment identities matching candidate rows.
+            key: Sampling operation identity.
+            reference_poses: Optional frames used to compare candidate geometry.
+
+        Returns:
+            Per-row success, selected poses, and selection metadata.
+        """
+        return _sample_pose_candidates(
+            candidates,
+            sampling,
+            env_ids=env_ids,
+            key=key,
+            reference_poses=reference_poses,
+        )
+
     def set_custom_config(self, key: str, value: Any) -> None:
         """Set a custom affordance configuration value."""
         self.custom_config[key] = value
@@ -80,21 +124,31 @@ class Affordance:
 class AntipodalAffordance(Affordance):
     """Antipodal grasp affordance for parallel-jaw grippers.
 
-    The affordance owns only target-local triangle-mesh data. Simulator entity
-    handles and live poses belong to scene grounding, not semantic geometry.
+    The affordance owns only target-local triangle-mesh data. Its mesh may
+    describe either the whole object or one selected articulation link;
+    operations that infer whole-object geometry reject the latter. Simulator
+    entity handles and live poses belong to scene grounding.
     """
 
     mesh_vertices: torch.Tensor | None = None
-    """Object mesh vertices, shape [N, 3]."""
+    """Target-local mesh vertices, shape [N, 3]."""
 
     mesh_triangles: torch.Tensor | None = None
-    """Object mesh triangle indices, shape [M, 3]."""
+    """Target-local mesh triangle indices, shape [M, 3]."""
+
+    mesh_scope: Literal["object", "link"] = "object"
+    """Whether the mesh describes the whole object or one selected link."""
 
     MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
     """Maximum point-cloud size used for geometry-distribution analysis."""
 
     def __post_init__(self) -> None:
         """Validate optional target-local geometry without owning a generator."""
+        if type(self.mesh_scope) is not str or self.mesh_scope not in (
+            "object",
+            "link",
+        ):
+            raise ValueError("mesh_scope must be 'object' or 'link'.")
         if self.mesh_vertices is None and self.mesh_triangles is None:
             return
         if self.mesh_vertices is None or self.mesh_triangles is None:
@@ -134,6 +188,41 @@ class AntipodalAffordance(Affordance):
             raise ValueError(
                 "AntipodalAffordance.mesh_triangles reference invalid vertices."
             )
+
+    def get_grasp_candidates(
+        self,
+        generator: GraspPoseGenerator,
+        object_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> AffordancePoseCandidates:
+        """Generate constrained candidates using an externally owned service.
+
+        Args:
+            generator: Grasp-pose service configured for the actual gripper.
+            object_poses: Live-grounded world poses with shape ``(B, 4, 4)``.
+            approach_direction: Shared or per-row approach direction.
+            obj_longest_axis: Optional axis restricting the graspable region.
+            is_positive_part: Which end of the optional axis is graspable.
+
+        Returns:
+            Padded candidates with explicit validity.
+        """
+        rows = generator.get_valid_grasp_poses(
+            mesh_vertices=self.mesh_vertices,
+            mesh_triangles=self.mesh_triangles,
+            obj_poses=object_poses,
+            approach_direction=approach_direction,
+            obj_longest_axis=obj_longest_axis,
+            is_positive_part=is_positive_part,
+        )
+        if len(rows) != object_poses.shape[0]:
+            raise ValueError(
+                "grasp generator must return one candidate row per object pose."
+            )
+        return AffordancePoseCandidates.from_rows(rows, device=object_poses.device)
 
     def sample_surface_points(self, max_points: int = 1000) -> torch.Tensor:
         """Deterministically sample target-local mesh-surface points.
@@ -203,6 +292,7 @@ class AntipodalAffordance(Affordance):
         max_points: int = 1000,
     ) -> torch.Tensor:
         """Return the widest surface-point distribution axis in world space."""
+        self.require_whole_object_mesh()
         if obj_poses.ndim != 3 or obj_poses.shape[1:] != (4, 4):
             raise ValueError("obj_poses must have shape (B, 4, 4).")
         points = self.sample_surface_points(max_points=max_points).to(
@@ -221,6 +311,18 @@ class AntipodalAffordance(Affordance):
         if torch.any(singular_values[:, 0] <= 1.0e-8):
             raise ValueError("Object surface point distribution has no principal axis.")
         return torch.nn.functional.normalize(vh[:, 0, :], dim=1)
+
+    def require_whole_object_mesh(self) -> None:
+        """Reject a link-only grasp mesh where whole-object geometry is required.
+
+        Raises:
+            ValueError: If this affordance contains only a selected link mesh.
+        """
+        if self.mesh_scope != "object":
+            raise ValueError(
+                "This operation requires whole-object geometry; the antipodal "
+                "affordance contains only a selected articulation link mesh."
+            )
 
     @staticmethod
     def _evenly_subsample_points(
@@ -280,6 +382,12 @@ class TwistAffordance(Affordance):
     )
     """Fallback axis point, overridden by revolute-joint origin metadata."""
 
+    grasp_roll: float = field(default=0.0, kw_only=True)
+    """Nominal contact-frame rotation about the grasp z-axis, in radians."""
+
+    grasp_roll_range: tuple[float, float] | None = field(default=None, kw_only=True)
+    """Allowed absolute grasp rolls containing :attr:`grasp_roll`."""
+
     twist_axis: torch.Tensor = field(
         default_factory=lambda: torch.tensor([0.0, 1.0, 0.0])
     )
@@ -292,6 +400,22 @@ class TwistAffordance(Affordance):
     """Optional lower and upper angular limits in radians."""
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.grasp_roll, bool)
+            or not isinstance(self.grasp_roll, Real)
+            or not math.isfinite(self.grasp_roll)
+        ):
+            raise ValueError("grasp_roll must be a finite real scalar.")
+        self.grasp_roll = float(self.grasp_roll)
+        if self.grasp_roll_range is not None:
+            lower, upper = _validate_range(
+                self.grasp_roll_range, name="grasp_roll_range"
+            )
+            if not lower <= self.grasp_roll <= upper:
+                raise ValueError(
+                    "grasp_roll_range must contain the nominal grasp_roll."
+                )
+            self.grasp_roll_range = (lower, upper)
         if (
             not isinstance(self.twist_axis, torch.Tensor)
             or self.twist_axis.shape != (3,)
@@ -380,7 +504,57 @@ class TwistAffordance(Affordance):
         grasp_pose[:, :3, 3] = (
             torch.matmul(target_pose[:, :3, :3], local_grasp) + target_pose[:, :3, 3]
         )
-        return grasp_pose
+        nominal_roll = torch.full(
+            (len(target_pose),),
+            self.grasp_roll,
+            dtype=grasp_pose.dtype,
+            device=device,
+        )
+        return _roll_poses(grasp_pose, nominal_roll)
+
+    def sample_grasp_pose(
+        self,
+        target_pose: torch.Tensor,
+        *,
+        sampling: AffordanceSamplingContext | None,
+        env_ids: torch.Tensor,
+        key: str = "twist_grasp",
+    ) -> AffordanceSample:
+        """Sample explicitly declared roll symmetry around the grasp axis.
+
+        Args:
+            target_pose: Target world poses with shape ``(B, 4, 4)``.
+            sampling: Optional reproducible branch stream.
+            env_ids: Stable environment identities matching target rows.
+            key: Sampling operation identity.
+
+        Returns:
+            Sampled grasp poses and roll metadata.
+        """
+        nominal = self.get_grasp_pose(target_pose)
+        rolls = torch.full(
+            (len(nominal),),
+            self.grasp_roll,
+            dtype=nominal.dtype,
+            device=nominal.device,
+        )
+        if sampling is not None and self.grasp_roll_range is not None:
+            rolls = sampling.sample_range(
+                self.grasp_roll,
+                self.grasp_roll_range,
+                env_ids=env_ids,
+                key=key,
+            ).to(nominal)
+        poses = _roll_poses(nominal, rolls - self.grasp_roll)
+        return AffordanceSample(
+            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            poses=poses,
+            metadata={
+                "key": key,
+                "sampling": None if sampling is None else sampling.metadata(),
+                "roll": rolls.cpu().tolist(),
+            },
+        )
 
 
 @dataclass
@@ -738,6 +912,47 @@ class PressAffordance(Affordance):
         )
         return press_pose
 
+    def sample_press_pose(
+        self,
+        target_pose: torch.Tensor,
+        press_position: tuple[float, float, float] | None = None,
+        *,
+        sampling: AffordanceSamplingContext | None,
+        env_ids: torch.Tensor,
+        key: str = "press_roll",
+    ) -> AffordanceSample:
+        """Sample contact-frame roll while preserving point and forward axis.
+
+        Args:
+            target_pose: Target world poses with shape ``(B, 4, 4)``.
+            press_position: Optional exact local contact position.
+            sampling: Optional reproducible branch stream.
+            env_ids: Stable environment identities matching target rows.
+            key: Sampling operation identity.
+
+        Returns:
+            Sampled press poses and roll metadata.
+        """
+        poses = self.get_press_pose(target_pose, press_position=press_position)
+        rolls = torch.zeros(len(poses), dtype=poses.dtype, device=poses.device)
+        if sampling is not None:
+            rolls = sampling.sample_range(
+                0.0,
+                (-math.pi, math.pi),
+                env_ids=env_ids,
+                key=key,
+            ).to(poses)
+            poses = _roll_poses(poses, rolls)
+        return AffordanceSample(
+            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            poses=poses,
+            metadata={
+                "key": key,
+                "sampling": None if sampling is None else sampling.metadata(),
+                "roll": rolls.cpu().tolist(),
+            },
+        )
+
     @staticmethod
     def _validate_press_position(
         value: tuple[float, float, float] | None,
@@ -1041,6 +1256,79 @@ class InteractionPoints(Affordance):
     point_types: list[str] = field(default_factory=list)
     """Optional labels for each point's interaction type."""
 
+    def sample_poses(
+        self,
+        target_pose: torch.Tensor,
+        *,
+        sampling: AffordanceSamplingContext | None,
+        env_ids: torch.Tensor,
+        key: str = "interaction_points",
+        point_type: str | None = None,
+    ) -> AffordanceSample:
+        """Sample local contact points and their inward-facing frames.
+
+        Args:
+            target_pose: Target world poses with shape ``(B, 4, 4)``.
+            sampling: Optional reproducible branch stream.
+            env_ids: Stable environment identities matching target rows.
+            key: Sampling operation identity.
+            point_type: Optional exact interaction-point label.
+
+        Returns:
+            Sampled contact frames with selection success and metadata.
+
+        Raises:
+            ValueError: If point geometry, normals, or the requested type is invalid.
+        """
+        if target_pose.shape != (env_ids.numel(), 4, 4):
+            raise ValueError("target_pose must match env_ids with shape (B, 4, 4).")
+        points = _validate_local_point_cloud(self.points, field_name="points")
+        if self.normals is None or self.normals.shape != points.shape:
+            raise ValueError(
+                "InteractionPoints sampling requires one normal per point."
+            )
+        normals = self.normals.to(device=target_pose.device, dtype=target_pose.dtype)
+        if (
+            not torch.isfinite(normals).all()
+            or (torch.linalg.vector_norm(normals, dim=-1) <= 1.0e-6).any()
+        ):
+            raise ValueError("interaction normals must be finite and non-zero.")
+        indices = list(range(len(points)))
+        if point_type is not None:
+            if len(self.point_types) != len(points):
+                raise ValueError("point_types must label every interaction point.")
+            indices = [
+                index
+                for index, label in enumerate(self.point_types)
+                if label == point_type
+            ]
+        if not indices:
+            raise ValueError("No interaction points match the requested type.")
+
+        points = points.to(device=target_pose.device, dtype=target_pose.dtype)
+        z_axis = torch.nn.functional.normalize(-normals[indices], dim=-1)
+        x_axis, y_axis = _orthogonal_xy_from_z(z_axis)
+        local = torch.eye(4, device=target_pose.device, dtype=target_pose.dtype).repeat(
+            len(indices), 1, 1
+        )
+        local[:, :3, 0] = x_axis
+        local[:, :3, 1] = y_axis
+        local[:, :3, 2] = z_axis
+        local[:, :3, 3] = points[indices]
+        poses = target_pose[:, None] @ local[None]
+        costs = torch.zeros(poses.shape[:2], device=poses.device, dtype=poses.dtype)
+        return self.sample_candidates(
+            AffordancePoseCandidates(
+                poses=poses,
+                costs=costs,
+                valid=torch.ones_like(costs, dtype=torch.bool),
+            ),
+            sampling=sampling,
+            env_ids=env_ids,
+            key=key,
+            reference_poses=target_pose,
+        )
+
     def get_points_by_type(self, point_type: str) -> torch.Tensor | None:
         """Get points by their interaction type."""
         if point_type in self.point_types:
@@ -1075,6 +1363,9 @@ class AssembleAffordance(Affordance):
     )
     """Pose of the assemble object relative to the base object frame, shape
     ``(4, 4)`` or ``(num_envs, 4, 4)``."""
+
+    symmetry_transforms: torch.Tensor | None = None
+    """Assembly-equivalent object-local rotations with shape ``(K, 4, 4)``."""
 
     def get_assemble_object_pose(self, base_pose: torch.Tensor) -> torch.Tensor:
         """Return the assemble-object target pose for a given base-object pose.
@@ -1122,6 +1413,86 @@ class AssembleAffordance(Affordance):
                 "assemble_to_base_pose batch size must match base_pose batch size."
             )
         return torch.bmm(base_pose, rel)
+
+    def sample_assemble_object_pose(
+        self,
+        base_pose: torch.Tensor,
+        *,
+        sampling: AffordanceSamplingContext | None,
+        env_ids: torch.Tensor,
+        key: str = "assembly_symmetry",
+    ) -> AffordanceSample:
+        """Sample only explicitly declared assembly-equivalent rotations.
+
+        Args:
+            base_pose: Base-object world poses.
+            sampling: Optional reproducible branch stream.
+            env_ids: Stable environment identities matching base rows.
+            key: Sampling operation identity.
+
+        Returns:
+            Assembly target poses with selection success and metadata.
+        """
+        nominal = self.get_assemble_object_pose(base_pose)
+        identity = torch.eye(4, dtype=nominal.dtype, device=nominal.device)
+        if self.symmetry_transforms is None:
+            transforms = identity.unsqueeze(0)
+        else:
+            symmetry = self.symmetry_transforms.to(nominal)
+            if (
+                symmetry.ndim != 3
+                or symmetry.shape[1:] != (4, 4)
+                or len(symmetry) == 0
+                or not torch.isfinite(symmetry).all()
+            ):
+                raise ValueError(
+                    "symmetry_transforms must be finite poses with shape (K, 4, 4)."
+                )
+            if not torch.allclose(
+                symmetry[:, :3, 3], torch.zeros_like(symmetry[:, :3, 3])
+            ):
+                raise ValueError(
+                    "symmetry_transforms cannot translate the assembly mating center."
+                )
+            expected_bottom = torch.tensor(
+                [0.0, 0.0, 0.0, 1.0],
+                dtype=symmetry.dtype,
+                device=symmetry.device,
+            )
+            if not torch.allclose(
+                symmetry[:, 3], expected_bottom.expand(len(symmetry), -1)
+            ):
+                raise ValueError("symmetry_transforms must be homogeneous poses.")
+            rotation = symmetry[:, :3, :3]
+            if not torch.allclose(
+                rotation.transpose(-1, -2) @ rotation,
+                torch.eye(3, dtype=rotation.dtype, device=rotation.device).expand(
+                    len(rotation), -1, -1
+                ),
+                atol=1.0e-5,
+                rtol=1.0e-5,
+            ) or not torch.allclose(
+                torch.linalg.det(rotation),
+                torch.ones(len(rotation), dtype=rotation.dtype, device=rotation.device),
+                atol=1.0e-5,
+                rtol=1.0e-5,
+            ):
+                raise ValueError("symmetry_transforms rotations must be in SO(3).")
+            transforms = torch.cat((identity.unsqueeze(0), symmetry), dim=0)
+
+        poses = nominal[:, None] @ transforms[None]
+        costs = torch.zeros(poses.shape[:2], dtype=poses.dtype, device=poses.device)
+        return self.sample_candidates(
+            AffordancePoseCandidates(
+                poses=poses,
+                costs=costs,
+                valid=torch.ones_like(costs, dtype=torch.bool),
+            ),
+            sampling=sampling,
+            env_ids=env_ids,
+            key=key,
+            reference_poses=nominal,
+        )
 
 
 __all__ = [

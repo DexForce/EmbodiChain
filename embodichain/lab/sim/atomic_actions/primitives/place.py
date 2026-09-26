@@ -32,6 +32,7 @@ from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     split_joint_trajectory_at_pose,
 )
 from embodichain.lab.sim.atomic_actions.affordance import AssembleAffordance
+from embodichain.lab.sim.atomic_actions.affordance_sampling import AffordanceSample
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
     GRASP_COMMAND,
@@ -50,7 +51,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan, TimedTrajectory
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    PlannerDiagnostics,
+    TimedTrajectory,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -250,7 +255,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             if isinstance(target, AssembleGoal)
             else ~held_mask | exclusive_mask
         )
-        place_xpos = self._resolve_place_xpos(target, state, task_state_key)
+        place_xpos, affordance_sample = self._resolve_place_xpos(
+            target, state, task_state_key, request=request
+        )
+        if affordance_sample is not None:
+            eligible &= affordance_sample.success
         if not eligible.any():
             return self.failed_plan(
                 request,
@@ -293,6 +302,9 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             interpolation_dt=context.control_dt,
         )
         if request.motion_policy.strategy == "motion_gen":
+            # Keep the native combined path for the pose-based split. The
+            # motion generator resolves backend defaults when no explicit
+            # planner options were supplied.
             motion_options.sample_count = None
         motion_result = self.motion_generator.generate(
             build_pose_plan_states(torch.cat([down_xpos, back_xpos], dim=1)),
@@ -355,6 +367,14 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
                 held_object_updates={task_state_key: None},
                 coordinated_held_object_updates=coordinated_updates,
             ),
+            diagnostics=PlannerDiagnostics(
+                backend=self.planning_services.planner_name,
+                metadata=(
+                    {}
+                    if affordance_sample is None
+                    else {"affordance_sample": {"assembly": affordance_sample.metadata}}
+                ),
+            ),
             segment_lengths={
                 "approach": n_down,
                 "release": n_open + n_settle,
@@ -367,30 +387,47 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         target: PlaceGoal | AssembleGoal,
         state: PlanningContext,
         task_state_key: str,
-    ) -> torch.Tensor:
+        *,
+        request: ResolvedActionRequest[PlaceGoal | AssembleGoal, PlaceOptions],
+    ) -> tuple[torch.Tensor, AffordanceSample | None]:
         """Resolve the place EEF poses from a typed target.
 
         Args:
             target: Either an explicit EEF pose target or an assembly target.
             state: World state carrying the held-object transform.
+            task_state_key: Task-state resource that owns the held object.
+            request: Resolved invocation used to derive the sampling key.
+
         Returns:
-            Place EEF poses with shape ``(num_envs, 4, 4)`` or
+            Place EEF poses and the optional Affordance sample that produced
+            them. Direct placement poses have shape ``(num_envs, 4, 4)``;
+            via-point placement poses have shape
             ``(num_envs, n_waypoint, 4, 4)``.
         """
         if isinstance(target, PlaceGoal):
-            return resolve_pose_target(
-                resolve_pose_goal(target.xpos, state, name="xpos"),
-                num_envs=self.num_envs,
-                device=self.device,
+            return (
+                resolve_pose_target(
+                    resolve_pose_goal(target.xpos, state, name="xpos"),
+                    num_envs=self.num_envs,
+                    device=self.device,
+                ),
+                None,
             )
-        return self._resolve_assemble_place_xpos(target, state, task_state_key)
+        return self._resolve_assemble_place_xpos(
+            target,
+            state,
+            task_state_key,
+            sample_key=(request.invocation_id or self.skill_id) + ":assembly",
+        )
 
     def _resolve_assemble_place_xpos(
         self,
         target: AssembleGoal,
         state: PlanningContext,
         task_state_key: str,
-    ) -> torch.Tensor:
+        *,
+        sample_key: str,
+    ) -> tuple[torch.Tensor, AffordanceSample]:
         """Derive the place EEF pose from an assembly affordance.
 
         The assemble object target pose is ``base_pose @ assemble_to_base_pose``;
@@ -400,8 +437,11 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
         Args:
             target: Assembly target carrying the base/assemble affordance.
             state: World state carrying the held-object transform.
+            task_state_key: Task-state resource that owns the held object.
+            sample_key: Stable identity for the assembly sampling stream.
+
         Returns:
-            Place EEF poses with shape ``(num_envs, 4, 4)``.
+            Sampled place EEF poses and their assembly sampling provenance.
 
         Raises:
             ValueError: If no held object or base-pose source is available.
@@ -423,14 +463,19 @@ class Place(AtomicAction[PlaceGoal | AssembleGoal, PlaceOptions]):
             device=self.device,
             name="base_pose",
         )
-        assemble_object_pose = affordance.get_assemble_object_pose(base_pose)
+        sample = affordance.sample_assemble_object_pose(
+            base_pose,
+            sampling=state.affordance_sampling,
+            env_ids=state.env_ids,
+            key=sample_key,
+        )
         object_to_eef = resolve_object_target(
             held.object_to_eef,
             num_envs=self.num_envs,
             device=self.device,
             name="object_to_eef",
         )
-        return torch.bmm(assemble_object_pose, object_to_eef)
+        return torch.bmm(sample.poses, object_to_eef), sample
 
     def _lifted_pose(
         self, release_xpos: torch.Tensor, options: PlaceOptions

@@ -410,9 +410,9 @@ bound motion target.
 | Contract | Value |
 |---|---|
 | Skill ID | `pick_up` |
-| Goal | `GraspGoal(semantics=..., grasp_xpos=None)` |
+| Goal | `GraspGoal(semantics=..., grasp_xpos=None, object_pose=None)` |
 | Binding contract | `primary.motion` plus disjoint `primary.grasp` |
-| Precondition | `ObjectSemantics.entity_id` resolves in the planning snapshot; the deprecated live `entity` fallback remains temporarily; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
+| Precondition | When `object_pose` is omitted, `ObjectSemantics.entity_id` must resolve in the planning snapshot (the deprecated live `entity` fallback remains temporarily); an explicit `SceneEntityPose` must reference a snapshot entity; an `AntipodalAffordance` is required when neither an explicit grasp pose nor `fixed_object_to_eef` is supplied |
 | Effect | write `HeldObjectState` for the bound motion target |
 | Verification | the attachment effect must be verified during closed-loop execution |
 
@@ -429,6 +429,15 @@ bypasses affordance sampling, `rotate_upright`, and `grasp_frame_to_eef`. Withou
 the fixed calibration, the action samples valid affordance grasps and evaluates
 reachability. Both paths store the selected `object_to_eef` transform in the
 expected held-object state so later object-centric skills can reuse it.
+
+`GraspGoal.object_pose` optionally supplies the object pose used by the same
+planning pass. It accepts `(4, 4)` (broadcast to every environment) or
+`(B, 4, 4)` (one pose per environment row), and may be a `SceneEntityPose` when
+the pose should be resolved from another entity. With an explicit tensor, the
+pose is scene-independent; this is the intended interface for batched
+benchmark trials with small per-row translation perturbations. The tensor is a
+planning input only and does not teleport or otherwise mutate the simulator
+object.
 
 Set `ObjectSemantics.entity_id` to the same stable ID used by the scene
 snapshot. `PickUp` resolves that object pose once per planning attempt, uses the
@@ -458,6 +467,68 @@ live pose does not create an automatic scene dependency.
 deprecated entity-only fallback. For canonical snapshot grounding and moving
 target recovery, see
 `scripts/tutorials/atomic_action/moving_target_recovery.py`.
+
+### Picking articulated targets
+
+`PickUp` accepts an {class}`~embodichain.lab.sim.objects.Articulation` wherever
+it accepts a rigid object: the scene provider only reads `uid` and
+`get_local_pose()`. Two constraints apply to articulated targets.
+
+A locked articulation is treated as one compound rigid body: the articulation
+root carries object identity and pose, while one selected link is only the
+source of grasp geometry. `Articulation` has no whole-body `get_vertices()` /
+`get_triangles()`, and `get_link_vert_face()` returns vertices in the **link**
+frame, whereas grounding publishes the **articulation root** pose. Feeding link
+vertices straight to an affordance is therefore correct only where the two
+frames coincide, which is a property of one asset and not of the abstraction.
+
+Use
+{func}`~embodichain.lab.sim.atomic_actions.create_rigidized_articulation_antipodal_semantics`,
+which reads the link mesh, evaluates the root-to-link transform at the declared
+locked configuration, and expresses the vertices in the articulation-root frame
+before building
+{class}`~embodichain.lab.sim.atomic_actions.AntipodalAffordance`. It keeps
+`entity_id` at the articulation root UID, so grasp sampling,
+`HeldObjectState.object_to_eef`, `MoveHeldObject`, `Place`, and symbolic effects
+all share one frame:
+
+```python
+semantics = create_rigidized_articulation_antipodal_semantics(
+    cube,
+    grasp_link="lower_two_layers",
+    locked_qpos={"top_turn": 0.0},
+    label="rubiks_cube",
+)
+```
+
+`locked_qpos` declares the configuration the geometry is valid at and is
+verified against the articulation: every joint must be declared, must read that
+value, and must actually be *held* there — either by a position drive with
+non-zero stiffness commanded to the declared value, or by coincident position
+limits. Resting at the value is not enough, because a passive joint can sit
+there and swing away under load, leaving the transformed mesh describing a pose
+the object no longer has. One mesh is published for the whole batch, so the
+check covers every arena and refuses a batch whose arenas disagree on the
+root-to-link transform. Joint locking itself, initial positions, `fixed_base`
+and drive parameters stay with
+{class}`~embodichain.lab.sim.cfg.ArticulationCfg` or the physical environment.
+`slide.py` sources its handle affordance per link as well, but it manipulates
+the articulation rather than carrying it, so it does not rigidize the body.
+
+{class}`~embodichain.lab.sim.cfg.ArticulationCfg` fixes roots to the world by
+default, which suits drawers and doors but welds a graspable target in place.
+Set `root_props=ArticulationRootPropertiesCfg(fixed_base=False)`. Left at the
+default, `plan_success` still reports success and the whole trajectory replays
+while the object never moves, so verify the target pose rather than the plan.
+
+`scripts/tutorials/atomic_action/pickup_rubiks_cube.py` demonstrates both on a
+Rubik's cube whose `top_turn` joint is locked with a stiff position drive so the
+two layers grasp as one body. Grasps are sampled from the `lower_two_layers`
+link, the joint's parent.
+
+<p align="center">
+<img src="../../../_static/atomic_actions/pickup_rubiks_cube.gif" alt="PickUp on an articulated Rubik's cube" width="480" style="max-width: 100%;" />
+</p>
 
 (builtin-axis-align)=
 
@@ -713,7 +784,12 @@ generic `ActionBinding`, and the action keeps the gripper closed for all arm
 motion segments. Applications that require force/contact confirmation must
 verify it externally.
 
-**Example:** `scripts/tutorials/atomic_action/press.py`
+**Example:** `scripts/tutorials/atomic_action/press.py` loads
+`Microwave/microwave.urdf` and targets `button_link`, whose parent prismatic
+joint is `button_joint`. It requests `MotionPolicy.sample_count=256` with
+`PressOptions.hand_interp_steps=12`, then holds the final pose for 256
+simulation updates, with two physics steps per update. `--rigid_object`
+selects the standalone rigid button with the same sampling settings.
 
 (builtin-slide)=
 
@@ -833,10 +909,13 @@ policy therefore needs
 `sample_count >= 2 * hand_interp_steps + door_waypoint_count + 7`.
 
 **Example:** `scripts/tutorials/atomic_action/open_door.py` configures only the
-microwave's `door_handle` link. Automatic traversal resolves `door_hinge`
-through the intermediate fixed joint. Its absolute `--open_angle` value is
-normalized against the resolved hinge limits and passed as the goal's
-`open_fraction`.
+`handle_link` target in `Microwave/microwave.urdf`. Automatic traversal resolves
+`door_hinge` through `door_handle_fixed_joint`. Its absolute `--open_angle`
+value is normalized against the resolved hinge limits and passed as the goal's
+`open_fraction`. The tutorial requests `MotionPolicy.sample_count=300`,
+`OpenDoorOptions.hand_interp_steps=30`, and `door_waypoint_count=50` by
+default, then holds the final pose for 240 simulation updates, with two physics
+steps per update.
 
 (builtin-twist)=
 
@@ -892,7 +971,12 @@ completion therefore means commanded motion completion only. Applications that
 need semantic success must observe button/contact or articulation state and
 verify it outside the side-effect-free planner.
 
-**Example:** `scripts/tutorials/atomic_action/twist.py`
+**Example:** `scripts/tutorials/atomic_action/twist.py` loads
+`Microwave/microwave.urdf` and targets `knob_link`, whose parent revolute joint
+is `knob_joint`. It requests `MotionPolicy.sample_count=256` with
+`TwistOptions.hand_interp_steps=20`, then holds the final pose for 256
+simulation updates, with two physics steps per update. `--rigid_object`
+selects the standalone rigid knob with the same sampling settings.
 
 (builtin-coordinated-pickment)=
 
@@ -1053,6 +1137,15 @@ python scripts/tutorials/atomic_action/move_end_effector.py --headless --auto_pl
 python scripts/tutorials/atomic_action/pickup.py --headless --auto_play --device cpu
 python scripts/tutorials/atomic_action/hand_over.py --headless --auto_play --device cpu
 ```
+
+The scripts share a `--planner` selector for the non-neural backends
+(`toppra`, `trapezoidal`, or `curobo`); `trapezoidal` is the default. See
+{doc}`/tutorial/atomic_actions` for backend-specific caveats and examples.
+The dynamic-obstacle recovery example remains cuRobo-only because it updates a
+live collision world.
+Every script also receives the same single global `sun` light from the shared
+tutorial scene setup; vectorized environments do not create per-arena point
+lights.
 
 See {doc}`/tutorial/atomic_actions` for engine setup, static compilation,
 closed-loop execution, effect verification, and custom-action guidance.

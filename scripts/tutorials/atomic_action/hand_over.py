@@ -36,10 +36,10 @@ from embodichain.lab.sim.atomic_actions import (
     HandOverOptions,
     MotionPolicy,
 )
-from embodichain.lab.sim.cfg import RigidBodyAttributesCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
-from embodichain.lab.sim.shapes import MeshCfg
+from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.scenario_utils import (
     add_dual_tutorial_robot,
@@ -48,13 +48,17 @@ from scripts.tutorials.atomic_action.scenario_utils import (
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     TutorialRobot,
+    clone_local_pose_from_first_env,
+    create_affordance_sampling_context,
     create_antipodal_semantics,
     create_parallel_jaw_grasp_pose_generator,
     create_toppra_motion_generator,
     create_tutorial_argument_parser,
+    create_tutorial_rigid_body_physics,
     create_tutorial_simulation,
     get_hand_open_close_qpos,
-    clone_local_pose_from_first_env,
+    log_affordance_branch_diagnostics,
+    parse_affordance_sampling_arguments,
     prepare_tutorial_scene,
     publish_tutorial_scene,
     replay_trajectory,
@@ -68,7 +72,7 @@ HORIZONTAL_OBJECT_MESH_PATH = get_data_path(
 )
 VERTICAL_OBJECT_SCALE = (0.56, 0.56, 0.56)
 HORIZONTAL_OBJECT_SCALE = (2.0, 2.0, 2.0)
-GRIPPER_TCP_Z = 0.16
+GRIPPER_TCP_Z = 0.15
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -103,7 +107,12 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the demo."""
     parser = create_tutorial_argument_parser(
         "Dual-arm handover demo",
-        features=("diagnose_plan", "headless_play"),
+        features=(
+            "affordance_sampling",
+            "grasp_sampling",
+            "diagnose_plan",
+            "headless_play",
+        ),
         default_device="cpu",
         default_renderer="hybrid",
     )
@@ -112,7 +121,7 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Use the horizontal WaterBasin object instead of the vertical soda can.",
     )
-    return parser.parse_args()
+    return parse_affordance_sampling_arguments(parser)
 
 
 def create_dual_robot(
@@ -142,19 +151,28 @@ def create_support_surface(sim: SimulationManager) -> RigidObject:
     )
 
 
-def create_handover_object(sim: SimulationManager, args) -> RigidObject:
+def create_handover_object(
+    sim: SimulationManager,
+    args: argparse.Namespace | None = None,
+) -> RigidObject:
     """Create the mode-specific mesh object on the support surface."""
+    is_horizontal = bool(getattr(args, "is_horizontal", False))
     mesh_path = (
-        HORIZONTAL_OBJECT_MESH_PATH if args.is_horizontal else VERTICAL_OBJECT_MESH_PATH
+        HORIZONTAL_OBJECT_MESH_PATH if is_horizontal else VERTICAL_OBJECT_MESH_PATH
     )
-    body_scale = (
-        HORIZONTAL_OBJECT_SCALE if args.is_horizontal else VERTICAL_OBJECT_SCALE
-    )
+    body_scale = HORIZONTAL_OBJECT_SCALE if is_horizontal else VERTICAL_OBJECT_SCALE
     return sim.add_rigid_object(
         cfg=RigidObjectCfg(
             uid="handover_object",
-            shape=MeshCfg(fpath=mesh_path, compute_uv=False),
-            attrs=RigidBodyAttributesCfg(
+            shape=MeshCfg(
+                fpath=mesh_path,
+                compute_uv=False,
+                collision=MeshCollisionCfg(
+                    approximation="convex_decomposition",
+                    max_hulls=16,
+                ),
+            ),
+            attrs=create_tutorial_rigid_body_physics(
                 mass=0.01,
                 dynamic_friction=0.97,
                 static_friction=0.99,
@@ -166,12 +184,10 @@ def create_handover_object(sim: SimulationManager, args) -> RigidObject:
                 min_position_iters=32,
                 min_velocity_iters=8,
                 max_depenetration_velocity=2.0,
+                newton_contact=sim.is_newton_backend,
             ),
-            max_convex_hull_num=16,
             init_pos=[OBJECT_INIT_XY[0], OBJECT_INIT_XY[1], SUPPORT_SURFACE_Z + 0.12],
-            init_rot=(
-                OBJECT_ROT_VERTICAL if not args.is_horizontal else OBJECT_ROT_HORIZONTAL
-            ),
+            init_rot=(OBJECT_ROT_HORIZONTAL if is_horizontal else OBJECT_ROT_VERTICAL),
             body_scale=body_scale,
         )
     )
@@ -185,12 +201,16 @@ def run_handover_demo(
     """Plan and optionally execute one unified pick-up and handover."""
     create_support_surface(sim)
     obj = create_handover_object(sim, args)
+    sim.prepare()
     settle_object(sim, obj, step=0)
     clone_local_pose_from_first_env(obj)
     obj.clear_dynamics()
     publish_tutorial_scene(sim, args)
     object_semantics = create_antipodal_semantics(obj, label="handover")
-    motion_gen = create_toppra_motion_generator(robot)
+    motion_gen = create_toppra_motion_generator(
+        robot,
+        planner=getattr(args, "planner", "trapezoidal"),
+    )
 
     left_open, left_close = get_hand_open_close_qpos(
         robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
@@ -208,8 +228,8 @@ def run_handover_demo(
         hand_interp_steps=HANDOVER_HAND_INTERP_STEPS,
     )
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
-        n_sample=10_000,
-        force_refresh=False,
+        n_sample=args.n_sample,
+        force_refresh=args.force_reannotate,
     )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,
@@ -257,8 +277,12 @@ def run_handover_demo(
                 skill_options=handover_options,
             ),
         ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
+        engine.initial_context(
+            control_dt=sim.sim_config.physics_dt,
+            affordance_sampling=create_affordance_sampling_context(args),
+        ),
     )
+    log_affordance_branch_diagnostics(compiled.action_plans[0])
     success = compiled.plan_success
     traj = compiled.trajectory.positions
 
@@ -293,7 +317,6 @@ def main() -> None:
     sim = create_tutorial_simulation(
         args,
         arena_space=3.0,
-        light_pos=(0.0, -0.4, 3.0),
     )
     robot = create_dual_robot(sim, args.robot)
     run_handover_demo(args, sim, robot)
