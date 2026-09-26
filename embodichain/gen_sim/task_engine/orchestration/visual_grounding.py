@@ -27,6 +27,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .grounding import _MATCH_EVIDENCE_SCHEMA, _validate_match_evidence
+
 __all__ = ["make_visual_grounding_caller", "visual_grounding_available"]
 
 _VISUAL_SCHEMA: dict[str, Any] = {
@@ -48,6 +50,7 @@ _VISUAL_SCHEMA: dict[str, Any] = {
                     "evidence_view",
                     "evidence_note",
                     "scene_missing",
+                    "match_evidence",
                 ],
                 "properties": {
                     "reference_id": {"type": "string"},
@@ -63,6 +66,7 @@ _VISUAL_SCHEMA: dict[str, Any] = {
                     },
                     "evidence_note": {"type": "string"},
                     "scene_missing": {"type": "boolean"},
+                    "match_evidence": deepcopy(_MATCH_EVIDENCE_SCHEMA),
                 },
             },
         }
@@ -121,11 +125,15 @@ def _validate_visual_response(
         for item in evidence.get("objects", ())
     }
     for item in raw["bindings"]:
-        if not isinstance(item, Mapping) or set(item) != set(_CORE_KEYS) | {
+        fields = set(_CORE_KEYS) | {
             "evidence_view",
             "evidence_note",
             "scene_missing",
-        }:
+        }
+        if not isinstance(item, Mapping) or set(item) not in (
+            fields,
+            fields | {"match_evidence"},
+        ):
             raise ValueError("Visual grounding binding has invalid evidence fields.")
         status = item["status"]
         uids = item["uids"]
@@ -139,6 +147,8 @@ def _validate_visual_response(
             or not item["evidence_note"].strip()
         ):
             raise ValueError("Visual grounding binding has invalid visual evidence.")
+        # Leave semantic refusals to grounding so its adapter retains the response.
+        _validate_match_evidence(item, set(visible_views), check_resolution=False)
         if status == "not_found":
             if uids:
                 raise ValueError("Missing scene reference cannot select a UID.")
@@ -194,7 +204,10 @@ def make_visual_grounding_caller(
             "evidence for the supplied grounding requests. Return only existing "
             "inventory UIDs. If no matching UID exists, whether absent or "
             "visible but unlabeled, return not_found with scene_missing=true; "
-            "never substitute another object based only on shape. Articulation "
+            "a different category label alone does not mean an entity is absent. "
+            "Apply the supplied semantic identity rules also to visual evidence: "
+            "a broad name may identify a specific visible entity, but never "
+            "substitute another object based only on shape or utility. Articulation "
             "GLBs are editing proxies, not live joint states: "
             "never infer open/closed state from them. Do not infer physical "
             "capability, contact, or coordinates from pixels. Use ambiguous "
@@ -215,6 +228,13 @@ def make_visual_grounding_caller(
         )
         if not isinstance(raw, Mapping):
             raise ValueError("Visual grounding must return a mapping.")
+        resolved_model = model
+        if transport is None:
+            from embodichain.gen_sim.task_engine.interpretation import (
+                _load_llm_settings,
+            )
+
+            resolved_model = _load_llm_settings(model=model)["model"]
         audit = {
             "schema_version": "gen_sim.visual-grounding-call/v1",
             "source_config_sha256": evidence["source_config_sha256"],
@@ -222,6 +242,10 @@ def make_visual_grounding_caller(
             "image_paths": [os.path.relpath(path, start=root) for path in images],
             "image_sha256": image_hashes,
             "prompt_sha256": hashlib.sha256(visual_prompt.encode()).hexdigest(),
+            "prompt": visual_prompt,
+            "schema": deepcopy(_VISUAL_SCHEMA),
+            "model": resolved_model,
+            "transport": "default" if transport is None else "injected",
             "response": deepcopy(dict(raw)),
         }
         (root / f"call_{call_count:02d}.json").write_text(
@@ -230,7 +254,12 @@ def make_visual_grounding_caller(
         _validate_visual_response(raw, evidence)
         return {
             "bindings": [
-                {key: item[key] for key in _CORE_KEYS} for item in raw["bindings"]
+                {
+                    key: item[key]
+                    for key in (*_CORE_KEYS, "match_evidence")
+                    if key in item
+                }
+                for item in raw["bindings"]
             ]
         }
 

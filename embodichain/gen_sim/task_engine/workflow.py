@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
@@ -297,6 +297,7 @@ class TaskEngineWorkflow:
     ) -> None:
         self.task_agent = task_agent or TaskAgent()
         self.scene_adapter = scene_adapter or SceneAdapter()
+        self._owns_coordinator = coordinator is None
         self.coordinator = coordinator or TaskEngineCoordinator(
             task_agent=self.task_agent,
             scene_adapter=self.scene_adapter,
@@ -381,6 +382,13 @@ class TaskEngineWorkflow:
         with ArtifactTransaction(output_dir, overwrite=overwrite) as transaction:
             staging = transaction.staging_dir
             assert staging is not None
+            # Keep audit ownership local to this run, including early binding failures.
+            scene_adapter = copy(self.scene_adapter)
+            scene_adapter.audit_dir = staging / "binding_audit"
+            coordinator = self.coordinator
+            if self._owns_coordinator:
+                coordinator = copy(coordinator)
+                coordinator.scene_adapter = scene_adapter
             analysis_root = staging / "scene_analysis"
             state = start_stage(state, WorkflowStage.TASK_CANDIDATES)
             state = start_stage(state, WorkflowStage.SCENE_PREPARATION)
@@ -402,6 +410,7 @@ class TaskEngineWorkflow:
                 )
                 try:
                     candidate_set = candidate_future.result()
+                    _write_json(staging / "task_candidate_set.json", candidate_set)
                 except Exception as exc:
                     analysis_future.cancel()
                     state = fail_stage(
@@ -445,13 +454,29 @@ class TaskEngineWorkflow:
                         failure_class="scene_analysis",
                     )
             state = complete_stage(state, WorkflowStage.SCENE_PREPARATION)
+            _write_json(
+                staging / "binding_audit" / "source.json",
+                {
+                    "source": analysis.source.as_posix(),
+                    "source_config_sha256": (
+                        analysis.source_fingerprint.config_sha256
+                        if analysis.source_fingerprint is not None
+                        else None
+                    ),
+                    "source_fingerprint": (
+                        analysis.source_fingerprint.to_dict()
+                        if analysis.source_fingerprint is not None
+                        else None
+                    ),
+                },
+            )
 
             state = start_stage(state, WorkflowStage.CANDIDATE_SELECTION)
             try:
                 selection = self.scene_backend.select(
                     analysis,
                     candidate_set,
-                    self.scene_adapter,
+                    scene_adapter,
                     force_most_likely=False,
                 )
             except SceneAdapterProtocolError as exc:
@@ -553,7 +578,7 @@ class TaskEngineWorkflow:
                         visual_selection = self.scene_backend.select(
                             analysis,
                             candidate_set,
-                            self.scene_adapter,
+                            scene_adapter,
                             force_most_likely=False,
                             grounding_caller=visual_caller,
                         )
@@ -806,7 +831,7 @@ class TaskEngineWorkflow:
 
                 bundle_root = attempt_root / "bundle"
                 try:
-                    preparation = self.coordinator.prepare(
+                    preparation = coordinator.prepare(
                         normalized["task_id"],
                         normalized["task_instruction"],
                         SceneSourceRef(

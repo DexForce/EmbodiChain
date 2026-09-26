@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
+from tempfile import mkdtemp
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,8 @@ from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
     GroundingCaller,
+    _UnresolvedSceneReference,
+    _validate_match_evidence,
     ground_articulation_parts,
     ground_scene_references,
 )
@@ -55,6 +58,7 @@ from embodichain.gen_sim.task_engine.orchestration.source_scene import (
 from embodichain.gen_sim.task_engine import TaskCandidate, TaskCandidateSet
 from embodichain.gen_sim.task_engine.interpretation import (
     _default_instruction_caller,
+    _load_llm_settings,
 )
 from embodichain.gen_sim.task_engine.scene import (
     ConservativeSceneGraph,
@@ -360,12 +364,14 @@ class SceneAdapter:
         adjudicator: Adjudicator | None = None,
         robot_profile: str = "franka",
         scene_engine_adapter: SceneEngineV1Adapter | None = None,
+        audit_dir: str | Path | None = None,
     ) -> None:
         self.model = model
         self.grounding_caller = grounding_caller
         self.adjudicator = adjudicator
         self.robot_profile = robot_profile
         self.scene_engine_adapter = scene_engine_adapter or SceneEngineV1Adapter()
+        self.audit_dir = None if audit_dir is None else Path(audit_dir)
 
     def adapt(
         self,
@@ -519,9 +525,13 @@ class SceneAdapter:
         use_default_adjudicator = invoke is None
         if invoke is None:
             invoke = _default_grounding_caller()
+        if self.audit_dir is not None:
+            self.audit_dir.mkdir(parents=True, exist_ok=True)
+            call_dir = Path(mkdtemp(prefix="selection_", dir=self.audit_dir))
+            invoke = _audited_grounding_caller(invoke, call_dir)
         choose = adjudicator or self.adjudicator
         if choose is None and use_default_adjudicator:
-            choose = _default_adjudicator(model=self.model)
+            choose = _default_adjudicator(model=self.model, caller=invoke)
         audits: list[dict[str, Any]] = []
         bindings_by_candidate: dict[
             str, tuple[dict[str, tuple[str, ...]], dict[str, str]]
@@ -629,8 +639,52 @@ def _default_grounding_caller() -> GroundingCaller:
     return _default_instruction_caller
 
 
-def _default_adjudicator(*, model: str | None) -> Adjudicator:
-    caller = _default_grounding_caller()
+def _audited_grounding_caller(
+    caller: GroundingCaller, call_dir: Path
+) -> GroundingCaller:
+    configured = caller is _default_instruction_caller
+    call_count = 0
+
+    def invoke(**kwargs: Any) -> Mapping[str, Any]:
+        nonlocal call_count
+        call_count += 1
+        path = call_dir / f"call_{call_count:03d}.json"
+        call_kwargs = dict(kwargs)
+        audit = {
+            "prompt": kwargs["prompt"],
+            "schema": deepcopy(kwargs["schema"]),
+            "requested_model": kwargs.get("model"),
+            "model": kwargs.get("model"),
+            "transport": "configured" if configured else "injected",
+            "response": None,
+            "error_type": None,
+        }
+        try:
+            if configured:
+                # Persist only the selected model, never credentials or endpoint settings.
+                selected_model = _load_llm_settings(model=kwargs.get("model"))["model"]
+                call_kwargs["model"] = selected_model
+                audit["model"] = selected_model
+            response = caller(**call_kwargs)
+            audit["response"] = deepcopy(response)
+            return response
+        except Exception as exc:
+            # Provider exception text can contain credentials or signed URLs.
+            audit["error_type"] = type(exc).__name__
+            raise
+        finally:
+            path.write_text(
+                json.dumps(audit, ensure_ascii=False, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+
+    return invoke
+
+
+def _default_adjudicator(
+    *, model: str | None, caller: GroundingCaller | None = None
+) -> Adjudicator:
+    caller = caller or _default_grounding_caller()
 
     def adjudicate(**kwargs: Any) -> Mapping[str, Any]:
         candidates = [
@@ -927,7 +981,8 @@ def _audit_unresolved_response(
     for request in candidate["scene_request"]["references"]:
         reference_id = str(request["reference_id"])
         raw = by_id[reference_id]
-        if set(raw) != {"reference_id", "status", "uids", "confidence"}:
+        required = {"reference_id", "status", "uids", "confidence"}
+        if set(raw) not in (required, required | {"match_evidence"}):
             raise SceneAdapterProtocolError(
                 f"Grounding binding {reference_id!r} has unsupported fields."
             )
@@ -957,6 +1012,15 @@ def _audit_unresolved_response(
             raise SceneAdapterProtocolError(
                 f"Grounding binding {reference_id!r} has invalid confidence."
             )
+        try:
+            _validate_match_evidence(raw, set(inventory.by_uid))
+        except _UnresolvedSceneReference:
+            # A conflicting resolved proposal is a semantic rejection, not malformed JSON.
+            pass
+        except (TypeError, ValueError) as exc:
+            raise SceneAdapterProtocolError(
+                f"Grounding binding {reference_id!r} has invalid match evidence: {exc}"
+            ) from exc
         audit_status = status
         reasons: list[str] = []
         if status == "not_found" and uids:

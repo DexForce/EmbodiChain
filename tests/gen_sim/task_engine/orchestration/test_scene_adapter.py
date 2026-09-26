@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 
@@ -571,6 +572,262 @@ def test_scene_adapter_returns_report_for_business_level_non_binding(
     )
 
 
+@pytest.mark.parametrize("status", ["resolved", "not_found", "ambiguous"])
+def test_grounding_audit_retains_semantic_evidence_outside_binding_report(
+    scene_export: Path, tmp_path: Path, status: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        scene_adapter_module,
+        "_load_llm_settings",
+        lambda **_kwargs: pytest.fail(
+            "Injected callers must not load real provider settings."
+        ),
+    )
+    evidence = {
+        "match_type": "exact" if status == "resolved" else "none",
+        "support": (
+            ["The inventory describes a red can."] if status != "not_found" else []
+        ),
+        "conflicts": (
+            ["The requested color is absent."] if status == "not_found" else []
+        ),
+        "candidate_uids": ["red_can"],
+    }
+    response = {
+        "bindings": [
+            {
+                "reference_id": "upright.object",
+                "status": status,
+                "uids": [] if status == "not_found" else ["red_can"],
+                "confidence": 0.95 if status != "ambiguous" else 0.4,
+                "match_evidence": evidence,
+            }
+        ]
+    }
+    requests = []
+
+    def caller(**kwargs):
+        requests.append(deepcopy(kwargs))
+        return deepcopy(response)
+
+    audit_dir = tmp_path / "grounding_audit"
+    adapter = SceneAdapter(
+        model="injected-test-model", grounding_caller=caller, audit_dir=audit_dir
+    )
+    for _ in range(2):
+        result = adapter.adapt(
+            _candidate_set([_candidate("red", "red can")]), scene_export
+        )
+        assert (result.selected_candidate is not None) == (status == "resolved")
+        assert "match_evidence" not in json.dumps(result.binding_report)
+
+    calls = sorted(audit_dir.glob("selection_*/call_*.json"))
+    assert len(calls) == len(requests) == 2
+    assert len({path.parent for path in calls}) == 2
+    for path in calls:
+        audit = json.loads(path.read_text())
+        assert audit["prompt"] == requests[0]["prompt"]
+        assert audit["schema"] == requests[0]["schema"]
+        assert audit["response"] == response
+        assert audit["model"] == "injected-test-model"
+        assert audit["transport"] == "injected"
+
+
+def test_grounding_audit_records_resolved_model_without_transport_secrets(
+    scene_export: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requests = []
+
+    def default_caller(**kwargs):
+        requests.append(kwargs)
+        return _grounder(**kwargs)
+
+    monkeypatch.setattr(
+        scene_adapter_module, "_default_instruction_caller", default_caller
+    )
+    monkeypatch.setattr(
+        scene_adapter_module,
+        "_load_llm_settings",
+        lambda **_kwargs: {
+            "model": "configured-test-model",
+            "api_key": "secret-key-never-record",
+            "base_url": "secret-url-never-record",
+        },
+    )
+    audit_dir = tmp_path / "grounding_audit"
+    SceneAdapter(audit_dir=audit_dir).adapt(
+        _candidate_set([_candidate("red", "red can")]), scene_export
+    )
+
+    payload = next(audit_dir.glob("selection_*/call_*.json")).read_text()
+    audit = json.loads(payload)
+    assert audit["model"] == requests[0]["model"] == "configured-test-model"
+    assert audit["transport"] == "configured"
+    assert "secret-key" not in payload
+    assert "secret-url" not in payload
+
+
+def test_malformed_match_evidence_is_not_a_business_level_binding_failure(
+    scene_export: Path,
+) -> None:
+    def caller(**_kwargs):
+        return {
+            "bindings": [
+                {
+                    "reference_id": "upright.object",
+                    "status": "not_found",
+                    "uids": [],
+                    "confidence": 1.0,
+                    "match_evidence": {"match_type": "none"},
+                }
+            ]
+        }
+
+    with pytest.raises(SceneAdapterProtocolError, match="invalid match evidence"):
+        SceneAdapter(grounding_caller=caller).adapt(
+            _candidate_set([_candidate("missing", "green can")]), scene_export
+        )
+
+
+def test_resolved_match_with_explicit_conflict_remains_incompatible(
+    scene_export: Path,
+) -> None:
+    def caller(**_kwargs):
+        return {
+            "bindings": [
+                {
+                    "reference_id": "upright.object",
+                    "status": "resolved",
+                    "uids": ["red_can"],
+                    "confidence": 1.0,
+                    "match_evidence": {
+                        "match_type": "contextual",
+                        "support": ["The candidate is a can."],
+                        "conflicts": ["It is red, not the requested green."],
+                        "candidate_uids": ["red_can"],
+                    },
+                }
+            ]
+        }
+
+    result = SceneAdapter(grounding_caller=caller).adapt(
+        _candidate_set([_candidate("missing", "green can")]), scene_export
+    )
+    assert result.selected_candidate is None
+    assert result.binding_report["candidates"][0]["status"] == "incompatible"
+
+
+def test_visual_conflict_returns_incompatible_with_both_audits(
+    scene_export: Path, tmp_path: Path
+) -> None:
+    from PIL import Image
+
+    from embodichain.gen_sim.task_engine.orchestration.scene_source import (
+        scene_revision_id,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.visual_grounding import (
+        make_visual_grounding_caller,
+    )
+
+    config = scene_export / "scene_config.json"
+    asset = scene_export / "meshes/red_can.glb"
+    image = tmp_path / "oblique.png"
+    Image.new("RGB", (16, 16), "red").save(image)
+    image_hash = hashlib.sha256(image.read_bytes()).hexdigest()
+    evidence = {
+        "schema_version": "gen_sim.visual-grounding-evidence/v1",
+        "source_config_path": str(config),
+        "source_config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+        "scene_revision_id": scene_revision_id(config),
+        "render_kind": "configured_static_glb_proxies",
+        "articulation_state_untrusted_uids": [],
+        "objects": [
+            {
+                "uid": "red_can",
+                "visible_views": ["oblique"],
+                "asset_path": str(asset),
+                "asset_sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
+            }
+        ],
+        "views": [
+            {
+                "name": "oblique",
+                "annotated_path": str(image),
+                "annotated_sha256": image_hash,
+            }
+        ],
+        "catalog_path": str(image),
+        "catalog_sha256": image_hash,
+    }
+    match = {
+        "match_type": "contextual",
+        "support": ["The visible candidate is a can."],
+        "conflicts": ["It is red, not the requested green."],
+        "candidate_uids": ["red_can"],
+    }
+    response = {
+        "bindings": [
+            {
+                "reference_id": "upright.object",
+                "status": "resolved",
+                "uids": ["red_can"],
+                "confidence": 1.0,
+                "match_evidence": match,
+                "evidence_view": "oblique",
+                "evidence_note": "Visible red can body.",
+                "scene_missing": False,
+            }
+        ]
+    }
+    calls = []
+
+    def transport(**kwargs):
+        calls.append(kwargs)
+        return deepcopy(response)
+
+    visual_audit = tmp_path / "visual_audit"
+    grounding_audit = tmp_path / "grounding_audit"
+    caller = make_visual_grounding_caller(evidence, visual_audit, transport=transport)
+    result = SceneAdapter(
+        model="injected-vision-model",
+        grounding_caller=caller,
+        audit_dir=grounding_audit,
+    ).adapt(_candidate_set([_candidate("missing", "green can")]), scene_export)
+
+    assert len(calls) == 1
+    assert result.selected_candidate is None
+    assert result.role_bindings is None
+    reference = result.binding_report["candidates"][0]["references"][0]
+    assert reference["status"] == "incompatible"
+    assert any("conflicting attributes" in reason for reason in reference["reasons"])
+    visual_record = json.loads((visual_audit / "call_01.json").read_text())
+    assert visual_record["response"] == response
+    records = list(grounding_audit.glob("selection_*/call_*.json"))
+    assert len(records) == 1
+    grounding_record = json.loads(records[0].read_text())
+    assert grounding_record["response"]["bindings"][0]["match_evidence"] == match
+    assert grounding_record["error_type"] is None
+
+
+def test_grounding_audit_survives_transport_failure_without_logging_error_secrets(
+    scene_export: Path, tmp_path: Path
+) -> None:
+    def failing_caller(**_kwargs):
+        raise ValueError("request failed with api_key=secret")
+
+    audit_dir = tmp_path / "grounding_audit"
+    with pytest.raises(SceneAdapterProtocolError, match="before returning JSON"):
+        SceneAdapter(grounding_caller=failing_caller, audit_dir=audit_dir).adapt(
+            _candidate_set([_candidate("red", "red can")]), scene_export
+        )
+
+    payload = next(audit_dir.glob("selection_*/call_*.json")).read_text()
+    audit = json.loads(payload)
+    assert audit["error_type"] == "ValueError"
+    assert audit["response"] is None
+    assert "api_key" not in payload
+
+
 def test_semantic_blueprint_selection_forces_ranked_low_confidence_uid() -> None:
     candidate = _candidate("likely", "the can")
     scene_objects = [
@@ -674,6 +931,7 @@ def test_scene_adapter_uses_unique_bindable_then_injected_adjudication(
 
 def test_scene_adapter_runs_one_default_structured_adjudication(
     scene_export: Path,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adjudications = 0
@@ -688,7 +946,8 @@ def test_scene_adapter_runs_one_default_structured_adjudication(
     monkeypatch.setattr(
         scene_adapter_module, "_default_grounding_caller", lambda: caller
     )
-    result = SceneAdapter().adapt(
+    audit_dir = tmp_path / "grounding_audit"
+    result = SceneAdapter(audit_dir=audit_dir).adapt(
         _candidate_set([_candidate("red", "red can"), _candidate("blue", "blue can")]),
         scene_export,
     )
@@ -696,6 +955,7 @@ def test_scene_adapter_runs_one_default_structured_adjudication(
     assert result.selected_candidate_id == "blue"
     assert result.binding_report["selection_reason"] == "adjudicated_bindable"
     assert adjudications == 1
+    assert len(list(audit_dir.glob("selection_*/call_*.json"))) == 3
 
 
 def test_scene_adapter_accepts_direct_source_and_rejects_bad_protocol(
