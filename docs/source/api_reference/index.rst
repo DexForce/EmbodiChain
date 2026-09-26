@@ -85,3 +85,9 @@ documentation. CI runs this same checker after style checks and before tests.
 
    public_api
    locomotion_tasks
+
+
+.. toctree::
+   :maxdepth: 1
+
+   tianji_marvin
