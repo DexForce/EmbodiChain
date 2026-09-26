@@ -49,6 +49,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _validate_uid,
     build_scene_usdz,
     load_scene_usd_into_sim,
+    load_usd_stage_into_sim,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (
     USD_SCENE_SCHEMA,
@@ -527,6 +528,13 @@ def test_schema_v2_usd_preview_uses_direct_simulation_import(
     sim = _DirectUsdSim()
     assert load_scene_usd_into_sim(sim=sim, output_root=output_root) == [drawer]  # type: ignore[arg-type]
     assert sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
+
+    standalone_sim = _DirectUsdSim()
+    assert load_usd_stage_into_sim(  # type: ignore[arg-type]
+        sim=standalone_sim,
+        scene_usd_path=scene_path,
+    ) == [drawer]
+    assert standalone_sim.calls == [{"name": "scene", "file_path": str(scene_path)}]
 
 
 def test_build_scene_usdz_creates_relocatable_single_file(tmp_path: Path) -> None:

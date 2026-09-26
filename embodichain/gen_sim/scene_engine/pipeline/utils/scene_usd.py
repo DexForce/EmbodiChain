@@ -377,6 +377,26 @@ def load_scene_usd_into_sim(
     )
 
 
+def load_usd_stage_into_sim(
+    *,
+    sim: SimulationManager,
+    scene_usd_path: str | Path,
+) -> list[Articulation]:
+    """Load one schema-v2 USD or USDZ stage directly into a simulator.
+
+    This is the single-file delivery path. It does not require a Scene Engine
+    output directory or a JSON manifest; entity identity comes from USD prim
+    metadata and DexSim imports the same stage that EmbodiChain indexes.
+    """
+    path = Path(scene_usd_path).expanduser().resolve()
+    index = UsdSceneIndex.load(path, require_schema=True)
+    return _load_embodichain_usd_stage(
+        sim=sim,
+        scene_usd_path=path,
+        index=index,
+    )
+
+
 def _load_embodichain_usd_stage(
     *,
     sim: SimulationManager,

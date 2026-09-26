@@ -36,7 +36,7 @@ The `scene_export/` directory contains `scene.json`, `scene_config.json`,
 Generation and editing also produce an optional `scene_usd/` delivery package
 with a schema-v2 `scene.usda` carrying EmbodiChain entity metadata and a
 relocatable `scene.usdz` single-file package. DexSim preview loads schema-v2
-stages directly; the manifest and native GLTF/USDC assets remain legacy
+stages directly through `preview-scene --usd-file`; the manifest and native GLTF/USDC assets remain legacy
 compatibility data. Build it only after the complete simulation scene is
 prepared; validate UIDs and keep every packaged asset path inside the output
 root.

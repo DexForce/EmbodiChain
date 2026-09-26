@@ -33,6 +33,7 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
     _add_articulations,
     load_scene_export_into_sim,
     load_scene_usd_into_sim,
+    load_usd_stage_into_sim,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +45,8 @@ if TYPE_CHECKING:
 
 def preview_scene_export(
     *,
-    output_root: str | Path,
+    output_root: str | Path | None = None,
+    usd_file: str | Path | None = None,
     device: str = "cpu",
     headless: bool = False,
     visualization: VisualizationCfg | None = None,
@@ -55,6 +57,7 @@ def preview_scene_export(
 
     Args:
         output_root: Scene Engine output root containing ``scene_export/``.
+        usd_file: A standalone schema-v2 ``.usda`` or ``.usdz`` stage.
         device: Simulation device, for example ``"cpu"`` or ``"cuda"``.
         headless: Load and validate the scene without an interactive preview.
         visualization: Optional live-visualization configuration.
@@ -62,11 +65,21 @@ def preview_scene_export(
         use_usd: Load ``scene_usd/scene.usda`` through its manifest instead of
             assembling the source GLB/USDC assets.
     """
-    resolved_output_root = Path(output_root).expanduser().resolve()
+    if usd_file is not None and output_root is not None:
+        raise ValueError("Specify either output_root or usd_file, not both.")
+    if usd_file is None and output_root is None:
+        raise ValueError("One of output_root or usd_file is required.")
+    resolved_output_root = (
+        None if output_root is None else Path(output_root).expanduser().resolve()
+    )
     source_path = (
-        resolved_output_root / "scene_usd" / "scene.usda"
-        if use_usd
-        else resolved_output_root / "scene_export" / "scene_config.json"
+        Path(usd_file).expanduser().resolve()
+        if usd_file is not None
+        else (
+            resolved_output_root / "scene_usd" / "scene.usda"
+            if use_usd
+            else resolved_output_root / "scene_export" / "scene_config.json"
+        )
     )
     if not source_path.is_file():
         raise FileNotFoundError(f"Scene preview source not found: {source_path}")
@@ -85,12 +98,16 @@ def preview_scene_export(
     )
     try:
         articulations = (
-            load_scene_usd_into_sim(sim=sim, output_root=resolved_output_root)
-            if use_usd
-            else load_scene_export_into_sim(
-                sim=sim,
-                output_root=resolved_output_root,
-                force_static_rigids=True,
+            load_usd_stage_into_sim(sim=sim, scene_usd_path=source_path)
+            if usd_file is not None
+            else (
+                load_scene_usd_into_sim(sim=sim, output_root=resolved_output_root)
+                if use_usd
+                else load_scene_export_into_sim(
+                    sim=sim,
+                    output_root=resolved_output_root,
+                    force_static_rigids=True,
+                )
             )
         )
         sim.prepare()
@@ -164,11 +181,16 @@ def main(argv: Sequence[str] | None = None) -> None:
         prog="embodichain preview-scene",
         description="Preview a Scene Engine scene export in EmbodiChain simulation.",
     )
-    parser.add_argument(
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         "--output_root",
         type=Path,
-        required=True,
         help="Scene Engine output root containing scene_export/.",
+    )
+    source_group.add_argument(
+        "--usd-file",
+        type=Path,
+        help="Standalone schema-v2 .usda or .usdz scene file.",
     )
     parser.add_argument(
         "--device",
@@ -195,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     preview_scene_export(
         output_root=args.output_root,
+        usd_file=args.usd_file,
         device=args.device,
         headless=args.headless,
         visualization=visualization_cfg_from_args(args),

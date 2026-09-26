@@ -20,9 +20,10 @@
    `scene_graph.json`, `mesh_assets/`, and `articulated_assets/`. Generation and
    editing may additionally build `scene_usd/`; schema-v2 `scene.usda` carries
    stable EmbodiChain entity metadata and is loaded directly by DexSim, while
-   `scene.usdz` is the relocatable single-file delivery form. The manifest and
-   native GLTF/USDC files remain legacy compatibility data. It represents a
-   scene, not a complete `EmbodiedEnv` deployment.
+   `scene.usdz` is the relocatable single-file delivery form and
+   `preview-scene --usd-file` imports it directly. The manifest and native
+   GLTF/USDC files remain legacy compatibility data. It represents a scene,
+   not a complete `EmbodiedEnv` deployment.
 6. The general SimReady CLI is a separate ingest path. `simready_pipeline/cli/start.py` sets
    `PYOPENGL_PLATFORM=egl`, builds `JsonStore` and `ParserManager`, then calls
    `ingest_one_asset()`.

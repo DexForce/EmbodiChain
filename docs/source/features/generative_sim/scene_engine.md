@@ -164,3 +164,15 @@ embodichain preview-scene \
     --device cuda \
     --viser
 ```
+
+For a relocatable single-file delivery, use the generated USDZ directly:
+
+```bash
+embodichain preview-scene \
+    --usd-file /path/to/scene_usd/scene.usdz \
+    --headless
+```
+
+The standalone file must contain schema-v2 EmbodiChain entity metadata. The
+preview imports that USD stage directly through the simulation manager and does
+not require `scene_export/` or the JSON manifest.
