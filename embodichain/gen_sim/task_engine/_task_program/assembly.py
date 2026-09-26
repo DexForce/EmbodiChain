@@ -49,6 +49,8 @@ from .motion import (
 __all__: list[str] = []
 
 from .adaptive_grasp import ADAPTIVE_GRASP_REVISION
+from .coordinated_grasp import COORDINATED_GRASP_REVISION
+from .coordinated_motion import COORDINATED_MOTION_REVISION, GenSimCoordinatedPickment
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v4"
 
@@ -139,11 +141,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pour_receivers: dict[str, str] | None = None,
         drawer_routes: tuple = (),
         adaptive_pick: bool = False,
+        coordinated_motion: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._pour_receivers = dict(pour_receivers or {})
         self._adaptive_pick = adaptive_pick
+        self._coordinated_motion = coordinated_motion
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -197,6 +201,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 drawer_observations=self._drawers,
             )
             engine.register(GenSimPickUp(), replace=True)
+            if self._coordinated_motion:
+                engine.register(GenSimCoordinatedPickment(), replace=True)
             self.task_program_registration.validate_engine(engine)
             return engine
 
@@ -208,6 +214,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPlace(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
+        if self._coordinated_motion:
+            engine.register(GenSimCoordinatedPickment(), replace=True)
         self.task_program_registration.validate_engine(engine)
         return engine
 
@@ -228,6 +236,7 @@ class TaskAdapterFactory:
     pour_receivers: tuple[tuple[str, str], ...] = ()
     drawer_routes: tuple = ()
     adaptive_pick: bool = False
+    coordinated_grasp: bool = False
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -302,6 +311,12 @@ class TaskAdapterFactory:
                     simulation=environment.sim,
                 )
         grasp_generators = {name: create() for name, create in self.grasp_factories}
+        if self.coordinated_grasp:
+            from .coordinated_grasp import install_coordinated_grasps
+
+            grasp_generators = install_coordinated_grasps(
+                self.registration, environment.robot, grasp_generators
+            )
         grasp_generators = install_grasp_filters(
             self.registration,
             environment.sim,
@@ -348,6 +363,7 @@ class TaskAdapterFactory:
             pour_receivers=dict(self.pour_receivers),
             drawer_routes=self.drawer_routes,
             adaptive_pick=self.adaptive_pick,
+            coordinated_motion=self.coordinated_grasp,
         )
         return factory.create_adapter()
 
@@ -481,37 +497,10 @@ def load_deployment(
             ),
         )
     grasp_factories = base.integration.grasp_factories
-    # The pad envelope is needed for thin-object coordinated grasps. Retain
-    # the conservative full-finger envelope for inclined single-arm grasps:
-    # this three-box model couples palm placement to the finger length.
-    # The configured Robotiq grasp command closes its pads to zero gap.
-    # Its reference 1 cm sampling cutoff excludes the original tray's
-    # measured 5-8 mm contacts. The URDF pad collision mesh spans 65 mm
-    # about the configured 0.2 m TCP, not the proxy's symmetric 130 mm.
-    # Keep palm/width/thickness checks and all physical commands unchanged.
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
         in {"simulation.coordinated_hold", "simulation.coordinated_transport"}
         for item in program["program"]["items"]
-    )
-    grasp_factories = tuple(
-        (
-            name,
-            (
-                replace(
-                    factory,
-                    min_opening_width=(
-                        min(factory.min_opening_width, 0.005)
-                        if coordinated
-                        else factory.min_opening_width
-                    ),
-                    finger_length=0.065 if coordinated else factory.finger_length,
-                )
-                if factory.model_id == "robotiq_arg2f_140"
-                else factory
-            ),
-        )
-        for name, factory in grasp_factories
     )
     cartesian_approaches = any(
         item.get("steps", {}).get("call", {}).get("kind") == "hand_over"
@@ -532,6 +521,14 @@ def load_deployment(
     fingerprint = canonical_hash(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
+            **(
+                {
+                    "coordinated_grasp_revision": COORDINATED_GRASP_REVISION,
+                    "coordinated_motion_revision": COORDINATED_MOTION_REVISION,
+                }
+                if coordinated
+                else {}
+            ),
             **(
                 {"drawer_curobo_revision": 1}
                 if any(
@@ -568,6 +565,7 @@ def load_deployment(
         pour_receivers,
         drawers,
         adaptive_pick=adaptive_pick,
+        coordinated_grasp=coordinated,
     )
     integration = replace(
         base.integration,

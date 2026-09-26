@@ -111,6 +111,48 @@ def test_lower_existing_effort_is_not_increased() -> None:
     )
 
 
+@pytest.mark.parametrize("carrier_mass", [None, 0.01, 0.2])
+@pytest.mark.parametrize("resource", ["left", "right"])
+def test_light_pick_in_e5_sequence_requires_qualified_carrier(
+    carrier_mass, resource
+) -> None:
+    embodiment, scene, graph = _inputs(task_type="E2")
+    graph["nodes"][0]["call"]["resources"]["primary"] = resource
+    scene.rigid_objects += (
+        {"uid": "carrier", "attrs": {"mass_props": {"mass": carrier_mass}}},
+    )
+    graph["nodes"].insert(
+        0,
+        {
+            "task_type": "E5",
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.coordinated_hold",
+                "arguments": {"object": "carrier"},
+                "resources": {"left": "left", "right": "right"},
+            },
+        },
+    )
+    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    limits = embodiment["simulation"]["joint_drive_props"]["max_effort"]
+    assert limits[resource + "_eef"] == (0.5 if carrier_mass == 0.01 else 500.0)
+    other = "right" if resource == "left" else "left"
+    assert limits[other + "_eef"] == 500.0
+
+
+def test_e5_only_still_preserves_authored_grip_effort() -> None:
+    embodiment, scene, graph = _inputs(task_type="E5")
+    graph["nodes"][0]["call"] = {
+        "kind": "registered",
+        "call_id": "simulation.coordinated_hold",
+        "arguments": {"object": "object"},
+        "resources": {"left": "left", "right": "right"},
+    }
+    original = deepcopy(embodiment)
+    _calibrate_task_gripper_effort(embodiment, scene, graph)
+    assert embodiment == original
+
+
 def test_registered_pick_uses_its_bound_resource() -> None:
     embodiment, scene, graph = _inputs(task_type="E2")
     graph["nodes"][0]["call"] = {

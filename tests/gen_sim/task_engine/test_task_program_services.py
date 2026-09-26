@@ -937,7 +937,10 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
 
 
 @pytest.mark.parametrize("verify_retention", [False, True])
-def test_upright_alignment_lifts_before_rotating(verify_retention: bool) -> None:
+@pytest.mark.parametrize("height", [1.3, 0.8])
+def test_upright_alignment_lifts_before_rotating(
+    verify_retention: bool, height: float
+) -> None:
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
     pose[:, :3, 3] = torch.tensor([0.1, 0.2, 1.0])
@@ -947,7 +950,7 @@ def test_upright_alignment_lifts_before_rotating(verify_retention: bool) -> None
         get_link_pose=lambda **kw: torch.eye(4).unsqueeze(0),
     )
     lowerer = _AlignHeldFactory(
-        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, 1.3)),),
+        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, height)),),
         verify_retention=verify_retention,
     ).create(
         simulation=None,
@@ -998,8 +1001,10 @@ def test_upright_alignment_lifts_before_rotating(verify_retention: bool) -> None
     assert waypoints.shape == (1, 2, 4, 4)
     torch.testing.assert_close(waypoints[:, 0, :3, :3], original[:, :3, :3])
     torch.testing.assert_close(
-        waypoints[:, :, :3, 3], torch.tensor([[[0.1, 0.2, 1.3]]]).expand(-1, 2, -1)
+        waypoints[:, :, :3, 3],
+        torch.tensor([[[0.1, 0.2, max(1.0, height)], [0.1, 0.2, height]]]),
     )
+    assert result.goal.world_yaw_free
     torch.testing.assert_close(
         waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
     )

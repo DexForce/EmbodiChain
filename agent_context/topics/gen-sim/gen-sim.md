@@ -74,9 +74,29 @@ objects back to configured X/Y after settling.
 Task motion policy samples even single-EEF-target transports in Cartesian space;
 joint targets retain their joint-space behavior. E2 alignment preserves the
 acquired orientation during the staging lift, then turns the object aloft.
+E2 checks its final yaw-free alignment at release height before Place preserves
+that heading. Alignment staging never descends below the current height before
+the planner can choose the final orientation.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
+E5 Robotiq grasp clearance is isolated in
+`task_engine/_task_program/coordinated_grasp.py`: only the dual-grasp service
+uses URDF collision surfaces and deployment open/grasp commands in TCP space.
+Antipodal points seed a bounded finite-pad gap, centering and insertion search;
+their separation is not assumed to be the actual contact gap. Watertight target
+triangles preserve cavities that coarse convex unions can fill. Both inward pad
+faces must reach contact, with the open-to-contact sweep clear of other hand
+parts. Non-watertight targets fail explicitly instead of receiving guessed signs.
+Single-arm generator methods and
+their factories remain unchanged even in mixed E1/E5 programs; do not tune their
+finger envelope or opening margin at program scope. This target-mesh screening
+does not certify continuous approach clearance, contact dynamics, or attachment.
+`coordinated_motion.py` composes the shared planning helpers for E5 continuation:
+two verified grasps of the same object are retained through motion, and hands
+open only at release. Missing or conflicting held state cannot fall back to
+re-picking. Consecutive E5 relative targets accumulate for terminal checks;
+release retreat exceeds the unchanged separation threshold with tracking margin.
 For non-drawer, single-environment Place only, exhausted Cartesian IK planning
 may retry through the shared motion generator with nearby joint seeds and a
 joint-limit-margin preference. Already successful plans are returned unchanged;
@@ -85,10 +105,11 @@ and rechecks full-robot velocity after Place resampling. This is a bounded
 kinematic recovery, not collision or physical-placement qualification.
 E2 release preserves the observed aligned heading instead of adding another
 fixed yaw during descent; an upright instruction does not require that rotation.
-Generated E1/E2-only deployments cap the used Robotiq gripper `max_effort` at 0.5
-when every picked rigid body has an explicitly declared mass of at most 10 g.
+Generated E1/E2 deployments, including light E5 compositions, cap only grippers
+used by single-arm picks at `max_effort: 0.5` when every picked rigid body and
+E5 carrier has an explicitly declared mass of at most 10 g.
 The full closing range is retained; smaller existing effort limits are not
-increased. Unknown/heavier loads and other recipe families retain their declared
+increased. Unknown/heavier loads, E5-only programs and other recipe families retain their declared
 controls. Imported mimic behavior and shared robot defaults are unchanged.
 Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,

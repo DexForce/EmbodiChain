@@ -137,7 +137,10 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         pose[:, :3, :3] = correction @ pose[:, :3, :3]
         if position is not None:
             pose[:, :3, 3] = pose.new_tensor(position)
-            staging_pose[:, :3, 3] = pose[:, :3, 3]
+            staging_pose[:, :2, 3] = pose[:, :2, 3]
+            # A lower destination must not force the old heading down before
+            # the yaw-free planner can select a reachable final orientation.
+            staging_pose[:, 2, 3] = torch.maximum(staging_pose[:, 2, 3], pose[:, 2, 3])
         if args["preserve_yaw"]:
             return SemanticLowering(
                 goal=HeldObjectPoseGoal(pose), registered_effect=effect
@@ -185,7 +188,7 @@ class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "6"
+    revision: ClassVar[str] = "7"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...
