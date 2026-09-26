@@ -73,10 +73,12 @@ topics:
   aliases: [manager functor, functor pattern, observation manager, reward manager, event manager, action
       manager, dataset manager, 管理器]
   keywords: [FunctorCfg, ObservationCfg, RewardCfg, ActionTermCfg, ObservationManager, RewardManager,
-    EventManager, ActionManager, DatasetManager, SceneEntityCfg]
+    EventManager, ActionManager, ActionDescriptor, ActionTermDescriptor, ParallelGripperAction,
+    DatasetManager, SceneEntityCfg]
   paths: [topics/manager-functor/manager-functor.md]
   source_of_truth:
   - embodichain/lab/gym/envs/managers/action_manager.py
+  - embodichain/lab/gym/envs/managers/action_types.py
   - embodichain/lab/gym/envs/managers/actions.py
   - embodichain/lab/gym/envs/managers/manager_base.py
   - embodichain/lab/gym/envs/managers/cfg.py

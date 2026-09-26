@@ -131,6 +131,35 @@ def test_config_to_cfg_requires_explicit_physics_backend():
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
+@pytest.mark.parametrize(
+    ("action", "message"),
+    [
+        ({"func": "Delta" + "Qpos" + "Term", "params": {}}, "removed class"),
+        (
+            {
+                "func": "RelativeJointPositionAction",
+                "mode": "pre",
+                "params": {"part_name": "arm"},
+            },
+            "removed field 'mode'",
+        ),
+    ],
+)
+def test_config_to_cfg_rejects_removed_action_protocol(
+    action: dict[str, object], message: str
+) -> None:
+    """Action decoding fails with an explicit migration error."""
+    config = {
+        "id": "RemovedActionProtocol-v1",
+        "physics": "default",
+        "env": {"actions": {"arm_action": action}},
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
 @pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""

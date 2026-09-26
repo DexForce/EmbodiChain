@@ -285,8 +285,8 @@ class MyRewardCfg:
 @configclass
 class MyActionCfg:
     delta_qpos: ActionTermCfg = ActionTermCfg(
-        func="DeltaQposTerm",
-        params={"scale": 0.1},
+        func="RelativeJointPositionAction",
+        params={"part_name": "arm", "scale": 0.1},
     )
 
 
@@ -417,7 +417,7 @@ The dataset manager is called automatically during {meth}`~envs.Env.step()`, ens
 
 For RL tasks, EmbodiChain uses the **Action Manager** integrated into {class}`~envs.EmbodiedEnv`:
 
-* **Action Preprocessing**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Supports DeltaQposTerm, QposTerm, QposDenormalizedTerm, EefPoseTerm, QvelTerm, QfTerm. For a complete list of available action terms, please refer to {doc}`action_functors`.
+* **Flat Action Composition**: Configurable via ``actions`` in {class}`~envs.EmbodiedEnvCfg`. Terms own ordered slices and apply disjoint robot resources. For the built-in joint, EEF, and parallel-gripper actions, see {doc}`action_functors`.
 * **Standardized Info Structure**: {class}`~envs.EmbodiedEnv` provides ``compute_task_state``, ``get_info``, and ``evaluate`` for task-specific success/failure and metrics.
 * **Episode Management**: Configurable episode length and truncation logic.
 
@@ -426,14 +426,17 @@ For RL tasks, EmbodiChain uses the **Action Manager** integrated into {class}`~e
 Configure action preprocessing via the ``actions`` field:
 
 ```python
-from embodichain.lab.gym.envs.managers import ActionTermCfg, DeltaQposTerm
+from embodichain.lab.gym.envs.managers import (
+    ActionTermCfg,
+    RelativeJointPositionAction,
+)
 from embodichain.utils import configclass
 
 @configclass
 class MyRLActionCfg:
     delta_qpos: ActionTermCfg = ActionTermCfg(
-        func=DeltaQposTerm,
-        params={"scale": 0.1}
+        func=RelativeJointPositionAction,
+        params={"part_name": "arm", "scale": 0.1}
     )
 
 # In EmbodiedEnvCfg:
@@ -446,8 +449,8 @@ In a gym config file, use the ``actions`` section:
 ```json
 "actions": {
     "delta_qpos": {
-        "func": "DeltaQposTerm",
-        "params": { "scale": 0.1 }
+        "func": "RelativeJointPositionAction",
+        "params": { "part_name": "arm", "scale": 0.1 }
     }
 }
 ```

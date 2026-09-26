@@ -111,6 +111,30 @@ def test_heading_commands_consume_xyzw_quaternions() -> None:
     torch.testing.assert_close(env.command, torch.zeros((1, 3)), atol=1e-6, rtol=0)
 
 
+def test_locomotion_state_binds_new_action_term_buffers() -> None:
+    """Velocity state reads current, previous, and encoder-bias buffers."""
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    term = SimpleNamespace(
+        raw_actions=torch.ones(2, 3),
+        previous_raw_actions=torch.full((2, 3), 2.0),
+        position_bias=torch.full((2, 3), 0.1),
+    )
+    env = SimpleNamespace(
+        action_manager=SimpleNamespace(get_term=lambda name: term),
+    )
+
+    EmbodiChainVelocityEnv._bind_locomotion_action_state(env)
+
+    assert env.locomotion_action is term.raw_actions
+    assert env.last_locomotion_action is term.previous_raw_actions
+    assert env.encoder_bias is term.position_bias
+
+
 @pytest.mark.parametrize("robot", ["g1", "h1_2", "go1", "go2"])
 @pytest.mark.parametrize("backend", ["default", "newton"])
 def test_unitree_deployments_preserve_task_physics(
@@ -149,6 +173,43 @@ def test_unitree_deployments_preserve_task_physics(
     assert config.robot.root_props.self_collision_enabled is (robot in {"g1", "h1_2"})
     assert config.robot.asset_physics_mode == "overlay"
     assert config.sensor[0].articulation_cfg_list[0].link_name_list == []
+
+
+def test_velocity_env_injects_one_ordered_joint_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime locomotion binding must not combine part and joint selectors."""
+    from embodichain.lab.gym.envs import EmbodiedEnv
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.sim import cfg as sim_cfg
+    from embodichain.utils.utility import load_config
+    from embodichain_tasks.locomotion.velocity.go1_flat import UnitreeGo1FlatEnv
+
+    monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
+    path = Path("embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.yaml")
+    cfg = config_to_cfg(
+        load_config(path),
+        source_path=path,
+        manager_modules=[
+            f"embodichain_tasks.locomotion.managers.{module}"
+            for module in ("observations", "rewards")
+        ],
+    )
+    captured: dict[str, object] = {}
+
+    def capture_init(self, resolved_cfg, **kwargs) -> None:
+        del self, kwargs
+        captured["cfg"] = resolved_cfg
+
+    monkeypatch.setattr(EmbodiedEnv, "__init__", capture_init)
+
+    UnitreeGo1FlatEnv(cfg)
+
+    resolved = captured["cfg"]
+    params = resolved.actions.joint_position.params
+    assert "part_name" not in params
+    assert params["joint_names"] == go1_config.load_config().joint_names
+    assert params["preserve_order"] is True
 
 
 def test_policy_viewer_target_pose_preserves_world_xyzw_and_copies_state():

@@ -110,7 +110,8 @@ The ``env`` section defines the task environment:
 
 For RL environments, use the ``actions`` field for action preprocessing and ``extensions`` for task-specific parameters:
 
-- **actions**: Action Manager config (e.g., DeltaQposTerm with scale)
+- **actions**: Ordered flat Action Manager config (for example,
+  ``RelativeJointPositionAction`` with a selected control part and scale)
 - **extensions**: Task-specific parameters (e.g., success_threshold)
 
 Example:
@@ -123,8 +124,8 @@ Example:
        "num_envs": 4,
        "actions": {
          "delta_qpos": {
-           "func": "DeltaQposTerm",
-           "params": { "scale": 0.1 }
+           "func": "RelativeJointPositionAction",
+           "params": { "part_name": "arm", "scale": 0.1 }
          }
        },
        "extensions": {
@@ -431,8 +432,8 @@ To add a new RL environment:
        "num_envs": 4,
        "actions": {
          "delta_qpos": {
-           "func": "DeltaQposTerm",
-           "params": { "scale": 0.1 }
+           "func": "RelativeJointPositionAction",
+           "params": { "part_name": "arm", "scale": 0.1 }
          }
        },
        "extensions": {
@@ -443,7 +444,8 @@ To add a new RL environment:
 
 The ``EmbodiedEnv`` with Action Manager provides:
 
-- **Action Preprocessing**: Configurable via ``actions`` (DeltaQposTerm, QposTerm, EefPoseTerm, etc.)
+- **Action Composition**: Configure ordered joint, EEF, and gripper terms via
+  ``actions``; each term owns and directly applies its selected resources.
 - **Standardized Info**: Implements ``get_info()`` using ``compute_task_state()`` template method
 
 Best Practices
@@ -451,7 +453,8 @@ Best Practices
 
 - **Use EmbodiedEnv with Action Manager for RL Tasks**: Inherit from ``EmbodiedEnv`` and configure ``actions`` in your config. The Action Manager handles action preprocessing (delta_qpos, qpos, qvel, qf, eef_pose) in a modular way.
 
-- **Action Configuration**: Use the ``actions`` field in your config file. Example: ``"delta_qpos": {"func": "DeltaQposTerm", "params": {"scale": 0.1}}``.
+- **Action Configuration**: Use the ``actions`` field in your config file. For
+  example: ``"delta_qpos": {"func": "RelativeJointPositionAction", "params": {"part_name": "arm", "scale": 0.1}}``.
 
 - **Device Management**: Device is single-sourced from ``runtime.cuda``. All components (trainer/algorithm/policy/env) share the same device.
 

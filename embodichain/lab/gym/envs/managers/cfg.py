@@ -348,18 +348,7 @@ class RewardCfg(FunctorCfg):
 class ActionTermCfg(FunctorCfg):
     """Configuration for an action term.
 
-    The action term is used to preprocess raw actions from the policy into
-    the format expected by the robot (e.g., qpos, qvel, qf).
-    """
-
-    mode: Literal["pre", "post"] = "pre"
-    """The mode for the action term.
-
-    - ``pre``: Preprocess raw action from policy (default). This is applied before
-      the action is sent to the robot control.
-    - ``post``: Postprocess the action after it has been processed by another term.
-      This is useful for applying additional transformations like noise, clipping,
-      or filtering to the output actions.
+    The action term owns one ordered slice of the flat policy action.
     """
 
 

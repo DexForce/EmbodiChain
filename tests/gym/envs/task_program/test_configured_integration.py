@@ -1164,8 +1164,13 @@ def test_integration_registration_rejects_reusing_an_id_for_changed_config(
 
 
 def test_examples_have_no_importable_task_environment_modules() -> None:
-    """All three environment implementations are now serialized configuration."""
-    for task_name in _TASKS:
+    """Pure configuration-defined examples do not need Python task modules.
+
+    ``repeated_pick_place`` also ships import-registered RLinf variants, so
+    its task module is intentional even though the original Task Program
+    deployments remain configuration-defined.
+    """
+    for task_name in ("open_drawer", "hand_over"):
         module_name = f"embodichain_tasks.manipulation.{task_name}"
         assert importlib.util.find_spec(module_name) is None
 

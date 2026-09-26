@@ -904,9 +904,21 @@ def config_to_cfg(
     if "actions" in env_config:
         env_cfg.actions = ComponentCfg()
         for term_name, term_params in env_config["actions"].items():
+            if "mode" in term_params:
+                raise ValueError(
+                    f"Action term {term_name!r} uses removed field 'mode'; "
+                    "action terms now process and apply in configuration order."
+                )
+            term_class_name = term_params["func"]
+            if term_class_name.endswith("Term"):
+                raise ValueError(
+                    f"Action term {term_name!r} uses removed class "
+                    f"{term_class_name!r}; concrete action classes must use "
+                    "the new *Action protocol and naming."
+                )
             term_params_modified = deepcopy(term_params)
             term_func = find_function_from_modules(
-                term_params["func"],
+                term_class_name,
                 manager_modules,
                 raise_if_not_found=True,
             )

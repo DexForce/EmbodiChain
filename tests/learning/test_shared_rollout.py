@@ -66,6 +66,9 @@ class _FakeEnv:
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.device = device
+        # The flat action manager is intentionally present without the removed
+        # legacy conversion method; SyncCollector must pass raw actions to step.
+        self.action_manager = object()
         self.rollout_buffer: TensorDict | None = None
         self.current_rollout_step = 0
         self._obs = self._make_obs(step=0)

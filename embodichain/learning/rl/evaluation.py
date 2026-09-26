@@ -79,22 +79,17 @@ def infer_policy_action(
 
 
 def convert_policy_action_for_env(env: Any, action: torch.Tensor) -> Any:
-    """Move and convert a flat Policy action for the task Environment.
+    """Move a flat policy action to the task environment's device.
 
     Args:
         env: Environment that owns action preprocessing and simulation state.
         action: Flat action produced on the Policy inference device.
 
     Returns:
-        Action on the Environment device, converted through its action manager
-        when one is available.
+        Action on the Environment device.  The environment owns action-term
+        processing so that policy actions are validated and applied exactly
+        once inside :meth:`EmbodiedEnv.step`.
     """
-    action_manager = getattr(env, "action_manager", None)
-    if action_manager is None and hasattr(env, "get_wrapper_attr"):
-        try:
-            action_manager = env.get_wrapper_attr("action_manager")
-        except AttributeError:
-            action_manager = None
     env_device = getattr(env, "device", None)
     if env_device is None and hasattr(env, "get_wrapper_attr"):
         try:
@@ -103,9 +98,7 @@ def convert_policy_action_for_env(env: Any, action: torch.Tensor) -> Any:
             env_device = None
     if env_device is not None:
         action = action.to(env_device)
-    if action_manager is None:
-        return action
-    return action_manager.convert_policy_action_to_env_action(action)
+    return action
 
 
 def _selected_values(value: Any, indices: torch.Tensor) -> list[float]:

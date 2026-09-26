@@ -1,0 +1,7 @@
+id: RepeatedPickPlaceRlinfJoint-Franka-v1
+
+environment:
+  component: env.rlinf_joint.yaml
+
+embodiment:
+  component: ../../../components/embodiments/franka_panda_vla.yaml

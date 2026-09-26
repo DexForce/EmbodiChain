@@ -12,3 +12,9 @@ deployments:
     config: task.franka.newton.yaml
   ur5_newton:
     config: task.ur5.newton.yaml
+  franka_rlinf:
+    config: task.franka.rlinf.yaml
+  franka_rlinf_joint:
+    config: task.franka.rlinf_joint.yaml
+  franka_rlinf_expert:
+    config: task.franka.rlinf_expert.yaml

@@ -73,7 +73,7 @@ class FunctorCfg:
 | `ObservationCfg` | `mode`, `name` | ObservationManager |
 | `EventCfg` | `mode`, `interval_step`, `is_global` | EventManager |
 | `RewardCfg` | `weight`, `mode` | RewardManager |
-| `ActionTermCfg` | `mode` | ActionManager |
+| `ActionTermCfg` | *(no extra fields)* | ActionManager |
 | `DatasetFunctorCfg` | `mode` | DatasetManager |
 
 ### Python Config Example
@@ -201,8 +201,8 @@ When a training config references a gym config (via `trainer.gym_config`), the n
         "control_parts": ["arm"],
         "actions": {
             "delta_qpos": {
-                "func": "DeltaQposTerm",
-                "params": {"scale": 0.1}
+                "func": "RelativeJointPositionAction",
+                "params": {"part_name": "arm", "scale": 0.1}
             }
         },
         "events": {
@@ -436,8 +436,8 @@ class has no separate variant field.
             "num_envs": 4,
             "actions": {
                 "delta_qpos": {
-                    "func": "DeltaQposTerm",
-                    "params": {"scale": 0.1}
+                    "func": "RelativeJointPositionAction",
+                    "params": {"part_name": "arm", "scale": 0.1}
                 }
             }
         }
@@ -499,7 +499,7 @@ algorithm:
 In JSON and YAML configs, functor functions are specified by name (string). EmbodiChain resolves these strings at runtime by searching registered modules. For example:
 
 - `"distance_between_objects"` resolves to `embodichain.lab.gym.envs.managers.rewards.distance_between_objects`
-- `"DeltaQposTerm"` resolves to `embodichain.lab.gym.envs.managers.actions.DeltaQposTerm`
+- `"RelativeJointPositionAction"` resolves to `embodichain.lab.gym.envs.managers.actions.RelativeJointPositionAction`
 - `"get_object_pose"` resolves to `embodichain.lab.gym.envs.managers.observations.get_object_pose`
 
 When writing custom functors, make sure they are imported in the module's `__init__.py` so the resolver can find them.

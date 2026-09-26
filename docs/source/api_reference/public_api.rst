@@ -353,13 +353,24 @@ embodichain.lab.gym.envs.managers.actions
 
 .. autosummary::
 
-   DeltaQposTerm
-   QposTerm
-   QposDenormalizedTerm
-   QposNormalizedTerm
-   EefPoseTerm
-   QvelTerm
-   QfTerm
+   DefaultJointPositionAction
+   EefPoseAction
+   JointEffortAction
+   JointPositionAction
+   JointPositionToLimitsAction
+   JointVelocityAction
+   ParallelGripperAction
+   RelativeJointPositionAction
+
+embodichain.lab.gym.envs.managers.action_types
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.action_types
+
+.. autosummary::
+
+   ActionDescriptor
+   ActionTermDescriptor
 
 embodichain.lab.gym.envs.wrapper.replay
 ---------------------------------------
@@ -2216,6 +2227,19 @@ embodichain_tasks.manipulation.push_cube
 .. autosummary::
 
    PushCubeEnv
+
+embodichain_tasks.manipulation.repeated_pick_place
+--------------------------------------------------
+
+RLinf-facing repeated pick-and-place task registrations with explicit EEF and
+joint-position action variants.
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
+
+.. autosummary::
+
+   RepeatedPickPlaceRlinfEnv
+   RepeatedPickPlaceRlinfJointEnv
 
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------

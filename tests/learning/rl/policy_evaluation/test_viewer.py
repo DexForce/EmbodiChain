@@ -96,10 +96,6 @@ class ActionManager:
     def __init__(self) -> None:
         self.calls = 0
 
-    def convert_policy_action_to_env_action(self, action: torch.Tensor):
-        self.calls += 1
-        return action + 0.5
-
 
 class Environment:
     num_envs = 1
@@ -194,7 +190,8 @@ def test_viewer_reuses_task_actions_resets_and_metrics():
             "eval/success_rate": 1.0,
         }
     )
-    assert env.action_manager.calls == 4
+    assert env.action_manager.calls == 0
+    torch.testing.assert_close(env.actions[0], torch.tensor([[-1.0]]))
     assert env.reset_seeds == [17, None]
     assert env.exit_process_values == [False]
 
@@ -320,7 +317,7 @@ def test_camera_follows_xy_and_preserves_manual_orbit_and_zoom():
     np.testing.assert_array_equal(window.camera_pose[:3, :3], before[:3, :3])
     np.testing.assert_allclose(window.camera_pose[:3, 3] - before[:3, 3], [0.5, -1, 0])
     assert len(window.look_at_calls) == 1
-    assert env.action_manager.calls == 1
+    assert env.action_manager.calls == 0
     task.close()
 
 
