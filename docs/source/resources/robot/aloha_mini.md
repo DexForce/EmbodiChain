@@ -3,6 +3,11 @@
 `AlohaMiniCfg` loads the complete `AlohaMini/alohamini2pro.urdf` asset without
 renaming its joints or assembling separate arms.
 
+<div style="text-align: center;">
+  <img src="../../_static/robots/aloha_mini_2_pro.png" alt="Aloha Mini 2 Pro dual-arm robot" style="height: 400px; width: auto;"/>
+  <p><b>Aloha Mini 2 Pro</b></p>
+</div>
+
 ```python
 from embodichain.lab.sim.robots import AlohaMiniCfg
 

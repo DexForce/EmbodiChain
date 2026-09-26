@@ -90,6 +90,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             if term_cfg is not None:
                 mapping = {
                     "joint_names": self.velocity_task_config.joint_names,
+                    "preserve_order": True,
                     "offset": self.velocity_task_config.default_joint_position,
                     "scale": self.velocity_task_config.action_scale,
                 }
@@ -207,10 +208,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._command_steps_remaining = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
-        action_term = self.action_manager.get_term("joint_position")
-        self.locomotion_action = action_term.action
-        self.last_locomotion_action = action_term.previous_action
-        self.encoder_bias = action_term.position_bias
+        self._bind_locomotion_action_state()
         bias = config.data.get("events", {}).get("encoder_bias")
         if bias is not None:
             minimum, maximum = bias["params"]["bias_range"]
@@ -252,6 +250,13 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             shape=(config.action_dim,),
             dtype=np.float32,
         )
+
+    def _bind_locomotion_action_state(self) -> None:
+        """Bind task state to the default-position action term buffers."""
+        action_term = self.action_manager.get_term("joint_position")
+        self.locomotion_action = action_term.raw_actions
+        self.last_locomotion_action = action_term.previous_raw_actions
+        self.encoder_bias = action_term.position_bias
 
     def velocity_command_bounds(self) -> tuple[np.ndarray, np.ndarray]:
         """Return configured planar and yaw command bounds in SI units."""

@@ -23,7 +23,7 @@ import json
 import math
 import threading
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -45,6 +45,7 @@ from embodichain.data_pipeline.depth_video import (
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
 from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
+from .action_types import ActionDescriptor
 from .manager_base import Functor
 from .cfg import DatasetFunctorCfg
 
@@ -82,6 +83,16 @@ DEMO_FRAME_FEATURES = {
 }
 LEROBOT_SUBTASK_INDEX_KEY = "subtask_index"
 LEROBOT_SUBTASKS_PATH = Path("meta/subtasks.parquet")
+ACTION_CONTRACT_REPRESENTATIONS = {
+    "eef_pose_parallel_gripper",
+    "joint_position",
+    "joint_position_parallel_gripper",
+    "joint_position_velocity",
+}
+POLICY_ACTION_CONTRACT_TERMS = {
+    "eef_pose_parallel_gripper": ("eef_pose", "parallel_gripper"),
+    "joint_position_parallel_gripper": ("joint_position", "parallel_gripper"),
+}
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
@@ -106,6 +117,10 @@ class LeRobotRecorder(Functor):
     - Recording observation-action pairs during episodes
     - Converting data to LeRobot format
     - Saving episodes when they complete
+
+    Without an ``action_contract`` parameter, the recorder preserves the
+    existing joint-action schema. An optional versioned action contract can
+    select a joint or EEF representation and its auxiliary fields explicitly.
     """
 
     def __init__(self, cfg: DatasetFunctorCfg, env: EmbodiedEnv):
@@ -142,6 +157,30 @@ class LeRobotRecorder(Functor):
         # Optional parameters
         self.instruction = params.get("instruction", None)
         self.extra = params.get("extra", {})
+        superseded_action_options = {
+            key for key in ("action_mode", "record_eef_observation") if key in params
+        }
+        if superseded_action_options:
+            raise ValueError(
+                f"{sorted(superseded_action_options)!r} must be configured inside "
+                "action_contract."
+            )
+        self._action_contract_cfg = self._parse_action_contract(
+            params.get("action_contract")
+        )
+        representation = (
+            self._action_contract_cfg["representation"]
+            if self._action_contract_cfg is not None
+            else "joint_position"
+        )
+        self._policy_action_descriptors: tuple[ActionDescriptor, ...] = ()
+        self.record_eef_observation = bool(
+            self._action_contract_cfg
+            and self._action_contract_cfg["record_eef_observation"]
+        )
+        self._eef_observation_terms: tuple[Any, Any] | None = None
+        self.use_official_task_index = self._action_contract_cfg is not None
+        self._validate_action_contract_environment()
 
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
@@ -188,6 +227,115 @@ class LeRobotRecorder(Functor):
         # Initialize dataset
         self._initialize_dataset()
 
+    @staticmethod
+    def _parse_action_contract(value: Any) -> dict[str, Any] | None:
+        """Validate and normalize the optional action contract."""
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise TypeError("action_contract must be a mapping or None.")
+
+        contract = dict(value)
+        allowed_fields = {
+            "version",
+            "representation",
+            "record_eef_observation",
+        }
+        unknown_fields = sorted(set(contract) - allowed_fields)
+        if unknown_fields:
+            raise ValueError(f"unknown action_contract fields: {unknown_fields!r}.")
+        version = contract.get("version")
+        if type(version) is not int or version != 1:
+            raise ValueError(f"action_contract version must be 1, got {version!r}.")
+        representation = contract.get("representation")
+        if not isinstance(representation, str):
+            raise TypeError("action_contract representation must be a string.")
+        if representation not in ACTION_CONTRACT_REPRESENTATIONS:
+            raise ValueError(
+                "unsupported action representation "
+                f"{representation!r}; expected one of "
+                f"{sorted(ACTION_CONTRACT_REPRESENTATIONS)!r}."
+            )
+
+        is_eef = representation == "eef_pose_parallel_gripper"
+        for field in ("record_eef_observation",):
+            if field in contract and not isinstance(contract[field], bool):
+                raise TypeError(f"action_contract {field} must be a bool.")
+        return {
+            "version": 1,
+            "representation": representation,
+            "record_eef_observation": bool(
+                contract.get("record_eef_observation", is_eef)
+            ),
+        }
+
+    def _validate_action_contract_environment(self) -> None:
+        """Validate a policy contract against the manager-owned flat layout."""
+        cfg = self._action_contract_cfg
+        if cfg is None or cfg["representation"] not in POLICY_ACTION_CONTRACT_TERMS:
+            return
+        representation = cfg["representation"]
+        action_manager = getattr(self._env, "action_manager", None)
+        if action_manager is None:
+            raise ValueError(
+                f"{representation} action_contract requires a configured "
+                "ActionManager with descriptors."
+            )
+        descriptors = tuple(getattr(action_manager, "descriptors", ()))
+        if not descriptors:
+            raise ValueError(
+                f"{representation} action_contract requires ActionManager descriptors."
+            )
+        offset = 0
+        for descriptor in descriptors:
+            if descriptor.start != offset:
+                raise ValueError(
+                    "ActionManager descriptor slices must be contiguous from zero; "
+                    f"term {descriptor.name!r} starts at {descriptor.start}, "
+                    f"expected {offset}."
+                )
+            offset = descriptor.stop
+        actual = tuple(descriptor.term.representation for descriptor in descriptors)
+        expected = POLICY_ACTION_CONTRACT_TERMS[representation]
+        if actual != expected:
+            raise ValueError(
+                f"{representation} expected term sequence {expected!r}, got {actual!r}."
+            )
+        self._policy_action_descriptors = descriptors
+
+        if representation == "eef_pose_parallel_gripper":
+            arm_term = action_manager.get_term(descriptors[0].name)
+            gripper_term = action_manager.get_term(descriptors[1].name)
+            scale = torch.as_tensor(getattr(arm_term, "_scale", 1.0))
+            if not bool(torch.all(scale == 1.0)):
+                raise ValueError(
+                    "eef_pose_parallel_gripper action_contract requires EEF "
+                    "action scale 1.0."
+                )
+            if self.record_eef_observation:
+                required_arm = ("part_name", "controlled_joint_ids")
+                required_gripper = (
+                    "command_mode",
+                    "controlled_joint_ids",
+                    "lower_command",
+                    "upper_command",
+                )
+                if not all(hasattr(arm_term, name) for name in required_arm) or not all(
+                    hasattr(gripper_term, name) for name in required_gripper
+                ):
+                    raise ValueError(
+                        "EEF observation recording requires bound EefPoseAction "
+                        "and ParallelGripperAction terms."
+                    )
+                if gripper_term.command_mode == "continuous" and not bool(
+                    torch.any(gripper_term.lower_command != gripper_term.upper_command)
+                ):
+                    raise ValueError(
+                        "EEF observation recording requires at least one moving "
+                        "parallel-gripper joint."
+                    )
+                self._eef_observation_terms = (arm_term, gripper_term)
+
     def _derive_dataset_fps(self) -> int:
         """Derive the integer LeRobot sampling rate from the environment step."""
         step_dt = float(self._env.step_dt)
@@ -208,6 +356,157 @@ class LeRobotRecorder(Functor):
                 "resample observations before recording."
             )
         return dataset_fps
+
+    @property
+    def requires_raw_actions(self) -> bool:
+        """Whether this recorder needs raw policy requests."""
+        return bool(self._policy_action_descriptors)
+
+    def _action_contract(self) -> dict[str, Any] | None:
+        """Describe the primary action and auxiliary EEF fields in metadata."""
+        cfg = getattr(self, "_action_contract_cfg", None)
+        if cfg is None:
+            return None
+
+        representation = cfg["representation"]
+        measured_observation = (
+            "observation.eef_pose" if self.record_eef_observation else None
+        )
+        if representation in POLICY_ACTION_CONTRACT_TERMS:
+            return {
+                "version": 1,
+                "primary": "action",
+                "representation": representation,
+                "encoding": "flat_action_terms",
+                "action_terms": [
+                    descriptor.to_dict()
+                    for descriptor in self._policy_action_descriptors
+                ],
+                "requested_target": "action",
+                "measured_observation": measured_observation,
+            }
+        expert_action_spec = getattr(self._env, "expert_action_spec", None)
+        if representation == "joint_position_velocity":
+            if (
+                expert_action_spec is None
+                or expert_action_spec.joint_command_mode != "position_velocity"
+            ):
+                raise ValueError(
+                    "joint_position_velocity action_contract requires an "
+                    "ExpertActionSpec with joint_command_mode='position_velocity'."
+                )
+            return {
+                "version": 1,
+                "primary": "action",
+                "representation": representation,
+                "encoding": "active_joint_position_velocity",
+                "joint_command_mode": "position_velocity",
+                "qpos_slice": list(expert_action_spec.qpos_slice),
+                "qvel_slice": list(expert_action_spec.qvel_slice or ()),
+                "frame": "robot_joint_space",
+                "requested_target": "action",
+                "measured_observation": measured_observation,
+            }
+        if (
+            expert_action_spec is not None
+            and expert_action_spec.joint_command_mode != "position"
+        ):
+            raise ValueError(
+                "joint_position action_contract requires "
+                "joint_command_mode='position'."
+            )
+        return {
+            "version": 1,
+            "primary": "action",
+            "representation": representation,
+            "encoding": "active_joint_order",
+            "joint_command_mode": "position",
+            "frame": "robot_joint_space",
+            "requested_target": "action",
+            "measured_observation": measured_observation,
+        }
+
+    def _policy_action_list(self, env_id: int, step: int) -> torch.Tensor:
+        """Return and validate flat raw policy actions for one environment.
+
+        Args:
+            env_id: Parallel environment row.
+            step: Number of valid episode steps.
+
+        Returns:
+            Detached CPU actions in manager descriptor order.
+        """
+        raw_action_getter = getattr(self._env, "get_raw_action_history", None)
+        if raw_action_getter is None:
+            raise RuntimeError(
+                "Policy action contracts require raw action history "
+                "from the environment."
+            )
+        raw_actions = raw_action_getter(env_id, step)
+        if len(raw_actions) != step:
+            raise RuntimeError(
+                "Raw policy action history length does not match the episode "
+                f"length ({len(raw_actions)} != {step})."
+            )
+        actions = torch.as_tensor(raw_actions)
+        expected_shape = (step, self._policy_action_descriptors[-1].stop)
+        if tuple(actions.shape) != expected_shape:
+            raise RuntimeError(
+                "Raw policy action history must match the descriptor layout "
+                f"shape {expected_shape}, got {tuple(actions.shape)}."
+            )
+        self._validate_policy_action_values(actions)
+        return actions.detach().cpu().clone()
+
+    def validate_policy_action(self, action: torch.Tensor) -> None:
+        """Reject invalid live policy values before term processing or execution.
+
+        Args:
+            action: Flat policy tensor for all vector environments.
+
+        Raises:
+            TypeError: If the action is not a floating tensor.
+            ValueError: If its layout or descriptor-owned values are invalid.
+        """
+        if not self._policy_action_descriptors:
+            return
+        if not isinstance(action, torch.Tensor) or not action.is_floating_point():
+            raise TypeError("Policy dataset actions must be floating tensors.")
+        expected = (
+            self._env.num_envs,
+            self._policy_action_descriptors[-1].stop,
+        )
+        if tuple(action.shape) != expected:
+            raise ValueError(
+                f"Policy dataset action must have shape {expected}, "
+                f"got {tuple(action.shape)}."
+            )
+        self._validate_policy_action_values(action)
+
+    def _validate_policy_action_values(self, actions: torch.Tensor) -> None:
+        """Validate descriptor-specific values for one flat action batch."""
+        for descriptor in self._policy_action_descriptors:
+            values = actions[:, descriptor.start : descriptor.stop]
+            representation = descriptor.term.representation
+            if representation == "eef_pose" and not bool(torch.isfinite(values).all()):
+                raise ValueError("EEF policy actions must contain only finite values.")
+            if representation == "parallel_gripper" and (
+                not bool(torch.isfinite(values).all())
+                or bool(((values < -1.0) | (values > 1.0)).any())
+            ):
+                raise ValueError(
+                    "Parallel-gripper policy actions must be finite and within [-1, 1]."
+                )
+
+    def _contract_action_list(self, env_id: int, step: int, stored_actions: Any) -> Any:
+        """Build the primary and optional executed actions for one contract."""
+        cfg = getattr(self, "_action_contract_cfg", None)
+        if cfg is None:
+            return stored_actions
+        if cfg["representation"] in POLICY_ACTION_CONTRACT_TERMS:
+            return self._policy_action_list(env_id, step)
+
+        return torch.as_tensor(stored_actions).detach().cpu().clone()
 
     @property
     def dataset_path(self) -> str:
@@ -279,7 +578,8 @@ class LeRobotRecorder(Functor):
             if step <= 0:
                 continue
             obs_list = self._env.rollout_buffer["obs"][env_id, :step]
-            action_list = self._env.rollout_buffer["actions"][env_id, :step]
+            stored_actions = self._env.rollout_buffer["actions"][env_id, :step]
+            action_list = self._contract_action_list(env_id, step, stored_actions)
             annotations = {
                 key: self._env.rollout_buffer[key][env_id, :step]
                 for key in DEMO_ANNOTATION_KEYS
@@ -632,6 +932,13 @@ class LeRobotRecorder(Functor):
         previous_total_time = self.total_time
         self.total_time += current_episode_time
         episode_extra_info["total_time"] = self.total_time
+        action_contract = self._action_contract()
+        if action_contract is not None:
+            episode_extra_info["action_contract"] = action_contract
+        if getattr(self, "_policy_action_descriptors", ()):
+            episode_extra_info["embodichain.action_terms"] = [
+                descriptor.to_dict() for descriptor in self._policy_action_descriptors
+            ]
 
         depth_prefix = f"{LeRobotKey.OBS_PREFIX.value}depth."
         episode_index = self.curr_episode
@@ -640,11 +947,16 @@ class LeRobotRecorder(Functor):
         episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
         episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
         try:
+            use_official_task_index = getattr(self, "use_official_task_index", False)
             frame_subtasks = [
                 self._subtask_for_frame(task, episode_metadata, frame_index)
                 for frame_index in range(episode_length)
             ]
-            subtask_indices = self._register_subtasks(frame_subtasks)
+            subtask_indices = (
+                None
+                if use_official_task_index
+                else self._register_subtasks(frame_subtasks)
+            )
             if self._depth_manager is not None:
                 self._depth_manager.start_episode(
                     episode_index, list(self._depth_sensor_specs.keys())
@@ -697,9 +1009,14 @@ class LeRobotRecorder(Functor):
                 frame = self._convert_frame_to_lerobot(
                     obs,
                     action,
-                    task,
+                    frame_subtask if use_official_task_index else task,
+                    env_id=env_id,
                     annotations=frame_annotations,
-                    subtask_index=subtask_indices[frame_subtask],
+                    subtask_index=(
+                        None
+                        if subtask_indices is None
+                        else subtask_indices[frame_subtask]
+                    ),
                 )
                 # Offload depth to the sidecar writer and drop it from the frame
                 # so LeRobot's RGB-only image/video path never sees it. With
@@ -1193,16 +1510,36 @@ class LeRobotRecorder(Functor):
             if expert_action_spec is None
             else list(expert_action_spec.feature_names)
         )
+        if self._policy_action_descriptors:
+            action_dim = self._policy_action_descriptors[-1].stop
+            action_names = [
+                name
+                for descriptor in self._policy_action_descriptors
+                for name in descriptor.term.feature_names
+            ]
         features[LeRobotKey.ACTION.value] = {
             "dtype": "float32",
             "shape": (action_dim,),
             "names": action_names,
         }
-        features[LEROBOT_SUBTASK_INDEX_KEY] = {
-            "dtype": "int64",
-            "shape": (1,),
-            "names": None,
-        }
+        action_contract = self._action_contract()
+        if action_contract is not None:
+            features[LeRobotKey.ACTION.value]["info"] = {
+                "embodichain.action_contract": action_contract
+            }
+            if self._policy_action_descriptors:
+                features[LeRobotKey.ACTION.value]["info"][
+                    "embodichain.action_terms"
+                ] = [
+                    descriptor.to_dict()
+                    for descriptor in self._policy_action_descriptors
+                ]
+        if not self.use_official_task_index:
+            features[LEROBOT_SUBTASK_INDEX_KEY] = {
+                "dtype": "int64",
+                "shape": (1,),
+                "names": None,
+            }
 
         for feature_key in DEMO_FRAME_FEATURES.values():
             features[feature_key] = {
@@ -1295,10 +1632,126 @@ class LeRobotRecorder(Functor):
             }
 
         self._modify_feature_names(features)
+        if self.record_eef_observation:
+            features["observation.eef_pose"] = {
+                "dtype": "float32",
+                "shape": (7,),
+                "names": ["x", "y", "z", "roll", "pitch", "yaw", "gripper"],
+            }
         return features
 
-    @staticmethod
-    def _camera_feature_key(sensor_name: str, frame_name: str) -> str:
+    def _to_eef_observation(
+        self,
+        qpos: torch.Tensor,
+        *,
+        env_ids: Sequence[int],
+    ) -> torch.Tensor:
+        """Convert measured qpos rows into the configured auxiliary EEF layout.
+
+        Args:
+            qpos: Measured joint-position rows.
+            env_ids: Source vector-environment IDs matching those rows.
+
+        Returns:
+            Arena-frame xyz/RPY plus normalized gripper rows.
+        """
+        qpos = qpos.to(device=self._env.device, dtype=torch.float32)
+        if len(env_ids) != qpos.shape[0]:
+            raise ValueError("env_ids must contain one source row for each qpos row.")
+
+        active_joint_ids = getattr(self._env, "active_joint_ids", None)
+        if active_joint_ids is None:
+            active_joint_ids = tuple(range(qpos.shape[-1]))
+        else:
+            active_joint_ids = tuple(int(joint_id) for joint_id in active_joint_ids)
+        active_columns = {
+            joint_id: column for column, joint_id in enumerate(active_joint_ids)
+        }
+
+        def _active_columns(joint_ids: Sequence[int]) -> list[int]:
+            """Map full-robot joint IDs to the observation's active layout."""
+            try:
+                columns = [active_columns[int(joint_id)] for joint_id in joint_ids]
+            except KeyError as error:
+                raise ValueError(
+                    "EEF observation requires every controlled joint to be present "
+                    "in active_joint_ids."
+                ) from error
+            if any(column >= qpos.shape[-1] for column in columns):
+                raise ValueError(
+                    "EEF observation qpos width does not match active_joint_ids."
+                )
+            return columns
+
+        binding = getattr(self, "_eef_observation_terms", None)
+        if binding is None:
+            arm_name = "arm"
+            arm_ids = self._env.robot.get_joint_ids(arm_name, remove_mimic=True)
+        else:
+            arm_term, gripper_term = binding
+            arm_name = arm_term.part_name
+            arm_ids = list(arm_term.controlled_joint_ids)
+        pose = self._env.robot.compute_fk(
+            qpos=qpos[:, _active_columns(arm_ids)],
+            name=arm_name,
+            env_ids=env_ids,
+            to_matrix=True,
+        )
+        rotation = pose[:, :3, :3]
+        sy = torch.sqrt(rotation[:, 0, 0] ** 2 + rotation[:, 1, 0] ** 2)
+        singular = sy < 1e-6
+        roll = torch.atan2(rotation[:, 2, 1], rotation[:, 2, 2])
+        pitch = torch.atan2(-rotation[:, 2, 0], sy)
+        yaw = torch.atan2(rotation[:, 1, 0], rotation[:, 0, 0])
+        singular_roll = torch.atan2(-rotation[:, 1, 2], rotation[:, 1, 1])
+        roll = torch.where(singular, singular_roll, roll)
+        yaw = torch.where(singular, torch.zeros_like(yaw), yaw)
+
+        if binding is None:
+            hand_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
+            hand_qpos = qpos[:, _active_columns(hand_ids)].mean(dim=-1)
+            limits = self._env.robot.body_data.qpos_limits[0, hand_ids]
+            gripper = (
+                2.0
+                * (hand_qpos - limits[:, 0].mean())
+                / (limits[:, 1].mean() - limits[:, 0].mean())
+                - 1.0
+            )
+        else:
+            hand_ids = list(gripper_term.controlled_joint_ids)
+            hand_qpos = qpos[:, _active_columns(hand_ids)]
+            lower = gripper_term.lower_command.to(qpos)
+            upper = gripper_term.upper_command.to(qpos)
+            if gripper_term.command_mode == "continuous":
+                delta = upper - lower
+                moving = delta.abs() > torch.finfo(qpos.dtype).eps
+                weights = torch.where(
+                    moving,
+                    (hand_qpos - lower) / torch.where(moving, delta, 1.0),
+                    torch.zeros_like(hand_qpos),
+                )
+                count = moving.sum().clamp_min(1).to(qpos.dtype)
+                gripper = 2.0 * weights.sum(dim=-1) / count - 1.0
+            else:
+                open_distance = ((hand_qpos - upper) ** 2).sum(dim=-1)
+                close_distance = ((hand_qpos - lower) ** 2).sum(dim=-1)
+                gripper = torch.where(
+                    open_distance <= close_distance,
+                    torch.ones_like(open_distance),
+                    -torch.ones_like(close_distance),
+                )
+        return torch.cat(
+            (
+                pose[:, :3, 3],
+                roll[:, None],
+                pitch[:, None],
+                yaw[:, None],
+                gripper[:, None],
+            ),
+            dim=-1,
+        )
+
+    def _camera_feature_key(self, sensor_name: str, frame_name: str) -> str:
         """Return the LeRobot feature key for a camera frame.
 
         Args:
@@ -1408,8 +1861,10 @@ class LeRobotRecorder(Functor):
         obs: TensorDict,
         action: TensorDict | torch.Tensor,
         task: str,
+        *,
+        env_id: int,
         annotations: Mapping[str, Any] | None = None,
-        subtask_index: int = 0,
+        subtask_index: int | None = None,
     ) -> Dict:
         """Convert a single frame to LeRobot format.
 
@@ -1417,16 +1872,19 @@ class LeRobotRecorder(Functor):
             obs: Single environment observation (already extracted from batch)
             action: Single environment action (already extracted from batch)
             task: Episode-level task description.
+            env_id: Source vector-environment row for FK-sensitive features.
             annotations: Optional segment and terminal fields for this frame.
-            subtask_index: Dataset-global index of the active subtask description.
+            subtask_index: Optional legacy dataset-global subtask index.
 
         Returns:
             Frame dict in LeRobot format with numpy arrays
         """
-        frame = {
-            "task": task,
-            LEROBOT_SUBTASK_INDEX_KEY: torch.tensor([subtask_index], dtype=torch.int64),
-        }
+        frame = {"task": task}
+        if not self.use_official_task_index:
+            legacy_subtask_index = 0 if subtask_index is None else subtask_index
+            frame[LEROBOT_SUBTASK_INDEX_KEY] = torch.tensor(
+                [legacy_subtask_index], dtype=torch.int64
+            )
 
         if self._env.has_sensors:
             sensor_obs_space: dict = self._env.single_observation_space["sensor"]
@@ -1460,11 +1918,17 @@ class LeRobotRecorder(Functor):
                         f"Unsupported sensor type for '{sensor_name}' when converting to LeRobot format. Currently only support Camera and ContactSensor."
                     )
 
-        # Add state (use LeRobot standard key "observation.state")
+        # Keep the measured joint state as the primary observation state. An
+        # EEF pose derived from FK is auxiliary observation data, never an
+        # implicit replacement for the commanded action.
         frame[LeRobotKey.OBS_STATE.value] = obs["robot"]["qpos"].cpu()
-        # Keep additional proprio data that may be useful even though not in official LeRobot format
         frame[LeRobotKey.OBS_QVEL.value] = obs["robot"]["qvel"].cpu()
         frame[LeRobotKey.OBS_QF.value] = obs["robot"]["qf"].cpu()
+        if self.record_eef_observation:
+            frame["observation.eef_pose"] = self._to_eef_observation(
+                obs["robot"]["qpos"].unsqueeze(0),
+                env_ids=[env_id],
+            )[0].cpu()
 
         # Add extra observation features if they exist
         for key in obs.keys():
@@ -1480,7 +1944,7 @@ class LeRobotRecorder(Functor):
                     value = value.unsqueeze(0)
                 frame[key] = value.cpu()
 
-        # Add action.
+        # Add the primary policy action.
         if isinstance(action, torch.Tensor):
             action_data = action.cpu()
         elif isinstance(action, TensorDict):
@@ -1501,6 +1965,14 @@ class LeRobotRecorder(Functor):
                             break
                 if isinstance(action_tensor, torch.Tensor):
                     action_data = action_tensor.cpu()
+
+        if self._policy_action_descriptors:
+            if action_data is None:
+                raise ValueError(
+                    "Policy action contract requires an explicit flat command; "
+                    "an observed/FK-derived pose cannot be used as the action."
+                )
+            action_data = torch.as_tensor(action_data).cpu()
 
         frame[LeRobotKey.ACTION.value] = action_data
 

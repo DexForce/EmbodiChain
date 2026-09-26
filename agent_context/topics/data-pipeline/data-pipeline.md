@@ -49,10 +49,25 @@ physical reset. The recorder requires an exactly representable integer FPS.
 
 Expert rollout actions use the environment's `ExpertActionSpec`, independently
 of the policy action space. The default position mode preserves active-joint
-qpos storage. Position-velocity mode stores a flat `[qpos, qvel]` vector;
+qpos storage and rejects qvel/qf-only controller commands. Position-velocity
+mode stores a flat `[qpos, qvel]` vector;
 LeRobot feature width and ordered names follow that layout, while episode and
 trajectory metadata publish its version, joint names, slices, mode, and
 environment `step_dt`.
+
+LeRobot recording preserves that existing expert schema when `action_contract`
+is omitted. Expert contracts select `joint_position` or
+`joint_position_velocity` and continue to derive width, names, and slices from
+`ExpertActionSpec`. Policy contracts select `eef_pose_parallel_gripper` or
+`joint_position_parallel_gripper`; their width, ordered names, and term slices
+come from the live `ActionManager` descriptors. The descriptor sequence must
+match the declared representation and is stored as
+`embodichain.action_terms` in action-feature metadata and episode sidecars.
+Policy recorders validate EEF finiteness and normalized gripper bounds before
+ActionManager processing, then validate again before persistence. A
+`ControllerAction` cannot be written into this policy schema.
+Contract datasets use per-frame LeRobot `task` / `task_index` for segment
+instructions. Executed controller commands are not a separate dataset feature.
 
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder
@@ -69,6 +84,7 @@ Choose synchronous persistence or throttle production when memory bounds matter.
 |---|---|
 | Worker states, valid sampling, continuity, DataLoader | `tests/data_pipeline/test_online_data.py` |
 | Sync commit, FPS, fragments and depth routing | `tests/gym/envs/managers/test_dataset_functors.py` |
+| Legacy/action-contract schemas and official task mapping | `tests/gym/envs/managers/test_dataset_functors.py` |
 | Clone isolation, FIFO, errors and drain | `tests/gym/envs/managers/test_async_dataset_functors.py` |
 | Save/discard dispatch | `tests/gym/envs/managers/test_dataset_manager.py` |
 | Depth codec/temp files/metadata | `tests/data_pipeline/depth_video/` |

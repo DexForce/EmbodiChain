@@ -33,6 +33,7 @@ from .event_manager import EventManager
 from .observation_manager import ObservationManager
 from .reward_manager import RewardManager
 from .action_manager import *
+from .action_types import *
 from .actions import *
 from .dataset_manager import DatasetManager
 from .datasets import LeRobotRecorder
@@ -51,6 +52,18 @@ __all__ = [
     "EventManager",
     "ObservationManager",
     "RewardManager",
+    "ActionManager",
+    "ActionTerm",
+    "ActionDescriptor",
+    "ActionTermDescriptor",
+    "DefaultJointPositionAction",
+    "EefPoseAction",
+    "JointEffortAction",
+    "JointPositionAction",
+    "JointPositionToLimitsAction",
+    "JointVelocityAction",
+    "ParallelGripperAction",
+    "RelativeJointPositionAction",
     "DatasetManager",
     "LeRobotRecorder",
     "AsyncLeRobotRecorder",

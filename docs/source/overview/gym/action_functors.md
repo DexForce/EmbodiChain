@@ -3,141 +3,97 @@
 ```{currentmodule} embodichain.lab.gym.envs.managers
 ```
 
-This page lists all available action terms that can be used with the Action Manager. Action terms are configured using {class}`~cfg.ActionTermCfg` and are responsible for processing raw actions from the policy and converting them to the format expected by the robot (e.g., qpos, qvel, qf).
+Action terms define an ordered flat policy interface. `ActionManager` validates
+the complete `(num_envs, action_dim)` floating tensor, slices it in configuration
+order, calls each term's `process_actions()`, and later calls `apply_actions()`
+once before physics. Each term writes only its selected non-mimic joints.
 
 ## Quick Reference
 
-- Use this page when defining the policy-facing action space for RL or closed-loop control tasks.
-- Action terms are configured with {class}`~cfg.ActionTermCfg`.
-- Action terms transform one batched policy action into robot control commands for all environments.
-- Check each term's ``action_dim`` to determine how many values the policy must output.
+- Configure each term with {class}`~cfg.ActionTermCfg`; action terms have no
+  `mode` field.
+- The config attribute name becomes the stable term name and descriptor name.
+- The policy width is the sum of term `action_dim` values in config order.
+- Terms writing the same command type cannot own overlapping joint IDs.
+- `ControllerAction` is a separate controller-ready path and bypasses the
+  Action Manager.
 
 ````{tip}
-**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new action term with the correct class structure, `ActionTermCfg` registration, and module placement in `actions.py`.
+**Using an AI coding agent?** Use the **`/add-functor`** skill to scaffold a new
+action term with the project protocol and tests.
 ````
 
-## Joint Position Control
+## Built-in Actions
 
-```{list-table} Joint Position Action Terms
+```{list-table}
 :header-rows: 1
-:widths: 25 75
+:widths: 30 70
 
-* - Action Term
-  - Description
-* - {class}`~actions.DeltaQposTerm`
-  - Delta joint position action: current_qpos + scale * action -> qpos. The policy outputs position deltas relative to the current joint positions.
-
-    ```json
-    {"func": "DeltaQposTerm", "params": {"scale": 0.1}}
-    ```
-* - {class}`~actions.QposTerm`
-  - Absolute joint position action: scale * action -> qpos. The policy outputs direct target joint positions.
-
-    ```json
-    {"func": "QposTerm", "params": {"scale": 1.0}}
-    ```
-* - {class}`~actions.QposDenormalizedTerm`
-  - Normalized action in [-1, 1] -> denormalize to joint limits -> qpos. The policy outputs normalized values that are mapped to joint limits. With scale=1.0 (default), action in [-1, 1] maps to [low, high].
-
-    ```json
-    {"func": "QposDenormalizedTerm", "params": {"scale": 1.0}}
-    ```
-* - {class}`~actions.QposNormalizedTerm`
-  - Normalize action from qpos limits -> [range[0], range[1]]. Maps joint positions to a normalized range based on joint limits. Typically used for post-processing action outputs.
-
-    ```json
-    {"func": "QposNormalizedTerm", "params": {"range": [0.0, 1.0]}}
-    ```
+* - Action
+  - Policy and command mapping
+* - {class}`~actions.JointPositionAction`
+  - Absolute selected-joint position targets with optional scale and offset.
+* - {class}`~actions.JointPositionToLimitsAction`
+  - Per-joint normalized `[-1, 1]` values mapped to selected joint limits.
+* - {class}`~actions.RelativeJointPositionAction`
+  - Scaled offsets added to the current selected-joint positions.
+* - {class}`~actions.DefaultJointPositionAction`
+  - Normalized locomotion offsets around a configured default pose, with
+    current/previous raw buffers and encoder bias.
+* - {class}`~actions.JointVelocityAction`
+  - Scaled selected-joint velocity targets.
+* - {class}`~actions.JointEffortAction`
+  - Scaled selected-joint force or torque targets.
+* - {class}`~actions.EefPoseAction`
+  - A selected arm's absolute `xyz_rpy` or `xyz_quat_xyzw` target converted by
+    IK to selected-arm joint positions. Failed rows hold measured arm qpos.
+* - {class}`~actions.ParallelGripperAction`
+  - One normalized scalar mapped continuously or binarily to explicit
+    independent gripper-joint commands.
 ```
 
-## End-Effector Control
+## Configuration Examples
 
-```{list-table} End-Effector Action Terms
-:header-rows: 1
-:widths: 25 75
+Relative joint control:
 
-* - Action Term
-  - Description
-* - {class}`~actions.EefPoseTerm`
-  - End-effector pose (6D or 7D) -> IK -> qpos. The policy outputs target end-effector poses which are converted to joint positions via inverse kinematics. Returns ``ik_success`` in the output so reward/observation can penalize or condition on IK failures. Supports both 6D (euler angles) and 7D (``x, y, z, qx, qy, qz, qw``) pose representations.
-
-    ```json
-    {"func": "EefPoseTerm", "params": {"scale": 0.1, "pose_dim": 7}}
-    ```
+```yaml
+actions:
+  arm_action:
+    func: RelativeJointPositionAction
+    params: {part_name: arm, scale: 0.1}
 ```
 
-## Velocity and Force Control
+Composed Cartesian arm and parallel gripper control:
 
-```{list-table} Velocity and Force Action Terms
-:header-rows: 1
-:widths: 25 75
-
-* - Action Term
-  - Description
-* - {class}`~actions.QvelTerm`
-  - Joint velocity action: scale * action -> qvel. The policy outputs target joint velocities.
-
-    ```json
-    {"func": "QvelTerm", "params": {"scale": 1.0}}
-    ```
-* - {class}`~actions.QfTerm`
-  - Joint force/torque action: scale * action -> qf. The policy outputs target joint torques/forces.
-
-    ```json
-    {"func": "QfTerm", "params": {"scale": 1.0}}
-    ```
+```yaml
+control_parts: [arm, hand]
+actions:
+  arm_action:
+    func: EefPoseAction
+    params: {part_name: arm, pose_representation: xyz_rpy}
+  gripper_action:
+    func: ParallelGripperAction
+    params:
+      part_name: hand
+      command_mode: continuous
+      use_joint_limits: true
 ```
 
-## Usage Example
+The second configuration has seven policy dimensions: the six-dimensional arm
+slice followed by the one-dimensional gripper slice. A joint-position arm with
+seven independent joints plus the same gripper term has eight dimensions.
 
-```python
-from embodichain.lab.gym.envs.managers.cfg import ActionTermCfg
+## Action Term Contract
 
-# Example: Delta joint position control
-actions = {
-    "joint_position": ActionTermCfg(
-        func="DeltaQposTerm",
-        params={
-            "scale": 0.1,  # Scale factor for action deltas
-        },
-    ),
-}
+Every action term exposes:
 
-# Example: Normalized joint position control
-actions = {
-    "normalized_joint_position": ActionTermCfg(
-        func="QposDenormalizedTerm",
-        params={
-            "scale": 1.0,  # Full joint range utilization
-        },
-    ),
-}
+- `action_dim` and a one-dimensional Gymnasium `Box`;
+- `raw_actions` and `processed_actions` buffers;
+- `command_type` and ordered `controlled_joint_ids`;
+- an immutable `ActionTermDescriptor` describing names, units, normalization,
+  controlled joints, and metadata;
+- `process_actions(actions)`, `apply_actions()`, and selected-row `reset()`.
 
-# Example: Normalize qpos to [0, 1] range (for post-processing)
-actions = {
-    "normalize_qpos": ActionTermCfg(
-        func="QposNormalizedTerm",
-        params={
-            "range": [0.0, 1.0],  # Normalize to [0, 1] range
-        },
-    ),
-}
-
-# Example: End-effector pose control
-actions = {
-    "eef_pose": ActionTermCfg(
-        func="EefPoseTerm",
-        params={
-            "scale": 0.1,
-            "pose_dim": 7,  # 7D (x, y, z, qx, qy, qz, qw)
-        },
-    ),
-}
-```
-
-## Action Term Properties
-
-All action terms provide the following properties:
-
-- ``action_dim``: The dimension of the action space (number of values the policy should output)
-- ``process_action(action)``: Method to convert raw policy output to robot control format
+The manager binds term descriptors to flat slices as `ActionDescriptor` values.
+Dataset policy contracts use these descriptors directly; they do not infer
+semantics from class names.

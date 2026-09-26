@@ -14,7 +14,7 @@ EmbodiChain manager components configured by these tasks.
 .. autosummary::
 
    embodichain_tasks.classic_control.humanoid.HumanoidRunEnv
-   embodichain.lab.gym.envs.managers.actions.DefaultJointPositionTerm
+   embodichain.lab.gym.envs.managers.actions.DefaultJointPositionAction
    embodichain.lab.gym.envs.managers.randomization.physics.push_articulation_by_setting_velocity
    embodichain_tasks.locomotion.managers.velocity_locomotion_observation
    embodichain_tasks.locomotion.managers.velocity_locomotion_reward
