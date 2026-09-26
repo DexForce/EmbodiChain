@@ -125,7 +125,7 @@ def test_locomotion_state_binds_new_action_term_buffers() -> None:
         position_bias=torch.full((2, 3), 0.1),
     )
     env = SimpleNamespace(
-        action_manager=SimpleNamespace(get_term=lambda name: term),
+        action_manager=SimpleNamespace(get_term_by_contract=lambda contract: term),
     )
 
     EmbodiChainVelocityEnv._bind_locomotion_action_state(env)

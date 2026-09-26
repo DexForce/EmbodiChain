@@ -53,6 +53,15 @@ DEFAULT_MANAGER_MODULES = [
 _EXTRA_MANAGER_MODULES: list[str] = []
 _PHYSICS_BACKENDS = frozenset({"default", "newton"})
 
+# Pretrained policy bundles keep the training and Gym configuration snapshots
+# that were used to produce their checkpoints.  The published locomotion
+# bundles predate stable action contracts and still contain this implementation
+# name.  Keep the migration narrow: unsupported legacy protocols must continue
+# to fail instead of being guessed at.
+_LEGACY_ACTION_CONTRACTS = {
+    "DefaultJointPositionTerm": "joint_position.default_offset@1",
+}
+
 
 def _declared_physics_backend(config: Mapping[str, object]) -> str:
     """Return the single physics backend explicitly owned by a Gym config."""
@@ -912,22 +921,44 @@ def config_to_cfg(
                     f"Action term {term_name!r} uses removed field 'mode'; "
                     "action terms now process and apply in configuration order."
                 )
-            term_class_name = term_params["func"]
-            if term_class_name.endswith("Term"):
-                raise ValueError(
-                    f"Action term {term_name!r} uses removed class "
-                    f"{term_class_name!r}; concrete action classes must use "
-                    "the new *Action protocol and naming."
+            term_contract = term_params.get("contract")
+            term_class_name = term_params.get("func")
+            if term_contract is None and isinstance(term_class_name, str):
+                term_contract = _LEGACY_ACTION_CONTRACTS.get(term_class_name)
+            if term_contract is not None:
+                if not isinstance(term_contract, str):
+                    raise TypeError(
+                        f"Action term {term_name!r} contract must be a string."
+                    )
+                from embodichain.lab.gym.envs.managers.actions import (
+                    resolve_action_contract,
+                )
+
+                term_func = resolve_action_contract(term_contract)
+            else:
+                if not isinstance(term_class_name, str):
+                    raise ValueError(
+                        f"Action term {term_name!r} must declare a contract or "
+                        "implementation class."
+                    )
+                if term_class_name.endswith("Term"):
+                    raise ValueError(
+                        f"Action term {term_name!r} uses removed class "
+                        f"{term_class_name!r}; declare a stable action contract "
+                        "or use the new *Action protocol and naming."
+                    )
+                term_func = find_function_from_modules(
+                    term_class_name,
+                    manager_modules,
+                    raise_if_not_found=True,
                 )
             term_params_modified = deepcopy(term_params)
-            term_func = find_function_from_modules(
-                term_class_name,
-                manager_modules,
-                raise_if_not_found=True,
-            )
+            term_params_modified.pop("contract", None)
+            term_params_modified.pop("func", None)
             action_term = ActionTermCfg(
                 func=term_func,
                 params=term_params_modified.get("params", {}),
+                contract=term_contract,
             )
             setattr(env_cfg.actions, term_name, action_term)
 
