@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "89766834a23071ede531abc2cad1d324d064c965",
+  "revision": "95200adc3ac8436238217d53f3c2f1a4f621277e",
   "source_ref": "HEAD",
   "package_version": "0.2.4",
   "topic_index": "agent_context/MAP.yaml",
@@ -365,6 +365,35 @@
           "source_extension": ".rst"
         }
       ]
+    },
+    {
+      "id": "benchmark-framework",
+      "label": "Technical-report benchmark framework",
+      "kind": "module",
+      "topic_ids": [
+        "benchmark-framework"
+      ],
+      "summary": "Defines reproducible benchmark experiments, execution budgets, raw evidence, and offline reports.",
+      "boundaries": [
+        "The shared layer does not own simulator construction, task predicates, or production data persistence."
+      ],
+      "evidence": [
+        {
+          "path": "scripts/benchmark/core/contracts.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 17,
+          "excerpt": "\"\"\"Domain-neutral benchmark definitions and evidence records."
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "guides/cli",
+          "label": "Benchmark CLI entry point",
+          "source_extension": ".md"
+        }
+      ],
+      "details": "The public benchmark layer freezes experiment definitions, parameter matrices, budgets, lifecycle states, and comparison invariants. Its isolated execution and measurement helpers retain raw stage, continuous, and attempt evidence; reporting rebuilds units, denominators, uncertainty, tables, and figures without importing a simulator. Domain workers continue to own scene construction, physical validation, and persistence."
     },
     {
       "id": "chunk-samplers",
@@ -7534,6 +7563,7 @@
       "description": "Module responsibilities and direct dependencies, from task entry points to motion execution.",
       "node_ids": [
         "cli",
+        "benchmark-framework",
         "env-launcher",
         "task-discovery",
         "tasks",
@@ -7762,6 +7792,7 @@
           "label": "Entry points & environments",
           "node_ids": [
             "cli",
+            "benchmark-framework",
             "env-launcher",
             "task-discovery",
             "tasks",
