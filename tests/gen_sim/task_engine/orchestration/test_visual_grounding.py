@@ -125,6 +125,56 @@ def test_visual_caller_keeps_uid_validator_schema_and_saves_provenance(
     assert audit["response"]["bindings"][0]["scene_missing"] is True
 
 
+def test_visual_caller_preserves_semantic_evidence_and_replayable_prompt(
+    tmp_path: Path,
+) -> None:
+    evidence = _evidence(tmp_path)
+    match = {
+        "match_type": "broader_term",
+        "support": ["The sole vessel is the labeled cup."],
+        "conflicts": [],
+        "candidate_uids": ["cup_001"],
+    }
+    seen = []
+
+    def transport(**kwargs):
+        seen.append(kwargs)
+        return {
+            "bindings": [
+                {
+                    "reference_id": "step_01.object",
+                    "status": "resolved",
+                    "uids": ["cup_001"],
+                    "confidence": 0.9,
+                    "match_evidence": match,
+                    "evidence_view": "oblique",
+                    "evidence_note": "Visible rim and container body.",
+                    "scene_missing": False,
+                }
+            ]
+        }
+
+    caller = make_visual_grounding_caller(
+        evidence, tmp_path / "audit", transport=transport
+    )
+    result = caller(prompt="Ground the vessel", schema={}, model="vision-test")
+    assert result["bindings"][0]["match_evidence"] == match
+    assert "different category label alone" in seen[0]["prompt"]
+    assert (
+        "match_evidence"
+        in seen[0]["schema"]["properties"]["bindings"]["items"]["required"]
+    )
+    audit = json.loads((tmp_path / "audit/call_01.json").read_text())
+    assert audit["prompt"] == seen[0]["prompt"]
+    assert audit["schema"] == seen[0]["schema"]
+    assert audit["model"] == "vision-test"
+    assert audit["transport"] == "injected"
+
+    match["conflicts"] = ["The requested material is absent."]
+    result = caller(prompt="Ground the vessel", schema={}, model="vision-test")
+    assert result["bindings"][0]["match_evidence"]["conflicts"] == match["conflicts"]
+
+
 def test_visual_caller_rejects_stale_image_before_transport(tmp_path: Path) -> None:
     evidence = _evidence(tmp_path)
     evidence["catalog_sha256"] = "0" * 64

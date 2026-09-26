@@ -36,9 +36,13 @@ from embodichain.gen_sim.task_engine.config import (
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
     CandidateSelection,
+    SceneAdapter,
     SceneAdapterProtocolError,
 )
-from embodichain.gen_sim.task_engine.orchestration.scene_source import SceneSourceRef
+from embodichain.gen_sim.task_engine.orchestration.scene_source import (
+    SceneSourceFingerprint,
+    SceneSourceRef,
+)
 from embodichain.gen_sim.task_engine.scene_backend import SceneAnalysis, SceneRevision
 from embodichain.gen_sim.task_engine.workflow import (
     SubprocessActionExecutor,
@@ -547,7 +551,12 @@ def test_bound_scene_visual_spot_check_is_audited_without_replacing_selection(
         def analyze(self, request, output_root):
             return replace(
                 super().analyze(request, output_root),
-                source_fingerprint=SimpleNamespace(config_sha256=source_hash),
+                source_fingerprint=SceneSourceFingerprint(
+                    source_format="test-scene",
+                    config_path=tmp_path / "project" / "scene_config.json",
+                    config_sha256=source_hash,
+                    asset_sha256={},
+                ),
             )
 
         def select(self, *_args, **kwargs):
@@ -645,6 +654,10 @@ def test_unbound_scene_without_visual_provider_keeps_input_conflict(
 
     assert result.status == "input_conflict"
     assert result.failure_class == "unbound_scene_reference"
+    assert (
+        json.loads((result.output_dir / "task_candidate_set.json").read_text())
+        == candidates
+    )
     visual = json.loads(
         (result.output_dir / "visual_grounding_status.json").read_text()
     )
@@ -652,6 +665,87 @@ def test_unbound_scene_without_visual_provider_keeps_input_conflict(
         "status": "skipped",
         "reason": "visual_model_unavailable",
     }
+
+
+def test_early_binding_failure_keeps_inputs_and_uses_run_local_audit_adapter(
+    tmp_path: Path,
+) -> None:
+    candidates = _candidate_set()
+    fingerprint = SceneSourceFingerprint(
+        source_format="test-scene",
+        config_path=tmp_path / "project" / "scene_config.json",
+        config_sha256="a" * 64,
+        asset_sha256={},
+    )
+    original_adapter = SceneAdapter()
+    selected_adapters = []
+
+    class AuditedBackend(_SceneBackend):
+        def analyze(self, request, output_root):
+            return replace(
+                super().analyze(request, output_root), source_fingerprint=fingerprint
+            )
+
+        def select(self, analysis, candidate_set, adapter, **kwargs):
+            selected_adapters.append(adapter)
+            raise SceneAdapterProtocolError("injected invalid grounding response")
+
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_adapter=original_adapter,
+        scene_backend=AuditedBackend(_selection(candidates), input_kind="gym_project"),
+        coordinator=_Coordinator(["bound"]),
+        action_executor=_Executor([[True]]),
+    )
+    result = workflow.run(_request(tmp_path, existing=True))
+
+    assert result.failure_class == "candidate_selection"
+    assert (
+        json.loads((result.output_dir / "task_candidate_set.json").read_text())
+        == candidates
+    )
+    source = json.loads(
+        (result.output_dir / "binding_audit" / "source.json").read_text()
+    )
+    assert source["source_fingerprint"] == fingerprint.to_dict()
+    assert source["source_config_sha256"] == fingerprint.config_sha256
+    assert original_adapter.audit_dir is None
+    assert selected_adapters[0] is not original_adapter
+    assert selected_adapters[0].grounding_caller is original_adapter.grounding_caller
+    assert selected_adapters[0].audit_dir.name == "binding_audit"
+
+
+def test_default_coordinator_uses_run_local_adapter_without_mutating_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = _candidate_set()
+    used_adapters = []
+
+    class DefaultCoordinator(_Coordinator):
+        def __init__(self, *, task_agent, scene_adapter):
+            super().__init__(["bound"])
+            self.scene_adapter = scene_adapter
+
+        def prepare(self, *args, **kwargs):
+            used_adapters.append(self.scene_adapter)
+            return super().prepare(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "embodichain.gen_sim.task_engine.workflow.TaskEngineCoordinator",
+        DefaultCoordinator,
+    )
+    workflow = TaskEngineWorkflow(
+        task_agent=_TaskAgent(candidates),
+        scene_backend=_SceneBackend(_selection(candidates)),
+        action_executor=_Executor([[True]]),
+    )
+    result = workflow.run(_request(tmp_path))
+
+    assert result.status == "succeeded"
+    assert workflow.coordinator.scene_adapter is workflow.scene_adapter
+    assert workflow.scene_adapter.audit_dir is None
+    assert used_adapters[0] is not workflow.scene_adapter
+    assert used_adapters[0].audit_dir.name == "binding_audit"
 
 
 def test_articulation_grounding_never_uses_proxy_as_live_joint_state(

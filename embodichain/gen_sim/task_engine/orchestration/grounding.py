@@ -39,6 +39,60 @@ __all__ = [
 GroundingCaller = Callable[..., Mapping[str, Any]]
 
 _BINDING_KEYS = frozenset({"reference_id", "status", "uids", "confidence"})
+_MATCH_TYPES = ("exact", "synonym", "broader_term", "contextual", "none")
+_MATCH_EVIDENCE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["match_type", "support", "conflicts", "candidate_uids"],
+    "properties": {
+        "match_type": {"type": "string", "enum": list(_MATCH_TYPES)},
+        "support": {"type": "array", "items": {"type": "string"}},
+        "conflicts": {"type": "array", "items": {"type": "string"}},
+        "candidate_uids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": True,
+        },
+    },
+}
+_SEMANTIC_MATCH_RULES = (
+    "Semantic identity rules: names and categories are descriptive evidence, "
+    "not exact-match labels. Resolve synonyms, translations, and ordinary broad "
+    "or colloquial names to a more specific scene entity when supported by its "
+    "description, attributes and the reference context. Judge the same entity, "
+    "not a substitute that merely has a similar shape or could perform the action. "
+    "A category-name difference alone is not a contradiction. Prefer the direct "
+    "meaning when both a direct and a broader plausible match exist. Preserve "
+    "explicit modifiers (color, shape, material, subtype, location, state), exact "
+    "UIDs, and requested counts; never drop these to make a candidate fit. Do not "
+    "infer missing physical capabilities or states. A unique object is not enough "
+    "without positive semantic evidence. If multiple plausible entities remain "
+    "without a distinguishing constraint, or identity is uncertain, use ambiguous. "
+    "Use not_found only when no entity plausibly matches, not merely because its "
+    "category uses a different word. Splitting the same operation into steps, "
+    "adding unrelated steps, or changing inventory order must not change an "
+    "otherwise identical reference's identity.\n"
+    "Interpret the original language before translating category names. Do not "
+    "invent unstated modifiers from a default translation. For example, colloquial "
+    "Chinese '盘子' in a carrying/serving instruction can refer to a serving tray; "
+    "it does not itself require a round ceramic dinner plate. With one serving "
+    "tray and no competing plate, use broader_term when its description supports "
+    "that reading. With a plate and a tray, prefer the actual plate unless explicit "
+    "attributes identify the tray. In contrast, '白色圆形陶瓷餐盘' cannot match a "
+    "green rectangular plastic tray. Similarly '杯子' may identify a mug or tumbler, "
+    "but not an arbitrary container merely because it can hold liquid. These are "
+    "identity examples, not permission to substitute categories or ignore modifiers.\n"
+    "For each binding include match_evidence: match_type is exact (UID or direct "
+    "name), synonym (including translation), broader_term, contextual, or none. "
+    "support lists concise observable semantic facts, not hidden reasoning. "
+    "conflicts lists explicit requested attributes contradicted by the considered "
+    "entities. candidate_uids lists existing selected/plausible/near-match UIDs; "
+    "it is diagnostic, not permission to select them. For resolved, include all "
+    "selected UIDs in candidate_uids, positive support, and no conflicts. For "
+    "not_found use match_type=none and explain absence or the near candidates' "
+    "conflicts. Plausible unconflicted candidates without a unique identity mean "
+    "ambiguous, not scene_missing.\n"
+)
 _QUANTIFIERS = frozenset({"one", "all", "count"})
 _REDACTED_KEYS = frozenset(
     {
@@ -96,7 +150,7 @@ _GROUNDING_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": sorted(_BINDING_KEYS),
+                "required": sorted(_BINDING_KEYS | {"match_evidence"}),
                 "properties": {
                     "reference_id": {"type": "string"},
                     "status": {
@@ -113,6 +167,7 @@ _GROUNDING_SCHEMA: dict[str, Any] = {
                         "minimum": 0.0,
                         "maximum": 1.0,
                     },
+                    "match_evidence": deepcopy(_MATCH_EVIDENCE_SCHEMA),
                 },
             },
         }
@@ -137,6 +192,10 @@ class GroundingResult:
 
 class _UnresolvedSceneReference(ValueError):
     """Insufficient scene evidence cannot be repaired as malformed JSON."""
+
+    def __init__(self, message: str, *, semantic_rejection: bool = False) -> None:
+        super().__init__(message)
+        self.semantic_rejection = semantic_rejection
 
 
 def ground_articulation_parts(
@@ -448,7 +507,8 @@ def ground_scene_references(
             current_prompt += (
                 "\n\nREPAIR OVERRIDE: the previous grounding JSON failed local "
                 "validation. Return one corrected JSON object only. Preserve the "
-                "exact output fields bindings/reference_id/status/uids/confidence, "
+                "output fields bindings/reference_id/status/uids/confidence and "
+                "match_evidence, "
                 "cover every requested reference exactly once, and select only "
                 "UIDs from the supplied candidate inventory. Validation error: "
                 f"{first_error}"
@@ -614,13 +674,56 @@ def _grounding_prompt(
         "inventory entities. Target requests may also select support surfaces. "
         "Use status=ambiguous or status=not_found instead of guessing when the "
         "evidence is insufficient. Return exactly one binding per reference_id "
-        "with only reference_id, status, uids, and confidence.\n\n"
+        "with reference_id, status, uids, confidence, and match_evidence.\n\n"
+        f"{_SEMANTIC_MATCH_RULES}\n"
         f"Instruction:\n{instruction}\n\n"
         "Grounding requests:\n"
         f"{json.dumps(list(requests), ensure_ascii=False, sort_keys=True)}\n\n"
         "Redacted scene inventory:\n"
         f"{json.dumps(list(inventory), ensure_ascii=False, sort_keys=True)}"
     )
+
+
+def _validate_match_evidence(
+    raw: Mapping[str, Any], known_uids: set[str], *, check_resolution: bool = True
+) -> None:
+    """Check evidence consistency without treating model claims as scene facts."""
+    if "match_evidence" not in raw:
+        # Existing injected callers and saved four-field responses remain readable.
+        return
+    evidence = raw["match_evidence"]
+    if not isinstance(evidence, Mapping) or set(evidence) != set(
+        _MATCH_EVIDENCE_SCHEMA["required"]
+    ):
+        raise ValueError("Invalid match_evidence fields.")
+    if evidence["match_type"] not in _MATCH_TYPES:
+        raise ValueError("Invalid match_evidence.match_type.")
+    for field in ("support", "conflicts", "candidate_uids"):
+        values = evidence[field]
+        if not isinstance(values, list) or any(
+            not isinstance(value, str) or not value.strip() for value in values
+        ):
+            raise ValueError(f"match_evidence.{field} must contain non-empty strings.")
+    candidates = evidence["candidate_uids"]
+    if len(candidates) != len(set(candidates)):
+        raise ValueError("Duplicate evidence candidate UID.")
+    if set(candidates) - known_uids:
+        raise ValueError("Grounding selected an unknown evidence candidate UID.")
+    if not evidence["support"] and not evidence["conflicts"]:
+        raise ValueError("match_evidence must explain its semantic evidence.")
+    if not check_resolution:
+        return
+    if raw["status"] == "resolved":
+        if evidence["conflicts"]:
+            raise _UnresolvedSceneReference(
+                "Grounding cannot resolve a reference with conflicting attributes."
+            )
+        if evidence["match_type"] == "none" or not evidence["support"]:
+            raise ValueError("Resolved grounding requires positive matching evidence.")
+        if not set(raw["uids"]) <= set(candidates):
+            raise ValueError("Selected UIDs must be included in evidence candidates.")
+    elif raw["status"] == "not_found" and evidence["match_type"] != "none":
+        raise ValueError("Plausible matches cannot be not_found; use ambiguous.")
 
 
 def _validate_response(
@@ -641,13 +744,16 @@ def _validate_response(
 
     request_by_id = {str(request["reference_id"]): request for request in requests}
     bindings: dict[str, tuple[str, ...]] = {}
+    seen: set[str] = set()
+    unresolved: list[str] = []
+    conflicting_evidence = False
     for binding_index, raw in enumerate(raw_bindings):
         context = f"SceneGrounding.bindings[{binding_index}]"
         if not isinstance(raw, Mapping):
             raise ValueError(f"{context} must be a mapping.")
-        if set(raw) != _BINDING_KEYS:
+        if set(raw) not in (_BINDING_KEYS, _BINDING_KEYS | {"match_evidence"}):
             missing = sorted(_BINDING_KEYS - set(raw))
-            extra = sorted(set(raw) - _BINDING_KEYS)
+            extra = sorted(set(raw) - (_BINDING_KEYS | {"match_evidence"}))
             raise ValueError(
                 f"{context} fields must be exactly {sorted(_BINDING_KEYS)}; "
                 f"missing={missing}, unsupported={extra}."
@@ -657,17 +763,14 @@ def _validate_response(
             raise ValueError(f"{context}.reference_id must be a non-empty string.")
         if reference_id not in request_by_id:
             raise ValueError(f"{context} references unknown request {reference_id!r}.")
-        if reference_id in bindings:
+        if reference_id in seen:
             raise ValueError(f"Duplicate grounding binding for {reference_id!r}.")
+        seen.add(reference_id)
 
         status = raw["status"]
         if status not in {"resolved", "ambiguous", "not_found"}:
             raise ValueError(
                 f"{context}.status must be resolved, ambiguous, or not_found."
-            )
-        if status != "resolved":
-            raise _UnresolvedSceneReference(
-                f"Grounding request {reference_id!r} was not resolved: {status}."
             )
         confidence = raw["confidence"]
         if (
@@ -677,7 +780,7 @@ def _validate_response(
             or not 0.0 <= float(confidence) <= 1.0
         ):
             raise ValueError(f"{context}.confidence must be a number in [0, 1].")
-        if float(confidence) < 0.5:
+        if status == "resolved" and float(confidence) < 0.5:
             raise ValueError(
                 f"Grounding request {reference_id!r} confidence is below 0.5."
             )
@@ -697,13 +800,29 @@ def _validate_response(
             raise ValueError(
                 f"Grounding request {reference_id!r} selected unknown UIDs {unknown}."
             )
+        try:
+            _validate_match_evidence(raw, set(inventory.by_uid))
+        except _UnresolvedSceneReference as error:
+            # Validate the rest of the batch before committing a semantic refusal.
+            conflicting_evidence = True
+            unresolved.append(str(error))
+        if status != "resolved":
+            if status == "not_found" and uids:
+                raise ValueError(
+                    "Grounding status=not_found requires no selected UIDs."
+                )
+            unresolved.append(
+                f"Grounding request {reference_id!r} was not resolved: {status}."
+            )
+            continue
 
         request = request_by_id[reference_id]
         # An exact runtime identity is stronger evidence than a model's label
         # match. Never silently substitute another object for that identity.
         reference = request["reference"]
         if reference in inventory.by_uid and uids != (reference,):
-            raise _UnresolvedSceneReference(
+            conflicting_evidence = True
+            unresolved.append(
                 f"Grounding request {reference_id!r} names exact UID "
                 f"{reference!r}, but selected {uids!r}."
             )
@@ -721,9 +840,13 @@ def _validate_response(
         _validate_cardinality(request, uids)
         bindings[reference_id] = uids
 
-    missing = sorted(set(request_by_id) - set(bindings))
+    missing = sorted(set(request_by_id) - seen)
     if missing:
         raise ValueError(f"Scene grounding omitted requests {missing}.")
+    if unresolved:
+        raise _UnresolvedSceneReference(
+            " ".join(unresolved), semantic_rejection=not conflicting_evidence
+        )
     _reject_self_references(requests, bindings)
     return bindings
 

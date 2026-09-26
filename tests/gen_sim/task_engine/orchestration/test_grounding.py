@@ -325,6 +325,134 @@ def test_unresolved_evidence_is_not_retried_into_a_guessed_binding(status: str) 
     assert len(calls) == 1
 
 
+def _match_evidence(**overrides: object) -> dict:
+    return {
+        "match_type": "broader_term",
+        "support": ["The broad reference describes this specific scene entity."],
+        "conflicts": [],
+        "candidate_uids": ["cutting_board"],
+        **overrides,
+    }
+
+
+def test_grounding_requests_semantic_evidence_without_category_equality() -> None:
+    seen = []
+
+    def caller(**kwargs):
+        seen.append(kwargs)
+        return {
+            "bindings": [
+                _binding(
+                    "move.object", ["cutting_board"], match_evidence=_match_evidence()
+                ),
+                _binding("move.target", ["table"]),
+            ]
+        }
+
+    result = _run(_intent(), caller)
+    assert result.bindings["move.object"] == ("cutting_board",)
+    fields = seen[0]["schema"]["properties"]["bindings"]["items"]
+    assert "match_evidence" in fields["required"]
+    assert "not exact-match labels" in seen[0]["prompt"]
+    assert "same entity, not a substitute" in seen[0]["prompt"]
+    assert "explicit modifiers" in seen[0]["prompt"]
+    assert "original language before translating" in seen[0]["prompt"]
+    assert "invent unstated modifiers" in seen[0]["prompt"]
+
+
+def test_grounding_cannot_accept_its_own_reported_attribute_conflict() -> None:
+    seen = []
+
+    def caller(**kwargs):
+        seen.append(kwargs)
+        return {
+            "bindings": [
+                _binding(
+                    "move.object",
+                    ["cutting_board"],
+                    match_evidence=_match_evidence(conflicts=["Wrong material"]),
+                ),
+                _binding("move.target", ["table"]),
+            ]
+        }
+
+    with pytest.raises(ValueError, match="conflicting attributes"):
+        _run(_intent(), caller)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("status", ["resolved", "ambiguous", "not_found"])
+def test_grounding_rejects_unknown_evidence_candidates_even_on_rejection(
+    status: str,
+) -> None:
+    response = {
+        "bindings": [
+            _binding(
+                "move.object",
+                ["cutting_board"] if status == "resolved" else [],
+                status=status,
+                match_evidence=_match_evidence(candidate_uids=["invented"]),
+            ),
+            _binding("move.target", ["table"]),
+        ]
+    }
+    with pytest.raises(ValueError, match="unknown evidence candidate"):
+        _run(_intent(), lambda **_kwargs: response)
+
+
+def test_not_found_with_plausible_unconflicted_evidence_requires_ambiguity() -> None:
+    response = {
+        "bindings": [
+            _binding(
+                "move.object", [], status="not_found", match_evidence=_match_evidence()
+            ),
+            _binding("move.target", ["table"]),
+        ]
+    }
+    with pytest.raises(ValueError, match="use ambiguous"):
+        _run(_intent(), lambda **_kwargs: response)
+
+
+def test_near_candidate_conflict_keeps_genuine_not_found_without_retry() -> None:
+    seen = []
+
+    def caller(**kwargs):
+        seen.append(kwargs)
+        return {
+            "bindings": [
+                _binding(
+                    "move.object",
+                    [],
+                    status="not_found",
+                    match_evidence=_match_evidence(
+                        match_type="none",
+                        conflicts=["Requested ceramic, observed wood"],
+                    ),
+                ),
+                _binding("move.target", ["table"]),
+            ]
+        }
+
+    with pytest.raises(ValueError, match="was not resolved: not_found"):
+        _run(_intent(), caller)
+    assert len(seen) == 1
+
+
+def test_semantic_refusal_cannot_hide_another_rows_unknown_uid() -> None:
+    response = {
+        "bindings": [
+            _binding(
+                "move.object",
+                ["cutting_board"],
+                match_evidence=_match_evidence(conflicts=["Wrong material"]),
+            ),
+            _binding("move.target", ["invented"]),
+        ]
+    }
+    with pytest.raises(ValueError, match="after one repair.*unknown UIDs"):
+        _run(_intent(), lambda **_kwargs: response)
+
+
 def test_exact_scene_identity_cannot_be_replaced_by_another_known_object() -> None:
     calls = []
 
