@@ -79,6 +79,8 @@ _PLACEMENT_CLEARANCE: Final = 0.01
 _RELATIVE_POSITION_TOLERANCE: Final = 0.05
 _AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
+_COORDINATED_DETACH_DISTANCE: Final = 0.08
+_COORDINATED_RETREAT_MARGIN: Final = 0.04
 _PARK_CALL_ID: Final = "simulation.park"
 _HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_source"
 _HORIZONTAL_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_horizontal_source"
@@ -532,8 +534,15 @@ def _task_stability_payload(
         for resource in embodiment["skill_profile"]["resources"]
     }
     presets: dict[str, Any] = {}
+    coordinated_positions: dict[str, list[float]] = {}
     for node in graph["nodes"]:
         call = node["call"]
+        entity = call.get("object", call.get("arguments", {}).get("object"))
+        if call.get("call_id") not in {
+            _COORDINATED_HOLD_CALL_ID,
+            _COORDINATED_TRANSPORT_CALL_ID,
+        }:
+            coordinated_positions.pop(entity, None)
         if (
             call["kind"] == "hand_over"
             and node["id"] in terminal_nodes
@@ -661,22 +670,28 @@ def _task_stability_payload(
             _COORDINATED_TRANSPORT_CALL_ID,
         }:
             object_id = str(arguments["object"])
-            position = list(_position(objects[object_id]))
+            position = coordinated_positions.get(
+                object_id, list(_position(objects[object_id]))
+            )
             support = objects[object_id].get("attributes", {}).get("final_support", {})
-            if support.get("parent_uid") == "table" and scene.table_top_z is not None:
+            if (
+                object_id not in coordinated_positions
+                and support.get("parent_uid") == "table"
+                and scene.table_top_z is not None
+            ):
                 # The skill offsets the live resting pose, not the import hover gap.
                 bottom, _ = _vertical_mesh_bounds(
                     objects[object_id], axis_aligned=False
                 )
                 position[2] = float(scene.table_top_z) - bottom
             displacement = arguments["world_displacement"]
+            position = [position[i] + float(displacement[i]) for i in range(3)]
+            coordinated_positions[object_id] = position
             holding = call["call_id"] == _COORDINATED_HOLD_CALL_ID
             presets[f"gen_sim.{node['id']}.stable"] = {
                 "kind": "hold" if holding else "placement",
                 "entity": object_id,
-                "target_position": [
-                    position[i] + float(displacement[i]) for i in range(3)
-                ],
+                "target_position": position,
                 "motion_parts": (
                     [
                         motion_parts[call["resources"][slot]]
@@ -685,7 +700,7 @@ def _task_stability_payload(
                     if holding
                     else []
                 ),
-                "position_tolerance": 0.02 if holding else _RELATIVE_POSITION_TOLERANCE,
+                "position_tolerance": 0.05 if holding else _RELATIVE_POSITION_TOLERANCE,
             }
     return {
         "schema_version": "gen_sim_task_constraints/v1",
@@ -1607,7 +1622,8 @@ def _integration_payload(
                             "hold_steps": 4,
                             "release": True,
                             "release_steps": 10,
-                            "retreat_distance": 0.08,
+                            "retreat_distance": _COORDINATED_DETACH_DISTANCE
+                            + _COORDINATED_RETREAT_MARGIN,
                             "retreat_steps": 12,
                             "approach_direction": [0.0, 0.0, -1.0],
                             "left_to_right_arm_direction": [0.0, 1.0, 0.0],
@@ -1643,7 +1659,15 @@ def _integration_payload(
                             0.03
                             if semantic_id
                             in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
-                            else 0.08
+                            else (
+                                _COORDINATED_DETACH_DISTANCE
+                                if semantic_id
+                                in {
+                                    _COORDINATED_TRANSPORT_CALL_ID,
+                                    _COORDINATED_HOLD_CALL_ID,
+                                }
+                                else 0.08
+                            )
                         ),
                         "detached_rotation_threshold": 3.141592653589793,
                     },
@@ -2029,13 +2053,14 @@ def _grasp_contact_clearances(
 def _calibrate_task_gripper_effort(
     embodiment: dict[str, Any], scene: Any, graph: SemanticTaskGraph
 ) -> None:
-    """Bound grip preload only for qualified <=10 g rigid E1/E2 recipes.
+    """Bound qualified <=10 g E1/E2 grips, including light E5 compositions.
 
     The canonical Robotiq keeps its complete closing range. Unknown/heavier
     payloads and other recipe families retain their declared actuator limits.
     This does not change the imported mechanism or any collision properties.
     """
-    if any(node["task_type"] not in {"E1", "E2"} for node in graph["nodes"]):
+    families = {node["task_type"] for node in graph["nodes"]}
+    if not families <= {"E1", "E2", "E5"} or not families & {"E1", "E2"}:
         return
     picks = []
     for node in graph["nodes"]:
@@ -2053,7 +2078,15 @@ def _calibrate_task_gripper_effort(
     if not picks:
         return
     objects = {item["uid"]: item for item in scene.rigid_objects}
-    for object_id, _ in picks:
+    # A hand shared with E5 must also be qualified for its carried rigid body.
+    payloads = {object_id for object_id, _ in picks}
+    payloads.update(
+        node["call"]["arguments"]["object"]
+        for node in graph["nodes"]
+        if node["call"].get("call_id")
+        in {_COORDINATED_HOLD_CALL_ID, _COORDINATED_TRANSPORT_CALL_ID}
+    )
+    for object_id in payloads:
         mass = (
             objects.get(object_id, {})
             .get("attrs", {})

@@ -1035,8 +1035,8 @@ def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
             "call_id": "gen_sim.align_held",
             "arguments": {
                 "object": "can",
-                "target": "step_01_upright_staging_target",
-                "preserve_yaw": True,
+                "target": "step_01_upright_target",
+                "preserve_yaw": False,
             },
             "resources": {"primary": "left"},
         },

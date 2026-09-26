@@ -1953,6 +1953,73 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         load_config(paths.integration_fingerprint)["schema_version"]
         == "semantic_integration_fingerprint/v2"
     )
+    from embodichain.gen_sim.task_engine._task_program.assembly import (
+        compose_deployment,
+        load_deployment,
+    )
+
+    arguments = dict(
+        task_program=deployment["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.deployment.parent,
+    )
+    base = compose_deployment(**arguments)
+    selected = load_deployment(**arguments).integration.adapter_factory
+    assert selected.coordinated_grasp
+    # E5 must not rewrite the endpoint factories also used by ordinary Pick.
+    assert selected.grasp_factories == base.integration.grasp_factories
+    if call_id == "simulation.coordinated_transport":
+        retreat = integration["profile"]["action_options"][call_id]["retreat_distance"]
+        threshold = integration["profile"]["effect_monitors"][call_id]["params"][
+            "detached_translation_threshold"
+        ]
+        assert retreat - threshold == pytest.approx(0.04)
+
+
+def test_coordinated_hold_then_place_accumulates_relative_targets(tmp_path):
+    scene = _prepared_axis_scene(tmp_path)
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "id": name,
+            "task_instance_id": name,
+            "task_type": "E5",
+            "role": "primary",
+            "depends_on": deps,
+            "call": {
+                "kind": "registered",
+                "call_id": call,
+                "arguments": {
+                    "object": "bottle",
+                    "target": name,
+                    "world_displacement": delta,
+                },
+                "resources": {"left": "left", "right": "right"},
+            },
+        }
+        for name, call, delta, deps in (
+            ("raise", "simulation.coordinated_hold", [0.0, 0.0, 0.14], []),
+            ("lower", "simulation.coordinated_transport", [0.0, 0.0, -0.14], ["raise"]),
+        )
+    ]
+    graph["task_groups"] = [
+        {
+            "id": node["id"],
+            "task_type": "E5",
+            "node_ids": [node["id"]],
+            "depends_on": node["depends_on"],
+            "success": {"kind": "call_completed"},
+        }
+        for node in graph["nodes"]
+    ]
+    _, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    constraints = load_config(paths.program.parent / "constraints.json")["presets"]
+    up = constraints["gen_sim.raise.stable"]["target_position"]
+    down = constraints["gen_sim.lower.stable"]["target_position"]
+    assert down == pytest.approx(scene.rigid_objects[0]["init_pos"])
+    assert up[2] - down[2] == pytest.approx(0.14)
 
 
 @pytest.mark.parametrize(
