@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -32,7 +32,6 @@ from typing import (
     TYPE_CHECKING,
     Dict,
     Union,
-    Sequence,
     Tuple,
     Any,
     Iterable,
@@ -170,6 +169,13 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     sensor: List[SensorCfg] = []
+    enable_sensor: bool = True
+    """Whether configured sensors are instantiated and sampled.
+
+    Embodiment components may declare a reusable sensor suite even when a
+    deployment only needs proprioception. Set this to ``False`` to skip
+    sensor creation, including camera-group allocation and image fetching.
+    """
 
     light: EnvLightCfg = EnvLightCfg()
 
@@ -727,7 +733,66 @@ class EmbodiedEnv(BaseEnv):
         all visual randomization functors will be removed from the event manager.
         """
         from embodichain.utils.module_utils import get_all_exported_items_from_module
-        from embodichain.lab.gym.envs.managers.cfg import EventCfg
+        from embodichain.lab.gym.envs.managers.cfg import (
+            EventCfg,
+            ObservationCfg,
+            SceneEntityCfg,
+        )
+
+        sensor_enabled = getattr(self.cfg, "enable_sensor", True)
+        sensor_uids = {
+            cfg.uid for cfg in getattr(self.cfg, "sensor", []) if cfg.uid is not None
+        }
+
+        def uses_disabled_sensor(value: object, field_name: str | None = None) -> bool:
+            """Return whether nested functor params reference a disabled sensor."""
+            if isinstance(value, SceneEntityCfg):
+                return value.uid in sensor_uids
+            if isinstance(value, str):
+                return value == "all_sensors" or (
+                    field_name is not None
+                    and ("uid" in field_name.lower() or "sensor" in field_name.lower())
+                    and value in sensor_uids
+                )
+            if isinstance(value, Mapping):
+                return any(
+                    (isinstance(key, str) and key in sensor_uids)
+                    or uses_disabled_sensor(item, str(key))
+                    for key, item in value.items()
+                )
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                return any(uses_disabled_sensor(item, field_name) for item in value)
+            return False
+
+        if not sensor_enabled and sensor_uids:
+            for collection_name, cfg_type in (
+                ("events", EventCfg),
+                ("observations", ObservationCfg),
+            ):
+                collection = getattr(self.cfg, collection_name, None)
+                if collection is None:
+                    continue
+                items = (
+                    collection.items()
+                    if isinstance(collection, Mapping)
+                    else ((name, getattr(collection, name)) for name in dir(collection))
+                )
+                for name, functor_cfg in items:
+                    if not isinstance(functor_cfg, cfg_type):
+                        continue
+                    name_targets_sensor = isinstance(functor_cfg, ObservationCfg) and (
+                        functor_cfg.name == "sensor"
+                        or functor_cfg.name.startswith("sensor/")
+                    )
+                    if name_targets_sensor or uses_disabled_sensor(functor_cfg.params):
+                        logger.log_info(
+                            f"Filtering out {collection_name[:-1]} functor '{name}' "
+                            "because sensor acquisition is disabled."
+                        )
+                        if isinstance(collection, Mapping):
+                            collection[name] = None
+                        else:
+                            setattr(collection, name, None)
 
         functors_to_remove = {
             name
@@ -2234,6 +2299,11 @@ class EmbodiedEnv(BaseEnv):
         """
 
         # TODO: support sensor attachment to the robot.
+        if not self.cfg.enable_sensor:
+            logger.log_info(
+                "Sensor acquisition is disabled; configured sensors will not be instantiated."
+            )
+            return {}
 
         sensors = {}
         for cfg in self.cfg.sensor:
