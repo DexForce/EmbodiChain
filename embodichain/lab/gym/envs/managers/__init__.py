@@ -56,6 +56,7 @@ __all__ = [
     "ActionTerm",
     "ActionDescriptor",
     "ActionTermDescriptor",
+    "ActionTrace",
     "DefaultJointPositionAction",
     "EefPoseAction",
     "JointEffortAction",

@@ -371,6 +371,7 @@ embodichain.lab.gym.envs.managers.action_types
 
    ActionDescriptor
    ActionTermDescriptor
+   ActionTrace
 
 embodichain.lab.gym.envs.wrapper.replay
 ---------------------------------------
