@@ -19,6 +19,7 @@ from __future__ import annotations
 import torch
 import os
 import random
+import weakref
 import copy
 import numpy as np
 from pathlib import Path
@@ -142,17 +143,23 @@ def set_rigid_object_group_visual_material(
     obj.set_visual_material(mat, env_ids=env_ids)
 
 
-_WARNED_IGNORED_CAMERA_RANGES: set[tuple[str, tuple[str, ...]]] = set()
+# Keyed by the camera object, so envs that reuse a camera uid each warn once.
+_WARNED_IGNORED_CAMERA_RANGES: weakref.WeakKeyDictionary[
+    object, set[tuple[str, ...]]
+] = weakref.WeakKeyDictionary()
 
 
 def _warn_ignored_camera_ranges(
-    uid: str, mode: str, ranges: Dict[str, object], expected: str
+    camera: object, uid: str, mode: str, ranges: Dict[str, object], expected: str
 ) -> None:
     """Warn once per camera when ranges that its extrinsics mode never reads are set."""
     ignored = tuple(name for name, value in ranges.items() if value is not None)
-    if not ignored or (uid, ignored) in _WARNED_IGNORED_CAMERA_RANGES:
+    if not ignored:
         return
-    _WARNED_IGNORED_CAMERA_RANGES.add((uid, ignored))
+    warned = _WARNED_IGNORED_CAMERA_RANGES.setdefault(camera, set())
+    if ignored in warned:
+        return
+    warned.add(ignored)
     logger.log_warning(
         f"randomize_camera_extrinsics: camera '{uid}' uses {mode} extrinsics, "
         f"so {', '.join(ignored)} {'is' if len(ignored) == 1 else 'are'} ignored. "
@@ -200,6 +207,7 @@ def randomize_camera_extrinsics(
     if extrinsics.parent is not None:
         # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
         _warn_ignored_camera_ranges(
+            camera,
             entity_cfg.uid,
             "attach (parent)",
             {
@@ -245,6 +253,7 @@ def randomize_camera_extrinsics(
     elif extrinsics.eye is not None:
         # If extrinsics uses eye/target/up, use perturbation for look_at mode
         _warn_ignored_camera_ranges(
+            camera,
             entity_cfg.uid,
             "look_at (eye / target / up)",
             {"pos_range": pos_range, "euler_range": euler_range},

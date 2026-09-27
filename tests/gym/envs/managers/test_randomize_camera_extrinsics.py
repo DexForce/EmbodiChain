@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -54,7 +55,9 @@ def _attach_extrinsics() -> SimpleNamespace:
 def warnings(monkeypatch) -> list[str]:
     messages: list[str] = []
     monkeypatch.setattr(visual.logger, "log_warning", messages.append)
-    monkeypatch.setattr(visual, "_WARNED_IGNORED_CAMERA_RANGES", set())
+    monkeypatch.setattr(
+        visual, "_WARNED_IGNORED_CAMERA_RANGES", weakref.WeakKeyDictionary()
+    )
     return messages
 
 
@@ -77,6 +80,22 @@ def test_look_at_camera_warns_once_about_pos_and_euler_ranges(warnings) -> None:
     # The camera is still placed with its configured look_at pose on every reset.
     assert env.camera.look_at.call_count == 3
     env.camera.set_local_pose.assert_not_called()
+
+
+@pytest.mark.no_sim
+def test_envs_sharing_a_camera_uid_each_warn(warnings) -> None:
+    envs = [_make_env(_look_at_extrinsics()) for _ in range(2)]
+    for env in envs * 2:
+        randomize_camera_extrinsics(
+            env,
+            torch.arange(2),
+            SceneEntityCfg(uid="cam_high"),
+            pos_range=([-0.01] * 3, [0.01] * 3),
+        )
+
+    # One warning per environment, not one per process.
+    assert len(warnings) == 2
+    assert all("cam_high" in message for message in warnings)
 
 
 @pytest.mark.no_sim
