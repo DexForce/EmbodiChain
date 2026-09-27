@@ -142,6 +142,24 @@ def set_rigid_object_group_visual_material(
     obj.set_visual_material(mat, env_ids=env_ids)
 
 
+_WARNED_IGNORED_CAMERA_RANGES: set[tuple[str, tuple[str, ...]]] = set()
+
+
+def _warn_ignored_camera_ranges(
+    uid: str, mode: str, ranges: Dict[str, object], expected: str
+) -> None:
+    """Warn once per camera when ranges that its extrinsics mode never reads are set."""
+    ignored = tuple(name for name, value in ranges.items() if value is not None)
+    if not ignored or (uid, ignored) in _WARNED_IGNORED_CAMERA_RANGES:
+        return
+    _WARNED_IGNORED_CAMERA_RANGES.add((uid, ignored))
+    logger.log_warning(
+        f"randomize_camera_extrinsics: camera '{uid}' uses {mode} extrinsics, "
+        f"so {', '.join(ignored)} {'is' if len(ignored) == 1 else 'are'} ignored. "
+        f"Use {expected} for this camera instead."
+    )
+
+
 def randomize_camera_extrinsics(
     env: EmbodiedEnv,
     env_ids: Union[torch.Tensor, None],
@@ -170,6 +188,9 @@ def randomize_camera_extrinsics(
         eye_range: Eye position perturbation range (look_at mode).
         target_range: Target position perturbation range (look_at mode).
         up_range: Up vector perturbation range (look_at mode).
+
+    Ranges that do not apply to the camera's extrinsics mode are ignored; a
+    warning is logged once per camera so that such config mistakes are visible.
     """
     camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
     num_instance = len(env_ids)
@@ -178,6 +199,16 @@ def randomize_camera_extrinsics(
 
     if extrinsics.parent is not None:
         # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
+        _warn_ignored_camera_ranges(
+            entity_cfg.uid,
+            "attach (parent)",
+            {
+                "eye_range": eye_range,
+                "target_range": target_range,
+                "up_range": up_range,
+            },
+            "pos_range / euler_range",
+        )
         init_pos = getattr(extrinsics, "pos", [0.0, 0.0, 0.0])
         init_quat = getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0])
         new_pose = torch.tensor(
@@ -213,6 +244,12 @@ def randomize_camera_extrinsics(
 
     elif extrinsics.eye is not None:
         # If extrinsics uses eye/target/up, use perturbation for look_at mode
+        _warn_ignored_camera_ranges(
+            entity_cfg.uid,
+            "look_at (eye / target / up)",
+            {"pos_range": pos_range, "euler_range": euler_range},
+            "eye_range / target_range / up_range",
+        )
         init_eye = (
             torch.tensor(extrinsics.eye, dtype=torch.float32, device=env.device)
             .unsqueeze(0)
