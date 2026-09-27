@@ -691,6 +691,8 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
         row_records: list[dict[str, object]] = []
         row_templates: list[TrajectoryTemplate] = []
         row_specs: list[CandidateSpec] = []
+        row_all_templates: list[tuple[TrajectoryTemplate, ...]] = []
+        row_all_specs: list[tuple[CandidateSpec, ...]] = []
         for row in range(context.batch_size):
             recipe = self._recipe_for_row(row)
             payload = {
@@ -791,6 +793,8 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             selected_dts.append(selected.template.dt)
             row_templates.append(selected.template)
             row_specs.append(selected.spec)
+            row_all_templates.append(tuple(item.template for item in items))
+            row_all_specs.append(tuple(item.spec for item in items))
             row_records.append(
                 {
                     "row_index": row,
@@ -825,8 +829,15 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 dt=torch.stack(selected_dts),
             ),
         )
-        for row, (spec, template, record) in enumerate(
-            zip(row_specs, row_templates, row_records, strict=True)
+        for row, (spec, template, record, all_specs, all_templates) in enumerate(
+            zip(
+                row_specs,
+                row_templates,
+                row_records,
+                row_all_specs,
+                row_all_templates,
+                strict=True,
+            )
         ):
             self._records.append(
                 TaskProgramGenerationRecord(
@@ -834,8 +845,8 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                     workflow_call_index=call_request.workflow_call_index,
                     candidate_index=int(record["trajectory_selected"]),
                     selected_candidate_id=spec.identity.candidate_id,
-                    candidates=(spec,),
-                    templates=(template,),
+                    candidates=all_specs,
+                    templates=all_templates,
                     recipe_index=int(record["recipe_index"]),
                     cycle_index=cycle_index,
                     affordance_requested=int(record["affordance_requested"]),

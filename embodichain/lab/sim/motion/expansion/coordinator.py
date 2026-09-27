@@ -52,7 +52,11 @@ def _plain_json(value: object) -> object:
     return value
 
 
-def _trajectory_fingerprint(template: TrajectoryTemplate) -> str:
+def _trajectory_fingerprint(
+    template: TrajectoryTemplate,
+    *,
+    affordance_selection: Mapping[str, object],
+) -> str:
     """Return an exact content digest for one unpadded candidate template."""
     metadata = {
         "joint_names": template.joint_names,
@@ -72,6 +76,7 @@ def _trajectory_fingerprint(template: TrajectoryTemplate) -> str:
         ),
         "allowed_operators": template.allowed_operators,
         "controlled_joint_indices": template.controlled_joint_indices,
+        "affordance_selection": _plain_json(affordance_selection),
     }
     digest = hashlib.sha256(
         json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
@@ -308,7 +313,10 @@ class CandidateCoordinator:
                 validator_id=template.validator_id,
                 controlled_joint_indices=template.controlled_joint_indices,
             )
-            fingerprint = _trajectory_fingerprint(row_template)
+            fingerprint = _trajectory_fingerprint(
+                row_template,
+                affordance_selection=affordance,
+            )
             if (
                 fingerprint in self._seen_fingerprints
                 or fingerprint in batch_fingerprints

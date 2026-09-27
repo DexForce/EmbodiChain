@@ -31,6 +31,7 @@ if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 import gymnasium
+import torch
 
 from embodichain.cli.sim import add_seed_arg_to_parser, add_sim_args_to_parser
 from embodichain.lab.gym.envs.demo import DemoEpisodeResult, execute_demo_episode
@@ -42,6 +43,7 @@ from embodichain.lab.gym.utils.registration import (
 from embodichain.lab.sim.motion.expansion import (
     CombinedEpisodeCoordinator,
     CombinedGenerationProfile,
+    CubeInitialPoseProvider,
     PhysicalSlotPool,
     TrajectoryGenerationJobCfg,
     ValidationResult,
@@ -310,14 +312,49 @@ def main(argv: list[str] | None = None) -> None:
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
     visual_registry = None
     combined_recipes = ()
+    reference_families = ()
     if isinstance(profile, CombinedGenerationProfile):
         visual_registry = VisualProfileRegistry.from_yaml(
             args.generation_profile.parent / profile.visual.profile_file
         )
-        combined_recipes = enumerate_candidate_recipes(profile)
+        reference_families = CubeInitialPoseProvider.from_yaml(
+            args.generation_profile.parent
+            / "generation_profiles/cube_initial_pose.yaml",
+            seed=7,
+        ).enumerate(profile.scene_randomization.reference_family_count)
+        combined_recipes = enumerate_candidate_recipes(
+            profile,
+            families=reference_families,
+        )
     try:
         for candidate_index in candidate_indices:
             env.reset(seed=args.seed, options={"save_data": False})
+            if reference_families:
+                batch_size = int(env.unwrapped.num_envs)
+                family_by_id = {
+                    family.reference_family_id: family for family in reference_families
+                }
+                batch_recipes = combined_recipes[
+                    candidate_index : candidate_index + batch_size
+                ]
+                cube = env.unwrapped.sim.get_rigid_object("cube")
+                pose = torch.tensor(
+                    [
+                        [
+                            *family_by_id[recipe.reference_family_id].cube_position,
+                            *family_by_id[
+                                recipe.reference_family_id
+                            ].cube_quaternion_xyzw,
+                        ]
+                        for recipe in batch_recipes
+                    ],
+                    dtype=torch.float32,
+                    device=env.unwrapped.device,
+                )
+                cube.set_local_pose(
+                    pose,
+                    env_ids=torch.arange(batch_size, device=env.unwrapped.device),
+                )
             if visual_registry is not None:
                 assignments = {
                     env_id: combined_recipes[
@@ -364,6 +401,7 @@ def main(argv: list[str] | None = None) -> None:
                         "combined scheduler returned non-contiguous rows"
                     )
             recording_started = False
+            terminal_status = "rejected"
             try:
                 if args.save_video:
                     recording_started = env.unwrapped.sim.start_window_record(
@@ -381,40 +419,48 @@ def main(argv: list[str] | None = None) -> None:
                     generation_profile=profile,
                     generation_candidate_index=candidate_index,
                 )
+                if result.completed and bool(result.success) and all(result.success):
+                    terminal_status = "accepted"
             finally:
                 if recording_started:
                     if env.unwrapped.sim.is_window_recording():
                         env.unwrapped.sim.stop_window_record()
                     env.unwrapped.sim.wait_window_record_saves()
-            records = env.unwrapped.task_program_generation_records
-            measured_validation = MeasuredValidator().validate_demo_result(result)
-            if not measured_validation.accepted:
+            try:
+                records = env.unwrapped.task_program_generation_records
+                measured_validation = MeasuredValidator().validate_demo_result(result)
+                if not measured_validation.accepted:
+                    raise RuntimeError(
+                        "Measured validation rejected candidate "
+                        f"{candidate_index}: {measured_validation.checks}"
+                    )
+                _write_generation_json(
+                    profile,
+                    records,
+                    result,
+                    measured_validation,
+                    args.output_dir / f"candidate_{candidate_index}.json",
+                )
+                _save_generation_plot(
+                    records,
+                    args.output_dir / f"candidate_{candidate_index}.png",
+                )
+                if not result.completed:
+                    raise RuntimeError(
+                        f"Candidate {candidate_index} stopped: {result.terminal_reason}"
+                    )
+                task_success = bool(result.success) and all(result.success)
+                env.reset(
+                    options={"save_data": bool(result.completed and task_success)}
+                )
+            finally:
                 if scheduler is not None:
                     for assignment in assignments:
-                        scheduler.finish(assignment, status="rejected")
-                raise RuntimeError(
-                    "Measured validation rejected candidate "
-                    f"{candidate_index}: {measured_validation.checks}"
-                )
-            if scheduler is not None:
-                for assignment in assignments:
-                    scheduler.finish(assignment, status="accepted")
-            _write_generation_json(
-                profile,
-                records,
-                result,
-                measured_validation,
-                args.output_dir / f"candidate_{candidate_index}.json",
-            )
-            _save_generation_plot(
-                records,
-                args.output_dir / f"candidate_{candidate_index}.png",
-            )
-            if not result.completed:
-                raise RuntimeError(
-                    f"Candidate {candidate_index} stopped: {result.terminal_reason}"
-                )
-            env.reset(options={"save_data": result.completed})
+                        try:
+                            scheduler.finish(assignment, status=terminal_status)
+                        except ValueError:
+                            scheduler.cancel()
+                            break
     finally:
         env.close()
     if args.concat_video:

@@ -58,7 +58,7 @@ def test_combined_profile_decodes_canonical_shape() -> None:
         (_PROFILE.parent / "env.generation.yaml").read_text(encoding="utf-8")
     )
     lights = env["simulation"]["light"]["direct"]
-    assert len(lights) == 1
+    assert {light["uid"] for light in lights} == {"main_light", "rect_light"}
     assert lights[0]["light_type"] == "sun"
     assert lights[0]["intensity"] <= 10
     recorder = env["env"]["events"]["record_camera"]
@@ -103,6 +103,28 @@ def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
         "cube_pose_03",
     }
     assert {item.visual_profile_id for item in recipes} == set(profile.visual.profiles)
+
+
+def test_authored_pose_profile_controls_family_geometry_and_identity() -> None:
+    profile = load_generation_profile(_PROFILE)
+    assert isinstance(profile, CombinedGenerationProfile)
+    provider = CubeInitialPoseProvider.from_yaml(
+        _PROFILE.parent / "generation_profiles/cube_initial_pose.yaml"
+    )
+    families = provider.enumerate(4)
+    recipes = enumerate_candidate_recipes(profile, families=families)
+    assert recipes[0].reference_family_id == "cube_pose_00"
+    altered = list(families)
+    altered[0] = altered[0].__class__(
+        reference_family_id=altered[0].reference_family_id,
+        cube_position=(1.0, 2.0, 3.0),
+        cube_quaternion_xyzw=altered[0].cube_quaternion_xyzw,
+        drop_targets=altered[0].drop_targets,
+        deterministic_seed=altered[0].deterministic_seed,
+    )
+    altered_recipes = enumerate_candidate_recipes(profile, families=altered)
+    assert recipes[0].candidate_id != altered_recipes[0].candidate_id
+    assert schedule_digest(recipes) != schedule_digest(altered_recipes)
 
 
 def test_physical_slot_pool_releases_only_exact_reservations() -> None:

@@ -61,15 +61,8 @@ def test_visual_registry_resolves_seeded_visual_profiles() -> None:
     )
 
     light = registry.resolve("rgb_light_01", seed=123)
-    assert light.operations == (
-        {
-            "kind": "global_sun",
-            "scope": "global",
-            "light_uid": "main_light",
-            "color": [1.0, 0.82, 0.62],
-            "intensity": 5.75,
-        },
-    )
+    assert light.operations[0]["kind"] == "rect_light"
+    assert light.operations[0]["scope"] == "per_environment"
 
 
 def test_visual_registry_rejects_global_sun_intensity_above_ten() -> None:
@@ -128,8 +121,27 @@ def test_visual_registry_applies_global_sun_once_for_all_rows() -> None:
             self.sim = sim
 
     sun = Sun()
-    registry = VisualProfileRegistry.from_yaml(
-        _TASK_ROOT / "generation_profiles/rgb_visual.yaml"
+    registry = VisualProfileRegistry(
+        "rgb_visual",
+        "rgb_visual:v1",
+        {
+            "rgb_light_01": {
+                "operations": [
+                    {
+                        "kind": "global_sun",
+                        "scope": "global",
+                        "light_uid": "main_light",
+                        "color": [1.0, 0.82, 0.62],
+                        "intensity": 5.75,
+                    }
+                ]
+            },
+            "rgb_canonical": {
+                "operations": [
+                    {"kind": "authored_cube_material", "scope": "per_environment"}
+                ]
+            },
+        },
     )
     applications = registry.apply_to_environment(
         Env(Sim(sun)),
@@ -167,6 +179,16 @@ def test_round_robin_coordinator_releases_slots_and_counts_terminal_states() -> 
     coordinator.finish(assignment, status="accepted")
     assert coordinator.snapshot()["accepted"] == 1
     assert coordinator.snapshot()["available_slots"] == 1
+
+
+def test_round_robin_accepts_a_batch_crossing_family_boundaries() -> None:
+    profile = _profile()
+    recipes = enumerate_candidate_recipes(
+        profile,
+        families=CubeInitialPoseProvider().enumerate(4),
+    )
+    ordered = round_robin_recipes(recipes[1:17], family_count=2)
+    assert len(ordered) == 16
 
 
 def test_measured_validator_requires_three_cycle_target_evidence() -> None:

@@ -24,7 +24,6 @@ from embodichain.lab.sim.motion.execution import (
     EpisodeSink,
     FixedSceneInitialStatePort,
     InitialStatePort,
-    LocalArtifactSink,
     MultiSlotRunner,
     MeasuredExecutor,
     SingleSlotOutcome,
@@ -259,22 +258,6 @@ def test_fixed_scene_port_adapts_restore_and_verify_contract() -> None:
     port = FixedSceneInitialStatePort(host)
     assert port.restore(object()) == 1
     assert host.calls == 1
-
-
-def test_local_artifact_sink_writes_atomic_episode_layout(tmp_path) -> None:
-    session, coordinator, _ = _coordinator()
-    sink = LocalArtifactSink(tmp_path)
-    outcome = _runner(coordinator, sink=sink).run_next()
-
-    assert outcome.status == "committed"
-    candidate_dir = tmp_path / "candidates" / outcome.candidate_id
-    assert (candidate_dir / "generation.json").is_file()
-    assert (candidate_dir / "physical_episode.json").is_file()
-    assert (candidate_dir / "trajectory.pt").is_file()
-    assert (candidate_dir / "observations" / "rgb.npz").is_file()
-    sink.write_manifest({"status": "complete", "accepted": 1})
-    assert (tmp_path / "manifest.json").is_file()
-    assert session.snapshot()["counts"]["committed"] == 1
 
 
 def test_multi_slot_runner_releases_exact_slot_between_fifo_candidates() -> None:

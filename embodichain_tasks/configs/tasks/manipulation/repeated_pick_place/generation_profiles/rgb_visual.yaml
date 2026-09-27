@@ -25,8 +25,9 @@ profiles:
   rgb_light_01:
     seed_offset: 3
     operations:
-      - kind: global_sun
-        scope: global
-        light_uid: main_light
+      - kind: rect_light
+        scope: per_environment
+        light_uid: rect_light
         color: [1.0, 0.82, 0.62]
-        intensity: 5.75
+        intensity: 10.0
+        direction: [0.0, 0.0, -1.0]

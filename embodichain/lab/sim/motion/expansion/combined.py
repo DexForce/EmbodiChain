@@ -572,6 +572,8 @@ class CubeInitialPoseProvider:
         self,
         poses: Sequence[tuple[float, float, float]] | None = None,
         *,
+        family_ids: Sequence[str] | None = None,
+        profile_revision: str = "cube_initial_pose:v1",
         drop_targets: Sequence[tuple[str, tuple[float, float, float]]] = (
             ("drop_pose_00", (-0.40, 0.48, 0.10)),
             ("drop_pose_01", (-0.42, -0.08, 0.10)),
@@ -601,8 +603,62 @@ class CubeInitialPoseProvider:
         if any(len(position) != 3 for _, position in targets):
             raise ValueError("drop target positions must have three coordinates")
         self._positions = positions
+        if family_ids is None:
+            ids = tuple(f"cube_pose_{index:02d}" for index in range(len(positions)))
+        else:
+            ids = tuple(_text(value, "reference family ID") for value in family_ids)
+            if len(ids) != len(positions) or len(set(ids)) != len(ids):
+                raise ValueError("family_ids must align with unique authored poses")
+        self._family_ids = ids
+        self._profile_revision = _text(profile_revision, "profile_revision")
         self._targets = targets
         self._seed = seed
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, *, seed: int = 0) -> "CubeInitialPoseProvider":
+        """Load authored cube families from a strict pose profile."""
+        with Path(path).open(encoding="utf-8") as stream:
+            root = yaml.safe_load(stream)
+        data = _mapping(root, "initial-pose profile")
+        _keys(
+            data,
+            {"profile_id", "revision", "change_scope", "keep_drop_targets", "poses"},
+            "initial-pose profile",
+        )
+        if data.get("change_scope") != "cube_initial_pose_only":
+            raise ValueError("initial-pose profile must change only cube_initial_pose")
+        if data.get("keep_drop_targets") is not True:
+            raise ValueError("initial-pose profile must keep authored drop targets")
+        poses = []
+        family_ids = []
+        for item in data.get("poses", ()):
+            value = _mapping(item, "initial-pose profile pose")
+            _keys(
+                value,
+                {"id", "position", "quaternion_xyzw"},
+                "initial-pose profile pose",
+            )
+            position = tuple(
+                _finite(number, "cube position") for number in value["position"]
+            )
+            if len(position) != 3:
+                raise ValueError("cube position must contain three values")
+            quaternion = tuple(
+                _finite(number, "cube quaternion")
+                for number in value["quaternion_xyzw"]
+            )
+            if quaternion != (0.0, 0.0, 0.0, 1.0):
+                raise ValueError(
+                    "only the authored identity cube quaternion is supported"
+                )
+            poses.append(position)
+            family_ids.append(_text(value["id"], "reference family ID"))
+        return cls(
+            poses,
+            family_ids=family_ids,
+            profile_revision=_text(data.get("revision"), "profile revision"),
+            seed=seed,
+        )
 
     def enumerate(self, count: int | None = None) -> tuple[ReferenceFamilySpec, ...]:
         """Enumerate the first ``count`` legal deterministic families."""
@@ -615,13 +671,14 @@ class CubeInitialPoseProvider:
                 raise ValueError("cube positions must contain three coordinates")
             result.append(
                 ReferenceFamilySpec(
-                    reference_family_id=f"cube_pose_{index:02d}",
+                    reference_family_id=self._family_ids[index],
                     cube_position=tuple(
                         _finite(value, "cube position") for value in position
                     ),
                     cube_quaternion_xyzw=(0.0, 0.0, 0.0, 1.0),
                     drop_targets=self._targets,
                     deterministic_seed=self._seed + index,
+                    profile_revision=self._profile_revision,
                 )
             )
         return tuple(result)
@@ -786,6 +843,11 @@ def enumerate_candidate_recipes(
                     job_id,
                     profile.source.source_revision,
                     family.reference_family_id,
+                    family.cube_position,
+                    family.cube_quaternion_xyzw,
+                    family.drop_targets,
+                    family.profile_revision,
+                    family.scene_signature,
                     recipe_index,
                     tuple(
                         (c.affordance_requested, c.trajectory_requested) for c in cycles
@@ -795,6 +857,11 @@ def enumerate_candidate_recipes(
                     "job_id": job_id,
                     "revision": profile.source.source_revision,
                     "family": family.reference_family_id,
+                    "cube_position": family.cube_position,
+                    "cube_quaternion_xyzw": family.cube_quaternion_xyzw,
+                    "drop_targets": family.drop_targets,
+                    "profile_revision": family.profile_revision,
+                    "scene_signature": family.scene_signature,
                     "recipe_index": recipe_index,
                     "cycles": [
                         (c.affordance_requested, c.trajectory_requested) for c in cycles

@@ -291,6 +291,33 @@ class VisualProfileRegistry:
                             focal_x_range=(fx * (scale - 1.0), fx * (scale - 1.0)),
                             focal_y_range=(fy * (scale - 1.0), fy * (scale - 1.0)),
                         )
+                    elif kind == "rect_light":
+                        light = sim.get_light(
+                            str(operation.get("light_uid", "rect_light"))
+                        )
+                        if light is None or getattr(light, "is_global", False):
+                            raise ValueError(
+                                "rect_light requires a per-environment rect light"
+                            )
+                        color = torch.tensor(
+                            operation.get("color", [1.0, 1.0, 1.0]),
+                            dtype=torch.float32,
+                        ).repeat(len(env_ids), 1)
+                        light.set_color(color, env_ids=ids)
+                        light.set_intensity(
+                            torch.full(
+                                (len(env_ids),),
+                                float(operation.get("intensity", 8.0)),
+                            ),
+                            env_ids=ids,
+                        )
+                        light.set_direction(
+                            torch.tensor(
+                                operation.get("direction", [0.0, 0.0, -1.0]),
+                                dtype=torch.float32,
+                            ).repeat(len(env_ids), 1),
+                            env_ids=ids,
+                        )
                     else:
                         raise ValueError(f"unsupported visual operation: {kind!r}")
                 applications.append(application)
@@ -310,17 +337,18 @@ def round_robin_recipes(
     if type(family_count) is not int or family_count < 1:
         raise ValueError("family_count must be a positive integer")
     values = tuple(recipes)
-    if not values or len(values) % family_count:
-        raise ValueError("recipes must divide evenly across reference families")
+    if not values:
+        raise ValueError("recipes must be nonempty")
     groups: dict[str, list[CandidateRecipe]] = {}
     for recipe in values:
         groups.setdefault(recipe.reference_family_id, []).append(recipe)
     if len(groups) != family_count:
         raise ValueError("recipe family count does not match family_count")
     ordered: list[CandidateRecipe] = []
-    for offset in range(len(values) // family_count):
+    for offset in range(max(len(group) for group in groups.values())):
         for family in groups:
-            ordered.append(groups[family][offset])
+            if offset < len(groups[family]):
+                ordered.append(groups[family][offset])
     return tuple(ordered)
 
 
