@@ -25,7 +25,7 @@ Asset archives are downloaded from `https://hf-mirror.com/datasets/DexForceAI/em
 export EMBODICHAIN_DOWNLOAD_PREFIX=https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/
 ```
 
-Like the root directories above, the prefix is read when `embodichain.data` is first imported, so set it before starting Python.
+A missing trailing slash is added automatically. Locomotion assets also fall back to the Hugging Face Hub if the configured host fails. Like the root directories above, the prefix is read when `embodichain.data` is first imported, so set it before starting Python.
 
 ## Download CLI
 
