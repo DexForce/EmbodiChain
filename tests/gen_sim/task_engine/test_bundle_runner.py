@@ -99,7 +99,9 @@ def test_initial_probe_plans_without_dispatch_or_effect_commit(
         compiler=compiler, engine=engine, observation_provider=observer
     )
     compiled = SimpleNamespace(
-        preflight_analyses=lambda: [SimpleNamespace(kind="sequential", calls=())]
+        preflight_analyses=lambda: [SimpleNamespace(kind="sequential", calls=())],
+        program_id="test",
+        iter_segments=lambda: iter([SimpleNamespace(segment_id="first")]),
     )
     adapter = Mock()
     adapter.compile.return_value = compiled
@@ -111,6 +113,7 @@ def test_initial_probe_plans_without_dispatch_or_effect_commit(
     )
     env = SimpleNamespace(robot=SimpleNamespace(get_qpos=lambda: torch.zeros(1, 2)))
     result = _bundle_runner._probe_initial_plan(env, deployment, object())
+    compiler.analyze.assert_called_once_with((), workflow_id="test/first")
     assert result["plan_success"] == [success]
     assert result["task_success"] is None
     assert result["analysis_call_count"] == 2

@@ -54,7 +54,7 @@ def select_container_landing(
     # Union the actual triangles, not their convex hull: holes remain unsupported.
     floor = unary_union([Polygon(triangle[:, :2]) for triangle in triangles])
     radius = float(np.linalg.norm(child_vertices[:, :2], axis=1).max())
-    safe = floor.buffer(-(radius + 0.02))
+    safe = floor.buffer(-(radius + 0.035))
     if safe.is_empty:
         raise ValueError(
             "Container floor cannot contain the object footprint and margin."
