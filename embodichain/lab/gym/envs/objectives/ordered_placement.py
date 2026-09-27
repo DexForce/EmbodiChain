@@ -76,6 +76,20 @@ class OrderedPlacementObjective:
         self._stable = torch.zeros_like(self._success)
         self._valid = torch.zeros_like(self._success)
         self._hold = torch.zeros(num_envs, device=self.device, dtype=torch.float64)
+        self._steps = torch.zeros(num_envs, device=self.device, dtype=torch.long)
+        self._elapsed_seconds = torch.zeros(
+            num_envs, device=self.device, dtype=torch.float64
+        )
+        goal_count = len(self.cfg.regions)
+        self._milestone_steps = torch.full(
+            (num_envs, goal_count), -1, device=self.device, dtype=torch.long
+        )
+        self._milestone_times = torch.full(
+            (num_envs, goal_count),
+            float("nan"),
+            device=self.device,
+            dtype=torch.float64,
+        )
         self._position = torch.zeros(
             num_envs, 3, device=self.device, dtype=torch.float64
         )
@@ -99,11 +113,15 @@ class OrderedPlacementObjective:
             self._stable,
             self._valid,
             self._hold,
+            self._steps,
+            self._elapsed_seconds,
             self._position,
             self._linear_speed,
             self._angular_speed,
         ):
             tensor[ids] = 0
+        self._milestone_steps[ids] = -1
+        self._milestone_times[ids] = float("nan")
 
     @torch.no_grad()
     def update(self, measured_state: MeasuredRigidObjectState, dt: float) -> None:
@@ -130,6 +148,8 @@ class OrderedPlacementObjective:
                 "Measured state must contain floating (num_envs, 3) tensors on the objective device."
             )
         position, linear, angular = tensors
+        self._steps.add_(1)
+        self._elapsed_seconds.add_(dt)
         self._position.copy_(position)
         linear_speed = torch.linalg.vector_norm(linear, dim=-1)
         angular_speed = torch.linalg.vector_norm(angular, dim=-1)
@@ -159,6 +179,13 @@ class OrderedPlacementObjective:
             atol=0.0,
         )
         reached = (self._progress < len(self.cfg.regions)) & held
+        reached_ids = torch.nonzero(reached, as_tuple=False).squeeze(-1)
+        if reached_ids.numel() > 0:
+            reached_goals = target[reached_ids]
+            self._milestone_steps[reached_ids, reached_goals] = self._steps[reached_ids]
+            self._milestone_times[reached_ids, reached_goals] = self._elapsed_seconds[
+                reached_ids
+            ]
         self._progress.add_(reached.long())
         self._success.copy_((self._progress == len(self.cfg.regions)) & stable & held)
         self._hold[reached & ~self._success] = 0.0
@@ -176,6 +203,10 @@ class OrderedPlacementObjective:
             "goal_count": len(self.cfg.regions),
             "success": self._success.clone(),
             "progress": self._progress.clone(),
+            "steps": self._steps.clone(),
+            "elapsed_seconds": self._elapsed_seconds.clone(),
+            "milestone_steps": self._milestone_steps.clone(),
+            "milestone_times": self._milestone_times.clone(),
             "metrics": {
                 "stable": self._stable.clone(),
                 "measurement_valid": self._valid.clone(),

@@ -79,6 +79,10 @@ def test_ordered_dwell_transient_final_revocation_and_partial_reset():
     assert objective.snapshot()["progress"].tolist() == [3, 3]
     objective.reset([0])
     assert objective.snapshot()["progress"].tolist() == [0, 3]
+    assert objective.snapshot()["milestone_steps"].tolist() == [
+        [-1, -1, -1],
+        [2, 4, 6],
+    ]
     assert terminal["success"].tolist() == [True, True]
 
 
@@ -95,6 +99,25 @@ def test_snapshot_queries_are_pure_detached_and_json_compatible():
     row = objective.snapshot_row(0)
     assert row["progress"] == 0
     assert row["predicate"] == "ordered_stable_regions"
+    json.dumps(row, allow_nan=False)
+
+
+def test_snapshot_records_milestone_steps_and_elapsed_times():
+    objective = _runtime()
+    for xs in [(0.0, 0.0), (0.0, 0.0), (1.0, 1.0), (1.0, 1.0), (0.0, 0.0), (0.0, 0.0)]:
+        objective.update(_state(xs), 0.1)
+
+    snapshot = objective.snapshot()
+    assert snapshot["steps"].tolist() == [6, 6]
+    assert snapshot["milestone_steps"].tolist() == [[2, 4, 6], [2, 4, 6]]
+    torch.testing.assert_close(
+        snapshot["milestone_times"],
+        torch.tensor([[0.2, 0.4, 0.6], [0.2, 0.4, 0.6]], dtype=torch.float64),
+        atol=1e-12,
+        rtol=0.0,
+    )
+    row = objective.snapshot_row(0)
+    assert row["milestone_steps"] == [2, 4, 6]
     json.dumps(row, allow_nan=False)
 
 
