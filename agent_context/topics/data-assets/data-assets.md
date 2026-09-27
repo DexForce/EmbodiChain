@@ -21,7 +21,9 @@ Online sampling and demonstration persistence belong to
 Root constants are evaluated at import time. `EMBODICHAIN_DATA_ROOT` defaults
 to `~/.cache/embodichain_data`; `EMBODICHAIN_DATASET_ROOT` defaults to
 `~/.cache/embodichain_datasets`. Database storage uses
-`~/.cache/embodichain/database`. Set overrides before importing consumers.
+`~/.cache/embodichain/database`. `EMBODICHAIN_DOWNLOAD_PREFIX` overrides the
+base URL for asset archives (default: the hf-mirror.com copy of
+`DexForceAI/embodichain_data`). Set overrides before importing consumers.
 
 `get_data_path(path)` resolves in this order:
 

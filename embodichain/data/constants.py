@@ -26,8 +26,9 @@ __all__ = [
     "EMBODICHAIN_DEFAULT_DATABASE_ROOT",
 ]
 
-EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/"
+EMBODICHAIN_DOWNLOAD_PREFIX = os.environ.get(
+    "EMBODICHAIN_DOWNLOAD_PREFIX",
+    "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/",
 )
 EMBODICHAIN_DEFAULT_DATA_ROOT = os.environ.get(
     "EMBODICHAIN_DATA_ROOT", str(Path.home() / ".cache" / "embodichain_data")

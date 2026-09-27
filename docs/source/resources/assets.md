@@ -17,6 +17,16 @@ Similarly, the dataset recording root (used by `LeRobotRecorder`) defaults to `~
 export EMBODICHAIN_DATASET_ROOT=/mnt/shared/embodichain_datasets
 ```
 
+## Download Source
+
+Asset archives are downloaded from `https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/` by default. If that mirror is not reachable from your network, point `EMBODICHAIN_DOWNLOAD_PREFIX` at another host that serves the same dataset layout, for example the Hugging Face Hub itself:
+
+```bash
+export EMBODICHAIN_DOWNLOAD_PREFIX=https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/
+```
+
+Like the root directories above, the prefix is read when `embodichain.data` is first imported, so set it before starting Python.
+
 ## Download CLI
 
 The unified `embodichain data` command manages downloadable assets.
