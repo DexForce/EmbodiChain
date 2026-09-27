@@ -16,12 +16,17 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
 import torch
 from tensordict import TensorDict
 
+from embodichain.lab.gym.envs.expert_trajectory import (
+    EXPERT_TRAJECTORY_SCHEMA_VERSION,
+    build_expert_action_spec,
+)
 from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
 from embodichain.lab.gym.utils.trajectory_state import restore_trajectory_state
@@ -40,10 +45,20 @@ class ReplayWrapper(gym.Wrapper):
     pose/qpos is written directly each step, producing observations only (no
     reward / success / action). In ``dynamic`` mode the recorded robot actions
     are fed back through :meth:`env.step` so physics re-simulates the scene;
-    the full ``obs/reward/terminated/truncated/info`` tuple is returned. Flat
-    position-velocity expert actions are reconstructed as controller commands
-    before they are fed back. The ``control`` mode uses the same kinematic
-    behavior while exposing :meth:`go_to_step` for interactive scrubbing.
+    the full ``obs/reward/terminated/truncated/info`` tuple is returned. The
+    ``control`` mode uses the same kinematic behavior while exposing
+    :meth:`go_to_step` for interactive scrubbing.
+
+    Dynamic replay treats missing ``meta.action_kind`` (or ``"policy"``) as raw
+    policy actions. Current expert recordings use ``action_kind="expert"``;
+    ``"expert_controller"`` remains accepted for stacked-branch compatibility.
+    Expert recordings carry the canonical schema so qpos/qvel targets can be
+    reconstructed before stepping. Schema metadata alone cannot identify
+    controller actions: older position-only raw policy recordings carry it too.
+
+    Physical-objective dynamic replay currently supports one environment and
+    full resets only. Stepping past exhaustion raises instead of extending
+    objective dwell time by repeating the final command.
 
     Args:
         env: The environment to wrap (constructed without ``record_trajectory``).
@@ -67,6 +82,16 @@ class ReplayWrapper(gym.Wrapper):
         self._mode = mode
         self._trajectory = load_trajectory(trajectory)
         meta = self._trajectory["meta"]
+        self._controller_spec = None
+        self._objective_replay = (
+            mode == "dynamic" and getattr(env, "physical_objective", None) is not None
+        )
+        if self._objective_replay and env.num_envs != 1:
+            raise ValueError("Physical-objective replay requires a single environment.")
+        if mode == "dynamic":
+            if any(int(length) <= 0 for length in meta["lengths"]):
+                raise ValueError("Dynamic replay requires positive trajectory lengths.")
+            self._validate_action_schema(meta)
 
         # Sanity-check that the trajectory matches the replay env's robot.
         traj_robot_dof = int(meta.get("robot_dof", self.env.robot.dof))
@@ -100,6 +125,49 @@ class ReplayWrapper(gym.Wrapper):
             self.env.num_envs, dtype=torch.long, device=self.env.device
         )
 
+    def _validate_action_schema(self, meta: dict) -> None:
+        """Validate explicit controller recordings before any simulation step."""
+        kind = meta.get("action_kind", "policy")
+        if kind in {"policy", "raw_policy"}:
+            return
+        if kind not in {"expert", "expert_controller"}:
+            raise ValueError(f"Unsupported trajectory action_kind: {kind!r}.")
+        version = meta.get("expert_trajectory_schema_version")
+        if type(version) is not int or version != EXPERT_TRAJECTORY_SCHEMA_VERSION:
+            raise ValueError("Unsupported expert_trajectory_schema_version.")
+        spec = build_expert_action_spec(
+            joint_names=[
+                self.env.robot.joint_names[joint_id]
+                for joint_id in self.env.active_joint_ids
+            ],
+            joint_command_mode=meta.get("joint_command_mode"),
+        )
+        expected = spec.metadata(step_dt=self.env.step_dt)
+        for key in ("joint_names", "qpos_slice", "qvel_slice"):
+            value = meta.get(key)
+            if key not in meta or value != expected[key]:
+                raise ValueError(f"Trajectory {key} does not match the replay layout.")
+            if key.endswith("_slice") and value is not None:
+                if any(type(index) is not int for index in value):
+                    raise ValueError(f"Trajectory {key} requires integer indices.")
+        step_dt = meta.get("step_dt")
+        if (
+            isinstance(step_dt, bool)
+            or not isinstance(step_dt, (int, float))
+            or not math.isfinite(step_dt)
+            or step_dt <= 0
+            or not math.isclose(step_dt, self.env.step_dt, rel_tol=1e-9, abs_tol=0.0)
+        ):
+            raise ValueError("Trajectory step_dt does not match the replay cadence.")
+        actions = self._trajectory["actions"]
+        if actions.ndim != 3 or actions.shape[-1] != spec.width:
+            raise ValueError(
+                "Trajectory controller action width does not match schema."
+            )
+        if not actions.is_floating_point() or not bool(torch.isfinite(actions).all()):
+            raise ValueError("Trajectory controller actions must be finite floats.")
+        self._controller_spec = spec
+
     def _expand_to_env_count(self) -> None:
         """Broadcast a single-env trajectory to the wrapped env's env count."""
         meta = self._trajectory["meta"]
@@ -121,6 +189,8 @@ class ReplayWrapper(gym.Wrapper):
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
     ) -> tuple[EnvObs, dict]:
+        if self._objective_replay and options is not None and "reset_ids" in options:
+            raise ValueError("Physical-objective replay does not support reset_ids.")
         obs, info = self.env.reset(seed=seed, options=options)
         # Disable physics during restore so set_local_pose's internal update
         # does not integrate dynamics.
@@ -146,6 +216,8 @@ class ReplayWrapper(gym.Wrapper):
         self, action: Any
     ) -> tuple[EnvObs, torch.Tensor, torch.Tensor, torch.Tensor, dict]:
         env = self.env
+        if self._objective_replay and bool((self._replay_steps >= self._lengths).any()):
+            raise RuntimeError("Physical-objective replay is exhausted; reset first.")
         n = env.num_envs
         idx = torch.arange(n, device=env.device)
         st = self._replay_steps.clamp(max=self._lengths - 1)  # finished envs hold last
@@ -164,72 +236,18 @@ class ReplayWrapper(gym.Wrapper):
                 {},
             )
 
-        # dynamic: feed the recorded (pre-process) action; env.step re-preprocesses.
+        # Raw policy recordings retain their ordinary action-manager preprocessing.
         action_t = self._trajectory["actions"][idx, st]
-        obs, reward, term, trunc, info = env.step(self._decode_dynamic_action(action_t))
+        if self._controller_spec is not None:
+            spec = self._controller_spec
+            commands = {"qpos": action_t[:, slice(*spec.qpos_slice)]}
+            if spec.qvel_slice is not None:
+                commands["qvel"] = action_t[:, slice(*spec.qvel_slice)]
+            action_t = ControllerAction(TensorDict(commands, batch_size=[n]))
+        obs, reward, term, trunc, info = env.step(action_t)
         self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
         trunc = trunc | (self._replay_steps >= self._lengths)
         return obs, reward, term, trunc, info
-
-    def _decode_dynamic_action(
-        self, action: torch.Tensor
-    ) -> torch.Tensor | ControllerAction:
-        """Convert persisted expert actions back to controller commands.
-
-        Position-velocity expert trajectories are stored as one flat vector so
-        they can be serialized alongside position-only actions.  The environment
-        control boundary expects a ``ControllerAction`` containing separate
-        ``qpos`` and ``qvel`` entries, so reconstruct that envelope before
-        calling ``env.step``. Policy actions and position-only expert actions
-        already use the environment's native flat representation.
-        """
-        meta = self._trajectory["meta"]
-        if (
-            meta.get("action_kind", "expert") != "expert"
-            or meta.get("joint_command_mode") != "position_velocity"
-        ):
-            return action
-
-        qpos_slice = meta.get("qpos_slice")
-        qvel_slice = meta.get("qvel_slice")
-        if (
-            not isinstance(qpos_slice, (list, tuple))
-            or len(qpos_slice) != 2
-            or not isinstance(qvel_slice, (list, tuple))
-            or len(qvel_slice) != 2
-        ):
-            raise ValueError(
-                "Position-velocity trajectory metadata must define qpos_slice "
-                "and qvel_slice."
-            )
-
-        try:
-            qpos_start, qpos_end = (int(value) for value in qpos_slice)
-            qvel_start, qvel_end = (int(value) for value in qvel_slice)
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                "Position-velocity trajectory slices must contain integers."
-            ) from error
-
-        width = int(action.shape[-1])
-        if not (
-            0 <= qpos_start < qpos_end <= width and 0 <= qvel_start < qvel_end <= width
-        ):
-            raise ValueError(
-                "Position-velocity trajectory slices exceed the stored action "
-                f"width {width}: qpos={qpos_slice}, qvel={qvel_slice}."
-            )
-
-        return ControllerAction(
-            value=TensorDict(
-                {
-                    "qpos": action[..., qpos_start:qpos_end],
-                    "qvel": action[..., qvel_start:qvel_end],
-                },
-                batch_size=[self.env.num_envs],
-                device=action.device,
-            )
-        )
 
     def go_to_step(self, step: int) -> EnvObs:
         """Scrub to a specific recorded state (kinematic).

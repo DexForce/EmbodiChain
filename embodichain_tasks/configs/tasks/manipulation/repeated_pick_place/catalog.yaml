@@ -18,3 +18,5 @@ deployments:
     config: task.franka.rlinf_joint.yaml
   franka_rlinf_expert:
     config: task.franka.rlinf_expert.yaml
+  ur5_objective:
+    config: task.ur5.objective.yaml

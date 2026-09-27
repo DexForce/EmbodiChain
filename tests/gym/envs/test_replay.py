@@ -213,6 +213,7 @@ def test_position_velocity_targets_keep_fixed_env_step_and_are_saved(tmp_path):
         path = tmp_path / "position_velocity.pt"
         env.save_trajectory(str(path))
         saved = torch.load(path, weights_only=False)
+        assert saved["meta"]["action_kind"] == "expert"
         assert saved["meta"]["joint_command_mode"] == "position_velocity"
         assert saved["meta"]["step_dt"] == pytest.approx(env.step_dt)
         assert saved["meta"]["qpos_slice"] == [0, env.robot.dof]
