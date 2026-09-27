@@ -20,8 +20,10 @@ import os
 import gc
 import sys
 import queue
+import struct
 import time
 import threading
+import zlib
 from contextlib import contextmanager
 import dexsim
 import torch
@@ -99,6 +101,7 @@ from embodichain.lab.sim.cfg import (
     validate_physics_cfg,
     MarkerCfg,
     WindowRecordCfg,
+    WindowCaptureCfg,
     WindowCameraPoseCfg,
     LightCfg,
     RigidObjectCfg,
@@ -235,6 +238,7 @@ class SimulationManagerCfg:
         visualization: VisualizationCfg | None = None,
         window_record: WindowRecordCfg | None = None,
         window_camera_pose: WindowCameraPoseCfg | None = None,
+        window_capture: WindowCaptureCfg | Mapping[str, object] | None = None,
         startup_summary: Literal["compact", "full", "off"] = "compact",
         dexsim_startup_info: bool = False,
         scene_node_capacity: int | None = None,
@@ -271,6 +275,15 @@ class SimulationManagerCfg:
         )
         self.window_record = (
             WindowRecordCfg() if window_record is None else window_record
+        )
+        if isinstance(window_capture, Mapping):
+            window_capture = WindowCaptureCfg(**window_capture)
+        if window_capture is not None and not isinstance(
+            window_capture, WindowCaptureCfg
+        ):
+            raise TypeError("window_capture must be a WindowCaptureCfg or mapping.")
+        self.window_capture = (
+            WindowCaptureCfg() if window_capture is None else window_capture
         )
         self.window_camera_pose = (
             WindowCameraPoseCfg() if window_camera_pose is None else window_camera_pose
@@ -385,6 +398,9 @@ class SimulationManagerCfg:
 
     window_camera_pose: WindowCameraPoseCfg = field(default_factory=WindowCameraPoseCfg)
     """Interactive viewer camera-pose printing settings."""
+
+    window_capture: WindowCaptureCfg = field(default_factory=WindowCaptureCfg)
+    """Single-frame native viewer capture settings (hotkey and output path)."""
 
     visualization: VisualizationCfg = field(default_factory=VisualizationCfg)
     """Live browser visualization settings."""
@@ -613,6 +629,18 @@ class SimulationManager:
         )
         self._window_record_input_control: ObjectManipulator | None = None
         self._window_record_save_threads: list[threading.Thread] = []
+        self._window_capture_camera: object | None = None
+        wc = sim_config.window_capture
+        self._window_capture_hotkey_cfg: dict[str, object] | None = (
+            {
+                "save_path": wc.save_path,
+                "image_prefix": wc.image_prefix,
+                "hotkey": wc.hotkey,
+            }
+            if wc.enable_hotkey
+            else None
+        )
+        self._window_capture_input_control: ObjectManipulator | None = None
         wcp = sim_config.window_camera_pose
         self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
             {"convert_to_look_at": wcp.convert_to_look_at}
@@ -701,6 +729,7 @@ class SimulationManager:
             self._window = self._world.get_windows()
             self.is_window_opened = self._window is not None
             self._enable_default_entity_gizmo()
+            self._register_default_window_controls()
 
         self._is_constructed = True
         if not self._defer_startup_summary:
@@ -1944,23 +1973,14 @@ class SimulationManager:
             )
             return False
         if self.is_window_opened:
+            self._register_default_window_controls()
             return True
         self._world.open_window()
         self._window = self._world.get_windows()
         if self._window is None:
             return False
         self._enable_default_entity_gizmo()
-
-        if (
-            self._window_record_hotkey_cfg is not None
-            and self._window_record_input_control is None
-        ):
-            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
-        if (
-            self._window_camera_pose_hotkey_cfg is not None
-            and self._window_camera_pose_input_control is None
-        ):
-            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+        self._register_default_window_controls()
         self.is_window_opened = True
         if self.spawn_result is not None:
             self.sync_render_state()
@@ -1973,9 +1993,14 @@ class SimulationManager:
             self.stop_window_record()
         for _, gizmo in self.get_gizmo_items():
             gizmo.detach_native_window()
+        capture_camera = getattr(self, "_window_capture_camera", None)
+        if capture_camera is not None and hasattr(capture_camera, "is_open"):
+            if capture_camera.is_open() and hasattr(capture_camera, "close_camera"):
+                capture_camera.close_camera()
         self._world.close_window()
         self._window = None
         self._window_record_input_control = None
+        self._window_capture_input_control = None
         self._window_camera_pose_input_control = None
         self.is_window_opened = False
 
@@ -3964,6 +3989,335 @@ class SimulationManager:
 
         for control in controls:
             self._window.add_input_control(control)
+
+    def _register_default_window_controls(self) -> None:
+        """Register configured built-in controls on an available window."""
+        if getattr(self, "_window", None) is None:
+            return
+        if (
+            getattr(self, "_window_record_hotkey_cfg", None) is not None
+            and getattr(self, "_window_record_input_control", None) is None
+        ):
+            self.enable_window_record_hotkey(**self._window_record_hotkey_cfg)
+        if (
+            getattr(self, "_window_capture_hotkey_cfg", None) is not None
+            and getattr(self, "_window_capture_input_control", None) is None
+        ):
+            self.enable_window_capture_hotkey(**self._window_capture_hotkey_cfg)
+        if (
+            getattr(self, "_window_camera_pose_hotkey_cfg", None) is not None
+            and getattr(self, "_window_camera_pose_input_control", None) is None
+        ):
+            self.enable_window_camera_pose_hotkey(**self._window_camera_pose_hotkey_cfg)
+
+    @staticmethod
+    def _resolve_window_hotkey_code(hotkey: object) -> int:
+        """Resolve an ``InputKey``, scancode, or single-letter hotkey."""
+        if isinstance(hotkey, str):
+            normalized = hotkey.strip().upper()
+            if len(normalized) == 1:
+                normalized = f"SCANCODE_{normalized}"
+            elif not normalized.startswith("SCANCODE_"):
+                normalized = f"SCANCODE_{normalized}"
+            try:
+                from dexsim.types import InputKey
+
+                hotkey = getattr(InputKey, normalized)
+            except (AttributeError, TypeError) as exc:
+                raise ValueError(
+                    f"Unknown native-window hotkey {hotkey!r}. Use an InputKey, "
+                    "SDL scancode, or a single letter."
+                ) from exc
+
+        value = getattr(hotkey, "value", hotkey)
+        if isinstance(value, Integral):
+            return int(value)
+        raise TypeError(
+            "Native-window hotkey must be an InputKey, integer scancode, or string."
+        )
+
+    @classmethod
+    def _validate_window_capture_hotkey(cls, hotkey: object) -> int:
+        """Validate a capture key against native and EmbodiChain controls."""
+        key_code = cls._resolve_window_hotkey_code(hotkey)
+        from dexsim.types import InputKey
+
+        reserved_names = (
+            # Existing EmbodiChain controls.
+            "SCANCODE_R",
+            "SCANCODE_P",
+            "SCANCODE_I",
+            # DexSim selection and entity-gizmo controls.
+            "SCANCODE_F",
+            "SCANCODE_L",
+            "SCANCODE_G",
+            # DexSim camera movement controls.
+            "SCANCODE_W",
+            "SCANCODE_A",
+            "SCANCODE_S",
+            "SCANCODE_D",
+            "SCANCODE_E",
+            "SCANCODE_Q",
+            "SCANCODE_SPACE",
+        )
+        reserved_codes = {int(getattr(InputKey, name).value) for name in reserved_names}
+        if key_code in reserved_codes:
+            raise ValueError(
+                "Window capture hotkey conflicts with an existing native-window "
+                "control. Choose an unused key such as 'c'."
+            )
+        return key_code
+
+    @staticmethod
+    def _build_window_capture_output(
+        save_path: str | os.PathLike[str] | None,
+        image_prefix: str,
+    ) -> Path:
+        """Resolve a PNG path for a native viewer capture."""
+        if save_path is None:
+            output_dir = Path.cwd() / "outputs" / "images"
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+            return output_dir / f"{image_prefix}_{timestamp}.png"
+
+        path = Path(save_path)
+        if path.suffix.lower() != ".png":
+            path = (
+                path.with_suffix(".png")
+                if path.suffix
+                else path.with_name(path.name + ".png")
+            )
+        return path
+
+    @staticmethod
+    def _normalize_window_capture_image(image: object) -> np.ndarray | None:
+        """Copy and validate one renderer image for ownership-safe use."""
+        if image is None:
+            return None
+        try:
+            array = np.asarray(image)
+        except Exception:
+            return None
+        if array.size == 0 or array.ndim not in (2, 3):
+            return None
+        if array.ndim == 3 and array.shape[2] not in (1, 3, 4):
+            return None
+
+        if array.dtype != np.uint8:
+            if np.issubdtype(array.dtype, np.floating):
+                finite = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=0.0)
+                if finite.size and float(np.max(finite)) <= 1.0:
+                    finite = finite * 255.0
+                array = finite
+            array = np.clip(array, 0, 255).astype(np.uint8)
+        return np.array(array, dtype=np.uint8, order="C", copy=True)
+
+    @staticmethod
+    def _write_window_capture_png(image: np.ndarray, path: Path) -> None:
+        """Write an RGB/RGBA/gray uint8 image as a PNG without optional deps."""
+        array = np.asarray(image, dtype=np.uint8)
+        if array.ndim == 2:
+            color_type = 0
+        elif array.ndim == 3 and array.shape[2] == 1:
+            array = array[..., 0]
+            color_type = 0
+        elif array.ndim == 3 and array.shape[2] == 3:
+            color_type = 2
+        elif array.ndim == 3 and array.shape[2] == 4:
+            color_type = 6
+        else:
+            raise ValueError(f"Unsupported PNG image shape {array.shape}.")
+
+        height, width = array.shape[:2]
+        rows = b"".join(b"\x00" + row.tobytes() for row in array)
+
+        def chunk(kind: bytes, payload: bytes) -> bytes:
+            return (
+                struct.pack(">I", len(payload))
+                + kind
+                + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+            )
+
+        png = b"\x89PNG\r\n\x1a\n"
+        png += chunk(
+            b"IHDR",
+            struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0),
+        )
+        png += chunk(b"IDAT", zlib.compress(rows))
+        png += chunk(b"IEND", b"")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
+
+    def _capture_native_window_frame(self) -> np.ndarray | None:
+        """Read one owned frame from DexSim's native window when available."""
+        if self._window is None:
+            return None
+        get_picture = getattr(self._window, "get_picture", None)
+        if not callable(get_picture):
+            return None
+        try:
+            frame = self._normalize_window_capture_image(get_picture())
+        except Exception as exc:
+            logger.log_warning(f"Native window frame readback failed: {exc}")
+            return None
+        if frame is None:
+            logger.log_warning(
+                "Native window did not provide a non-empty rendered frame."
+            )
+        return frame
+
+    def _capture_window_fallback_frame(self) -> np.ndarray | None:
+        """Capture the current window pose through an offscreen camera fallback.
+
+        DexSim 0.5.0 does not expose a CPU readback for every native renderer
+        (notably Hybrid and Fast-RT window surfaces).  The fallback keeps the
+        current camera pose and asks the renderer's regular camera readback
+        path for one frame, so callers still receive the simulation viewport
+        rather than an empty placeholder.
+        """
+        if self._window is None:
+            return None
+        get_pose_matrix = getattr(self._window, "get_pose_matrix", None)
+        if not callable(get_pose_matrix):
+            return None
+
+        try:
+            pose = np.asarray(get_pose_matrix(), dtype=np.float32)
+            if pose.shape != (4, 4):
+                raise ValueError(f"expected a 4x4 pose, got {pose.shape}")
+            capture_camera = getattr(self, "_window_capture_camera", None)
+            if capture_camera is None:
+                camera_name = f"viewer_capture_camera_{self.instance_id}"
+                capture_camera = self._env.create_camera(
+                    camera_name, self.sim_config.width, self.sim_config.height
+                )
+                self._window_capture_camera = capture_camera
+            camera = capture_camera
+            if hasattr(camera, "is_open") and camera.is_open() is False:
+                camera.open_camera()
+            camera.set_world_pose(pose)
+            camera.render()
+            return self._normalize_window_capture_image(camera.get_rgb_map())
+        except Exception as exc:
+            logger.log_warning(
+                "Native window capture fallback could not render the current "
+                f"viewport: {exc}"
+            )
+            return None
+
+    def capture_window(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+        image_prefix: str = "viewer_capture",
+    ) -> np.ndarray | None:
+        """Capture one owned image from the current native viewer viewport.
+
+        The method first consumes DexSim's native ``Windows.get_picture()``
+        frame.  If that renderer path is unavailable or returns an empty frame,
+        an offscreen camera is rendered at the current viewer pose.  The
+        fallback is needed by the DexSim 0.5.0 Hybrid and Fast-RT window
+        implementations, whose swapchain does not expose a CPU buffer.
+
+        Args:
+            save_path: Optional PNG path.  A ``.png`` suffix is added when it
+                is omitted.  When ``None``, the image is returned without
+                writing a file.
+            image_prefix: Prefix used by the native hotkey when it generates a
+                default output path.  Direct calls that omit ``save_path`` only
+                return the image and do not write a file.
+
+        Returns:
+            A caller-owned ``uint8`` image array, or ``None`` when the window is
+            closed or neither readback path produced a non-empty frame.
+        """
+        if self._window is None or getattr(self, "is_window_opened", True) is False:
+            logger.log_warning("No simulation window available to capture.")
+            return None
+
+        frame = self._capture_native_window_frame()
+        if frame is None:
+            frame = self._capture_window_fallback_frame()
+        if frame is None:
+            logger.log_warning(
+                "Native window capture produced no image; no file was written."
+            )
+            return None
+
+        if save_path is not None:
+            path = self._build_window_capture_output(save_path, image_prefix)
+            try:
+                self._write_window_capture_png(frame, path)
+            except Exception as exc:
+                logger.log_warning(f"Failed to save native window capture: {exc}")
+            else:
+                logger.log_info(f"Native window capture saved to {path}")
+        return frame
+
+    def capture_window_image(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+    ) -> np.ndarray | None:
+        """Alias for :meth:`capture_window` for image-oriented callers.
+
+        Args:
+            save_path: Optional PNG path to write alongside the returned image.
+
+        Returns:
+            The owned image array, or ``None`` when capture is unavailable.
+        """
+        return self.capture_window(save_path=save_path)
+
+    def enable_window_capture_hotkey(
+        self,
+        save_path: str | os.PathLike[str] | None = None,
+        image_prefix: str = "viewer_capture",
+        hotkey: object = "c",
+    ) -> bool:
+        """Register a hotkey that saves one native viewer frame as a PNG.
+
+        Args:
+            save_path: Optional PNG path.  If omitted, a timestamped path is
+                generated under ``outputs/images`` for each key press.
+            image_prefix: Prefix for generated output names.
+            hotkey: DexSim ``InputKey``, SDL scancode, or key name to register.
+
+        Returns:
+            Whether the control is registered on an open native window.
+
+        Raises:
+            ValueError: If the key conflicts with an existing native control.
+        """
+        key_code = self._validate_window_capture_hotkey(hotkey)
+        self._window_capture_hotkey_cfg = {
+            "save_path": save_path,
+            "image_prefix": image_prefix,
+            "hotkey": hotkey,
+        }
+        if self._window is None:
+            logger.log_warning(
+                "No simulation window available yet. The viewer capture hotkey "
+                "will be registered after `open_window()`."
+            )
+            return False
+        if getattr(self, "_window_capture_input_control", None) is not None:
+            return True
+
+        sim = self
+
+        class WindowCaptureEvent(ObjectManipulator):
+            def on_key_down(self, key):
+                if key == key_code:
+                    output_path = sim._build_window_capture_output(
+                        save_path, image_prefix
+                    )
+                    sim.capture_window(save_path=output_path)
+
+        self._window_capture_input_control = WindowCaptureEvent()
+        self._window.add_input_control(self._window_capture_input_control)
+        logger.log_info(
+            f"Viewer capture hotkey registered. Press {hotkey!r} to save a frame."
+        )
+        return True
 
     def _build_window_record_output(
         self, save_path: str | None, video_prefix: str

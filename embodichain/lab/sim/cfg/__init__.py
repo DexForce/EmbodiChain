@@ -77,7 +77,7 @@ from .simulation import (
     validate_physics_cfg,
 )
 from .urdf import URDFCfg
-from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
+from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowCaptureCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
 DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
@@ -101,6 +101,7 @@ __all__ = [
     "validate_physics_cfg",
     "MarkerCfg",
     "WindowRecordCfg",
+    "WindowCaptureCfg",
     "WindowCameraPoseCfg",
     "ShapeCfg",
     "MeshCfg",

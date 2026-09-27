@@ -8,7 +8,7 @@ Overview
 
 This module collects the ``@configclass`` configuration objects for everything
 that can be spawned into a simulation scene. It covers global simulation
-settings (rendering, physics, GPU memory, markers, window recording/camera),
+settings (rendering, physics, GPU memory, markers, window recording/capture/camera),
 rigid-body / soft-body / cloth physical attributes and their overrides, joint
 drive properties, and the per-entity configs consumed by
 :class:`~embodichain.lab.sim.sim_manager.SimulationManager` and the object
@@ -45,6 +45,7 @@ UV seams and render detail.
    NewtonCollisionPipelineCfg
    MarkerCfg
    WindowRecordCfg
+   WindowCaptureCfg
    WindowCameraPoseCfg
    GPUMemoryCfg
    MassPropertiesCfg

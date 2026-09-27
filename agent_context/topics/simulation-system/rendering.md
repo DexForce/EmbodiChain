@@ -37,6 +37,13 @@ and native controls have their own owners:
 [visualization](../sim-visualization/sim-visualization.md) and
 [native gizmos](../sim-visualization/native-gizmos.md).
 
+Native single-frame captures are configured by ``SimulationManagerCfg.window_capture``
+and use the **C** hotkey by default. The manager copies a non-empty
+``Windows.get_picture()`` frame when DexSim provides one; renderers without
+native CPU readback fall back to an offscreen camera at the current window
+pose. Closed windows and empty readbacks return no image and never create an
+empty output file.
+
 ## Parented cameras
 
 `sensors/attachment.py:resolve_parent_nodes()` accepts an unambiguous link name
