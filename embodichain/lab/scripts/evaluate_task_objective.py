@@ -40,6 +40,9 @@ import yaml
 
 __all__: list[str] = []
 
+_COMPONENT_SUFFIXES = frozenset({".json", ".yaml", ".yml"})
+_MAX_COMPONENT_BYTES = 8 * 1024 * 1024
+
 
 def _json_value(value: Any) -> Any:
     """Snapshot resolved configuration without silently stringifying objects."""
@@ -92,22 +95,44 @@ def _json_value(value: Any) -> Any:
 
 
 def _component_snapshot(source: Path) -> dict[str, dict[str, str]]:
-    """Capture authored deployment dependencies and their content hashes."""
+    """Capture validated authored deployment dependencies and their hashes.
+
+    Component references are user-controlled configuration. Restrict snapshot
+    reads to regular JSON/YAML files with a bounded size before opening them;
+    the normal deployment loader remains responsible for semantic validation.
+    """
     source = source.resolve()
     result: dict[str, dict[str, str]] = {}
     visited: set[Path] = set()
 
     def visit(path: Path) -> None:
-        path = path.resolve()
+        path = path.expanduser().resolve()
         if path in visited:
             return
+        if path.suffix.lower() not in _COMPONENT_SUFFIXES:
+            raise ValueError(
+                f"Component snapshot only supports JSON/YAML files: {path}."
+            )
+        if not path.is_file():
+            raise FileNotFoundError(f"Component snapshot path is not a file: {path}.")
+        size = path.stat().st_size
+        if size > _MAX_COMPONENT_BYTES:
+            raise ValueError(
+                f"Component snapshot file is too large ({size} bytes): {path}."
+            )
         visited.add(path)
         content = path.read_bytes()
+        try:
+            text_content = content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                f"Component snapshot is not UTF-8 text: {path}."
+            ) from error
         result[os.path.relpath(path, source.parent)] = {
             "sha256": hashlib.sha256(content).hexdigest(),
-            "content": content.decode("utf-8"),
+            "content": text_content,
         }
-        data = yaml.safe_load(content)
+        data = yaml.safe_load(text_content)
         if not isinstance(data, Mapping):
             return
         for name in ("environment", "embodiment", "scene", "objective"):
@@ -252,7 +277,7 @@ def _run(args: argparse.Namespace) -> Path:
         "schema_version": 1,
         "deployment": str(source),
         "code": _revision(Path(__file__).resolve().parent),
-        "components": _component_snapshot(source),
+        "components": {},
         "status": "initializing",
         "variation": {
             "scope": "per_episode",
@@ -265,6 +290,8 @@ def _run(args: argparse.Namespace) -> Path:
     env = None
     failure: BaseException | None = None
     try:
+        report["components"] = _component_snapshot(source)
+        _write_report(report_path, report)
         discover_task_packages()
         execute_init_hooks()
         args.num_envs = 1
@@ -277,7 +304,10 @@ def _run(args: argparse.Namespace) -> Path:
                     "Select a deployment with objective and task_program components."
                 )
             if args.initial_position_jitter:
-                objective_path = source.parent / config["objective"]["component"]
+                objective_path = Path(config["objective"]["component"]).expanduser()
+                if not objective_path.is_absolute():
+                    objective_path = source.parent / objective_path
+                objective_path = objective_path.resolve()
                 objective_data = yaml.safe_load(objective_path.read_text())
                 radius = args.initial_position_jitter
                 config["env"].setdefault("events", {})["objective_initial_pose"] = {
@@ -350,7 +380,9 @@ def _run(args: argparse.Namespace) -> Path:
         trajectory_path = output / "expert.pt"
         env.save_trajectory(str(trajectory_path))
         trajectory = torch.load(trajectory_path, weights_only=False)
-        trajectory["meta"]["action_kind"] = "expert_controller"
+        # Keep the current trajectory contract explicit even when a custom
+        # test or legacy environment omits the producer metadata.
+        trajectory["meta"]["action_kind"] = "expert"
         torch.save(trajectory, trajectory_path)
         expert["persistence_status"]["diagnostic_trajectory"] = "written"
         report["trajectory"] = trajectory_path.name

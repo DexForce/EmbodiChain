@@ -262,7 +262,8 @@ class _LifecycleEnv(EmbodiedEnv):
         self.sim = SimpleNamespace(
             device=torch.device("cpu"),
             get_rigid_object=lambda uid: self.object,
-            update=lambda *args: None,
+            update=lambda *args, **kwargs: None,
+            render_frame=lambda **kwargs: __import__("contextlib").nullcontext(),
             reset_objects_state=lambda **kwargs: None,
             sync_render_state=lambda: None,
             capture_visualization_safely=lambda **kwargs: None,
@@ -271,6 +272,7 @@ class _LifecycleEnv(EmbodiedEnv):
             available_modes=["interval", "reset"],
             _mode_functor_cfgs={},
             apply=self._apply_event,
+            reset=lambda **kwargs: None,
         )
         self.interval_x = 0.0
         self.reset_snapshot = None

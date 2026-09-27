@@ -29,8 +29,17 @@ from embodichain.lab.gym.envs.wrapper.replay import ReplayWrapper
 
 
 class _DeltaActions:
-    def process_action(self, action, mode):
-        return action + 10 if mode == "pre" else action
+    def __init__(self):
+        self.action = None
+
+    def process_action(self, action):
+        self.action = action + 10
+
+    def apply_action(self):
+        return None
+
+    def action_trace(self):
+        return None
 
 
 class _ReplayEnv(gym.Env):
@@ -38,6 +47,9 @@ class _ReplayEnv(gym.Env):
 
     _preprocess_action = EmbodiedEnv._preprocess_action
     _prepare_controller_action = EmbodiedEnv._prepare_controller_action
+    _step_action = EmbodiedEnv._step_action
+    _active_qpos_command = EmbodiedEnv._active_qpos_command
+    _record_raw_action = EmbodiedEnv._record_raw_action
 
     def __init__(self, num_envs=1):
         self.num_envs = num_envs
@@ -46,11 +58,15 @@ class _ReplayEnv(gym.Env):
             dof=3,
             joint_names=["unused", "elbow", "wrist"],
             get_qpos=lambda: torch.zeros(num_envs, 3),
+            set_qpos=lambda **kwargs: None,
+            set_qvel=lambda **kwargs: None,
+            set_qf=lambda **kwargs: None,
         )
         self.active_joint_ids = [1, 2]
         self.max_episode_steps = 20
         self.step_dt = 0.04
         self.action_manager = _DeltaActions()
+        self.dataset_manager = None
         self._traj_buffer = None
         self._demo_no_auto_reset = False
         self.physical_objective = None
@@ -61,7 +77,8 @@ class _ReplayEnv(gym.Env):
 
     def step(self, action):
         self.last_action = action
-        self.last_command = self._preprocess_action(action)
+        prepared = self._preprocess_action(action)
+        self.last_command = self._step_action(prepared)
         self.step_count += 1
         done = torch.zeros(self.num_envs, dtype=torch.bool)
         return {}, torch.zeros(self.num_envs), done, done.clone(), {}
@@ -105,13 +122,16 @@ def test_raw_delta_actions_keep_preprocessing_despite_expert_metadata(kind):
     replay = ReplayWrapper(env, trajectory)
     replay.step(None)
     assert isinstance(env.last_action, torch.Tensor)
-    torch.testing.assert_close(env.last_command, torch.tensor([[10.0, 11.0]]))
+    torch.testing.assert_close(env.action_manager.action, torch.tensor([[10.0, 11.0]]))
 
 
 @pytest.mark.parametrize("mode", ["position", "position_velocity"])
-def test_expert_controller_replay_decodes_targets_without_delta_preprocessing(mode):
+@pytest.mark.parametrize("kind", ["expert", "expert_controller"])
+def test_expert_controller_replay_decodes_targets_without_delta_preprocessing(
+    mode, kind
+):
     env = _ReplayEnv()
-    replay = ReplayWrapper(env, _trajectory(mode=mode))
+    replay = ReplayWrapper(env, _trajectory(mode=mode, kind=kind))
     replay.step(None)
     assert isinstance(env.last_action, ControllerAction)
     torch.testing.assert_close(env.last_command["qpos"], torch.tensor([[0.0, 1.0]]))
@@ -242,8 +262,8 @@ def _objective_env():
                 "cpu",
             )
             self.sim = SimpleNamespace(enable_physics=lambda enabled: None)
-            self.robot.set_local_pose = lambda value: None
-            self.robot.set_qpos = lambda value, target: None
+            self.robot.set_local_pose = lambda *args, **kwargs: None
+            self.robot.set_qpos = lambda *args, **kwargs: None
 
         def step(self, action):
             obs, reward, term, trunc, info = super().step(action)
@@ -321,10 +341,11 @@ def test_policy_recording_preserves_raw_delta_before_controller_transform():
     env = _ReplayEnv()
     env._traj_buffer = TensorDict({"actions": torch.zeros(1, 1, 2)}, batch_size=[1, 1])
     env._traj_steps = torch.zeros(1, dtype=torch.long)
+    env._trajectory_action_kind = "policy"
     env._seed_trajectory_states = lambda ids: None
     env.step(torch.tensor([[1.0, 2.0]]))
     EmbodiedEnv._write_trajectory_step(env)
-    torch.testing.assert_close(env.last_command, torch.tensor([[11.0, 12.0]]))
+    torch.testing.assert_close(env.action_manager.action, torch.tensor([[11.0, 12.0]]))
     torch.testing.assert_close(
-        env._traj_buffer["actions"][0, 0], torch.tensor([1.0, 2.0])
+        env._traj_buffer["actions"][0, 0], torch.tensor([11.0, 12.0])
     )

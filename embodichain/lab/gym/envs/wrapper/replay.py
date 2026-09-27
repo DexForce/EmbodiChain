@@ -49,11 +49,12 @@ class ReplayWrapper(gym.Wrapper):
     ``control`` mode uses the same kinematic behavior while exposing
     :meth:`go_to_step` for interactive scrubbing.
 
-    Dynamic replay treats missing ``meta.action_kind`` (or ``"raw_policy"``)
-    as raw policy actions. Known expert controller recordings must explicitly
-    set ``meta.action_kind="expert_controller"`` and carry the canonical expert
-    action schema. Schema metadata alone cannot identify controller actions:
-    older position-only raw policy recordings carry that metadata too.
+    Dynamic replay treats missing ``meta.action_kind`` (or ``"policy"``) as raw
+    policy actions. Current expert recordings use ``action_kind="expert"``;
+    ``"expert_controller"`` remains accepted for stacked-branch compatibility.
+    Expert recordings carry the canonical schema so qpos/qvel targets can be
+    reconstructed before stepping. Schema metadata alone cannot identify
+    controller actions: older position-only raw policy recordings carry it too.
 
     Physical-objective dynamic replay currently supports one environment and
     full resets only. Stepping past exhaustion raises instead of extending
@@ -126,10 +127,10 @@ class ReplayWrapper(gym.Wrapper):
 
     def _validate_action_schema(self, meta: dict) -> None:
         """Validate explicit controller recordings before any simulation step."""
-        kind = meta.get("action_kind", "raw_policy")
-        if kind == "raw_policy":
+        kind = meta.get("action_kind", "policy")
+        if kind in {"policy", "raw_policy"}:
             return
-        if kind != "expert_controller":
+        if kind not in {"expert", "expert_controller"}:
             raise ValueError(f"Unsupported trajectory action_kind: {kind!r}.")
         version = meta.get("expert_trajectory_schema_version")
         if type(version) is not int or version != EXPERT_TRAJECTORY_SCHEMA_VERSION:
@@ -183,7 +184,7 @@ class ReplayWrapper(gym.Wrapper):
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
         meta["num_envs"] = env_envs
-        meta["lengths"] = meta["lengths"] * env_envs
+        meta["lengths"] = list(meta["lengths"]) * env_envs
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None

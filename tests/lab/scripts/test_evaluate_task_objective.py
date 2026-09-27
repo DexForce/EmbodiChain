@@ -44,6 +44,33 @@ def test_component_snapshot_tracks_referenced_content(tmp_path: Path) -> None:
     )
 
 
+def test_component_snapshot_rejects_non_config_files(tmp_path: Path) -> None:
+    from embodichain.lab.scripts.evaluate_task_objective import _component_snapshot
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private value\n")
+    task = tmp_path / "task.yaml"
+    task.write_text(f"objective:\n  component: {secret}\n")
+
+    with pytest.raises(ValueError, match="JSON/YAML"):
+        _component_snapshot(task)
+
+
+def test_component_snapshot_rejects_oversized_files(tmp_path: Path) -> None:
+    from embodichain.lab.scripts.evaluate_task_objective import (
+        _MAX_COMPONENT_BYTES,
+        _component_snapshot,
+    )
+
+    component = tmp_path / "large.yaml"
+    component.write_bytes(b"x" * (_MAX_COMPONENT_BYTES + 1))
+    task = tmp_path / "task.yaml"
+    task.write_text(f"objective:\n  component: {component}\n")
+
+    with pytest.raises(ValueError, match="too large"):
+        _component_snapshot(task)
+
+
 def test_report_keeps_execution_physics_and_acceptance_independent() -> None:
     from embodichain.lab.scripts.evaluate_task_objective import _outcomes
 
@@ -245,6 +272,7 @@ def completed_runner(runner_case, monkeypatch):
     class Env(gym.Env):
         _preprocess_action = EmbodiedEnv._preprocess_action
         _prepare_controller_action = EmbodiedEnv._prepare_controller_action
+        _active_qpos_command = EmbodiedEnv._active_qpos_command
         _mask_controller_demo_action = EmbodiedEnv._mask_controller_demo_action
         _write_trajectory_step = EmbodiedEnv._write_trajectory_step
         _write_episode_rollout_step = EmbodiedEnv._write_episode_rollout_step
