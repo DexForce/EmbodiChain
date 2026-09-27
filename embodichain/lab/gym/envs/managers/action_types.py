@@ -23,12 +23,65 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TypeAlias
 
+import torch
+
 from embodichain.lab.gym.envs._json import json_safe_copy
 
-__all__ = ["ActionDescriptor", "ActionTermDescriptor"]
+__all__ = ["ActionDescriptor", "ActionTermDescriptor", "ActionTrace"]
 
 JSONScalar: TypeAlias = None | bool | int | float | str
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
+
+
+@dataclass(frozen=True, slots=True)
+class ActionTrace:
+    """Capture one policy request and its controller-side action stages.
+
+    ``requested`` is the flat action emitted by a policy. ``processed`` and
+    ``executed`` are term-keyed controller commands. The latter is optional
+    because a trace can be captured before the controller boundary is applied.
+    Keeping these stages explicit prevents dataset consumers from assigning
+    different meanings to one overloaded ``actions`` buffer.
+    """
+
+    requested: torch.Tensor
+    processed: Mapping[str, torch.Tensor]
+    executed: Mapping[str, torch.Tensor] | None
+    command_types: tuple[str, ...]
+    controlled_joint_ids: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.requested, torch.Tensor):
+            raise TypeError("requested must be a torch.Tensor.")
+        object.__setattr__(self, "requested", self.requested.detach().clone())
+        object.__setattr__(
+            self,
+            "processed",
+            MappingProxyType(
+                {name: value.detach().clone() for name, value in self.processed.items()}
+            ),
+        )
+        if self.executed is not None:
+            object.__setattr__(
+                self,
+                "executed",
+                MappingProxyType(
+                    {
+                        name: value.detach().clone()
+                        for name, value in self.executed.items()
+                    }
+                ),
+            )
+
+    def clone(self) -> "ActionTrace":
+        """Return an independently owned copy of this trace."""
+        return ActionTrace(
+            requested=self.requested,
+            processed=self.processed,
+            executed=self.executed,
+            command_types=self.command_types,
+            controlled_joint_ids=self.controlled_joint_ids,
+        )
 
 
 def _validate_non_empty_name(value: str, *, field_name: str) -> None:

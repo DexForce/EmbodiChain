@@ -31,7 +31,7 @@ import torch
 from embodichain.utils import logger
 from embodichain.utils.string import string_to_callable
 
-from .action_types import ActionDescriptor, ActionTermDescriptor
+from .action_types import ActionDescriptor, ActionTermDescriptor, ActionTrace
 from .cfg import ActionTermCfg
 from .manager_base import Functor, ManagerBase
 
@@ -173,6 +173,33 @@ class ActionManager(ManagerBase):
     def descriptors(self) -> tuple[ActionDescriptor, ...]:
         """Return ordered action-term descriptors bound to flat slices."""
         return self._descriptors
+
+    def action_trace(
+        self, executed: dict[str, torch.Tensor] | None = None
+    ) -> ActionTrace:
+        """Return a snapshot of requested, processed, and executed commands.
+
+        Args:
+            executed: Optional term-keyed command snapshot captured at the
+                controller boundary. When omitted, the processed term values
+                are used as the best available command representation.
+
+        Returns:
+            An independently owned :class:`ActionTrace`.
+        """
+        processed = {name: term.processed_actions for name, term in self._terms.items()}
+        command_types = tuple(term.command_type for term in self._terms.values())
+        controlled_joint_ids = tuple(
+            tuple(int(index) for index in term.controlled_joint_ids)
+            for term in self._terms.values()
+        )
+        return ActionTrace(
+            requested=self._action,
+            processed=processed,
+            executed=processed if executed is None else executed,
+            command_types=command_types,
+            controlled_joint_ids=controlled_joint_ids,
+        )
 
     @cached_property
     def single_action_space(self) -> gym.spaces.Box:

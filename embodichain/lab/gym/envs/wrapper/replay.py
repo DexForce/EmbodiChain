@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any
 
 import gymnasium as gym
 import torch
+from tensordict import TensorDict
 
+from embodichain.lab.gym.envs.types import ControllerAction
 from embodichain.lab.gym.utils.gym_utils import load_trajectory
 from embodichain.lab.gym.utils.trajectory_state import restore_trajectory_state
 from embodichain.utils import logger
@@ -38,9 +40,10 @@ class ReplayWrapper(gym.Wrapper):
     pose/qpos is written directly each step, producing observations only (no
     reward / success / action). In ``dynamic`` mode the recorded robot actions
     are fed back through :meth:`env.step` so physics re-simulates the scene;
-    the full ``obs/reward/terminated/truncated/info`` tuple is returned. The
-    ``control`` mode uses the same kinematic behavior while exposing
-    :meth:`go_to_step` for interactive scrubbing.
+    the full ``obs/reward/terminated/truncated/info`` tuple is returned. Flat
+    position-velocity expert actions are reconstructed as controller commands
+    before they are fed back. The ``control`` mode uses the same kinematic
+    behavior while exposing :meth:`go_to_step` for interactive scrubbing.
 
     Args:
         env: The environment to wrap (constructed without ``record_trajectory``).
@@ -113,7 +116,7 @@ class ReplayWrapper(gym.Wrapper):
             t = self._trajectory[key]
             self._trajectory[key] = t.expand(env_envs, *t.shape[1:]).clone()
         meta["num_envs"] = env_envs
-        meta["lengths"] = meta["lengths"] * env_envs
+        meta["lengths"] = list(meta["lengths"]) * env_envs
 
     def reset(
         self, *, seed: int | None = None, options: dict | None = None
@@ -163,10 +166,70 @@ class ReplayWrapper(gym.Wrapper):
 
         # dynamic: feed the recorded (pre-process) action; env.step re-preprocesses.
         action_t = self._trajectory["actions"][idx, st]
-        obs, reward, term, trunc, info = env.step(action_t)
+        obs, reward, term, trunc, info = env.step(self._decode_dynamic_action(action_t))
         self._replay_steps = (self._replay_steps + 1).clamp(max=self._lengths)
         trunc = trunc | (self._replay_steps >= self._lengths)
         return obs, reward, term, trunc, info
+
+    def _decode_dynamic_action(
+        self, action: torch.Tensor
+    ) -> torch.Tensor | ControllerAction:
+        """Convert persisted expert actions back to controller commands.
+
+        Position-velocity expert trajectories are stored as one flat vector so
+        they can be serialized alongside position-only actions.  The environment
+        control boundary expects a ``ControllerAction`` containing separate
+        ``qpos`` and ``qvel`` entries, so reconstruct that envelope before
+        calling ``env.step``. Policy actions and position-only expert actions
+        already use the environment's native flat representation.
+        """
+        meta = self._trajectory["meta"]
+        if (
+            meta.get("action_kind", "expert") != "expert"
+            or meta.get("joint_command_mode") != "position_velocity"
+        ):
+            return action
+
+        qpos_slice = meta.get("qpos_slice")
+        qvel_slice = meta.get("qvel_slice")
+        if (
+            not isinstance(qpos_slice, (list, tuple))
+            or len(qpos_slice) != 2
+            or not isinstance(qvel_slice, (list, tuple))
+            or len(qvel_slice) != 2
+        ):
+            raise ValueError(
+                "Position-velocity trajectory metadata must define qpos_slice "
+                "and qvel_slice."
+            )
+
+        try:
+            qpos_start, qpos_end = (int(value) for value in qpos_slice)
+            qvel_start, qvel_end = (int(value) for value in qvel_slice)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "Position-velocity trajectory slices must contain integers."
+            ) from error
+
+        width = int(action.shape[-1])
+        if not (
+            0 <= qpos_start < qpos_end <= width and 0 <= qvel_start < qvel_end <= width
+        ):
+            raise ValueError(
+                "Position-velocity trajectory slices exceed the stored action "
+                f"width {width}: qpos={qpos_slice}, qvel={qvel_slice}."
+            )
+
+        return ControllerAction(
+            value=TensorDict(
+                {
+                    "qpos": action[..., qpos_start:qpos_end],
+                    "qvel": action[..., qvel_start:qvel_end],
+                },
+                batch_size=[self.env.num_envs],
+                device=action.device,
+            )
+        )
 
     def go_to_step(self, step: int) -> EnvObs:
         """Scrub to a specific recorded state (kinematic).

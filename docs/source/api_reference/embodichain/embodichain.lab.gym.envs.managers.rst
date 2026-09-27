@@ -48,6 +48,7 @@ functors), :class:`ActionManager` (``process_action(action)`` then
       ActionTerm
       ActionDescriptor
       ActionTermDescriptor
+      ActionTrace
       DefaultJointPositionAction
       EefPoseAction
       JointEffortAction
@@ -209,6 +210,8 @@ Action Descriptors
     :members:
 
 .. autoclass:: ActionTermDescriptor
+
+.. autoclass:: ActionTrace
     :members:
 
 Observation Functions
