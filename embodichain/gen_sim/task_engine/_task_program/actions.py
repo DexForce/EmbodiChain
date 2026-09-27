@@ -48,6 +48,7 @@ from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
+from embodichain.lab.sim.atomic_actions.state import TaskState
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
     to_full_robot_trajectory,
@@ -83,7 +84,17 @@ class _PickSelection:
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
     "gen_sim_pick_selection", default=None
 )
-_RECEIVE_SELECTION: ContextVar[tuple | None] = ContextVar(
+
+
+@dataclass
+class _ReceiveSelection:
+    resources: object
+    held: object
+    alternate: torch.Tensor
+    sampled: bool = False
+
+
+_RECEIVE_SELECTION: ContextVar[_ReceiveSelection | None] = ContextVar(
     "gen_sim_receive_selection", default=None
 )
 
@@ -96,6 +107,7 @@ class GenSimPickUp(PickUp):
     OptionsType = PickUp.OptionsType
     binding_contract = PickUp.binding_contract
     adaptive_unconstrained = False
+    pick_purposes: dict[str, str] | None = None
 
     def _plan(self, request, context):
         if self.adaptive_unconstrained:
@@ -116,7 +128,16 @@ class GenSimPickUp(PickUp):
                 )
             ):
                 semantics = deepcopy(goal.semantics)
-                semantics.affordance.set_custom_config(ADAPTIVE_GRASP, "free")
+                purpose = (
+                    "ordinary"
+                    if self.pick_purposes is None
+                    else self.pick_purposes.get(request.invocation_id)
+                )
+                if purpose not in {"ordinary", "pour"}:
+                    raise ValueError(
+                        "Unbound GenSim Pick purpose; regenerate the bundle."
+                    )
+                semantics.affordance.set_custom_config(ADAPTIVE_GRASP, purpose)
                 request = replace(request, goal=replace(goal, semantics=semantics))
         token = _PICK_SELECTION.set(_PickSelection(request=request))
         try:
@@ -175,7 +196,7 @@ class GenSimPickUp(PickUp):
         rule_selector = affordance.get_custom_config(_PICK_GRASP_RULE)
         selection = _PICK_SELECTION.get()
         if (
-            mode in {"free", "ends"}
+            mode in {"ordinary", "pour", "ends"}
             and selection is not None
             and rule_selector is None
             and options.pick_object_part == "center"
@@ -187,7 +208,13 @@ class GenSimPickUp(PickUp):
                 qpos=start_qpos, name=manipulator.control_part, to_matrix=True
             )
             generator = self.planning_services.grasp_pose_generator(grasp_target_id)
-            choices = grasp_strategies(axis, object_pose, tcp, ends=mode == "ends")
+            choices = grasp_strategies(
+                axis,
+                object_pose,
+                tcp,
+                ends=mode == "ends",
+                purpose="handover_source" if mode == "ends" else mode,
+            )
             return self._select_adaptive_pick(
                 affordance,
                 generator,
@@ -376,13 +403,98 @@ class GenSimHandOver(HandOver):
 
     def _plan_existing_hold(self, request, context, resources, held):
         mode = held.semantics.affordance.get_custom_config(ADAPTIVE_GRASP)
-        token = _RECEIVE_SELECTION.set(
-            (resources, held) if mode in {"free", "ends"} else None
-        )
-        try:
+        if mode not in {"ordinary", "pour", "ends"}:
             return super()._plan_existing_hold(request, context, resources, held)
+        selection = _ReceiveSelection(
+            resources,
+            held,
+            torch.zeros(context.batch_size, dtype=torch.bool, device=self.device),
+        )
+        token = _RECEIVE_SELECTION.set(selection)
+        try:
+            first = super()._plan_existing_hold(request, context, resources, held)
+            if first.plan_success.all() or not selection.sampled:
+                return first
+            selection.alternate = ~first.plan_success
+            # Retry planning only. Never dispatch commands, alter the source
+            # attachment, or consume randomness belonging to later calls.
+            devices = (
+                [context.robot.qpos.device.index] if context.robot.qpos.is_cuda else []
+            )
+            with torch.random.fork_rng(devices=devices):
+                second = super()._plan_existing_hold(request, context, resources, held)
+            metadata = {
+                "receive_direction_attempts": [
+                    {
+                        "plan_success": plan.plan_success.tolist(),
+                        "metadata": dict(plan.diagnostics.metadata),
+                    }
+                    for plan in (first, second)
+                ],
+                "selected_receive_attempt": torch.where(
+                    first.plan_success, 0, torch.where(second.plan_success, 1, -1)
+                ).tolist(),
+            }
+            if not (second.plan_success & ~first.plan_success).any():
+                return replace(
+                    first,
+                    diagnostics=replace(
+                        first.diagnostics,
+                        metadata={**first.diagnostics.metadata, **metadata},
+                    ),
+                )
+            return self._merge_receive_plans(request, context, first, second, metadata)
         finally:
             _RECEIVE_SELECTION.reset(token)
+
+    def _merge_receive_plans(self, request, context, first, second, metadata):
+        """Retain successful rows and shared HandOver's planned effect contracts."""
+        keep = first.plan_success
+        if first.segments != second.segments:
+            raise ValueError("HandOver direction retries must preserve phase timing.")
+        trajectory = replace(
+            second.joint_trajectory,
+            positions=torch.where(
+                keep[:, None, None],
+                first.joint_trajectory.positions,
+                second.joint_trajectory.positions,
+            ),
+            dt=torch.where(
+                keep[:, None], first.joint_trajectory.dt, second.joint_trajectory.dt
+            ),
+        )
+
+        def effects(name):
+            previous, retry = getattr(first, name), getattr(second, name)
+            hypothetical = TaskState(
+                batch_size=context.batch_size, device=context.robot.qpos.device
+            )
+            hypothetical = previous.apply(hypothetical, keep)
+            hypothetical = retry.apply(hypothetical, ~keep & second.plan_success)
+            return StateDelta(
+                held_object_updates={
+                    key: hypothetical.get_held_object(key)
+                    for key in previous.held_object_updates.keys()
+                    | retry.held_object_updates.keys()
+                }
+            )
+
+        return self.build_plan(
+            request,
+            context,
+            success=keep | second.plan_success,
+            trajectory=trajectory,
+            expected_effects=effects("expected_effects"),
+            effect_candidates=effects("effect_candidates"),
+            diagnostics=PlannerDiagnostics(
+                backend=first.diagnostics.backend,
+                metadata=metadata,
+            ),
+            segment_lengths={
+                segment.name: segment.stop - segment.start for segment in first.segments
+            },
+            scene_dependency_monitor_until=first.scene_dependency_monitor_until,
+        )
 
     def _resolve_grasp(
         self,
@@ -410,7 +522,7 @@ class GenSimHandOver(HandOver):
                 context=context,
                 sample_key=sample_key,
             )
-        resources, held = selection
+        resources, held = selection.resources, selection.held
         axis = observed_axis(affordance, object_pose)
         source = object_pose @ held.object_to_eef.to(object_pose)
         destination = self.robot.compute_fk(
@@ -419,17 +531,41 @@ class GenSimHandOver(HandOver):
             to_matrix=True,
         )
         positive = opposite_grasp_end(axis, object_pose, source, destination)
+        choices = grasp_strategies(
+            axis,
+            object_pose,
+            destination,
+            ends=True,
+            positive=positive,
+            purpose="handover_receive",
+        )
+        choice = replace(
+            choices[0],
+            direction=torch.where(
+                selection.alternate[:, None], choices[1].direction, choices[0].direction
+            ),
+        )
         sample, _ = select_grasp(
             affordance,
             self.planning_services.grasp_pose_generator(grasp_target_id),
             object_pose,
-            grasp_strategies(
-                axis, object_pose, destination, ends=True, positive=positive
-            ),
+            (choice,),
             context,
             sample_key,
         )
-        return sample
+        selection.sampled = True
+        return replace(
+            sample,
+            metadata={
+                **sample.metadata,
+                "adaptive_grasp": {
+                    **sample.metadata["adaptive_grasp"],
+                    "strategy_indices": torch.where(
+                        sample.success, selection.alternate.long(), -1
+                    ).tolist(),
+                },
+            },
+        )
 
 
 def _unit(value: torch.Tensor) -> torch.Tensor:

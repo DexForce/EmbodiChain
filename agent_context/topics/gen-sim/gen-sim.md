@@ -167,19 +167,26 @@ this visual path. Without usable Task Engine LLM configuration, text-only
 binding and its existing conflict behavior remain unchanged.
 E4 may defer unnamed transfer/receiver arms as `auto`; the planner binds the
 source from the held state or nearest scene side and the other arm as receiver,
-while preserving explicitly named arms. The GenSim `adaptive_pick` declaration
-enables automatic geometry for unconstrained built-in Pick calls without replacing
-their semantic identity or compiler-owned downstream reachability constraints.
-The wrapper marks only an owned goal snapshot; E4 source lowerers additionally
-reserve an object end. `_task_program/adaptive_grasp.py` ranks top-down and
-arm-relative diagonal approaches from the observed axis and bound arm TCP,
-without fixed world-side or axis-sign assumptions. `GenSimPickUp` screens each
+while preserving explicitly named arms. GenSim declares `pick_purposes` per
+generated Pick segment, bound to the compiled runtime invocation identity;
+missing or stale declarations reject loading. Built-in Pick identity and
+compiler-owned downstream reachability remain unchanged. Ordinary pickup tries
+top-down before arm-relative diagonal approaches. Pour pickup retains its
+axis-dependent ordering. E4 source lowerers reserve an object end and try both
+ends top-down before either end diagonally. The wrapper marks only an owned goal
+snapshot; upright and stack constraints take precedence over ordinary policy.
+`GenSimPickUp` screens each
 candidate strategy through the shared full pickup planner and retains the exact
 successful trajectory per row; endpoint IK alone is not acceptance. Explicit
 grasp poses, fixed calibrations and constrained picks retain their contracts.
-`GenSimHandOver` chooses the receiving end from the actual source attachment,
-reusing the same geometry policy while delegating transfer, release, retreat
-and state effects to shared HandOver. These are GenSim-local skill replacements,
+`GenSimHandOver` chooses the receiving end from the actual source attachment.
+Vertical receiving grasps try diagonal then top-down; horizontal ones reverse
+that order. Candidate, IK or path failure triggers one alternate-direction
+attempt through the complete shared HandOver planner before execution. Successful
+rows retain their first trajectories and attachment candidates. Exhaustion
+fails normally; no source regrasp or cross-call recovery is added. Transfer,
+release, retreat and state effects remain owned by shared HandOver. E5 paired
+grasping and E6 handle policies remain separate. These are GenSim-local skill replacements,
 not another executor or changes to shared goal/options types. Unmarked calls
 delegate unchanged; drawer-owned motion does not install the handover wrapper.
 Constrained E2 Pick lowerers

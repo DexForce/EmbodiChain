@@ -31,7 +31,53 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
 __all__: list[str] = []
 
 ADAPTIVE_GRASP = "gen_sim.adaptive_grasp"
-ADAPTIVE_GRASP_REVISION = 1
+ADAPTIVE_GRASP_REVISION = 2
+
+
+def bind_pick_purposes(
+    declarations: object, program: Any
+) -> tuple[tuple[str, str], ...]:
+    """Bind generated segment policies to canonical runtime invocation IDs.
+
+    Keep built-in Pick calls intact so the shared compiler still owns their
+    downstream look-ahead. No object-wide purpose or invocation-name parsing is
+    used: each declaration must match one compiled generated Pick segment.
+    """
+    from embodichain.lab.task_program.semantics import Pick
+
+    if type(declarations) is not dict or any(
+        type(name) is not str or purpose not in {"ordinary", "pour"}
+        for name, purpose in declarations.items()
+    ):
+        raise ValueError(
+            "GenSim pick_purposes must map segment names to ordinary/pour."
+        )
+    remaining = dict(declarations)
+    routes = []
+    for segment in program.iter_segments():
+        picks = [
+            call
+            for call in segment.calls
+            if type(call.call) is Pick and call.call.grasp is None
+        ]
+        if not picks:
+            continue
+        if len(picks) != 1 or segment.name not in remaining:
+            raise ValueError(
+                "Every generated Pick needs its own purpose; regenerate the bundle."
+            )
+        purpose = remaining.pop(segment.name)
+        routes.append(
+            (
+                f"{program.program_id}/{segment.segment_id}:{picks[0].segment_call_index}",
+                purpose,
+            )
+        )
+    if remaining:
+        raise ValueError(
+            "GenSim pick_purposes references a missing or non-Pick segment."
+        )
+    return tuple(routes)
 
 
 @dataclass(frozen=True)
@@ -71,8 +117,11 @@ def grasp_strategies(
     *,
     ends: bool,
     positive: torch.Tensor | None = None,
+    purpose: str = "pour",
 ) -> tuple[GraspStrategy, ...]:
-    """Prefer tutorial-style approaches without assuming an arm or axis sign."""
+    """Order approaches by call purpose without assuming an arm or axis sign."""
+    if purpose not in {"ordinary", "pour", "handover_source", "handover_receive"}:
+        raise ValueError(f"Unknown GenSim grasp purpose: {purpose!r}.")
     down = torch.zeros_like(axis)
     down[:, 2] = -1
     toward = pose[:, :3, 3] - tcp[:, :3, 3]
@@ -83,8 +132,12 @@ def grasp_strategies(
     diagonal = torch.where(length > 1e-6, diagonal, down)
     vertical = axis[:, 2:3].abs() >= math.sqrt(0.5)
     directions = (
-        torch.where(vertical, diagonal, down),
-        torch.where(vertical, down, diagonal),
+        (down, diagonal)
+        if purpose in {"ordinary", "handover_source"}
+        else (
+            torch.where(vertical, diagonal, down),
+            torch.where(vertical, down, diagonal),
+        )
     )
     nearest = ((tcp[:, :3, 3] - pose[:, :3, 3]) * axis).sum(-1) >= 0
     parts = (

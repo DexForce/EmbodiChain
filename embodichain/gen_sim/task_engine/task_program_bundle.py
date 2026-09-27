@@ -709,6 +709,11 @@ def _task_stability_payload(
             n["call"]["kind"] == "pick" and not n["call"].get("grasp")
             for n in graph["nodes"]
         ),
+        "pick_purposes": {
+            n["id"]: ("pour" if n["task_type"] == "E3" else "ordinary")
+            for n in graph["nodes"]
+            if n["call"]["kind"] == "pick" and not n["call"].get("grasp")
+        },
     }
 
 

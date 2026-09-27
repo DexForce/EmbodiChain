@@ -70,7 +70,10 @@ def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any
     context = assembly.observation_provider.observe(
         TaskState(batch_size=qpos.shape[0], device=qpos.device)
     )
-    workflow = assembly.compiler.analyze(analyses[0].calls)
+    first = next(compiled.iter_segments())
+    workflow = assembly.compiler.analyze(
+        analyses[0].calls, workflow_id=f"{compiled.program_id}/{first.segment_id}"
+    )
     grounded = assembly.compiler.ground(workflow, 0, context)
     plan = assembly.engine.plan(grounded.invocation, context)
     final_velocity = _validate_final_plan_velocity(plan, unwrapped.robot)
@@ -141,12 +144,14 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pour_receivers: dict[str, str] | None = None,
         drawer_routes: tuple = (),
         adaptive_pick: bool = False,
+        pick_purposes: tuple[tuple[str, str], ...] = (),
         coordinated_motion: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._pour_receivers = dict(pour_receivers or {})
         self._adaptive_pick = adaptive_pick
+        self._pick_purposes = pick_purposes
         self._coordinated_motion = coordinated_motion
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
@@ -209,6 +214,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine = super().create_atomic_action_engine(profile)
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
+        pick.pick_purposes = dict(self._pick_purposes)
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
         engine.register(GenSimMoveHeldObject(), replace=True)
@@ -236,6 +242,7 @@ class TaskAdapterFactory:
     pour_receivers: tuple[tuple[str, str], ...] = ()
     drawer_routes: tuple = ()
     adaptive_pick: bool = False
+    pick_purposes: tuple[tuple[str, str], ...] = ()
     coordinated_grasp: bool = False
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
@@ -363,6 +370,7 @@ class TaskAdapterFactory:
             pour_receivers=dict(self.pour_receivers),
             drawer_routes=self.drawer_routes,
             adaptive_pick=self.adaptive_pick,
+            pick_purposes=self.pick_purposes,
             coordinated_motion=self.coordinated_grasp,
         )
         return factory.create_adapter()
@@ -386,7 +394,8 @@ def load_deployment(
     if (
         type(payload) is not dict
         or not {"schema_version", "presets"}.issubset(payload)
-        or set(payload) - {"schema_version", "presets", "drawers", "adaptive_pick"}
+        or set(payload)
+        - {"schema_version", "presets", "drawers", "adaptive_pick", "pick_purposes"}
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
         raise ValueError(
@@ -474,6 +483,9 @@ def load_deployment(
         relation_grounders=(),
     )
     program = load_config(base.program_path)
+    from embodichain.lab.task_program.language import load_task_program
+    from .adaptive_grasp import bind_pick_purposes
+
     from .align_held import with_held_alignment
 
     registration = with_held_alignment(
@@ -496,6 +508,14 @@ def load_deployment(
                 if cfg.kind == "stack"
             ),
         )
+    compiled = registration.catalog.preflight(
+        load_task_program(
+            base.program_path,
+            integration=base.selection,
+            validation_context=registration.catalog,
+        )
+    )
+    pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
@@ -565,6 +585,7 @@ def load_deployment(
         pour_receivers,
         drawers,
         adaptive_pick=adaptive_pick,
+        pick_purposes=pick_purposes,
         coordinated_grasp=coordinated,
     )
     integration = replace(
