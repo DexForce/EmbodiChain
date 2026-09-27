@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Small, isolated camera benchmark and offline reports."""
+"""Pure-rendering R-series workloads, adapters and offline reports."""
 
 from __future__ import annotations
 

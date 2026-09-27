@@ -3,8 +3,9 @@
 The shared technical-report core lives in `scripts/benchmark/core/`;
 offline aggregation, comparison and report/figure outputs live in
 `scripts/benchmark/reporting/`.
-The camera pilot is the first consumer. Other benchmark domains retain their
-existing owners and can adopt these helpers incrementally.
+The pure-rendering R-series suite is the first complete domain consumer;
+`camera-pilot` remains its smallest compatibility example. Other benchmark
+domains retain their existing owners and can adopt these helpers incrementally.
 
 ## Entry points and ownership
 
@@ -25,6 +26,8 @@ existing owners and can adopt these helpers incrementally.
 | Camera workload and runtime selection | `scripts/benchmark/rendering/workload.py`, `run_benchmark.py` |
 | Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
 | Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
+| R-series matrices and capture contract | `scripts/benchmark/rendering/suite.py` |
+| R-series launcher, worker and offline report | `scripts/benchmark/rendering/suite_runner.py`, `suite_worker.py`, `suite_report.py` |
 | G-03 case, attempt, receipt, fixture and session adapter | `scripts/benchmark/expert_generation/` |
 
 ## Boundaries
@@ -33,6 +36,9 @@ Core and shared reporting import only the standard library. They must not
 import domain workers, NumPy, Torch or simulators. Domain configuration and
 worker modules may use their own installed dependencies. The camera CLI's
 report-only path stays ahead of simulation-dependent configuration imports.
+The R-series list and report-only paths follow the same rule; their resolved
+cell record is standard-library only and simulator-specific adapters are
+imported inside worker processes.
 
 The launcher freezes `RunSpec` values and runs platforms serially in separate
 processes. Core writes the complete plan and not-run records before starting.
@@ -84,10 +90,22 @@ not step. EmbodiChain uses its public camera-group render and camera look-at
 APIs. See `scripts/benchmark/rendering/README.md` for exact supported runtime
 and reproduction commands.
 
+## Pure-rendering R-series cautions
+
+R-03 varies resolution, R-04 varies camera batch size, R-05 varies RGB/depth/
+normal modalities, R-06 varies static versus moving temporal capture, and R-09
+varies device versus host delivery and duplicate host copies. All measurements
+exclude physics stepping and keep warm-up outside the denominator. EmbodiChain
+uses arena camera groups; Isaac Lab uses independent USD camera views aggregated
+into one result batch, and the adapter records this treatment in renderer
+provenance. The shared comparison remains unqualified until image quality,
+lighting and modality semantics are calibrated across the two renderers.
+
 ## Validation
 
-Use `tests/benchmark/core/`, `tests/benchmark/reporting/`, the camera pilot tests
-under `tests/benchmark/rendering/`, and `tests/test_main.py` for CLI regressions.
+Use `tests/benchmark/core/`, `tests/benchmark/reporting/`, the camera pilot and
+R-series suite tests under `tests/benchmark/rendering/`, and `tests/test_main.py`
+for CLI regressions.
 The scalar-core tests prove reuse without images or simulators; import tests
 use Python without site-packages. Real GPU camera runs qualify the installed
 backends separately. Tutorial scripts are references, not production test

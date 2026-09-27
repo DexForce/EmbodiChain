@@ -89,6 +89,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         camera_main(arguments[1:])
         return
+    if arguments and arguments[0] == "rendering-suite":
+        # Keep R-series listing and offline reports independent of simulators.
+        from scripts.benchmark.rendering.suite_runner import main as rendering_main
+
+        rendering_main(arguments[1:])
+        return
     if arguments and arguments[0] == "expert-generation":
         # Keep the simulator-free G-03 fixture and offline report path light.
         from scripts.benchmark.expert_generation.run_benchmark import (
@@ -107,6 +113,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "camera-pilot",
         add_help=False,
         help="Run the minimal camera comparison or rebuild its report offline.",
+    )
+    subparsers.add_parser(
+        "rendering-suite",
+        add_help=False,
+        help="Run the R-03/R-04/R-05/R-06/R-09 pure-rendering suite.",
     )
     subparsers.add_parser(
         "expert-generation",

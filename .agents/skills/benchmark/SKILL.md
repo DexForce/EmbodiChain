@@ -24,7 +24,9 @@ For experiments using the technical-report framework, reuse
 and `scripts/benchmark/reporting/` for aggregation and comparison eligibility.
 Keep scene construction, platform APIs and domain validation in the experiment's
 own directory. Read [the framework entry points](../../../scripts/benchmark/README.md)
-and use the camera pilot as the first working example.
+and use `scripts/benchmark/rendering/suite.py` / `suite_runner.py` for the
+R-03/R-04/R-05/R-06/R-09 pure-rendering matrix; `camera-pilot` remains the
+smallest working example.
 
 Core/report rebuilds remain independent of simulator imports. Record raw seconds,
 bytes, metric populations and missing-value reasons; keep execution completion

@@ -1,9 +1,10 @@
-# 技术报告 Benchmark 核心与首个实验
+# 技术报告 Benchmark 核心与纯渲染实验
 
-当前交付是技术报告 benchmark 的公共框架 v1，以及使用它的 `camera-pilot` 相机实验。
+当前交付是技术报告 benchmark 的公共框架 v1，以及完整的纯渲染 R-03/R-04/R-05/R-06/R-09 实验套件。
 它覆盖实验定义、矩阵与预算、隔离运行、三类测量、标准产物、来源追踪、离线统计、
 图表导出和比较条件检查。
-相机实验同时提供 EmbodiChain/DexSim 和 Isaac Lab 的实现与复跑命令。
+每个纯渲染 cell 同时提供 EmbodiChain/DexSim 和 Isaac Lab 的独立进程实现与复跑命令；
+`camera-pilot` 保留为最小兼容样例。
 
 ## 结构和职责
 
@@ -27,6 +28,10 @@ scripts/benchmark/
     figures.py                 无绘图库依赖的 CSV/SVG 及共享样式
     report.py                  通用离线 summary/report 重建
   rendering/
+    suite.py                   R-03/R-04/R-05/R-06/R-09 矩阵、边界和 capture 合同
+    suite_runner.py            全部纯渲染实验的 launcher
+    suite_worker.py            一个矩阵 cell 的隔离 worker
+    suite_report.py            纯渲染离线报告、CSV 和 SVG
     workload.py                相机配置、共同几何场景、RGB 校验及指标
     run_benchmark.py           选择本机两个 Python 环境，构建 RunSpec
     worker.py                  单个实验进程的场景/采集/验证生命周期
@@ -49,7 +54,7 @@ scripts/benchmark/
 机器人/场景配置、物理推进、图像格式与质量判定仍由领域代码及平台 API 拥有。
 
 已有 motion-generation、Atomic Action、RL 等 benchmark 有各自稳定 owner；
-相机是这一核心的首个使用者，后续实验可以按需要迁移共用能力。
+纯渲染套件是这个核心的第一个完整 R-series 使用者，后续 L/P/G/D 实验可以按需要迁移共用能力。
 
 ## 最小数据流
 
@@ -91,11 +96,57 @@ case/run/repeat/attempt 身份、命令、预算和超时；完整环境变量�
 而不是用一个 success-rate 字段混合三种 population。核心当前不负责集群、候选生成、
 Gym reset 或数据集 commit。
 
-## 首个实验与 Isaac Lab 复现
+## 纯渲染 R-series 与 Isaac Lab 复现
+
+统一入口覆盖 issue #679 中的全部纯渲染实验：
+
+| 实验 | 变化轴 | 主要指标 |
+|---|---|---|
+| R-03 | 128/256/512 分辨率 | observation 1/s、camera exposure 1/s、P50/P95、读回带宽 |
+| R-04 | 1/4/16 个环境批次 | 批量 exposure throughput、render/readback 计数 |
+| R-05 | RGB、RGB+depth、RGB+normals | 模态增量耗时、读回字节和吞吐 |
+| R-06 | 静态/移动时间序列 | 新曝光检查、时间序列吞吐和延迟 |
+| R-09 | device、单次 host readback、重复 host readback | GPU completion、读回次数和端到端 observation cost |
+
+列出冻结矩阵，不启动模拟器：
+
+```bash
+python -m scripts.benchmark rendering-suite --list
+```
+
+先以三个测量帧做两个平台 smoke run：
+
+```bash
+python -m scripts.benchmark rendering-suite \
+  --experiment all --smoke \
+  --embodichain-python /home/dex/miniconda3/envs/open/bin/python \
+  --isaaclab-root /home/dex/workspace/sources/IsaacLab \
+  --isaaclab-python /home/dex/workspace/sources/IsaacLab/env_isaaclab/bin/python \
+  --output outputs/benchmarks/rendering-suite-smoke
+```
+
+正式运行时去掉 `--smoke`，并按硬件预算设置 `--repeats`、`--warmup-frames` 和
+`--measured-frames`。每个 R 实验写入自己的时间戳目录；同一命令不会复用或覆盖旧结果。
+使用 `--backend embodichain` 或 `--backend isaaclab` 可单独运行平台。
+
+每个 cell 的边界是 `render → declared GPU completion → observation delivery`。
+`render_only` 不执行 host readback；`host_readback` 执行一次阻塞读回；
+`duplicate_readback` 对同一完成曝光执行两次 host copy。R-04 的 EmbodiChain 使用 arena
+camera groups，Isaac Lab 使用独立 USD camera views 聚合成同一 batch；实现差异会写入
+`renderer.batch_semantics`，不自动升级为等质量性能结论。
+
+质量协议目前只验证新曝光和非空/有限样本，光照与模态语义尚未完成跨渲染器标定，
+所以报告的 comparison 保持 `not_qualified`，不会生成等画质 speedup。
+
+### 最小 camera-pilot 样例
 
 实验是程序化桌面与三个方块、一个 RGB 相机。两个 backend 使用同一几何、
 相机内参/视角和计时终点：发起渲染到 CPU RGB 可读。具体设置和安装路径参数见
 [相机实验说明](rendering/README.md)。
+
+Isaac Lab 对照固定为 `v3.0.0-beta2.patch1` 的提交
+`ffff603eafc6b74264a5261cc0183d6a65390d78`，对应 Isaac Sim `6.0.1.0`。
+Python 环境、安装前提和版本校验命令见相机实验说明中的 [Isaac Lab 对照环境](rendering/README.md#isaac-lab-对照环境)。
 
 ```bash
 python -m scripts.benchmark camera-pilot --help
