@@ -116,6 +116,7 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGripperModelCfg,
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+from embodichain.lab.sim.motion.planners.base_planner import CollisionWorldInfo
 from embodichain.lab.sim.motion.planners import (
     MoveType,
     PlanOptions,
@@ -3659,9 +3660,11 @@ def test_press_plans_close_approach_press_and_retract() -> None:
     ("failed_second_row", "preserve_failure_evidence"),
     ((False, False), (True, False), (True, True)),
 )
+@pytest.mark.parametrize("slow_backend", (False, True))
 def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
     failed_second_row: bool,
     preserve_failure_evidence: bool,
+    slow_backend: bool,
 ) -> None:
     """Use the real facade, with a Cartesian backend double and mixed row failures."""
     generator = _motion_generator()
@@ -3679,6 +3682,13 @@ def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
     native_path[0, :, 0] = torch.tensor([0.0, -0.05, -0.1, 0.0, 0.02, 0.0, -0.1])
     native_path[1, :, 0] = torch.tensor([0.0, -0.1, -0.05, 0.0, 0.01, 0.02, -0.1])
     native_path[:, :, 3] = torch.arange(7) * 0.01
+    native_dt = torch.full((NUM_ENVS, native_path.shape[1]), CONTROL_DT)
+    native_dt[:, 0] = 0.0
+    if slow_backend:
+        # Deliberately exceed the fixed phase-count budget with uneven timing.
+        native_dt = CONTROL_DT * torch.tensor(
+            [[0, 47, 7, 23, 71, 11, 67], [0, 13, 57, 41, 29, 17, 83]]
+        )
 
     def backend_plan(*, target_states, options) -> PlanResult:
         assert len(target_states) == 4
@@ -3695,12 +3705,10 @@ def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
         success = torch.ones(NUM_ENVS, dtype=torch.bool)
         if failed_second_row:
             success[1] = False
-        dt = torch.full((NUM_ENVS, native_path.shape[1]), CONTROL_DT)
-        dt[:, 0] = 0.0
         return PlanResult(
             success=success,
             positions=native_path.clone(),
-            dt=dt,
+            dt=native_dt.clone(),
         )
 
     generator.planner.plan.side_effect = backend_plan
@@ -3750,7 +3758,15 @@ def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
         )
     torch.testing.assert_close(options.start_qpos, initial_qpos[:, :ARM_DOF])
     trajectory = _joint_trajectory(plan)
-    assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
+    if slow_backend:
+        assert trajectory.waypoint_count > sample_count
+    else:
+        assert trajectory.positions.shape == (NUM_ENVS, sample_count, ROBOT_DOF)
+    # Closing and phase-junction holds are additional to the backend duration.
+    close_duration = (PressOptions().hand_interp_steps - 1) * CONTROL_DT
+    assert torch.all(
+        trajectory.duration + 1e-6 >= native_dt.sum(dim=1) + close_duration
+    )
     for row, end_indices in enumerate(((2, 3, 4, 6), (1, 3, 5, 6))):
         if row == 1 and failed_second_row and not preserve_failure_evidence:
             continue
@@ -3767,10 +3783,14 @@ def test_press_motion_gen_plans_four_ordered_goals_in_one_backend_call(
                 trajectory.positions[row, segment.stop - 1, :ARM_DOF],
                 native_path[row, end_index],
             )
+            source_duration = native_dt[row, start_index + 1 : end_index + 1].sum()
+            phase_duration = trajectory.dt[row, segment.start + 1 : segment.stop].sum()
+            assert phase_duration + 1e-6 >= source_duration
             start_index = end_index
     if failed_second_row and not preserve_failure_evidence:
         torch.testing.assert_close(
-            trajectory.positions[1], initial_qpos[1].expand(sample_count, -1)
+            trajectory.positions[1],
+            initial_qpos[1].expand(trajectory.waypoint_count, -1),
         )
     for frame in plan.commands.frames:
         assert frame.active_mask.tolist() == [True, not failed_second_row]
@@ -3783,9 +3803,92 @@ def test_press_combined_split_accepts_stationary_single_sample() -> None:
     path = torch.zeros(NUM_ENVS, 1, ARM_DOF)
     targets = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
     counts = (2, 3, 4, 5)
-    parts = action._split_motion_path(path, targets, "arm", counts)
-    for part, count in zip(parts, counts):
+    parts = action._split_motion_path(
+        path, torch.zeros(NUM_ENVS, 1), targets, "arm", counts, CONTROL_DT
+    )
+    for (part, dt), count in zip(parts, counts):
         torch.testing.assert_close(part, path.expand(-1, count, -1))
+        torch.testing.assert_close(
+            dt[:, 1:], torch.full((NUM_ENVS, count - 1), CONTROL_DT)
+        )
+
+
+def test_press_retiming_preserves_backend_dwell_and_arrival_offset() -> None:
+    path = torch.tensor([[[0.0], [1.0], [1.0], [2.0]]]).expand(NUM_ENVS, -1, -1)
+    # The repeated pose must dwell for 0.8 s; row 1 also starts with a 0.2 s hold.
+    dt = torch.tensor([[0.0, 0.2, 0.8, 0.2], [0.2, 0.2, 0.8, 0.2]])
+    positions, intervals = Press._retime_motion_phase(path, dt, 4, 0.1)
+
+    torch.testing.assert_close(intervals.sum(dim=1), torch.tensor([1.2, 1.4]))
+    torch.testing.assert_close(positions[0, 2:11, 0], torch.ones(9))
+    torch.testing.assert_close(positions[1, :3, 0], torch.zeros(3))
+    torch.testing.assert_close(positions[1, 4:13, 0], torch.ones(9))
+    torch.testing.assert_close(positions[:, -1, 0], torch.full((NUM_ENVS,), 2.0))
+
+
+@pytest.mark.parametrize("supports_validation", (True, False))
+def test_press_requires_collision_validation_of_exact_final_samples(
+    supports_validation: bool,
+) -> None:
+    generator = _motion_generator()
+    generator.planner.supports_joint_trajectory_validation = supports_validation
+    generator.planner.collision_world_info = CollisionWorldInfo()
+    obstacle_poses = {"wall": torch.eye(4).repeat(NUM_ENVS, 1, 1)}
+    plan_options = PlanOptions()
+    plan_options.dynamic_obstacle_poses = obstacle_poses
+    native_path = torch.zeros(NUM_ENVS, 2, ARM_DOF)
+    native_path[0, -1, 0] = 1.0
+    generator.generate = Mock(
+        return_value=PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=native_path,
+            dt=torch.tensor([[0.0, 4 * CONTROL_DT]]).expand(NUM_ENVS, -1),
+        )
+    )
+
+    def validate(trajectory, *, control_part, obstacle_poses):
+        assert control_part == "arm"
+        torch.testing.assert_close(
+            obstacle_poses["wall"], plan_options.dynamic_obstacle_poses["wall"]
+        )
+        # Only a newly interpolated middle sample collides; native endpoints do not.
+        return ~torch.isclose(trajectory[:, :, 0], torch.tensor(0.5))
+
+    generator.planner.validate_joint_trajectory.side_effect = validate
+    action = _bind_action(generator, Press())
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
+        geometry={},
+        label="button",
+        entity_id="button",
+    )
+    context = _context()
+    invocation = ActionInvocation(
+        skill_id="press",
+        goal=PressGoal(semantics, torch.eye(4)),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(
+            strategy="motion_gen", sample_count=21, plan_opts=plan_options
+        ),
+        skill_options=PressOptions(hand_interp_steps=3),
+    )
+    if not supports_validation:
+        with pytest.raises(ValueError, match="requires joint-trajectory validation"):
+            _plan_action(action, invocation, context)
+        return
+    plan = _plan_action(action, invocation, context)
+
+    generator.planner.validate_joint_trajectory.assert_called_once()
+    checked = generator.planner.validate_joint_trajectory.call_args.args[0]
+    trajectory = _joint_trajectory(plan)
+    assert checked.shape[:2] == trajectory.positions.shape[:2]
+    assert torch.isclose(checked[0, :, 0], torch.tensor(0.5)).any()
+    torch.testing.assert_close(checked[1], trajectory.positions[1, :, :ARM_DOF])
+    assert plan.plan_success.tolist() == [False, True]
+    torch.testing.assert_close(
+        trajectory.positions[0],
+        context.robot.qpos[0].expand(trajectory.waypoint_count, -1),
+    )
 
 
 def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> None:

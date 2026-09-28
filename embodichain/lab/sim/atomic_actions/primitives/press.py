@@ -24,10 +24,8 @@ from typing import ClassVar
 
 import torch
 
-from embodichain.lab.sim.atomic_actions.primitives._helpers import (
-    arm_qpos_from_state,
-    resample_planned_trajectory,
-)
+from embodichain.compute.trajectory import retime_to_control_grid
+from embodichain.lab.sim.atomic_actions.primitives._helpers import arm_qpos_from_state
 from embodichain.lab.sim.atomic_actions.affordance import PressAffordance
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -243,15 +241,17 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             )
             assert isinstance(result.success, torch.Tensor)
             assert result.positions is not None
-            approach_arm, contact_arm, press_arm, retract_arm = self._split_motion_path(
+            motion_phases = self._split_motion_path(
                 result.positions,
+                result.dt,
                 targets[:, :3],
                 control_part,
                 (n_approach, n_contact, n_press, n_retract),
+                interpolation_dt,
             )
             success = contact_sample.success & result.success
         else:
-            approach_success, approach_arm = self._plan_pose_segment(
+            approach_success, approach_phase = self._plan_pose_segment(
                 approach_xpos,
                 start_arm_qpos,
                 control_part,
@@ -259,13 +259,14 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 n_approach,
                 interpolation_dt=interpolation_dt,
             )
+            approach_arm = approach_phase[0]
             contact_keyframes = axis_translation_keyframes(
                 approach_xpos,
                 contact_xpos,
                 contact_xpos[:, :3, 2],
                 n_waypoints=n_contact - 1,
             )
-            contact_success, contact_arm = self._plan_pose_segment(
+            contact_success, contact_phase = self._plan_pose_segment(
                 contact_keyframes,
                 approach_arm[:, -1],
                 control_part,
@@ -274,13 +275,14 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=True,
             )
+            contact_arm = contact_phase[0]
             press_keyframes = axis_translation_keyframes(
                 contact_xpos,
                 pressed_xpos,
                 contact_xpos[:, :3, 2],
                 n_waypoints=n_press - 1,
             )
-            press_success, press_arm = self._plan_pose_segment(
+            press_success, press_phase = self._plan_pose_segment(
                 press_keyframes,
                 contact_arm[:, -1],
                 control_part,
@@ -289,13 +291,14 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=True,
             )
+            press_arm = press_phase[0]
             retract_keyframes = axis_translation_keyframes(
                 pressed_xpos,
                 approach_xpos,
                 contact_xpos[:, :3, 2],
                 n_waypoints=n_retract - 1,
             )
-            retract_success, retract_arm = self._plan_pose_segment(
+            retract_success, retract_phase = self._plan_pose_segment(
                 retract_keyframes,
                 press_arm[:, -1],
                 control_part,
@@ -311,8 +314,9 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                 & press_success
                 & retract_success
             )
+            motion_phases = (approach_phase, contact_phase, press_phase, retract_phase)
 
-        parts = (hand_close, approach_arm, contact_arm, press_arm, retract_arm)
+        parts = (hand_close, *(phase[0] for phase in motion_phases))
         lengths = tuple(part.shape[1] for part in parts)
         full = torch.empty(
             (self.num_envs, sum(lengths), self.robot_dof),
@@ -327,20 +331,46 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         full[:, offset:stop, hand_joint_ids] = hand_close
         offset = stop
 
-        for arm in (approach_arm, contact_arm, press_arm, retract_arm):
+        hand_dt = torch.full(hand_close.shape[:2], interpolation_dt, device=self.device)
+        hand_dt[:, 0] = 0.0
+        phase_intervals = [hand_dt]
+        for arm, dt in motion_phases:
             stop = offset + arm.shape[1]
             full[:, offset:stop, arm_joint_ids] = arm
             full[:, offset:stop, hand_joint_ids] = hand_grasp_qpos.unsqueeze(1)
+            # Keep one control-period hold at each phase junction, as with the
+            # original uniform composition, without replacing backend timing.
+            dt = dt.clone()
+            dt[:, 0] = interpolation_dt
+            phase_intervals.append(dt)
             offset = stop
+
+        if self.motion_generator.supports_joint_trajectory_validation:
+            validity = self.motion_generator.validate_joint_trajectory(
+                full[:, :, arm_joint_ids],
+                control_part=control_part,
+                obstacle_poses=getattr(
+                    request.motion_policy.plan_opts, "dynamic_obstacle_poses", None
+                ),
+            )
+            success = success & validity.all(dim=1)
+        elif (
+            request.motion_policy.strategy == "motion_gen"
+            and self.motion_generator.collision_world_info is not None
+        ):
+            raise ValueError(
+                "Press requires joint-trajectory validation when retiming a "
+                "collision-aware backend path."
+            )
 
         return self.build_plan(
             request,
             context,
             success=success,
-            trajectory=TimedTrajectory.from_uniform_step(
+            trajectory=TimedTrajectory.from_positions(
                 full,
                 env_ids=context.env_ids,
-                step_dt=interpolation_dt,
+                dt=torch.cat(phase_intervals, dim=1),
             ),
             expected_effects=StateDelta(),
             diagnostics=PlannerDiagnostics(
@@ -383,11 +413,20 @@ class Press(AtomicAction[PressGoal, PressOptions]):
     def _split_motion_path(
         self,
         trajectory: torch.Tensor,
+        dt: torch.Tensor | None,
         split_poses: torch.Tensor,
         control_part: str,
         sample_counts: tuple[int, int, int, int],
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Split at minimum-error boundaries in temporal order before resampling."""
+        control_dt: float,
+    ) -> tuple[
+        tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, torch.Tensor],
+    ]:
+        """Split at ordered native boundaries and safely retime each phase."""
+        if dt is None:
+            raise ValueError("Press requires explicit backend trajectory timing.")
         poses = self.robot.compute_batch_fk(
             qpos=trajectory, name=control_part, to_matrix=True
         )
@@ -426,22 +465,56 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         )
         segments = []
         for segment_index, count in enumerate(sample_counts):
+            native_count = max(
+                indices[segment_index + 1] - indices[segment_index] + 1
+                for indices in boundaries
+            )
+            positions = trajectory.new_empty(
+                trajectory.shape[0], native_count, trajectory.shape[2]
+            )
+            intervals = dt.new_zeros(trajectory.shape[0], native_count)
+            for row, indices in enumerate(boundaries):
+                start, stop = indices[segment_index : segment_index + 2]
+                path = trajectory[row, start : stop + 1]
+                positions[row] = path[-1]
+                positions[row, : path.shape[0]] = path
+                intervals[row, : path.shape[0]] = dt[row, start : stop + 1]
+            if segment_index:
+                # The shared boundary has already arrived in the prior phase.
+                intervals[:, 0] = 0.0
             segments.append(
-                torch.cat(
-                    [
-                        resample_planned_trajectory(
-                            trajectory[
-                                row : row + 1,
-                                indices[segment_index] : indices[segment_index + 1] + 1,
-                            ],
-                            count,
-                        )
-                        for row, indices in enumerate(boundaries)
-                    ],
-                    dim=0,
-                )
+                self._retime_motion_phase(positions, intervals, count, control_dt)
             )
         return segments[0], segments[1], segments[2], segments[3]
+
+    @staticmethod
+    def _retime_motion_phase(
+        positions: torch.Tensor,
+        dt: torch.Tensor | None,
+        sample_count: int,
+        control_dt: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Use the requested count as a minimum, preserving source time profile."""
+        if dt is None:
+            raise ValueError("Press requires explicit backend trajectory timing.")
+        # An initial arrival offset is a hold, not time that may be discarded.
+        positions = torch.cat((positions[:, :1], positions), dim=1)
+        dt = torch.cat((dt.new_zeros(dt.shape[0], 1), dt), dim=1)
+        duration = dt.sum(dim=1)
+        stationary = (positions == positions[:, :1]).all(dim=2).all(dim=1)
+        if ((duration == 0) & ~stationary).any():
+            raise ValueError("A zero-duration Press phase cannot change position.")
+        minimum_duration = (sample_count - 1) * control_dt
+        scale = torch.maximum(
+            torch.ones_like(duration),
+            minimum_duration / torch.where(duration > 0, duration, 1.0),
+        )
+        scaled_dt = dt * torch.where(duration > 0, scale, 1.0)[:, None]
+        scaled_dt[:, -1] = torch.where(duration > 0, scaled_dt[:, -1], minimum_duration)
+        retimed, _, intervals, _ = retime_to_control_grid(
+            positions, scaled_dt, control_dt
+        )
+        return retimed, intervals
 
     def _plan_pose_segment(
         self,
@@ -453,7 +526,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         *,
         interpolation_dt: float,
         cartesian_linear: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
             options=request.motion_policy.to_motion_gen_options(
@@ -466,8 +539,8 @@ class Press(AtomicAction[PressGoal, PressOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
-        return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+        return result.success, self._retime_motion_phase(
+            result.positions, result.dt, sample_count, interpolation_dt
         )
 
 

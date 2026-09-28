@@ -117,8 +117,13 @@ for such a segment raises instead of silently bypassing backend timing.
 Press supports both strategies: `ik_interp` preserves the contact/press/retract
 Cartesian samples; `motion_gen` sends approach/contact/press/retract targets to
 the selected backend in one ordered request, then aligns the three internal
-boundaries chronologically on native samples before resampling each phase.
-It does not promise a straight path between endpoints or fall back to IK.
+boundaries chronologically on native samples.
+Each phase retains its native time profile while retiming to the control grid;
+requested phase counts are minima, so long phases expand rather than speeding
+up. Press validates its final assembled arm samples through a capable backend
+and rejects collision-aware backend paths without that validation capability.
+It does not promise continuous collision freedom, a straight path between
+endpoints, or a fallback to IK.
 
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
