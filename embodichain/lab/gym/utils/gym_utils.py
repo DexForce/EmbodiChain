@@ -1091,6 +1091,7 @@ def add_env_launcher_args_to_parser(
 
     parser.add_argument(
         "--gym_config",
+        "--gym-config",
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
@@ -1116,6 +1117,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--filter_dataset_saving",
+        "--filter-dataset-saving",
         help="Whether to filter out dataset saving.",
         default=False,
         action="store_true",
@@ -1209,6 +1211,30 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["max_episodes"] = args.max_episodes
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
+    dataset_dir = getattr(args, "generation_dataset_dir", None)
+    if dataset_dir is not None:
+        if type(dataset_dir) is not str or not dataset_dir.strip():
+            raise ValueError("--dataset-dir must be a nonempty path")
+        env_config = merged_config.get("env")
+        if not isinstance(env_config, Mapping):
+            raise ValueError("--dataset-dir requires an env.dataset configuration")
+        datasets = env_config.get("dataset")
+        if not isinstance(datasets, Mapping) or not datasets:
+            raise ValueError("--dataset-dir requires at least one dataset manager")
+        updated_datasets = deepcopy(dict(datasets))
+        for dataset_name, dataset_config in updated_datasets.items():
+            if not isinstance(dataset_config, Mapping):
+                raise ValueError(
+                    f"env.dataset.{dataset_name} must be a mapping when using "
+                    "--dataset-dir"
+                )
+            params = deepcopy(dict(dataset_config.get("params", {})))
+            params["save_path"] = dataset_dir
+            dataset_config = deepcopy(dict(dataset_config))
+            dataset_config["params"] = params
+            updated_datasets[dataset_name] = dataset_config
+        merged_config["env"] = deepcopy(dict(env_config))
+        merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
@@ -1235,6 +1261,65 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         visualization["viser_server"] = viser_server
         merged_config["visualization"] = visualization
     return merged_config
+
+
+def _apply_generation_runtime_overlay(config: dict[str, Any]) -> dict[str, Any]:
+    """Apply task-owned generation host values after environment expansion.
+
+    Physical scene and backend values remain owned by the selected environment
+    component. Generation deployments may add recorder/reset managers and
+    batch runtime values without maintaining a duplicate ``env.generation``
+    scene file.
+    """
+    generation = config.get("generation")
+    if not isinstance(generation, Mapping):
+        return config
+    runtime = generation.get("runtime")
+    if runtime is None:
+        return config
+    if not isinstance(runtime, Mapping):
+        raise ValueError("generation.runtime must be a mapping")
+    allowed = {
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "simulation",
+        "env",
+    }
+    unknown = set(runtime) - allowed
+    if unknown:
+        raise ValueError(
+            f"generation.runtime contains unsupported fields: {sorted(unknown)}"
+        )
+
+    def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+        merged = deepcopy(dict(base))
+        for key, value in patch.items():
+            if isinstance(value, Mapping):
+                current = merged.get(key, {})
+                if not isinstance(current, Mapping):
+                    raise ValueError(
+                        f"generation.runtime.{key} cannot replace a scalar"
+                    )
+                merged[key] = merge(current, value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+
+    resolved = deepcopy(config)
+    for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
+        if key in runtime:
+            resolved[key] = deepcopy(runtime[key])
+    for key in ("simulation", "env"):
+        if key in runtime:
+            current = resolved.get(key, {})
+            if not isinstance(current, Mapping) or not isinstance(
+                runtime[key], Mapping
+            ):
+                raise ValueError(f"generation.runtime.{key} must be a mapping")
+            resolved[key] = merge(current, runtime[key])
+    return resolved
 
 
 def build_env_cfg_from_args(
@@ -1266,7 +1351,9 @@ def build_env_cfg_from_args(
         gym_config = _resolve_environment_component(
             gym_config,
             base_dir=gym_config_source_path.parent,
+            selected_backend=getattr(args, "physics", None),
         )
+    gym_config = _apply_generation_runtime_overlay(gym_config)
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)

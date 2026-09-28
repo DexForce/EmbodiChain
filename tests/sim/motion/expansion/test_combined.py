@@ -54,16 +54,20 @@ def test_combined_profile_decodes_canonical_shape() -> None:
         visual_profile_ids=visual_ids,
         observation_profile_ids=profile.observation.profiles,
     )
-    env = yaml.safe_load(
-        (_PROFILE.parent / "env.generation.yaml").read_text(encoding="utf-8")
+    task = yaml.safe_load(
+        (_PROFILE.parent / "task.ur5.generation.yaml").read_text(encoding="utf-8")
     )
-    lights = env["simulation"]["light"]["direct"]
+    runtime = task["generation"]["runtime"]
+    lights = runtime["simulation"]["light"]["direct"]
     assert {light["uid"] for light in lights} == {"main_light", "rect_light"}
     assert lights[0]["light_type"] == "sun"
     assert lights[0]["intensity"] <= 10
-    recorder = env["env"]["events"]["record_camera"]
+    recorder = runtime["env"]["events"]["record_camera"]
     assert recorder["func"] == "record_camera_data"
     assert recorder["params"]["max_env_num"] == 16
+    generation_reset = runtime["env"]["events"]["generation_profile_reset"]
+    assert generation_reset["func"] == "apply_generation_profile_reset"
+    assert generation_reset["mode"] == "reset"
 
 
 def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:

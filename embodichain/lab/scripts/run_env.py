@@ -23,7 +23,8 @@ import select
 import sys
 import time
 
-from collections.abc import Iterable, Iterator, Sequence, Sized
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import gymnasium
@@ -357,6 +358,9 @@ def generate_function(
 
     max_attempts = int(kwargs.pop("max_attempts", 3))
     reset_before = bool(kwargs.pop("reset_before", True))
+    generation_record_sink = kwargs.pop("_generation_record_sink", None)
+    if generation_record_sink is not None and not callable(generation_record_sink):
+        raise TypeError("_generation_record_sink must be callable or None")
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
@@ -393,6 +397,14 @@ def generate_function(
                 and _selected_rows_have_frames(result, normalized_save_env_ids)
             )
             if execution_cfg.mode == "segment_fragments" and fragment_env_ids:
+                if generation_record_sink is not None:
+                    generation_record_sink(
+                        tuple(
+                            getattr(
+                                _env_target(env), "task_program_generation_records", ()
+                            )
+                        )
+                    )
                 _commit_pending_episode(env, fragment_env_ids)
                 commit_succeeded = True
                 if not successful:
@@ -404,6 +416,14 @@ def generate_function(
             if execution_cfg.mode == "continuous" and (
                 successful or persistable_failure
             ):
+                if generation_record_sink is not None:
+                    generation_record_sink(
+                        tuple(
+                            getattr(
+                                _env_target(env), "task_program_generation_records", ()
+                            )
+                        )
+                    )
                 # reset() is the commit boundary: dataset functors consume the
                 # whole episode once, then buffers and scene state are reset.
                 _commit_pending_episode(env, normalized_save_env_ids)
@@ -437,6 +457,342 @@ def generate_function(
             )
 
     return False
+
+
+def _configure_generation_reset_event(
+    env: Any,
+    params: Mapping[str, Any],
+) -> None:
+    """Install one generation batch payload in the reset lifecycle."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+    target = _env_target(env)
+    event_manager = getattr(target, "event_manager", None)
+    if event_manager is None:
+        raise RuntimeError("generation requires an event manager")
+    active_functors = event_manager.active_functors
+    if "generation_profile_reset" not in active_functors.get("reset", ()):
+        raise RuntimeError(
+            "generation profile requires the generation_profile_reset reset event"
+        )
+    current_cfg = event_manager.get_functor_cfg("generation_profile_reset")
+    event_manager.set_functor_cfg(
+        "generation_profile_reset",
+        EventCfg(func=current_cfg.func, mode="reset", params=dict(params)),
+    )
+
+
+def _resolve_generation_request(
+    args: Any,
+    gym_config: Mapping[str, Any],
+) -> tuple[Any, tuple[int, ...], Path] | None:
+    """Resolve a task-bound or CLI-selected Generation Profile."""
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.utils.utility import load_config
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedGenerationProfile,
+        TrajectoryGenerationJobCfg,
+        load_generation_profile,
+    )
+
+    binding = gym_config.get("generation")
+    if binding is not None:
+        if not isinstance(binding, Mapping):
+            raise ValueError("generation must be a mapping")
+        unknown = set(binding) - {
+            "profile",
+            "policy",
+            "overrides",
+            "runtime",
+            "candidate_indices",
+        }
+        if unknown:
+            raise ValueError(
+                f"generation contains unsupported fields: {sorted(unknown)}"
+            )
+    cli_profile = getattr(args, "generation_profile", None)
+    binding_profile = None if binding is None else binding.get("profile")
+    binding_policy = None if binding is None else binding.get("policy")
+    if binding_profile is not None and binding_policy is not None:
+        raise ValueError("generation may select profile or policy, not both")
+    profile_value = cli_profile if cli_profile is not None else binding_profile
+    if profile_value is None and binding_policy is None:
+        if getattr(args, "generation_candidate_indices", None) is not None:
+            raise ValueError("generation candidate indices require a profile")
+        return None
+    if binding_policy is not None:
+        if not isinstance(binding_policy, Mapping):
+            raise ValueError("generation.policy must be a mapping")
+        policy_path_value = binding_policy.get("component")
+        if (
+            not isinstance(policy_path_value, str)
+            or not policy_path_value.strip()
+            or policy_path_value != policy_path_value.strip()
+        ):
+            raise ValueError("generation.policy.component must be a nonempty path")
+        task_path = resolve_config_path(args.gym_config)
+        policy_path = Path(policy_path_value).expanduser()
+        if not policy_path.is_absolute():
+            policy_path = task_path.parent / policy_path
+        policy_path = policy_path.resolve()
+        policy_data = load_config(policy_path)
+        overrides = binding.get("overrides", {}) if binding is not None else {}
+        if not isinstance(overrides, Mapping):
+            raise ValueError("generation.overrides must be a mapping")
+
+        def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+            merged = dict(base)
+            for key, value in patch.items():
+                if isinstance(value, Mapping):
+                    current = merged.get(key, {})
+                    if not isinstance(current, Mapping):
+                        raise ValueError(
+                            f"generation.overrides.{key} cannot replace a scalar"
+                        )
+                    merged[key] = merge(current, value)
+                else:
+                    merged[key] = value
+            return merged
+
+        if not isinstance(policy_data, Mapping):
+            raise ValueError("generation policy component must be a mapping")
+        profile = CombinedGenerationProfile.from_mapping(merge(policy_data, overrides))
+        profile_path = task_path
+    else:
+        if (
+            not isinstance(profile_value, str)
+            or not profile_value.strip()
+            or profile_value != profile_value.strip()
+        ):
+            raise ValueError("generation.profile must be a nonempty path")
+        task_path = resolve_config_path(args.gym_config)
+        profile_path = Path(profile_value).expanduser()
+        if not profile_path.is_absolute():
+            profile_path = (
+                Path.cwd() / profile_path
+                if cli_profile is not None
+                else task_path.parent / profile_path
+            )
+        profile_path = profile_path.resolve()
+        profile = load_generation_profile(profile_path)
+    if (
+        isinstance(profile, TrajectoryGenerationJobCfg)
+        and profile.source.kind == "task_program"
+    ):
+        raise ValueError(
+            "run-task requires a schema_version=1 Generation Profile for "
+            "Task Program sources; legacy task_program profiles are unsupported"
+        )
+
+    candidate_values = getattr(args, "generation_candidate_indices", None)
+    if candidate_values is None and binding is not None:
+        candidate_values = binding.get("candidate_indices")
+    if candidate_values is None:
+        candidate_indices: tuple[int, ...] = ()
+    else:
+        if not isinstance(candidate_values, (list, tuple)):
+            raise ValueError("generation.candidate_indices must be a sequence")
+        candidate_indices = tuple(candidate_values)
+        if not candidate_indices or len(set(candidate_indices)) != len(
+            candidate_indices
+        ):
+            raise ValueError("generation candidate indices must be nonempty and unique")
+        if any(type(index) is not int or index < 0 for index in candidate_indices):
+            raise ValueError(
+                "generation candidate indices must be non-negative integers"
+            )
+    return profile, candidate_indices, profile_path
+
+
+def _generation_candidate_indices(
+    profile: Any,
+    configured: tuple[int, ...],
+    *,
+    num_envs: int,
+) -> tuple[int, ...]:
+    """Resolve and validate candidate batch starts for one profile."""
+    from embodichain.lab.sim.motion.expansion import CombinedGenerationProfile
+
+    if num_envs < 1:
+        raise ValueError("generation requires at least one environment")
+    if isinstance(profile, CombinedGenerationProfile):
+        profile.validate_for_num_envs(num_envs)
+        total = (
+            profile.scene_randomization.reference_family_count
+            * profile.affordance.branches_per_family
+            * profile.trajectory.variants_per_family
+        )
+        indices = configured or tuple(range(0, total, num_envs))
+        if any(index >= total for index in indices):
+            raise ValueError(
+                "combined generation candidate index exceeds the recipe budget"
+            )
+        return indices
+    total = profile.augmentation.max_variants_per_reference
+    indices = configured or tuple(range(total))
+    if any(index >= total for index in indices):
+        raise ValueError("generation candidate index exceeds the profile budget")
+    return indices
+
+
+def _run_generation(
+    env: Any,
+    args: Any,
+    gym_config: Mapping[str, Any],
+) -> None:
+    """Run task-bound trajectory generation batches through the Gym lifecycle."""
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedGenerationProfile,
+        CubeInitialPoseProvider,
+        VisualProfileRegistry,
+        enumerate_candidate_recipes,
+    )
+
+    request = _resolve_generation_request(args, gym_config)
+    if request is None:
+        raise ValueError("run_generation requires a generation profile")
+    profile, configured_indices, profile_path = request
+    target = _env_target(env)
+    num_envs = int(getattr(target, "num_envs", 1))
+    indices = _generation_candidate_indices(
+        profile,
+        configured_indices,
+        num_envs=num_envs,
+    )
+    if (
+        getattr(args, "disable_sensor", False)
+        and isinstance(profile, CombinedGenerationProfile)
+        and profile.visual.enabled
+    ):
+        raise ValueError(
+            "--disable-sensor cannot be used with a combined profile that "
+            "contains visual generation"
+        )
+
+    if isinstance(profile, CombinedGenerationProfile):
+        visual_registry = (
+            VisualProfileRegistry.from_yaml(
+                profile_path.parent / profile.visual.profile_file
+            )
+            if profile.visual.enabled
+            else None
+        )
+        if profile.scene_randomization.enabled:
+            family_path = (
+                profile_path.parent
+                / "generation_profiles"
+                / (f"{profile.scene_randomization.profile}.yaml")
+            )
+            families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
+                profile.scene_randomization.reference_family_count
+            )
+        else:
+            families = CubeInitialPoseProvider().enumerate(
+                profile.scene_randomization.reference_family_count
+            )
+        recipes = enumerate_candidate_recipes(profile, families=families)
+    else:
+        visual_registry = None
+        families = ()
+        recipes = ()
+
+    output_dir = getattr(args, "generation_output_dir", None)
+    if output_dir is None:
+        output_dir = (
+            profile.persistence.output_dir
+            if isinstance(profile, CombinedGenerationProfile)
+            else str(profile_path.parent / "generation-output")
+        )
+    output_path = Path(output_dir).expanduser()
+    output_path.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {
+        "profile": str(profile_path),
+        "candidate_indices": list(indices),
+        "num_envs": num_envs,
+        "batches": [],
+    }
+    successful_batches = 0
+
+    for candidate_index in indices:
+        if isinstance(profile, CombinedGenerationProfile) and (
+            profile.scene_randomization.enabled or profile.visual.enabled
+        ):
+            family_by_id = {family.reference_family_id: family for family in families}
+            batch_recipes = tuple(
+                recipes[(candidate_index + row) % len(recipes)]
+                for row in range(num_envs)
+            )
+            reset_payload: dict[str, Any] = {}
+            if profile.scene_randomization.enabled:
+                pose = torch.tensor(
+                    [
+                        [
+                            *family_by_id[recipe.reference_family_id].cube_position,
+                            *family_by_id[
+                                recipe.reference_family_id
+                            ].cube_quaternion_xyzw,
+                        ]
+                        for recipe in batch_recipes
+                    ],
+                    dtype=torch.float32,
+                    device=target.device,
+                )
+                reset_payload["cube_pose"] = pose
+            assignments = {
+                row: recipes[(candidate_index + row) % len(recipes)].visual_profile_id
+                for row in range(num_envs)
+            }
+            if profile.visual.enabled:
+                reset_payload.update(
+                    {
+                        "visual_registry": visual_registry,
+                        "visual_assignments": assignments,
+                        "visual_seed": (args.seed if args.seed is not None else 7)
+                        + candidate_index,
+                    }
+                )
+            _configure_generation_reset_event(env, reset_payload)
+
+        env.reset(seed=args.seed, options={"save_data": False})
+        batch_records: list[Any] = []
+        generated = generate_function(
+            env,
+            time_id=candidate_index,
+            save_path=str(output_path),
+            save_video=getattr(args, "generation_save_video", False),
+            debug_mode=getattr(args, "debug_mode", False),
+            save_env_ids=tuple(range(num_envs)),
+            max_attempts=int(gym_config.get("demo_max_attempts", 3)),
+            reset_before=False,
+            generation_profile=profile,
+            generation_candidate_index=candidate_index,
+            _generation_record_sink=batch_records.extend,
+        )
+        if not generated:
+            manifest["batches"].append(
+                {
+                    "candidate_index": candidate_index,
+                    "status": "rejected",
+                    "records": [record.to_metadata() for record in batch_records],
+                }
+            )
+            continue
+        successful_batches += 1
+        manifest["batches"].append(
+            {
+                "candidate_index": candidate_index,
+                "status": "accepted",
+                "records": [record.to_metadata() for record in batch_records],
+            }
+        )
+    manifest["accepted_batches"] = successful_batches
+    manifest["rejected_batches"] = len(indices) - successful_batches
+    (output_path / "generation_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    if successful_batches == 0:
+        raise RuntimeError("all generation candidate batches were rejected")
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
@@ -770,6 +1126,14 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         preview(env)
         return
 
+    if (
+        getattr(args, "generation_profile", None) is not None
+        or "generation" in gym_config
+    ):
+        log_info("Generation mode enabled.", color="green")
+        _run_generation(env, args, gym_config)
+        return
+
     # Prepare one clean scene. max_episodes counts persisted per-environment
     # episodes, not vector batches. Every successful generate_function call
     # commits exactly the selected rows and leaves the next batch ready to plan.
@@ -929,6 +1293,45 @@ def _create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Log the structured trace for each failed demo attempt.",
     )
+    parser.add_argument(
+        "--generation-profile",
+        "--generation_profile",
+        type=str,
+        default=None,
+        help="Generation Profile path; overrides task.generation.profile.",
+    )
+    parser.add_argument(
+        "--generation-candidate-indices",
+        "--generation_candidate_indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Logical generation recipe batch starts.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        "--generation-output-dir",
+        "--generation_output_dir",
+        dest="generation_output_dir",
+        type=str,
+        default=None,
+        help="Directory for generation provenance and manifests.",
+    )
+    parser.add_argument(
+        "--dataset-dir",
+        "--generation-dataset-dir",
+        "--generation_dataset_dir",
+        dest="generation_dataset_dir",
+        type=str,
+        default=None,
+        help="Override dataset manager save_path values.",
+    )
+    parser.add_argument(
+        "--generation-save-video",
+        "--generation_save_video",
+        action="store_true",
+        help="Save generation episode videos when the environment supports it.",
+    )
 
     parser.add_argument(
         "--replay",
@@ -1021,6 +1424,46 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+
+    generation_request = _resolve_generation_request(args, gym_config)
+    if generation_request is not None:
+        from embodichain.lab.sim.motion.expansion import CombinedGenerationProfile
+
+        profile = generation_request[0]
+        program = getattr(env_cfg, "task_program", None)
+        if program is None:
+            raise ValueError("generation requires a configured Task Program")
+        if (
+            profile.source.kind != "task_program"
+            or profile.source.source_id != program.program_id
+        ):
+            raise ValueError(
+                "generation profile source must match the configured Task Program"
+            )
+        if isinstance(profile, CombinedGenerationProfile):
+            _generation_candidate_indices(
+                profile,
+                generation_request[1],
+                num_envs=env_cfg.num_envs,
+            )
+            if getattr(args, "disable_sensor", False) and profile.visual.enabled:
+                raise ValueError(
+                    "--disable-sensor cannot be used with a combined profile "
+                    "that contains visual generation"
+                )
+            if profile.scene_randomization.enabled or profile.visual.enabled:
+                configured_events = getattr(env_cfg, "events", None)
+                if getattr(configured_events, "generation_profile_reset", None) is None:
+                    raise ValueError(
+                        "combined generation with scene or visual variation "
+                        "requires the generation_profile_reset event"
+                    )
+        else:
+            _generation_candidate_indices(
+                profile,
+                generation_request[1],
+                num_envs=env_cfg.num_envs,
+            )
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")

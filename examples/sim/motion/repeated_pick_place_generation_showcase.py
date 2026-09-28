@@ -58,8 +58,8 @@ _TASK_ROOT = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 )
-_DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.franka.yaml"
-_DEFAULT_GENERATION_PROFILE = _TASK_ROOT / "generation.demo.yaml"
+_DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.generation.yaml"
+_DEFAULT_GENERATION_PROFILE = _TASK_ROOT / "generation.combined.yaml"
 _VIDEO_LOOK_AT = (
     (-1.25, -1.15, 0.95),
     (-0.25, -0.02, 0.25),
@@ -205,7 +205,7 @@ def _create_parser() -> argparse.ArgumentParser:
         "--candidate-indices",
         nargs="+",
         type=int,
-        default=[0, 1, 2],
+        default=[0],
     )
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument(
@@ -296,6 +296,31 @@ def _write_combined_video(
     return combined
 
 
+def _configure_generation_reset_event(
+    env: object,
+    params: dict[str, object],
+) -> None:
+    """Install the current candidate payload into the reset event."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+    unwrapped = getattr(env, "unwrapped", env)
+    event_manager = getattr(unwrapped, "event_manager", None)
+    if event_manager is None:
+        raise RuntimeError(
+            "combined generation requires the generation_profile_reset event"
+        )
+    active_functors = event_manager.active_functors
+    if "generation_profile_reset" not in active_functors.get("reset", ()):
+        raise RuntimeError(
+            "combined generation requires the generation_profile_reset reset event"
+        )
+    current_cfg = event_manager.get_functor_cfg("generation_profile_reset")
+    event_manager.set_functor_cfg(
+        "generation_profile_reset",
+        EventCfg(func=current_cfg.func, mode="reset", params=params),
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     """Run selected candidates through the configured Task Program environment."""
     args = _create_parser().parse_args(argv)
@@ -314,70 +339,78 @@ def main(argv: list[str] | None = None) -> None:
     combined_recipes = ()
     reference_families = ()
     if isinstance(profile, CombinedGenerationProfile):
-        visual_registry = VisualProfileRegistry.from_yaml(
-            args.generation_profile.parent / profile.visual.profile_file
-        )
-        reference_families = CubeInitialPoseProvider.from_yaml(
-            args.generation_profile.parent
-            / "generation_profiles/cube_initial_pose.yaml",
-            seed=7,
-        ).enumerate(profile.scene_randomization.reference_family_count)
+        if profile.visual.enabled:
+            visual_registry = VisualProfileRegistry.from_yaml(
+                args.generation_profile.parent / profile.visual.profile_file
+            )
+        if profile.scene_randomization.enabled:
+            reference_families = CubeInitialPoseProvider.from_yaml(
+                args.generation_profile.parent
+                / "generation_profiles/cube_initial_pose.yaml",
+                seed=7,
+            ).enumerate(profile.scene_randomization.reference_family_count)
+        else:
+            reference_families = CubeInitialPoseProvider().enumerate(
+                profile.scene_randomization.reference_family_count
+            )
         combined_recipes = enumerate_candidate_recipes(
             profile,
             families=reference_families,
         )
     try:
         for candidate_index in candidate_indices:
-            env.reset(seed=args.seed, options={"save_data": False})
-            if reference_families:
+            reset_params: dict[str, object] = {}
+            batch_recipes = ()
+            visual_assignments: dict[int, str] = {}
+            if isinstance(profile, CombinedGenerationProfile):
                 batch_size = int(env.unwrapped.num_envs)
+                if candidate_index >= len(combined_recipes):
+                    raise ValueError(
+                        "candidate_index batch exceeds the combined recipe budget"
+                    )
+                batch_recipes = tuple(
+                    combined_recipes[(candidate_index + row) % len(combined_recipes)]
+                    for row in range(batch_size)
+                )
                 family_by_id = {
                     family.reference_family_id: family for family in reference_families
                 }
-                batch_recipes = combined_recipes[
-                    candidate_index : candidate_index + batch_size
-                ]
-                cube = env.unwrapped.sim.get_rigid_object("cube")
-                pose = torch.tensor(
-                    [
+                if profile.scene_randomization.enabled:
+                    pose = torch.tensor(
                         [
-                            *family_by_id[recipe.reference_family_id].cube_position,
-                            *family_by_id[
-                                recipe.reference_family_id
-                            ].cube_quaternion_xyzw,
-                        ]
-                        for recipe in batch_recipes
-                    ],
-                    dtype=torch.float32,
-                    device=env.unwrapped.device,
-                )
-                cube.set_local_pose(
-                    pose,
-                    env_ids=torch.arange(batch_size, device=env.unwrapped.device),
-                )
-            if visual_registry is not None:
-                assignments = {
-                    env_id: combined_recipes[
-                        (candidate_index + env_id) % len(combined_recipes)
-                    ].visual_profile_id
-                    for env_id in range(env.unwrapped.num_envs)
-                }
-                visual_registry.apply_to_environment(
-                    env.unwrapped,
-                    assignments,
-                    seed=7 + candidate_index,
-                )
+                            [
+                                *family_by_id[recipe.reference_family_id].cube_position,
+                                *family_by_id[
+                                    recipe.reference_family_id
+                                ].cube_quaternion_xyzw,
+                            ]
+                            for recipe in batch_recipes
+                        ],
+                        dtype=torch.float32,
+                        device=env.unwrapped.device,
+                    )
+                    reset_params["cube_pose"] = pose
+                if profile.visual.enabled:
+                    visual_assignments = {
+                        env_id: recipe.visual_profile_id
+                        for env_id, recipe in enumerate(batch_recipes)
+                    }
+                    reset_params.update(
+                        {
+                            "visual_registry": visual_registry,
+                            "visual_assignments": visual_assignments,
+                            "visual_seed": 7 + candidate_index,
+                        }
+                    )
+                if reset_params:
+                    _configure_generation_reset_event(env, reset_params)
+
+            env.reset(seed=args.seed, options={"save_data": False})
+
             scheduler = None
             assignments = ()
             if isinstance(profile, CombinedGenerationProfile):
                 batch_size = int(env.unwrapped.num_envs)
-                if candidate_index + batch_size > len(combined_recipes):
-                    raise ValueError(
-                        "candidate_index batch exceeds the combined recipe budget"
-                    )
-                batch_recipes = combined_recipes[
-                    candidate_index : candidate_index + batch_size
-                ]
                 scheduler = CombinedEpisodeCoordinator(
                     batch_recipes,
                     slot_pool=PhysicalSlotPool(batch_size),

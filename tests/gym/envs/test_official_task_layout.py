@@ -114,16 +114,36 @@ def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
             assert "physics_config" not in config, config_path
             owner_path = config_path.parent / environment["component"]
             owner = load_config(owner_path)
+            owners = (("component", owner_path, owner),)
+        elif type(environment) is dict and (
+            "default" in environment or "newton" in environment
+        ):
+            assert "physics" not in config, config_path
+            assert "physics_config" not in config, config_path
+            assert "default" in environment, config_path
+            owners = tuple(
+                (
+                    backend,
+                    config_path.parent / environment[backend],
+                    load_config(config_path.parent / environment[backend]),
+                )
+                for backend in ("default", "newton")
+                if backend in environment
+            )
         else:
             owner_path = config_path
             owner = config
+            owners = (("inline", owner_path, owner),)
 
-        backend = owner.get("physics")
-        assert backend in {"default", "newton"}, owner_path
-        physics_config = owner.get("physics_config", {})
-        assert type(physics_config) is dict, owner_path
-        config_type = type(physics_cfg_for_backend(backend))
-        config_type(**physics_config)
+        for variant, owner_path, owner in owners:
+            backend = owner.get("physics")
+            assert backend in {"default", "newton"}, (variant, owner_path)
+            if variant in {"default", "newton"}:
+                assert backend == variant, (variant, owner_path)
+            physics_config = owner.get("physics_config", {})
+            assert type(physics_config) is dict, owner_path
+            config_type = type(physics_cfg_for_backend(backend))
+            config_type(**physics_config)
 
 
 def test_official_action_configs_use_new_classes_only() -> None:

@@ -43,7 +43,10 @@ from embodichain.lab.task_program.integrations import (
 from embodichain.lab.task_program.integrations._configured_composition import (
     _load_configured_task_program_deployment,
 )
-from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
+from embodichain.lab.gym.utils._component_composition import (
+    _resolve_environment_component,
+    _resolve_gym_components,
+)
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.lab.gym.envs.task_program.bridge import (
@@ -91,20 +94,11 @@ _REPEATED_CUBE_INTEGRATION = Path(
     "tasks/manipulation/repeated_pick_place/task_program/integration.yaml"
 )
 _REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml")
-_REPEATED_CUBE_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"
-)
-_REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"
-)
 _RUBIKS_CUBE_GYM_CONFIG = Path(
     "tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"
 )
 _OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
 _OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
-_OPEN_DRAWER_NEWTON_GYM_CONFIG = Path(
-    "tasks/manipulation/open_drawer/task.ur5.newton.yaml"
-)
 _TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
 _UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
@@ -371,10 +365,16 @@ def _configure_cube_environment():
     return payload, cfg, REGISTERED_ENVS[str(payload["id"])]
 
 
-def _configure_packaged_environment(relative_path: Path):
+def _configure_packaged_environment(relative_path: Path, *, physics: str | None = None):
     """Load one packaged deployment and its selected physical component."""
     path = _REPOSITORY_ROOT / "embodichain_tasks/configs" / relative_path
     payload = _read_payload(relative_path)
+    if physics is not None:
+        payload = _resolve_environment_component(
+            payload,
+            base_dir=path.parent,
+            selected_backend=physics,
+        )
     return payload, config_to_cfg(payload, source_path=path)
 
 
@@ -383,14 +383,20 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     default_payload, default_cfg = _configure_packaged_environment(
         _REPEATED_CUBE_GYM_CONFIG
     )
-    assert default_payload["environment"] == {"component": "env.yaml"}
+    assert default_payload["environment"] == {
+        "default": "env.yaml",
+        "newton": "env.newton.yaml",
+    }
     assert isinstance(default_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_cfg.rigid_object[0].attrs.collision_props is None
     assert (
         default_cfg.robot.link_attrs["newton_gripper_contacts"].attrs.mass_props is None
     )
 
-    _, cube_cfg = _configure_packaged_environment(_REPEATED_CUBE_NEWTON_GYM_CONFIG)
+    _, cube_cfg = _configure_packaged_environment(
+        _REPEATED_CUBE_GYM_CONFIG,
+        physics="newton",
+    )
     assert isinstance(cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     cube_physics = cube_cfg.sim_cfg.physics_cfg
     assert cube_physics.num_substeps == 20
@@ -429,7 +435,8 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert robot_material.rolling_friction == pytest.approx(0.01)
 
     _, franka_cube_cfg = _configure_packaged_environment(
-        _REPEATED_CUBE_FRANKA_NEWTON_GYM_CONFIG
+        Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"),
+        physics="newton",
     )
     assert isinstance(franka_cube_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     assert franka_cube_cfg.sim_cfg.physics_cfg.solver_cfg == cube_physics.solver_cfg
@@ -445,9 +452,10 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     )
 
     drawer_payload, drawer_cfg = _configure_packaged_environment(
-        _OPEN_DRAWER_NEWTON_GYM_CONFIG
+        _OPEN_DRAWER_GYM_CONFIG,
+        physics="newton",
     )
-    assert drawer_payload["environment"] == {"component": "env.newton.yaml"}
+    assert drawer_payload["physics"] == "newton"
     assert isinstance(drawer_cfg.sim_cfg.physics_cfg, NewtonPhysicsCfg)
     drawer_physics = drawer_cfg.sim_cfg.physics_cfg
     assert drawer_physics.num_substeps == 20
@@ -463,7 +471,10 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     default_drawer_payload, default_drawer_cfg = _configure_packaged_environment(
         _OPEN_DRAWER_GYM_CONFIG
     )
-    assert default_drawer_payload["environment"] == {"component": "env.yaml"}
+    assert default_drawer_payload["environment"] == {
+        "default": "env.yaml",
+        "newton": "env.newton.yaml",
+    }
     assert isinstance(default_drawer_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_drawer_cfg.articulation[0].link_attrs is None
 

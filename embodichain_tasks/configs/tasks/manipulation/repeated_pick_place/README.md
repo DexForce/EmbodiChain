@@ -7,8 +7,6 @@ physical environment is selected separately from the robot embodiment and progra
 |---|---|---|---|
 | franka (default) | franka_panda | default | `task.franka.yaml` |
 | ur5 | ur5_dh_pgi_140_80 | default | `task.ur5.yaml` |
-| franka_newton | franka_panda | newton | `task.franka.newton.yaml` |
-| ur5_newton | ur5_dh_pgi_140_80 | newton | `task.ur5.newton.yaml` |
 
 Inspect the available deployments:
 
@@ -17,36 +15,36 @@ embodichain show-task embodichain_tasks:repeated_pick_place
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 ```
 
-Each deployment owns its physics backend through its environment component. Choose
-a deployment for another backend; `--physics` does not switch an existing one.
+Each deployment offers `default` and `newton` environment variants. Select the
+backend with `--physics`; requesting an undefined variant fails before simulator
+construction.
 Task Program execution is the supported expert demonstration route. These original
 examples do not independently qualify measured physical placement. No preview or
 physical qualification result is claimed by this catalog.
 
 ## Configured trajectory-generation showcase
 
-Run the same deployment with the separate source-neutral Generation Profile:
+The generation deployment binds a default profile directly in
+`task.ur5.generation.yaml`, so the formal task entry point can run the complete
+64-recipe batch schedule without an example-specific wrapper:
 
 ```bash
-python examples/sim/motion/repeated_pick_place_generation_showcase.py \
-  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
-  --generation-profile embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.demo.yaml \
+embodichain run-task \
+  --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.generation.yaml \
+  --num-envs 16 --arena-space 2.5 --device cpu --headless --seed 7 \
   --output-dir /tmp/repeated-pick-place-generation \
-  --seed 7 --device cuda --headless
+  --dataset-dir /tmp/repeated-pick-place-lerobot
 ```
 
-The showcase executes candidate ordinals 0, 1, and 2 as separate Task Program
-episodes and writes JSON provenance plus joint-trajectory plots. Add
-`--save-video` for one MP4 per candidate. The profile varies only the Place
-retract phase on the original control grid; Pick, release/contact samples, and
-phase endpoints remain unchanged.
+`--generation-profile` and `--generation-candidate-indices` override the values
+declared by the task deployment. The profile remains a separate resource so a
+deployment selects an expansion policy without duplicating its full schema.
+The dataset recorder is owned by `env.yaml`; pass `--filter-dataset-saving` to
+run without saving episodes.
 
-The explicit environment seed rewinds reset and grasp-sampling streams before
-each candidate so all three ordinals start from the same reference episode.
-
-This is a projected-assurance visualization. Completion means the configured
-command sequence completed; it is not measured task success, receipt-confirmed
-coverage, or a qualified dataset commit.
+The Python showcase remains available for visual debugging, but it uses the same
+combined profile and task deployment as the formal entry point. The formal
+`run-task` command is the supported collection path.
 
 The combined profile currently exposes a simulator-free deterministic preflight
 for the episode scheduler. It validates the 16-row capacity, enumerates four
@@ -63,7 +61,12 @@ python examples/sim/motion/repeated_pick_place_generation_combined.py \
 The physical host runner and measured artifact capture consume this schedule;
 the preflight command does not claim simulator execution or task success.
 
-The generation environment now enables the LeRobot recorder. A successful
+For the simulator showcase, the task's `generation.runtime` overlay registers
+a `generation_profile_reset` reset event. The runner supplies the selected
+candidate's cube pose and visual assignments before each reset, and the event
+applies them through the environment reset lifecycle.
+
+The generation runtime overlay now enables the LeRobot recorder. A successful
 combined showcase commits one LeRobot episode per physical row at
 `/tmp/repeated-pick-place-lerobot` and stores the generation records in
 `meta/embodichain_episodes.jsonl`.

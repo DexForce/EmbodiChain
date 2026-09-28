@@ -61,6 +61,40 @@ __all__ = [
 ]
 
 
+def _arm_joint_indices(
+    robot: object,
+    joint_count: int,
+    *,
+    reference_qpos: torch.Tensor | None = None,
+    joint_limits: torch.Tensor | None = None,
+) -> tuple[int, ...] | None:
+    """Prefer arm joints for trajectory residuals when a robot exposes parts."""
+    get_joint_ids = getattr(robot, "get_joint_ids", None)
+    if not callable(get_joint_ids):
+        return None
+    try:
+        values = tuple(
+            int(index) for index in get_joint_ids(name="arm", remove_mimic=True)
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not values or any(index < 0 or index >= joint_count for index in values):
+        return None
+    if reference_qpos is not None and joint_limits is not None:
+        qpos = reference_qpos.reshape(-1)
+        limits = joint_limits
+        if limits.ndim == 3:
+            limits = limits[0]
+        safe = [
+            index
+            for index in values
+            if limits[index, 0] < qpos[index] < limits[index, 1]
+        ]
+        if safe:
+            return tuple(safe)
+    return values
+
+
 @dataclass(frozen=True)
 class TaskProgramSourceAdapter:
     """Expose a Task Program's grounded Atomic plan through SourceAdapter."""
@@ -289,7 +323,13 @@ class TaskProgramCandidatePlanTransformFactory:
         plan: ActionPlan,
     ) -> ActionPlan:
         if context.batch_size != 1:
-            raise ValueError("the T4 Task Program transform supports B=1")
+            return self._transform_batch(
+                call_request,
+                engine,
+                resolved,
+                context,
+                plan,
+            )
         robot = engine.robot
         joint_names = tuple(robot.joint_names)
         limits = robot.body_data.qpos_limits
@@ -326,6 +366,12 @@ class TaskProgramCandidatePlanTransformFactory:
             joint_names=joint_names,
             phase_permissions=self._profile.source.phase_permissions,
             phase_kinds=self._profile.source.phase_kinds,
+            controlled_joint_indices=_arm_joint_indices(
+                robot,
+                len(joint_names),
+                reference_qpos=context.robot.qpos,
+                joint_limits=limits,
+            ),
             validator_id=self._profile.validation.validator_id,
         )
         coordinator = CandidateCoordinator(
@@ -340,20 +386,22 @@ class TaskProgramCandidatePlanTransformFactory:
             plan,
             count=self._profile.augmentation.max_variants_per_reference,
         )
-        if self._candidate_index >= len(items):
-            raise ValueError(
-                "candidate_index is outside candidates that survived generation"
-            )
-        selected = items[self._candidate_index]
+        if not items:
+            raise ValueError("no trajectory candidates survived generation")
+        selected_index = min(self._candidate_index, len(items) - 1)
+        selected = items[selected_index]
         candidates = tuple(item.spec for item in items)
         templates = tuple(item.template for item in items)
         record = TaskProgramGenerationRecord(
             workflow_id=call_request.workflow_id,
             workflow_call_index=call_request.workflow_call_index,
-            candidate_index=self._candidate_index,
+            candidate_index=selected_index,
             selected_candidate_id=selected.spec.identity.candidate_id,
             candidates=candidates,
             templates=templates,
+            trajectory_requested=self._candidate_index,
+            trajectory_selected=selected_index,
+            fallback_count=max(0, self._candidate_index - selected_index),
         )
         metadata = dict(plan.diagnostics.metadata)
         metadata["generation"] = record.to_metadata()
@@ -400,11 +448,11 @@ def _combined_phase_declarations(
 
 
 class CombinedTaskProgramCandidatePlanTransformFactory:
-    """Apply one deterministic combined recipe to a repeated Task Program.
+    """Apply one deterministic combined recipe to a Task Program call.
 
     Pick calls receive their recipe-selected Affordance branch before Atomic
-    planning. Place calls are expanded after planning on the existing control
-    grid. Unknown Atomic phase names remain replay-only and are never edited.
+    planning. Built-in Pick/Place profiles retain their specialized path;
+    profiles with explicit phase declarations use the generic call path.
     """
 
     def __init__(
@@ -466,6 +514,8 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             raise TypeError("engine must be an AtomicActionEngine")
         if request.workflow_id.split("/", 1)[0] != self._program_id:
             raise ValueError("workflow ID does not match profile source_id")
+        if self._profile.source.phase_permissions:
+            return context
         cycle_index = request.workflow_call_index // 2
         if cycle_index >= len(self._recipes[0].cycle_schedule):
             raise ValueError("workflow call index exceeds the three-cycle recipe")
@@ -499,7 +549,10 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             raise TypeError("engine must be an AtomicActionEngine")
         if request.workflow_id.split("/", 1)[0] != self._program_id:
             raise ValueError("workflow ID does not match profile source_id")
-        if request.invocation.skill_id not in {"place"}:
+        if (
+            not self._profile.source.phase_permissions
+            and request.invocation.skill_id not in {"place"}
+        ):
             return None
 
         def transform(
@@ -519,6 +572,14 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
         context: PlanningContext,
         plan: ActionPlan,
     ) -> ActionPlan:
+        if self._profile.source.phase_permissions:
+            return self._transform_generic(
+                call_request,
+                engine,
+                resolved,
+                context,
+                plan,
+            )
         if context.batch_size != 1:
             return self._transform_batch(
                 call_request,
@@ -656,6 +717,369 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             ),
         )
         self._records.append(record)
+        return rebuilt
+
+    def _transform_generic(
+        self,
+        call_request: TaskProgramPlanRequest,
+        engine: AtomicActionEngine,
+        resolved: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> ActionPlan:
+        """Expand one generic Task Program call through the new profile schema."""
+        trajectory = plan.joint_trajectory
+        if trajectory is None or trajectory.batch_size != context.batch_size:
+            raise ValueError("generic generation requires a matching joint trajectory")
+        robot = engine.robot
+        joint_names = tuple(robot.joint_names)
+        limits = robot.body_data.qpos_limits
+        if not isinstance(limits, torch.Tensor):
+            raise TypeError("robot qpos_limits must be a tensor")
+        if limits.ndim == 3:
+            limits = limits[0]
+        if limits.shape != (len(joint_names), 2):
+            raise ValueError("robot qpos_limits must match the full joint order")
+        declared = {segment.name for segment in plan.segments}
+        if declared != set(self._profile.source.phase_permissions) or declared != set(
+            self._profile.source.phase_kinds
+        ):
+            raise ValueError(
+                "generic generation phase declarations must exactly match the plan"
+            )
+        phases = tuple(
+            TrajectoryPhase(
+                segment.name,
+                segment.start,
+                segment.stop,
+                kind=self._profile.source.phase_kinds[segment.name],
+                allowed_operators=tuple(
+                    self._profile.source.phase_permissions[segment.name]
+                ),
+            )
+            for segment in plan.segments
+        )
+        invocation_id = resolved.invocation_id or resolved.skill_id
+        positions: list[torch.Tensor] = []
+        dts: list[torch.Tensor] = []
+        row_records: list[dict[str, object]] = []
+        row_specs: list[tuple[CandidateSpec, ...]] = []
+        row_templates: list[tuple[TrajectoryTemplate, ...]] = []
+        for row in range(context.batch_size):
+            recipe = self._recipe_for_row(row)
+            qpos = context.robot.qpos[row]
+            digest = hashlib.sha256(
+                qpos.detach().cpu().contiguous().numpy().tobytes()
+            ).hexdigest()
+            case = SceneCase(
+                scene_case_id=self._integration_id,
+                initial_state_id="initial_" + digest,
+                scene_signature=f"{self._integration_id}:scene:{context.scene.version}",
+                task_id=self._program_id,
+                robot_profile_id=self._robot_profile_id,
+            )
+            payload = {
+                "source": {
+                    "kind": "task_program",
+                    "source_id": self._program_id,
+                    "source_revision": self._profile.source.source_revision,
+                    "unit_scope": "action",
+                    "template_id": self._profile.source.template_id,
+                    "phase_permissions": self._profile.source.phase_permissions,
+                    "phase_kinds": self._profile.source.phase_kinds,
+                },
+                "augmentation": {
+                    "seed": recipe.visual_seed % (2**63),
+                    "max_variants_per_reference": self._profile.trajectory.variants_per_family,
+                    "factors": {
+                        "spatial": {
+                            "enabled": self._profile.trajectory.spatial.enabled,
+                            "method": self._profile.trajectory.spatial.operators,
+                            "joint_offset_scale": self._profile.trajectory.spatial.joint_offset_scale,
+                            "via_count": self._profile.trajectory.spatial.via_count,
+                        },
+                        "timing": {"enabled": False},
+                    },
+                },
+                "affordance": {"enabled": False},
+                "scheduling": {
+                    "candidate_budget": self._profile.trajectory.variants_per_family,
+                },
+                "execution": {"max_inflight": 1},
+                "observation": {"enabled": False, "profiles": []},
+            }
+            legacy = TrajectoryGenerationJobCfg.from_mapping(payload)
+            session = GenerationSession(legacy)
+            session.register_case(case, limits, joint_names=joint_names)
+            source_context = SourceContext(
+                source_id=self._program_id,
+                source_revision=self._profile.source.source_revision,
+                unit_id=(f"{recipe.candidate_id}:{invocation_id}:row:{row}"),
+                scene_case=case,
+                control_dt=context.require_control_dt(),
+            )
+            template = TrajectoryTemplate(
+                source_id=self._program_id,
+                source_revision=self._profile.source.source_revision,
+                template_id=source_context.unit_id,
+                joint_names=joint_names,
+                positions=trajectory.positions[row],
+                dt=trajectory.dt[row],
+                phases=phases,
+                allowed_operators=tuple(
+                    dict.fromkeys(
+                        operator
+                        for phase in phases
+                        for operator in phase.allowed_operators
+                    )
+                ),
+                validator_id="task_success",
+                controlled_joint_indices=_arm_joint_indices(
+                    robot,
+                    len(joint_names),
+                    reference_qpos=qpos,
+                    joint_limits=limits,
+                ),
+            )
+            coordinator = CandidateCoordinator(
+                legacy,
+                session=session,
+                source_adapter=TemplateSourceAdapter(),
+                source_context=source_context,
+                joint_limits=limits,
+                backend_id=plan.diagnostics.backend,
+            )
+            items = coordinator.enqueue_source(
+                template,
+                count=self._profile.trajectory.variants_per_family,
+            )
+            if not items:
+                raise ValueError(f"generic generation row {row} produced no candidates")
+            requested = recipe.cycle_schedule[0].trajectory_requested
+            selected_index = min(requested, len(items) - 1)
+            selected = items[selected_index]
+            positions.append(selected.template.positions)
+            dts.append(selected.template.dt)
+            row_specs.append(tuple(item.spec for item in items))
+            row_templates.append(tuple(item.template for item in items))
+            row_records.append(
+                {
+                    "row_index": row,
+                    "recipe_index": recipe.recipe_index,
+                    "candidate_id": selected.spec.identity.candidate_id,
+                    "trajectory_requested": requested,
+                    "trajectory_selected": selected_index,
+                    "fallback_count": max(0, requested - selected_index),
+                }
+            )
+        metadata = dict(plan.diagnostics.metadata)
+        metadata["generation"] = {"rows": row_records}
+        source_plan = replace(
+            plan,
+            diagnostics=PlannerDiagnostics(
+                backend=plan.diagnostics.backend,
+                messages=plan.diagnostics.messages,
+                metadata=metadata,
+                failure=plan.diagnostics.failure,
+            ),
+        )
+        rebuilt = engine.rebuild_plan_from_trajectory(
+            resolved,
+            context,
+            source_plan,
+            TimedTrajectory.from_positions(
+                torch.stack(positions),
+                env_ids=context.env_ids,
+                dt=torch.stack(dts),
+            ),
+        )
+        for row, (specs, templates, record) in enumerate(
+            zip(row_specs, row_templates, row_records, strict=True)
+        ):
+            self._records.append(
+                TaskProgramGenerationRecord(
+                    workflow_id=call_request.workflow_id,
+                    workflow_call_index=call_request.workflow_call_index,
+                    candidate_index=int(record["trajectory_selected"]),
+                    selected_candidate_id=str(record["candidate_id"]),
+                    candidates=specs,
+                    templates=templates,
+                    recipe_index=int(record["recipe_index"]),
+                    cycle_index=0,
+                    trajectory_requested=int(record["trajectory_requested"]),
+                    trajectory_selected=int(record["trajectory_selected"]),
+                    fallback_count=int(record["fallback_count"]),
+                    env_id=row,
+                )
+            )
+        return rebuilt
+
+    def _transform_batch(
+        self,
+        call_request: TaskProgramPlanRequest,
+        engine: AtomicActionEngine,
+        resolved: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+    ) -> ActionPlan:
+        """Expand each planning row independently and rebuild one batch plan."""
+        trajectory = plan.joint_trajectory
+        if trajectory is None:
+            raise ValueError("batch generation requires a joint trajectory")
+        if trajectory.batch_size != context.batch_size:
+            raise ValueError("plan trajectory batch must match planning context")
+        robot = engine.robot
+        joint_names = tuple(robot.joint_names)
+        limits = robot.body_data.qpos_limits
+        if not isinstance(limits, torch.Tensor):
+            raise TypeError("robot qpos_limits must be a tensor")
+        if limits.ndim == 3:
+            limits = limits[0]
+        if limits.shape != (len(joint_names), 2):
+            raise ValueError("robot qpos_limits must match the full joint order")
+        phase_names = {segment.name for segment in plan.segments}
+        if phase_names != set(
+            self._profile.source.phase_permissions
+        ) or phase_names != set(self._profile.source.phase_kinds):
+            raise ValueError(
+                "generation phase declarations must exactly match the ActionPlan"
+            )
+        phases = tuple(
+            TrajectoryPhase(
+                segment.name,
+                segment.start,
+                segment.stop,
+                kind=self._profile.source.phase_kinds[segment.name],
+                allowed_operators=tuple(
+                    self._profile.source.phase_permissions[segment.name]
+                ),
+            )
+            for segment in plan.segments
+        )
+        invocation_id = resolved.invocation_id or resolved.skill_id
+        selected_positions: list[torch.Tensor] = []
+        selected_dt: list[torch.Tensor] = []
+        row_records: list[dict[str, object]] = []
+        row_specs: list[tuple[CandidateSpec, ...]] = []
+        row_templates: list[tuple[TrajectoryTemplate, ...]] = []
+        for row in range(context.batch_size):
+            row_qpos = context.robot.qpos[row]
+            initial_digest = hashlib.sha256(
+                row_qpos.detach().cpu().contiguous().numpy().tobytes()
+            ).hexdigest()
+            case = SceneCase(
+                scene_case_id=self._integration_id,
+                initial_state_id="initial_" + initial_digest,
+                scene_signature=f"{self._integration_id}:scene:{context.scene.version}",
+                task_id=self._program_id,
+                robot_profile_id=self._robot_profile_id,
+            )
+            session = GenerationSession(self._profile)
+            session.register_case(case, limits, joint_names=joint_names)
+            source_context = SourceContext(
+                source_id=self._profile.source.source_id,
+                source_revision=self._profile.source.source_revision,
+                unit_id=(
+                    f"{call_request.workflow_id}:"
+                    f"{call_request.workflow_call_index}:{invocation_id}:row:{row}"
+                ),
+                scene_case=case,
+                control_dt=context.require_control_dt(),
+            )
+            template = TrajectoryTemplate(
+                source_id=self._program_id,
+                source_revision=self._profile.source.source_revision,
+                template_id=source_context.unit_id,
+                joint_names=joint_names,
+                positions=trajectory.positions[row],
+                dt=trajectory.dt[row],
+                phases=phases,
+                allowed_operators=tuple(
+                    dict.fromkeys(
+                        operator
+                        for phase in phases
+                        for operator in phase.allowed_operators
+                    )
+                ),
+                validator_id=self._profile.validation.validator_id,
+                controlled_joint_indices=_arm_joint_indices(
+                    robot,
+                    len(joint_names),
+                    reference_qpos=row_qpos,
+                    joint_limits=limits,
+                ),
+            )
+            coordinator = CandidateCoordinator(
+                self._profile,
+                session=session,
+                source_adapter=TemplateSourceAdapter(),
+                source_context=source_context,
+                joint_limits=limits,
+                backend_id=plan.diagnostics.backend,
+            )
+            items = coordinator.enqueue_source(
+                template,
+                count=self._profile.augmentation.max_variants_per_reference,
+            )
+            if not items:
+                raise ValueError(f"row {row} produced no trajectory candidates")
+            requested = (
+                self._candidate_index + row
+            ) % self._profile.augmentation.max_variants_per_reference
+            selected_index = min(requested, len(items) - 1)
+            selected = items[selected_index]
+            selected_positions.append(selected.template.positions)
+            selected_dt.append(selected.template.dt)
+            row_specs.append(tuple(item.spec for item in items))
+            row_templates.append(tuple(item.template for item in items))
+            row_records.append(
+                {
+                    "row_index": row,
+                    "candidate_index": selected_index,
+                    "candidate_id": selected.spec.identity.candidate_id,
+                    "trajectory_requested": requested,
+                    "trajectory_selected": selected_index,
+                    "fallback_count": max(0, requested - selected_index),
+                }
+            )
+        metadata = dict(plan.diagnostics.metadata)
+        metadata["generation"] = {"rows": row_records}
+        source_plan = replace(
+            plan,
+            diagnostics=PlannerDiagnostics(
+                backend=plan.diagnostics.backend,
+                messages=plan.diagnostics.messages,
+                metadata=metadata,
+                failure=plan.diagnostics.failure,
+            ),
+        )
+        rebuilt = engine.rebuild_plan_from_trajectory(
+            resolved,
+            context,
+            source_plan,
+            TimedTrajectory.from_positions(
+                torch.stack(selected_positions),
+                env_ids=context.env_ids,
+                dt=torch.stack(selected_dt),
+            ),
+        )
+        for row, (specs, templates, record) in enumerate(
+            zip(row_specs, row_templates, row_records, strict=True)
+        ):
+            self._records.append(
+                TaskProgramGenerationRecord(
+                    workflow_id=call_request.workflow_id,
+                    workflow_call_index=call_request.workflow_call_index,
+                    candidate_index=int(record["candidate_index"]),
+                    selected_candidate_id=str(record["candidate_id"]),
+                    candidates=specs,
+                    templates=templates,
+                    trajectory_requested=int(record["trajectory_requested"]),
+                    trajectory_selected=int(record["trajectory_selected"]),
+                    fallback_count=int(record["fallback_count"]),
+                    env_id=row,
+                )
+            )
         return rebuilt
 
     def _transform_batch(

@@ -49,11 +49,11 @@ The reusable `env.yaml` owns episode/environment values and physical simulation
 entities, and contains no Task Program metadata. When a backend needs native
 solver/contact values, a companion such as `env.newton.yaml` owns those values
 while retaining the same scene geometry and control cadence. The integration's
-nested `scene_binding` maps canonical `entity_id` values to physical
+The integration's nested `scene_binding` maps canonical `entity_id` values to physical
 `simulation_uid` values and owns semantic types and affordances. A thin
-`task.<embodiment>.yaml` deployment selects the Default environment; a backend
-companion such as `task.ur5.newton.yaml` selects `env.newton.yaml`. Both select
-one reusable embodiment and all three Task Program components (`program`,
+`task.<embodiment>.yaml` deployment selects named `default` and `newton`
+environment variants. Both select one reusable embodiment and all three Task
+Program components (`program`,
 `integration`, and `execution_policy`). Give each backend deployment a distinct
 Gym ID because the backend is file-owned.
 
@@ -120,8 +120,8 @@ selected by the `"id"` field of the gym config.
 # Data generation mode
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 
-# Newton companion (the file owns the backend; --physics only confirms it)
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml --physics newton
+# Newton variant selected from the same deployment
+embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
 
 # Preview mode
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --preview
@@ -130,8 +130,8 @@ embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/re
 python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
-# Another Newton companion
-python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml --physics newton
+# Newton variant selected from the same deployment
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
 ```
 
 ## How registration works

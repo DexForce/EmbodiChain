@@ -9,6 +9,6 @@ task_program:
   execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
 
 embodiment:
-  component: ../../../components/embodiments/franka_panda_vla.yaml
+  component: ../../../components/embodiments/franka_panda.yaml
   overrides:
     init_rot: [0.0, 0.0, 180.0]

@@ -32,15 +32,11 @@ from setuptools import Distribution
 from setuptools.command.build_py import build_py
 
 from setup import get_package_dir
-from embodichain.lab.sim.motion.expansion import load_generation_profile
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
-_REPEATED_PICK_PLACE_GENERATION = Path(
-    "tasks/manipulation/repeated_pick_place/generation.demo.yaml"
-)
 _PROGRAMS = {
     Path(
         "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
@@ -69,17 +65,7 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml"): (
-        "repeated_cube_pick_place",
-        "task_program_repeated_pick_place",
-        "ur5_dh_pgi_140_80",
-    ),
     Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"): (
-        "repeated_cube_pick_place",
-        "task_program_repeated_pick_place",
-        "franka_panda",
-    ),
-    Path("tasks/manipulation/repeated_pick_place/task.franka.newton.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
         "franka_panda",
@@ -89,7 +75,7 @@ _DEPLOYMENTS = {
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/open_drawer/task.ur5.newton.yaml"): (
+    Path("tasks/manipulation/open_drawer/task.ur5.generation.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
@@ -114,7 +100,6 @@ _RESOURCE_PATHS = frozenset(
     {
         *_PROGRAMS,
         *_DEPLOYMENTS,
-        _REPEATED_PICK_PLACE_GENERATION,
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
         Path("tasks/manipulation/repeated_pick_place/README.md"),
         Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf.yaml"),
@@ -126,21 +111,22 @@ _RESOURCE_PATHS = frozenset(
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
+        Path("components/generation_policies/task_program_episode.yaml"),
         Path("components/embodiments/cobotmagic.yaml"),
         Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
-        Path("components/embodiments/franka_panda_vla.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/env.yaml"),
         Path("tasks/manipulation/open_drawer/env.newton.yaml"),
+        Path("tasks/manipulation/open_drawer/README.md"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
-        Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.rlinf.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.rlinf_expert.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.rlinf_joint.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task.franka.rlinf_joint.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/env.yaml"),
         Path("tasks/manipulation/repeated_pick_place/env.newton.yaml"),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
@@ -149,13 +135,6 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }
 )
-
-
-def test_repeated_pick_place_generation_profile_strictly_loads() -> None:
-    profile = load_generation_profile(_CONFIG_SOURCE / _REPEATED_PICK_PLACE_GENERATION)
-
-    assert profile.source.kind == "task_program"
-    assert profile.augmentation.max_variants_per_reference == 3
 
 
 class _StagedConfigPackage(NamedTuple):

@@ -4,4 +4,4 @@ environment:
   component: env.rlinf.yaml
 
 embodiment:
-  component: ../../../components/embodiments/franka_panda_vla.yaml
+  component: ../../../components/embodiments/franka_panda.yaml

@@ -1846,3 +1846,51 @@ def test_asset_replacement_failure_preserves_original_config() -> None:
     replacement = env.sim.replace_rigid_object.call_args.kwargs["cfg"]
     assert replacement.shape.fpath == "new.ply"
     env.sim.remove_asset.assert_not_called()
+
+
+def test_generation_profile_reset_applies_selected_scene_and_visual_rows() -> None:
+    from embodichain.lab.gym.envs.managers.events import (
+        apply_generation_profile_reset,
+    )
+
+    class Cube:
+        def __init__(self) -> None:
+            self.pose = None
+            self.env_ids = None
+
+        def set_local_pose(self, pose, env_ids=None):
+            self.pose = pose
+            self.env_ids = env_ids
+
+    class Sim:
+        def __init__(self, cube) -> None:
+            self.cube = cube
+
+        def get_rigid_object(self, uid):
+            assert uid == "cube"
+            return self.cube
+
+    class Registry:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def apply_to_environment(self, env, assignments, *, seed):
+            self.calls.append((env, dict(assignments), seed))
+
+    cube = Cube()
+    registry = Registry()
+    env = Mock(num_envs=4, sim=Sim(cube))
+    pose = torch.arange(28, dtype=torch.float32).reshape(4, 7)
+
+    apply_generation_profile_reset(
+        env,
+        torch.tensor([1, 3]),
+        cube_pose=pose,
+        visual_registry=registry,
+        visual_assignments={0: "canonical", 1: "camera", 2: "light", 3: "material"},
+        visual_seed=11,
+    )
+
+    assert torch.equal(cube.pose, pose[[1, 3]])
+    assert torch.equal(cube.env_ids, torch.tensor([1, 3]))
+    assert registry.calls == [(env, {1: "camera", 3: "material"}, 11)]

@@ -98,16 +98,15 @@ not by Task Program or Gym.
 |---|---|---|
 | `TaskProgramRubiksCubePickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
 | `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.newton.yaml` |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml` |
+| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
+| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
 | `TaskProgramOpenDrawer-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.newton.yaml` |
+| `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
 | `HandOver-v1` | verified | `embodichain_tasks/configs/tasks/manipulation/hand_over/` |
 | `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
 
-The task-local configured example is
-`embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.demo.yaml`;
-its README routes to
+The task-local configured generation example is bound through the deployment's
+shared generation policy; its README routes to
 `examples/sim/motion/repeated_pick_place_generation_showcase.py`. That showcase
 reports projected completion and candidate provenance, not measured physical
 success or receipt-confirmed coverage.

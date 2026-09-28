@@ -145,18 +145,62 @@ def _resolve_environment_component(
     config: Mapping[str, object],
     *,
     base_dir: Path,
+    selected_backend: str | None = None,
 ) -> dict[str, object]:
-    """Expand one backend-specific reusable physical environment component."""
+    """Expand one selected reusable physical environment component.
+
+    A deployment may use the compact ``environment.default/newton`` mapping;
+    resolution still produces one concrete component before Gym decoding.
+    """
     resolved = _owned_mapping(config, path="Gym deployment")
     declaration = _mapping(
         resolved.pop("environment"),
         path="environment",
-        required=frozenset({"component"}),
+        required=frozenset(),
+        optional=frozenset({"component", "default", "newton", "variants"}),
     )
+    if "component" in declaration:
+        if any(key in declaration for key in ("default", "newton", "variants")):
+            raise ValueError(
+                "environment.component cannot be combined with backend variants"
+            )
+        component_value = declaration["component"]
+        component_path_name = "environment.component"
+    else:
+        if "variants" in declaration and any(
+            key in declaration for key in ("default", "newton")
+        ):
+            raise ValueError(
+                "environment.variants cannot be combined with direct backend keys"
+            )
+        variants_value = declaration.get("variants", declaration)
+        if not isinstance(variants_value, Mapping):
+            raise TypeError("environment variants must be a mapping")
+        variants = dict(variants_value)
+        if any(key not in {"default", "newton"} for key in variants):
+            raise ValueError(
+                "environment variants may only define 'default' and 'newton'"
+            )
+        backend = selected_backend or "default"
+        if backend not in variants:
+            available = sorted(str(key) for key in variants)
+            raise ValueError(
+                f"environment does not define backend {backend!r}; "
+                f"available variants: {available}"
+            )
+        component_value = variants[backend]
+        component_path_name = f"environment.{backend}"
+    if isinstance(component_value, Mapping):
+        component_declaration = _mapping(
+            component_value,
+            path=component_path_name,
+            required=frozenset({"component"}),
+        )
+        component_value = component_declaration["component"]
     component_path = _component_path(
-        declaration["component"],
+        component_value,
         base_dir=base_dir,
-        path="environment.component",
+        path=component_path_name,
     )
     component = _mapping(
         _load_yaml_component(component_path, field_name="environment component"),

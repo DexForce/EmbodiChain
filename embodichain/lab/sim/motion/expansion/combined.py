@@ -130,6 +130,8 @@ class _CombinedSourceCfg:
     source_revision: str = "config:repeated_pick_place_v1"
     unit_scope: str = "episode"
     template_id: str = "repeated_pick_place_episode"
+    phase_permissions: dict[str, tuple[str, ...]] = {}
+    phase_kinds: dict[str, str] = {}
 
     def __post_init__(self) -> None:
         if self.kind != "task_program":
@@ -138,6 +140,35 @@ class _CombinedSourceCfg:
             _text(getattr(self, name), f"source.{name}")
         if self.unit_scope != "episode":
             raise ValueError("combined source.unit_scope must be episode")
+        permissions = {
+            phase_id: tuple(operators)
+            for phase_id, operators in self.phase_permissions.items()
+        }
+        kinds = dict(self.phase_kinds)
+        if set(permissions) != set(kinds):
+            raise ValueError(
+                "source.phase_permissions and source.phase_kinds must name "
+                "the same phases"
+            )
+        for phase_id, operators in permissions.items():
+            _text(phase_id, "source phase")
+            if len(set(operators)) != len(operators):
+                raise ValueError(f"source.phase_permissions.{phase_id} must be unique")
+            if any(
+                operator not in ("joint_residual", "via_points")
+                for operator in operators
+            ):
+                raise ValueError(
+                    f"source.phase_permissions.{phase_id} contains an unsupported operator"
+                )
+        for phase_id, kind in kinds.items():
+            _text(phase_id, "source phase")
+            if kind not in ("free", "contact", "hold"):
+                raise ValueError(
+                    f"source.phase_kinds.{phase_id} must be free, contact, or hold"
+                )
+        self.phase_permissions = permissions
+        self.phase_kinds = kinds
 
 
 @configclass
@@ -154,11 +185,11 @@ class _SceneRandomizationCfg:
             self.reference_family_count, "scene_randomization.reference_family_count", 1
         )
         _text(self.profile, "scene_randomization.profile")
-        if self.change_scope != "cube_initial_pose_only":
+        if self.enabled and self.change_scope != "cube_initial_pose_only":
             raise ValueError(
                 "scene_randomization.change_scope must be cube_initial_pose_only"
             )
-        if not self.keep_drop_targets:
+        if self.enabled and not self.keep_drop_targets:
             raise ValueError("combined generation must keep authored drop targets")
 
 
@@ -233,7 +264,11 @@ class _VisualCfg:
 
     def __post_init__(self) -> None:
         self.profile_file = _text(self.profile_file, "visual.profile_file")
-        self.profiles = _strings(self.profiles, "visual.profiles")
+        self.profiles = _strings(
+            self.profiles,
+            "visual.profiles",
+            nonempty=self.enabled,
+        )
         _bool(self.enabled, "visual.enabled")
         _bool(self.apply_per_rollout, "visual.apply_per_rollout")
         _bool(
@@ -252,7 +287,7 @@ class _ObservationCfg:
     capture_video: bool = False
 
     def __post_init__(self) -> None:
-        self.profiles = _strings(self.profiles, "observation.profiles")
+        self.profiles = _strings(self.profiles, "observation.profiles", nonempty=False)
         _bool(self.capture_rgb, "observation.capture_rgb")
         _bool(self.capture_video, "observation.capture_video")
 
@@ -370,7 +405,15 @@ class CombinedGenerationProfile:
                 _CombinedSourceCfg,
                 data.get("source", {}),
                 "source",
-                {"kind", "source_id", "source_revision", "unit_scope", "template_id"},
+                {
+                    "kind",
+                    "source_id",
+                    "source_revision",
+                    "unit_scope",
+                    "template_id",
+                    "phase_permissions",
+                    "phase_kinds",
+                },
             ),
             "scene_randomization": _construct(
                 _SceneRandomizationCfg,

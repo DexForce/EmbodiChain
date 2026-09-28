@@ -350,18 +350,6 @@ def test_candidate_transform_rejects_out_of_range_ordinal_atomically() -> None:
     "override",
     [
         {"affordance": {"enabled": True}},
-        {
-            "augmentation": {
-                "max_variants_per_reference": 3,
-                "factors": {
-                    "spatial": {
-                        "enabled": True,
-                        "method": ["joint_residual", "via_points"],
-                    },
-                    "timing": {"enabled": True},
-                },
-            }
-        },
     ],
 )
 def test_candidate_transform_rejects_unsupported_profile_modes(
