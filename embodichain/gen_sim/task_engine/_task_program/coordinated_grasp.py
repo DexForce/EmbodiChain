@@ -35,8 +35,10 @@ from embodichain.utils import logger
 
 __all__: list[str] = []
 
-COORDINATED_GRASP_REVISION = 2
+COORDINATED_GRASP_REVISION = 4
 _CONTACT_TOLERANCE = 0.0005
+# A geometric facing cone, not a friction-cone or force-closure certificate.
+_CONTACT_NORMAL_COSINE = 0.5
 
 
 @dataclass(frozen=True)
@@ -194,6 +196,29 @@ class TriangleTarget:
         )
         self.lower, self.upper = torch.tensor(mesh.bounds, dtype=torch.float32)
 
+    def query_surface_normals(self, points: torch.Tensor) -> torch.Tensor:
+        """Query only near-contact samples using the cached target triangle BVH."""
+        import open3d as o3d
+
+        if not points.numel():
+            return torch.empty_like(points)
+        flat = points.detach().reshape(-1, 3).cpu().float().contiguous()
+        closest = self.scene.compute_closest_points(
+            o3d.core.Tensor(flat.numpy()), nthreads=2
+        )
+        normals = closest["primitive_normals"].numpy()
+        surface = closest["points"].numpy()
+        # Orient locally using the same solid-interior convention as signed
+        # distances. Total mesh volume cannot orient independent or nested shells.
+        offset = normals * (_CONTACT_TOLERANCE * 0.02)
+        probes = np.stack((surface + offset, surface - offset), axis=1)
+        occupied = self.scene.compute_occupancy(
+            o3d.core.Tensor(probes.astype(np.float32)), nthreads=2, nsamples=3
+        ).numpy()
+        sign = occupied[:, 1] - occupied[:, 0]
+        # Equal occupancy on both sides is ambiguous: a zero normal fails the gate.
+        return torch.from_numpy(normals * sign[:, None]).to(points).reshape_as(points)
+
     def query_batch_points(
         self, points: torch.Tensor, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -299,6 +324,7 @@ class HandCollisionChecker:
             "input": len(valid),
             "invalid_width_or_pose": int((~valid).sum()),
             "contact_missing": 0,
+            "contact_orientation": 0,
             "contact_body": 0,
             "contact_pad": 0,
             "open_body": 0,
@@ -351,6 +377,31 @@ class HandCollisionChecker:
                     touching = (nearest.abs() <= _CONTACT_TOLERANCE).all(-1)
                     counts["contact_missing"] += int((~touching).sum())
                     valid[indices[selected]] &= touching
+                    # Point proximity alone also accepts two pads grazing the
+                    # same tray face. Require material facing each inward pad.
+                    contacts = (
+                        _inward_faces(pads)[selected]
+                        & (pad_distances.abs() <= _CONTACT_TOLERANCE)
+                        & touching[:, None, None]
+                    )
+                    facing = torch.zeros_like(contacts)
+                    if contacts.any():
+                        pad_points = points[:, body.shape[1] :].reshape(
+                            -1, 2, pads.shape[2], 3
+                        )
+                        normals = self.target.query_surface_normals(
+                            pad_points[contacts]
+                        )
+                        axis = transforms[:, :3, 0]
+                        outward = torch.stack((-axis, axis), dim=1)
+                        outward = outward[:, :, None].expand_as(pad_points)
+                        facing[contacts] = torch.isfinite(normals).all(-1) & (
+                            (normals * outward[contacts]).sum(-1)
+                            >= _CONTACT_NORMAL_COSINE
+                        )
+                    opposed = facing.any(-1).all(-1)
+                    counts["contact_orientation"] += int((touching & ~opposed).sum())
+                    valid[indices[selected]] &= opposed
                 limit = torch.where(allowed, -_CONTACT_TOLERANCE, -1e-6)
                 body_bad = (
                     distance[:, : body.shape[1]] < limit[:, : body.shape[1]]
