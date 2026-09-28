@@ -31,7 +31,11 @@ from embodichain.lab.gym.envs.managers.randomization import visual
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_camera_extrinsics,
 )
-from embodichain.utils.math import matrix_from_quat
+from embodichain.utils.math import (
+    euler_xyz_from_quat,
+    matrix_from_quat,
+    quat_from_euler_xyz,
+)
 
 
 def _make_env(extrinsics: SimpleNamespace) -> SimpleNamespace:
@@ -174,12 +178,15 @@ def test_arena_pose_camera_uses_nonzero_pose_ranges(warnings, monkeypatch) -> No
     assert torch.allclose(pose[:, :3, 3], expected_position)
 
     # Arena-frame poses are converted to the OpenGL frame just like Camera.reset.
-    baseline_rotation = matrix_from_quat(
-        torch.tensor(_arena_pose_extrinsics().quat).unsqueeze(0)
-    )[0]
-    baseline_rotation[:, 1] *= -1
-    baseline_rotation[:, 2] *= -1
-    assert not torch.allclose(pose[0, :3, :3], baseline_rotation)
+    base_quat = torch.tensor(_arena_pose_extrinsics().quat).unsqueeze(0)
+    base_euler = torch.stack(euler_xyz_from_quat(base_quat), dim=1)
+    euler_delta = torch.tensor([0.05, -0.01, 0.06])
+    expected_euler = base_euler + euler_delta
+    roll, pitch, yaw = expected_euler.unbind(dim=1)
+    expected_rotation = matrix_from_quat(quat_from_euler_xyz(roll, pitch, yaw))[0]
+    expected_rotation[:, 1] *= -1
+    expected_rotation[:, 2] *= -1
+    assert torch.allclose(pose[0, :3, :3], expected_rotation)
 
 
 @pytest.mark.no_sim
