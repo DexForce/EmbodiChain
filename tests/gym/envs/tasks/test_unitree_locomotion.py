@@ -135,6 +135,37 @@ def test_locomotion_state_binds_new_action_term_buffers() -> None:
     assert env.encoder_bias is term.position_bias
 
 
+def test_locomotion_state_keeps_legacy_named_action_binding() -> None:
+    """A compatible named custom action remains valid without a contract ID."""
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    term = SimpleNamespace(
+        raw_actions=torch.ones(2, 3),
+        previous_raw_actions=torch.full((2, 3), 2.0),
+        position_bias=torch.full((2, 3), 0.1),
+    )
+
+    def unexpected_contract_lookup(contract: str) -> None:
+        raise AssertionError(f"unexpected contract lookup: {contract}")
+
+    env = SimpleNamespace(
+        action_manager=SimpleNamespace(
+            get_term=lambda name: term,
+            get_term_by_contract=unexpected_contract_lookup,
+        ),
+    )
+
+    EmbodiChainVelocityEnv._bind_locomotion_action_state(env)
+
+    assert env.locomotion_action is term.raw_actions
+    assert env.last_locomotion_action is term.previous_raw_actions
+    assert env.encoder_bias is term.position_bias
+
+
 @pytest.mark.parametrize("robot", ["g1", "h1_2", "go1", "go2"])
 @pytest.mark.parametrize("backend", ["default", "newton"])
 def test_unitree_deployments_preserve_task_physics(

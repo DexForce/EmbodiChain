@@ -61,7 +61,21 @@ class ActionTerm(Functor):
         super().__init__(cfg, env)
 
     def resolved_contract_id(self) -> str | None:
-        """Return the configured contract or the implementation's stable ID."""
+        """Return the configured contract or the implementation's stable ID.
+
+        Raises:
+            ValueError: If a configured contract differs from the implementation
+                contract declared by the action class.
+        """
+        implementation_contract = type(self).contract_id
+        if (
+            self.cfg.contract is not None
+            and self.cfg.contract != implementation_contract
+        ):
+            raise ValueError(
+                f"Configured contract {self.cfg.contract!r} does not match "
+                f"{type(self).__name__} contract {implementation_contract!r}."
+            )
         return self.cfg.contract or self.contract_id
 
     @property
@@ -415,6 +429,18 @@ class ActionManager(ManagerBase):
             ):
                 raise TypeError(
                     f"Action term {term_name!r} must resolve to an ActionTerm class."
+                )
+
+            implementation_contract = term_cfg.func.contract_id
+            if (
+                term_cfg.contract is not None
+                and term_cfg.contract != implementation_contract
+            ):
+                raise ValueError(
+                    f"Action term {term_name!r} configured contract "
+                    f"{term_cfg.contract!r} does not match implementation "
+                    f"{term_cfg.func.__name__} contract "
+                    f"{implementation_contract!r}."
                 )
 
             self._process_functor_cfg_at_play(term_name, term_cfg)

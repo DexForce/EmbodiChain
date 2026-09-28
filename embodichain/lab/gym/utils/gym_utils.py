@@ -927,8 +927,14 @@ def config_to_cfg(
                     f"Action term {term_name!r} uses removed field 'mode'; "
                     "action terms now process and apply in configuration order."
                 )
+            if term_params.get("contract") is not None and "func" in term_params:
+                raise ValueError(
+                    f"Action term {term_name!r} cannot declare both 'func' and "
+                    "'contract'; choose one action declaration."
+                )
             term_contract = term_params.get("contract")
             term_class_name = term_params.get("func")
+            is_legacy_default_position = term_class_name == "DefaultJointPositionTerm"
             if term_contract is None and isinstance(term_class_name, str):
                 term_contract = _LEGACY_ACTION_CONTRACTS.get(term_class_name)
             if term_contract is not None:
@@ -961,6 +967,16 @@ def config_to_cfg(
             term_params_modified = deepcopy(term_params)
             term_params_modified.pop("contract", None)
             term_params_modified.pop("func", None)
+            if is_legacy_default_position:
+                legacy_params = term_params_modified.get("params", {})
+                if not isinstance(legacy_params, dict):
+                    raise TypeError(
+                        f"Action term {term_name!r} params must be a mapping."
+                    )
+                # The removed term treated an omitted or null clip as unbounded.
+                # Preserve that behavior when loading persisted policy snapshots.
+                legacy_params.setdefault("clip", None)
+                term_params_modified["params"] = legacy_params
             action_term = ActionTermCfg(
                 func=term_func,
                 params=term_params_modified.get("params", {}),

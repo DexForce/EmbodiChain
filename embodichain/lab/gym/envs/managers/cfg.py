@@ -350,7 +350,8 @@ class ActionTermCfg(FunctorCfg):
 
     The action term owns one ordered slice of the flat policy action. New
     persisted configurations should use ``contract`` so the action semantics
-    remain stable when the implementation class is renamed.
+    remain stable when the implementation class is renamed. A configured
+    contract must match the selected action implementation's ``contract_id``.
     """
 
     contract: str | None = None

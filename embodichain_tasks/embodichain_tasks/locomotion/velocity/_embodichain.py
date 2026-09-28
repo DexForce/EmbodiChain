@@ -252,10 +252,45 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
 
     def _bind_locomotion_action_state(self) -> None:
-        """Bind task state to the default-position action term buffers."""
-        action_term = self.action_manager.get_term_by_contract(
-            "joint_position.default_offset@1"
-        )
+        """Bind task state to the default-position action term buffers.
+
+        Older custom deployments identify this compatible term by the stable
+        ``joint_position`` name without declaring a contract. Keep that
+        name-based path when its state interface is present, then fall back to
+        the versioned contract for migrated configurations.
+        """
+        contract_id = "joint_position.default_offset@1"
+        required_state = ("raw_actions", "previous_raw_actions", "position_bias")
+
+        action_term = None
+        get_term = getattr(self.action_manager, "get_term", None)
+        if callable(get_term):
+            try:
+                named_term = get_term("joint_position")
+            except KeyError:
+                named_term = None
+            if named_term is not None:
+                resolved_contract = getattr(named_term, "contract_id", None)
+                resolve_contract = getattr(named_term, "resolved_contract_id", None)
+                if callable(resolve_contract):
+                    resolved_contract = resolve_contract()
+                if resolved_contract in {None, contract_id} and all(
+                    hasattr(named_term, attribute) for attribute in required_state
+                ):
+                    action_term = named_term
+
+        if action_term is None:
+            action_term = self.action_manager.get_term_by_contract(contract_id)
+        missing_state = [
+            attribute
+            for attribute in required_state
+            if not hasattr(action_term, attribute)
+        ]
+        if missing_state:
+            raise TypeError(
+                f"Locomotion action term must expose {required_state}; "
+                f"missing {missing_state}."
+            )
         self.locomotion_action = action_term.raw_actions
         self.last_locomotion_action = action_term.previous_raw_actions
         self.encoder_bias = action_term.position_bias

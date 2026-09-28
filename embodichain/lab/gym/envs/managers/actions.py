@@ -367,7 +367,11 @@ class JointEffortAction(_JointAction):
 
 
 class DefaultJointPositionAction(_JointAction):
-    """Map normalized actions around a configured default joint pose."""
+    """Map normalized actions around a configured default joint pose.
+
+    ``clip`` defaults to ``1.0``; ``None`` preserves the unbounded behavior of
+    legacy ``DefaultJointPositionTerm`` snapshots.
+    """
 
     contract_id: ClassVar[str] = "joint_position.default_offset@1"
     command_type = "qpos"
@@ -394,20 +398,26 @@ class DefaultJointPositionAction(_JointAction):
             device=env.device,
             name="scale",
         )
-        self._clip = float(cfg.params.get("clip", 1.0))
+        clip = cfg.params.get("clip", 1.0)
+        self._clip = None if clip is None else float(clip)
         self.position_bias = torch.zeros_like(self._raw_actions)
 
     @property
     def action_space(self) -> gym.spaces.Box:
+        if self._clip is None:
+            bounds = np.full(self.action_dim, np.inf, dtype=np.float32)
+        else:
+            bounds = np.full(self.action_dim, self._clip, dtype=np.float32)
         return gym.spaces.Box(
-            low=-np.full(self.action_dim, self._clip, dtype=np.float32),
-            high=np.full(self.action_dim, self._clip, dtype=np.float32),
+            low=-bounds,
+            high=bounds,
             dtype=np.float32,
         )
 
     def process_actions(self, actions: torch.Tensor) -> None:
         self._store_raw(actions)
-        self._raw_actions.clamp_(-self._clip, self._clip)
+        if self._clip is not None:
+            self._raw_actions.clamp_(-self._clip, self._clip)
         self._processed_actions.copy_(
             self._offset + self._scale * self._raw_actions - self.position_bias
         )
