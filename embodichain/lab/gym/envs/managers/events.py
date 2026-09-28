@@ -436,7 +436,8 @@ def register_entity_pose(
                     }
                 )
                 if compute_pose_object_to_arena:
-                    pose_arena = torch.bmm(entity_pose, entity_extra_attr_val)
+                    # matmul broadcasts a static (1, 4, 4) pose over all envs; bmm doesn't.
+                    pose_arena = torch.matmul(entity_pose, entity_extra_attr_val)
                     update_registration_dict.update(
                         {
                             entity_cfg.uid
@@ -550,8 +551,10 @@ def get_pose(
             return None
         entity_cfg.control_parts = control_parts
         control_part = control_parts[0]
-        control_part_qpos = entity.get_qpos()[
-            env_ids, entity.get_joint_ids(control_part)
+        # Select envs first, then joints: indexing with both at once pairs the
+        # two index lists element-wise instead of taking every joint per env.
+        control_part_qpos = entity.get_qpos()[env_ids][
+            :, entity.get_joint_ids(control_part)
         ]
         entity_pose = entity.compute_fk(
             control_part_qpos, name=control_part, to_matrix=to_matrix
