@@ -49,7 +49,8 @@ class _FakeEnv(gym.Env):
         self.num_envs = num_envs
         self.device = torch.device("cpu")
         self.max_episode_steps = 10
-        self.robot = SimpleNamespace(dof=2)
+        self.step_dt = 0.04
+        self.robot = SimpleNamespace(dof=2, joint_names=["joint0", "joint1"])
         self.active_joint_ids = [0, 1]
         self.sim = _FakeSim()
         self.sim_cfg = SimpleNamespace(physics_dt=0.01)
@@ -110,6 +111,12 @@ def _trajectory(
         "lengths": [num_steps] * num_envs,
         "robot_dof": 2,
         "active_joint_ids": [0, 1],
+        "expert_trajectory_schema_version": 1,
+        "joint_command_mode": "position",
+        "joint_names": ["joint0", "joint1"],
+        "qpos_slice": [0, 2],
+        "qvel_slice": None,
+        "step_dt": 0.04,
     }
     if meta_updates:
         meta.update(meta_updates)

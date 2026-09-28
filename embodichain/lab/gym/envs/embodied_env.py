@@ -48,17 +48,16 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     LightCfg,
 )
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    get_func_tag,
-)
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    ActionBank,
-)
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
+from embodichain.lab.gym.envs.objectives import (
+    MeasuredRigidObjectState,
+    OrderedPlacementObjective,
+    OrderedPlacementObjectiveCfg,
+)
 from embodichain.lab.gym.envs.demo import (
     DEMO_SCHEMA_VERSION,
     DemoExecutionCfg,
@@ -227,6 +226,9 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
 
+    objective: OrderedPlacementObjectiveCfg | None = None
+    """Optional measured physical objective, independent of task success and persistence."""
+
     expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
     """Source-neutral expert trajectory control and recording settings."""
 
@@ -313,7 +315,6 @@ class EmbodiedEnv(BaseEnv):
         perturbation, etc.
     - observation manager: The observation manager is used to manage the observations in the environment,
         such as depth, segmentation, etc.
-    - action bank: The action bank is used to manage the actions in the environment, such as action composition, action graph, etc.
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
 
@@ -367,8 +368,9 @@ class EmbodiedEnv(BaseEnv):
                     "task_program_adapter_factory must implement "
                     "TaskProgramAdapterFactory or be None."
                 )
+        self.physical_objective: OrderedPlacementObjective | None = None
+        self._physical_objective_object = None
         self.affordance_datas = {}
-        self.action_bank = None
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
@@ -391,6 +393,7 @@ class EmbodiedEnv(BaseEnv):
         super().__init__(cfg, **kwargs)
 
         try:
+            self._initialize_physical_objective()
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
                     self.robot.joint_names[joint_id]
@@ -832,59 +835,6 @@ class EmbodiedEnv(BaseEnv):
                         )
                         setattr(self.cfg.events, attr_name, None)
 
-    def _init_action_bank(
-        self, action_bank_cls: ActionBank, action_config: Dict[str, Any]
-    ):
-        """
-        Initialize action bank and parse action graph structure.
-
-        Args:
-            action_bank_cls: The ActionBank class for this environment.
-            action_config: The configuration dict for the action bank.
-        """
-        self.action_bank = action_bank_cls(action_config)
-        try:
-            this_class_name = self.action_bank.__class__.__name__
-            node_func = {}
-            edge_func = {}
-            for class_name in [this_class_name, ActionBank.__name__]:
-                node_func.update(get_func_tag("node").functions.get(class_name, {}))
-                edge_func.update(get_func_tag("edge").functions.get(class_name, {}))
-        except KeyError as e:
-            raise KeyError(
-                f"Function tag for {e} not found in action bank function registry."
-            )
-
-        self.graph_compose, jobs_data, jobkey2index = self.action_bank.parse_network(
-            node_functions=node_func, edge_functions=edge_func, vis_graph=False
-        )
-        self.packages = self.action_bank.gantt(
-            tasks_data=jobs_data, taskkey2index=jobkey2index, vis=False
-        )
-
-    def set_affordance(self, key: str, value: Any):
-        """
-        Set an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            value (Any): The affordance value.
-        """
-        self.affordance_datas[key] = value
-
-    def get_affordance(self, key: str, default: Any = None):
-        """
-        Get an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            default (Any, optional): Default value if key not found.
-
-        Returns:
-            Any: The affordance value or default.
-        """
-        return self.affordance_datas.get(key, default)
-
     def _hook_after_sim_step(
         self,
         obs: EnvObs,
@@ -993,6 +943,49 @@ class EmbodiedEnv(BaseEnv):
             if "interval" in self.event_manager.available_modes:
                 with self._profiler.section("event_interval"):
                     self.event_manager.apply(mode="interval")
+
+    def _initialize_physical_objective(self) -> None:
+        """Bind an optional objective to an existing measured rigid object."""
+        cfg = getattr(self.cfg, "objective", None)
+        self.physical_objective = None
+        self._physical_objective_object = None
+        if cfg is None:
+            return
+        objective = OrderedPlacementObjective(cfg, self.num_envs, self.device)
+        obj = self.sim.get_rigid_object(objective.cfg.object_uid)
+        if obj is None:
+            raise ValueError(
+                f"Physical objective object_uid {objective.cfg.object_uid!r} "
+                "does not name an existing rigid object."
+            )
+        if obj.body_data is None:
+            raise ValueError(
+                f"Physical objective object_uid {objective.cfg.object_uid!r} "
+                "requires measured rigid body data; static objects are unsupported."
+            )
+        self._physical_objective_object = obj
+        self.physical_objective = objective
+
+    def _update_physical_objective(self) -> None:
+        """Observe measured state after interval events, once per control step."""
+        objective = getattr(self, "physical_objective", None)
+        if objective is None:
+            return
+        obj = self._physical_objective_object
+        objective.update(
+            MeasuredRigidObjectState(
+                position=obj.get_local_pose()[:, :3],
+                linear_velocity=obj.body_data.lin_vel,
+                angular_velocity=obj.body_data.ang_vel,
+            ),
+            self.step_dt,
+        )
+
+    def _reset_physical_objective(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Clear objective rows after recorders and episode reset events."""
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            objective.reset(env_ids)
 
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
@@ -1475,6 +1468,9 @@ class EmbodiedEnv(BaseEnv):
                     "metadata": {},
                 }
             ]
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            metadata["physical_objective"] = objective.snapshot_row(env_id)
         return metadata
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
@@ -2131,6 +2127,9 @@ class EmbodiedEnv(BaseEnv):
             "elapsed_steps": self._elapsed_steps,
             "metrics": metrics,
         }
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            info["physical_objective"] = objective.snapshot()
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
@@ -2173,14 +2172,17 @@ class EmbodiedEnv(BaseEnv):
             )
         if is_controller_action:
             action = action.value
-        record_position_velocity = (
+        record_controller_targets = (
             self._traj_buffer is not None
             and not policy_trajectory
             and getattr(self, "expert_action_spec", None) is not None
-            and self.expert_action_spec.joint_command_mode == "position_velocity"
+            and (
+                is_controller_action
+                or self.expert_action_spec.joint_command_mode == "position_velocity"
+            )
         )
         retain_raw_action = getattr(self, "_record_raw_actions", False) or (
-            self._traj_buffer is not None and not record_position_velocity
+            self._traj_buffer is not None and not record_controller_targets
         )
         raw_action = (
             (action.clone() if hasattr(action, "clone") else copy.deepcopy(action))
@@ -2234,7 +2236,7 @@ class EmbodiedEnv(BaseEnv):
                 )
         if policy_trajectory:
             self._traj_raw_action = raw_action.clone()
-        elif record_position_velocity:
+        elif record_controller_targets:
             self._traj_raw_action = encode_expert_action(
                 action,
                 spec=self.expert_action_spec,

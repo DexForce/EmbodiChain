@@ -65,6 +65,11 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
     ),
+    Path("tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml"): (
+        "repeated_cube_pick_place",
+        "task_program_repeated_pick_place",
+        "ur5_dh_pgi_140_80",
+    ),
     Path("tasks/manipulation/repeated_pick_place/task.franka.yaml"): (
         "repeated_cube_pick_place",
         "task_program_repeated_pick_place",
@@ -97,6 +102,7 @@ _RESOURCE_PATHS = frozenset(
         *_DEPLOYMENTS,
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
         Path("tasks/manipulation/repeated_pick_place/README.md"),
+        Path("tasks/manipulation/repeated_pick_place/objective.yaml"),
         Path("tasks/manipulation/push_cube/catalog.yaml"),
         Path("tasks/manipulation/push_cube/README.md"),
         Path("tasks/manipulation/tableware/stack_cups/catalog.yaml"),

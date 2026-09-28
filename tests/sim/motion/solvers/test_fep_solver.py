@@ -1081,6 +1081,23 @@ def test_tcp_updates_refresh_both_geometry_and_fk(solver: FEPSolver) -> None:
         _assert_pose_accuracy(target, solver.get_fk(result))
 
 
+def test_invalid_tcp_update_preserves_fk_and_ik(solver: FEPSolver) -> None:
+    tcp = np.eye(4)
+    tcp[:3, :3] = Rotation.from_euler("xyz", [0.2, -0.1, 0.3]).as_matrix()
+    tcp[:3, 3] = [0.13, -0.02, 0.03]
+    solver.set_tcp(tcp)
+    qpos = solver.get_default_qpos_seed()[None]
+    target = solver.get_fk(qpos)
+    for invalid in (np.zeros((4, 4)), np.diag([2.0, 1, 1, 1]), np.full((4, 4), np.nan)):
+        with pytest.raises((ValueError, np.linalg.LinAlgError)):
+            solver.set_tcp(invalid)
+        np.testing.assert_array_equal(solver.get_tcp(), tcp)
+        _assert_pose_accuracy(target, solver.get_fk(qpos))
+        valid, result = solver.get_ik(target, qpos)
+        assert bool(valid.all())
+        _assert_pose_accuracy(target, solver.get_fk(result))
+
+
 @pytest.mark.parametrize(
     "invalid", ["target", "seed", "limits", "rotation", "last_row"]
 )

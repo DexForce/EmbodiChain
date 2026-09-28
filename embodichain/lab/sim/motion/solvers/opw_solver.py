@@ -27,6 +27,7 @@ from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.compute.kinematics._warp.opw import (
     OPWparam,
@@ -131,9 +132,7 @@ class OPWSolver(BaseSolver):
     def set_tcp(self, xpos: np.ndarray):
         super().set_tcp(xpos)
         self._tcp_warp = wp.mat44f(self.tcp_xpos)
-        tcp_inv = np.eye(4, dtype=float)
-        tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
-        tcp_inv[:3, 3] = -tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
+        tcp_inv = inv_transform(self.tcp_xpos)
         self._tcp_inv_warp = wp.mat44f(tcp_inv)
 
     def _init_warp_solver(self, cfg: OPWSolverCfg, **kwargs):

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 from typing import Union, Tuple, Any, Literal, TYPE_CHECKING
 from scipy.spatial.transform import Rotation
@@ -23,6 +25,7 @@ from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.utils.math import (
     apply_delta_pose,
     compute_pose_error,
+    inv_transform,
 )
 
 if TYPE_CHECKING:
@@ -246,7 +249,7 @@ class DifferentialSolver(BaseSolver):
         tcp_xpos = torch.as_tensor(
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        tcp_xpos_inv = torch.inverse(tcp_xpos)
+        tcp_xpos_inv = inv_transform(tcp_xpos)
         current_xpos = current_xpos @ tcp_xpos_inv
         compute_xpos = target_xpos @ tcp_xpos_inv
 

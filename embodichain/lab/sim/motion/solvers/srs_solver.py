@@ -25,6 +25,7 @@ import warp as wp
 
 from embodichain.lab.sim.motion.solvers import BaseSolver, SolverCfg
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 from embodichain.utils.device_utils import standardize_device_string
 from embodichain.compute.kinematics._warp.srs import (
     check_success_kernel,
@@ -140,9 +141,9 @@ class _BaseSRSSolverImpl:
     def _parse_params(self):
         # Compute the inverse transformation matrices for TCP, end-effector, and base.
         self.tcp_xpos = self.cfg.tcp
-        self.tcp_inv_np = np.linalg.inv(self.tcp_xpos)
-        self.T_e_oe_inv_np = np.linalg.inv(self.cfg.T_e_oe)
-        self.T_b_ob_inv_np = np.linalg.inv(self.cfg.T_b_ob)
+        self.tcp_inv_np = inv_transform(np.asarray(self.tcp_xpos))
+        self.T_e_oe_inv_np = inv_transform(np.asarray(self.cfg.T_e_oe))
+        self.T_b_ob_inv_np = inv_transform(np.asarray(self.cfg.T_b_ob))
 
         # Convert configuration parameters to numpy arrays for efficient computation.
         self.dh_params_np = np.asarray(self.cfg.dh_params)
@@ -1420,7 +1421,7 @@ class SRSSolver(BaseSolver):
         super().set_tcp(xpos)
         if hasattr(self, "impl"):
             self.impl.tcp_xpos = self.tcp_xpos.copy()
-            self.impl.tcp_inv_np = np.linalg.inv(self.tcp_xpos)
+            self.impl.tcp_inv_np = inv_transform(self.tcp_xpos)
             if isinstance(self.impl, _CUDASRSSolverImpl):
                 self.impl.tcp_inv_wp = wp.mat44(*self.impl.tcp_inv_np.flatten())
 

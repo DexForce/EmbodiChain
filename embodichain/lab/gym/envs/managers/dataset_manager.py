@@ -92,9 +92,7 @@ class DatasetManager(ManagerBase):
         # Call base class to parse functors
         super().__init__(cfg, env)
 
-        ## TODO: fix configurable_action.py to avoid getting env.metadata['dataset']
         # Extract robot_meta and instruction from functor params or plain config and add to env.metadata for backward compatibility
-        # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         robot_meta_found = False
 
         # First, try to extract from functor params
