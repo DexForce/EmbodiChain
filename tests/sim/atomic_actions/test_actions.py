@@ -4581,6 +4581,27 @@ def test_handover_requires_antipodal_affordance_and_valid_options() -> None:
         HandOverOptions(hand_interp_steps=0)
 
 
+def test_handover_rejects_link_scoped_grasp_mesh() -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(mesh_scope="link"),
+        geometry={},
+        entity_id="handover_object",
+    )
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+        binding=_dual_binding(action, "source", "destination"),
+    )
+
+    with pytest.raises(ValueError, match="whole-object geometry"):
+        _plan_action(
+            action,
+            invocation,
+            _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1)),
+        )
+
+
 @pytest.mark.parametrize(
     ("hold_steps", "expected_segments"),
     (
@@ -4654,6 +4675,24 @@ def test_coordinated_pick_returns_full_dof_plan_and_omits_empty_hold(
         for previous, current in zip(plan.segments, plan.segments[1:])
     )
     assert plan.segments[-1].stop == plan.commands.frame_count
+
+
+def test_coordinated_pick_rejects_link_scoped_grasp_mesh() -> None:
+    action = _bind_action(_dual_motion_generator(), CoordinatedPickment())
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(mesh_scope="link"),
+        geometry={},
+        entity_id="partial_object",
+    )
+
+    with pytest.raises(ValueError, match="whole-object geometry"):
+        action._resolve_dual_arm_grasp_poses(
+            semantics,
+            torch.eye(4).repeat(NUM_ENVS, 1, 1),
+            CoordinatedPickmentOptions(),
+            "left_hand",
+            "right_hand",
+        )
 
 
 def test_coordinated_pick_implicit_initial_pose_uses_scene_snapshot() -> None:
@@ -5269,7 +5308,10 @@ def _expanded_context(
     )
 
 
-def test_pickup_samples_distinct_feasible_grasps_through_affordance() -> None:
+@pytest.mark.parametrize("mesh_scope", ("object", "link"))
+def test_pickup_samples_distinct_feasible_grasps_through_affordance(
+    mesh_scope: str,
+) -> None:
     generator = _motion_generator()
     generator.robot.compute_batch_ik.side_effect = lambda *, pose, name, joint_seed: (
         torch.ones(pose.shape[:2], dtype=torch.bool),
@@ -5288,6 +5330,7 @@ def test_pickup_samples_distinct_feasible_grasps_through_affordance() -> None:
         affordance=AntipodalAffordance(
             mesh_vertices=torch.zeros(3, 3),
             mesh_triangles=torch.tensor([[0, 1, 2]]),
+            mesh_scope=mesh_scope,
         ),
         geometry={},
         entity_id="cube",

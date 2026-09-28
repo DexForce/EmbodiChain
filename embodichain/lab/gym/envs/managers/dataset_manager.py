@@ -92,9 +92,7 @@ class DatasetManager(ManagerBase):
         # Call base class to parse functors
         super().__init__(cfg, env)
 
-        ## TODO: fix configurable_action.py to avoid getting env.metadata['dataset']
         # Extract robot_meta and instruction from functor params or plain config and add to env.metadata for backward compatibility
-        # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         robot_meta_found = False
 
         # First, try to extract from functor params
@@ -195,6 +193,25 @@ class DatasetManager(ManagerBase):
             functor_cfg.save_failed_episodes
             for functor_cfg in self._mode_functor_cfgs.get("save", [])
         )
+
+    @property
+    def requires_raw_actions(self) -> bool:
+        """Whether a recorder needs pre-controller policy actions."""
+        return any(
+            bool(getattr(functor_cfg.func, "requires_raw_actions", False))
+            for functor_cfg in self._mode_functor_cfgs.get("save", [])
+        )
+
+    def validate_policy_action(self, action: torch.Tensor) -> None:
+        """Validate a live policy action for every descriptor-driven recorder.
+
+        Args:
+            action: Flat policy tensor before ActionManager processing.
+        """
+        for functor_cfg in self._mode_functor_cfgs.get("save", []):
+            validator = getattr(functor_cfg.func, "validate_policy_action", None)
+            if callable(validator):
+                validator(action)
 
     """
     Operations.

@@ -17,8 +17,9 @@
 """Unified benchmark for OPW, UR, FEP, and Pytorch kinematic solvers.
 
 Measures IK wall-clock latency, pose accuracy, success rate, and memory usage
-across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), and the
-Pytorch solver (CPU vs optional CUDA).
+across OPW (Warp CUDA vs CPU), UR analytic (Warp CPU vs CUDA), FEP, and Pytorch.
+The explicit Franka mode compares its current FEP preset with the former
+Pytorch preset on identical workloads.
 Run: embodichain benchmark robotics-kinematic-solver
 """
 
@@ -77,11 +78,12 @@ def _parse_args() -> argparse.Namespace:
         "--solvers",
         "-s",
         nargs="+",
-        choices=(*SUPPORTED_SOLVERS, "all"),
+        choices=(*SUPPORTED_SOLVERS, "franka", "all"),
         default=["all"],
         help=(
-            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, all. "
-            "Default: all"
+            "Solvers to benchmark. Use one or more of: opw, pytorch, ur, fep, "
+            "franka, all. The franka comparison runs only when selected explicitly. "
+            "Default: all."
         ),
     )
     return parser.parse_args()
@@ -91,7 +93,11 @@ def _normalize_selected_solvers(selected_solvers: list[str] | None) -> set[str]:
     """Normalize selected solver names to a canonical set."""
     if not selected_solvers or "all" in selected_solvers:
         return set(SUPPORTED_SOLVERS)
-    return {solver for solver in selected_solvers if solver in SUPPORTED_SOLVERS}
+    return {
+        solver
+        for solver in selected_solvers
+        if solver in (*SUPPORTED_SOLVERS, "franka")
+    }
 
 
 def _sync_cuda() -> None:
@@ -876,18 +882,24 @@ def benchmark_ur_solver() -> tuple[list[dict[str, object]], list[dict[str, objec
     return perf_rows, metric_rows
 
 
-def _timed_fep_ik_call(
-    solver: FEPSolver,
+def _timed_solver_ik_call(
+    solver: FEPSolver | PytorchSolver,
     fk_xpos: torch.Tensor,
     qpos_seed: torch.Tensor,
+    repeats: int = 10,
+    random_seed: int | None = None,
 ) -> tuple[float, dict[str, float], float, torch.Tensor, torch.Tensor]:
-    """Measure median FEP latency over ten synchronized, warmed calls."""
+    """Measure median latency over synchronized, warmed solver calls."""
+    if random_seed is not None:
+        torch.manual_seed(random_seed)
     solver.get_ik(fk_xpos, qpos_seed)
     _sync_cuda()
     _reset_peak_gpu_memory()
     before = _memory_snapshot()
     timings = []
-    for _ in range(10):
+    for _ in range(repeats):
+        if random_seed is not None:
+            torch.manual_seed(random_seed)
         start = time.perf_counter()
         success, joints = solver.get_ik(fk_xpos, qpos_seed)
         _sync_cuda()
@@ -959,7 +971,7 @@ def benchmark_fep_solver() -> tuple[list[dict[str, object]], list[dict[str, obje
                 if mode == "known_q7":
                     trial_seed[:, 6] = qpos[:, 6]
                 target = solver.get_fk(qpos)
-                elapsed, memory, peak, success, joints = _timed_fep_ik_call(
+                elapsed, memory, peak, success, joints = _timed_solver_ik_call(
                     solver, target, trial_seed
                 )
                 if max_step is not None:
@@ -1008,6 +1020,135 @@ def benchmark_fep_solver() -> tuple[list[dict[str, object]], list[dict[str, obje
     return perf_rows, metric_rows
 
 
+def benchmark_franka_solver_comparison() -> (
+    tuple[list[dict[str, object]], list[dict[str, object]]]
+):
+    """Compare Franka's default FEP and former Pytorch solver on shared inputs."""
+    from scipy.spatial.transform import Rotation
+
+    from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+
+    perf_rows: list[dict[str, object]] = []
+    metric_rows: list[dict[str, object]] = []
+    workloads = (
+        ("central", 1),
+        ("central", 16),
+        ("central", 64),
+        ("wide", 64),
+        ("nearby", 64),
+    )
+    devices = [torch.device("cpu")]
+    if torch.cuda.is_available():
+        devices.append(torch.device("cuda"))
+
+    print("\n=== Franka Panda: default FEP search versus former Pytorch ===")
+    for device in devices:
+        generator = torch.Generator().manual_seed(2026)
+        robot_cfg = FrankaPandaCfg.from_dict({})
+        fep_cfg = robot_cfg.solver_cfg["arm"]
+        if not isinstance(fep_cfg, FEPSolverCfg) or not fep_cfg.redundancy_search:
+            raise RuntimeError("Franka's default arm solver must enable FEP search")
+        urdf_path = get_data_path("Franka/Panda/PandaWithHand.urdf")
+        fep_cfg.urdf_path = urdf_path
+        fep_solver = fep_cfg.init_solver(device=device)
+        pytorch_solver = PytorchSolverCfg(
+            urdf_path=urdf_path,
+            root_link_name=fep_cfg.root_link_name,
+            end_link_name=fep_cfg.end_link_name,
+            joint_names=robot_cfg.control_parts["arm"],
+            tcp=fep_cfg.tcp,
+            num_samples=30,
+        ).init_solver(device=device)
+        for limit_name in ("lower_qpos_limits", "upper_qpos_limits"):
+            torch.testing.assert_close(
+                getattr(fep_solver, limit_name), getattr(pytorch_solver, limit_name)
+            )
+
+        lower, upper = fep_solver.lower_qpos_limits, fep_solver.upper_qpos_limits
+        for scenario, count in workloads:
+            fractions = torch.rand(count, 7, generator=generator).to(device)
+            if scenario != "wide":
+                fractions = 0.25 + 0.5 * fractions
+            qpos = lower + (upper - lower) * fractions
+            if scenario == "nearby":
+                offset = (
+                    torch.rand(count, 7, generator=generator).to(device) - 0.5
+                ) * 0.07
+                seed = (qpos + offset).clamp(lower, upper)
+            else:
+                seed = lower + (upper - lower) * torch.rand(
+                    count, 7, generator=generator
+                ).to(device)
+            target = fep_solver.get_fk(qpos)
+            timings_ms: dict[str, float] = {}
+            first_row = len(perf_rows)
+            for name, solver in (
+                ("fep_search", fep_solver),
+                ("pytorch_legacy", pytorch_solver),
+            ):
+                elapsed, memory, peak, success, joints = _timed_solver_ik_call(
+                    solver,
+                    target,
+                    seed,
+                    repeats=5,
+                    random_seed=2026 if name == "pytorch_legacy" else None,
+                )
+                success = success.bool()
+                joints = joints.reshape(count, 7)
+                expected = target[success].cpu().numpy().astype(np.float64)
+                actual = solver.get_fk(joints[success]).cpu().numpy().astype(np.float64)
+                translation = np.linalg.norm(
+                    expected[:, :3, 3] - actual[:, :3, 3], axis=-1
+                )
+                rotation = (
+                    (
+                        Rotation.from_matrix(expected[:, :3, :3]).inv()
+                        * Rotation.from_matrix(actual[:, :3, :3])
+                    ).magnitude()
+                    if len(actual)
+                    else np.empty(0)
+                )
+                impl = f"franka_{name}_{device.type}"
+                common = {
+                    "sample_size": count,
+                    "scenario": scenario,
+                    "impl": impl,
+                    "component": "franka_ik",
+                }
+                elapsed_ms = elapsed * 1000
+                timings_ms[name] = elapsed_ms
+                perf_rows.append(
+                    {
+                        **common,
+                        "cost_time_ms": f"{elapsed_ms:.6f}",
+                        "cpu_delta_mb": f"{memory['cpu_mb']:.6f}",
+                        "gpu_delta_mb": f"{memory['gpu_mb']:.6f}",
+                        "peak_gpu_mb": f"{peak:.6f}",
+                    }
+                )
+                metric_rows.append(
+                    {
+                        **common,
+                        "success_rate": f"{success.float().mean().item():.6f}",
+                        "translation_err_mm": f"{(float(translation.mean()) if len(translation) else float('nan')) * 1000:.6f}",
+                        "rotation_err_deg": f"{(float(rotation.mean()) if len(rotation) else float('nan')) * 180 / np.pi:.6f}",
+                    }
+                )
+                print(
+                    f"  {device.type} {scenario}/{name} n={count:>3d}: "
+                    f"{elapsed_ms:.2f} ms, success={success.float().mean().item():.2%}, "
+                    f"CPU Δ={memory['cpu_mb']:+.1f} MB, "
+                    f"GPU Δ={memory['gpu_mb']:+.1f} MB, peak GPU={peak:.1f} MB"
+                )
+            speedup = timings_ms["pytorch_legacy"] / timings_ms["fep_search"]
+            for row in perf_rows[first_row:]:
+                row["speedup_vs_pytorch"] = (
+                    f"{speedup:.2f}x" if "fep_search" in row["impl"] else "1.00x"
+                )
+            print(f"    FEP speedup over Pytorch: {speedup:.2f}x")
+    return perf_rows, metric_rows
+
+
 def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
     """Run unified OPW + UR + FEP + Pytorch kinematic solver benchmarks."""
     solvers_to_run = _normalize_selected_solvers(selected_solvers)
@@ -1019,14 +1160,21 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
     print("\nSelected solvers:", ", ".join(sorted(solvers_to_run)))
 
     print("\nConfiguration differences:")
-    print(
-        "- OPW solver: analytic OPW parameters via OPWSolverCfg with "
-        "opw-specific joint limits."
-    )
-    print("- Pytorch solver: UR10 URDF-based PytorchSolver with " "UR10 joint limits.")
-    print("- UR solver: analytic UR10 IK via URSolverCfg with UR10 DH parameters.")
+    if "opw" in solvers_to_run:
+        print(
+            "- OPW solver: analytic OPW parameters via OPWSolverCfg with "
+            "opw-specific joint limits."
+        )
+    if "pytorch" in solvers_to_run:
+        print("- Pytorch solver: UR10 URDF-based PytorchSolver with UR10 joint limits.")
+    if "ur" in solvers_to_run:
+        print("- UR solver: analytic UR10 IK via URSolverCfg with UR10 DH parameters.")
     if "fep" in solvers_to_run:
         print("- FEP solver: fixed-q7 geometry and optional q7 search on Franka.")
+    if "franka" in solvers_to_run:
+        print(
+            "- Franka comparison: default FEP search versus former Pytorch with 30 seeds."
+        )
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []
@@ -1051,6 +1199,11 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
         perf_rows.extend(fep_perf_rows)
         metric_rows.extend(fep_metric_rows)
 
+    if "franka" in solvers_to_run:
+        franka_perf_rows, franka_metric_rows = benchmark_franka_solver_comparison()
+        perf_rows.extend(franka_perf_rows)
+        metric_rows.extend(franka_metric_rows)
+
     leaderboard_rows = _build_leaderboard_rows(metric_rows)
 
     benchmark_name = "kinematic_solver"
@@ -1073,6 +1226,13 @@ def run_all_benchmarks(selected_solvers: list[str] | None = None) -> None:
                 "FEP reports median latency over ten synchronized warmed calls. known_q7 supplies a feasible q7; seed_q7 and search use the same seeds without the true q7. central targets sample the central half of joint limits; wide samples the full range; boundary places one joint within 0.1% of a bound. small_step perturbs seeds by at most 0.035 rad and requires all accepted joints to stay within 0.04 rad of the seed. For fixed-q7 modes this displacement filter is applied after timing. Pose errors include accepted rows only. Finite search does not prove global completeness."
             ]
             if "fep" in solvers_to_run
+            else []
+        )
+        + (
+            [
+                "Franka comparison uses the same URDF, target poses, seed joints, limits, and device for both solvers; CPU and CUDA also receive the same generated workloads. FEP uses the current Franka preset with redundancy search; Pytorch uses the former preset's 30 seed samples (caller seed plus 29 random samples) and 500 maximum iterations. Each latency is the median of five synchronized warmed calls. Pytorch random samples are reset to seed 2026 before each call outside the timer. Pose errors include successful rows only. Speedup is Pytorch batch latency divided by FEP batch latency."
+            ]
+            if "franka" in solvers_to_run
             else []
         )
         + (

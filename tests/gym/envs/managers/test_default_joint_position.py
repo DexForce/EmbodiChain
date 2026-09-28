@@ -14,46 +14,71 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Tests for default-offset locomotion joint actions."""
+
 from __future__ import annotations
 
-from types import SimpleNamespace
-import pytest
 import torch
+
 from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
-from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionTerm
+from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionAction
+
+from action_test_utils import make_action_env
 
 
-def make_manager():
-    robot = SimpleNamespace(
-        joint_names=["unused", "a", "b"],
-        cfg=SimpleNamespace(init_qpos=[9.0, 0.2, -0.4]),
+def make_manager() -> ActionManager:
+    """Build a two-joint default-position manager."""
+    env = make_action_env(
+        num_envs=2,
+        joint_names=("unused", "a", "b"),
+        parts={"policy": (1, 2)},
     )
-    env = SimpleNamespace(
-        num_envs=2, device=torch.device("cpu"), active_joint_ids=[1, 2], robot=robot
-    )
+    env.robot.cfg.init_qpos = [9.0, 0.2, -0.4]
     cfg = ActionTermCfg(
-        func=DefaultJointPositionTerm,
-        params=dict(joint_names=["a", "b"], scale=[0.5, 2.0], clip=1.0),
+        func=DefaultJointPositionAction,
+        params={
+            "joint_names": ["a", "b"],
+            "scale": [0.5, 2.0],
+            "clip": 1.0,
+        },
     )
-    return ActionManager({"joints": cfg}, env)
+    return ActionManager({"joint_position": cfg}, env)
 
 
-def test_joint_mapping_works_without_task_specific_attributes():
+def test_joint_mapping_works_without_task_specific_attributes() -> None:
+    """Default offset, scale, clipping, and bias remain generic."""
     manager = make_manager()
-    term = manager.get_term("joints")
+    term = manager.get_term("joint_position")
     term.position_bias[0] = torch.tensor([0.1, 0.2])
-    target = term.process_action(torch.tensor([[2.0, -2.0], [0.0, 0.0]]))
-    torch.testing.assert_close(target, torch.tensor([[0.6, -2.6], [0.2, -0.4]]))
-    assert torch.equal(term.action, torch.tensor([[1.0, -1.0], [0.0, 0.0]]))
+
+    manager.process_action(torch.tensor([[2.0, -2.0], [0.0, 0.0]]))
+
+    torch.testing.assert_close(
+        term.processed_actions,
+        torch.tensor([[0.6, -2.6], [0.2, -0.4]]),
+    )
+    torch.testing.assert_close(
+        term.raw_actions,
+        torch.tensor([[1.0, -1.0], [0.0, 0.0]]),
+    )
 
 
-def test_manager_selective_reset_clears_action_history_only_in_selected_rows():
+def test_manager_selective_reset_clears_action_history_only_in_selected_rows() -> None:
+    """Locomotion history resets selected rows without clearing encoder bias."""
     manager = make_manager()
-    term = manager.get_term("joints")
+    term = manager.get_term("joint_position")
     term.position_bias.fill_(0.1)
-    term.process_action(torch.ones(2, 2))
-    term.process_action(torch.full((2, 2), 0.5))
+    manager.process_action(torch.ones(2, 2))
+    manager.process_action(torch.full((2, 2), 0.5))
+
     manager.reset(env_ids=[0])
-    assert torch.equal(term.action, torch.tensor([[0.0, 0.0], [0.5, 0.5]]))
-    assert torch.equal(term.previous_action, torch.tensor([[0.0, 0.0], [1.0, 1.0]]))
-    assert torch.equal(term.position_bias, torch.full((2, 2), 0.1))
+
+    torch.testing.assert_close(
+        term.raw_actions,
+        torch.tensor([[0.0, 0.0], [0.5, 0.5]]),
+    )
+    torch.testing.assert_close(
+        term.previous_raw_actions,
+        torch.tensor([[0.0, 0.0], [1.0, 1.0]]),
+    )
+    torch.testing.assert_close(term.position_bias, torch.full((2, 2), 0.1))

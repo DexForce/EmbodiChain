@@ -14,443 +14,757 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Action terms for processing policy actions into robot control commands.
-
-This module provides concrete implementations of :class:`ActionTerm` that convert
-raw policy actions into different control formats (e.g., joint positions, velocities,
-forces, or end-effector poses).
-
-The action terms are typically used in conjunction with :class:`ActionManager` which
-handles calling the appropriate term based on configuration.
-
-Available action terms:
-
-- :class:`DeltaQposTerm`: Delta joint position (current + scale * action)
-- :class:`QposTerm`: Absolute joint position (scale * action)
-- :class:`QposDenormalizedTerm`: Normalized action [-1,1] -> joint limits
-- :class:`EefPoseTerm`: End-effector pose -> IK -> joint position
-- :class:`QvelTerm`: Joint velocity (scale * action)
-- :class:`QfTerm`: Joint force/torque (scale * action)
-"""
+"""Built-in independently applied policy-action terms."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Any
 
+import gymnasium as gym
+import numpy as np
 import torch
-from tensordict import TensorDict
 
-from embodichain.lab.sim.types import EnvAction
 from embodichain.utils.math import matrix_from_euler, matrix_from_quat
+from embodichain.utils.string import resolve_matching_names_values
+
 from .action_manager import ActionTerm
+from .action_types import ActionTermDescriptor
 from .cfg import ActionTermCfg
 
-# Import ActionTerm from action_manager after it's defined
-# This is a late import to avoid circular dependency
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
-
 __all__ = [
-    "DefaultJointPositionTerm",
-    "DeltaQposTerm",
-    "QposTerm",
-    "QposDenormalizedTerm",
-    "QposNormalizedTerm",
-    "EefPoseTerm",
-    "QvelTerm",
-    "QfTerm",
+    "DefaultJointPositionAction",
+    "EefPoseAction",
+    "JointEffortAction",
+    "JointPositionAction",
+    "JointPositionToLimitsAction",
+    "JointVelocityAction",
+    "ParallelGripperAction",
+    "RelativeJointPositionAction",
 ]
 
 
-# ----------------------------------------------------------------------------
-# Concrete ActionTerm implementations
-# ----------------------------------------------------------------------------
-
-
-class DeltaQposTerm(ActionTerm):
-    """Delta joint position action: current_qpos + scale * action -> qpos.
-
-    This action term adds a scaled delta to the current joint positions.
-    Useful for relative position control where the policy outputs position offsets.
-
-    Args:
-        scale: Scaling factor for the action. Defaults to 1.0.
-
-    Example:
-        >>> cfg = ActionTermCfg(func=DeltaQposTerm, params={"scale": 0.1})
-        >>> term = DeltaQposTerm(cfg, env)
-        >>> action = torch.ones(num_envs, dof) * 2.0
-        >>> result = term.process_action(action)
-        >>> # result["qpos"] = current_qpos + 0.1 * action
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def input_key(self) -> str:
-        return "qpos"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        return action * self._scale + self._env.robot.get_qpos()
-
-
-class QposTerm(ActionTerm):
-    """Absolute joint position action: scale * action -> qpos.
-
-    This action term directly uses the scaled action as target joint positions.
-    Useful for absolute position control.
-
-    Args:
-        scale: Scaling factor for the action. Defaults to 1.0.
-
-    Example:
-        >>> cfg = ActionTermCfg(func=QposTerm, params={"scale": 1.0})
-        >>> term = QposTerm(cfg, env)
-        >>> action = torch.ones(num_envs, dof) * 0.5
-        >>> result = term.process_action(action)
-        >>> # result["qpos"] = 0.5 * action
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def input_key(self) -> str:
-        return "qpos"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        qpos = action * self._scale
-        return qpos
-
-
-class QposDenormalizedTerm(ActionTerm):
-    """Normalized action in [range[0], range[1]] -> denormalize to joint limits -> qpos.
-
-    The policy outputs normalized actions in the range [range[0], range[1]] which are then
-    mapped to the joint's position limits.
-
-    The policy output is scaled by ``params.scale`` before denormalization.
-    With scale=1.0 (default), action in [range[0], range[1]] maps to [low, high].
-    With scale<1.0, the effective range shrinks toward the center (e.g. scale=0.5
-    maps to 25%-75% of joint range). Use scale=1.0 for standard normalized control.
-
-    Args:
-        scale: Scaling factor applied before denormalization. Defaults to 1.0.
-        joint_ids: List of joint IDs to apply the action to. Defaults to all active joints.
-        range: The range of the normalized action. Defaults to [-1.0, 1.0].
-
-    Example:
-        >>> cfg = ActionTermCfg(func=QposDenormalizedTerm, params={"scale": 1.0})
-        >>> term = QposDenormalizedTerm(cfg, env)
-        >>> action = torch.tensor([[-1.0, 1.0], [0.0, 0.0]])  # min/max per joint
-        >>> result = term.process_action(action)
-        >>> # Maps [-1, 1] to [qpos_limits_low, qpos_limits_high]
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
-        self._range = cfg.params.get("range", [-1.0, 1.0])
-
-    @property
-    def input_key(self) -> str:
-        return "qpos"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        scaled = action * self._scale
-        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
-        low = qpos_limits[:, 0]
-        high = qpos_limits[:, 1]
-        scaled[:, self._joint_ids] = low + (
-            scaled[:, self._joint_ids] - self._range[0]
-        ) / (self._range[1] - self._range[0]) * (high - low)
-        return scaled
-
-
-class QposNormalizedTerm(ActionTerm):
-    """Normalize action from qpos limits -> [range[0], range[1]].
-
-    Map joint positions to a normalized range [range[0], range[1]] based on the joint limits.
-    This is the usually used for post processing the output of action.
-
-    Args:
-        joint_ids: List of joint IDs to apply the action to. Defaults to all active joints.
-        range: The range of the normalized action. Defaults to [0.0, 1.0].
-
-    Example:
-        >>> cfg = ActionTermCfg(func=QposNormalizedTerm)
-        >>> term = QposNormalizedTerm(cfg, env)
-        >>> action = torch.tensor([[-1.0, 1.0], [0.0, 0.0]])  # min/max per joint
-        >>> result = term.process_action(action)
-        >>> # Maps [-1, 1] to [0, 1] based on joint limits
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._joint_ids = cfg.params.get("joint_ids", self._env.active_joint_ids)
-        self._range = cfg.params.get("range", [0.0, 1.0])
-
-    @property
-    def input_key(self) -> str:
-        return "qpos"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        qpos_limits = self._env.robot.body_data.qpos_limits[0, self._joint_ids]
-        low = qpos_limits[:, 0]
-        high = qpos_limits[:, 1]
-        action[:, self._joint_ids] = (action[:, self._joint_ids] - low) / (
-            high - low
-        ) * (self._range[1] - self._range[0]) + self._range[0]
-        return action
-
-
-class EefPoseTerm(ActionTerm):
-    """End-effector pose (6D or 7D) -> IK -> qpos.
-
-    The policy outputs a target end-effector pose which is converted to joint
-    positions using inverse kinematics.
-
-    Supports two pose representations:
-    - 6D: position (3) + Euler angles (3)
-    - 7D: position (3) + quaternion in ``xyzw`` order (4)
-
-    On IK failure, falls back to current_qpos for that env.
-    Returns ``ik_success`` in the TensorDict so reward/observation
-    can penalize or condition on IK failures.
-
-    Args:
-        scale: Scaling factor for the pose. Defaults to 1.0.
-        pose_dim: Dimension of the pose (6 for Euler, 7 for quaternion). Defaults to 7.
-
-    Example:
-        >>> cfg = ActionTermCfg(func=EefPoseTerm, params={"scale": 1.0, "pose_dim": 7})
-        >>> term = EefPoseTerm(cfg, env)
-        >>> # 7D: position (3) + quaternion (4)
-        >>> action = torch.zeros(num_envs, 7)
-        >>> action[:, :3] = 0.1  # target position
-        >>> action[:, 6] = 1.0   # quaternion w (xyzw identity)
-        >>> result = term.process_action(action)
-        >>> # result["qpos"] = IK solution
-        >>> # result["ik_success"] = bool tensor indicating IK success
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-        self._pose_dim = cfg.params.get("pose_dim", 7)  # 6 for euler, 7 for quat
-
-    @property
-    def input_key(self) -> str:
-        return "eef_pose"
-
-    @property
-    def action_dim(self) -> int:
-        return self._pose_dim
-
-    def process_action(self, action: torch.Tensor) -> EnvAction:
-        scaled = action * self._scale
-        current_qpos = self._env.robot.get_qpos()
-        batch_size = scaled.shape[0]
-        target_pose = (
-            torch.eye(4, device=self.device).unsqueeze(0).repeat(batch_size, 1, 1)
-        )
-        if scaled.shape[-1] == 6:
-            target_pose[:, :3, 3] = scaled[:, :3]
-            target_pose[:, :3, :3] = matrix_from_euler(scaled[:, 3:6])
-        elif scaled.shape[-1] == 7:
-            target_pose[:, :3, 3] = scaled[:, :3]
-            target_pose[:, :3, :3] = matrix_from_quat(scaled[:, 3:7])
-        else:
-            raise ValueError(
-                f"EEF pose action must be 6D or 7D, got {scaled.shape[-1]}D"
-            )
-        # Batch IK: robot.compute_ik supports (num_envs, 4, 4) pose and (num_envs, dof) seed
-        ret, qpos_ik = self._env.robot.compute_ik(
-            pose=target_pose,
-            joint_seed=current_qpos,
-        )
-        # Fallback to current_qpos where IK failed
-        result_qpos = torch.where(
-            ret.unsqueeze(-1).expand_as(qpos_ik), qpos_ik, current_qpos
-        )
-        return TensorDict(
-            {"qpos": result_qpos, "ik_success": ret},
-            batch_size=[batch_size],
-            device=self.device,
-        )
-
-
-class QvelTerm(ActionTerm):
-    """Joint velocity action: scale * action -> qvel.
-
-    This action term outputs target joint velocities.
-    Useful for velocity control tasks.
-
-    Args:
-        scale: Scaling factor for the action. Defaults to 1.0.
-
-    Example:
-        >>> cfg = ActionTermCfg(func=QvelTerm, params={"scale": 0.2})
-        >>> term = QvelTerm(cfg, env)
-        >>> action = torch.ones(num_envs, dof)
-        >>> result = term.process_action(action)
-        >>> # result["qvel"] = 0.2 * action
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def input_key(self) -> str:
-        return "qvel"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        return action * self._scale
-
-
-class QfTerm(ActionTerm):
-    """Joint force/torque action: scale * action -> qf.
-
-    This action term outputs target joint forces/torques.
-    Useful for impedance control or force-based tasks.
-
-    Args:
-        scale: Scaling factor for the action. Defaults to 1.0.
-
-    Example:
-        >>> cfg = ActionTermCfg(func=QfTerm, params={"scale": 10.0})
-        >>> term = QfTerm(cfg, env)
-        >>> action = torch.ones(num_envs, dof)
-        >>> result = term.process_action(action)
-        >>> # result["qf"] = 10.0 * action
-    """
-
-    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
-        super().__init__(cfg, env)
-        self._scale = cfg.params.get("scale", 1.0)
-
-    @property
-    def input_key(self) -> str:
-        return "qf"
-
-    @property
-    def action_dim(self) -> int:
-        return len(self._env.active_joint_ids)
-
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        return action * self._scale
-
-
-class DefaultJointPositionTerm(ActionTerm):
-    """Convert policy actions to joint positions around a configured default pose.
-
-    Parameters are explicit: ``joint_names`` defines policy order, ``offset``
-    supplies the default pose (otherwise robot init_qpos is used), ``scale``
-    accepts a scalar or per-joint values, and ``clip`` bounds policy actions.
-    Public ``action``, ``previous_action`` and ``position_bias`` buffers let
-    observations and randomization consume this term's state directly.
-    """
+def _parameter_tensor(
+    value: float | list[float] | tuple[float, ...] | torch.Tensor,
+    *,
+    width: int,
+    device: torch.device | str,
+    name: str,
+) -> torch.Tensor:
+    tensor = torch.as_tensor(value, dtype=torch.float32, device=device)
+    if tensor.ndim == 0:
+        return tensor
+    if tuple(tensor.shape) != (width,):
+        raise ValueError(f"{name} must be scalar or contain {width} values.")
+    return tensor
+
+
+class _JointAction(ActionTerm):
+    """Base class for terms that own an ordered non-mimic joint selection."""
+
+    command_type: str
+    representation: str
+    units: str
+    normalization: str | None = None
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
-        """Create the mapping and per-environment action state.
-
-        Args:
-            cfg: Term configuration with explicit mapping parameters.
-            env: Environment providing the robot and active joint order.
-        """
         super().__init__(cfg, env)
-        names = tuple(cfg.params["joint_names"])
-        self._joint_ids = torch.tensor(
-            [env.robot.joint_names.index(name) for name in names],
-            dtype=torch.long,
-            device=env.device,
+        params = cfg.params
+        part_name = params.get("part_name")
+        joint_names = params.get("joint_names")
+        if (part_name is None) == (joint_names is None):
+            raise ValueError(
+                f"{type(self).__name__} requires exactly one of part_name or joint_names."
+            )
+
+        if part_name is not None:
+            joint_ids = env.robot.get_joint_ids(str(part_name), remove_mimic=True)
+        else:
+            requested_names = [str(name) for name in joint_names]
+            joint_ids = [env.robot.joint_names.index(name) for name in requested_names]
+            mimic_ids = set(getattr(env.robot, "mimic_ids", ()))
+            if any(joint_id in mimic_ids for joint_id in joint_ids):
+                raise ValueError(
+                    f"{type(self).__name__} joint_names must not select mimic followers."
+                )
+            if not bool(params.get("preserve_order", False)):
+                joint_ids = sorted(joint_ids)
+
+        self._joint_ids = tuple(int(joint_id) for joint_id in joint_ids)
+        if not self._joint_ids:
+            raise ValueError(f"{type(self).__name__} resolved no controlled joints.")
+        if len(set(self._joint_ids)) != len(self._joint_ids):
+            raise ValueError(f"{type(self).__name__} resolved duplicate joint IDs.")
+        self._joint_names = tuple(
+            env.robot.joint_names[index] for index in self._joint_ids
         )
-        if not torch.equal(
-            self._joint_ids, torch.as_tensor(env.active_joint_ids, device=env.device)
-        ):
-            raise ValueError("joint_names must match the active-joint order.")
-        robot_default = torch.as_tensor(env.robot.cfg.init_qpos, device=env.device)[
-            self._joint_ids
-        ]
-        self._offset = torch.as_tensor(
+        self._raw_actions = torch.zeros(
+            env.num_envs, self.action_dim, dtype=torch.float32, device=env.device
+        )
+        self._previous_raw_actions = torch.zeros_like(self._raw_actions)
+        self._processed_actions = torch.zeros_like(self._raw_actions)
+
+    @property
+    def action_dim(self) -> int:
+        return len(self._joint_ids)
+
+    @property
+    @abstractmethod
+    def action_space(self) -> gym.spaces.Box: ...
+
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
+
+    @property
+    def previous_raw_actions(self) -> torch.Tensor:
+        """Return raw actions from the previous control step."""
+        return self._previous_raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
+    @property
+    def controlled_joint_ids(self) -> tuple[int, ...]:
+        return self._joint_ids
+
+    @property
+    def descriptor(self) -> ActionTermDescriptor:
+        return ActionTermDescriptor(
+            representation=self.representation,
+            action_dim=self.action_dim,
+            feature_names=self._joint_names,
+            units=(self.units,) * self.action_dim,
+            normalization=self.normalization,
+            joint_names=self._joint_names,
+            metadata={},
+        )
+
+    def _store_raw(self, actions: torch.Tensor) -> None:
+        expected = (self.num_envs, self.action_dim)
+        if tuple(actions.shape) != expected:
+            raise ValueError(
+                f"{type(self).__name__} expected action shape {expected}, "
+                f"got {tuple(actions.shape)}."
+            )
+        self._previous_raw_actions.copy_(self._raw_actions)
+        self._raw_actions.copy_(actions)
+
+    def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
+        ids = slice(None) if env_ids is None else env_ids
+        self._raw_actions[ids] = 0
+        self._previous_raw_actions[ids] = 0
+        self._processed_actions[ids] = 0
+
+
+class JointPositionAction(_JointAction):
+    """Apply absolute position actions to selected joints."""
+
+    command_type = "qpos"
+    representation = "joint_position"
+    units = "rad_or_m"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+        self._offset = _parameter_tensor(
+            cfg.params.get("offset", 0.0),
+            width=self.action_dim,
+            device=env.device,
+            name="offset",
+        )
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        limits = self._env.robot.body_data.qpos_limits[0, list(self._joint_ids)]
+        return gym.spaces.Box(
+            low=limits[:, 0].detach().cpu().numpy(),
+            high=limits[:, 1].detach().cpu().numpy(),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        self._processed_actions.copy_(self._raw_actions * self._scale + self._offset)
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+
+class JointPositionToLimitsAction(_JointAction):
+    """Map normalized selected-joint actions to position limits."""
+
+    command_type = "qpos"
+    representation = "joint_position"
+    units = "rad_or_m"
+    normalization = "minus_one_to_one"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+        limits = env.robot.body_data.qpos_limits[0, list(self._joint_ids)]
+        self._lower = limits[:, 0]
+        self._upper = limits[:, 1]
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        return gym.spaces.Box(
+            low=-np.ones(self.action_dim, dtype=np.float32),
+            high=np.ones(self.action_dim, dtype=np.float32),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        normalized = (self._raw_actions * self._scale).clamp(-1.0, 1.0)
+        self._processed_actions.copy_(
+            self._lower + (normalized + 1.0) * 0.5 * (self._upper - self._lower)
+        )
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+
+class RelativeJointPositionAction(_JointAction):
+    """Add scaled relative actions to current selected positions."""
+
+    command_type = "qpos"
+    representation = "relative_joint_position"
+    units = "rad_or_m"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+        clip = cfg.params.get("clip")
+        self._clip = None if clip is None else float(clip)
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        bound = np.inf if self._clip is None else self._clip
+        return gym.spaces.Box(
+            low=-np.full(self.action_dim, bound, dtype=np.float32),
+            high=np.full(self.action_dim, bound, dtype=np.float32),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        if self._clip is not None:
+            self._raw_actions.clamp_(-self._clip, self._clip)
+        current = self._env.robot.get_qpos()[:, list(self._joint_ids)]
+        self._processed_actions.copy_(current + self._raw_actions * self._scale)
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+
+class JointVelocityAction(_JointAction):
+    """Apply scaled velocity actions to selected joints."""
+
+    command_type = "qvel"
+    representation = "joint_velocity"
+    units = "rad_or_m_per_s"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        limits = self._env.robot.body_data.qvel_limits[0, list(self._joint_ids)]
+        return gym.spaces.Box(
+            low=(-limits).detach().cpu().numpy(),
+            high=limits.detach().cpu().numpy(),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        self._processed_actions.copy_(self._raw_actions * self._scale)
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qvel(
+            qvel=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+
+class JointEffortAction(_JointAction):
+    """Apply scaled effort actions to selected joints."""
+
+    command_type = "qf"
+    representation = "joint_effort"
+    units = "N_or_Nm"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        limits = self._env.robot.body_data.qf_limits[0, list(self._joint_ids)]
+        return gym.spaces.Box(
+            low=(-limits).detach().cpu().numpy(),
+            high=limits.detach().cpu().numpy(),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        self._processed_actions.copy_(self._raw_actions * self._scale)
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qf(
+            qf=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+
+class DefaultJointPositionAction(_JointAction):
+    """Map normalized locomotion actions around a configured default pose."""
+
+    command_type = "qpos"
+    representation = "default_joint_position"
+    units = "normalized"
+    normalization = "minus_one_to_one"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        robot_default = torch.as_tensor(
+            env.robot.cfg.init_qpos,
+            dtype=torch.float32,
+            device=env.device,
+        )[list(self._joint_ids)]
+        self._offset = _parameter_tensor(
             cfg.params.get("offset", robot_default),
+            width=self.action_dim,
+            device=env.device,
+            name="offset",
+        )
+        self._scale = _parameter_tensor(
+            cfg.params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+        self._clip = float(cfg.params.get("clip", 1.0))
+        self.position_bias = torch.zeros_like(self._raw_actions)
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        return gym.spaces.Box(
+            low=-np.full(self.action_dim, self._clip, dtype=np.float32),
+            high=np.full(self.action_dim, self._clip, dtype=np.float32),
+            dtype=np.float32,
+        )
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        self._store_raw(actions)
+        self._raw_actions.clamp_(-self._clip, self._clip)
+        self._processed_actions.copy_(
+            self._offset + self._scale * self._raw_actions - self.position_bias
+        )
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+    def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
+        super().reset(env_ids)
+
+
+class EefPoseAction(ActionTerm):
+    """Convert an absolute EEF pose into selected-arm joint targets."""
+
+    command_type = "qpos"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        params = cfg.params
+        self._part_name = str(params["part_name"])
+        self._joint_ids = tuple(
+            int(value)
+            for value in env.robot.get_joint_ids(
+                self._part_name,
+                remove_mimic=True,
+            )
+        )
+        if not self._joint_ids:
+            raise ValueError("EefPoseAction resolved no arm joints.")
+        self._joint_names = tuple(
+            env.robot.joint_names[index] for index in self._joint_ids
+        )
+        self._pose_representation = str(params.get("pose_representation", "xyz_rpy"))
+        if self._pose_representation == "xyz_rpy":
+            self._action_dim = 6
+            self._feature_names = ("x", "y", "z", "roll", "pitch", "yaw")
+            self._units = ("m", "m", "m", "rad", "rad", "rad")
+            rotation = "rpy_radians"
+        elif self._pose_representation == "xyz_quat_xyzw":
+            self._action_dim = 7
+            self._feature_names = ("x", "y", "z", "qx", "qy", "qz", "qw")
+            self._units = (
+                "m",
+                "m",
+                "m",
+                "unitless",
+                "unitless",
+                "unitless",
+                "unitless",
+            )
+            rotation = "quaternion_xyzw"
+        else:
+            raise ValueError(
+                "pose_representation must be 'xyz_rpy' or 'xyz_quat_xyzw'."
+            )
+        self._scale = _parameter_tensor(
+            params.get("scale", 1.0),
+            width=self.action_dim,
+            device=env.device,
+            name="scale",
+        )
+        self._space = gym.spaces.Box(
+            low=-np.full(self.action_dim, np.inf, dtype=np.float32),
+            high=np.full(self.action_dim, np.inf, dtype=np.float32),
+            dtype=np.float32,
+        )
+        self._raw_actions = torch.zeros(
+            env.num_envs, self.action_dim, dtype=torch.float32, device=env.device
+        )
+        self._previous_raw_actions = torch.zeros_like(self._raw_actions)
+        self._processed_actions = torch.zeros(
+            env.num_envs,
+            len(self._joint_ids),
             dtype=torch.float32,
             device=env.device,
         )
-        self._scale = torch.as_tensor(
-            cfg.params.get("scale", 1.0), dtype=torch.float32, device=env.device
+        self._ik_success = torch.zeros(
+            env.num_envs,
+            dtype=torch.bool,
+            device=env.device,
         )
-        for label, value in (("offset", self._offset), ("scale", self._scale)):
-            if value.ndim > 0 and value.shape != (self.action_dim,):
-                raise ValueError(
-                    f"{label} must be scalar or contain one value per joint."
-                )
-        self._clip = cfg.params.get("clip")
-        self.action = torch.zeros((env.num_envs, self.action_dim), device=env.device)
-        self.previous_action = torch.zeros_like(self.action)
-        self.position_bias = torch.zeros_like(self.action)
-
-    @property
-    def input_key(self) -> str:
-        """Robot command field produced by the term."""
-        return "qpos"
+        self._descriptor = ActionTermDescriptor(
+            representation="eef_pose",
+            action_dim=self.action_dim,
+            feature_names=self._feature_names,
+            units=self._units,
+            normalization=None,
+            joint_names=self._joint_names,
+            metadata={"frame": "arena", "rotation": rotation},
+        )
 
     @property
     def action_dim(self) -> int:
-        """Number of controlled joints."""
-        return self._joint_ids.numel()
+        return self._action_dim
 
-    def process_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Store policy actions and return mapped joint targets.
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        return self._space
 
-        Args:
-            action: Batched policy actions in the configured joint order.
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
 
-        Returns:
-            Default-offset, scaled and bias-corrected joint positions.
-        """
-        if action.shape != self.action.shape:
+    @property
+    def previous_raw_actions(self) -> torch.Tensor:
+        """Return pose requests from the previous control step."""
+        return self._previous_raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
+    @property
+    def ik_success(self) -> torch.Tensor:
+        """Return per-environment IK success for the latest request."""
+        return self._ik_success
+
+    @property
+    def controlled_joint_ids(self) -> tuple[int, ...]:
+        return self._joint_ids
+
+    @property
+    def descriptor(self) -> ActionTermDescriptor:
+        return self._descriptor
+
+    @property
+    def part_name(self) -> str:
+        """Return the robot control part used for IK and FK."""
+        return self._part_name
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        expected = (self.num_envs, self.action_dim)
+        if tuple(actions.shape) != expected:
             raise ValueError(
-                f"Expected action shape {self.action.shape}, got {action.shape}."
+                f"EefPoseAction expected action shape {expected}, "
+                f"got {tuple(actions.shape)}."
             )
-        self.previous_action.copy_(self.action)
-        self.action.copy_(
-            action if self._clip is None else action.clamp(-self._clip, self._clip)
+        self._previous_raw_actions.copy_(self._raw_actions)
+        self._raw_actions.copy_(actions)
+        scaled = self._raw_actions * self._scale
+        target_pose = torch.eye(4, dtype=torch.float32, device=self.device).repeat(
+            self.num_envs,
+            1,
+            1,
         )
-        return self._offset + self._scale * self.action - self.position_bias
+        target_pose[:, :3, 3] = scaled[:, :3]
+        if self._pose_representation == "xyz_rpy":
+            target_pose[:, :3, :3] = matrix_from_euler(scaled[:, 3:6])
+        else:
+            target_pose[:, :3, :3] = matrix_from_quat(scaled[:, 3:7])
+
+        current = self._env.robot.get_qpos()[:, list(self._joint_ids)]
+        success, qpos = self._env.robot.compute_ik(
+            pose=target_pose,
+            joint_seed=current,
+            name=self._part_name,
+        )
+        self._ik_success.copy_(success)
+        self._processed_actions.copy_(torch.where(success[:, None], qpos, current))
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
 
     def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
-        """Clear action history for selected rows, preserving calibrated bias.
-
-        Args:
-            env_ids: Rows to reset. None selects all rows.
-        """
         ids = slice(None) if env_ids is None else env_ids
-        self.action[ids] = 0
-        self.previous_action[ids] = 0
+        self._raw_actions[ids] = 0
+        self._previous_raw_actions[ids] = 0
+        self._processed_actions[ids] = 0
+        self._ik_success[ids] = False
+
+
+class ParallelGripperAction(ActionTerm):
+    """Map one scalar policy action to explicit parallel-gripper joints."""
+
+    command_type = "qpos"
+
+    def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv) -> None:
+        super().__init__(cfg, env)
+        params = cfg.params
+        self._part_name = str(params["part_name"])
+        self._joint_ids = tuple(
+            int(value)
+            for value in env.robot.get_joint_ids(self._part_name, remove_mimic=True)
+        )
+        if not self._joint_ids:
+            raise ValueError("ParallelGripperAction resolved no independent joints.")
+        self._joint_names = tuple(
+            env.robot.joint_names[index] for index in self._joint_ids
+        )
+        self._command_mode = str(params.get("command_mode", "continuous"))
+        if self._command_mode not in {"continuous", "binary"}:
+            raise ValueError("command_mode must be 'continuous' or 'binary'.")
+
+        limits = env.robot.body_data.qpos_limits[0, list(self._joint_ids)]
+        if self._command_mode == "continuous":
+            if bool(params.get("use_joint_limits", False)):
+                self._lower_command = limits[:, 0].clone()
+                self._upper_command = limits[:, 1].clone()
+            else:
+                self._lower_command = self._resolve_command(
+                    params.get("lower_command"),
+                    field_name="lower_command",
+                )
+                self._upper_command = self._resolve_command(
+                    params.get("upper_command"),
+                    field_name="upper_command",
+                )
+            self._open_command = self._upper_command
+            self._close_command = self._lower_command
+        else:
+            self._open_command = self._resolve_command(
+                params.get("open_command"),
+                field_name="open_command",
+            )
+            self._close_command = self._resolve_command(
+                params.get("close_command"),
+                field_name="close_command",
+            )
+            self._lower_command = self._close_command
+            self._upper_command = self._open_command
+
+        self._raw_actions = torch.zeros(
+            env.num_envs, 1, dtype=torch.float32, device=env.device
+        )
+        self._previous_raw_actions = torch.zeros_like(self._raw_actions)
+        self._processed_actions = torch.zeros(
+            env.num_envs,
+            len(self._joint_ids),
+            dtype=torch.float32,
+            device=env.device,
+        )
+        self._space = gym.spaces.Box(
+            low=-np.ones(1, dtype=np.float32),
+            high=np.ones(1, dtype=np.float32),
+            dtype=np.float32,
+        )
+        self._descriptor = ActionTermDescriptor(
+            representation="parallel_gripper",
+            action_dim=1,
+            feature_names=("gripper",),
+            units=("normalized",),
+            normalization="minus_one_to_one",
+            joint_names=self._joint_names,
+            metadata={"command_mode": self._command_mode},
+        )
+
+    @property
+    def action_dim(self) -> int:
+        return 1
+
+    @property
+    def action_space(self) -> gym.spaces.Box:
+        return self._space
+
+    @property
+    def raw_actions(self) -> torch.Tensor:
+        return self._raw_actions
+
+    @property
+    def previous_raw_actions(self) -> torch.Tensor:
+        """Return scalar requests from the previous control step."""
+        return self._previous_raw_actions
+
+    @property
+    def processed_actions(self) -> torch.Tensor:
+        return self._processed_actions
+
+    @property
+    def controlled_joint_ids(self) -> tuple[int, ...]:
+        return self._joint_ids
+
+    @property
+    def descriptor(self) -> ActionTermDescriptor:
+        return self._descriptor
+
+    @property
+    def part_name(self) -> str:
+        """Return the robot control part owning the gripper joints."""
+        return self._part_name
+
+    @property
+    def command_mode(self) -> str:
+        """Return the continuous or binary scalar command mode."""
+        return self._command_mode
+
+    @property
+    def lower_command(self) -> torch.Tensor:
+        """Return the continuous command at normalized value ``-1``."""
+        return self._lower_command
+
+    @property
+    def upper_command(self) -> torch.Tensor:
+        """Return the continuous command at normalized value ``1``."""
+        return self._upper_command
+
+    @property
+    def open_command(self) -> torch.Tensor:
+        """Return the resolved open joint command."""
+        return self._open_command
+
+    @property
+    def close_command(self) -> torch.Tensor:
+        """Return the resolved close joint command."""
+        return self._close_command
+
+    def _resolve_command(self, value: Any, *, field_name: str) -> torch.Tensor:
+        if not isinstance(value, dict):
+            raise TypeError(f"{field_name} must be a mapping of joint expressions.")
+        indices, _, values = resolve_matching_names_values(
+            value,
+            self._joint_names,
+            preserve_order=True,
+        )
+        if sorted(indices) != list(range(len(self._joint_names))):
+            raise ValueError(
+                f"{field_name} must cover every gripper joint exactly once."
+            )
+        command = torch.empty(
+            len(self._joint_names),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        command[indices] = torch.as_tensor(
+            values,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        return command
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        expected = (self.num_envs, 1)
+        if tuple(actions.shape) != expected:
+            raise ValueError(
+                f"ParallelGripperAction expected action shape {expected}, "
+                f"got {tuple(actions.shape)}."
+            )
+        self._previous_raw_actions.copy_(self._raw_actions)
+        self._raw_actions.copy_(actions)
+        if self._command_mode == "continuous":
+            weight = (self._raw_actions.clamp(-1.0, 1.0) + 1.0) * 0.5
+            self._processed_actions.copy_(
+                torch.lerp(self._lower_command, self._upper_command, weight)
+            )
+        else:
+            self._processed_actions.copy_(
+                torch.where(
+                    self._raw_actions >= 0.0,
+                    self._open_command,
+                    self._close_command,
+                )
+            )
+
+    def apply_actions(self) -> None:
+        self._env.robot.set_qpos(
+            qpos=self._processed_actions,
+            joint_ids=list(self._joint_ids),
+        )
+
+    def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
+        ids = slice(None) if env_ids is None else env_ids
+        self._raw_actions[ids] = 0
+        self._previous_raw_actions[ids] = 0
+        self._processed_actions[ids] = 0

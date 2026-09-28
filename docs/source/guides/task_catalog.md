@@ -62,4 +62,24 @@ references a task-relative JSON report. Select a different deployment to change
 physics backends: launcher `--physics` does not override the backend owned by
 the physical environment component.
 
+## Measure an independent physical objective
+
+The `ur5_objective` deployment attaches an optional ordered stable-region
+objective to the repeated pick-place task. It observes the cube reaching the
+configured regions in order and reports physical progress separately from Task
+Program completion, segment acceptance and dataset persistence.
+
+```bash
+python -m embodichain.lab.scripts.evaluate_task_objective \
+  --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.objective.yaml \
+  --output-dir objective-run --seed 0 --num_envs 1 --headless --device cuda
+```
+
+The report records the resolved deployment, component hashes, effective seed,
+actual initial pose, expert outcome, dynamic replay outcome and physical
+objective snapshot. Add `--initial-position-jitter 0.005` for a bounded initial
+pose variation. This first runner supports one environment and dynamic replay
+through the recorded horizon; a compatible DexSim build is required for native
+physical qualification.
+
 For launch and recording options, see {doc}`run_env`.

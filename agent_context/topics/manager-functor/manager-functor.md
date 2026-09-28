@@ -21,7 +21,7 @@ All paths relative to `embodichain/lab/gym/envs/`.
 
 Managers orchestrate collections of **functors** that run at specific points in the environment step loop.
 Each manager owns a typed config (`@configclass`) whose attributes are `FunctorCfg` (or subclass) instances.
-At init, the manager resolves every `FunctorCfg.func` (string → callable or class → instance), validates argument signatures against `FunctorCfg.params`, resolves `SceneEntityCfg` objects to scene indices, and groups functors by `mode`.
+At init, the manager resolves every `FunctorCfg.func` (string → callable or class → instance), validates argument signatures against `FunctorCfg.params`, and resolves `SceneEntityCfg` objects to scene indices. Event, observation, reward, and dataset managers group functors by `mode`; `ActionManager` instead preserves configuration order as one flat policy layout.
 
 **Key invariant**: The config attribute name becomes the functor's unique identifier within that manager.
 
@@ -34,7 +34,7 @@ At init, the manager resolves every `FunctorCfg.func` (string → callable or cl
 | `ObservationManager` | `ObservationCfg` | `modify`, `add` | `compute(obs) → EnvObs` |
 | `RewardManager` | `RewardCfg` | `add`, `replace` | `compute(obs, action, info) → (reward, info_dict)` |
 | `EventManager` | `EventCfg` | `startup`, `reset`, `interval`, user-defined | `apply(mode, env_ids)` |
-| `ActionManager` | `ActionTermCfg` | `pre`, `post` | `process_action(action, mode) → EnvAction` |
+| `ActionManager` | `ActionTermCfg` | Ordered flat slices | `process_action(action)`, then `apply_action()` |
 | `DatasetManager` | `DatasetFunctorCfg` | `save` | `apply(mode, env_ids)` |
 
 ---
@@ -56,7 +56,7 @@ FunctorCfg(
 
 - `func` can be a **string** (resolved via `string_to_callable` at init) or a direct reference.
 - `params` values of type `SceneEntityCfg` are auto-resolved to joint/body indices when the sim starts.
-- Subclass configs add fields: `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, `ObservationCfg.name`, `ActionTermCfg.mode`.
+- Subclass configs add fields such as `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, and `ObservationCfg.name`. `ActionTermCfg` has no mode field.
 
 ---
 
@@ -72,9 +72,10 @@ and implement the same call contract; use them for persistent state or buffers.
 | Reward | `env, obs, action, info` | Reward tensor |
 | Event / randomization | `env, env_ids` | Side effects; normally `None` |
 | Dataset | `env, env_ids` | Persistence side effects |
-| Action term | `process_action(action)` | Controller/policy action for the selected stage |
+| Action term | `process_actions(actions)`, then `apply_actions()` | Stores one raw slice, then writes its owned robot resources |
 
-An `ActionTerm` additionally exposes `input_key` and `action_dim`. Use
+An `ActionTerm` exposes its dimension and Box space, current raw and processed
+buffers, command type, controlled joint IDs, and immutable descriptor. Use
 `/add-functor` for the precise scaffold; do not apply the event signature to
 observations, rewards or action terms.
 
@@ -84,8 +85,9 @@ Managers resolve callable strings, validate parameters, resolve `SceneEntityCfg`
 UID/joint/body selectors, and instantiate class functors during preparation.
 The config attribute name is the stable functor identity.
 
-The environment calls action `pre`, physics, event `interval`, observation,
-reward and action `post` in that order. `ControllerAction` skips only `pre`;
+For a flat policy tensor, the environment calls manager processing, manager
+application, physics, event `interval`, observation, and reward in that order.
+`ControllerAction` bypasses the manager and uses the direct controller boundary;
 the full loop and reset ordering are owned by
 [environment execution](../env-framework/execution.md).
 
@@ -120,11 +122,21 @@ focused environment integration case when invocation order changes.
 - Corrupted asynchronous recordings: snapshot owned CPU payloads before rollout
   buffers are cleared; follow the recorder's persistence contract.
 
-### Default joint-position actions
+### Flat action ownership
 
-The standard `DefaultJointPositionTerm` in `managers/actions.py` accepts explicit
-`joint_names`, `offset`, `scale` and optional `clip`. It exposes current/previous
-action and position-bias buffers without reading task-specific attributes.
-ActionManager dispatches `reset(env_ids)` to its terms; EmbodiedEnv calls it on
-episode reset so untouched rows retain their action history. Locomotion supplies
-its robot-specific mapping and reads these public buffers for observations/rewards.
+`ActionManager` concatenates term Box bounds in configuration order, validates
+the whole `(num_envs, action_dim)` floating tensor before changing state, and
+binds each term to an `ActionDescriptor` slice. Terms that write the same
+command type cannot own overlapping joint IDs. Each term applies only its
+resolved non-mimic selection; this makes arm and gripper terms composable and
+leaves a separate resource namespace available for future tendon/synergy terms.
+Joint-command descriptors must name every controlled ID in the same order, so
+third-party terms cannot hide overlap. During sticky vectorized demos, the
+manager replaces inactive qpos rows with measured holds and inactive qvel/qf
+rows with zero before applying terms.
+
+`DefaultJointPositionAction` exposes `raw_actions`, `previous_raw_actions`, and
+`position_bias` for locomotion state construction. `EefPoseAction` owns selected
+arm IK and `ParallelGripperAction` maps one scalar to explicit independent
+gripper joints. ActionManager dispatches selected-row reset to every term so
+untouched rows retain their action history.

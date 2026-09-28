@@ -288,15 +288,10 @@ def test_franka_robot_ik_shapes_frames_and_limit_sync(
     from embodichain.lab.sim.robots import FrankaPandaCfg
 
     cfg = FrankaPandaCfg.from_dict({})
-    assert cfg.solver_cfg["arm"].class_type == "PytorchSolver"
-    assert cfg.solver_cfg["arm"].num_samples == 30
-    cfg.solver_cfg["arm"] = FEPSolverCfg(
-        urdf_path=solver.urdf_path,
-        root_link_name="base",
-        end_link_name="fr3_hand_tcp",
-        redundancy_search=True,
-        ik_solution_selection=selection,
-    )
+    assert isinstance(cfg.solver_cfg["arm"], FEPSolverCfg)
+    assert cfg.solver_cfg["arm"].redundancy_search
+    cfg.solver_cfg["arm"].urdf_path = solver.urdf_path
+    cfg.solver_cfg["arm"].ik_solution_selection = selection
     # Exercise Robot's real binding, frame conversion and limit synchronization;
     # only the physics-owned poses/limits are supplied without a live simulator.
     robot = object.__new__(Robot)

@@ -45,6 +45,7 @@ RL tasks sometimes drop the `-v<N>` suffix (`CartPoleRL`, `PushCubeRL`).
 | `configs/components/execution_policies/*.yaml` | Reusable execution policy | Physical environment/embodiment ownership |
 | `<task>/agents/<algorithm>.{json,yaml}` | Optional RL training configuration | Task identity or Python registration ownership |
 | `<task>/catalog.yaml` | Logical task key, presentation metadata and named deployment references | Gym registration or duplicated runtime settings |
+| Optional `objective.component` | Independent physical evaluation declaration | Program completion, segment acceptance or persistence authority |
 
 Component files do not use compatibility `version` fields. Inline runnable
 Gym configs remain supported when no conflicting component selector is used.
@@ -88,6 +89,15 @@ task integration's nested `scene_binding`. The shared
 `cobotmagic.yaml` component owns a top-view RGB camera, two wrist
 RGB cameras, and an optional right-arm skill profile. Tableware handwritten and
 configured Task Program deployments reuse that same embodiment.
+The runnable Gym config may set `enable_sensor: false` while selecting an
+embodiment with cameras. The component still owns the sensor declarations, but
+`EmbodiedEnv` skips their creation and sensor observations; the run launcher
+provides `--disable_sensor` / `--disable-sensor` as a one-run override. The
+shared online-data rollout buffer also omits image allocation for a disabled
+inline sensor suite. Sensor-dependent event and observation functors are
+removed before their managers are constructed, including nested
+`SceneEntityCfg` references, `all_sensors` selectors, sensor output paths and
+camera-keyed observation descriptors.
 
 ### Configuration-owned Task Program environment
 
@@ -170,6 +180,12 @@ infer Python-only handwritten capabilities. Uncataloged tasks retain inferred
 records. Metadata must point to existing runnable configs and a valid default;
 capabilities remain deployment-specific. A catalog's optional validation report
 is provenance, not a replacement for measured runtime results.
+
+`objective: {component: objective.yaml}` is a deployment-owned, optional selector
+resolved relative to its declaring Gym config. The strict decoder and tensor
+evaluator live under `gym/envs/objectives/`. It observes ordered stable regions
+for a declared physical rigid object and does not depend on Task Program bindings.
+See [execution](execution.md) for the separate result authority and reset contract.
 
 ---
 

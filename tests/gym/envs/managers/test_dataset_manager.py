@@ -131,6 +131,21 @@ def test_apply_forwards_only_functor_params() -> None:
     assert calls == [(env, env_ids, True)]
 
 
+def test_validate_policy_action_forwards_to_descriptor_recorders() -> None:
+    """Live policy validation reaches each recorder before manager processing."""
+    validator = MagicMock()
+    recorder = SimpleNamespace(validate_policy_action=validator)
+    manager = DatasetManager.__new__(DatasetManager)
+    manager._mode_functor_cfgs = {
+        "save": [SimpleNamespace(func=recorder), SimpleNamespace(func=object())]
+    }
+    action = torch.zeros(2, 3)
+
+    manager.validate_policy_action(action)
+
+    validator.assert_called_once_with(action)
+
+
 def make_manager_for_finalize(*named_functors) -> DatasetManager:
     """Create a manager lifecycle fixture without constructing a simulator."""
     manager = DatasetManager.__new__(DatasetManager)

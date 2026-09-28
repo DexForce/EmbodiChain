@@ -428,6 +428,8 @@ def config_to_cfg(
     policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
     their corresponding component selector is absent. A resolved config
     containing ``task_program`` composes its semantic and policy components.
+    Set ``enable_sensor`` to ``False`` to keep an embodiment's sensor
+    declaration while skipping sensor acquisition.
     Every resolved environment explicitly owns one ``physics`` backend and an
     optional ``physics_config`` mapping whose fields must belong to that backend.
     The existing
@@ -513,6 +515,12 @@ def config_to_cfg(
     )
     component_resolution = _resolve_gym_components(config, base_dir=base_dir)
     config = component_resolution.config
+    if "objective" in config:
+        from embodichain.lab.gym.envs.objectives.config import load_objective_component
+
+        env_cfg.objective = load_objective_component(
+            config["objective"], base_dir=base_dir
+        )
 
     physics_backend = _declared_physics_backend(config)
     physics_config_value = config.get("physics_config", {})
@@ -635,6 +643,7 @@ def config_to_cfg(
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
+    env_cfg.enable_sensor = config.get("enable_sensor", True)
 
     render_config = deepcopy(config.get("render_cfg", {}))
     if isinstance(render_config.get("dlss"), dict):
@@ -904,9 +913,21 @@ def config_to_cfg(
     if "actions" in env_config:
         env_cfg.actions = ComponentCfg()
         for term_name, term_params in env_config["actions"].items():
+            if "mode" in term_params:
+                raise ValueError(
+                    f"Action term {term_name!r} uses removed field 'mode'; "
+                    "action terms now process and apply in configuration order."
+                )
+            term_class_name = term_params["func"]
+            if term_class_name.endswith("Term"):
+                raise ValueError(
+                    f"Action term {term_name!r} uses removed class "
+                    f"{term_class_name!r}; concrete action classes must use "
+                    "the new *Action protocol and naming."
+                )
             term_params_modified = deepcopy(term_params)
             term_func = find_function_from_modules(
-                term_params["func"],
+                term_class_name,
                 manager_modules,
                 raise_if_not_found=True,
             )
@@ -1045,6 +1066,7 @@ def add_env_launcher_args_to_parser(
         --preview: Whether to preview the environment after launching (default: False)
         --filter_visual_rand: Whether to filter out visual randomization (default: False)
         --filter_dataset_saving: Whether to filter out dataset saving (default: False)
+        --disable_sensor: Whether to skip configured sensor acquisition (default: False)
         --viser: Whether to expose the environment through Viser (default: False)
         --viser-*: Viser server, update-rate, and environment selection options
 
@@ -1101,6 +1123,17 @@ def add_env_launcher_args_to_parser(
     parser.add_argument(
         "--filter_dataset_saving",
         help="Whether to filter out dataset saving.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--disable_sensor",
+        "--disable-sensor",
+        dest="disable_sensor",
+        help=(
+            "Disable configured sensor acquisition. Sensors declared by an "
+            "embodiment are not instantiated."
+        ),
         default=False,
         action="store_true",
     )
@@ -1180,6 +1213,8 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
         merged_config["max_episodes"] = args.max_episodes
+    if getattr(args, "disable_sensor", False):
+        merged_config["enable_sensor"] = False
     if viser_enabled:
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
@@ -1250,6 +1285,8 @@ def build_env_cfg_from_args(
     )
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+    if getattr(args, "disable_sensor", False):
+        cfg.enable_sensor = False
     cfg.record_trajectory = getattr(args, "record_trajectory", False)
     if getattr(args, "trajectory_save_dir", None):
         cfg.trajectory_save_dir = args.trajectory_save_dir
@@ -1439,6 +1476,7 @@ def init_rollout_buffer_from_config(
     The function creates a rollout buffer containing:
         - Basic observations: ``robot/qpos``, ``robot/qvel``, ``robot/qf``
         - Sensor observations: ``sensor/<uid>`` for each sensor in config
+          (omitted when ``enable_sensor`` is ``False``)
         - Extra observations: Custom observations from observation functors in ``add`` mode
             that have a ``shape`` specified in their ``extra`` parameter
 
@@ -1480,46 +1518,12 @@ def init_rollout_buffer_from_config(
 
     # Parse sensor
     sensor_desc = {}
-    for cfg in config.get("sensor", []):
-        desc = {}
-        width = cfg.get("width", 640)
-        height = cfg.get("height", 480)
-        desc["color"] = torch.zeros(
-            (
-                batch_size,
-                max_episode_steps,
-                height,
-                width,
-                4,
-            ),
-            dtype=torch.uint8,
-            device=device,
-        )
-        if cfg.get("enable_mask", False):
-            desc["mask"] = torch.zeros(
-                (
-                    batch_size,
-                    max_episode_steps,
-                    height,
-                    width,
-                ),
-                dtype=torch.int32,
-                device=device,
-            )
-        if cfg.get("enable_depth", False):
-            desc["depth"] = torch.zeros(
-                (
-                    batch_size,
-                    max_episode_steps,
-                    height,
-                    width,
-                ),
-                dtype=torch.float32,
-                device=device,
-            )
-
-        if cfg.get("sensor_type", "Camera") == "StereoCamera":
-            desc["color_right"] = torch.zeros(
+    if config.get("enable_sensor", True):
+        for cfg in config.get("sensor", []):
+            desc = {}
+            width = cfg.get("width", 640)
+            height = cfg.get("height", 480)
+            desc["color"] = torch.zeros(
                 (
                     batch_size,
                     max_episode_steps,
@@ -1530,8 +1534,8 @@ def init_rollout_buffer_from_config(
                 dtype=torch.uint8,
                 device=device,
             )
-            if "mask" in desc:
-                desc["mask_right"] = torch.zeros(
+            if cfg.get("enable_mask", False):
+                desc["mask"] = torch.zeros(
                     (
                         batch_size,
                         max_episode_steps,
@@ -1541,8 +1545,8 @@ def init_rollout_buffer_from_config(
                     dtype=torch.int32,
                     device=device,
                 )
-            if "depth" in desc:
-                desc["depth_right"] = torch.zeros(
+            if cfg.get("enable_depth", False):
+                desc["depth"] = torch.zeros(
                     (
                         batch_size,
                         max_episode_steps,
@@ -1553,7 +1557,42 @@ def init_rollout_buffer_from_config(
                     device=device,
                 )
 
-        sensor_desc[cfg.get("uid", "camera")] = desc
+            if cfg.get("sensor_type", "Camera") == "StereoCamera":
+                desc["color_right"] = torch.zeros(
+                    (
+                        batch_size,
+                        max_episode_steps,
+                        height,
+                        width,
+                        4,
+                    ),
+                    dtype=torch.uint8,
+                    device=device,
+                )
+                if "mask" in desc:
+                    desc["mask_right"] = torch.zeros(
+                        (
+                            batch_size,
+                            max_episode_steps,
+                            height,
+                            width,
+                        ),
+                        dtype=torch.int32,
+                        device=device,
+                    )
+                if "depth" in desc:
+                    desc["depth_right"] = torch.zeros(
+                        (
+                            batch_size,
+                            max_episode_steps,
+                            height,
+                            width,
+                        ),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+
+            sensor_desc[cfg.get("uid", "camera")] = desc
 
     # For simplicity, we initialize the observation buffer as a flat vector with dimension state_dim.
     # In practice, you may want to initialize it according to the actual observation space structure.

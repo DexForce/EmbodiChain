@@ -14,10 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""External Policy Profiles for ``embodichain eval-policy``."""
+"""Policy evaluation configuration for ``embodichain eval-policy``."""
 
 from __future__ import annotations
 
+from .camera import PolicyViewerCameraCfg
 from .profile import (
     MotionProfile,
     MotionProfileRequest,
@@ -26,6 +27,7 @@ from .profile import (
 )
 
 __all__ = [
+    "PolicyViewerCameraCfg",
     "MotionProfile",
     "MotionProfileRequest",
     "build_motion_profile",
