@@ -75,6 +75,14 @@ the graph. Validate complete observation-layout metadata/fingerprint before
 rollout; model dimensions and waypoint capacity belong to the export contract.
 Inspect the `policy-deploy` package extra for runtime dependencies.
 
+`NeuralPlannerCfg.dt` is bookkeeping, not solved timing: the rollout integrates
+a joint delta per step, so a saturated step implies `action_scale / dt` rad/s
+and overshoots a typical arm's velocity limit several times over. Setting
+`constraints` swaps that nominal timing for a TOPPRA parameterization through
+the shared entry point below; it resamples the path, so positions and poses
+change with the timing, and it cannot reduce the path's own jerk. Default
+remains `None`, which preserves the nominal-timing behavior.
+
 Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. Target/FK quaternions follow the shared
 [simulation convention](../simulation-system/simulation-system.md); do not
@@ -94,8 +102,13 @@ semantics are owned by [collision worlds](collision-worlds.md).
 
 ## Retiming and playback
 
-`compute/trajectory/timing.py` owns time-domain differentiation/resampling and
-`retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
+`toppra_planner.py::retime_joint_paths()` is the shared entry point for
+re-parameterizing an already-planned joint path under velocity and acceleration
+limits, used by planners that emit geometry without executable timing. It is
+the planner's own time parameterization, so it resamples along the fitted
+spline; recompute derived poses from its output rather than reusing the input
+samples. `compute/trajectory/timing.py` owns time-domain
+differentiation/resampling and `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
 unchanged samples may represent padding/junctions. Time resampling preserves
 first-arrival offset and total duration but does not certify motion limits.
 
