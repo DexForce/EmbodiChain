@@ -135,6 +135,49 @@ def test_inv_transform_rejects_unsupported_input_type() -> None:
         inv_transform(np.eye(4).tolist())
 
 
+@pytest.mark.parametrize("backend", [np.asarray, torch.as_tensor])
+@pytest.mark.parametrize(
+    "kind",
+    ["zero", "singular", "scale", "shear", "reflection", "last_row", "nan", "inf"],
+)
+def test_inv_transform_rejects_invalid_rigid_transforms(backend, kind) -> None:
+    transform = np.eye(4)
+    if kind == "zero":
+        transform[:] = 0
+    elif kind == "singular":
+        transform[2, 2] = 0
+    elif kind == "scale":
+        transform[0, 0] = 1.1
+    elif kind == "shear":
+        transform[0, 1] = 0.2
+    elif kind == "reflection":
+        transform[0, 0] = -1
+    elif kind == "last_row":
+        transform[3, 0] = 0.1
+    else:
+        transform[0, 3] = float(kind)
+    error = np.linalg.LinAlgError if kind in ("zero", "singular") else ValueError
+
+    with pytest.raises(error):
+        inv_transform(backend(transform))
+
+
+@pytest.mark.parametrize("backend", [np.asarray, torch.as_tensor])
+def test_inv_transform_accepts_rounded_float32_rotations(backend) -> None:
+    # A 45-degree rotation rounded to six decimal places, as in robot configs.
+    transform = np.array(
+        [
+            [0.707107, -0.707107, 0, 0.13],
+            [0.707107, 0.707107, 0, -0.02],
+            [0, 0, 1, 0.03],
+            [0, 0, 0, 1],
+        ],
+        dtype=np.float32,
+    )
+    inverse = inv_transform(backend(transform))
+    np.testing.assert_allclose(np.asarray(inverse) @ transform, np.eye(4), atol=1e-6)
+
+
 def test_inv_transform_legacy_import_is_compatible() -> None:
     from embodichain.utils.utility import inv_transform as legacy_inv_transform
 

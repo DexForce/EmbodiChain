@@ -19,6 +19,7 @@ a synchronized dual-arm robot.
 
    DexforceW1Cfg
    CobotMagicCfg
+   TianjiMarvinCfg
    FrankaPandaCfg
    URRobotCfg
    DualArmRobotCfg
@@ -42,6 +43,17 @@ a synchronized dual-arm robot.
    :inherited-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: TianjiMarvinCfg
+   :members: from_dict, build_pk_serial_chain, with_gripper
+
+See :doc:`/resources/robot/tianji_marvin` for variant selection, control parts,
+the FK/IK frame contract, and runnable examples. The same configuration is
+available through its implementation module:
+
+.. autosummary::
+
+   embodichain.lab.sim.robots.tianji_marvin.TianjiMarvinCfg
 
 .. autoclass:: FrankaPandaCfg
    :members:

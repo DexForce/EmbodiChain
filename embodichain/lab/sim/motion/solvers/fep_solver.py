@@ -138,6 +138,7 @@ class FEPSolver(BaseSolver):
         import warp as wp
 
         cfg.__post_init__()
+        tcp = cfg._get_tcp_as_numpy()
         chain = kwargs.pop("pk_serial_chain", None)
         if chain is None:
             chain = create_pk_serial_chain(
@@ -169,7 +170,7 @@ class FEPSolver(BaseSolver):
         )
         self._end_tool = tool
         self._ready = None
-        self.set_tcp(cfg._get_tcp_as_numpy())
+        self.set_tcp(tcp)
         wp.init()
 
     def set_tcp(self, xpos: np.ndarray) -> None:
@@ -178,11 +179,13 @@ class FEPSolver(BaseSolver):
         Args:
             xpos: TCP transform relative to the configured end link.
         """
-        super().set_tcp(xpos)
+        tcp = np.array(xpos)
         frames = self._model_frames.copy()
-        frames[1] = inv_transform(self._end_tool @ self.tcp_xpos)
-        frames[-1] = frames[-1] @ self.tcp_xpos
-        self._frames = torch.tensor(frames, device=self.device, dtype=torch.float64)
+        frames[1] = inv_transform(self._end_tool @ tcp)
+        frames[-1] = frames[-1] @ tcp
+        updated_frames = torch.tensor(frames, device=self.device, dtype=torch.float64)
+        super().set_tcp(tcp)
+        self._frames = updated_frames
         if self.device.type == "cuda":
             current = torch.cuda.current_stream(self.device)
             if self._ready is not None:

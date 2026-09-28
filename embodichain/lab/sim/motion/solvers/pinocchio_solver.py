@@ -237,8 +237,9 @@ class PinocchioSolver(BaseSolver):
             return self.get_default_qpos_seed().detach().cpu().numpy().astype(float)
         return np.zeros(self.robot.model.nq)
 
-    def set_tcp(self, tcp: np.ndarray):
-        self.tcp = tcp
+    def set_tcp(self, tcp: np.ndarray) -> None:
+        super().set_tcp(tcp)
+        self.tcp = self.tcp_xpos
 
     def get_iteration_params(self) -> dict:
         r"""Returns the current iteration parameters.

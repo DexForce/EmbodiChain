@@ -291,9 +291,6 @@ class PinkSolver(BaseSolver):
         tcp = np.asarray(xpos, dtype=float)
         if tcp.shape != (4, 4) or not np.isfinite(tcp).all():
             raise ValueError("TCP must be a finite 4x4 homogeneous matrix")
-        # Preserve rejection of singular updates before replacing the live TCP.
-        if np.linalg.det(tcp) == 0.0:
-            raise np.linalg.LinAlgError("TCP transform is singular")
         tcp_inverse = inv_transform(tcp)
         super().set_tcp(tcp)
         self._tcp_inverse = tcp_inverse

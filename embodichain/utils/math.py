@@ -1996,8 +1996,10 @@ def unmake_pose(pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 def inv_transform(transform: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """Invert a single rigid transform without modifying its input.
 
-    Uses ``[R.T, -R.T @ t; 0, 1]``. The input must represent a rigid
-    transform with an orthonormal rotation, not a general affine matrix.
+    Uses ``[R.T, -R.T @ t; 0, 1]`` after validating a finite SE(3)
+    transform. The rotation must be orthonormal with determinant +1 and
+    the last row must be ``[0, 0, 0, 1]`` (absolute tolerance ``1e-5``).
+    General affine matrices are not supported.
     Use :func:`pose_inv` for batched Torch transforms.
 
     Args:
@@ -2009,12 +2011,44 @@ def inv_transform(transform: np.ndarray | torch.Tensor) -> np.ndarray | torch.Te
 
     Raises:
         TypeError: If the input is neither a NumPy array nor a Torch tensor.
-        ValueError: If the input shape is not ``(4, 4)``.
+        ValueError: If the shape is not ``(4, 4)`` or the input is not finite SE(3).
+        numpy.linalg.LinAlgError: If the transform is singular.
     """
     if not isinstance(transform, (np.ndarray, torch.Tensor)):
         raise TypeError("transform must be a NumPy array or Torch tensor")
     if transform.shape != (4, 4):
         raise ValueError(f"Expected a single (4, 4) transform, got {transform.shape}")
+
+    # Validate outside autograd, at double precision, including for half/integer
+    # inputs whose backend does not support determinant evaluation directly.
+    if isinstance(transform, torch.Tensor):
+        if transform.is_complex():
+            raise ValueError("Expected a real SE(3) transform")
+        checked = transform.detach().to(dtype=torch.float64)
+        identity = torch.eye(4, dtype=checked.dtype, device=checked.device)
+        backend = torch
+    else:
+        if np.iscomplexobj(transform):
+            raise ValueError("Expected a real SE(3) transform")
+        checked = transform.astype(np.float64, copy=False)
+        identity = np.eye(4)
+        backend = np
+    if not backend.isfinite(checked).all():
+        raise ValueError("Expected a finite SE(3) transform")
+    rotation = checked[:3, :3]
+    if not (
+        backend.allclose(checked[3], identity[3], rtol=0, atol=1e-5)
+        and backend.allclose(rotation.T @ rotation, identity[:3, :3], rtol=0, atol=1e-5)
+        and backend.allclose(
+            backend.linalg.det(rotation), identity[3, 3], rtol=0, atol=1e-5
+        )
+    ):
+        if backend.linalg.det(checked) == 0:
+            raise np.linalg.LinAlgError("Transform is singular")
+        raise ValueError(
+            "Expected an SE(3) transform with an orthonormal rotation, "
+            "determinant +1 and last row [0, 0, 0, 1]"
+        )
 
     if isinstance(transform, torch.Tensor):
         inverse = torch.eye(4, dtype=transform.dtype, device=transform.device)
