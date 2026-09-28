@@ -557,7 +557,7 @@ def get_pose(
             :, entity.get_joint_ids(control_part)
         ]
         entity_pose = entity.compute_fk(
-            control_part_qpos, name=control_part, to_matrix=to_matrix
+            control_part_qpos, name=control_part, to_matrix=to_matrix, env_ids=env_ids
         )  # NOTE: now compute_fk returns arena pose
         entity_pose_register_name = control_part + "_pose"
     else:

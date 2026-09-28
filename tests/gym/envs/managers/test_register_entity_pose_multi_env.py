@@ -50,9 +50,15 @@ def _make_robot(num_envs: int) -> MagicMock:
     robot.get_qpos.return_value = qpos.reshape(num_envs, NUM_JOINTS)
     robot.get_joint_ids.return_value = ARM_JOINTS
 
-    def compute_fk(qpos, name=None, to_matrix=True):
+    def compute_fk(qpos, name=None, to_matrix=True, env_ids=None):
+        # Same batch rule as Robot.compute_fk: qpos rows must match env_ids
+        # (all envs when env_ids is None), since the base link poses are
+        # fetched for those envs.
         if qpos.dim() == 1:
             qpos = qpos.unsqueeze(0)
+        n = num_envs if env_ids is None else len(env_ids)
+        if qpos.shape[0] != n:
+            raise ValueError(f"batch size mismatch: expected {n}, got {qpos.shape[0]}")
         return torch.eye(4).repeat(qpos.shape[0], 1, 1)
 
     robot.compute_fk.side_effect = compute_fk
@@ -95,8 +101,11 @@ def test_get_pose_robot_subset_of_envs():
 
     get_pose(env, env_ids, cfg)
 
-    fk_qpos = robot.compute_fk.call_args.args[0]
-    assert torch.equal(fk_qpos, robot.get_qpos.return_value[env_ids][:, ARM_JOINTS])
+    call = robot.compute_fk.call_args
+    assert torch.equal(call.kwargs["env_ids"], env_ids)
+    assert torch.equal(
+        call.args[0], robot.get_qpos.return_value[env_ids][:, ARM_JOINTS]
+    )
 
 
 @pytest.mark.parametrize("num_envs", [1, 3])
