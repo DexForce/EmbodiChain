@@ -39,6 +39,7 @@ from .artifacts import (
     write_resolved_suite,
 )
 from .config import PlannerSpecCfg, SuiteCfg, stable_hash
+from .embodiments import EmbodimentResolution, resolve_embodiment
 from .metrics import timed_call
 from .models import (
     BenchmarkCase,
@@ -122,6 +123,11 @@ class BenchmarkRunner:
         self.headless = headless
         self.output_root = Path(output_root)
         self.video = VideoRecordCfg() if video is None else video
+        self.embodiment_resolution: EmbodimentResolution = resolve_embodiment(
+            suite.embodiment,
+            suite.robot,
+            base_dir=Path.cwd(),
+        )
         self.robot_provider = create_robot_provider(suite.robot)
         self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
@@ -599,7 +605,7 @@ class BenchmarkRunner:
                                 domain=case_domain,
                                 track_group=track_group,
                                 embodiment_id=case.embodiment_id
-                                or self.suite.resolved_embodiment_id,
+                                or self.embodiment_resolution.embodiment_id,
                                 required_capabilities=frozenset(required),
                             )
                         )
@@ -611,6 +617,7 @@ class BenchmarkRunner:
                         self.cases,
                         suite=self.suite,
                         planner_config_hashes=planner_config_hashes,
+                        embodiment_resolution=self.embodiment_resolution,
                     )
                     for spec in self.planner_specs:
                         self._run_adapter(
@@ -637,6 +644,7 @@ class BenchmarkRunner:
             self.cases,
             suite=self.suite,
             planner_config_hashes=planner_config_hashes,
+            embodiment_resolution=self.embodiment_resolution,
         )
         metadata = [
             self.metadata[spec.id]

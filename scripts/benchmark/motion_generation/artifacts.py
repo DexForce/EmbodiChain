@@ -26,13 +26,16 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import yaml
 
 from .config import SuiteCfg, suite_to_dict
 from .models import BenchmarkCase, TrialRecord
+
+if TYPE_CHECKING:
+    from .embodiments import EmbodimentResolution
 
 __all__ = [
     "TrialJsonlWriter",
@@ -188,6 +191,7 @@ def write_case_manifest(
     *,
     suite: SuiteCfg | None = None,
     planner_config_hashes: Mapping[str, str] | None = None,
+    embodiment_resolution: "EmbodimentResolution | None" = None,
 ) -> Path:
     """Write the algorithm-independent case manifest."""
     payload: dict[str, object] = {
@@ -196,7 +200,9 @@ def write_case_manifest(
     }
     if suite is not None:
         payload["resolved_suite_version"] = suite.suite_version
-        if suite.embodiment is None:
+        if embodiment_resolution is not None:
+            payload["resolved_embodiment"] = embodiment_resolution.to_metadata()
+        elif suite.embodiment is None:
             payload["resolved_embodiment"] = {
                 "id": suite.robot.id,
                 "provider": suite.robot.provider,

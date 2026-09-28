@@ -122,8 +122,9 @@ embodiment:
 ```
 
 The resolved component and overrides are recorded in `case_manifest.json`; the
-component loader and endpoint binding remain the next embodiment integration
-layer.
+static resolver also records endpoint bindings, declared capabilities, runtime
+services, and a stable component hash. Runtime `RobotCfg` construction and
+simulator binding remain the next embodiment integration layer.
 
 ### Domain provenance
 
