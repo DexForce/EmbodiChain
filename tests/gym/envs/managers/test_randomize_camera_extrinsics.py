@@ -158,7 +158,9 @@ def test_attached_camera_warns_about_look_at_ranges(warnings) -> None:
 @pytest.mark.no_sim
 def test_arena_pose_camera_uses_nonzero_pose_ranges(warnings, monkeypatch) -> None:
     def midpoint_sample(*, lower, upper, size, device):
-        return ((lower + upper) / 2).expand(size).clone()
+        midpoint = (lower + upper) / 2
+        row_delta = (upper - lower) * 0.25
+        return torch.stack((midpoint, midpoint + row_delta), dim=0).to(device)
 
     monkeypatch.setattr(visual, "sample_uniform", midpoint_sample)
     env = _make_env(_arena_pose_extrinsics())
@@ -174,19 +176,19 @@ def test_arena_pose_camera_uses_nonzero_pose_ranges(warnings, monkeypatch) -> No
     env.camera.set_local_pose.assert_called_once()
     (pose,) = env.camera.set_local_pose.call_args.args
     assert pose.shape == (2, 4, 4)
-    expected_position = torch.tensor([0.04, -0.02, 0.13]).repeat(2, 1)
+    expected_position = torch.tensor([[0.04, -0.02, 0.13], [0.05, -0.015, 0.14]])
     assert torch.allclose(pose[:, :3, 3], expected_position)
 
     # Arena-frame poses are converted to the OpenGL frame just like Camera.reset.
     base_quat = torch.tensor(_arena_pose_extrinsics().quat).unsqueeze(0)
     base_euler = torch.stack(euler_xyz_from_quat(base_quat), dim=1)
-    euler_delta = torch.tensor([0.05, -0.01, 0.06])
+    euler_delta = torch.tensor([[0.05, -0.01, 0.06], [0.065, 0.005, 0.075]])
     expected_euler = base_euler + euler_delta
     roll, pitch, yaw = expected_euler.unbind(dim=1)
-    expected_rotation = matrix_from_quat(quat_from_euler_xyz(roll, pitch, yaw))[0]
-    expected_rotation[:, 1] *= -1
-    expected_rotation[:, 2] *= -1
-    assert torch.allclose(pose[0, :3, :3], expected_rotation)
+    expected_rotation = matrix_from_quat(quat_from_euler_xyz(roll, pitch, yaw))
+    expected_rotation[:, :, 1] *= -1
+    expected_rotation[:, :, 2] *= -1
+    assert torch.allclose(pose[:, :3, :3], expected_rotation)
 
 
 @pytest.mark.no_sim
