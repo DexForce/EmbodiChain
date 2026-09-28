@@ -93,6 +93,7 @@ METRIC_COLUMNS = (
     "jerk_utilization",
     "max_joint_velocity_rad_s",
     "max_joint_acceleration_rad_s2",
+    "max_joint_jerk_rad_s3",
     "joint_path_length_rad",
     "cartesian_path_length_m",
     "path_efficiency",

@@ -421,6 +421,36 @@ def _utilization(
     return peak, utilization, utilization > 1.0 + tolerance
 
 
+def _trim_hold_padding(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Drop a trailing run of unchanged samples that elapse no time.
+
+    A batched planner pads shorter rows out to the longest by repeating the
+    final pose at a zero interval. Those samples are bookkeeping, not motion:
+    differentiating through them produces a velocity step across zero elapsed
+    time, which the next differentiation stage rejects outright. Removing them
+    first keeps a legitimately padded batch evaluable.
+
+    ``dt[0]`` is an arrival offset rather than a step, so a single-sample path
+    is returned unchanged.
+    """
+    count = positions.shape[0]
+    if count < 2:
+        return positions, dt
+    last = count
+    while (
+        last > 2
+        and float(dt[last - 1]) == 0.0
+        and bool(torch.equal(positions[last - 1], positions[last - 2]))
+    ):
+        last -= 1
+    if last == count:
+        return positions, dt
+    return positions[:last], dt[:last]
+
+
 def _moves_in_zero_time(positions: torch.Tensor, dt: torch.Tensor) -> bool:
     """Return whether the path changes position across a zero-length interval.
 
@@ -468,13 +498,24 @@ def _dynamic_limit_metrics(
     qacc_limits: torch.Tensor | None,
     qjerk_limits: torch.Tensor | None,
     tolerance: float,
+    timing_is_solved: bool = True,
 ) -> dict[str, float | bool | None]:
     """Return peak dynamics, limit utilization, and violation per derivative.
 
     Every entry is ``None`` when the trajectory is unusable or the matching
     limit is unconfigured. Acceleration and jerk limits have no asset source,
     so an unset limit is reported as not applicable rather than as satisfied.
+
+    The per-derivative peaks, utilizations and violations always describe the
+    timing the planner reported. ``dynamic_limits_satisfied`` is the verdict
+    that feeds ``motion_valid``, and it additionally requires that timing to be
+    solved: a planner that reports a nominal constant has not claimed an
+    executable duration, so its trajectory is neither credited nor failed on a
+    clock it never solved. Those rows still publish their diagnostics, which is
+    what makes a nominal and a retimed run of the same policy comparable.
     """
+    if positions is not None and dt is not None:
+        positions, dt = _trim_hold_padding(positions, dt)
     if positions is None or dt is None or positions.shape[0] < 2:
         velocity = acceleration = jerk = None
     elif _moves_in_zero_time(positions, dt):
@@ -491,7 +532,7 @@ def _dynamic_limit_metrics(
             "max_joint_jerk_rad_s3": math.inf,
             "jerk_utilization": math.inf if qjerk_limits is not None else None,
             "jerk_limit_violation": True if qjerk_limits is not None else None,
-            "dynamic_limits_satisfied": False,
+            "dynamic_limits_satisfied": False if timing_is_solved else None,
         }
     else:
         velocity, acceleration, jerk = _trajectory_derivatives(positions, dt)
@@ -519,7 +560,9 @@ def _dynamic_limit_metrics(
         "max_joint_jerk_rad_s3": peak_jerk,
         "jerk_utilization": jerk_utilization,
         "jerk_limit_violation": jerk_violation,
-        "dynamic_limits_satisfied": (not any(checks)) if checks else None,
+        "dynamic_limits_satisfied": (
+            (not any(checks)) if (checks and timing_is_solved) else None
+        ),
     }
 
 
@@ -593,6 +636,7 @@ def compute_case_outcomes(
     joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None,
     joint_jerk_limit_rad_s3: float | Sequence[float] | None = None,
     dynamic_limit_tolerance: float = 1.0e-3,
+    timing_is_solved: bool = True,
 ) -> tuple[CaseOutcome, ...]:
     """Recompute free-space success and quality from a planner trajectory."""
     planning_success = _success_tensor(result.success, case.batch_size)
@@ -710,10 +754,11 @@ def compute_case_outcomes(
                 qacc_limits,
                 qjerk_limits,
                 dynamic_limit_tolerance,
+                timing_is_solved,
             )
         else:
             dynamic = _dynamic_limit_metrics(
-                None, None, None, None, None, dynamic_limit_tolerance
+                None, None, None, None, None, dynamic_limit_tolerance, timing_is_solved
             )
         validity_space = case.case_parameters.get(
             "motion_validity", "ordered_cartesian_waypoints"

@@ -143,6 +143,7 @@ class ScenarioProvider(ABC):
         suite: "SuiteCfg",
         *,
         planning_time_ms: float,
+        timing_is_solved: bool = True,
     ) -> ScenarioEvaluation:
         """Externally validate a planner-only trajectory."""
         if not isinstance(result, PlanResult):
@@ -161,6 +162,7 @@ class ScenarioProvider(ABC):
             ),
             joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
             dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
+            timing_is_solved=timing_is_solved,
         )
         return ScenarioEvaluation(outcomes=outcomes)
 

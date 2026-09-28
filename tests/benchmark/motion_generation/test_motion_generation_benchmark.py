@@ -437,6 +437,50 @@ def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation():
     assert outcome.failure_code == "dynamic_limit_violation"
 
 
+def test_hold_padded_batch_row_still_evaluates():
+    # A batched planner pads a short row by repeating its final pose at a zero
+    # interval. Differentiating straight through that hold steps the velocity
+    # across zero elapsed time, which the next stage rejects outright.
+    case = _case()
+    case.target_waypoints[0, 0, 0, 3] = 0.1
+    positions = torch.zeros(1, 4, 7)
+    positions[0, 1:, 0] = 0.1
+    dt = torch.tensor([[0.0, 0.025, 0.0, 0.0]])
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.velocity_limit_violation is True
+
+
+def test_nominal_timing_reports_dynamics_without_deciding_validity():
+    # The same trajectory, judged under a clock the planner solved and under
+    # one it merely assumed.
+    solved = _dynamic_outcomes()[0]
+    nominal = _dynamic_outcomes(timing_is_solved=False)[0]
+
+    # Diagnostics describe the reported timing either way.
+    for outcome in (solved, nominal):
+        assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+        assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
+        assert outcome.velocity_limit_violation is True
+
+    # Only a solved clock produces a verdict that can fail the trajectory.
+    assert solved.dynamic_limits_satisfied is False
+    assert solved.motion_valid is False
+    assert solved.failure_code == "dynamic_limit_violation"
+    assert nominal.dynamic_limits_satisfied is None
+    assert nominal.motion_valid is True
+    assert nominal.failure_code is None
+
+
 def test_nominal_timing_planner_reports_no_comparable_duration():
     case = _case()
     metadata = [
