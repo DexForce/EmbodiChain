@@ -26,11 +26,13 @@ from __future__ import annotations
 
 from .cfg import (
     SPATIAL_METHODS,
+    TrajectoryExpansionCfg,
     TrajectoryAugmentationCfg,
     TrajectoryGenerationJobCfg,
 )
 from .combined import (
     CandidateRecipe,
+    CallRecipe,
     CombinedGenerationProfile,
     CubeInitialPoseProvider,
     CycleRecipe,
@@ -106,6 +108,7 @@ __all__ = [
     "SPATIAL_METHODS",
     "CandidateIdentity",
     "CandidateRecipe",
+    "CallRecipe",
     "CombinedAssignment",
     "CombinedEpisodeCoordinator",
     "CandidateSpec",
@@ -127,6 +130,7 @@ __all__ = [
     "VisualProfileRegistry",
     "SceneCase",
     "TrajectoryAugmentationCfg",
+    "TrajectoryExpansionCfg",
     "TrajectoryGenerationJobCfg",
     "TrajectoryPhase",
     "TrajectoryTemplate",

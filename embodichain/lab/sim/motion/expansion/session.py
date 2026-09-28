@@ -27,7 +27,7 @@ from types import MappingProxyType
 
 import torch
 
-from .cfg import TrajectoryGenerationJobCfg
+from .cfg import TrajectoryExpansionCfg, TrajectoryGenerationJobCfg
 from .contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
@@ -122,11 +122,15 @@ class GenerationSession:
 
     def __init__(
         self,
-        cfg: TrajectoryGenerationJobCfg,
+        cfg: TrajectoryExpansionCfg | TrajectoryGenerationJobCfg,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._cfg = TrajectoryGenerationJobCfg.from_mapping(cfg.to_dict())
+        if isinstance(cfg, TrajectoryGenerationJobCfg):
+            cfg = TrajectoryExpansionCfg.from_generation_job(cfg)
+        if not isinstance(cfg, TrajectoryExpansionCfg):
+            raise TypeError("cfg must be a TrajectoryExpansionCfg")
+        self._cfg = TrajectoryExpansionCfg.from_mapping(cfg.to_dict())
         self._clock, self._started_at = clock, clock()
         self._cases: dict[
             tuple[str, str],

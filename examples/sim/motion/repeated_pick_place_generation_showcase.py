@@ -45,7 +45,6 @@ from embodichain.lab.sim.motion.expansion import (
     CombinedGenerationProfile,
     CubeInitialPoseProvider,
     PhysicalSlotPool,
-    TrajectoryGenerationJobCfg,
     ValidationResult,
     enumerate_candidate_recipes,
     load_generation_profile,
@@ -71,7 +70,7 @@ __all__ = ["main"]
 
 
 def _write_generation_json(
-    profile: TrajectoryGenerationJobCfg | CombinedGenerationProfile,
+    profile: CombinedGenerationProfile,
     records: tuple[TaskProgramGenerationRecord, ...],
     result: DemoEpisodeResult,
     measured_validation: ValidationResult,
@@ -168,16 +167,12 @@ def _save_generation_plot(
 def _validate_candidate_indices(
     values: Iterable[int],
     *,
-    profile: TrajectoryGenerationJobCfg | CombinedGenerationProfile,
+    profile: CombinedGenerationProfile,
 ) -> tuple[int, ...]:
     indices = tuple(values)
     if not indices or len(set(indices)) != len(indices):
         raise ValueError("candidate indices must be nonempty and unique")
-    limit = (
-        len(enumerate_candidate_recipes(profile))
-        if isinstance(profile, CombinedGenerationProfile)
-        else profile.augmentation.max_variants_per_reference
-    )
+    limit = len(enumerate_candidate_recipes(profile))
     if any(type(index) is not int or not 0 <= index < limit for index in indices):
         raise ValueError(f"candidate indices must be within [0, {limit})")
     return indices
@@ -340,6 +335,11 @@ def main(argv: list[str] | None = None) -> None:
         profile, _, _ = request
     else:
         profile = load_generation_profile(args.generation_profile)
+    if not isinstance(profile, CombinedGenerationProfile):
+        raise ValueError(
+            "the Task Program showcase requires a schema_version=1 "
+            "CombinedGenerationProfile"
+        )
     candidate_indices = _validate_candidate_indices(
         args.candidate_indices,
         profile=profile,

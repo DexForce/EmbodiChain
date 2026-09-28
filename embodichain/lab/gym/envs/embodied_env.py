@@ -93,7 +93,6 @@ from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.expansion import (
         CombinedGenerationProfile,
-        TrajectoryGenerationJobCfg,
     )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
@@ -2624,9 +2623,7 @@ class EmbodiedEnv(BaseEnv):
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: (
-            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
-        ) = None,
+        generation_profile: CombinedGenerationProfile | None = None,
         generation_candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
@@ -2695,9 +2692,7 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
-        generation_profile: (
-            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
-        ) = None,
+        generation_profile: CombinedGenerationProfile | None = None,
         generation_candidate_index: int = 0,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:

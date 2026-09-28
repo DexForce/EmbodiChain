@@ -34,7 +34,6 @@ from typing import Protocol, runtime_checkable
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
 from embodichain.lab.sim.motion.expansion import (
     CombinedGenerationProfile,
-    TrajectoryGenerationJobCfg,
 )
 from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
@@ -99,7 +98,6 @@ from .catalog import (
 )
 from .generation import (
     CombinedTaskProgramCandidatePlanTransformFactory,
-    TaskProgramCandidatePlanTransformFactory,
 )
 from embodichain.lab.task_program.language.schema import (
     TaskProgramCfg,
@@ -303,9 +301,7 @@ class TaskProgramRuntimeAssembly:
     runtime: SemanticCallExecutor
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None
     generation_trace_provider: (
-        TaskProgramCandidatePlanTransformFactory
-        | CombinedTaskProgramCandidatePlanTransformFactory
-        | None
+        CombinedTaskProgramCandidatePlanTransformFactory | None
     ) = None
 
 
@@ -677,9 +673,7 @@ class TaskProgramEnvironmentAdapter:
         *,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
         generation_trace_provider: (
-            TaskProgramCandidatePlanTransformFactory
-            | CombinedTaskProgramCandidatePlanTransformFactory
-            | None
+            CombinedTaskProgramCandidatePlanTransformFactory | None
         ) = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
@@ -695,10 +689,7 @@ class TaskProgramEnvironmentAdapter:
             )
         if generation_trace_provider is not None and not isinstance(
             generation_trace_provider,
-            (
-                TaskProgramCandidatePlanTransformFactory,
-                CombinedTaskProgramCandidatePlanTransformFactory,
-            ),
+            CombinedTaskProgramCandidatePlanTransformFactory,
         ):
             raise TypeError(
                 "generation_trace_provider must be a "
@@ -842,9 +833,7 @@ class TaskProgramEnvironmentAdapter:
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: (
-            TrajectoryGenerationJobCfg | CombinedGenerationProfile | None
-        ) = None,
+        generation_profile: CombinedGenerationProfile | None = None,
         candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
@@ -862,11 +851,10 @@ class TaskProgramEnvironmentAdapter:
         semantic = self._assemble_semantic_components(program.integration)
         self._preflight_program(program, semantic.compiler)
         if generation_profile is not None and not isinstance(
-            generation_profile,
-            (TrajectoryGenerationJobCfg, CombinedGenerationProfile),
+            generation_profile, CombinedGenerationProfile
         ):
             raise TypeError(
-                "generation_profile must be a supported Generation Profile or None."
+                "generation_profile must be a CombinedGenerationProfile or None."
             )
         if type(candidate_index) is not int or candidate_index < 0:
             raise ValueError("candidate_index must be a non-negative integer.")
@@ -880,27 +868,10 @@ class TaskProgramEnvironmentAdapter:
                 integration_id=self._scene_registry_id,
                 robot_profile_id=self._robot_profile_id,
             )
-        elif isinstance(generation_profile, TrajectoryGenerationJobCfg):
-            generation = TaskProgramCandidatePlanTransformFactory(
-                generation_profile,
-                candidate_index=candidate_index,
-                program_id=program.program_id,
-                integration_id=self._scene_registry_id,
-                robot_profile_id=self._robot_profile_id,
-            )
         else:
             generation = None
         if generation_profile is not None:
-            program_skill_ids = self._program_skill_ids(program, semantic.compiler)
-            if (
-                isinstance(generation_profile, TrajectoryGenerationJobCfg)
-                and generation_profile.source.template_id not in program_skill_ids
-            ):
-                raise ValueError(
-                    "generation_profile source.template_id "
-                    f"{generation_profile.source.template_id!r} is not present in "
-                    f"the compiled program skills {sorted(program_skill_ids)!r}."
-                )
+            self._program_skill_ids(program, semantic.compiler)
         assembly = self._assemble_execution_runtime(
             semantic,
             plan_transform_factory=generation,

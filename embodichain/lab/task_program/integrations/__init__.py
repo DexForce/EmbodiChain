@@ -27,7 +27,6 @@ from .environment import (
 )
 from .generation import (
     CombinedTaskProgramCandidatePlanTransformFactory,
-    TaskProgramCandidatePlanTransformFactory,
     TaskProgramGenerationRecord,
     TaskProgramSourceAdapter,
 )
@@ -95,7 +94,6 @@ __all__ = [
     "TaskProgramEnvironmentFactory",
     "TaskProgramIntegrationCatalog",
     "TaskProgramSourceAdapter",
-    "TaskProgramCandidatePlanTransformFactory",
     "CombinedTaskProgramCandidatePlanTransformFactory",
     "TaskProgramGenerationRecord",
     "TaskProgramRuntimeAssembly",

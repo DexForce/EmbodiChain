@@ -36,6 +36,7 @@ from .operators import TIMING_PROFILES
 
 __all__ = [
     "SPATIAL_METHODS",
+    "TrajectoryExpansionCfg",
     "TrajectoryAugmentationCfg",
     "TrajectoryGenerationJobCfg",
 ]
@@ -653,6 +654,56 @@ def _validate_nested(value: Any, expected: type, name: str) -> None:
         )
     # Re-decode a plain mapping to reject mutated nested types and unsupported values.
     _decode(expected, value.to_dict(), name)
+
+
+@configclass
+class TrajectoryExpansionCfg:
+    """Source-neutral expansion settings shared by every expert source.
+
+    This contract deliberately excludes source identity, Task Program
+    selection, environment ownership, and reset policy. Handwritten,
+    MotionGenerator, Atomic Action, and Task Program adapters can all consume
+    the same expansion settings.
+    """
+
+    augmentation: TrajectoryAugmentationCfg = TrajectoryAugmentationCfg()
+    affordance: _AffordanceCfg = _AffordanceCfg()
+    observation: _ObservationCfg = _ObservationCfg()
+    scheduling: _SchedulingCfg = _SchedulingCfg()
+    execution: _ExecutionCfg = _ExecutionCfg()
+    validation: _ValidationCfg = _ValidationCfg()
+    collection: _CollectionCfg = _CollectionCfg()
+    persistence: _PersistenceCfg = _PersistenceCfg()
+
+    def __post_init__(self) -> None:
+        for name, expected in get_type_hints(type(self)).items():
+            _validate_nested(getattr(self, name), expected, name)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "TrajectoryExpansionCfg":
+        """Decode source-neutral expansion settings with closed fields."""
+        return _decode(cls, data)
+
+    @classmethod
+    def from_generation_job(
+        cls,
+        job: "TrajectoryGenerationJobCfg",
+    ) -> "TrajectoryExpansionCfg":
+        """Project a legacy job into the source-neutral expansion contract."""
+        if not isinstance(job, TrajectoryGenerationJobCfg):
+            raise TypeError("job must be a TrajectoryGenerationJobCfg")
+        payload = job.to_dict()
+        fields_to_keep = (
+            "augmentation",
+            "affordance",
+            "observation",
+            "scheduling",
+            "execution",
+            "validation",
+            "collection",
+            "persistence",
+        )
+        return cls.from_mapping({name: payload[name] for name in fields_to_keep})
 
 
 @configclass

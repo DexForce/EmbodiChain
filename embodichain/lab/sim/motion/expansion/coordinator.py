@@ -26,7 +26,7 @@ import json
 
 import torch
 
-from .cfg import TrajectoryGenerationJobCfg
+from .cfg import TrajectoryExpansionCfg, TrajectoryGenerationJobCfg
 from .contracts import (
     CandidateSpec,
     CandidateTrajectoryBatch,
@@ -151,7 +151,7 @@ class CandidateCoordinator:
 
     def __init__(
         self,
-        cfg: TrajectoryGenerationJobCfg,
+        cfg: TrajectoryExpansionCfg | TrajectoryGenerationJobCfg,
         *,
         session: GenerationSession,
         source_adapter: SourceAdapter[object],
@@ -162,8 +162,10 @@ class CandidateCoordinator:
         acceleration_limits: torch.Tensor | None = None,
         task_jacobians: torch.Tensor | None = None,
     ) -> None:
-        if not isinstance(cfg, TrajectoryGenerationJobCfg):
-            raise TypeError("cfg must be a TrajectoryGenerationJobCfg")
+        if isinstance(cfg, TrajectoryGenerationJobCfg):
+            cfg = TrajectoryExpansionCfg.from_generation_job(cfg)
+        if not isinstance(cfg, TrajectoryExpansionCfg):
+            raise TypeError("cfg must be a TrajectoryExpansionCfg")
         if not isinstance(session, GenerationSession):
             raise TypeError("session must be a GenerationSession")
         if not callable(getattr(source_adapter, "export_template", None)):
@@ -178,7 +180,7 @@ class CandidateCoordinator:
             raise ValueError(
                 "velocity_limits and acceleration_limits must be supplied together"
             )
-        self._cfg = TrajectoryGenerationJobCfg.from_mapping(cfg.to_dict())
+        self._cfg = TrajectoryExpansionCfg.from_mapping(cfg.to_dict())
         self._session = session
         self._source_adapter = source_adapter
         self._source_context = source_context

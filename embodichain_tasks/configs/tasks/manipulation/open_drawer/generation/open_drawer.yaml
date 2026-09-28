@@ -6,6 +6,9 @@ overrides:
     source_id: slide_open_drawer
     source_revision: config:open_drawer_v1
     template_id: slide
+    call_count: 1
+    affordance_call_indices: []
+    trajectory_call_indices: [0]
     phase_permissions:
       approach: []
       reach: []

@@ -45,6 +45,7 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     profile, candidate_indices, _ = request
     assert isinstance(profile, CombinedGenerationProfile)
     assert profile.source.source_id == "repeated_cube_pick_place"
+    assert profile.source.call_count == 6
     assert profile.scene_randomization.reference_family_count == 4
     assert profile.trajectory.spatial.joint_offset_scale == 0.005
     assert candidate_indices == (0, 16, 32, 48)
@@ -58,6 +59,7 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
     profile, candidate_indices, _ = request
     assert isinstance(profile, CombinedGenerationProfile)
     assert profile.source.source_id == "slide_open_drawer"
+    assert profile.source.call_count == 1
     assert profile.source.phase_permissions["pull"] == ("joint_residual",)
     assert profile.visual.enabled is False
     assert candidate_indices == (0, 1, 2)

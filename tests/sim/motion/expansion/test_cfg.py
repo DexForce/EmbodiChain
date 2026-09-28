@@ -22,6 +22,7 @@ import pytest
 import yaml
 
 from embodichain.lab.sim.motion.expansion import (
+    TrajectoryExpansionCfg,
     TrajectoryAugmentationCfg,
     TrajectoryGenerationJobCfg,
 )
@@ -89,6 +90,23 @@ def test_job_decodes_nested_schema_and_round_trips_without_imports() -> None:
         TrajectoryGenerationJobCfg.from_mapping(cfg.to_dict()).to_dict()
         == cfg.to_dict()
     )
+
+
+def test_source_neutral_expansion_cfg_round_trips_without_source_fields() -> None:
+    cfg = TrajectoryExpansionCfg.from_mapping(
+        {
+            "augmentation": {
+                "max_variants_per_reference": 3,
+            },
+            "scheduling": {
+                "candidate_budget": 3,
+            },
+        }
+    )
+
+    assert cfg.augmentation.max_variants_per_reference == 3
+    assert "source" not in cfg.to_dict()
+    assert TrajectoryExpansionCfg.from_mapping(cfg.to_dict()).to_dict() == cfg.to_dict()
 
 
 def test_generation_profile_is_source_neutral_and_uses_one_family_budget():
@@ -189,7 +207,7 @@ def test_generation_profile_rejects_transitional_atomic_source_kind() -> None:
         TrajectoryGenerationJobCfg.from_mapping({"source": {"kind": "atomic"}})
 
 
-def test_load_generation_profile_uses_strict_decoder(tmp_path: Path) -> None:
+def test_load_generation_profile_rejects_legacy_task_program(tmp_path: Path) -> None:
     from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
 
     path = tmp_path / "generation.yaml"
@@ -198,9 +216,8 @@ def test_load_generation_profile_uses_strict_decoder(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    cfg = load_generation_profile(path)
-
-    assert cfg.source.kind == "task_program"
+    with pytest.raises(ValueError, match="legacy task_program"):
+        load_generation_profile(path)
 
 
 @pytest.mark.parametrize(

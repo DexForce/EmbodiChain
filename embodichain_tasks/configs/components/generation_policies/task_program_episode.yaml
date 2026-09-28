@@ -6,6 +6,9 @@ source:
   source_revision: task_program_source:v1
   unit_scope: episode
   template_id: task_program_call
+  call_count: 1
+  affordance_call_indices: []
+  trajectory_call_indices: [0]
 
 scene_randomization:
   enabled: false

@@ -45,8 +45,8 @@ from embodichain.lab.sim.motion.expansion import (
     SceneCase,
     SourceContext,
     TemplateSourceAdapter,
+    TrajectoryExpansionCfg,
     TrajectoryPhase,
-    TrajectoryGenerationJobCfg,
     TrajectoryTemplate,
     enumerate_candidate_recipes,
 )
@@ -56,7 +56,6 @@ from embodichain.lab.task_program.runtime.generation import TaskProgramPlanReque
 __all__ = [
     "TaskProgramSourceAdapter",
     "TaskProgramGenerationRecord",
-    "TaskProgramCandidatePlanTransformFactory",
     "CombinedTaskProgramCandidatePlanTransformFactory",
 ]
 
@@ -240,195 +239,6 @@ class TaskProgramGenerationRecord:
         }
 
 
-class TaskProgramCandidatePlanTransformFactory:
-    """Generate and select same-grid candidates for configured Atomic calls."""
-
-    def __init__(
-        self,
-        profile: TrajectoryGenerationJobCfg,
-        *,
-        candidate_index: int,
-        program_id: str,
-        integration_id: str,
-        robot_profile_id: str,
-    ) -> None:
-        if not isinstance(profile, TrajectoryGenerationJobCfg):
-            raise TypeError("profile must be a TrajectoryGenerationJobCfg")
-        if type(candidate_index) is not int or candidate_index < 0:
-            raise ValueError("candidate_index must be a non-negative integer")
-        for value, name in (
-            (program_id, "program_id"),
-            (integration_id, "integration_id"),
-            (robot_profile_id, "robot_profile_id"),
-        ):
-            if type(value) is not str or not value.strip():
-                raise ValueError(f"{name} must be a nonempty string")
-        owned = TrajectoryGenerationJobCfg.from_mapping(profile.to_dict())
-        if owned.source.kind != "task_program":
-            raise ValueError("profile source.kind must be task_program")
-        if owned.source.source_id != program_id:
-            raise ValueError("profile source_id must match program_id")
-        if candidate_index >= owned.augmentation.max_variants_per_reference:
-            raise ValueError("candidate_index is outside generated variants")
-        if owned.affordance.enabled:
-            raise ValueError(
-                "the T4 Task Program transform requires Affordance disabled"
-            )
-        if owned.augmentation.factors.timing.enabled:
-            raise ValueError("the T4 Task Program transform does not support timing")
-        self._profile = owned
-        self._candidate_index = candidate_index
-        self._program_id = program_id
-        self._integration_id = integration_id
-        self._robot_profile_id = robot_profile_id
-        self._records: list[TaskProgramGenerationRecord] = []
-
-    @property
-    def records(self) -> tuple[TaskProgramGenerationRecord, ...]:
-        """Return generation records in planning-call order."""
-        return tuple(record.snapshot() for record in self._records)
-
-    def create_plan_transform(
-        self,
-        request: TaskProgramPlanRequest,
-        *,
-        engine: AtomicActionEngine,
-    ) -> PlanTransform | None:
-        """Return a candidate transform for the selected skill only."""
-        if not isinstance(request, TaskProgramPlanRequest):
-            raise TypeError("request must be a TaskProgramPlanRequest")
-        if not isinstance(engine, AtomicActionEngine):
-            raise TypeError("engine must be an AtomicActionEngine")
-        workflow_program = request.workflow_id.split("/", 1)[0]
-        if workflow_program != self._program_id:
-            raise ValueError("workflow ID does not match profile source_id")
-        if request.invocation.skill_id != self._profile.source.template_id:
-            return None
-
-        def transform(
-            resolved: ResolvedActionRequest,
-            context: PlanningContext,
-            plan: ActionPlan,
-        ) -> ActionPlan:
-            return self._transform(request, engine, resolved, context, plan)
-
-        return transform
-
-    def _transform(
-        self,
-        call_request: TaskProgramPlanRequest,
-        engine: AtomicActionEngine,
-        resolved: ResolvedActionRequest,
-        context: PlanningContext,
-        plan: ActionPlan,
-    ) -> ActionPlan:
-        if context.batch_size != 1:
-            return self._transform_batch(
-                call_request,
-                engine,
-                resolved,
-                context,
-                plan,
-            )
-        robot = engine.robot
-        joint_names = tuple(robot.joint_names)
-        limits = robot.body_data.qpos_limits
-        if not isinstance(limits, torch.Tensor):
-            raise TypeError("robot qpos_limits must be a tensor")
-        if limits.ndim == 3:
-            limits = limits[0]
-        if limits.shape != (len(joint_names), 2):
-            raise ValueError("robot qpos_limits must match the full joint order")
-        initial_digest = hashlib.sha256(
-            context.robot.qpos.detach().cpu().contiguous().numpy().tobytes()
-        ).hexdigest()
-        case = SceneCase(
-            scene_case_id=self._integration_id,
-            initial_state_id="initial_" + initial_digest,
-            scene_signature=f"{self._integration_id}:scene:{context.scene.version}",
-            task_id=self._program_id,
-            robot_profile_id=self._robot_profile_id,
-        )
-        session = GenerationSession(self._profile)
-        session.register_case(case, limits, joint_names=joint_names)
-        invocation_id = resolved.invocation_id or resolved.skill_id
-        source_context = SourceContext(
-            source_id=self._profile.source.source_id,
-            source_revision=self._profile.source.source_revision,
-            unit_id=(
-                f"{call_request.workflow_id}:"
-                f"{call_request.workflow_call_index}:{invocation_id}"
-            ),
-            scene_case=case,
-            control_dt=context.require_control_dt(),
-        )
-        atomic_adapter = ActionPlanTemplateAdapter(
-            joint_names=joint_names,
-            phase_permissions=self._profile.source.phase_permissions,
-            phase_kinds=self._profile.source.phase_kinds,
-            controlled_joint_indices=_arm_joint_indices(
-                robot,
-                len(joint_names),
-                reference_qpos=context.robot.qpos,
-                joint_limits=limits,
-            ),
-            validator_id=self._profile.validation.validator_id,
-        )
-        coordinator = CandidateCoordinator(
-            self._profile,
-            session=session,
-            source_adapter=TaskProgramSourceAdapter(atomic_adapter),
-            source_context=source_context,
-            joint_limits=limits,
-            backend_id=plan.diagnostics.backend,
-        )
-        items = coordinator.enqueue_source(
-            plan,
-            count=self._profile.augmentation.max_variants_per_reference,
-        )
-        if not items:
-            raise ValueError("no trajectory candidates survived generation")
-        selected_index = min(self._candidate_index, len(items) - 1)
-        selected = items[selected_index]
-        candidates = tuple(item.spec for item in items)
-        templates = tuple(item.template for item in items)
-        record = TaskProgramGenerationRecord(
-            workflow_id=call_request.workflow_id,
-            workflow_call_index=call_request.workflow_call_index,
-            candidate_index=selected_index,
-            selected_candidate_id=selected.spec.identity.candidate_id,
-            candidates=candidates,
-            templates=templates,
-            trajectory_requested=self._candidate_index,
-            trajectory_selected=selected_index,
-            fallback_count=max(0, self._candidate_index - selected_index),
-        )
-        metadata = dict(plan.diagnostics.metadata)
-        metadata["generation"] = record.to_metadata()
-        source_plan = replace(
-            plan,
-            diagnostics=PlannerDiagnostics(
-                backend=plan.diagnostics.backend,
-                messages=plan.diagnostics.messages,
-                metadata=metadata,
-                failure=plan.diagnostics.failure,
-            ),
-        )
-        trajectory = TimedTrajectory.from_positions(
-            selected.template.positions.unsqueeze(0),
-            env_ids=context.env_ids,
-            dt=selected.template.dt.unsqueeze(0),
-        )
-        rebuilt = engine.rebuild_plan_from_trajectory(
-            resolved,
-            context,
-            source_plan,
-            trajectory,
-        )
-        self._records.append(record)
-        return rebuilt
-
-
 def _combined_phase_declarations(
     plan: ActionPlan,
     operators: tuple[str, ...],
@@ -516,9 +326,9 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             raise ValueError("workflow ID does not match profile source_id")
         if self._profile.source.phase_permissions:
             return context
-        cycle_index = request.workflow_call_index // 2
-        if cycle_index >= len(self._recipes[0].cycle_schedule):
-            raise ValueError("workflow call index exceeds the three-cycle recipe")
+        call_index = request.workflow_call_index
+        if call_index >= len(self._recipes[0].call_schedule):
+            raise ValueError("workflow call index exceeds the recipe call schedule")
         if request.invocation.skill_id not in {"pick", "pick_up"}:
             return context
         recipes = tuple(self._recipe_for_row(row) for row in range(context.batch_size))
@@ -530,7 +340,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 episode_id=self._candidate_index,
                 attempt_id=0,
                 branch_overrides=tuple(
-                    recipe.cycle_schedule[cycle_index].affordance_requested
+                    recipe.call_schedule[call_index].affordance_requested
                     for recipe in recipes
                 ),
             ),
@@ -588,9 +398,10 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 context,
                 plan,
             )
-        cycle_index = call_request.workflow_call_index // 2
-        if cycle_index >= len(self._recipe.cycle_schedule):
-            raise ValueError("workflow call index exceeds the three-cycle recipe")
+        call_index = call_request.workflow_call_index
+        if call_index >= len(self._recipe.call_schedule):
+            raise ValueError("workflow call index exceeds the recipe call schedule")
+        cycle_index = call_index // 2
         robot = engine.robot
         joint_names = tuple(robot.joint_names)
         limits = robot.body_data.qpos_limits
@@ -633,7 +444,9 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             "execution": {"max_inflight": 1},
             "observation": {"enabled": False, "profiles": []},
         }
-        legacy = TrajectoryGenerationJobCfg.from_mapping(payload)
+        expansion_cfg = TrajectoryExpansionCfg.from_mapping(
+            {key: value for key, value in payload.items() if key != "source"}
+        )
         digest = hashlib.sha256(
             context.robot.qpos.detach().cpu().contiguous().numpy().tobytes()
         ).hexdigest()
@@ -644,7 +457,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             task_id=self._program_id,
             robot_profile_id=self._robot_profile_id,
         )
-        session = GenerationSession(legacy)
+        session = GenerationSession(expansion_cfg)
         session.register_case(case, limits, joint_names=joint_names)
         source_context = SourceContext(
             source_id=self._program_id,
@@ -663,7 +476,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             validator_id="task_success",
         )
         coordinator = CandidateCoordinator(
-            legacy,
+            expansion_cfg,
             session=session,
             source_adapter=TaskProgramSourceAdapter(adapter),
             source_context=source_context,
@@ -676,7 +489,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
         )
         if not items:
             raise ValueError("combined trajectory generation produced no survivors")
-        requested = self._recipe.cycle_schedule[cycle_index].trajectory_requested
+        requested = self._recipe.call_schedule[call_index].trajectory_requested
         selected_index = min(requested, len(items) - 1)
         selected = items[selected_index]
         record = TaskProgramGenerationRecord(
@@ -687,9 +500,9 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             candidates=tuple(item.spec for item in items),
             templates=tuple(item.template for item in items),
             recipe_index=self._recipe.recipe_index,
-            cycle_index=cycle_index,
-            affordance_requested=self._recipe.cycle_schedule[
-                cycle_index
+            cycle_index=call_index // 2,
+            affordance_requested=self._recipe.call_schedule[
+                call_index
             ].affordance_requested,
             trajectory_requested=requested,
             trajectory_selected=selected_index,
@@ -808,8 +621,10 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 "execution": {"max_inflight": 1},
                 "observation": {"enabled": False, "profiles": []},
             }
-            legacy = TrajectoryGenerationJobCfg.from_mapping(payload)
-            session = GenerationSession(legacy)
+            expansion_cfg = TrajectoryExpansionCfg.from_mapping(
+                {key: value for key, value in payload.items() if key != "source"}
+            )
+            session = GenerationSession(expansion_cfg)
             session.register_case(case, limits, joint_names=joint_names)
             source_context = SourceContext(
                 source_id=self._program_id,
@@ -842,7 +657,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 ),
             )
             coordinator = CandidateCoordinator(
-                legacy,
+                expansion_cfg,
                 session=session,
                 source_adapter=TemplateSourceAdapter(),
                 source_context=source_context,
@@ -855,7 +670,10 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             )
             if not items:
                 raise ValueError(f"generic generation row {row} produced no candidates")
-            requested = recipe.cycle_schedule[0].trajectory_requested
+            call_index = call_request.workflow_call_index
+            if call_index >= len(recipe.call_schedule):
+                raise ValueError("workflow call index exceeds the recipe call schedule")
+            requested = recipe.call_schedule[call_index].trajectory_requested
             selected_index = min(requested, len(items) - 1)
             selected = items[selected_index]
             positions.append(selected.template.positions)
@@ -1091,9 +909,9 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
         plan: ActionPlan,
     ) -> ActionPlan:
         """Expand each physical row against its own deterministic recipe."""
-        cycle_index = call_request.workflow_call_index // 2
-        if cycle_index >= len(self._recipes[0].cycle_schedule):
-            raise ValueError("workflow call index exceeds the three-cycle recipe")
+        call_index = call_request.workflow_call_index
+        if call_index >= len(self._recipes[0].call_schedule):
+            raise ValueError("workflow call index exceeds the recipe call schedule")
         trajectory = plan.joint_trajectory
         if trajectory is None:
             raise ValueError("combined batch generation requires a joint trajectory")
@@ -1148,7 +966,9 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 "execution": {"max_inflight": 1},
                 "observation": {"enabled": False, "profiles": []},
             }
-            legacy = TrajectoryGenerationJobCfg.from_mapping(payload)
+            expansion_cfg = TrajectoryExpansionCfg.from_mapping(
+                {key: value for key, value in payload.items() if key != "source"}
+            )
             digest = hashlib.sha256(
                 context.robot.qpos[row].detach().cpu().contiguous().numpy().tobytes()
             ).hexdigest()
@@ -1159,7 +979,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 task_id=self._program_id,
                 robot_profile_id=self._robot_profile_id,
             )
-            session = GenerationSession(legacy)
+            session = GenerationSession(expansion_cfg)
             session.register_case(case, limits, joint_names=joint_names)
             phases = tuple(
                 TrajectoryPhase(
@@ -1197,7 +1017,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                 control_dt=context.require_control_dt(),
             )
             coordinator = CandidateCoordinator(
-                legacy,
+                expansion_cfg,
                 session=session,
                 source_adapter=TemplateSourceAdapter(),
                 source_context=source_context,
@@ -1210,7 +1030,7 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
             )
             if not items:
                 raise ValueError(f"row {row} produced no trajectory survivors")
-            requested = recipe.cycle_schedule[cycle_index].trajectory_requested
+            requested = recipe.call_schedule[call_index].trajectory_requested
             selected_index = min(requested, len(items) - 1)
             selected = items[selected_index]
             positions.append(selected.template.positions)
@@ -1224,8 +1044,8 @@ class CombinedTaskProgramCandidatePlanTransformFactory:
                     "row_index": row,
                     "recipe_index": recipe.recipe_index,
                     "candidate_id": selected.spec.identity.candidate_id,
-                    "affordance_requested": recipe.cycle_schedule[
-                        cycle_index
+                    "affordance_requested": recipe.call_schedule[
+                        call_index
                     ].affordance_requested,
                     "trajectory_requested": requested,
                     "trajectory_selected": selected_index,

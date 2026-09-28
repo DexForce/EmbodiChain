@@ -504,7 +504,6 @@ def _resolve_generation_request(
     from embodichain.utils.utility import load_config
     from embodichain.lab.sim.motion.expansion import (
         CombinedGenerationProfile,
-        TrajectoryGenerationJobCfg,
         load_generation_profile,
     )
 
@@ -602,15 +601,6 @@ def _resolve_generation_request(
             )
         profile_path = profile_path.resolve()
         profile = load_generation_profile(profile_path)
-    if (
-        isinstance(profile, TrajectoryGenerationJobCfg)
-        and profile.source.kind == "task_program"
-    ):
-        raise ValueError(
-            "run-task requires a schema_version=1 Generation Profile for "
-            "Task Program sources; legacy task_program profiles are unsupported"
-        )
-
     candidate_values = getattr(args, "generation_candidate_indices", None)
     if candidate_values is None and binding is not None:
         candidate_values = binding.get("candidate_indices")
@@ -655,11 +645,10 @@ def _generation_candidate_indices(
                 "combined generation candidate index exceeds the recipe budget"
             )
         return indices
-    total = profile.augmentation.max_variants_per_reference
-    indices = configured or tuple(range(total))
-    if any(index >= total for index in indices):
-        raise ValueError("generation candidate index exceeds the profile budget")
-    return indices
+    raise ValueError(
+        "run-task generation requires a CombinedGenerationProfile; "
+        "direct source profiles need a source-specific provider host"
+    )
 
 
 def _run_generation(
@@ -679,6 +668,8 @@ def _run_generation(
     if request is None:
         raise ValueError("run_generation requires a generation profile")
     profile, configured_indices, profile_path = request
+    if not isinstance(profile, CombinedGenerationProfile):
+        raise ValueError("run-task generation requires a CombinedGenerationProfile")
     target = _env_target(env)
     num_envs = int(getattr(target, "num_envs", 1))
     indices = _generation_candidate_indices(
@@ -686,44 +677,35 @@ def _run_generation(
         configured_indices,
         num_envs=num_envs,
     )
-    if (
-        getattr(args, "disable_sensor", False)
-        and isinstance(profile, CombinedGenerationProfile)
-        and profile.visual.enabled
-    ):
+    if getattr(args, "disable_sensor", False) and profile.visual.enabled:
         raise ValueError(
             "--disable-sensor cannot be used with a combined profile that "
             "contains visual generation"
         )
 
-    if isinstance(profile, CombinedGenerationProfile):
-        visual_registry = (
-            VisualProfileRegistry.from_yaml(
-                _resolve_generation_resource(
-                    profile_path,
-                    profile.visual.profile_file,
-                )
-            )
-            if profile.visual.enabled
-            else None
-        )
-        if profile.scene_randomization.enabled:
-            family_path = _resolve_generation_resource(
+    visual_registry = (
+        VisualProfileRegistry.from_yaml(
+            _resolve_generation_resource(
                 profile_path,
-                profile.scene_randomization.profile_file,
+                profile.visual.profile_file,
             )
-            families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
-                profile.scene_randomization.reference_family_count
-            )
-        else:
-            families = CubeInitialPoseProvider().enumerate(
-                profile.scene_randomization.reference_family_count
-            )
-        recipes = enumerate_candidate_recipes(profile, families=families)
+        )
+        if profile.visual.enabled
+        else None
+    )
+    if profile.scene_randomization.enabled:
+        family_path = _resolve_generation_resource(
+            profile_path,
+            profile.scene_randomization.profile_file,
+        )
+        families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
+            profile.scene_randomization.reference_family_count
+        )
     else:
-        visual_registry = None
-        families = ()
-        recipes = ()
+        families = CubeInitialPoseProvider().enumerate(
+            profile.scene_randomization.reference_family_count
+        )
+    recipes = enumerate_candidate_recipes(profile, families=families)
 
     output_dir = getattr(args, "generation_output_dir", None)
     if output_dir is None:
@@ -743,9 +725,7 @@ def _run_generation(
     successful_batches = 0
 
     for candidate_index in indices:
-        if isinstance(profile, CombinedGenerationProfile) and (
-            profile.scene_randomization.enabled or profile.visual.enabled
-        ):
+        if profile.scene_randomization.enabled or profile.visual.enabled:
             family_by_id = {family.reference_family_id: family for family in families}
             batch_recipes = tuple(
                 recipes[(candidate_index + row) % len(recipes)]

@@ -43,6 +43,9 @@ overrides:
     source_id: repeated_cube_pick_place
     source_revision: config:repeated_pick_place_v1
     template_id: repeated_pick_place_episode
+    call_count: 6
+    affordance_call_indices: [0, 2, 4]
+    trajectory_call_indices: [1, 3, 5]
   scene_randomization:
     enabled: true
     reference_family_count: 4

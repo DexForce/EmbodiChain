@@ -41,6 +41,7 @@ __all__ = [
     "ReferenceFamilySpec",
     "CubeInitialPoseProvider",
     "CycleRecipe",
+    "CallRecipe",
     "CandidateRecipe",
     "PhysicalSlotPool",
     "SlotReservation",
@@ -132,6 +133,9 @@ class _CombinedSourceCfg:
     template_id: str = "repeated_pick_place_episode"
     phase_permissions: dict[str, tuple[str, ...]] = {}
     phase_kinds: dict[str, str] = {}
+    call_count: int = 6
+    affordance_call_indices: tuple[int, ...] = (0, 2, 4)
+    trajectory_call_indices: tuple[int, ...] = (1, 3, 5)
 
     def __post_init__(self) -> None:
         if self.kind != "task_program":
@@ -169,6 +173,18 @@ class _CombinedSourceCfg:
                 )
         self.phase_permissions = permissions
         self.phase_kinds = kinds
+        _int(self.call_count, "source.call_count", 1)
+        self.affordance_call_indices = tuple(self.affordance_call_indices)
+        self.trajectory_call_indices = tuple(self.trajectory_call_indices)
+        for field_name, indices in (
+            ("source.affordance_call_indices", self.affordance_call_indices),
+            ("source.trajectory_call_indices", self.trajectory_call_indices),
+        ):
+            if len(set(indices)) != len(indices) or any(
+                type(index) is not int or not 0 <= index < self.call_count
+                for index in indices
+            ):
+                raise ValueError(f"{field_name} must contain unique call indices")
 
 
 @configclass
@@ -420,6 +436,9 @@ class CombinedGenerationProfile:
                     "template_id",
                     "phase_permissions",
                     "phase_kinds",
+                    "call_count",
+                    "affordance_call_indices",
+                    "trajectory_call_indices",
                 },
             ),
             "scene_randomization": _construct(
@@ -745,6 +764,15 @@ class CycleRecipe:
 
 
 @dataclass(frozen=True)
+class CallRecipe:
+    """Requested affordance and trajectory ordinals for one workflow call."""
+
+    call_index: int
+    affordance_requested: int
+    trajectory_requested: int
+
+
+@dataclass(frozen=True)
 class CandidateRecipe:
     """Complete episode recipe; identity is independent of simulator row."""
 
@@ -753,6 +781,7 @@ class CandidateRecipe:
     reference_family_id: str
     physical_geometry_family_id: str
     cycle_schedule: tuple[CycleRecipe, ...]
+    call_schedule: tuple[CallRecipe, ...]
     visual_profile_id: str
     visual_seed: int
     source_unit_id: str
@@ -865,27 +894,42 @@ def enumerate_candidate_recipes(
         raise ValueError("families does not contain the requested reference count")
     a_count = profile.affordance.branches_per_family
     t_count = profile.trajectory.variants_per_family
+    affordance_calls = set(profile.source.affordance_call_indices)
+    trajectory_calls = set(profile.source.trajectory_call_indices)
     visual_profiles = profile.visual.profiles or ("rgb_canonical",)
     result: list[CandidateRecipe] = []
     for family_index, family in enumerate(family_values[:family_count]):
         for a0 in range(a_count):
             for t0 in range(t_count):
                 recipe_index = family_index * (a_count * t_count) + a0 * t_count + t0
-                cycles = tuple(
-                    CycleRecipe(
-                        cycle_index=cycle,
+                call_schedule = tuple(
+                    CallRecipe(
+                        call_index=call_index,
                         affordance_requested=(
                             0
-                            if recipe_index == 0
-                            else (a0 + cycle + 2 * family_index) % a_count
+                            if recipe_index == 0 or call_index not in affordance_calls
+                            else (a0 + call_index // 2 + 2 * family_index) % a_count
                         ),
                         trajectory_requested=(
                             0
-                            if recipe_index == 0
-                            else (t0 + 2 * cycle + family_index) % t_count
+                            if recipe_index == 0 or call_index not in trajectory_calls
+                            else (t0 + 2 * (call_index // 2) + family_index) % t_count
                         ),
                     )
-                    for cycle in range(3)
+                    for call_index in range(profile.source.call_count)
+                )
+                cycle_count = max(1, (profile.source.call_count + 1) // 2)
+                cycles = tuple(
+                    CycleRecipe(
+                        cycle_index=cycle,
+                        affordance_requested=call_schedule[
+                            min(2 * cycle, len(call_schedule) - 1)
+                        ].affordance_requested,
+                        trajectory_requested=call_schedule[
+                            min(2 * cycle + 1, len(call_schedule) - 1)
+                        ].trajectory_requested,
+                    )
+                    for cycle in range(cycle_count)
                 )
                 visual_index = (
                     0 if recipe_index == 0 else recipe_index % len(visual_profiles)
@@ -901,6 +945,10 @@ def enumerate_candidate_recipes(
                     family.scene_signature,
                     recipe_index,
                     tuple(
+                        (c.affordance_requested, c.trajectory_requested)
+                        for c in call_schedule
+                    ),
+                    tuple(
                         (c.affordance_requested, c.trajectory_requested) for c in cycles
                     ),
                 )
@@ -914,6 +962,10 @@ def enumerate_candidate_recipes(
                     "profile_revision": family.profile_revision,
                     "scene_signature": family.scene_signature,
                     "recipe_index": recipe_index,
+                    "calls": [
+                        (c.affordance_requested, c.trajectory_requested)
+                        for c in call_schedule
+                    ],
                     "cycles": [
                         (c.affordance_requested, c.trajectory_requested) for c in cycles
                     ],
@@ -931,6 +983,7 @@ def enumerate_candidate_recipes(
                         reference_family_id=family.reference_family_id,
                         physical_geometry_family_id=family.reference_family_id,
                         cycle_schedule=cycles,
+                        call_schedule=call_schedule,
                         visual_profile_id=visual_profiles[visual_index],
                         visual_seed=int(digest[:16], 16),
                         source_unit_id=profile.source.source_id,
@@ -951,6 +1004,10 @@ def schedule_digest(recipes: Sequence[CandidateRecipe]) -> str:
             "cycles": [
                 [cycle.affordance_requested, cycle.trajectory_requested]
                 for cycle in item.cycle_schedule
+            ],
+            "calls": [
+                [call.affordance_requested, call.trajectory_requested]
+                for call in item.call_schedule
             ],
             "visual": item.visual_profile_id,
             "seed": item.deterministic_seed_digest,
