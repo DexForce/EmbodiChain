@@ -601,10 +601,24 @@ def test_tianji_marvin_overrides_and_roundtrip(with_gripper):
 
 
 @pytest.mark.parametrize("with_gripper", [True, False])
-def test_tianji_marvin_serial_chains_and_solvers_match_source(with_gripper):
+@pytest.mark.parametrize("use_link_frame", [False, True])
+def test_tianji_marvin_serial_chains_and_solvers_match_source(
+    with_gripper, use_link_frame
+):
     from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 
-    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    init_dict = {"with_gripper": with_gripper}
+    if use_link_frame:
+        init_dict["solver_cfg"] = {
+            part: {"tcp": np.eye(4).tolist()} for part in ("left_arm", "right_arm")
+        }
+    cfg = TianjiMarvinCfg.from_dict(init_dict)
+    # Documented end-link-to-TCP transform for both variants.
+    expected_tcp = (
+        torch.eye(4)
+        if use_link_frame
+        else torch.tensor([[0, 0, 1, 0.13], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
+    )
     chains = cfg.build_pk_serial_chain()
     assert set(chains) == set(cfg.solver_cfg) == {"left_arm", "right_arm"}
     for part, chain in chains.items():
@@ -622,8 +636,16 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(with_gripper):
         assert solver.dof == 7
         qpos = torch.tensor([[0.1, 0.2, -0.1, -0.3, 0.2, 0.1, -0.2]])
         tcp = torch.as_tensor(solver_cfg.tcp, dtype=qpos.dtype)
+        torch.testing.assert_close(tcp, expected_tcp)
+        expected_pose = chain.forward_kinematics(qpos).get_matrix() @ expected_tcp
+        torch.testing.assert_close(solver.get_fk(qpos), expected_pose)
+        success, solved_qpos = solver.get_ik(expected_pose, qpos_seed=qpos)
+        assert bool(success.all())
         torch.testing.assert_close(
-            solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
+            solver.get_fk(solved_qpos.reshape_as(qpos)),
+            expected_pose,
+            atol=1e-3,
+            rtol=0,
         )
 
 

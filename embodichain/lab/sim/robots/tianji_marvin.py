@@ -60,8 +60,16 @@ class TianjiMarvinCfg(RobotCfg):
     Both variants expose seven-joint ``left_arm`` and ``right_arm`` parts.
     With grippers, ``left_hand`` and ``right_hand`` each include the two
     finger joints; finger 2 mimics finger 1. Hands use joint-space control.
-    Arm FK/IK targets the source hand tool frames with grippers, and the
-    source EE frames without grippers, relative to each arm's base link.
+    Both variants apply an additional TCP transform to their source end links:
+    a translation of 0.13 m along the end link's +X axis and a +90 degree
+    rotation about its Y axis. With grippers the source end links are
+    ``left_hand_tool_link`` / ``right_hand_tool_link``; without grippers they
+    are ``left_ee`` / ``right_ee``.
+
+    Solver FK/IK uses the resulting TCP pose relative to each arm's base link.
+    Named ``Robot.compute_fk`` / ``Robot.compute_ik`` uses that same TCP in the
+    local arena frame. To use source end-link poses directly, override each
+    arm's ``solver_cfg[part].tcp`` with the 4x4 identity matrix.
 
     Example:
         >>> cfg = TianjiMarvinCfg.from_dict({"with_gripper": True})
@@ -118,6 +126,7 @@ class TianjiMarvinCfg(RobotCfg):
             part: PytorchSolverCfg(
                 root_link_name=root,
                 end_link_name=end,
+                # End-link-to-TCP transform, shared by both URDF variants.
                 tcp=[
                     [0.0, 0.0, 1.0, 0.13],
                     [0.0, 1.0, 0.0, 0.0],
@@ -169,6 +178,10 @@ class TianjiMarvinCfg(RobotCfg):
         self, device: torch.device = torch.device("cpu"), **kwargs: Any
     ) -> dict[str, pk.SerialChain]:
         """Build the two seven-joint arm chains in their local base frames.
+
+        These raw URDF chains end at the selected source end links and omit
+        ``solver_cfg[part].tcp``. Right-multiply their FK matrices by that
+        transform to obtain the corresponding solver TCP poses.
 
         The parallel fingers branch from the hand base and are controlled in
         joint space, so they are not represented by a single serial chain.
