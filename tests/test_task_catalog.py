@@ -231,6 +231,7 @@ def test_official_catalogs_resolve_real_deployments() -> None:
         "franka_rlinf",
         "franka_rlinf_joint",
         "franka_rlinf_expert",
+        "ur5_objective",
     }
     deployments = {deployment.name: deployment for deployment in pick.deployments}
     assert deployments["franka_rlinf"].config_ref.endswith("task.franka.rlinf.yaml")

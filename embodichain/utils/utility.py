@@ -21,7 +21,6 @@ import pickle
 import argparse
 import time
 import torch
-import functools
 import open3d as o3d
 import numpy as np
 
@@ -33,36 +32,6 @@ from typing import Any, Dict, List, Tuple, Callable
 
 from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
 from embodichain.utils.string import callable_to_string
-
-
-@functools.lru_cache(maxsize=None)  # memoization
-def get_func_tag(tagName):
-    return TagDecorator(tagName)
-
-
-# https://stackoverflow.com/questions/41834530/how-to-make-python-decorators-work-like-a-tag-to-make-function-calls-by-tag
-class TagDecorator(object):
-    def __init__(self, tagName):
-        self.functions = {}
-        self.tagName = tagName
-
-    def __str__(self):
-        return "<TagDecorator {tagName}>".format(tagName=self.tagName)
-
-    def __call__(self, f):
-        class_name = f.__qualname__.split(".")[0]
-        if class_name in self.functions.keys():
-            self.functions[class_name].update({f.__name__: f})
-        else:
-            self.functions.update({class_name: {f.__name__: f}})
-        return f
-
-
-def set_attributes_for_class(self, params=None):
-    if params:
-        for k, v in params.items():
-            if k != "self" and not k.startswith("_"):
-                setattr(self, k, v)
 
 
 def timer(func):

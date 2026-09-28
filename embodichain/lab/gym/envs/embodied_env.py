@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -32,7 +32,6 @@ from typing import (
     TYPE_CHECKING,
     Dict,
     Union,
-    Sequence,
     Tuple,
     Any,
     Iterable,
@@ -49,17 +48,16 @@ from embodichain.lab.sim.cfg import (
     ArticulationCfg,
     LightCfg,
 )
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    get_func_tag,
-)
-from embodichain.lab.gym.envs.action_bank.configurable_action import (
-    ActionBank,
-)
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
+from embodichain.lab.gym.envs.objectives import (
+    MeasuredRigidObjectState,
+    OrderedPlacementObjective,
+    OrderedPlacementObjectiveCfg,
+)
 from embodichain.lab.gym.envs.demo import (
     DEMO_SCHEMA_VERSION,
     DemoExecutionCfg,
@@ -78,6 +76,7 @@ from embodichain.lab.gym.envs.managers import (
     ObservationManager,
     RewardManager,
     ActionManager,
+    ActionTrace,
     DatasetManager,
 )
 from embodichain.lab.gym.utils.registration import register_env
@@ -170,6 +169,13 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     sensor: List[SensorCfg] = []
+    enable_sensor: bool = True
+    """Whether configured sensors are instantiated and sampled.
+
+    Embodiment components may declare a reusable sensor suite even when a
+    deployment only needs proprioception. Set this to ``False`` to skip
+    sensor creation, including camera-group allocation and image fetching.
+    """
 
     light: EnvLightCfg = EnvLightCfg()
 
@@ -215,6 +221,9 @@ class EmbodiedEnvCfg(EnvCfg):
 
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
+
+    objective: OrderedPlacementObjectiveCfg | None = None
+    """Optional measured physical objective, independent of task success and persistence."""
 
     expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
     """Source-neutral expert trajectory control and recording settings."""
@@ -302,7 +311,6 @@ class EmbodiedEnv(BaseEnv):
         perturbation, etc.
     - observation manager: The observation manager is used to manage the observations in the environment,
         such as depth, segmentation, etc.
-    - action bank: The action bank is used to manage the actions in the environment, such as action composition, action graph, etc.
     - affordance_datas: The affordance data that can be used to store the intermediate results or information
     """
 
@@ -356,8 +364,9 @@ class EmbodiedEnv(BaseEnv):
                     "task_program_adapter_factory must implement "
                     "TaskProgramAdapterFactory or be None."
                 )
+        self.physical_objective: OrderedPlacementObjective | None = None
+        self._physical_objective_object = None
         self.affordance_datas = {}
-        self.action_bank = None
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
 
@@ -374,10 +383,13 @@ class EmbodiedEnv(BaseEnv):
         self.dataset_manager: DatasetManager | None = None
         self._record_raw_actions = False
         self._last_action_manager_qpos: torch.Tensor | None = None
+        self._last_action_trace: ActionTrace | None = None
+        self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
 
         super().__init__(cfg, **kwargs)
 
         try:
+            self._initialize_physical_objective()
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
                     self.robot.joint_names[joint_id]
@@ -414,6 +426,7 @@ class EmbodiedEnv(BaseEnv):
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
             self._rollout_buffer_mode: str | None = None
+            self._rollout_action_semantics: str | None = None
             if self.cfg.init_rollout_buffer:
                 rollout_action_space = (
                     self.action_space
@@ -429,6 +442,11 @@ class EmbodiedEnv(BaseEnv):
                 )
                 self._max_rollout_steps = self.rollout_buffer.shape[1]
                 self._rollout_buffer_mode = "expert"
+                self._rollout_action_semantics = (
+                    "policy_request"
+                    if self._record_raw_actions
+                    else "expert_controller_command"
+                )
 
             self._traj_buffer: TensorDict | None = None
             self._traj_steps: torch.Tensor | None = None
@@ -437,6 +455,7 @@ class EmbodiedEnv(BaseEnv):
             self._raw_action_history: list[list[EnvAction]] = [
                 [] for _ in range(self.num_envs)
             ]
+            self._expert_controller_qpos_history = [[] for _ in range(self.num_envs)]
             self._traj_save_count = 0
             self._traj_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
             if self.cfg.record_trajectory:
@@ -671,6 +690,12 @@ class EmbodiedEnv(BaseEnv):
 
         self.rollout_buffer = rollout_buffer
         self._rollout_buffer_mode = self._infer_rollout_buffer_mode(rollout_buffer)
+        self._rollout_action_semantics = (
+            "policy_request"
+            if self._rollout_buffer_mode == "rl"
+            or getattr(self, "_record_raw_actions", False)
+            else "expert_controller_command"
+        )
         if self._rollout_buffer_mode == "rl":
             batch_size = self.rollout_buffer.batch_size
             if len(batch_size) != 2:
@@ -727,7 +752,66 @@ class EmbodiedEnv(BaseEnv):
         all visual randomization functors will be removed from the event manager.
         """
         from embodichain.utils.module_utils import get_all_exported_items_from_module
-        from embodichain.lab.gym.envs.managers.cfg import EventCfg
+        from embodichain.lab.gym.envs.managers.cfg import (
+            EventCfg,
+            ObservationCfg,
+            SceneEntityCfg,
+        )
+
+        sensor_enabled = getattr(self.cfg, "enable_sensor", True)
+        sensor_uids = {
+            cfg.uid for cfg in getattr(self.cfg, "sensor", []) if cfg.uid is not None
+        }
+
+        def uses_disabled_sensor(value: object, field_name: str | None = None) -> bool:
+            """Return whether nested functor params reference a disabled sensor."""
+            if isinstance(value, SceneEntityCfg):
+                return value.uid in sensor_uids
+            if isinstance(value, str):
+                return value == "all_sensors" or (
+                    field_name is not None
+                    and ("uid" in field_name.lower() or "sensor" in field_name.lower())
+                    and value in sensor_uids
+                )
+            if isinstance(value, Mapping):
+                return any(
+                    (isinstance(key, str) and key in sensor_uids)
+                    or uses_disabled_sensor(item, str(key))
+                    for key, item in value.items()
+                )
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                return any(uses_disabled_sensor(item, field_name) for item in value)
+            return False
+
+        if not sensor_enabled and sensor_uids:
+            for collection_name, cfg_type in (
+                ("events", EventCfg),
+                ("observations", ObservationCfg),
+            ):
+                collection = getattr(self.cfg, collection_name, None)
+                if collection is None:
+                    continue
+                items = (
+                    collection.items()
+                    if isinstance(collection, Mapping)
+                    else ((name, getattr(collection, name)) for name in dir(collection))
+                )
+                for name, functor_cfg in items:
+                    if not isinstance(functor_cfg, cfg_type):
+                        continue
+                    name_targets_sensor = isinstance(functor_cfg, ObservationCfg) and (
+                        functor_cfg.name == "sensor"
+                        or functor_cfg.name.startswith("sensor/")
+                    )
+                    if name_targets_sensor or uses_disabled_sensor(functor_cfg.params):
+                        logger.log_info(
+                            f"Filtering out {collection_name[:-1]} functor '{name}' "
+                            "because sensor acquisition is disabled."
+                        )
+                        if isinstance(collection, Mapping):
+                            collection[name] = None
+                        else:
+                            setattr(collection, name, None)
 
         functors_to_remove = {
             name
@@ -746,59 +830,6 @@ class EmbodiedEnv(BaseEnv):
                             f"Filtering out visual randomization functor: {attr.func.__name__}"
                         )
                         setattr(self.cfg.events, attr_name, None)
-
-    def _init_action_bank(
-        self, action_bank_cls: ActionBank, action_config: Dict[str, Any]
-    ):
-        """
-        Initialize action bank and parse action graph structure.
-
-        Args:
-            action_bank_cls: The ActionBank class for this environment.
-            action_config: The configuration dict for the action bank.
-        """
-        self.action_bank = action_bank_cls(action_config)
-        try:
-            this_class_name = self.action_bank.__class__.__name__
-            node_func = {}
-            edge_func = {}
-            for class_name in [this_class_name, ActionBank.__name__]:
-                node_func.update(get_func_tag("node").functions.get(class_name, {}))
-                edge_func.update(get_func_tag("edge").functions.get(class_name, {}))
-        except KeyError as e:
-            raise KeyError(
-                f"Function tag for {e} not found in action bank function registry."
-            )
-
-        self.graph_compose, jobs_data, jobkey2index = self.action_bank.parse_network(
-            node_functions=node_func, edge_functions=edge_func, vis_graph=False
-        )
-        self.packages = self.action_bank.gantt(
-            tasks_data=jobs_data, taskkey2index=jobkey2index, vis=False
-        )
-
-    def set_affordance(self, key: str, value: Any):
-        """
-        Set an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            value (Any): The affordance value.
-        """
-        self.affordance_datas[key] = value
-
-    def get_affordance(self, key: str, default: Any = None):
-        """
-        Get an affordance value by key.
-
-        Args:
-            key (str): The affordance key.
-            default (Any, optional): Default value if key not found.
-
-        Returns:
-            Any: The affordance value or default.
-        """
-        return self.affordance_datas.get(key, default)
 
     def _hook_after_sim_step(
         self,
@@ -908,6 +939,49 @@ class EmbodiedEnv(BaseEnv):
             if "interval" in self.event_manager.available_modes:
                 with self._profiler.section("event_interval"):
                     self.event_manager.apply(mode="interval")
+
+    def _initialize_physical_objective(self) -> None:
+        """Bind an optional objective to an existing measured rigid object."""
+        cfg = getattr(self.cfg, "objective", None)
+        self.physical_objective = None
+        self._physical_objective_object = None
+        if cfg is None:
+            return
+        objective = OrderedPlacementObjective(cfg, self.num_envs, self.device)
+        obj = self.sim.get_rigid_object(objective.cfg.object_uid)
+        if obj is None:
+            raise ValueError(
+                f"Physical objective object_uid {objective.cfg.object_uid!r} "
+                "does not name an existing rigid object."
+            )
+        if obj.body_data is None:
+            raise ValueError(
+                f"Physical objective object_uid {objective.cfg.object_uid!r} "
+                "requires measured rigid body data; static objects are unsupported."
+            )
+        self._physical_objective_object = obj
+        self.physical_objective = objective
+
+    def _update_physical_objective(self) -> None:
+        """Observe measured state after interval events, once per control step."""
+        objective = getattr(self, "physical_objective", None)
+        if objective is None:
+            return
+        obj = self._physical_objective_object
+        objective.update(
+            MeasuredRigidObjectState(
+                position=obj.get_local_pose()[:, :3],
+                linear_velocity=obj.body_data.lin_vel,
+                angular_velocity=obj.body_data.ang_vel,
+            ),
+            self.step_dt,
+        )
+
+    def _reset_physical_objective(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Clear objective rows after recorders and episode reset events."""
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            objective.reset(env_ids)
 
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
@@ -1072,6 +1146,11 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(raw_action_history):
                     raw_action_history[env_id].clear()
+        executed_qpos_history = getattr(self, "_expert_controller_qpos_history", None)
+        if executed_qpos_history is not None:
+            for env_id in env_ids_to_process.cpu().tolist():
+                if 0 <= env_id < len(executed_qpos_history):
+                    executed_qpos_history[env_id].clear()
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""
@@ -1377,6 +1456,9 @@ class EmbodiedEnv(BaseEnv):
                     "metadata": {},
                 }
             ]
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            metadata["physical_objective"] = objective.snapshot_row(env_id)
         return metadata
 
     def _infer_rollout_buffer_mode(self, rollout_buffer: TensorDict) -> str:
@@ -1392,6 +1474,15 @@ class EmbodiedEnv(BaseEnv):
         }.issubset(set(rollout_buffer.keys())):
             return "rl"
         return "expert"
+
+    @property
+    def rollout_action_semantics(self) -> str | None:
+        """Return the explicit meaning of ``rollout_buffer['actions']``.
+
+        Values are ``policy_request`` for RL/raw-policy buffers and
+        ``expert_controller_command`` for expert/demo buffers.
+        """
+        return self._rollout_action_semantics
 
     def _write_episode_rollout_step(
         self,
@@ -1426,6 +1517,7 @@ class EmbodiedEnv(BaseEnv):
 
         expert_action_spec = getattr(self, "expert_action_spec", None)
         policy_action = bool(getattr(self, "_record_raw_actions", False))
+        executed_qpos = getattr(self, "_last_action_manager_qpos", None)
         if policy_action:
             if not isinstance(action, torch.Tensor):
                 raise TypeError(
@@ -1464,6 +1556,20 @@ class EmbodiedEnv(BaseEnv):
                 "skipping action storage in rollout buffer."
             )
             action_to_store = None
+
+        if (
+            executed_qpos is None
+            and not policy_action
+            and not (
+                expert_action_spec is not None
+                and expert_action_spec.joint_command_mode == "position_velocity"
+            )
+        ):
+            if isinstance(action_to_store, torch.Tensor):
+                executed_qpos = action_to_store
+        record_executed_qpos = getattr(self, "_record_expert_controller_qpos", None)
+        if callable(record_executed_qpos):
+            record_executed_qpos(executed_qpos, env_ids)
         if (
             action_to_store is not None
             and not policy_action
@@ -1925,8 +2031,15 @@ class EmbodiedEnv(BaseEnv):
         action_manager = getattr(self, "action_manager", None)
         if action_manager is not None:
             action_manager.apply_action()
+            self._last_action_trace = action_manager.action_trace()
             return action
         return EmbodiedEnv._apply_controller_action(self, action)
+
+    @property
+    def last_action_trace(self) -> ActionTrace | None:
+        """Return the most recent ActionManager request/command trace."""
+        trace = getattr(self, "_last_action_trace", None)
+        return None if trace is None else trace.clone()
 
     def _apply_controller_action(self, action: EnvAction) -> EnvAction:
         """Apply one validated controller command directly to active joints."""
@@ -2002,6 +2115,9 @@ class EmbodiedEnv(BaseEnv):
             "elapsed_steps": self._elapsed_steps,
             "metrics": metrics,
         }
+        objective = getattr(self, "physical_objective", None)
+        if objective is not None:
+            info["physical_objective"] = objective.snapshot()
         return info
 
     def evaluate(self, **kwargs) -> Dict[str, Any]:
@@ -2023,6 +2139,8 @@ class EmbodiedEnv(BaseEnv):
         self, action: EnvAction | ControllerAction
     ) -> EnvAction | ControllerAction:
         """Resolve one raw or controller-ready action for robot control."""
+        self._last_action_manager_qpos = None
+        self._last_action_trace = None
         is_controller_action = isinstance(action, ControllerAction)
         controller_metadata = action.metadata if is_controller_action else None
         policy_trajectory = self._traj_buffer is not None and (
@@ -2042,14 +2160,17 @@ class EmbodiedEnv(BaseEnv):
             )
         if is_controller_action:
             action = action.value
-        record_position_velocity = (
+        record_controller_targets = (
             self._traj_buffer is not None
             and not policy_trajectory
             and getattr(self, "expert_action_spec", None) is not None
-            and self.expert_action_spec.joint_command_mode == "position_velocity"
+            and (
+                is_controller_action
+                or self.expert_action_spec.joint_command_mode == "position_velocity"
+            )
         )
         retain_raw_action = getattr(self, "_record_raw_actions", False) or (
-            self._traj_buffer is not None and not record_position_velocity
+            self._traj_buffer is not None and not record_controller_targets
         )
         raw_action = (
             (action.clone() if hasattr(action, "clone") else copy.deepcopy(action))
@@ -2074,18 +2195,36 @@ class EmbodiedEnv(BaseEnv):
                     else None
                 )
             else:
-                self._last_action_manager_qpos = None
+                processed_qpos = getattr(self.action_manager, "_processed_qpos", None)
+                try:
+                    self._last_action_manager_qpos = (
+                        processed_qpos().detach().clone()
+                        if callable(processed_qpos)
+                        else None
+                    )
+                except ValueError:
+                    # A policy action may contain velocity/effort terms, for
+                    # which there is no executed joint-position snapshot.
+                    self._last_action_manager_qpos = None
             raw_action = self.action_manager.action
         elif not is_controller_action:
             action = super()._preprocess_action(action)
             action = self._prepare_controller_action(action)
+            if getattr(self, "_demo_no_auto_reset", False):
+                action = self._mask_controller_demo_action(action)
         elif is_controller_action:
             action = self._prepare_controller_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 action = self._mask_controller_demo_action(action)
+            if isinstance(action, torch.Tensor):
+                self._last_action_manager_qpos = self._active_qpos_command(action)
+            elif "qpos" in action:
+                self._last_action_manager_qpos = self._active_qpos_command(
+                    action["qpos"]
+                )
         if policy_trajectory:
             self._traj_raw_action = raw_action.clone()
-        elif record_position_velocity:
+        elif record_controller_targets:
             self._traj_raw_action = encode_expert_action(
                 action,
                 spec=self.expert_action_spec,
@@ -2147,6 +2286,59 @@ class EmbodiedEnv(BaseEnv):
         for index, row in enumerate(rows):
             if active_mask is None or bool(active_mask[index]):
                 raw_action_history[index].append(row)
+
+    def _active_qpos_command(self, command: torch.Tensor) -> torch.Tensor:
+        """Return a detached active-joint qpos snapshot for recorder history."""
+        active_dim = len(self.active_joint_ids)
+        full_dim = int(self.robot.get_qpos().shape[-1])
+        if command.shape[-1] == active_dim:
+            return command.detach().clone()
+        if command.shape[-1] == full_dim:
+            return command[..., self.active_joint_ids].detach().clone()
+        raise ValueError(
+            "Cannot snapshot qpos command with dimension "
+            f"{command.shape[-1]}; expected {active_dim} or {full_dim}."
+        )
+
+    def _record_expert_controller_qpos(
+        self, action: torch.Tensor | None, env_ids: torch.Tensor
+    ) -> None:
+        """Keep expert controller qpos commands for compatible recorders."""
+        if action is None:
+            return
+        snapshots = self._active_qpos_command(action)
+        history = getattr(self, "_expert_controller_qpos_history", None)
+        if history is None:
+            history = [[] for _ in range(self.num_envs)]
+            self._expert_controller_qpos_history = history
+        for env_id in env_ids.detach().cpu().tolist():
+            history[env_id].append(snapshots[env_id].cpu().clone())
+
+    def get_expert_controller_qpos_history(
+        self, env_id: int, length: int | None = None
+    ) -> torch.Tensor:
+        """Return expert controller qpos commands for one episode."""
+        history = getattr(self, "_expert_controller_qpos_history", None)
+        if history is None:
+            return torch.empty((0, len(self.active_joint_ids)), dtype=torch.float32)
+        rows = history[int(env_id)]
+        if length is not None:
+            rows = rows[:length]
+        if not rows:
+            return torch.empty((0, len(self.active_joint_ids)), dtype=torch.float32)
+        return torch.stack(rows, dim=0)
+
+    def _record_executed_qpos(
+        self, action: torch.Tensor | None, env_ids: torch.Tensor
+    ) -> None:
+        """Compatibility alias for :meth:`_record_expert_controller_qpos`."""
+        self._record_expert_controller_qpos(action, env_ids)
+
+    def get_executed_qpos_history(
+        self, env_id: int, length: int | None = None
+    ) -> torch.Tensor:
+        """Compatibility alias for expert controller qpos history."""
+        return self.get_expert_controller_qpos_history(env_id, length)
 
     def get_raw_action_history(self, env_id: int, length: int | None = None) -> Any:
         """Return raw actions recorded for one environment episode."""
@@ -2234,6 +2426,11 @@ class EmbodiedEnv(BaseEnv):
         """
 
         # TODO: support sensor attachment to the robot.
+        if not self.cfg.enable_sensor:
+            logger.log_info(
+                "Sensor acquisition is disabled; configured sensors will not be instantiated."
+            )
+            return {}
 
         sensors = {}
         for cfg in self.cfg.sensor:
@@ -2623,6 +2820,11 @@ class EmbodiedEnv(BaseEnv):
                 self.current_rollout_step = 0
             except Exception as error:
                 errors.append(f"expert rollout discard: {error}")
+
+        executed_qpos_history = getattr(self, "_expert_controller_qpos_history", None)
+        if executed_qpos_history is not None:
+            for rows in executed_qpos_history:
+                rows.clear()
 
         if errors:
             raise RuntimeError(
