@@ -447,8 +447,9 @@ class PytorchSolver(BaseSolver):
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
         tcp_xpos_inv = tcp_xpos.clone()
-        tcp_xpos_inv[:3, :3] = tcp_xpos_inv[:3, :3].T
-        tcp_xpos_inv[:3, 3] = -tcp_xpos_inv[:3, :3] @ tcp_xpos_inv[:3, 3]
+        # Read from the original TCP to avoid overlapping transpose assignment.
+        tcp_xpos_inv[:3, :3] = tcp_xpos[:3, :3].T
+        tcp_xpos_inv[:3, 3] = -tcp_xpos_inv[:3, :3] @ tcp_xpos[:3, 3]
         target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof

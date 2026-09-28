@@ -621,8 +621,9 @@ def test_tianji_marvin_serial_chains_and_solvers_match_source(with_gripper):
         solver = solver_cfg.init_solver(device=torch.device("cpu"))
         assert solver.dof == 7
         qpos = torch.tensor([[0.1, 0.2, -0.1, -0.3, 0.2, 0.1, -0.2]])
+        tcp = torch.as_tensor(solver_cfg.tcp, dtype=qpos.dtype)
         torch.testing.assert_close(
-            solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix()
+            solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
         )
 
 

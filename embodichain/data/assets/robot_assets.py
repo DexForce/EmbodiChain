@@ -607,7 +607,7 @@ class TianjiMarvin(EmbodiChainDataset):
     def __init__(self, data_root: str = None):
         data_descriptor = o3d.data.DataDescriptor(
             os.path.join(EMBODICHAIN_DOWNLOAD_PREFIX, robot_assets, "TianjiMarvin.zip"),
-            "26912baf970d03a77d83284472ec4806",
+            "82c69f0641357f1e78f4fc2b964db988",
         )
         prefix = type(self).__name__
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root

@@ -118,6 +118,12 @@ class TianjiMarvinCfg(RobotCfg):
             part: PytorchSolverCfg(
                 root_link_name=root,
                 end_link_name=end,
+                tcp=[
+                    [0.0, 0.0, 1.0, 0.13],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [-1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
             )
             for part, (root, end) in _PART_FRAMES[self.with_gripper].items()
         }
@@ -215,7 +221,12 @@ def _main() -> None:
     )
     try:
         robot = sim.add_robot(
-            cfg=TianjiMarvinCfg.from_dict({"with_gripper": args.with_gripper})
+            cfg=TianjiMarvinCfg.from_dict(
+                {
+                    "with_gripper": args.with_gripper,
+                    "init_pos": [0.0, 0.0, 0.1],
+                }
+            )
         )
         sim.prepare()
         sim.update(step=10)
