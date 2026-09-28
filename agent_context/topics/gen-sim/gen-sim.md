@@ -88,6 +88,16 @@ their separation is not assumed to be the actual contact gap. Watertight target
 triangles preserve cavities that coarse convex unions can fill. Both inward pad
 faces must reach contact, with the open-to-contact sweep clear of other hand
 parts. Non-watertight targets fail explicitly instead of receiving guessed signs.
+Near-contact inward-pad samples also require outward target normals within
+60 degrees of the corresponding pad-facing direction. This excludes tangential
+or back-facing proximity without treating it as force closure. Normal queries
+reuse the target triangle BVH and run only on near-contact pad samples; rejected
+endpoints do not enter the closing sweep. Two-sided occupancy probes orient
+each queried normal using the signed-distance solid convention, not global
+mesh volume: independently reversed components and nested cavities retain
+their own inside/outside boundary. Ambiguous probes cannot certify contact.
+Regenerate E5 bundles after changes
+to this versioned geometry policy.
 Single-arm generator methods and
 their factories remain unchanged even in mixed E1/E5 programs; do not tune their
 finger envelope or opening margin at program scope. This target-mesh screening
