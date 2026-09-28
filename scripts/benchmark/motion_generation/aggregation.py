@@ -70,6 +70,42 @@ def _case_macro_rate(
     return sum(case_rates) / len(case_rates)
 
 
+def _case_macro_rate_optional(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    attribute: str,
+) -> float | None:
+    """Macro-average a tri-state outcome attribute, reporting N/A as ``None``.
+
+    Unlike :func:`_case_macro_rate`, a ``None`` outcome means the check did not
+    apply rather than that it passed, so it is excluded from the average and a
+    case with no applicable outcome is skipped entirely. When no case applies
+    the metric is ``None``, which keeps an unconfigured limit from being
+    reported as a zero violation rate.
+    """
+    if not track_cases:
+        return None
+
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+
+    case_rates: list[float] = []
+    for case in track_cases:
+        applicable = [
+            outcome
+            for outcome in outcomes_by_case.get(case.case_id, [])
+            if getattr(outcome, attribute) is not None
+        ]
+        if not applicable:
+            continue
+        case_rates.append(
+            sum(bool(getattr(outcome, attribute)) for outcome in applicable)
+            / len(applicable)
+        )
+    return sum(case_rates) / len(case_rates) if case_rates else None
+
+
 def _case_supports_attribute(case: BenchmarkCase, attribute: str) -> bool:
     """Return whether a staged outcome applies to one case protocol."""
     if attribute == "task_success":
@@ -325,8 +361,13 @@ def _performance_rows(
                 "end_to_end_time_ms": _mean(
                     record.end_to_end_time_ms for record in group
                 ),
-                "trajectory_duration_s": _mean(
-                    record.trajectory_duration_s for record in group
+                "native_timing": info.native_timing,
+                # A planner that never solves timing reports a nominal dt, so
+                # its duration is not comparable with a solved one.
+                "trajectory_duration_s": (
+                    _mean(record.trajectory_duration_s for record in group)
+                    if info.native_timing
+                    else None
                 ),
                 "trajectory_waypoints": _mean(
                     (
@@ -588,6 +629,31 @@ def _metric_rows(
                     ),
                     "joint_violation_rate": _case_macro_rate(
                         measured, group_cases, "joint_limit_violation"
+                    ),
+                    "velocity_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "velocity_limit_violation"
+                    ),
+                    "acceleration_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "acceleration_limit_violation"
+                    ),
+                    "jerk_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "jerk_limit_violation"
+                    ),
+                    "max_joint_velocity_rad_s": _mean(
+                        outcome.max_joint_velocity_rad_s for outcome in valid_outcomes
+                    ),
+                    "max_joint_acceleration_rad_s2": _mean(
+                        outcome.max_joint_acceleration_rad_s2
+                        for outcome in valid_outcomes
+                    ),
+                    "velocity_utilization": _mean(
+                        outcome.velocity_utilization for outcome in valid_outcomes
+                    ),
+                    "acceleration_utilization": _mean(
+                        outcome.acceleration_utilization for outcome in valid_outcomes
+                    ),
+                    "jerk_utilization": _mean(
+                        outcome.jerk_utilization for outcome in valid_outcomes
                     ),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes
