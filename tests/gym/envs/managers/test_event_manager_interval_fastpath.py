@@ -1,4 +1,5 @@
 """interval_step==1 快路径：functor 收到显式全量 ID 张量（非 None）。"""
+
 import torch
 
 from embodichain.lab.gym.envs.managers.event_manager import EventManager
@@ -11,9 +12,7 @@ class _RecordingFunctor:
         self.calls = []
 
     def __call__(self, env, env_ids, **kwargs):
-        self.calls.append(
-            None if env_ids is None else env_ids.clone()
-        )
+        self.calls.append(None if env_ids is None else env_ids.clone())
 
 
 def test_interval_one_fastpath_passes_explicit_all_row_ids(monkeypatch):
@@ -36,7 +35,8 @@ def test_interval_one_fastpath_passes_explicit_all_row_ids(monkeypatch):
     # 拦截 _call_event_functor，记录传入的 env_ids
     received = []
     monkeypatch.setattr(
-        manager, "_call_event_functor",
+        manager,
+        "_call_event_functor",
         lambda mode, name, cfg, env, ids: received.append(ids),
     )
 
