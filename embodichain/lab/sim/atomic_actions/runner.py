@@ -30,6 +30,11 @@ import torch
 from embodichain.utils import configclass
 
 from .bindings import RuntimeEndpointTarget
+from .evidence import (
+    PhysicalEvidenceFrame,
+    PhysicalEvidenceProvider,
+    PhysicalEvidenceRequest,
+)
 from .execution import (
     ExecutionSession,
     ExecutionStatus,
@@ -287,6 +292,9 @@ class RunnerStep:
     message: str | None = None
     """Terminal or failure diagnostic, when available."""
 
+    evidence: PhysicalEvidenceFrame | None = None
+    """Fresh physical evidence collected for this observation tick, if enabled."""
+
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunnerStatus):
             raise TypeError("status must be a RunnerStatus.")
@@ -298,7 +306,13 @@ class RunnerStep:
             raise ValueError("command_count must be non-negative.")
         if self.message is not None and not isinstance(self.message, str):
             raise TypeError("message must be a string or None.")
+        if self.evidence is not None and not isinstance(
+            self.evidence, PhysicalEvidenceFrame
+        ):
+            raise TypeError("evidence must be PhysicalEvidenceFrame or None.")
         object.__setattr__(self, "dispatches", tuple(self.dispatches))
+        if self.evidence is not None:
+            object.__setattr__(self, "evidence", self.evidence.snapshot())
 
     @property
     def is_waiting(self) -> bool:
@@ -328,6 +342,24 @@ PhaseEffectGateVerifier = Callable[
 ]
 """Synchronous verifier for one blocking trajectory-segment entry gate."""
 
+PhysicalEffectVerifier = Callable[
+    [PlanningContext, PhysicalEvidenceFrame, EffectVerificationRequest],
+    EffectVerificationResult,
+]
+"""Effect verifier that consumes a synchronized physical-evidence frame."""
+
+PhysicalHeldObjectGuardVerifier = Callable[
+    [PlanningContext, PhysicalEvidenceFrame, HeldObjectGuardRequest],
+    HeldObjectGuardResult | None,
+]
+"""Held-object guard verifier backed by a synchronized evidence frame."""
+
+PhysicalPhaseEffectGateVerifier = Callable[
+    [PlanningContext, PhysicalEvidenceFrame, PhaseEffectGateRequest],
+    PhaseEffectGateResult,
+]
+"""Phase-effect gate verifier backed by a synchronized evidence frame."""
+
 RunnerStepCallback = Callable[[RunnerStep], None]
 """Optional observer called after every blocking runner-loop iteration."""
 
@@ -350,6 +382,8 @@ class ExecutionRunner:
         command_sink: Controller or simulation command boundary.
         clock: Optional scheduler clock. Defaults to monotonic wall time.
         cfg: Optional acknowledgement, scheduling, and completion policy.
+        physical_evidence_provider: Optional synchronized evidence source used
+            by evidence-aware verifiers.
     """
 
     def __init__(
@@ -360,6 +394,7 @@ class ExecutionRunner:
         *,
         clock: ExecutionClock | None = None,
         cfg: ExecutionRunnerCfg | None = None,
+        physical_evidence_provider: PhysicalEvidenceProvider | None = None,
     ) -> None:
         if not isinstance(session, ExecutionSession):
             raise TypeError("session must be an ExecutionSession.")
@@ -371,11 +406,20 @@ class ExecutionRunner:
             raise TypeError("clock must implement ExecutionClock.")
         if cfg is not None and not isinstance(cfg, ExecutionRunnerCfg):
             raise TypeError("cfg must be an ExecutionRunnerCfg.")
+        if physical_evidence_provider is not None and not isinstance(
+            physical_evidence_provider, PhysicalEvidenceProvider
+        ):
+            raise TypeError(
+                "physical_evidence_provider must implement " "PhysicalEvidenceProvider."
+            )
         self._session = session
         self._observation_provider = observation_provider
         self._command_sink = command_sink
         self._clock = clock or MonotonicExecutionClock()
         self.cfg = cfg or ExecutionRunnerCfg()
+        self._physical_evidence_provider = physical_evidence_provider
+        self._observation_revision = 0
+        self._last_evidence: PhysicalEvidenceFrame | None = None
         self._status = RunnerStatus.RUNNING
         self._next_step_at = self._clock_now()
         self._last_context: PlanningContext | None = session.latest_context
@@ -413,6 +457,16 @@ class ExecutionRunner:
             self._effect_tick is not None
             and self._effect_tick.pending_effect is not None
         )
+
+    @property
+    def physical_evidence_provider(self) -> PhysicalEvidenceProvider | None:
+        """Return the optional runtime physical-evidence provider."""
+        return self._physical_evidence_provider
+
+    @property
+    def last_evidence(self) -> PhysicalEvidenceFrame | None:
+        """Return the latest collected evidence snapshot, if available."""
+        return None if self._last_evidence is None else self._last_evidence.snapshot()
 
     def revise_current(self, invocation: ActionInvocation) -> None:
         """Stage a newer revision for the next scheduled observation boundary.
@@ -495,9 +549,16 @@ class ExecutionRunner:
         *,
         effect_result: EffectVerificationResult | None = None,
         effect_verifier: EffectVerifier | None = None,
+        physical_effect_verifier: PhysicalEffectVerifier | None = None,
         phase_effect_gate_result: PhaseEffectGateResult | None = None,
         phase_effect_gate_verifier: PhaseEffectGateVerifier | None = None,
+        physical_phase_effect_gate_verifier: (
+            PhysicalPhaseEffectGateVerifier | None
+        ) = None,
         held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
+        physical_held_object_guard_verifier: (
+            PhysicalHeldObjectGuardVerifier | None
+        ) = None,
     ) -> RunnerStep:
         """Perform one due observation/session/controller update without sleeping.
 
@@ -510,16 +571,23 @@ class ExecutionRunner:
                 and before the session consumes the result. It is not called
                 after the request deadline. Mutually exclusive with
                 ``effect_result``.
+            physical_effect_verifier: Evidence-aware alternative to
+                ``effect_verifier``. It receives the fresh evidence frame
+                collected by this runner.
             phase_effect_gate_result: Optional externally produced result for
                 the current blocking trajectory-segment entry gate.
             phase_effect_gate_verifier: Optional synchronous verifier for the
                 current gate. It runs on a fresh due-cycle observation and is
                 mutually exclusive with ``phase_effect_gate_result``.
+            physical_phase_effect_gate_verifier: Evidence-aware alternative
+                to ``phase_effect_gate_verifier``.
             held_object_guard_verifier: Optional synchronous phase-aware
                 verifier. It receives a fresh observation and the current
                 command-phase request before :meth:`ExecutionSession.tick` and
                 command dispatch. Returning ``None`` means the current phase
                 has no applicable held-object guard.
+            physical_held_object_guard_verifier: Evidence-aware alternative
+                to ``held_object_guard_verifier``.
 
         Returns:
             Runner status, optional session tick, controller acknowledgements,
@@ -529,6 +597,10 @@ class ExecutionRunner:
             raise ValueError(
                 "effect_result and effect_verifier are mutually exclusive."
             )
+        if effect_verifier is not None and physical_effect_verifier is not None:
+            raise ValueError(
+                "effect_verifier and physical_effect_verifier are mutually exclusive."
+            )
         if (
             phase_effect_gate_result is not None
             and phase_effect_gate_verifier is not None
@@ -537,16 +609,48 @@ class ExecutionRunner:
                 "phase_effect_gate_result and phase_effect_gate_verifier are "
                 "mutually exclusive."
             )
+        if (
+            phase_effect_gate_verifier is not None
+            and physical_phase_effect_gate_verifier is not None
+        ):
+            raise ValueError(
+                "phase_effect_gate_verifier and its physical counterpart are "
+                "mutually exclusive."
+            )
+        if (
+            held_object_guard_verifier is not None
+            and physical_held_object_guard_verifier is not None
+        ):
+            raise ValueError(
+                "held_object_guard_verifier and its physical counterpart are "
+                "mutually exclusive."
+            )
         if effect_verifier is not None and not callable(effect_verifier):
             raise TypeError("effect_verifier must be callable or None.")
+        if physical_effect_verifier is not None and not callable(
+            physical_effect_verifier
+        ):
+            raise TypeError("physical_effect_verifier must be callable or None.")
         if held_object_guard_verifier is not None and not callable(
             held_object_guard_verifier
         ):
             raise TypeError("held_object_guard_verifier must be callable or None.")
+        if physical_held_object_guard_verifier is not None and not callable(
+            physical_held_object_guard_verifier
+        ):
+            raise TypeError(
+                "physical_held_object_guard_verifier must be callable or None."
+            )
         if phase_effect_gate_verifier is not None and not callable(
             phase_effect_gate_verifier
         ):
             raise TypeError("phase_effect_gate_verifier must be callable or None.")
+        if physical_phase_effect_gate_verifier is not None and not callable(
+            physical_phase_effect_gate_verifier
+        ):
+            raise TypeError(
+                "physical_phase_effect_gate_verifier must be callable or None."
+            )
         now = self._clock_now()
         if self._status is not RunnerStatus.RUNNING:
             return self._result(timestamp=now)
@@ -583,14 +687,39 @@ class ExecutionRunner:
                 context=context,
             )
 
+        try:
+            evidence = self._collect_evidence(context)
+        except Exception as exc:
+            return self._fail(
+                f"Physical evidence provider failed: {type(exc).__name__}: {exc}",
+                context=context,
+            )
+        if evidence is None and (
+            physical_effect_verifier is not None
+            or physical_phase_effect_gate_verifier is not None
+            or physical_held_object_guard_verifier is not None
+        ):
+            return self._fail(
+                "An evidence-aware verifier requires a physical evidence provider.",
+                context=context,
+            )
+
         pending_effect = self._session.pending_effect
         if (
-            effect_verifier is not None
-            and pending_effect is not None
+            pending_effect is not None
+            and (effect_verifier is not None or physical_effect_verifier is not None)
             and context.robot.timestamp <= pending_effect.deadline
         ):
             try:
-                effect_result = effect_verifier(context, pending_effect)
+                if physical_effect_verifier is not None:
+                    assert evidence is not None
+                    effect_result = physical_effect_verifier(
+                        context,
+                        evidence,
+                        pending_effect,
+                    )
+                elif effect_verifier is not None:
+                    effect_result = effect_verifier(context, pending_effect)
                 if type(effect_result) is not EffectVerificationResult:
                     raise TypeError(
                         "EffectVerifier must return exactly "
@@ -604,15 +733,26 @@ class ExecutionRunner:
 
         phase_effect_gate_request = self._session.phase_effect_gate_request
         if (
-            phase_effect_gate_verifier is not None
-            and phase_effect_gate_request is not None
+            phase_effect_gate_request is not None
+            and (
+                phase_effect_gate_verifier is not None
+                or physical_phase_effect_gate_verifier is not None
+            )
             and context.robot.timestamp <= phase_effect_gate_request.deadline
         ):
             try:
-                phase_effect_gate_result = phase_effect_gate_verifier(
-                    context,
-                    phase_effect_gate_request,
-                )
+                if physical_phase_effect_gate_verifier is not None:
+                    assert evidence is not None
+                    phase_effect_gate_result = physical_phase_effect_gate_verifier(
+                        context,
+                        evidence,
+                        phase_effect_gate_request,
+                    )
+                elif phase_effect_gate_verifier is not None:
+                    phase_effect_gate_result = phase_effect_gate_verifier(
+                        context,
+                        phase_effect_gate_request,
+                    )
                 if type(phase_effect_gate_result) is not PhaseEffectGateResult:
                     raise TypeError(
                         "PhaseEffectGateVerifier must return exactly "
@@ -628,15 +768,26 @@ class ExecutionRunner:
         held_object_guard_result: HeldObjectGuardResult | None = None
         held_object_guard_request = self._session.held_object_guard_request
         if (
-            held_object_guard_verifier is not None
-            and held_object_guard_request is not None
+            held_object_guard_request is not None
+            and (
+                held_object_guard_verifier is not None
+                or physical_held_object_guard_verifier is not None
+            )
             and context.robot.timestamp <= held_object_guard_request.deadline
         ):
             try:
-                held_object_guard_result = held_object_guard_verifier(
-                    context,
-                    held_object_guard_request,
-                )
+                if physical_held_object_guard_verifier is not None:
+                    assert evidence is not None
+                    held_object_guard_result = physical_held_object_guard_verifier(
+                        context,
+                        evidence,
+                        held_object_guard_request,
+                    )
+                elif held_object_guard_verifier is not None:
+                    held_object_guard_result = held_object_guard_verifier(
+                        context,
+                        held_object_guard_request,
+                    )
                 if (
                     held_object_guard_result is not None
                     and type(held_object_guard_result) is not HeldObjectGuardResult
@@ -770,6 +921,7 @@ class ExecutionRunner:
             tick=tick,
             dispatches=dispatches,
             wait_duration=self._remaining_wait(self._clock_now()),
+            evidence=evidence,
         )
 
     def cancel(self, reason: str = "Execution cancelled by caller.") -> RunnerStep:
@@ -992,6 +1144,32 @@ class ExecutionRunner:
         except Exception:
             return self._last_context
 
+    def _collect_evidence(
+        self,
+        context: PlanningContext,
+    ) -> PhysicalEvidenceFrame | None:
+        """Collect one synchronized evidence frame after a fresh observation."""
+        provider = self._physical_evidence_provider
+        if provider is None:
+            self._last_evidence = None
+            return None
+        self._observation_revision += 1
+        frame = provider.collect(
+            context,
+            PhysicalEvidenceRequest(
+                timestamp=context.robot.timestamp,
+                observation_revision=self._observation_revision,
+                env_ids=context.env_ids,
+            ),
+        )
+        if type(frame) is not PhysicalEvidenceFrame:
+            raise TypeError(
+                "PhysicalEvidenceProvider.collect() must return exactly "
+                "PhysicalEvidenceFrame."
+            )
+        self._last_evidence = frame.snapshot()
+        return self._last_evidence
+
     def _safe_stop(
         self,
         context: PlanningContext | None,
@@ -1040,6 +1218,7 @@ class ExecutionRunner:
         context: PlanningContext | None = None,
         tick: ExecutionTick | None = None,
         dispatches: list[CommandDispatch] | tuple[CommandDispatch, ...] = (),
+        evidence: PhysicalEvidenceFrame | None = None,
     ) -> RunnerStep:
         """Build an immutable runner result."""
         return RunnerStep(
@@ -1051,6 +1230,7 @@ class ExecutionRunner:
             dispatches=tuple(dispatches),
             command_count=self._command_count,
             message=self._message,
+            evidence=evidence,
         )
 
 
@@ -1061,6 +1241,7 @@ __all__ = [
     "CommandOperation",
     "CommandSink",
     "EffectVerifier",
+    "PhysicalEffectVerifier",
     "ExecutionClock",
     "ExecutionRunner",
     "ExecutionRunnerCfg",
@@ -1068,6 +1249,8 @@ __all__ = [
     "MonotonicExecutionClock",
     "ObservationProvider",
     "PhaseEffectGateVerifier",
+    "PhysicalPhaseEffectGateVerifier",
+    "PhysicalHeldObjectGuardVerifier",
     "RunnerStatus",
     "RunnerStep",
     "RunnerStepCallback",

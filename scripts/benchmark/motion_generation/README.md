@@ -185,6 +185,22 @@ contains the existing measured replay summary. Missing optional measurements
 mean unavailable evidence; the follow-up evaluation work must extend observation
 collection before claiming grasp/release/retention or intermediate-stage success.
 
+### Atomic Action runtime evidence
+
+The runtime foundation in
+`embodichain/lab/sim/atomic_actions/evidence.py` provides versioned
+`PhysicalEvidenceRequest`, `PhysicalEvidenceBatch`, and
+`PhysicalEvidenceFrame` values plus a `PhysicalEvidenceProvider` port. The
+`ExecutionRunner` can collect one aligned frame after each fresh observation
+and pass it to an evidence-aware effect verifier, phase-effect gate, or
+held-object guard. Existing verifier callbacks remain compatible.
+
+Atomic Skill primitives continue to declare only an
+`EffectVerificationRequirement`; they do not read simulator objects or mutate
+physical state. Benchmark evaluators, Task Program effect monitors, and future
+Gym/RL reward views can consume the same evidence provider through separate
+adapters.
+
 Return one `PhysicalEvaluation` per environment, each containing the same ordered
 stage IDs. `StageOutcome.status` distinguishes `passed`, `failed`, `not_reached`,
 and `not_applicable`. Failed stages require a failure code; measurements retain

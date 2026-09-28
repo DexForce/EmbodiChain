@@ -44,7 +44,11 @@ ActionInvocation                       semantic program
 ```
 
 Planning never steps simulation and never treats command completion as proof of
-a physical effect.
+a physical effect. Runtime hosts may collect versioned physical evidence after
+each fresh observation and pass it to an evidence-aware effect verifier, phase
+gate, or held-object guard. Evidence acquisition stays outside planning and
+does not mutate symbolic task state; verification results are the only path
+that commits or invalidates observed effects.
 
 ## Package map
 
@@ -55,6 +59,7 @@ a physical effect.
 | Articulation affordance geometry adapter | `atomic_actions/articulation_geometry.py` |
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
+| Runtime physical evidence | `evidence.py`, `scene.py`, `runner.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |

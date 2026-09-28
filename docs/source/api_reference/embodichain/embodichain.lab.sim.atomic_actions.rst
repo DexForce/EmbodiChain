@@ -90,10 +90,17 @@ embodichain.lab.sim.atomic_actions
       EffectVerificationRequest
       EffectVerificationRequirement
       EffectVerificationResult
+      PhysicalEvidenceBatch
+      PhysicalEvidenceFrame
+      PhysicalEvidenceProvider
+      PhysicalEvidenceRequest
       PhaseEffectGateRequest
       PhaseEffectGateResult
+      PhysicalEffectVerifier
+      PhysicalPhaseEffectGateVerifier
       HeldObjectGuardRequest
       HeldObjectGuardResult
+      PhysicalHeldObjectGuardVerifier
       ExecutionPlanAttempt
       ExecutionEvent
       ExecutionEventKind
@@ -326,6 +333,18 @@ Engine and execution
 .. autoclass:: ObservationProvider
    :members:
 
+.. autoclass:: PhysicalEvidenceProvider
+   :members:
+
+.. autoclass:: PhysicalEvidenceRequest
+   :members:
+
+.. autoclass:: PhysicalEvidenceBatch
+   :members:
+
+.. autoclass:: PhysicalEvidenceFrame
+   :members:
+
 .. autoclass:: CommandSink
    :members:
 
@@ -390,6 +409,12 @@ Engine and execution
 .. autoclass:: EffectVerificationResult
    :members:
 
+.. autodata:: PhysicalEffectVerifier
+
+.. autodata:: PhysicalPhaseEffectGateVerifier
+
+.. autodata:: PhysicalHeldObjectGuardVerifier
+
 .. autoclass:: ExecutionPlanAttempt
    :members:
 
@@ -404,6 +429,28 @@ Semantic objects and helpers
 
 Verification implementation module
 ----------------------------------
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.evidence
+
+.. autosummary::
+
+   PhysicalEvidenceBatch
+   PhysicalEvidenceFrame
+   PhysicalEvidenceProvider
+   PhysicalEvidenceRequest
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.runner
+
+.. autosummary::
+
+   PhysicalEffectVerifier
+   PhysicalPhaseEffectGateVerifier
+   PhysicalHeldObjectGuardVerifier
+
+Evidence-backed execution keeps acquisition separate from the existing
+symbolic effect verifier. The runner collects one aligned frame after each
+fresh observation and passes it only to the explicitly selected evidence-aware
+verifier.
 
 .. currentmodule:: embodichain.lab.sim.atomic_actions.verification
 
