@@ -14,16 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import dexsim.engine
 import numpy as np
-import open3d as o3d
 import trimesh
 import dexsim
 
-from typing import Tuple, List, Dict, Any, Union
+from typing import TYPE_CHECKING, Tuple, List, Dict, Any, Union
 
 from embodichain.utils import logger
+
+if TYPE_CHECKING:
+    import open3d as o3d
 
 
 def export_articulation_mesh(
@@ -55,6 +59,8 @@ def export_articulation_mesh(
     Returns:
         o3d.geometry.TriangleMesh: The combined Open3D mesh object of all articulations.
     """
+    import open3d as o3d
+
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 

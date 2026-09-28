@@ -451,6 +451,12 @@ class DefaultJointPositionTerm(ActionTerm):
         Args:
             env_ids: Rows to reset. None selects all rows.
         """
-        ids = slice(None) if env_ids is None else env_ids
-        self.action[ids] = 0
-        self.previous_action[ids] = 0
+        if env_ids is None:
+            self.action.zero_()
+            self.previous_action.zero_()
+        else:
+            ids = torch.as_tensor(env_ids, dtype=torch.long).to(
+                device=self.action.device, non_blocking=True
+            )
+            self.action.index_fill_(0, ids, 0)
+            self.previous_action.index_fill_(0, ids, 0)

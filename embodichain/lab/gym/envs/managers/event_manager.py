@@ -152,6 +152,7 @@ class EventManager(ManagerBase):
 
         # call the base class (this will parse the functors config)
         super().__init__(cfg, env)
+        self._all_env_ids = torch.arange(env.num_envs, device=env.device)
 
     def __str__(self) -> str:
         """Returns: A string representation for event manager."""
@@ -309,6 +310,17 @@ class EventManager(ManagerBase):
                     # call the event functor (with None for env_ids)
                     self._call_event_functor(
                         mode, functor_name, functor_cfg, self._env, None
+                    )
+                elif not functor_cfg.is_global and functor_cfg.interval_step == 1:
+                    # Every row is due, including rows reset on the last step.
+                    # Reuse the known selection instead of synchronizing a
+                    # CUDA nonzero merely to recover all environment indices.
+                    self._call_event_functor(
+                        mode,
+                        functor_name,
+                        functor_cfg,
+                        self._env,
+                        self._all_env_ids,
                     )
                 else:
                     valid_env_ids = (

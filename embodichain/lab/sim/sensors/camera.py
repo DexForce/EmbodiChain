@@ -64,6 +64,12 @@ class CameraCfg(SensorCfg):
 
     sensor_type: str = "Camera"
 
+    backend: Literal["native", "newton-tiled"] = "native"
+    """Image producer. Newton tiled uses CUDA visual geometry without a native renderer."""
+
+    cuda_graph: bool = True
+    """Capture pose mapping, BVH refit and tiled image generation together."""
+
     visualization_role: Literal["sensor", "record"] = "sensor"
     """Role used to group this camera in live visualization previews."""
 
@@ -146,6 +152,12 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        if config.backend not in ("native", "newton-tiled"):
+            raise ValueError(f"Unsupported camera backend: {config.backend!r}.")
+        if config.backend == "native":
+            owner._require_native_renderer("Native cameras")
+        self._owner = owner
+        self._tiled_batch = None
         self._world = owner.get_world()
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
@@ -159,6 +171,9 @@ class Camera(BaseSensor):
     def _build_sensor_from_config(
         self, config: CameraCfg, device: torch.device
     ) -> None:
+        if config.backend == "newton-tiled":
+            self._build_tiled_sensor(config, device)
+            return
         self._frame_buffer = self._world.create_camera_group(
             [config.width, config.height], self.num_instances, True
         )
@@ -215,14 +230,60 @@ class Camera(BaseSensor):
 
         self.cfg: CameraCfg = config
 
+    def _build_tiled_sensor(self, config: CameraCfg, device: torch.device) -> None:
+        import numpy as np
+        from dexsim.spawn import CameraDesc
+        from embodichain.lab.sim.sensors.attachment import resolve_parent_asset
+
+        if device.type != "cuda" or self._owner.physics.name != "newton":
+            raise ValueError("Newton tiled cameras require Newton physics on CUDA.")
+        unsupported = set(config.get_data_types()) - {"color", "depth"}
+        if unsupported:
+            raise NotImplementedError(
+                f"Newton tiled camera outputs are color/depth; requested {sorted(unsupported)}."
+            )
+        parent_path = None
+        if config.extrinsics.parent is not None:
+            uid, link = resolve_parent_asset(
+                config.extrinsics.parent,
+                {**self._owner._articulations, **self._owner._robots},
+                self.num_instances,
+            )
+            encode = lambda name: name.replace("%", "%25").replace("/", "%2F")
+            parent_path = f"{{ARENA_NS}}/{encode(uid)}/{encode(link)}"
+        fx, fy, cx, cy = config.intrinsics
+        desc = CameraDesc(
+            name=config.uid,
+            width=config.width,
+            height=config.height,
+            near=config.near,
+            far=config.far,
+            parent_path=parent_path,
+            intrinsic=np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], np.float32),
+        )
+        scene = self._owner._spawn_scene.builder.result
+        self._tiled_batch = scene.create_camera_batch(
+            desc,
+            arena_names=[arena.get_name() for arena in self._arenas],
+            cuda_graph=config.cuda_graph,
+        )
+        self._frame_buffer = None
+        self._entities[:] = [self._tiled_batch] * self.num_instances
+        for name in config.get_data_types():
+            self._data_buffer[name] = self._tiled_batch.data[name]
+        self.cfg = config
+        self._is_attached = parent_path is not None
+
     @cached_property
-    def group_id(self) -> int:
+    def group_id(self) -> int | None:
         """Get the camera group ID in the dexsim world.
 
         Returns:
             int: The camera group ID.
         """
-        return self._frame_buffer.get_group_id()
+        return (
+            None if self._tiled_batch is not None else self._frame_buffer.get_group_id()
+        )
 
     @property
     def is_attached(self) -> bool:
@@ -246,6 +307,11 @@ class Camera(BaseSensor):
         Args:
             **kwargs: Additional keyword arguments for sensor update.
         """
+        if self._tiled_batch is not None:
+            data = self._tiled_batch.render()
+            for name in self.cfg.get_data_types():
+                self._data_buffer[name] = data[name]
+            return
         fetch_only = kwargs.get("fetch_only", False)
         if not fetch_only:
             self._frame_buffer.apply()
@@ -280,6 +346,8 @@ class Camera(BaseSensor):
 
     def _detach_from_parent_nodes(self) -> None:
         """Retain camera views while their Spawn-owned parents are rebuilt."""
+        if self._tiled_batch is not None:
+            return
         for entity in self._entities:
             entity.get_node().detach_parent()
         self._is_attached = False
@@ -322,6 +390,14 @@ class Camera(BaseSensor):
                 ``(N, 7)`` vectors in ``(x, y, z, qx, qy, qz, qw)`` order.
             env_ids (Sequence[int] | None): The environment IDs to set the pose for. If None, set for all environments.
         """
+        if self._tiled_batch is not None:
+            values = pose.to(device=self.device, dtype=torch.float32)
+            if values.ndim == 3 and values.shape[1:] == (4, 4):
+                values = torch.cat(
+                    (values[:, :3, 3], quat_from_matrix(values[:, :3, :3])), dim=-1
+                )
+            self._tiled_batch.set_local_pose(values, env_ids)
+            return
         if env_ids is None:
             local_env_ids = range(len(self._entities))
         else:
@@ -352,6 +428,10 @@ class Camera(BaseSensor):
         Returns:
             torch.Tensor: The local pose of the camera.
         """
+        if self._tiled_batch is not None:
+            return self._format_tiled_pose(
+                self._tiled_batch.get_local_pose(), to_matrix
+            )
         poses = []
         for entity in self._entities:
             pose = entity.get_local_pose()
@@ -374,6 +454,10 @@ class Camera(BaseSensor):
         Returns:
             A tensor representing the pose of the sensor in the arena frame.
         """
+        if self._tiled_batch is not None:
+            poses = self._tiled_batch.get_world_pose().clone()
+            poses[:, :3] -= self._tiled_batch.arena_offsets
+            return self._format_tiled_pose(poses, to_matrix)
         poses = []
         for i, entity in enumerate(self._entities):
             pose = entity.get_world_pose()
@@ -392,6 +476,9 @@ class Camera(BaseSensor):
         if self._is_destroyed:
             return
         self._is_destroyed = True
+        if self._tiled_batch is not None:
+            self._tiled_batch.close()
+            self._tiled_batch = None
         for arena, camera_name in self._camera_names:
             try:
                 arena.remove_camera(camera_name)
@@ -408,6 +495,16 @@ class Camera(BaseSensor):
         self._is_attached = False
         self._arenas = []
         self._world = None
+        self._owner = None
+
+    @staticmethod
+    def _format_tiled_pose(poses: torch.Tensor, to_matrix: bool) -> torch.Tensor:
+        if not to_matrix:
+            return poses
+        result = torch.eye(4, device=poses.device).expand(len(poses), 4, 4).clone()
+        result[:, :3, 3] = poses[:, :3]
+        result[:, :3, :3] = matrix_from_quat(poses[:, 3:])
+        return result
 
     def look_at(
         self,
@@ -425,7 +522,9 @@ class Camera(BaseSensor):
             env_ids (Sequence[int] | None): The environment IDs to set the look at for. If None, set for all environments.
         """
         if up is None:
-            up = torch.tensor([[0.0, 0.0, 1.0]]).repeat(eye.shape[0], 1)
+            up = torch.tensor([[0.0, 0.0, 1.0]], device=eye.device).repeat(
+                eye.shape[0], 1
+            )
 
         pose = look_at_to_pose(eye, target, up)
         # To opengl coordinate system.
@@ -445,6 +544,10 @@ class Camera(BaseSensor):
             intrinsics (torch.Tensor): The intrinsics for the left camera with shape (4,) / (3, 3) or (N, 4) / (N, 3, 3).
             env_ids (Sequence[int] | None): The environment ids to set the intrinsics. If None, set for all environments.
         """
+        if self._tiled_batch is not None:
+            raise NotImplementedError(
+                "Tiled camera intrinsics are fixed for the batch; recreate the camera to change them."
+            )
         ids = env_ids if env_ids is not None else range(self.num_instances)
 
         if intrinsics.dim() == 2 and intrinsics.shape[1] == 3:
@@ -472,6 +575,10 @@ class Camera(BaseSensor):
         Returns:
             torch.Tensor: The intrinsics for the left camera with shape (N, 3, 3).
         """
+        if self._tiled_batch is not None:
+            return torch.as_tensor(
+                self._tiled_batch.desc.intrinsic, device=self.device
+            ).expand(self.num_instances, 3, 3)
         intrinsics = []
         for entity in self._entities:
             intrinsics.append(
@@ -483,27 +590,40 @@ class Camera(BaseSensor):
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
 
+        if self._tiled_batch is not None:
+            self._tiled_batch.reset(env_ids)
+
         if self.cfg.extrinsics.eye is not None:
             eye = (
-                torch.tensor(self.cfg.extrinsics.eye, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.eye, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             target = (
-                torch.tensor(self.cfg.extrinsics.target, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.target, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             up = (
-                torch.tensor(self.cfg.extrinsics.up, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.up, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
                 if self.cfg.extrinsics.up is not None
                 else None
             )
+            if env_ids is not None:
+                eye, target = eye[env_ids], target[env_ids]
+                if up is not None:
+                    up = up[env_ids]
             self.look_at(eye, target, up, env_ids=env_ids)
         else:
-            pose = self.cfg.extrinsics.transformation
+            pose = self.cfg.extrinsics.transformation.to(self.device)
             pose = pose.unsqueeze_(0).repeat(self.num_instances, 1, 1)
 
             if self.cfg.extrinsics.parent is None:
@@ -511,4 +631,6 @@ class Camera(BaseSensor):
                 pose[:, :3, 1] = -pose[:, :3, 1]
                 pose[:, :3, 2] = -pose[:, :3, 2]
 
-            self.set_local_pose(pose, env_ids=env_ids)
+            self.set_local_pose(
+                pose if env_ids is None else pose[env_ids], env_ids=env_ids
+            )

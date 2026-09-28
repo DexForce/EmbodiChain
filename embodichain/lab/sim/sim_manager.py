@@ -65,7 +65,7 @@ from dexsim.types import (
     ThreadMode,
 )
 from dexsim.core import TASK_RETURN
-from dexsim.engine import Material, ObjectManipulator
+from dexsim.engine import ObjectManipulator
 from dexsim.models import MeshObject
 from dexsim.render import LightType, Windows
 
@@ -137,7 +137,7 @@ from embodichain.utils.math import (
 )
 
 if TYPE_CHECKING:
-    from dexsim.engine import PhysicsScene
+    from dexsim.engine import Material, PhysicsScene
     from dexsim.scene import Scene
     from dexsim.interaction import EntityGizmoConfig, EntityGizmoManipulator
     from embodichain.lab.visualization import (
@@ -593,6 +593,10 @@ class SimulationManager:
                     self._render_device_name = render_device.name
                     break
         self._world: dexsim.World = dexsim.World(world_config)
+        if self.has_native_renderer:
+            from .utility.dynamic_pybind import init_dynamic_pybind
+
+            init_dynamic_pybind()
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
 
@@ -684,15 +688,17 @@ class SimulationManager:
         # The structure is keys to the loaded texture data. The keys represent the texture group.
         self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
 
-        self._init_sim_resources()
-
         # The plane material and visibility are authored before declaration so
         # both eager Default loading and deferred Newton loading see them.
         self._spawn_default_plane_visibility = True
+        self._spawn_default_plane_material = None
         self._default_plane = None
-        self.set_default_background()
+        if self.has_native_renderer:
+            self._init_sim_resources()
+            self.set_default_background()
         self._declare_spawn_default_plane()
-        self.set_default_global_lighting()
+        if self.has_native_renderer:
+            self.set_default_global_lighting()
 
         # SpawnScene has already prepared the configured Arenas. Start the
         # optional browser runtime after default resources are declared.
@@ -811,7 +817,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        valid = {"auto", "no-render", "hybrid", "fast-rt", "rt"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
@@ -827,6 +833,17 @@ class SimulationManager:
         cfg.DEFAULT_RENDERER = resolved
         logger.log_info(f"Default renderer set to '{resolved}'.")
         return resolved
+
+    @property
+    def has_native_renderer(self) -> bool:
+        """Whether the World owns a native renderer and visual resources."""
+        return self.sim_config.render_cfg.renderer != "no-render"
+
+    def _require_native_renderer(self, operation: str) -> None:
+        if not self.has_native_renderer:
+            raise RuntimeError(
+                f"{operation} requires a native renderer; the World uses no-render."
+            )
 
     @cached_property
     def num_envs(self) -> int:
@@ -1153,6 +1170,11 @@ class SimulationManager:
             sim_config.render_cfg.renderer = resolved_renderer
 
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
+        if not self.has_native_renderer:
+            if not sim_config.headless:
+                raise ValueError("renderer='no-render' requires headless=True.")
+            if getattr(sim_config.physics_cfg, "sync_to_renderer", None) is True:
+                raise ValueError("sync_to_renderer=True requires a native renderer.")
 
         if type(sim_config.device) is str:
             self.device = torch.device(sim_config.device)
@@ -2068,7 +2090,8 @@ class SimulationManager:
     def _bind_default_plane(self, plane: Any) -> None:
         """Retain the spawned ground plane and apply its visibility."""
         self._default_plane = plane
-        plane.set_visible(self._spawn_default_plane_visibility)
+        if self.has_native_renderer:
+            plane.set_visible(self._spawn_default_plane_visibility)
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
@@ -2078,12 +2101,13 @@ class SimulationManager:
         directional light is a global scene light (infinite distance)
         pointing downward along the -Z axis.
         """
+        self._require_native_renderer("Default global lighting")
         # Environment emission light
         self.set_emission_light([1.0, 1.0, 1.0], 100.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
-
+        self._require_native_renderer("Default background")
         mat_name = "plane_mat"
         mat_path = self._default_resources.get_material_path("PlaneDark")
         color_texture = os.path.join(mat_path, "PlaneDark_2K_Color.jpg")
@@ -3188,7 +3212,7 @@ class SimulationManager:
 
     def get_robot_uid_list(self) -> List[str]:
         """
-        Retrieves a list of unique identifiers (UIDs) for all robots in the V2 system.
+        Retrieves a list of unique identifiers (UIDs) for all robots in the simulation system.
 
         Returns:
             list: A list containing the UIDs of the robots.
@@ -3635,6 +3659,8 @@ class SimulationManager:
                 "physics backend."
             )
         if isinstance(sensor_factory, type) and issubclass(sensor_factory, Camera):
+            if sensor_cfg.backend == "newton-tiled":
+                self.prepare()
             if len(self._arenas) != self.num_envs:
                 raise RuntimeError(
                     "Camera creation requires all Spawn Arenas to be "
@@ -3644,6 +3670,7 @@ class SimulationManager:
             if (
                 sensor_cfg.extrinsics.parent is not None
                 and self._spawn_scene.builder.result is not None
+                and sensor_cfg.backend == "native"
             ):
                 # Resolve before allocating native camera views so an invalid
                 # parent cannot leave partially constructed render resources.
@@ -3687,6 +3714,8 @@ class SimulationManager:
 
     def _attach_camera_parent(self, sensor: Camera) -> None:
         """Resolve and attach one camera to its configured parent nodes."""
+        if sensor.cfg.backend == "newton-tiled":
+            return
         parent = sensor.cfg.extrinsics.parent
         if parent is None:
             return
@@ -4031,7 +4060,7 @@ class SimulationManager:
             state.record_camera.render()
             rgb = np.asarray(state.record_camera.get_rgb_map())
             if rgb.size != 0:
-                frame = np.ascontiguousarray(rgb[..., :3])
+                frame = np.array(rgb[..., :3], copy=True, order="C")
 
         if frame is None:
             return state.task_status
@@ -4478,6 +4507,7 @@ class SimulationManager:
             VisualMaterial: the created visual material instance handle.
         """
 
+        self._require_native_renderer("Native visual materials")
         if cfg.uid in self._visual_materials:
             logger.log_warning(
                 f"Visual material {cfg.uid} already exists. Returning the existing one."

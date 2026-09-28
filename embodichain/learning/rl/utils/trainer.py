@@ -238,11 +238,12 @@ class Trainer:
                 metrics_dict = info.get("metrics")
                 self._log_scalar_dict("rewards", rewards_dict)
                 self._log_scalar_dict("metrics", metrics_dict)
-                log_dict = {}
-                log_dict.update(self._pack_log_dict("rewards", rewards_dict))
-                log_dict.update(self._pack_log_dict("metrics", metrics_dict))
-                if log_dict and self.use_wandb:
-                    wandb.log(log_dict, step=self.global_step)
+                if self.use_wandb:
+                    log_dict = {}
+                    log_dict.update(self._pack_log_dict("rewards", rewards_dict))
+                    log_dict.update(self._pack_log_dict("metrics", metrics_dict))
+                    if log_dict:
+                        wandb.log(log_dict, step=self.global_step)
 
         rollout = self.buffer.start_rollout()
         rollout = self.collector.collect(

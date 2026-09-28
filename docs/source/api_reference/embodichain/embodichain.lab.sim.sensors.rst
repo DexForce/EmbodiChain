@@ -70,8 +70,11 @@ this path. Directly constructed cameras require an explicit attachment call.
 .. autosummary::
 
     ~attachment.resolve_parent_nodes
+    ~attachment.resolve_parent_asset
 
 .. autofunction:: embodichain.lab.sim.sensors.attachment.resolve_parent_nodes
+
+.. autofunction:: embodichain.lab.sim.sensors.attachment.resolve_parent_asset
 
 Stereo Camera
 -------------

@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from math import log
 from functools import wraps
 from datetime import datetime
+import logging
 import os
 import threading
 import torch
@@ -869,7 +870,9 @@ class EmbodiedEnv(BaseEnv):
             dtype=torch.bool,
             device=self.episode_success_status.device,
         )
-        self.episode_success_status[update_mask] = success[update_mask]
+        self.episode_success_status.copy_(
+            torch.where(update_mask, success, self.episode_success_status)
+        )
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -914,7 +917,10 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
+        if logger.logger.isEnabledFor(logging.DEBUG):
+            logger.log_debug(
+                f"Initializing episode for env_ids: {env_ids}", color="blue"
+            )
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
@@ -1014,7 +1020,7 @@ class EmbodiedEnv(BaseEnv):
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
-            _traj_steps[env_ids_to_process] = 0
+            _traj_steps.index_fill_(0, env_ids_to_process, 0)
 
         # Clear episode buffers only after every recorder has consumed them.
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
@@ -1039,7 +1045,7 @@ class EmbodiedEnv(BaseEnv):
             self._demo_active_rollout_start_steps[demo_ids] = 0
             self._demo_steps[demo_ids] = 0
 
-        self.episode_success_status[env_ids_to_process] = False
+        self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)

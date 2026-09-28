@@ -9,6 +9,7 @@ The {class}`CameraCfg` class defines the configuration for camera sensors. It in
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
+| `backend` | `str` | `"native"` | Image producer: `native` or `newton-tiled`. |
 | `width` | `int` | `640` | Width of the captured image. |
 | `height` | `int` | `480` | Height of the captured image. |
 | `intrinsics` | `tuple` | `(600, 600, 320.0, 240.0)` | Camera intrinsics `(fx, fy, cx, cy)`. |
@@ -22,6 +23,35 @@ The {class}`CameraCfg` class defines the configuration for camera sensors. It in
 | `enable_position` | `bool` | `False` | Enable 3D position map capture. |
 
 ## Camera Extrinsics
+
+### CUDA images without a native renderer
+
+`CameraCfg(backend="newton-tiled")` uses the finalized Newton Scene's CUDA tiled
+camera. It supports `RenderCfg(renderer="no-render")`, CUDA simulation, RGBA
+color and optical-axis depth. The physics model, collision geometry, existing
+sensor definitions, and physical stepping stay unchanged. Image geometry comes
+from retained visual assets and follows the simulated body poses.
+
+Select `enable_color=True` and/or `enable_depth=True`. Mask, normal, position,
+stereo, and native renderer material effects are not supported by this backend;
+unsupported configurations raise an error when the sensor is created. Intrinsics,
+clipping, and fixed or rigid-link extrinsics use the same `CameraCfg` fields.
+
+In a Gym environment, sensor updates happen at the existing observation update
+boundary. In a standalone simulation, call `camera.update()` after physics has
+advanced, then read `camera.get_data()`. Outputs stay on CUDA. The next update
+reuses the output buffers, so copy observations into rollout storage when they
+must survive another frame. Reset clears selected rows before the next sample;
+destroying the camera releases its scene resources, while retained tensors keep
+their data storage alive. Depth is measured in metres along the optical axis,
+with zero for pixels outside the clipping range.
+
+The first frame captures the camera CUDA Graph. Subsequent motion updates poses
+and refits visual geometry without recapture; a supported scene rebuild refreshes
+the mapping and graph. Camera creation or sampling does not load native Vulkan
+or OptiX rendering modules.
+
+### Pose fields
 
 The `ExtrinsicsCfg` class defines the position and orientation of the camera.
 

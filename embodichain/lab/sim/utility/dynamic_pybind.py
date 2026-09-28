@@ -14,10 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-import dexsim
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 import numpy as np
 
-from dexsim.engine import RenderBody
+if TYPE_CHECKING:
+    from dexsim.engine import RenderBody
 
 
 def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -> None:
@@ -67,5 +70,6 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -
 
 def init_dynamic_pybind() -> None:
     """Initialize dynamic pybind interface."""
+    from dexsim.engine import RenderBody
 
     RenderBody.set_projective_uv = set_projective_uv

@@ -22,11 +22,13 @@ import dexsim
 import numpy as np
 
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import TYPE_CHECKING, Dict, Union
 from functools import cached_property
 
-from dexsim.engine import MaterialInst, Material
 from embodichain.utils import configclass, logger
+
+if TYPE_CHECKING:
+    from dexsim.engine import MaterialInst, Material
 
 __all__ = [
     "VisualMaterialCfg",

@@ -310,6 +310,60 @@ class ArticulationViewBase(ABC):
         """
         raise NotImplementedError("This view does not expose batch link properties.")
 
+    def fetch_joint_properties(
+        self,
+        *,
+        position_limits: torch.Tensor | None = None,
+        velocity_limit: torch.Tensor | None = None,
+        effort_limit: torch.Tensor | None = None,
+        stiffness: torch.Tensor | None = None,
+        damping: torch.Tensor | None = None,
+        friction: torch.Tensor | None = None,
+        armature: torch.Tensor | None = None,
+    ) -> None:
+        """Read current joint parameters in public DOF order.
+
+        Args:
+            position_limits: Lower/upper output, shape ``(N, dof, 2)``.
+            velocity_limit: Velocity-limit output, shape ``(N, dof)``.
+            effort_limit: Effort-limit output, shape ``(N, dof)``.
+            stiffness: Drive-stiffness output, shape ``(N, dof)``.
+            damping: Drive-damping output, shape ``(N, dof)``.
+            friction: Joint-friction output, shape ``(N, dof)``.
+            armature: Joint-armature output, shape ``(N, dof)``.
+
+        Outputs are caller-owned. Omitted fields are not read; at least one
+        output is required. Values follow the backend's current model, with
+        retained descriptor changes becoming visible after Scene rebuild.
+
+        Raises:
+            NotImplementedError: If this view has no batch property reader.
+        """
+        raise NotImplementedError("This view does not expose batch joint properties.")
+
+    def fetch_state(
+        self,
+        qpos: torch.Tensor,
+        qvel: torch.Tensor,
+        root_pose: torch.Tensor,
+        root_lin_vel: torch.Tensor,
+        root_ang_vel: torch.Tensor,
+    ) -> None:
+        """Read joint and root state into caller-owned buffers.
+
+        Args:
+            qpos: Joint positions, shape ``(N, dof)``.
+            qvel: Joint velocities, shape ``(N, dof)``.
+            root_pose: Root poses, shape ``(N, 7)``, in ``xyz + xyzw`` order.
+            root_lin_vel: Root world-frame linear velocities, shape ``(N, 3)``.
+            root_ang_vel: Root world-frame angular velocities, shape ``(N, 3)``.
+        """
+        self.fetch_qpos(qpos)
+        self.fetch_qvel(qvel)
+        self.fetch_root_pose(root_pose)
+        self.fetch_root_linear_velocity(root_lin_vel)
+        self.fetch_root_angular_velocity(root_ang_vel)
+
     @abstractmethod
     def fetch_root_pose(self, data: torch.Tensor) -> torch.Tensor:
         """Fetch root poses into ``data`` and return a view/result tensor."""
@@ -387,6 +441,24 @@ class ArticulationViewBase(ABC):
             velocity: Selected root velocities with shape ``(N, 6)``.
             env_ids: Environment rows in the same order as ``velocity``.
         """
+        ...
+
+    @abstractmethod
+    def apply_state(
+        self,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        *,
+        root_pose: torch.Tensor | None = None,
+        qpos: torch.Tensor | None = None,
+        target_qpos: torch.Tensor | None = None,
+        qvel: torch.Tensor | None = None,
+        target_qvel: torch.Tensor | None = None,
+        qf: torch.Tensor | None = None,
+        root_velocity: torch.Tensor | None = None,
+        clear_dynamics: bool = False,
+    ) -> None:
+        """Submit selected final physical state without intermediate propagation."""
         ...
 
     @abstractmethod

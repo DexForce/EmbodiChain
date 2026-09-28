@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Literal, Union, List
 import numpy as np
 import torch
 
-from dexsim.utility import images_to_video
 from embodichain.lab.gym.envs.managers import Functor, FunctorCfg
 from embodichain.lab.sim.sensors.camera import CameraCfg, Camera
 
@@ -148,6 +147,8 @@ class record_camera_data(Functor):
         self._ensure_open()
         if len(self._frames) > 0:
             video_name = f"episode_{self._current_episode}_{self._name}"
+            from dexsim.utility import images_to_video
+
             images_to_video(self._frames, self._save_path, video_name, fps=20)
 
             self._current_episode += 1
@@ -242,6 +243,8 @@ class record_camera_data_async(record_camera_data):
             video_name = f"ep{self._current_episode}_{self._name}_allenvs"
             # Peek above and pop only after persistence succeeds. A failed
             # write therefore remains observable and retryable at finalize().
+            from dexsim.utility import images_to_video
+
             images_to_video(big_frames, self._save_path, video_name, fps=20)
             for queue in self._committed_env_episodes:
                 queue.popleft()

@@ -14,14 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import re
 import os
 import ast
-import cv2
 import h5py
 import torch
 import inspect
-import open3d as o3d
 
 from copy import deepcopy
 from functools import wraps
