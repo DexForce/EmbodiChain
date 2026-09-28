@@ -8,7 +8,7 @@
 | Exported sensor/config names | `embodichain/lab/sim/sensors/__init__.py` |
 | Image configuration, data flags, extrinsics | `embodichain/lab/sim/sensors/camera.py` → `CameraCfg`, `Camera` |
 | Two-eye transforms and attachment | `embodichain/lab/sim/sensors/stereo.py` → `StereoCameraCfg`, `StereoCamera` |
-| Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_nodes` |
+| Parent-name resolution | `embodichain/lab/sim/sensors/attachment.py` → `resolve_parent_asset`, `resolve_parent_nodes` |
 | Creation, preparation and attachment coordination | `embodichain/lab/sim/sim_manager.py` → `add_sensor`, `prepare` |
 | Contact query adaptation and actor metadata | `embodichain/lab/sim/sensors/contact_sensor.py` |
 | Fixed contact-buffer scatter | `embodichain/lab/sim/sensors/_warp/contact.py` |
@@ -23,8 +23,9 @@ these are source-owned values.
 
 Create sensors through `SimulationManager.add_sensor()`. The explicit manager
 owns the World, ordered Arenas, preparation and semantic parent resolution;
-sensors must not rediscover a singleton manager. Cameras are render features
-on both physics backends. Contact availability is a backend capability checked
+sensors must not rediscover a singleton manager. `CameraCfg.backend` selects
+native rendering or `newton-tiled`; the latter uses a Scene-owned CUDA camera
+batch with Newton and supports a NoRender World. Contact availability is a backend capability checked
 before preparation and again after Newton AutoSolver selection.
 
 Componentized Gym deployments select the robot and its sensor suite together
@@ -41,19 +42,24 @@ The camera's extrinsics decoder owns look-at versus explicit-pose precedence.
 
 ## Camera attachment boundary
 
-`resolve_parent_nodes()` parses a canonical link name or
+`resolve_parent_asset()` parses a canonical link name or
 `<asset_uid>/<link_name>`, disambiguates registered assets, and checks instance
-counts. It queries public `Articulation.get_link_render_nodes()`; neither the
-resolver nor camera should inspect private entity lists, guess clone suffixes,
-or search global native nodes.
+counts. Tiled cameras resolve this physical identity to Scene body/link
+transforms. Native `resolve_parent_nodes()` additionally queries public
+`Articulation.get_link_render_nodes()`. Neither path inspects private entity
+lists, guesses clone suffixes, or searches global native nodes.
 
-Cameras attach only to concrete per-environment render nodes and report success
+Native cameras attach to concrete per-environment render nodes and report success
 after applying parent-relative extrinsics. Stereo attachment covers both eyes.
 Direct camera construction requires explicit attachment. A manager topology
 rebuild must detach old views before native skeletons are removed, then resolve
 and attach the new nodes after binding. See
 [sensor lifecycle contracts](lifecycle.md#camera-rebuilds) when changing rebuild
-ordering or supporting another parent type.
+ordering or supporting another parent type. Tiled cameras consume current
+physics transforms directly, retain their CUDA output buffers across ordinary
+motion/reset, and rebuild their batch after topology changes. Perspective
+RGBA and depth are supported; unsupported projection/output/material features
+fail explicitly. Camera construction does not enable a native renderer.
 
 ## Contact boundary
 

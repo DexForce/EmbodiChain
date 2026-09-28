@@ -49,8 +49,3 @@ __all__ = [
     "CONVEX_DECOMP_DIR",
     "REACHABLE_XPOS_DIR",
 ]
-
-
-from .utility.dynamic_pybind import init_dynamic_pybind
-
-init_dynamic_pybind()

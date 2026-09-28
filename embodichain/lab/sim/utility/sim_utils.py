@@ -20,7 +20,6 @@ import os
 import warnings as _warnings
 
 import dexsim
-import open3d as o3d
 
 from typing import TYPE_CHECKING, List, Union
 
@@ -49,7 +48,6 @@ from embodichain.lab.sim.cfg import (
 from embodichain.utils.string import resolve_matching_names
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg, SphereCfg
 from embodichain.utils import logger
-from dexsim.kit.meshproc import get_mesh_auto_uv
 import numpy as np
 
 if TYPE_CHECKING:
@@ -501,6 +499,9 @@ def _apply_mesh_uv_mapping(obj: MeshObject, cfg: RigidObjectCfg) -> None:
     """Compute and apply UV mapping for a mesh rigid-object prototype."""
     if not cfg.shape.compute_uv:
         return
+
+    import open3d as o3d
+    from dexsim.kit.meshproc import get_mesh_auto_uv
 
     vertices = obj.get_vertices()
     triangles = obj.get_triangles()

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from embodichain.lab.sim.objects import Articulation
 
-__all__ = ["resolve_parent_nodes"]
+__all__ = ["resolve_parent_nodes", "resolve_parent_asset"]
 
 
 def resolve_parent_nodes(
@@ -48,6 +48,27 @@ def resolve_parent_nodes(
         RuntimeError: If the asset count differs from ``num_envs``, or an
             environment is missing the link or its render node.
     """
+    uid, link_name = resolve_parent_asset(parent, assets, num_envs)
+    return assets[uid].get_link_render_nodes(link_name)
+
+
+def resolve_parent_asset(
+    parent: str, assets: Mapping[str, Articulation], num_envs: int
+) -> tuple[str, str]:
+    """Resolve a canonical asset UID and link without requesting render nodes.
+
+    Args:
+        parent: A link name, optionally prefixed with ``asset_uid/``.
+        assets: Scene asset UIDs mapped to articulations or robots.
+        num_envs: Expected number of instances of the resolved asset.
+
+    Returns:
+        The asset UID and canonical link name for physics-based attachment.
+
+    Raises:
+        ValueError: The link is missing or ambiguous.
+        RuntimeError: The asset has a different number of instances.
+    """
     asset_uid: str | None = None
     link_name = parent
     if "/" in parent:
@@ -55,7 +76,7 @@ def resolve_parent_nodes(
         if candidate_uid in assets:
             asset_uid, link_name = candidate_uid, candidate_link
 
-    matches: list[tuple[str, list[Node]]] = []
+    matches: list[tuple[str, str]] = []
     for uid, asset in assets.items():
         if asset_uid is not None and uid != asset_uid:
             continue
@@ -66,10 +87,10 @@ def resolve_parent_nodes(
                 f"Camera parent asset {uid!r} has {asset.num_instances} instances "
                 f"for {num_envs} arenas."
             )
-        matches.append((uid, asset.get_link_render_nodes(link_name)))
+        matches.append((uid, link_name))
 
     if len(matches) == 1:
-        return matches[0][1]
+        return matches[0]
     if len(matches) > 1:
         owners = ", ".join(uid for uid, _ in matches)
         raise ValueError(

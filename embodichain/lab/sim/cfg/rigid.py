@@ -223,6 +223,9 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
     """
 
+    priority: int | None = None
+    """MuJoCo contact-parameter priority; None preserves the source value."""
+
     condim: int | None = None
     """MuJoCo contact dimension: 1, 3, 4, or 6.
 

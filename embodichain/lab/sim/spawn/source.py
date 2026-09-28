@@ -63,11 +63,9 @@ def resolve_articulation_source(
 ) -> ArticulationDesc:
     """Populate exact URDF metadata without building a Newton model.
 
-    DexSim 0.4.3 removed its public source-resolution phase while retaining
-    the same URDF-to-descriptor translator inside the Newton adapter. This
-    compatibility boundary invokes that translator with a disposable
-    render-only skeleton, allowing name-dependent EmbodiChain overlays to be
-    authored before :meth:`SceneBuilder.finalize`.
+    Use DexSim's shared CPU asset parser and descriptor translator so
+    name-dependent overlays can be authored before :meth:`SceneBuilder.finalize`
+    without allocating a native Skeleton or rendering resources.
 
     Args:
         builder: Scene builder that owns the target arena layout.
@@ -91,53 +89,19 @@ def resolve_articulation_source(
         desc.joints = []
         desc.root_link_name = None
 
-    arena = _source_arena(builder, desc)
-    temp_name = f"__embodichain_resolve__{desc.name.replace('/', '__')}__{id(desc)}"
-    skeleton = arena.create_skeleton("skeleton")
-    if skeleton is None:
-        raise RuntimeError(f"Failed to create a source resolver for {desc.name!r}.")
-    skeleton.set_name(temp_name)
-    skeleton.detach_parent()
-    try:
-        scale = np.asarray(desc.body_scale, dtype=np.float32).reshape(3)
-        load_result = skeleton.load_urdf(os.path.abspath(desc.urdf_path), scale)
-        if load_result != 0:
-            raise RuntimeError(
-                f"Skeleton.load_urdf({desc.urdf_path!r}) failed: {load_result}"
-            )
+    from dexsim.engine import load_urdf_asset
+    from dexsim.spawn.adapters.newton_articulation_adapter import (
+        _translate_urdf_articulation,
+    )
 
-        # DexSim currently exposes no public metadata-only resolver. Reuse the
-        # adapter's source translator so its retained descriptor semantics stay
-        # identical to the subsequent Newton build.
-        from dexsim.spawn.adapters.newton_articulation_adapter import (
-            _translate_urdf_articulation,
-        )
-
-        collision_link_names = set()
-        for link_name in skeleton.get_link_names(True):
-            try:
-                if skeleton.get_collision_shapes(link_name):
-                    collision_link_names.add(link_name)
-            except (KeyError, RuntimeError, TypeError, AttributeError):
-                continue
-        _translate_urdf_articulation(skeleton, desc)
-        source_states = _read_urdf_inertial_states(desc.urdf_path)
-        _annotate_urdf_source_physics(
-            desc,
-            source_states,
-            collision_link_names,
-        )
-        # A zero/invalid source tensor falls back to geometry in both backends.
-        # The Newton translator currently carries the URDF origin through even
-        # after rejecting that tensor; clear it before configuration can retain
-        # the value as an explicit COM override.  Do not touch descriptors that
-        # already contain caller-authored links (those are not source defaults).
-        if previous is not None or not had_retained_links:
-            _clear_invalid_source_com(desc)
-    finally:
-        # Drop the wrapper before deleting its Arena-owned native object.
-        skeleton = None
-        arena.remove_skeleton(temp_name)
+    scale = np.asarray(desc.body_scale, dtype=np.float32).reshape(3)
+    asset = load_urdf_asset(os.path.abspath(desc.urdf_path), scale)
+    collision_link_names = {link.name for link in asset.links if link.collisions}
+    _translate_urdf_articulation(asset, desc)
+    source_states = _read_urdf_inertial_states(desc.urdf_path)
+    _annotate_urdf_source_physics(desc, source_states, collision_link_names)
+    if previous is not None or not had_retained_links:
+        _clear_invalid_source_com(desc)
 
     setattr(desc, "_embodichain_source_signature", signature)
     return desc

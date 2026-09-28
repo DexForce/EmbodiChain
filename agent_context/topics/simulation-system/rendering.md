@@ -3,6 +3,22 @@
 Read this for physics/render synchronization, native-window/DLSS configuration
 and readiness reporting. Return to the [simulation overview](simulation-system.md).
 
+## Physics-only initialization
+
+`RenderCfg(renderer="no-render")` selects DexSim's renderer-independent core.
+The manager skips native background, light and visual-material setup while
+preserving physical ground and source geometry. A headless native renderer
+still creates offscreen rendering resources; it is a different configuration.
+DexSim's core wheel omits native renderer libraries; the full wheel loads
+those libraries only when native rendering is requested.
+
+State-only environments need no camera or renderer. An explicitly configured
+`CameraCfg(backend="newton-tiled")` creates a Scene-owned CUDA camera batch
+from the same visual descriptors and current physics transforms. It does not
+create native render nodes or publish to Vulkan. Native cameras and windows
+continue through the native renderer path. Sensor backend selection and
+attachment belong to the [sensor system](../sensor-system/sensor-system.md).
+
 ## Rendering does not advance physics
 
 `SimulationManager.render_frame()` owns a read-only consumption phase after
@@ -41,12 +57,14 @@ and native controls have their own owners:
 
 `sensors/attachment.py:resolve_parent_nodes()` accepts an unambiguous link name
 or `<asset_uid>/<link_name>`, using the articulation's public render-node query.
-The manager owns CameraGroup plus one native camera view per Arena; attachment
+For native cameras, the manager owns CameraGroup plus one view per Arena; attachment
 reparents those views and extrinsics remain local to the link. Lights have no
 corresponding parent-attachment contract.
 
 `prepare()` detaches cameras before rebuilt parents are destroyed, then
-reattaches every configured camera once per committed topology revision.
+reattaches configured cameras once per committed topology revision. Tiled
+cameras resolve the physical asset/link and reacquire a Scene camera batch;
+they do not use the render-node query.
 Completion is marked only after all attachments succeed, so partial failures
 retry. The camera registry is the sole attachment-intent store. Detailed
 sensor behavior belongs to [sensors](../sensor-system/sensor-system.md).

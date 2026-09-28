@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, List, Sequence
 from functools import cached_property
 
 from dexsim.scene import Scene
-from dexsim.engine import MaterialInst
 from dexsim.types import RigidBodyShape
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg, RigidObjectCfg
 from embodichain.lab.sim.objects.backends import (
@@ -84,6 +83,7 @@ from embodichain.utils.math import matrix_from_quat, quat_from_matrix, matrix_fr
 from embodichain.utils import logger
 
 if TYPE_CHECKING:
+    from dexsim.engine import MaterialInst
     from dexsim.scene import SpawnedRigidBody
 
 __all__ = ["CollisionShapeDesc", "RigidBodyData", "RigidObject", "RigidObjectCfg"]

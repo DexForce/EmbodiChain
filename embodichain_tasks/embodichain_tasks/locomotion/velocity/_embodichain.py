@@ -27,9 +27,11 @@ import numpy as np
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.sim.types import EnvObs
 from embodichain.utils.math import quat_apply, quat_apply_inverse
 
 from .._robot import apply_task_joint_drive_properties
+from .contracts._math import constant
 
 __all__ = ["EmbodiChainVelocityEnv"]
 
@@ -78,6 +80,20 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
     explicit_pd_effort_control = False
 
     def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs) -> None:
+        rewards = (
+            self.velocity_task_config.data.get("rewards", {})
+            if self.velocity_task_config is not None
+            else {}
+        )
+        self._state_fields = frozenset(
+            field.name
+            for field in fields(self.state_type)
+            if not (
+                field.name == "self_collision_count"
+                and field.default is None
+                and "self_collisions" not in rewards
+            )
+        )
         cfg = EmbodiedEnvCfg() if cfg is None else cfg
         if cfg.robot is not MISSING and self.velocity_task_config is not None:
             term_cfg = (
@@ -156,7 +172,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             device=self.device,
         )
         sensor = self.get_sensor("locomotion_contacts")
-        robot_ids = sensor.get_actor_ids(self.robot.uid, self.robot.link_names)
         self._foot_contacts = sensor.create_history(
             "feet",
             sensor.get_actor_ids(self.robot.uid, self.foot_link_names),
@@ -169,17 +184,19 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "illegal",
             sensor.get_actor_ids(self.robot.uid, self.illegal_contact_link_names),
         )
-        self._self_contacts = sensor.create_history(
-            "self",
-            robot_ids,
-            counterpart_ids=robot_ids,
-            force_threshold=float(
-                config.data.get("rewards", {})
-                .get("self_collisions", {})
-                .get("params", {})
-                .get("force_threshold", 0.0)
-            ),
-        )
+        if "self_collision_count" in self._state_fields:
+            robot_ids = sensor.get_actor_ids(self.robot.uid, self.robot.link_names)
+            self._self_contacts = sensor.create_history(
+                "self",
+                robot_ids,
+                counterpart_ids=robot_ids,
+                force_threshold=float(
+                    config.data.get("rewards", {})
+                    .get("self_collisions", {})
+                    .get("params", {})
+                    .get("force_threshold", 0.0)
+                ),
+            )
         self._locomotion_generator = self.get_generator("locomotion.commands_and_noise")
         action_shape = (self.num_envs, config.action_dim)
         foot_shape = (self.num_envs, len(self.foot_link_names))
@@ -196,6 +213,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._command_steps_remaining = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
+        self._command_steps_until_check = 0
         action_term = self.action_manager.get_term("joint_position")
         self.locomotion_action = action_term.action
         self.last_locomotion_action = action_term.previous_action
@@ -293,6 +311,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self.command.copy_(torch.as_tensor(values, device=self.device).unsqueeze(0))
         self.reward_command.copy_(self.command)
         self._command_steps_remaining.fill_(torch.iinfo(torch.long).max)
+        self._command_steps_until_check = torch.iinfo(torch.long).max
         self._heading_env.fill_(False)
         self._forward_env.fill_(False)
         static_standing = stopped and (frequency is None or frequency == 0.0)
@@ -335,7 +354,15 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 tuple(stage.get(name, ranges[name]))
                 for name in ("lin_vel_x", "lin_vel_y", "ang_vel_z")
             )
-        return torch.tensor(active, dtype=torch.float32, device=self.device)
+        key = (active, self.device)
+        cached = getattr(self, "_command_ranges_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (
+                key,
+                torch.tensor(active, dtype=torch.float32, device=self.device),
+            )
+            self._command_ranges_cache = cached
+        return cached[1]
 
     def _active_single_axis_fraction(self) -> float:
         command = self.velocity_task_config.data["commands"]["twist"]
@@ -387,6 +414,12 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._command_steps_remaining[env_ids] = (
             torch.ceil(seconds / self.step_dt).to(torch.long).clamp_min(1)
         )
+        # Partial reset may shorten the earliest deadline. The one-step slack
+        # keeps the host bound conservative under float32 interval rounding.
+        self._command_steps_until_check = min(
+            self._command_steps_until_check,
+            max(1, math.floor(float(minimum) / self.step_dt) - 1),
+        )
         heading_range = command["ranges"].get("heading")
         if bool(command.get("heading_command")) and heading_range is not None:
             self._heading_target[env_ids] = torch.empty(
@@ -400,31 +433,49 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 count, device=self.device, generator=self._locomotion_generator
             ) <= float(command.get("rel_heading_envs", 0.0))
         else:
-            self._heading_env[env_ids] = False
+            self._heading_env.index_fill_(0, env_ids, False)
         self._standing_env[env_ids] = torch.rand(
             count, device=self.device, generator=self._locomotion_generator
         ) <= float(command.get("rel_standing_envs", 0.0))
         gait_frequency_range = command.get("gait_frequency_range")
         if gait_frequency_range is None:
-            self._gait_frequency[env_ids] = 0.0
+            self._gait_frequency.index_fill_(0, env_ids, 0.0)
         else:
-            self._gait_frequency[env_ids] = torch.empty(
-                count, device=self.device
-            ).uniform_(
+            frequency = torch.empty(count, device=self.device).uniform_(
                 float(gait_frequency_range[0]),
                 float(gait_frequency_range[1]),
                 generator=self._locomotion_generator,
             )
-            self._gait_frequency[env_ids[self._standing_env[env_ids]]] = 0.0
+            frequency.masked_fill_(self._standing_env[env_ids], 0.0)
+            self._gait_frequency[env_ids] = frequency
         self._forward_env[env_ids] = torch.rand(
             count, device=self.device, generator=self._locomotion_generator
         ) <= float(command.get("rel_forward_envs", 0.0))
-        forward_ids = env_ids[self._forward_env[env_ids]]
-        if forward_ids.numel() > 0:
-            self.command[forward_ids, 0] = (
-                self.command[forward_ids, 0].abs().clamp_min(0.3)
+        forward = self._forward_env[env_ids]
+        selected_command = self.command[env_ids]
+        selected_command[:, 0].copy_(
+            torch.where(
+                forward,
+                selected_command[:, 0].abs().clamp_min(0.3),
+                selected_command[:, 0],
             )
-            self.command[forward_ids, 1:] = 0.0
+        )
+        selected_command[:, 1:].masked_fill_(forward.unsqueeze(-1), 0.0)
+        self.command[env_ids] = selected_command
+
+    def _advance_command_timer(self) -> None:
+        """Advance GPU timers without selecting rows before any can be due."""
+        self._command_steps_remaining.sub_(1)
+        self._command_steps_until_check -= 1
+        if self._command_steps_until_check > 0:
+            return
+        resample_ids = (
+            (self._command_steps_remaining <= 0).nonzero(as_tuple=False).squeeze(-1)
+        )
+        self._resample_commands(resample_ids)
+        self._command_steps_until_check = int(
+            self._command_steps_remaining.min().item()
+        )
 
     def _update_heading_commands(self) -> None:
         command = self.velocity_task_config.data["commands"]["twist"]
@@ -438,43 +489,54 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         error = torch.atan2(torch.sin(error), torch.cos(error))
         yaw_range = self._active_command_ranges()[2]
         yaw = (float(command.get("heading_control_stiffness", 0.0)) * error).clamp(
-            min=float(yaw_range[0]), max=float(yaw_range[1])
+            min=yaw_range[0], max=yaw_range[1]
         )
-        self.command[self._heading_env, 2] = yaw[self._heading_env]
-        self.command[self._standing_env] = 0.0
+        self.command[:, 2].copy_(
+            torch.where(self._heading_env, yaw, self.command[:, 2])
+        )
+        self.command.masked_fill_(self._standing_env.unsqueeze(-1), 0.0)
 
     def _update_sim_state(self, **kwargs) -> None:
         super()._update_sim_state(**kwargs)
-        velocity = self.robot.get_qvel()[:, self.policy_joint_ids]
-        self._joint_acceleration.copy_(
-            (velocity - self._previous_joint_velocity) / self.step_dt
-        )
-        self._previous_joint_velocity.copy_(velocity)
-        root_quaternion = self.robot.body_data.root_pose[:, 3:7]
-        root_lin_vel_w = self.robot.body_data.root_lin_vel
-        root_ang_vel_w = self.robot.body_data.root_ang_vel
-        root_velocity_w = torch.cat((root_lin_vel_w, root_ang_vel_w), dim=-1)
-        self._root_acceleration_w.copy_(
-            (root_velocity_w - self._previous_root_velocity_w) / self.step_dt
-        )
-        self._previous_root_velocity_w.copy_(root_velocity_w)
-        base_lin_vel_b = quat_apply_inverse(root_quaternion, root_lin_vel_w)
-        base_ang_vel_b = quat_apply_inverse(root_quaternion, root_ang_vel_w)
-        filter_weight = float(
-            self.velocity_task_config.data.get("velocity_filter_weight", 1.0)
-        )
-        self._filtered_base_lin_vel_b.lerp_(base_lin_vel_b, filter_weight)
-        self._filtered_base_ang_vel_b.lerp_(base_ang_vel_b, filter_weight)
-        self._update_foot_swing_height()
+        state = None
+        if {
+            "joint_acc",
+            "root_acceleration_w",
+            "reward_base_lin_vel_b",
+            "reward_base_ang_vel_b",
+        } & self._state_fields:
+            state = self.robot.body_data.fetch_state()
+        if "joint_acc" in self._state_fields:
+            velocity = state["qvel"][:, self.policy_joint_ids]
+            self._joint_acceleration.copy_(
+                (velocity - self._previous_joint_velocity) / self.step_dt
+            )
+            self._previous_joint_velocity.copy_(velocity)
+        if "root_acceleration_w" in self._state_fields:
+            root_velocity_w = torch.cat(
+                (state["root_lin_vel"], state["root_ang_vel"]),
+                dim=-1,
+            )
+            self._root_acceleration_w.copy_(
+                (root_velocity_w - self._previous_root_velocity_w) / self.step_dt
+            )
+            self._previous_root_velocity_w.copy_(root_velocity_w)
+        if {"reward_base_lin_vel_b", "reward_base_ang_vel_b"} & self._state_fields:
+            root_quaternion = state["root_pose"][:, 3:7]
+            base_lin_vel_b = quat_apply_inverse(root_quaternion, state["root_lin_vel"])
+            base_ang_vel_b = quat_apply_inverse(root_quaternion, state["root_ang_vel"])
+            filter_weight = float(
+                self.velocity_task_config.data.get("velocity_filter_weight", 1.0)
+            )
+            self._filtered_base_lin_vel_b.lerp_(base_lin_vel_b, filter_weight)
+            self._filtered_base_ang_vel_b.lerp_(base_ang_vel_b, filter_weight)
+        if "foot_swing_height_cost" in self._state_fields:
+            self._update_foot_swing_height()
         self._episode_step += 1
         self._global_control_step += 1
         self._gait_process.add_(self.step_dt * self._gait_frequency).remainder_(1.0)
         self.reward_command.copy_(self.command)
-        self._command_steps_remaining.sub_(1)
-        resample_ids = (
-            (self._command_steps_remaining <= 0).nonzero(as_tuple=False).squeeze(-1)
-        )
-        self._resample_commands(resample_ids)
+        self._advance_command_timer()
         self._update_heading_commands()
         self._invalidate_task_cache()
 
@@ -515,34 +577,26 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
         pose[:, 6] = torch.cos(0.5 * yaw)
         pose[:, 5] = torch.sin(0.5 * yaw)
-        self.robot.clear_dynamics(env_ids=ids)
-        self.robot.set_local_pose(pose, env_ids=ids)
-        joint_position = torch.as_tensor(
-            self.velocity_task_config.default_joint_position,
-            dtype=torch.float32,
-            device=self.device,
+        joint_position = constant(
+            self.velocity_task_config.default_joint_position, pose
         ).expand(count, -1)
-        self.robot.set_qpos(
-            joint_position,
-            joint_ids=self.policy_joint_ids,
+        self.robot.set_state(
             env_ids=ids,
-            target=False,
-        )
-        self.robot.set_qpos(
-            joint_position,
             joint_ids=self.policy_joint_ids,
-            env_ids=ids,
-            target=True,
+            root_pose=pose,
+            qpos=joint_position,
+            target_qpos=joint_position,
+            clear_dynamics=True,
         )
-        self._episode_step[ids] = 0
-        self._previous_joint_velocity[ids] = 0.0
-        self._joint_acceleration[ids] = 0.0
-        self._previous_root_velocity_w[ids] = 0.0
-        self._root_acceleration_w[ids] = 0.0
-        self._filtered_base_lin_vel_b[ids] = 0.0
-        self._filtered_base_ang_vel_b[ids] = 0.0
-        self._foot_peak_height[ids] = 0.0
-        self._foot_swing_height_cost[ids] = 0.0
+        self._episode_step.index_fill_(0, ids, 0)
+        self._previous_joint_velocity.index_fill_(0, ids, 0.0)
+        self._joint_acceleration.index_fill_(0, ids, 0.0)
+        self._previous_root_velocity_w.index_fill_(0, ids, 0.0)
+        self._root_acceleration_w.index_fill_(0, ids, 0.0)
+        self._filtered_base_lin_vel_b.index_fill_(0, ids, 0.0)
+        self._filtered_base_ang_vel_b.index_fill_(0, ids, 0.0)
+        self._foot_peak_height.index_fill_(0, ids, 0.0)
+        self._foot_swing_height_cost.index_fill_(0, ids, 0.0)
         self._resample_commands(ids)
         self._update_heading_commands()
         self.reward_command[ids] = self.command[ids]
@@ -602,10 +656,11 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         )
 
     def _common_state(self) -> dict[str, torch.Tensor]:
-        root_pose = self.robot.body_data.root_pose
+        state = self.robot.body_data.fetch_state()
+        root_pose = state["root_pose"]
         root_quaternion = root_pose[:, 3:7]
-        root_lin_vel_w = self.robot.body_data.root_lin_vel
-        root_ang_vel_w = self.robot.body_data.root_ang_vel
+        root_lin_vel_w = state["root_lin_vel"]
+        root_ang_vel_w = state["root_ang_vel"]
         gravity_w = torch.zeros_like(root_lin_vel_w)
         gravity_w[:, 2] = -1.0
         link_pose = self.robot.body_data.body_link_pose
@@ -640,7 +695,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 orientation_velocity,
                 self._imu_offset,
             )
-        return {
+        common = {
             "base_lin_vel_b": base_lin_vel_b,
             "base_ang_vel_b": base_ang_vel_b,
             "reward_base_lin_vel_b": self._filtered_base_lin_vel_b,
@@ -650,10 +705,9 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "reward_command": self.reward_command,
             "gait_frequency": self._gait_frequency,
             "gait_process": self._gait_process,
-            "joint_pos": self.robot.get_qpos()[:, self.policy_joint_ids],
-            "joint_vel": self.robot.get_qvel()[:, self.policy_joint_ids],
+            "joint_pos": state["qpos"][:, self.policy_joint_ids],
+            "joint_vel": state["qvel"][:, self.policy_joint_ids],
             "joint_acc": self._joint_acceleration,
-            "joint_torque": self.robot.get_qf()[:, self.policy_joint_ids],
             "action": self.locomotion_action,
             "last_action": self.last_locomotion_action,
             "episode_step": self._episode_step,
@@ -672,9 +726,6 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "soft_joint_lower": (midpoint - half_range).unsqueeze(0),
             "soft_joint_upper": (midpoint + half_range).unsqueeze(0),
             "reward_body_ang_vel_w": orientation_velocity[:, 3:],
-            "angular_momentum_w": self._orbital_angular_momentum(
-                link_pose[:, :, :3], link_velocity[:, :, :3]
-            ),
             "illegal_contact_force": (
                 illegal_force_by_body.amax(dim=-1)
                 if illegal_force_by_body.shape[-1]
@@ -684,10 +735,19 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             "orientation_projected_gravity_b": quat_apply_inverse(
                 orientation_pose[:, 3:7], gravity_w
             ),
-            "self_collision_count": self._self_contacts.contact_count,
             "encoder_bias": self.encoder_bias,
             "foot_swing_height_cost": self._foot_swing_height_cost,
         }
+
+        if "joint_torque" in self._state_fields:
+            common["joint_torque"] = self.robot.get_qf()[:, self.policy_joint_ids]
+        if "angular_momentum_w" in self._state_fields:
+            common["angular_momentum_w"] = self._orbital_angular_momentum(
+                link_pose[:, :, :3], link_velocity[:, :, :3]
+            )
+        if "self_collision_count" in self._state_fields:
+            common["self_collision_count"] = self._self_contacts.contact_count
+        return common
 
     def _make_task_state(self, common: dict[str, torch.Tensor]) -> Any:
         values: dict[str, Any] = {}
@@ -706,17 +766,43 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             self._state_cache = self._make_task_state(self._common_state())
         return self._state_cache
 
+    def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
+        # Actor and critic functors consume the same task snapshot. Build the
+        # clean pair once within this manager pass, then discard it so resets,
+        # later observations and direct callers cannot reuse an old result.
+        previous = getattr(self, "_observation_pair_cache", None)
+        self._observation_pair_cache = []
+        try:
+            return super()._extend_obs(obs, **kwargs)
+        finally:
+            self._observation_pair_cache = previous
+
     def build_velocity_locomotion_observations(
         self,
         *,
         enable_corruption: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Build actor and asymmetric critic observations."""
-        actor, critic = self.build_observations_fn(
-            self.velocity_task_config, self.get_velocity_locomotion_state()
-        )
-        if enable_corruption and self.corrupt_actor_fn is not None:
+        """Build independent actor and critic tensors, with fresh requested noise.
+
+        Observation-manager terms share one clean pair per pass. Calls outside
+        that pass build a new pair from the current task state.
+        """
+        cache = getattr(self, "_observation_pair_cache", None)
+        if cache is None or not cache:
+            pair = self.build_observations_fn(
+                self.velocity_task_config, self.get_velocity_locomotion_state()
+            )
+            if cache is not None:
+                cache.append(pair)
+        else:
+            pair = cache[0]
+        actor, critic = pair
+        corrupt = enable_corruption and self.corrupt_actor_fn is not None
+        if cache is not None:
+            actor, critic = actor.clone(), critic.clone()
+        elif corrupt:
             actor = actor.clone()
+        if corrupt:
             actor = self.corrupt_actor_fn(actor, self._locomotion_generator)
         return actor, critic
 

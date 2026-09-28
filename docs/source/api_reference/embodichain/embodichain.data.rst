@@ -32,6 +32,40 @@ task configs.
    :undoc-members:
    :show-inheritance:
 
+Package Exports
+---------------
+
+Dataset lookup and cache locations are also available from the package root.
+Dataset download implementation and preset registries load when requested,
+so importing cache paths does not initialize those optional dependencies.
+
+.. currentmodule:: embodichain.data
+
+.. autosummary::
+
+   EmbodiChainDataset
+   get_data_class
+   get_data_path
+   database_dir
+   database_2d_dir
+   database_agent_prompt_dir
+   database_demo_dir
+
+.. autoclass:: EmbodiChainDataset
+   :members:
+
+.. autofunction:: get_data_class
+
+.. autofunction:: get_data_path
+
+.. autodata:: database_dir
+
+.. autodata:: database_2d_dir
+
+.. autodata:: database_agent_prompt_dir
+
+.. autodata:: database_demo_dir
+
 Constants
 ---------
 

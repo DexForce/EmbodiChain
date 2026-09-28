@@ -176,10 +176,12 @@ class DLSSCfg:
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
+    """Renderer backend to use for the simulation.
 
     Note:
+    - 'no-render' creates a physics-only World without native graphics resources.
+        It requires headless mode. Camera sensors select their own supported backend.
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
         'hybrid', while datacenter cards (A100/A800, H100/H800/H200/H20) use 'fast-rt'.
         If no CUDA device is available or the GPU is unknown, it falls back to 'hybrid'.
@@ -212,7 +214,9 @@ class RenderCfg:
 
     def to_dexsim_flags(self) -> Renderer:
         """Convert the renderer name to DexSim's renderer enum."""
-        if self.renderer == "hybrid":
+        if self.renderer == "no-render":
+            return Renderer.NORENDER
+        elif self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
@@ -228,7 +232,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'no-render', 'hybrid', 'fast-rt', or 'rt'."
             )
 
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
@@ -238,6 +242,8 @@ class RenderCfg:
             world_config: DexSim world configuration to update in place.
         """
         world_config.renderer = self.to_dexsim_flags()
+        if self.renderer == "no-render":
+            return
         world_config.dlss_config = self.dlss.to_dexsim_cfg(
             window_width=world_config.win_config.width,
             window_height=world_config.win_config.height,

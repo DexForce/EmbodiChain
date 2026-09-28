@@ -21,7 +21,6 @@ import sys
 import tty
 import termios
 import time
-import cv2
 import torch
 import numpy as np
 
@@ -48,6 +47,7 @@ def run_keyboard_control_for_camera(
         rot_step (float, optional): Rotation step size in degrees. Defaults to 1.0.
         vis_pose (bool, optional): Whether to visualize the camera pose in axis form. Defaults to False.
     """
+    import cv2
     from embodichain.lab.sim import SimulationManager
 
     sim = SimulationManager.get_instance()

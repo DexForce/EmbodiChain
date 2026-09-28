@@ -16,23 +16,25 @@
 
 from __future__ import annotations
 
-import cv2
 import pickle
 import argparse
 import time
 import torch
 import functools
-import open3d as o3d
 import numpy as np
 
 from tqdm import tqdm
 from PIL import Image
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Callable
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Callable
 
 from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
 from embodichain.utils.string import callable_to_string
+
+if TYPE_CHECKING:
+    import cv2
+    import open3d as o3d
 
 
 @functools.lru_cache(maxsize=None)  # memoization
@@ -201,6 +203,7 @@ def set_texture_to_material(material, texture: np.ndarray, env, type: str = "col
 
 
 def get_random_real_image(base_path: str, read: bool = True) -> np.ndarray:
+    import cv2
     import os, random
 
     # 随机选择一个子文件夹
@@ -232,6 +235,7 @@ def read_all_folder_images(base_path: str) -> List[np.ndarray]:
     Returns:
         List[np.ndarray]: A list of images read from the subfolders.
     """
+    import cv2
     import os
 
     images = []
@@ -303,6 +307,8 @@ def get_right_name(name: str):
 
 
 def read_video(video_path: str):
+    import cv2
+
     video = cv2.VideoCapture(video_path)
     total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     length = total_frame_count
@@ -313,6 +319,8 @@ def read_video(video_path: str):
 def create_video_writer(
     video_path: str, resolution: Tuple[int, int], fps: int
 ) -> cv2.VideoWriter:
+    import cv2
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # 用于mp4格式的生成
     video_vis = cv2.VideoWriter(
         video_path,
@@ -440,6 +448,7 @@ def load_txt(path: str) -> str:
 
 
 def encode_image(image: np.ndarray, format: str = "png"):
+    import cv2
     import base64
 
     image_encode = cv2.imencode(f".{format}", image)[1]
@@ -467,6 +476,7 @@ def inv_transform(transform: np.ndarray) -> np.ndarray:
 
 
 def scale_image(image, scale=0.5):
+    import cv2
     import cv2
 
     h, w = image.shape[:2]
