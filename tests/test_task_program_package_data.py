@@ -254,6 +254,17 @@ import json
 from pathlib import Path
 import sys
 
+build_lib = Path(sys.argv[1]).resolve()
+expected_deployments = json.loads(sys.argv[2])
+# An installed ``embodichain_tasks`` parent package can shadow the staged
+# namespace package. Pin its search path to the isolated build output
+# so this subprocess really exercises the staged package resources.
+import types
+
+staged_namespace = types.ModuleType("embodichain_tasks")
+staged_namespace.__path__ = [str(build_lib / "embodichain_tasks")]
+sys.modules["embodichain_tasks"] = staged_namespace
+
 import embodichain_tasks.configs as config_package
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.task_program.integrations._configured_composition import (
@@ -263,8 +274,6 @@ from embodichain.lab.gym.utils._component_composition import _resolve_gym_compon
 from embodichain.utils.utility import load_config
 from embodichain_tasks.configs import get_config_path
 
-build_lib = Path(sys.argv[1]).resolve()
-expected_deployments = json.loads(sys.argv[2])
 module_path = Path(config_package.__file__).resolve()
 assert module_path.is_relative_to(build_lib), (module_path, build_lib)
 decoded_deployments = {}
