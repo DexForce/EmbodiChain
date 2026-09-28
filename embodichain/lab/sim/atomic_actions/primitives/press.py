@@ -350,19 +350,25 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             obstacle_poses = getattr(
                 request.motion_policy.plan_opts, "dynamic_obstacle_poses", None
             )
+            dynamic_obstacle_ids = self.motion_generator.dynamic_collision_entity_ids
             if (
                 obstacle_poses is None
                 and request.motion_policy.dynamic_collision_mode
                 is not DynamicCollisionMode.OFF
-                and context.scene.collision_entity_ids
+                and dynamic_obstacle_ids
             ):
                 # ik_interp bypasses backend planning options, but validating its
                 # final samples still needs the live collision-world snapshot.
-                obstacle_poses = context.scene.collision_obstacle_poses(
+                scene_obstacle_poses = context.scene.collision_obstacle_poses(
                     batch_size=context.batch_size,
                     device=context.robot.qpos.device,
                     dtype=context.robot.qpos.dtype,
                 )
+                obstacle_poses = {
+                    entity_id: scene_obstacle_poses[entity_id]
+                    for entity_id in dynamic_obstacle_ids
+                    if entity_id in scene_obstacle_poses
+                }
             validity = self.motion_generator.validate_joint_trajectory(
                 full[:, :, arm_joint_ids],
                 control_part=control_part,

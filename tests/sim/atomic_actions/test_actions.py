@@ -3891,7 +3891,7 @@ def test_press_requires_collision_validation_of_exact_final_samples(
     )
 
 
-def test_press_ik_interp_validates_with_live_dynamic_obstacle_poses() -> None:
+def test_press_ik_interp_validates_only_configured_dynamic_obstacle_poses() -> None:
     generator = _motion_generator()
     generator.planner.supports_joint_trajectory_validation = True
     generator.planner.collision_world_info = CollisionWorldInfo(
@@ -3902,15 +3902,21 @@ def test_press_ik_interp_validates_with_live_dynamic_obstacle_poses() -> None:
     )
     obstacle_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     obstacle_poses[:, 0, 3] = torch.tensor([1.0, 2.0])
+    unconfigured_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    unconfigured_poses[:, 1, 3] = torch.tensor([3.0, 4.0])
     scene = SceneSnapshot(
         timestamp=0.0,
         version=1,
-        entities={"wall": EntityState(obstacle_poses)},
-        collision_entity_ids=("wall",),
+        entities={
+            "wall": EntityState(obstacle_poses),
+            "unconfigured": EntityState(unconfigured_poses),
+        },
+        collision_entity_ids=("wall", "unconfigured"),
     )
 
     def validate(trajectory, *, control_part, obstacle_poses):
         assert control_part == "arm"
+        assert tuple(obstacle_poses) == ("wall",)
         torch.testing.assert_close(obstacle_poses["wall"], obstacle_poses_expected)
         return torch.ones(trajectory.shape[:2], dtype=torch.bool)
 
