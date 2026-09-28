@@ -3891,6 +3891,52 @@ def test_press_requires_collision_validation_of_exact_final_samples(
     )
 
 
+def test_press_ik_interp_validates_with_live_dynamic_obstacle_poses() -> None:
+    generator = _motion_generator()
+    generator.planner.supports_joint_trajectory_validation = True
+    generator.planner.collision_world_info = CollisionWorldInfo(
+        entity_ids=("wall",),
+        dynamic_entity_ids=("wall",),
+        batch_mode="per_env",
+        supports_updates=True,
+    )
+    obstacle_poses = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    obstacle_poses[:, 0, 3] = torch.tensor([1.0, 2.0])
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=1,
+        entities={"wall": EntityState(obstacle_poses)},
+        collision_entity_ids=("wall",),
+    )
+
+    def validate(trajectory, *, control_part, obstacle_poses):
+        assert control_part == "arm"
+        torch.testing.assert_close(obstacle_poses["wall"], obstacle_poses_expected)
+        return torch.ones(trajectory.shape[:2], dtype=torch.bool)
+
+    obstacle_poses_expected = obstacle_poses.clone()
+    generator.planner.validate_joint_trajectory.side_effect = validate
+    action = _bind_action(generator, Press())
+    semantics = ObjectSemantics(
+        affordance=PressAffordance(press_position=(0.0, 0.0, 0.0)),
+        geometry={},
+        label="button",
+        entity_id="button",
+    )
+    invocation = ActionInvocation(
+        skill_id="press",
+        goal=PressGoal(semantics, torch.eye(4)),
+        binding=_binding(action),
+        motion_policy=MotionPolicy(strategy="ik_interp", sample_count=21),
+        skill_options=PressOptions(hand_interp_steps=3),
+    )
+
+    plan = _plan_action(action, invocation, _context(scene=scene))
+
+    assert plan.plan_success.tolist() == [True, True]
+    generator.planner.validate_joint_trajectory.assert_called_once()
+
+
 def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> None:
     affordance = PressAffordance(
         press_axis=torch.tensor([1.0, 0.0, 0.0]),

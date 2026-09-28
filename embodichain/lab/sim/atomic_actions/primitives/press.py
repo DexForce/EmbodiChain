@@ -49,6 +49,7 @@ from embodichain.lab.sim.atomic_actions.plans import (
     PlannerDiagnostics,
     TimedTrajectory,
 )
+from embodichain.lab.sim.atomic_actions.policies import DynamicCollisionMode
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -346,12 +347,26 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             offset = stop
 
         if self.motion_generator.supports_joint_trajectory_validation:
+            obstacle_poses = getattr(
+                request.motion_policy.plan_opts, "dynamic_obstacle_poses", None
+            )
+            if (
+                obstacle_poses is None
+                and request.motion_policy.dynamic_collision_mode
+                is not DynamicCollisionMode.OFF
+                and context.scene.collision_entity_ids
+            ):
+                # ik_interp bypasses backend planning options, but validating its
+                # final samples still needs the live collision-world snapshot.
+                obstacle_poses = context.scene.collision_obstacle_poses(
+                    batch_size=context.batch_size,
+                    device=context.robot.qpos.device,
+                    dtype=context.robot.qpos.dtype,
+                )
             validity = self.motion_generator.validate_joint_trajectory(
                 full[:, :, arm_joint_ids],
                 control_part=control_part,
-                obstacle_poses=getattr(
-                    request.motion_policy.plan_opts, "dynamic_obstacle_poses", None
-                ),
+                obstacle_poses=obstacle_poses,
             )
             success = success & validity.all(dim=1)
         elif (
