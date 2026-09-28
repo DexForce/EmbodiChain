@@ -50,6 +50,25 @@ planners:
       pos_eps: 0.01
       rot_eps: 0.1
       joint_eps: 0.01
+  # Paired arm: identical policy and cases, output retimed under the same
+  # velocity and acceleration limits the metrics validate against. Compare it
+  # against `nmg` to separate the policy's path from its nominal timing.
+  - id: nmg_retimed
+    adapter: nmg_onnx
+    role: candidate
+    enabled: false
+    config:
+      onnx_model_path: null
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
+      action_scale: 0.2
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      joint_eps: 0.01
+      retime: true
 
 protocol:
   warmup_trials: 1
