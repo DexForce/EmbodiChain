@@ -22,15 +22,20 @@ import importlib.metadata
 import json
 import platform
 import subprocess
+from collections.abc import Mapping
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 import yaml
 
 from .config import SuiteCfg, suite_to_dict
 from .models import BenchmarkCase, TrialRecord
+
+if TYPE_CHECKING:
+    from .embodiments import EmbodimentResolution
 
 __all__ = [
     "TrialJsonlWriter",
@@ -137,6 +142,10 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
         ),
         "target_waypoints": case.target_waypoints.detach().cpu().tolist(),
         "case_parameters": _to_json_value(case.case_parameters),
+        "domain": _domain_to_dict(case.domain),
+        "track_group": case.track_group,
+        "embodiment_id": case.embodiment_id,
+        "required_capabilities": sorted(case.required_capabilities),
         "validity_evidence": {
             "method": (
                 "reference_qpos_fk"
@@ -152,25 +161,62 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
     }
 
 
+def _domain_to_dict(domain: object) -> dict[str, object] | None:
+    """Serialize a domain identity without leaking set representations."""
+    if domain is None:
+        return None
+    values = asdict(domain)
+    values["required_capabilities"] = sorted(values.get("required_capabilities", ()))
+    if not values["required_capabilities"]:
+        values.pop("required_capabilities")
+    return values
+
+
 def _to_json_value(value: object) -> object:
     """Recursively preserve tensors and numeric case configuration values."""
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().tolist()
     if isinstance(value, dict):
         return {str(key): _to_json_value(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return sorted(_to_json_value(item) for item in value)
     if isinstance(value, (list, tuple)):
         return [_to_json_value(item) for item in value]
     return value
 
 
-def write_case_manifest(path: str | Path, cases: list[BenchmarkCase]) -> Path:
+def write_case_manifest(
+    path: str | Path,
+    cases: list[BenchmarkCase],
+    *,
+    suite: SuiteCfg | None = None,
+    planner_config_hashes: Mapping[str, str] | None = None,
+    embodiment_resolution: "EmbodimentResolution | None" = None,
+) -> Path:
     """Write the algorithm-independent case manifest."""
+    payload: dict[str, object] = {
+        "case_schema_version": 3,
+        "cases": [_case_to_dict(case) for case in cases],
+    }
+    if suite is not None:
+        payload["resolved_suite_version"] = suite.suite_version
+        if embodiment_resolution is not None:
+            payload["resolved_embodiment"] = embodiment_resolution.to_metadata()
+        elif suite.embodiment is None:
+            payload["resolved_embodiment"] = {
+                "id": suite.robot.id,
+                "provider": suite.robot.provider,
+            }
+        else:
+            payload["resolved_embodiment"] = {
+                "component": suite.embodiment.component,
+                "overrides": _to_json_value(suite.embodiment.overrides),
+            }
+    if planner_config_hashes:
+        payload["planner_config_hashes"] = dict(sorted(planner_config_hashes.items()))
     return write_json(
         path,
-        {
-            "case_schema_version": 2,
-            "cases": [_case_to_dict(case) for case in cases],
-        },
+        payload,
     )
 
 

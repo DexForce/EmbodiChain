@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -38,7 +38,8 @@ from .artifacts import (
     write_json,
     write_resolved_suite,
 )
-from .config import PlannerSpecCfg, SuiteCfg
+from .config import PlannerSpecCfg, SuiteCfg, stable_hash
+from .embodiments import EmbodimentResolution, resolve_embodiment
 from .metrics import timed_call
 from .models import (
     BenchmarkCase,
@@ -122,6 +123,11 @@ class BenchmarkRunner:
         self.headless = headless
         self.output_root = Path(output_root)
         self.video = VideoRecordCfg() if video is None else video
+        self.embodiment_resolution: EmbodimentResolution = resolve_embodiment(
+            suite.embodiment,
+            suite.robot,
+            base_dir=Path.cwd(),
+        )
         self.robot_provider = create_robot_provider(suite.robot)
         self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
@@ -179,6 +185,9 @@ class BenchmarkRunner:
             "task_difficulty": case.task_difficulty,
             "primary_success": case.primary_success,
             "phase": phase,
+            "domain": case.domain,
+            "track_group": case.track_group,
+            "embodiment_id": case.embodiment_id,
         }
 
     def _record_unavailable(
@@ -395,6 +404,22 @@ class BenchmarkRunner:
         self.metadata.setdefault(metadata.algorithm_id, metadata)
         supported_cases = []
         for case in cases:
+            case_required_capabilities = set(required_capabilities) | set(
+                case.required_capabilities
+            )
+            missing_case_capabilities = sorted(
+                case_required_capabilities - set(adapter.capabilities)
+            )
+            if missing_case_capabilities:
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    "missing required capabilities: "
+                    + ", ".join(missing_case_capabilities),
+                    failure_code="unsupported_capability",
+                )
+                continue
             motion_capability, modality_reason = _case_motion_capability(case)
             if (
                 motion_capability is None
@@ -423,16 +448,6 @@ class BenchmarkRunner:
         if not supported_cases:
             return
         first_case = supported_cases[0]
-        missing = sorted(required_capabilities - adapter.capabilities)
-        if missing:
-            self._record_unavailable(
-                writer,
-                metadata,
-                first_case,
-                f"missing required capabilities: {', '.join(missing)}",
-                failure_code="unsupported_capability",
-            )
-            return
         available, reason = adapter.availability()
         if not available:
             self._record_unavailable(
@@ -534,11 +549,14 @@ class BenchmarkRunner:
         write_resolved_suite(run_dir / "resolved_suite.yaml", self.suite)
         write_json(run_dir / "environment.json", environment_metadata())
         writer = TrialJsonlWriter(run_dir / "trials.jsonl")
+        planner_config_hashes = {
+            spec.id: stable_hash(spec.config) for spec in self.planner_specs
+        }
 
         print("=" * 60)
         print("Motion Generation Benchmark")
         print("=" * 60)
-        enabled_tracks = self.suite.enabled_tracks()
+        enabled_tracks = self.suite.evaluation_tracks()
         print(
             f"suite={self.suite.suite_version} device={self.device} "
             f"tracks={','.join(track.id for track in enabled_tracks)} "
@@ -567,7 +585,40 @@ class BenchmarkRunner:
                     cases = provider.generate_cases(
                         self.suite, track, robot, self.control_part, batch_size
                     )
+                    domain = (
+                        track.domain.to_identity() if track.domain is not None else None
+                    )
+                    if domain is not None and any(
+                        case.domain not in (None, domain) for case in cases
+                    ):
+                        raise ValueError("Provider domain conflicts with track.domain.")
+                    track_group = track.group_id or track.id
+                    resolved_cases = []
+                    for case in cases:
+                        case_domain = case.domain or domain
+                        required = set(case.required_capabilities)
+                        if case_domain is not None:
+                            required.update(case_domain.required_capabilities)
+                        resolved_cases.append(
+                            replace(
+                                case,
+                                domain=case_domain,
+                                track_group=track_group,
+                                embodiment_id=case.embodiment_id
+                                or self.embodiment_resolution.embodiment_id,
+                                required_capabilities=frozenset(required),
+                            )
+                        )
+                    cases = resolved_cases
                     self.cases.extend(cases)
+                    # Persist each frozen population before evaluating candidates.
+                    write_case_manifest(
+                        run_dir / "case_manifest.json",
+                        self.cases,
+                        suite=self.suite,
+                        planner_config_hashes=planner_config_hashes,
+                        embodiment_resolution=self.embodiment_resolution,
+                    )
                     for spec in self.planner_specs:
                         self._run_adapter(
                             writer,
@@ -588,7 +639,13 @@ class BenchmarkRunner:
                         sim.destroy(exit_process=False)
                         SimulationManager.flush_cleanup_queue()
 
-        write_case_manifest(run_dir / "case_manifest.json", self.cases)
+        write_case_manifest(
+            run_dir / "case_manifest.json",
+            self.cases,
+            suite=self.suite,
+            planner_config_hashes=planner_config_hashes,
+            embodiment_resolution=self.embodiment_resolution,
+        )
         metadata = [
             self.metadata[spec.id]
             for spec in self.planner_specs

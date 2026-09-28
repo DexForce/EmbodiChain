@@ -23,9 +23,10 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 
 from .metrics.stats import nearest_rank_percentile
+from .generalization import aggregate_generalization
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
 
-__all__ = ["aggregate_results"]
+__all__ = ["aggregate_generalization", "aggregate_results"]
 
 
 def _mean(values: Iterable[float | None]) -> float | None:
@@ -42,6 +43,8 @@ def _case_macro_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
     attribute: str,
+    *,
+    excluded_case_ids: frozenset[str] = frozenset(),
 ) -> float:
     """Macro-average a boolean outcome attribute equally across mandatory cases.
 
@@ -50,6 +53,9 @@ def _case_macro_rate(
     case cannot dominate a B=1 case on the leaderboard. Missing cases
     contribute ``0.0`` so selective skipping cannot inflate the rate.
     """
+    track_cases = [
+        case for case in track_cases if case.case_id not in excluded_case_ids
+    ]
     if not track_cases:
         return 0.0
 
@@ -83,20 +89,33 @@ def _case_macro_optional_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
     attribute: str,
+    *,
+    excluded_case_ids: frozenset[str] = frozenset(),
 ) -> float | None:
     """Macro-average an applicable staged boolean, otherwise return ``None``."""
     applicable = [
-        case for case in track_cases if _case_supports_attribute(case, attribute)
+        case
+        for case in track_cases
+        if case.case_id not in excluded_case_ids
+        and _case_supports_attribute(case, attribute)
     ]
     if not applicable:
         return None
-    return _case_macro_rate(measured, applicable, attribute)
+    return _case_macro_rate(
+        measured, applicable, attribute, excluded_case_ids=excluded_case_ids
+    )
 
 
 def _case_macro_primary_rate(
-    measured: list[TrialRecord], track_cases: list[BenchmarkCase]
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    *,
+    excluded_case_ids: frozenset[str] = frozenset(),
 ) -> float:
     """Macro-average each case's explicitly declared primary success stage."""
+    track_cases = [
+        case for case in track_cases if case.case_id not in excluded_case_ids
+    ]
     if not track_cases:
         return 0.0
     outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
@@ -119,8 +138,13 @@ def _case_macro_mean(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
     attribute: str,
+    *,
+    excluded_case_ids: frozenset[str] = frozenset(),
 ) -> float | None:
     """Macro-average a numeric outcome attribute across cases with values."""
+    track_cases = [
+        case for case in track_cases if case.case_id not in excluded_case_ids
+    ]
     if not track_cases:
         return None
 
@@ -177,6 +201,55 @@ def _top_failure(outcomes: list[CaseOutcome]) -> str | None:
         outcome.failure_code for outcome in outcomes if outcome.failure_code
     )
     return failures.most_common(1)[0][0] if failures else None
+
+
+def _unsupported_case_ids(records: Iterable[TrialRecord]) -> frozenset[str]:
+    """Return capability-gated cases excluded from success denominators."""
+    return frozenset(
+        record.case_id
+        for record in records
+        if record.phase is TrialPhase.AVAILABILITY
+        and record.status == "unsupported"
+        and record.failure_code in {"unsupported_capability", "unsupported_capacity"}
+    )
+
+
+def _stage_success_rates(
+    measured: list[TrialRecord],
+    cases: list[BenchmarkCase],
+    *,
+    excluded_case_ids: frozenset[str],
+) -> dict[str, float] | None:
+    """Compute chained physical stage rates from measured observations."""
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+    passed: Counter[str] = Counter()
+    reached: Counter[str] = Counter()
+    saw_stage = False
+    for case in cases:
+        if case.case_id in excluded_case_ids:
+            continue
+        for outcome in outcomes_by_case.get(case.case_id, []):
+            prefix_passed = True
+            for stage in outcome.stages:
+                saw_stage = True
+                if stage.status == "not_applicable":
+                    continue
+                if not prefix_passed:
+                    break
+                reached[stage.stage_id] += 1
+                if stage.status == "passed":
+                    passed[stage.stage_id] += 1
+                else:
+                    prefix_passed = False
+    if not saw_stage:
+        return None
+    return {
+        stage_id: passed[stage_id] / reached[stage_id]
+        for stage_id in sorted(reached)
+        if reached[stage_id]
+    }
 
 
 def _peak_gpu(records: Iterable[TrialRecord]) -> float | None:
@@ -416,7 +489,17 @@ def _metric_rows(
         ],
         list[TrialRecord],
     ] = defaultdict(list)
+    unsupported_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
     for record in records:
+        if (
+            record.phase is TrialPhase.AVAILABILITY
+            and record.status == "unsupported"
+            and record.failure_code
+            in {"unsupported_capability", "unsupported_capacity"}
+        ):
+            unsupported_by_algorithm_track[(record.algorithm_id, record.track)].add(
+                record.case_id
+            )
         if record.phase is not TrialPhase.MEASURED:
             continue
         key = (
@@ -532,6 +615,9 @@ def _metric_rows(
                 ),
                 [],
             )
+            excluded_case_ids = frozenset(
+                unsupported_by_algorithm_track[(info.algorithm_id, track)]
+            )
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
             expected = expected_by_group[group_key]
@@ -553,24 +639,46 @@ def _metric_rows(
                     "cases": len(group_cases),
                     "n_valid": len(valid_outcomes),
                     "coverage_rate": min(1.0, len(outcomes) / max(expected, 1)),
-                    "success_rate": _case_macro_primary_rate(measured, group_cases),
+                    "success_rate": _case_macro_primary_rate(
+                        measured,
+                        group_cases,
+                        excluded_case_ids=excluded_case_ids,
+                    ),
                     "planning_success_rate": _case_macro_rate(
-                        measured, group_cases, "planning_success"
+                        measured,
+                        group_cases,
+                        "planning_success",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "motion_valid_rate": _case_macro_rate(
-                        measured, group_cases, "motion_valid"
+                        measured,
+                        group_cases,
+                        "motion_valid",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "execution_success_rate": _case_macro_optional_rate(
-                        measured, group_cases, "execution_success"
+                        measured,
+                        group_cases,
+                        "execution_success",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "task_success_rate": _case_macro_optional_rate(
-                        measured, group_cases, "task_success"
+                        measured,
+                        group_cases,
+                        "task_success",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "ordered_waypoint_success_rate": _case_macro_rate(
-                        measured, group_cases, "ordered_waypoints_reached"
+                        measured,
+                        group_cases,
+                        "ordered_waypoints_reached",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "waypoint_completion_rate": _case_macro_mean(
-                        measured, group_cases, "completed_waypoint_ratio"
+                        measured,
+                        group_cases,
+                        "completed_waypoint_ratio",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "final_pos_err_mm": _mean(
                         outcome.final_translation_err_mm for outcome in valid_outcomes
@@ -587,7 +695,10 @@ def _metric_rows(
                         for outcome in valid_outcomes
                     ),
                     "joint_violation_rate": _case_macro_rate(
-                        measured, group_cases, "joint_limit_violation"
+                        measured,
+                        group_cases,
+                        "joint_limit_violation",
+                        excluded_case_ids=excluded_case_ids,
                     ),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes
@@ -624,6 +735,11 @@ def _metric_rows(
                         )
                         for outcome in outcomes
                     ),
+                    "stage_success_rates": _stage_success_rates(
+                        measured,
+                        group_cases,
+                        excluded_case_ids=excluded_case_ids,
+                    ),
                     "top_failure": _top_failure(outcomes),
                 }
             )
@@ -659,14 +775,46 @@ def _leaderboard_rows(
                 and record.phase is TrialPhase.MEASURED
             ]
             outcomes = [outcome for record in measured for outcome in record.outcomes]
-            coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
-            motion_rate = _case_macro_rate(measured, track_cases, "motion_valid")
-            planning_rate = _case_macro_rate(measured, track_cases, "planning_success")
-            execution_rate = _case_macro_optional_rate(
-                measured, track_cases, "execution_success"
+            excluded_case_ids = frozenset(
+                record.case_id
+                for record in records
+                if record.algorithm_id == info.algorithm_id
+                and record.track == track
+                and record.phase is TrialPhase.AVAILABILITY
+                and record.status == "unsupported"
+                and record.failure_code
+                in {"unsupported_capability", "unsupported_capacity"}
             )
-            task_rate = _case_macro_optional_rate(measured, track_cases, "task_success")
-            primary_rate = _case_macro_primary_rate(measured, track_cases)
+            coverage = min(1.0, len(outcomes) / max(expected_outcomes, 1))
+            motion_rate = _case_macro_rate(
+                measured,
+                track_cases,
+                "motion_valid",
+                excluded_case_ids=excluded_case_ids,
+            )
+            planning_rate = _case_macro_rate(
+                measured,
+                track_cases,
+                "planning_success",
+                excluded_case_ids=excluded_case_ids,
+            )
+            execution_rate = _case_macro_optional_rate(
+                measured,
+                track_cases,
+                "execution_success",
+                excluded_case_ids=excluded_case_ids,
+            )
+            task_rate = _case_macro_optional_rate(
+                measured,
+                track_cases,
+                "task_success",
+                excluded_case_ids=excluded_case_ids,
+            )
+            primary_rate = _case_macro_primary_rate(
+                measured,
+                track_cases,
+                excluded_case_ids=excluded_case_ids,
+            )
             latency_p95 = _case_macro_latency_p95(measured, track_cases)
             peak_gpu = _peak_gpu(measured)
             track_entries.append(
@@ -718,4 +866,7 @@ def aggregate_results(
         "time_and_memory": _performance_rows(records, metadata, cases),
         "success_and_metrics": _metric_rows(records, metadata, cases, measured_trials),
         "leaderboard": _leaderboard_rows(records, metadata, cases, measured_trials),
+        "generalization": aggregate_generalization(
+            records, metadata, cases, measured_trials
+        ),
     }

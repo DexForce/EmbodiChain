@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +94,7 @@ METRIC_COLUMNS = (
     "articulation_joint_delta",
     "articulation_joint_peak_signed_delta",
     "replan_count",
+    "stage_success_rates",
     "top_failure",
 )
 
@@ -127,6 +129,8 @@ def _format_value(column: str, value: object) -> str:
         if column.endswith("_rate") or column in {"path_efficiency"}:
             return f"{value:.2%}"
         return f"{value:.6f}"
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
     return str(value)
 
 
@@ -187,6 +191,40 @@ def write_markdown_report(
         ]
     )
     lines.extend(_format_table(aggregates["success_and_metrics"], METRIC_COLUMNS))
+    domain_rows = aggregates.get("generalization", [])
+    if domain_rows:
+        lines.extend(
+            [
+                "",
+                "## Generalization summary",
+                "",
+                "Domain statistics are computed from the raw trial records. "
+                "Unsupported capability cases lower coverage and are excluded "
+                "from success denominators.",
+                "",
+            ]
+        )
+        for row in domain_rows:
+            lines.append(
+                "- "
+                + "; ".join(
+                    f"{name}={_format_value(name, row.get(name))}"
+                    for name in (
+                        "track",
+                        "algorithm",
+                        "domain_id",
+                        "domain_version",
+                        "domain_kind",
+                        "coverage_rate",
+                        "success_rate",
+                        "domain_mean_success_rate",
+                        "domain_worst_success_rate",
+                        "domain_success_variance",
+                        "domain_retention",
+                        "generalization_eligible",
+                    )
+                )
+            )
     lines.extend(["", "## Leaderboard", ""])
     lines.extend(_format_table(aggregates["leaderboard"], LEADERBOARD_COLUMNS))
     if notes:
