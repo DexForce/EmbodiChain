@@ -24,8 +24,54 @@ import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.objects import Robot
 from embodichain.lab.sim.cfg import RobotCfg, RenderCfg
+from embodichain.lab.sim.motion.solvers import PytorchSolver
 from embodichain.data import get_data_path
 from embodichain.utils.utility import reset_all_seeds
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "tcp_kind", ["identity", "translation", "rotation_translation"]
+)
+def test_ik_removes_tcp_before_solving(monkeypatch, tcp_kind):
+    """The numerical solver must receive flange poses, with the TCP removed."""
+    solver = object.__new__(PytorchSolver)
+    solver.device = torch.device("cpu")
+    solver.dof = 1
+    solver._num_samples = 1
+    solver._seed_sampler = None
+    solver.lower_qpos_limits = torch.tensor([-2.0])
+    solver.upper_qpos_limits = torch.tensor([2.0])
+    tcp = np.eye(4)
+    if tcp_kind != "identity":
+        tcp[0, 3] = 0.13  # Marvin's 13 cm tool offset.
+    if tcp_kind == "rotation_translation":
+        # +90 degrees about Y: unlike identity, this rotation is not symmetric.
+        tcp[:3, :3] = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]
+    solver.set_tcp(tcp)
+
+    flange_poses = torch.tensor(
+        [
+            [[1, 0, 0, 0.5], [0, 1, 0, 0.2], [0, 0, 1, 0.3], [0, 0, 0, 1]],
+            [[0, -1, 0, -0.2], [1, 0, 0, 0.4], [0, 0, 1, 0.6], [0, 0, 0, 1]],
+        ],
+        dtype=torch.float32,
+    )
+    target = flange_poses @ torch.as_tensor(tcp, dtype=torch.float32)
+    original_target = target.clone()
+    received = []
+
+    def capture_target(target_pose, joint_seed):
+        received.append(target_pose.clone())
+        # Stop at the numerical solver boundary; convergence is tested separately.
+        return torch.zeros(len(joint_seed), dtype=torch.bool), joint_seed.clone()
+
+    monkeypatch.setattr(solver, "_compute_inverse_kinematics", capture_target)
+    for _ in range(2):
+        solver.get_ik(target, qpos_seed=torch.zeros((2, 1)))
+        torch.testing.assert_close(received[-1], flange_poses, atol=1e-7, rtol=0)
+        torch.testing.assert_close(target, original_target, atol=0, rtol=0)
+        np.testing.assert_array_equal(solver.get_tcp(), tcp)
 
 
 def grid_sample_qpos_from_limits(

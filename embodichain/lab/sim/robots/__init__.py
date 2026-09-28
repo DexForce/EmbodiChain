@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from .aloha_mini import AlohaMiniCfg
+from .tianji_marvin import TianjiMarvinCfg
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
 from .franka_panda import FrankaPandaCfg
@@ -27,6 +28,7 @@ from .dual_arm import DualArmRobotCfg, build_dual_arm_cfg
 
 __all__ = [
     "AlohaMiniCfg",
+    "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",

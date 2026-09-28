@@ -45,3 +45,9 @@ this catalog and toctree.
    :maxdepth: 1
 
    aloha_mini
+
+
+.. toctree::
+   :maxdepth: 1
+
+   tianji_marvin

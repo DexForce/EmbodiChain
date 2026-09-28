@@ -21,8 +21,15 @@ import torch
 
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.motion.solvers import (
+    DifferentialSolver,
     DifferentialSolverCfg,
+    FEPSolverCfg,
     OPWSolverCfg,
+    PinocchioSolver,
+    PinocchioSolverCfg,
+    PinkSolverCfg,
+    PytorchSolverCfg,
+    SRSSolverCfg,
     URSolverCfg,
 )
 from embodichain.lab.sim.motion.solvers.opw_solver import OPWSolver
@@ -36,6 +43,50 @@ UR5_DH_PARAMETERS = {
     "d5": 0.09465,
     "d6": 0.0823,
 }
+
+
+@pytest.mark.parametrize(
+    "cfg_type",
+    [
+        PytorchSolverCfg,
+        DifferentialSolverCfg,
+        PinocchioSolverCfg,
+        PinkSolverCfg,
+        SRSSolverCfg,
+        FEPSolverCfg,
+        OPWSolverCfg,
+        URSolverCfg,
+    ],
+)
+@pytest.mark.parametrize("tcp", [np.zeros((4, 4)), np.diag([2.0, 1, 1, 1])])
+def test_invalid_configured_tcp_is_rejected_before_model_loading(cfg_type, tcp):
+    cfg = cfg_type(
+        tcp=tcp,
+        joint_names=[f"joint{i}" for i in range(7)],
+        root_link_name="base",
+        end_link_name="tool",
+    )
+    # No URDF or backend resources are needed to reject malformed TCPs.
+    with pytest.raises((ValueError, np.linalg.LinAlgError), match=r"SE\(3\)|singular"):
+        cfg.init_solver(device="cpu", num_envs=1)
+
+
+@pytest.mark.parametrize(
+    "solver_type", [PytorchSolver, DifferentialSolver, PinocchioSolver]
+)
+@pytest.mark.parametrize(
+    "tcp", [np.zeros((4, 4)), np.diag([2.0, 1, 1, 1]), np.full((4, 4), np.nan)]
+)
+def test_invalid_tcp_update_preserves_numerical_solver_state(solver_type, tcp):
+    solver = object.__new__(solver_type)
+    previous_tcp = np.eye(4)
+    previous_tcp[:3, 3] = [0.13, -0.02, 0.03]
+    solver.set_tcp(previous_tcp)
+
+    with pytest.raises((ValueError, np.linalg.LinAlgError), match=r"SE\(3\)|singular"):
+        solver.set_tcp(tcp)
+
+    np.testing.assert_array_equal(solver.get_tcp(), previous_tcp)
 
 
 def test_continuous_batch_ik_is_an_optional_solver_capability() -> None:

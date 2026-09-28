@@ -20,6 +20,7 @@ import torch
 import numpy as np
 import warp as wp
 from embodichain.utils import configclass
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.data import get_data_path
 from embodichain.compute.kinematics._warp.ur import (
@@ -134,9 +135,7 @@ class URSolver(BaseSolver):
 
     def set_tcp(self, tcp: np.ndarray):
         super().set_tcp(tcp)
-        self._tcp_inv = np.eye(4, dtype=float)
-        self._tcp_inv[:3, :3] = self.tcp_xpos[:3, :3].T
-        self._tcp_inv[:3, 3] = -self._tcp_inv[:3, :3] @ self.tcp_xpos[:3, 3]
+        self._tcp_inv = inv_transform(self.tcp_xpos)
         self._tcp_inv_tensor = torch.tensor(
             self._tcp_inv, dtype=torch.float32, device=self.device
         )
