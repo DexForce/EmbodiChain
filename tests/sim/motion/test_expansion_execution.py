@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -35,12 +37,12 @@ from embodichain.lab.sim.motion.expansion import (
     CandidateWorkItem,
     CommitReceipt,
     ExpertEpisode,
-    GenerationSession,
+    ExpansionSession,
     PhysicalSlotPool,
     SceneCase,
     SourceContext,
     TemplateSourceAdapter,
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
     TrajectoryPhase,
     TrajectoryTemplate,
     ValidationCheck,
@@ -48,7 +50,7 @@ from embodichain.lab.sim.motion.expansion import (
 )
 
 
-def _cfg(**collection: int) -> TrajectoryGenerationJobCfg:
+def _cfg(**collection: int) -> TrajectoryExpansionJobCfg:
     payload: dict[str, object] = {
         "augmentation": {
             "factors": {
@@ -64,7 +66,7 @@ def _cfg(**collection: int) -> TrajectoryGenerationJobCfg:
     }
     if collection:
         payload["collection"] = collection
-    return TrajectoryGenerationJobCfg.from_mapping(payload)
+    return TrajectoryExpansionJobCfg.from_mapping(payload)
 
 
 def _template() -> TrajectoryTemplate:
@@ -85,11 +87,11 @@ def _coordinator(
     *,
     count: int = 1,
     **collection: int,
-) -> tuple[GenerationSession, CandidateCoordinator, tuple[CandidateWorkItem, ...]]:
+) -> tuple[ExpansionSession, CandidateCoordinator, tuple[CandidateWorkItem, ...]]:
     cfg = _cfg(**collection)
     case = SceneCase("case", "initial", "signature", "task", "robot")
     limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
-    session = GenerationSession(cfg)
+    session = ExpansionSession(cfg)
     session.register_case(case, limits, joint_names=("arm", "tool"))
     coordinator = CandidateCoordinator(
         cfg,
@@ -111,6 +113,13 @@ class _Restorer:
         if self.fail:
             raise RuntimeError("restore failed")
         self.items.append(item.spec.identity.candidate_id)
+        return {"epoch": len(self.items)}
+
+
+class _SlotRestorer(_Restorer):
+    def restore(self, item: CandidateWorkItem, *, slot_id: int | None = None) -> object:
+        del item
+        self.items.append(str(slot_id))
         return {"epoch": len(self.items)}
 
 
@@ -167,6 +176,27 @@ class _Executor:
             episode_id=episode_id,
             commit_id=commit_id,
             phases=item.template.phases,
+        )
+
+
+class _SlotExecutor(_Executor):
+    def execute(
+        self,
+        item: CandidateWorkItem,
+        prepared: object,
+        *,
+        episode_id: str,
+        commit_id: str,
+        on_rollout_started,
+        slot_id: int | None = None,
+    ) -> ExpertEpisode:
+        del slot_id
+        return super().execute(
+            item,
+            prepared,
+            episode_id=episode_id,
+            commit_id=commit_id,
+            on_rollout_started=on_rollout_started,
         )
 
 
@@ -241,7 +271,7 @@ def _runner(
     )
 
 
-def test_generation_host_types_are_not_exported_from_expansion() -> None:
+def test_expansion_host_types_are_not_exported_from_expansion() -> None:
     for name in (
         "InitialStatePort",
         "MeasuredExecutor",
@@ -268,6 +298,30 @@ def test_multi_slot_runner_releases_exact_slot_between_fifo_candidates() -> None
 
     assert tuple(outcome.status for outcome in outcomes) == ("committed", "committed")
     assert runner.slot_pool.available_count == 1
+    assert session.snapshot()["counts"]["committed"] == 2
+
+
+def test_multi_slot_runner_can_switch_compatible_slots_between_candidates() -> None:
+    session, coordinator, items = _coordinator(count=2, target_committed_episodes=2)
+    for index, key in enumerate(("arm-a", "arm-b")):
+        coordinator._pending[index] = replace(
+            items[index],
+            spec=replace(items[index].spec, compatibility_key=key),
+        )
+    restorer = _SlotRestorer()
+    runner = MultiSlotRunner(
+        _runner(
+            coordinator,
+            restorer=restorer,
+            executor=_SlotExecutor(),
+        ),
+        PhysicalSlotPool(2, compatibility_keys={0: "arm-a", 1: "arm-b"}),
+    )
+
+    outcomes = runner.run_until_empty()
+
+    assert tuple(outcome.status for outcome in outcomes) == ("committed", "committed")
+    assert restorer.items == ["0", "1"]
     assert session.snapshot()["counts"]["committed"] == 2
 
 

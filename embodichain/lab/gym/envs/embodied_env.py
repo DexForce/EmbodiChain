@@ -91,13 +91,13 @@ from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.motion.expansion import (
-        CombinedGenerationProfile,
+        CombinedExpansionProfile,
     )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
         TaskProgramEnvironmentAdapter,
-        TaskProgramGenerationRecord,
+        TaskProgramExpansionRecord,
     )
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
@@ -1363,8 +1363,8 @@ class EmbodiedEnv(BaseEnv):
             )
             bridge = getattr(self, "_active_task_program_bridge", None)
             if bridge is not None:
-                records = bridge.generation_records
-                metadata["generation"] = [
+                records = bridge.expansion_records
+                metadata["expansion"] = [
                     record.to_metadata()
                     for record in records
                     if getattr(record, "env_id", None) in (None, env_id)
@@ -2625,15 +2625,15 @@ class EmbodiedEnv(BaseEnv):
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: CombinedGenerationProfile | None = None,
-        generation_candidate_index: int = 0,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Task Program.
-            generation_profile: Optional episode-scoped Generation Profile.
-            generation_candidate_index: FIFO candidate ordinal selected from
+            expansion_profile: Optional episode-scoped Expansion Profile.
+            expansion_candidate_index: FIFO candidate ordinal selected from
                 each matching Atomic plan.
 
         Returns:
@@ -2642,17 +2642,17 @@ class EmbodiedEnv(BaseEnv):
         """
         return self._checked_task_program_adapter().create_bridge(
             program,
-            generation_profile=generation_profile,
-            candidate_index=generation_candidate_index,
+            expansion_profile=expansion_profile,
+            candidate_index=expansion_candidate_index,
         )
 
     @property
-    def task_program_generation_records(
+    def task_program_expansion_records(
         self,
-    ) -> tuple[TaskProgramGenerationRecord, ...]:
+    ) -> tuple[TaskProgramExpansionRecord, ...]:
         """Return records owned by the active generated Task Program episode."""
         bridge = getattr(self, "_active_task_program_bridge", None)
-        return () if bridge is None else bridge.generation_records
+        return () if bridge is None else bridge.expansion_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
         """Return completed Task Program acceptance or legacy task success.
@@ -2694,8 +2694,8 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
-        generation_profile: CombinedGenerationProfile | None = None,
-        generation_candidate_index: int = 0,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -2710,9 +2710,9 @@ class EmbodiedEnv(BaseEnv):
             *args: Positional arguments forwarded to the legacy planner.
             task_program: Optional episode-level program config or provider-free
                 compiled program.
-            generation_profile: Optional source-neutral profile applied to
+            expansion_profile: Optional source-neutral profile applied to
                 matching grounded Atomic calls in this episode.
-            generation_candidate_index: FIFO candidate ordinal selected from
+            expansion_candidate_index: FIFO candidate ordinal selected from
                 each generated reference.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
@@ -2734,22 +2734,22 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            if generation_profile is None and generation_candidate_index == 0:
+            if expansion_profile is None and expansion_candidate_index == 0:
                 bridge = self.create_task_program_bridge(compiled_program)
             else:
                 bridge = self.create_task_program_bridge(
                     compiled_program,
-                    generation_profile=generation_profile,
-                    generation_candidate_index=generation_candidate_index,
+                    expansion_profile=expansion_profile,
+                    expansion_candidate_index=expansion_candidate_index,
                 )
             self._active_task_program_bridge = bridge
             return bridge.iter_segments()
 
-        if generation_profile is not None:
-            raise ValueError("generation_profile requires a selected Task Program")
-        if generation_candidate_index != 0:
+        if expansion_profile is not None:
+            raise ValueError("expansion_profile requires a selected Task Program")
+        if expansion_candidate_index != 0:
             raise ValueError(
-                "generation_candidate_index requires a selected Task Program"
+                "expansion_candidate_index requires a selected Task Program"
             )
 
         actions = self.create_demo_action_list(*args, **kwargs)

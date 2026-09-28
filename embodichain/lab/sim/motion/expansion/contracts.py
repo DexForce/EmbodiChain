@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Owned values for fixed-scene trajectory generation, independent of hosts.
+"""Owned values for fixed-scene trajectory expansion, independent of hosts.
 
 Tensor inputs are detached and copied at construction. Frozen dataclasses prevent
 field replacement; consumers must still treat their owned tensors as read-only.

@@ -4,8 +4,8 @@ environment:
   default: envs/default.yaml
   newton: envs/newton.yaml
 
-generation:
-  config: generation/open_drawer.yaml
+expansion:
+  config: expansion/open_drawer.yaml
 
 task_program:
   program: task_program/program.yaml

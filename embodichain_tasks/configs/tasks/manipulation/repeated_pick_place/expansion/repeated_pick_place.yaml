@@ -1,27 +1,11 @@
-# Task-facing generation overrides. Referenced by task.ur5.yaml.
+# Task-facing expansion overrides. Referenced by task.ur5.yaml.
 runtime:
   num_envs: 16
   arena_space: 2.5
-  simulation:
-    light:
-      direct:
-        - uid: main_light
-          light_type: sun
-          color: [0.6, 0.6, 0.6]
-          intensity: 5.0
-          direction: [0.0, 0.0, -1.0]
-        - uid: rect_light
-          light_type: rect
-          color: [1.0, 1.0, 1.0]
-          intensity: 8.0
-          init_pos: [-0.42, 0.08, 0.8]
-          direction: [0.0, 0.0, -1.0]
-          rect_width: 0.5
-          rect_height: 0.5
   env:
     events:
-      generation_profile_reset:
-        func: apply_generation_profile_reset
+      expansion_profile_reset:
+        func: apply_expansion_profile_reset
         mode: reset
         params: {}
       record_camera:
@@ -37,7 +21,7 @@ runtime:
           max_env_num: 16
           save_path: /tmp/repeated-pick-place-camera
 policy:
-  component: ../../../../components/generation_policies/task_program_episode.yaml
+  component: ../../../../components/expansion_policies/task_program_episode.yaml
 overrides:
   source:
     source_id: repeated_cube_pick_place
@@ -81,17 +65,10 @@ overrides:
     policy: round_robin_fifo
     candidate_budget: 64
     reference_family_budget: 4
-    queue_max_items: 64
-    queue_max_bytes: 536870912
   execution:
     max_inflight: 16
     compatibility: strict
-    restore_initial_state: true
-    cancel_policy: safe_finish_and_drain
   persistence:
     sink: lerobot
-    output_dir: /tmp/repeated-pick-place-generation
-    write_trajectories: true
-    write_observations: true
-    write_manifest: true
+    output_dir: /tmp/repeated-pick-place-expansion
 candidate_indices: [0, 16, 32, 48]

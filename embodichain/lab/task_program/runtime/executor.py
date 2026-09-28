@@ -98,7 +98,7 @@ from .results import (
     _snapshot_event,
     _snapshot_task_state,
 )
-from .generation import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
+from .expansion import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
 from ..compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,

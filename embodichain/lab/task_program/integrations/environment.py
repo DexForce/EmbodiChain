@@ -33,7 +33,7 @@ from typing import Protocol, runtime_checkable
 
 from embodichain.lab.sim.atomic_actions.engine import AtomicActionEngine
 from embodichain.lab.sim.motion.expansion import (
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
 )
 from embodichain.lab.sim.atomic_actions.runner import (
     ExecutionRunnerCfg,
@@ -73,7 +73,7 @@ from embodichain.lab.task_program.semantics.profiles import (
     RobotSkillProfile,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
-from embodichain.lab.task_program.runtime.generation import (
+from embodichain.lab.task_program.runtime.expansion import (
     TaskProgramPlanTransformFactory,
 )
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
@@ -96,8 +96,8 @@ from .catalog import (
     IntegrationFingerprintMismatch,
     SimulationTaskProgramRegistration,
 )
-from .generation import (
-    CombinedTaskProgramCandidatePlanTransformFactory,
+from .expansion import (
+    CombinedTaskProgramExpansionFactory,
 )
 from embodichain.lab.task_program.language.schema import (
     TaskProgramCfg,
@@ -300,9 +300,7 @@ class TaskProgramRuntimeAssembly:
     parallel_safety_validator: ParallelCommandSafetyValidator | None
     runtime: SemanticCallExecutor
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None
-    generation_trace_provider: (
-        CombinedTaskProgramCandidatePlanTransformFactory | None
-    ) = None
+    expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None
 
 
 class TaskProgramEnvironmentAdapter:
@@ -672,9 +670,7 @@ class TaskProgramEnvironmentAdapter:
         semantic: SemanticExecutorComponents,
         *,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
-        generation_trace_provider: (
-            CombinedTaskProgramCandidatePlanTransformFactory | None
-        ) = None,
+        expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
         if type(semantic) is not SemanticExecutorComponents:
@@ -687,13 +683,13 @@ class TaskProgramEnvironmentAdapter:
                 "plan_transform_factory must implement "
                 "TaskProgramPlanTransformFactory or be None."
             )
-        if generation_trace_provider is not None and not isinstance(
-            generation_trace_provider,
-            CombinedTaskProgramCandidatePlanTransformFactory,
+        if expansion_trace_provider is not None and not isinstance(
+            expansion_trace_provider,
+            CombinedTaskProgramExpansionFactory,
         ):
             raise TypeError(
-                "generation_trace_provider must be a "
-                "a supported generation factory or None."
+                "expansion_trace_provider must be a "
+                "a supported expansion factory or None."
             )
         self._validate_registration_ownership()
 
@@ -826,14 +822,14 @@ class TaskProgramEnvironmentAdapter:
             parallel_safety_validator=parallel_safety_validator,
             runtime=runtime,
             plan_transform_factory=plan_transform_factory,
-            generation_trace_provider=generation_trace_provider,
+            expansion_trace_provider=expansion_trace_provider,
         )
 
     def create_bridge(
         self,
         program: CompiledTaskProgram,
         *,
-        generation_profile: CombinedGenerationProfile | None = None,
+        expansion_profile: CombinedExpansionProfile | None = None,
         candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
@@ -850,32 +846,32 @@ class TaskProgramEnvironmentAdapter:
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)
         self._preflight_program(program, semantic.compiler)
-        if generation_profile is not None and not isinstance(
-            generation_profile, CombinedGenerationProfile
+        if expansion_profile is not None and not isinstance(
+            expansion_profile, CombinedExpansionProfile
         ):
             raise TypeError(
-                "generation_profile must be a CombinedGenerationProfile or None."
+                "expansion_profile must be a CombinedExpansionProfile or None."
             )
         if type(candidate_index) is not int or candidate_index < 0:
             raise ValueError("candidate_index must be a non-negative integer.")
-        if generation_profile is None and candidate_index != 0:
-            raise ValueError("candidate_index requires a generation_profile.")
-        if isinstance(generation_profile, CombinedGenerationProfile):
-            generation = CombinedTaskProgramCandidatePlanTransformFactory(
-                generation_profile,
+        if expansion_profile is None and candidate_index != 0:
+            raise ValueError("candidate_index requires an expansion_profile.")
+        if isinstance(expansion_profile, CombinedExpansionProfile):
+            expansion = CombinedTaskProgramExpansionFactory(
+                expansion_profile,
                 candidate_index=candidate_index,
                 program_id=program.program_id,
                 integration_id=self._scene_registry_id,
                 robot_profile_id=self._robot_profile_id,
             )
         else:
-            generation = None
-        if generation_profile is not None:
+            expansion = None
+        if expansion_profile is not None:
             self._program_skill_ids(program, semantic.compiler)
         assembly = self._assemble_execution_runtime(
             semantic,
-            plan_transform_factory=generation,
-            generation_trace_provider=generation,
+            plan_transform_factory=expansion,
+            expansion_trace_provider=expansion,
         )
         return TaskProgramDemoBridge(
             program,
@@ -886,7 +882,7 @@ class TaskProgramEnvironmentAdapter:
             validator_port=self._validator_port,
             runner_cfg=assembly.runner_cfg,
             parallel_safety_validator=assembly.parallel_safety_validator,
-            generation_trace_provider=assembly.generation_trace_provider,
+            expansion_trace_provider=assembly.expansion_trace_provider,
         )
 
     @staticmethod

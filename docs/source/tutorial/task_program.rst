@@ -17,7 +17,7 @@ What you will configure
 -----------------------
 
 A supported configuration-defined Task Program has six core owners. A task that
-also collects augmented trajectories may add a separate generation declaration:
+also collects augmented trajectories may add a separate expansion declaration:
 
 1. ``program.yaml`` owns the embodiment-independent task flow and targets;
 2. ``integration.yaml`` owns task-specific semantic requirements, its nested
@@ -44,14 +44,14 @@ lifecycle.
 
 The official repeated Pick/Place example is a complete reference. Its physical
 backends live under ``envs/``; the UR5 deployment additionally
-references ``generation/repeated_pick_place.yaml`` through ``generation.config``:
+references ``expansion/repeated_pick_place.yaml`` through ``expansion.config``:
 
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
   and ``envs/newton.yaml``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation/repeated_pick_place.yaml``;
+* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
 * ``embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
 * ``embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
 

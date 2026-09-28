@@ -13,6 +13,14 @@ simulation:
         color: [0.6, 0.6, 0.6]
         intensity: 5.0
         direction: [0.0, 0.0, -1.0]
+      - uid: rect_light
+        light_type: rect
+        color: [1.0, 1.0, 1.0]
+        intensity: 8.0
+        init_pos: [-0.42, 0.08, 0.8]
+        direction: [0.0, 0.0, -1.0]
+        rect_width: 0.5
+        rect_height: 0.5
   background: []
   rigid_object:
     - uid: cube

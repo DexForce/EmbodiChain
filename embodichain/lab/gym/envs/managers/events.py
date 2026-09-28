@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
-    "apply_generation_profile_reset",
+    "apply_expansion_profile_reset",
     "replace_assets_from_group",
     "prepare_extra_attr",
     "register_entity_attrs",
@@ -73,7 +73,7 @@ __all__ = [
 ]
 
 
-def apply_generation_profile_reset(
+def apply_expansion_profile_reset(
     env: EmbodiedEnv,
     env_ids: torch.Tensor | Sequence[int] | slice | None,
     *,
@@ -82,12 +82,12 @@ def apply_generation_profile_reset(
     visual_assignments: Mapping[int, str] | None = None,
     visual_seed: int = 0,
 ) -> None:
-    """Apply one generation candidate's scene and visual state at reset.
+    """Apply one expansion candidate's scene and visual state at reset.
 
-    The generation runner owns candidate enumeration and supplies the resolved
+    The expansion runner owns candidate enumeration and supplies the resolved
     batch payload through the event configuration immediately before reset.
     This event owns only the environment mutation boundary, so the same reset
-    lifecycle is used for ordinary and generation environments.
+    lifecycle is used for ordinary and expansion environments.
 
     Args:
         env: Environment whose selected rows should be prepared.
@@ -111,7 +111,7 @@ def apply_generation_profile_reset(
     if row_ids.numel() == 0:
         return
     if torch.any(row_ids < 0) or torch.any(row_ids >= num_envs):
-        raise ValueError("generation reset env_ids are outside the environment range")
+        raise ValueError("expansion reset env_ids are outside the environment range")
 
     if cube_pose is not None:
         if cube_pose.ndim != 2 or cube_pose.shape[1] != 7:
@@ -126,7 +126,7 @@ def apply_generation_profile_reset(
             raise ValueError("cube_pose rows must match num_envs or selected env_ids")
         cube = env.sim.get_rigid_object("cube")
         if cube is None:
-            raise ValueError("generation reset requires a rigid object named 'cube'")
+            raise ValueError("expansion reset requires a rigid object named 'cube'")
         pose_env_ids = row_ids.to(device=getattr(env, "device", "cpu"))
         cube.set_local_pose(selected_pose, env_ids=pose_env_ids)
 

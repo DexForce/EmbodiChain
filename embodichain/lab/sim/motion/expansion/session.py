@@ -27,7 +27,7 @@ from types import MappingProxyType
 
 import torch
 
-from .cfg import TrajectoryExpansionCfg, TrajectoryGenerationJobCfg
+from .cfg import TrajectoryExpansionCfg, TrajectoryExpansionJobCfg
 from .contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
@@ -42,7 +42,7 @@ from .contracts import (
 from .coverage import CoverageIndex, describe_trajectory
 from .manipulability import ManipulabilityBands
 
-__all__ = ["GenerationSession"]
+__all__ = ["ExpansionSession"]
 
 
 @dataclass
@@ -102,7 +102,7 @@ def _validation_summary(result: ValidationResult) -> ValidationResult:
     )
 
 
-class GenerationSession:
+class ExpansionSession:
     """Own one job's bounded candidates, budgets, evidence, and commit history.
 
     This value-only session never reads an environment or steps a simulator.
@@ -122,12 +122,12 @@ class GenerationSession:
 
     def __init__(
         self,
-        cfg: TrajectoryExpansionCfg | TrajectoryGenerationJobCfg,
+        cfg: TrajectoryExpansionCfg | TrajectoryExpansionJobCfg,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        if isinstance(cfg, TrajectoryGenerationJobCfg):
-            cfg = TrajectoryExpansionCfg.from_generation_job(cfg)
+        if isinstance(cfg, TrajectoryExpansionJobCfg):
+            cfg = TrajectoryExpansionCfg.from_expansion_job(cfg)
         if not isinstance(cfg, TrajectoryExpansionCfg):
             raise TypeError("cfg must be a TrajectoryExpansionCfg")
         self._cfg = TrajectoryExpansionCfg.from_mapping(cfg.to_dict())
@@ -138,7 +138,7 @@ class GenerationSession:
         ] = {}
         self._coverage: dict[str, CoverageIndex] = {}
         self._bands: dict[tuple[str, str], ManipulabilityBands] = {}
-        self._generation_ordinals: dict[tuple[str, ...], int] = {}
+        self._expansion_ordinals: dict[tuple[str, ...], int] = {}
         self._ordinals: dict[tuple[str, ...], int] = {}
         self._attempts: dict[str, _Attempt] = {}
         self._commits: dict[str, str] = {}
@@ -255,7 +255,7 @@ class GenerationSession:
                 factor.band_edges, reference=manipulability_reference
             )
 
-    def generation_generator(
+    def expansion_generator(
         self,
         case_id: str,
         initial_state_id: str,
@@ -265,9 +265,9 @@ class GenerationSession:
         template_id: str,
         operation_id: str,
     ) -> torch.Generator:
-        """Allocate the next deterministic logical-generation random stream.
+        """Allocate the next deterministic logical-expansion random stream.
 
-        Logical generation ordinals do not consume physical proposal capacity.
+        Logical expansion ordinals do not consume physical proposal capacity.
         The caller serializes this operation with the rest of the session.
         """
         self._cases[(case_id, initial_state_id)]
@@ -287,9 +287,9 @@ class GenerationSession:
             template_id,
             operation_id,
         )
-        ordinal = self._generation_ordinals.get(stream, 0)
+        ordinal = self._expansion_ordinals.get(stream, 0)
         digest = _digest(self._cfg.augmentation.seed, *stream, ordinal)
-        self._generation_ordinals[stream] = ordinal + 1
+        self._expansion_ordinals[stream] = ordinal + 1
         return torch.Generator(device="cpu").manual_seed(int(digest[:16], 16) % 2**63)
 
     def propose_many(

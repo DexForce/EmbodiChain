@@ -20,7 +20,7 @@ embodichain_tasks/<category-path>/<task>.py
 configs/tasks/<category-path>/<task>/envs/default.yaml  # reusable default backend
 configs/tasks/<category-path>/<task>/envs/newton.yaml   # optional Newton backend
 configs/tasks/<category-path>/<task>/task.<embodiment>.yaml     # componentized runnable deployment
-configs/tasks/<category-path>/<task>/generation/<profile>.yaml   # task-facing generation override
+configs/tasks/<category-path>/<task>/expansion/<profile>.yaml   # task-facing expansion override
 configs/tasks/<category-path>/<task>/task_program/program.yaml
 configs/tasks/<category-path>/<task>/task_program/integration.yaml
 configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
@@ -58,22 +58,22 @@ launcher selects the concrete backend from the same deployment with
 `--physics`; the selected environment file remains the owner of its backend
 fields.
 
-Task-facing trajectory generation is an optional third owner. A runnable task
+Task-facing trajectory expansion is an optional third owner. A runnable task
 can reference it without copying the robot or environment declaration:
 
 ```yaml
-generation:
-  config: generation/<task-profile>.yaml
+expansion:
+  config: expansion/<task-profile>.yaml
 ```
 
 The referenced file contains `runtime`, `policy`, `overrides`, and optional
-`candidate_indices`. Its mappings are merged with any task-local generation
+`candidate_indices`. Its mappings are merged with any task-local expansion
 fields, and its runtime overlay is applied after the selected environment
-variant is expanded. This keeps generation-specific batch size, recorder
+variant is expanded. This keeps expansion-specific batch size, recorder
 events, and augmentation policy beside the task while keeping physical scene
 ownership in `envs/`. `run-task` loads the referenced declaration;
-relative policy and resource paths inside it resolve from the generation file.
-`--generation-profile` and `--generation-candidate-indices` remain
+relative policy and resource paths inside it resolve from the expansion file.
+`--expansion-profile` and `--expansion-candidate-indices` remain
 command-line overrides.
 
 An embodiment owns the simulation robot and its sensor suite. Its optional
@@ -136,7 +136,7 @@ installed task packages and launches any registered environment; the task is
 selected by the `"id"` field of the gym config.
 
 ```bash
-# Data generation mode
+# Data expansion mode
 embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 
 # Newton variant selected from the same deployment

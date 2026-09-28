@@ -359,7 +359,7 @@ task text, segment frame ranges, subtask descriptions, and sidecar success. It
 returns status 0 when all checks pass, 1 for a validation mismatch, and 2 when
 the path, episode, or dataset cannot be loaded. For the complete validation
 contract and a comparison with LeRobot's official Rerun visualization, see
-{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>`.
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>`.
 
 ---
 

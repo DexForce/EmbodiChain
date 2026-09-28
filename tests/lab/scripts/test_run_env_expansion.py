@@ -14,16 +14,18 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Tests for task-bound Generation Policy resolution in ``run-task``."""
+"""Tests for task-bound Expansion Policy resolution in ``run-task``."""
 
 from __future__ import annotations
 
+import pytest
+
 from embodichain.lab.scripts.run_env import (
     _create_parser,
-    _resolve_generation_request,
+    _resolve_expansion_request,
 )
-from embodichain.lab.gym.utils.gym_utils import _apply_generation_runtime_overlay
-from embodichain.lab.sim.motion.expansion import CombinedGenerationProfile
+from embodichain.lab.gym.utils.gym_utils import _apply_expansion_runtime_overlay
+from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
@@ -33,7 +35,7 @@ def _resolve(path: str):
         ["--gym-config", path, "--headless", "--device", "cpu"]
     )
     config = load_config(resolve_config_path(path))
-    return _resolve_generation_request(args, config)
+    return _resolve_expansion_request(args, config)
 
 
 def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
@@ -43,7 +45,7 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     )
     assert request is not None
     profile, candidate_indices, _ = request
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "repeated_cube_pick_place"
     assert profile.source.call_count == 6
     assert profile.scene_randomization.reference_family_count == 4
@@ -57,7 +59,7 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
     )
     assert request is not None
     profile, candidate_indices, _ = request
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "slide_open_drawer"
     assert profile.source.call_count == 1
     assert profile.source.phase_permissions["pull"] == ("joint_residual",)
@@ -65,61 +67,76 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
     assert candidate_indices == (0, 1, 2)
 
 
-def test_task_generation_config_accepts_local_candidate_override() -> None:
+def test_task_expansion_config_accepts_local_candidate_override() -> None:
     task_path = resolve_config_path(
         "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     config = load_config(task_path)
-    config["generation"]["candidate_indices"] = [32]
+    config["expansion"]["candidate_indices"] = [32]
     args = _create_parser().parse_args(
         ["--gym-config", str(task_path), "--headless", "--device", "cpu"]
     )
 
-    request = _resolve_generation_request(args, config)
+    request = _resolve_expansion_request(args, config)
 
     assert request is not None
     assert request[1] == (32,)
     assert request[2].name == "repeated_pick_place.yaml"
 
 
-def test_task_generation_config_applies_runtime_overlay() -> None:
+def test_task_expansion_config_applies_runtime_overlay() -> None:
     task_path = resolve_config_path(
         "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
-    task = load_config(task_path)
-    resolved = _apply_generation_runtime_overlay(
+    with pytest.raises(ValueError, match="unsupported fields.*simulation"):
+        _apply_expansion_runtime_overlay(
+            {
+                "num_envs": 1,
+                "arena_space": 1.0,
+                "simulation": {"light": {"direct": []}},
+                "env": {"events": {}},
+                "expansion": {"runtime": {"simulation": {"light": {}}}},
+            },
+            base_dir=task_path.parent,
+        )
+
+    resolved = _apply_expansion_runtime_overlay(
         {
             "num_envs": 1,
             "arena_space": 1.0,
-            "simulation": {"light": {"direct": []}},
             "env": {"events": {}},
-            "generation": task["generation"],
+            "expansion": {
+                "runtime": {
+                    "num_envs": 16,
+                    "arena_space": 2.5,
+                    "env": {"events": {"expansion_profile_reset": {"mode": "reset"}}},
+                }
+            },
         },
         base_dir=task_path.parent,
     )
 
     assert resolved["num_envs"] == 16
     assert resolved["arena_space"] == 2.5
-    assert resolved["env"]["events"]["generation_profile_reset"]["mode"] == "reset"
-    assert len(resolved["simulation"]["light"]["direct"]) == 2
+    assert resolved["env"]["events"]["expansion_profile_reset"]["mode"] == "reset"
 
 
-def test_cli_generation_profile_overrides_task_generation_policy() -> None:
+def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
     task_path = resolve_config_path(
         "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     policy_path = resolve_config_path(
-        "embodichain_tasks/configs/components/generation_policies/"
+        "embodichain_tasks/configs/components/expansion_policies/"
         "task_program_episode.yaml"
     )
     args = _create_parser().parse_args(
         [
             "--gym-config",
             str(task_path),
-            "--generation-profile",
+            "--expansion-profile",
             str(policy_path),
             "--headless",
             "--device",
@@ -127,7 +144,7 @@ def test_cli_generation_profile_overrides_task_generation_policy() -> None:
         ]
     )
 
-    request = _resolve_generation_request(args, load_config(task_path))
+    request = _resolve_expansion_request(args, load_config(task_path))
 
     assert request is not None
     assert request[0].source.source_id == "task_program_source"

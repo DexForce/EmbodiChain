@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from .executor import SemanticCallExecutor
-from .generation import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
+from .expansion import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
 from .parallel import ParallelTimingPolicy
 from .parallel_executor import ParallelSemanticExecutor
 from .results import SemanticExecutionResult, SemanticExecutionStatus

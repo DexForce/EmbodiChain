@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Host-independent candidate generation and bounded logical queuing."""
+"""Host-independent candidate expansion and bounded logical queuing."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ import json
 
 import torch
 
-from .cfg import TrajectoryExpansionCfg, TrajectoryGenerationJobCfg
+from .cfg import TrajectoryExpansionCfg, TrajectoryExpansionJobCfg
 from .contracts import (
     CandidateSpec,
     CandidateTrajectoryBatch,
@@ -36,7 +36,7 @@ from .contracts import (
     ValidationResult,
     _json,
 )
-from .session import GenerationSession
+from .session import ExpansionSession
 from .source import SourceAdapter, SourceContext
 from .variants import TrajectoryVariant, expand_trajectory_variants
 
@@ -126,7 +126,7 @@ class CandidateWorkItem:
     template: TrajectoryTemplate
 
     def to_batch(self) -> CandidateTrajectoryBatch:
-        """Return the single-row logical batch consumed by GenerationSession."""
+        """Return the single-row logical batch consumed by ExpansionSession."""
         return CandidateTrajectoryBatch(
             positions=self.template.positions.unsqueeze(0),
             dt=self.template.dt.unsqueeze(0),
@@ -146,14 +146,14 @@ class CandidateCoordinator:
     The coordinator owns only template expansion and a bounded logical queue.
     Initial-state restoration, physical slots, measured validation, and
     persistence remain host responsibilities. A caller must register the source
-    case with the supplied :class:`GenerationSession` before proposing.
+    case with the supplied :class:`ExpansionSession` before proposing.
     """
 
     def __init__(
         self,
-        cfg: TrajectoryExpansionCfg | TrajectoryGenerationJobCfg,
+        cfg: TrajectoryExpansionCfg | TrajectoryExpansionJobCfg,
         *,
-        session: GenerationSession,
+        session: ExpansionSession,
         source_adapter: SourceAdapter[object],
         source_context: SourceContext,
         joint_limits: torch.Tensor,
@@ -162,12 +162,12 @@ class CandidateCoordinator:
         acceleration_limits: torch.Tensor | None = None,
         task_jacobians: torch.Tensor | None = None,
     ) -> None:
-        if isinstance(cfg, TrajectoryGenerationJobCfg):
-            cfg = TrajectoryExpansionCfg.from_generation_job(cfg)
+        if isinstance(cfg, TrajectoryExpansionJobCfg):
+            cfg = TrajectoryExpansionCfg.from_expansion_job(cfg)
         if not isinstance(cfg, TrajectoryExpansionCfg):
             raise TypeError("cfg must be a TrajectoryExpansionCfg")
-        if not isinstance(session, GenerationSession):
-            raise TypeError("session must be a GenerationSession")
+        if not isinstance(session, ExpansionSession):
+            raise TypeError("session must be a ExpansionSession")
         if not callable(getattr(source_adapter, "export_template", None)):
             raise TypeError("source_adapter must implement export_template")
         if not isinstance(source_context, SourceContext):
@@ -209,7 +209,7 @@ class CandidateCoordinator:
         return len(self._pending)
 
     @property
-    def session(self) -> GenerationSession:
+    def session(self) -> ExpansionSession:
         """Return the session that owns candidate lifecycle and receipts."""
         return self._session
 
@@ -268,7 +268,7 @@ class CandidateCoordinator:
             "trajectory_expansion:"
             + hashlib.sha256(affordance_payload.encode()).hexdigest()
         )
-        generator = self._session.generation_generator(
+        generator = self._session.expansion_generator(
             self._source_context.scene_case.scene_case_id,
             self._source_context.scene_case.initial_state_id,
             source_id=self._source_context.source_id,
@@ -377,7 +377,7 @@ class CandidateCoordinator:
         item: CandidateWorkItem,
         validation: ValidationResult,
     ) -> None:
-        """Admit one host-validated candidate to GenerationSession's ready pool.
+        """Admit one host-validated candidate to ExpansionSession's ready pool.
 
         The host owns collision/path validation; this method only transfers the
         immutable candidate and its validation result into the session state.

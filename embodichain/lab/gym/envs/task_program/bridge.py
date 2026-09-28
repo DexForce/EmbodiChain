@@ -74,9 +74,9 @@ from embodichain.lab.task_program.semantics.profiles import EffectAssurance
 from embodichain.lab.sim.types import EnvAction
 
 if TYPE_CHECKING:
-    from embodichain.lab.task_program.integrations.generation import (
-        CombinedTaskProgramCandidatePlanTransformFactory,
-        TaskProgramGenerationRecord,
+    from embodichain.lab.task_program.integrations.expansion import (
+        CombinedTaskProgramExpansionFactory,
+        TaskProgramExpansionRecord,
     )
 
 _SAFE_HOLD_ACTION_KINDS = frozenset(
@@ -984,9 +984,7 @@ class TaskProgramDemoBridge:
         validator_port: SegmentValidatorPort | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         parallel_safety_validator: ParallelCommandSafetyValidator | None = None,
-        generation_trace_provider: (
-            CombinedTaskProgramCandidatePlanTransformFactory | None
-        ) = None,
+        expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
     ) -> None:
         if not isinstance(program, CompiledTaskProgramPort):
             raise TypeError("program must implement CompiledTaskProgramPort.")
@@ -1018,18 +1016,17 @@ class TaskProgramDemoBridge:
                 "parallel_safety_validator must implement "
                 "ParallelCommandSafetyValidator."
             )
-        if generation_trace_provider is not None:
-            from embodichain.lab.task_program.integrations.generation import (
-                CombinedTaskProgramCandidatePlanTransformFactory,
+        if expansion_trace_provider is not None:
+            from embodichain.lab.task_program.integrations.expansion import (
+                CombinedTaskProgramExpansionFactory,
             )
 
             if not isinstance(
-                generation_trace_provider,
-                CombinedTaskProgramCandidatePlanTransformFactory,
+                expansion_trace_provider,
+                CombinedTaskProgramExpansionFactory,
             ):
                 raise TypeError(
-                    "generation_trace_provider must be a "
-                    "a supported generation factory or None."
+                    "expansion_trace_provider must be a supported expansion factory or None."
                 )
         self._program = program
         self._runtime = runtime
@@ -1039,7 +1036,7 @@ class TaskProgramDemoBridge:
         self._validator_port = validator_port
         self._runner_cfg = deepcopy(runner_cfg or ExecutionRunnerCfg())
         self._parallel_safety_validator = parallel_safety_validator
-        self._generation_trace_provider = generation_trace_provider
+        self._expansion_trace_provider = expansion_trace_provider
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
@@ -1055,11 +1052,11 @@ class TaskProgramDemoBridge:
         return self._program_completed
 
     @property
-    def generation_records(self) -> tuple[TaskProgramGenerationRecord, ...]:
-        """Return owned generation records from the optional transform provider."""
-        if self._generation_trace_provider is None:
+    def expansion_records(self) -> tuple[TaskProgramExpansionRecord, ...]:
+        """Return owned expansion records from the optional transform provider."""
+        if self._expansion_trace_provider is None:
             return ()
-        return self._generation_trace_provider.records
+        return self._expansion_trace_provider.records
 
     @property
     def completion_mask(self) -> torch.Tensor:

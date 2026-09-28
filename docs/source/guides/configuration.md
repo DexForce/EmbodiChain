@@ -125,11 +125,11 @@ class MyEventCfg:
 
 ## JSON and YAML Configuration
 
-For RL training and data generation, EmbodiChain uses file-based configs (`.json`, `.yaml`, or `.yml`). The file format mirrors the Python config structure but uses string names instead of direct function references.
+For RL training and data expansion, EmbodiChain uses file-based configs (`.json`, `.yaml`, or `.yml`). The file format mirrors the Python config structure but uses string names instead of direct function references.
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
-For offline expert generation, `max_episodes` counts persisted
+For offline expert expansion, `max_episodes` counts persisted
 per-environment episodes rather than vector batches. Thus `num_envs: 4` and
 `max_episodes: 10` produce two full four-row commits plus a final two-row
 commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
@@ -339,7 +339,7 @@ layout separates a reusable environment from runnable deployment choices:
 │   └── newton.yaml
 ├── task.franka.yaml
 ├── task.ur5.yaml
-├── generation/
+├── expansion/
 │   └── <task-profile>.yaml
 └── task_program/
     ├── integration.yaml
@@ -380,8 +380,8 @@ task_program:
   execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
 embodiment:
   component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
-generation:
-  config: generation/<task-profile>.yaml
+expansion:
+  config: expansion/<task-profile>.yaml
 ```
 
 All references above resolve relative to the runnable deployment file. An
@@ -390,14 +390,14 @@ own a `skill_profile` when Task Program needs semantic resources. The
 task-local `integration.yaml` owns its nested `scene_binding`, including each
 canonical `entity_id` to physical `simulation_uid` mapping.
 
-The optional `generation.config` reference keeps task-facing augmentation
+The optional `expansion.config` reference keeps task-facing augmentation
 settings in a separate file. That file may define `runtime`, `policy`,
 `overrides`, and `candidate_indices`; the runner deep-merges task-local fields,
 applies the runtime overlay after resolving the selected environment variant,
 and then constructs the common environment. `--physics` selects `default` or
-`newton` from the task mapping, while `--generation-profile` and
-`--generation-candidate-indices` override the referenced generation values.
-Relative policy and resource paths inside the generation file resolve from that
+`newton` from the task mapping, while `--expansion-profile` and
+`--expansion-candidate-indices` override the referenced expansion values.
+Relative policy and resource paths inside the expansion file resolve from that
 file's directory.
 
 Component ownership is exclusive. Do not combine `environment.component` with
@@ -546,7 +546,7 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
    `task.<embodiment>.yaml`, and Task Program intent plus semantic integration
    in `task_program/{program,integration}.yaml`. Keep shared embodiments and
    execution policies under `configs/components/`, and keep task-facing
-   generation overrides under `generation/`.
+   expansion overrides under `expansion/`.
 
 ---
 

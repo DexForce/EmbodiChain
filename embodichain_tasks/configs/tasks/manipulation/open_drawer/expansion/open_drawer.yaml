@@ -1,6 +1,6 @@
-# Task-facing generation overrides. Referenced by task.ur5.yaml.
+# Task-facing expansion overrides. Referenced by task.ur5.yaml.
 policy:
-  component: ../../../../components/generation_policies/task_program_episode.yaml
+  component: ../../../../components/expansion_policies/task_program_episode.yaml
 overrides:
   source:
     source_id: slide_open_drawer
@@ -34,12 +34,7 @@ overrides:
     policy: round_robin_fifo
     candidate_budget: 3
     reference_family_budget: 1
-    queue_max_items: 3
-    queue_max_bytes: 67108864
   persistence:
     sink: lerobot
-    output_dir: /tmp/open-drawer-generation
-    write_trajectories: true
-    write_observations: false
-    write_manifest: true
+    output_dir: /tmp/open-drawer-expansion
 candidate_indices: [0, 1, 2]

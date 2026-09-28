@@ -71,7 +71,7 @@ from embodichain.lab.sim.atomic_actions import (
     RobotObservation,
     TaskState,
 )
-from embodichain.lab.sim.motion.expansion import TrajectoryGenerationJobCfg
+from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 from embodichain.lab.task_program.semantics import (
     COMPOSITE_EFFECT_MONITOR_ID,
     COMPOSITE_EFFECT_MONITOR_REVISION,
@@ -451,22 +451,34 @@ def _program(
     )
 
 
-def _generation_profile(
+def _expansion_profile(
     program_id: str = "fake_pick",
     *,
     template_id: str = "pick_up",
-) -> TrajectoryGenerationJobCfg:
-    return TrajectoryGenerationJobCfg.from_mapping(
+) -> CombinedExpansionProfile:
+    return CombinedExpansionProfile.from_mapping(
         {
             "source": {
                 "kind": "task_program",
                 "source_id": program_id,
                 "source_revision": "test:r1",
-                "unit_scope": "action",
+                "unit_scope": "episode",
                 "template_id": template_id,
+                "call_count": 1,
+                "affordance_call_indices": [],
+                "trajectory_call_indices": [0],
             },
-            "augmentation": {"max_variants_per_reference": 1},
-            "scheduling": {"candidate_budget": 1},
+            "scene_randomization": {
+                "enabled": False,
+                "reference_family_count": 1,
+            },
+            "affordance": {"enabled": False, "branches_per_family": 1},
+            "trajectory": {"variants_per_family": 1},
+            "visual": {"enabled": False, "profiles": []},
+            "scheduling": {
+                "candidate_budget": 1,
+                "reference_family_budget": 1,
+            },
             "execution": {"max_inflight": 1},
         }
     )
@@ -554,7 +566,7 @@ def test_embodied_env_delegates_compilation_and_bridge_assembly() -> None:
     segment_iterator.close()
 
 
-def test_bridge_without_generation_profile_preserves_default_path() -> None:
+def test_bridge_without_expansion_profile_preserves_default_path() -> None:
     adapter = TaskProgramEnvironmentAdapter(
         _FakeEnvironmentFactory(),
         step_dt=_STEP_DT,
@@ -564,46 +576,31 @@ def test_bridge_without_generation_profile_preserves_default_path() -> None:
     default_bridge = adapter.create_bridge(compiled)
     explicit_bridge = adapter.create_bridge(
         compiled,
-        generation_profile=None,
+        expansion_profile=None,
         candidate_index=0,
     )
 
-    assert default_bridge.generation_records == ()
-    assert explicit_bridge.generation_records == ()
+    assert default_bridge.expansion_records == ()
+    assert explicit_bridge.expansion_records == ()
 
 
-def test_generation_profile_rejects_skill_absent_from_program() -> None:
-    factory = _FakeEnvironmentFactory()
-    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
-    compiled = adapter.compile(_program())
-
-    with pytest.raises(ValueError, match="template_id.*not present"):
-        adapter.create_bridge(
-            compiled,
-            generation_profile=_generation_profile(template_id="place"),
-            candidate_index=0,
-        )
-
-    assert factory.observation_samples == 0
-
-
-def test_embodied_env_threads_episode_generation_profile_to_bridge() -> None:
+def test_embodied_env_threads_episode_expansion_profile_to_bridge() -> None:
     adapter = TaskProgramEnvironmentAdapter(
         _FakeEnvironmentFactory(),
         step_dt=_STEP_DT,
     )
     env = _FakeDeclarativeEnvironment(adapter)
     compiled = adapter.compile(_program())
-    profile = _generation_profile()
+    profile = _expansion_profile()
 
     segments = env.create_demo_segments(
         task_program=compiled,
-        generation_profile=profile,
-        generation_candidate_index=0,
+        expansion_profile=profile,
+        expansion_candidate_index=0,
     )
 
     assert segments is not None
-    assert env.task_program_generation_records == ()
+    assert env.task_program_expansion_records == ()
 
 
 def test_adapter_assembles_position_velocity_command_encoder() -> None:

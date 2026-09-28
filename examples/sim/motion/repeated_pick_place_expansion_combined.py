@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Preflight and persist the deterministic combined generation schedule.
+"""Preflight and persist the deterministic combined expansion schedule.
 
 This command validates the profile and writes the schedule consumed by the
 future physical host runner.  It intentionally reports a configured schedule,
@@ -34,11 +34,11 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 from embodichain.lab.sim.motion.expansion import (
     CandidateRecipe,
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     CombinedEpisodeCoordinator,
     CubeInitialPoseProvider,
     enumerate_candidate_recipes,
-    load_generation_profile,
+    load_expansion_profile,
     PhysicalSlotPool,
     VisualProfileRegistry,
     round_robin_recipes,
@@ -56,7 +56,7 @@ _DEFAULT_TASK_CONFIG = (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-config", type=Path, default=_DEFAULT_TASK_CONFIG)
-    parser.add_argument("--generation-profile", type=Path, default=None)
+    parser.add_argument("--expansion-profile", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--device", default="cpu")
@@ -88,26 +88,26 @@ def _record(recipe: CandidateRecipe) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    if args.generation_profile is None:
+    if args.expansion_profile is None:
         from embodichain.lab.scripts.run_env import (
-            _resolve_generation_request,
+            _resolve_expansion_request,
         )
 
         task_path = resolve_config_path(args.task_config)
         args.gym_config = str(task_path)
-        args.generation_candidate_indices = None
-        request = _resolve_generation_request(args, load_config(task_path))
+        args.expansion_candidate_indices = None
+        request = _resolve_expansion_request(args, load_config(task_path))
         if request is None:
             raise ValueError(
-                "task config must bind a generation policy when "
-                "--generation-profile is omitted"
+                "task config must bind a expansion policy when "
+                "--expansion-profile is omitted"
             )
         profile, _, profile_anchor = request
         profile_source = str(profile_anchor)
     else:
-        profile = load_generation_profile(args.generation_profile)
-        profile_source = str(args.generation_profile)
-    if not isinstance(profile, CombinedGenerationProfile):
+        profile = load_expansion_profile(args.expansion_profile)
+        profile_source = str(args.expansion_profile)
+    if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError(
             "the combined command requires schema_version: 1 and trajectory"
         )

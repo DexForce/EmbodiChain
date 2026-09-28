@@ -110,7 +110,7 @@ _RESOURCE_PATHS = frozenset(
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
-        Path("components/generation_policies/task_program_episode.yaml"),
+        Path("components/expansion_policies/task_program_episode.yaml"),
         Path("components/randomization_profiles/cube_initial_pose.yaml"),
         Path("components/randomization_profiles/rgb_visual.yaml"),
         Path("components/embodiments/cobotmagic.yaml"),
@@ -121,13 +121,13 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/envs/default.yaml"),
         Path("tasks/manipulation/open_drawer/envs/newton.yaml"),
-        Path("tasks/manipulation/open_drawer/generation/open_drawer.yaml"),
+        Path("tasks/manipulation/open_drawer/expansion/open_drawer.yaml"),
         Path("tasks/manipulation/open_drawer/README.md"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/default.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
         Path(
-            "tasks/manipulation/repeated_pick_place/generation/"
+            "tasks/manipulation/repeated_pick_place/expansion/"
             "repeated_pick_place.yaml"
         ),
         Path("tasks/manipulation/repeated_pick_place/task_program/integration.yaml"),

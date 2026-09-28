@@ -22,38 +22,38 @@ import pytest
 import yaml
 
 from embodichain.lab.sim.motion.expansion import (
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     CubeInitialPoseProvider,
     PhysicalSlotPool,
     enumerate_candidate_recipes,
     schedule_digest,
 )
 from embodichain.lab.sim.motion.expansion.combined import load_visual_profile_registry
-from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
+from embodichain.lab.sim.motion.expansion.profile import load_expansion_profile
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
-from embodichain.lab.scripts.run_env import _create_parser, _resolve_generation_request
+from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
 
 _TASK_CONFIG = Path(__file__).parents[4] / (
     "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/" "task.ur5.yaml"
 )
 
 
-def _profile() -> CombinedGenerationProfile:
+def _profile() -> CombinedExpansionProfile:
     args = _create_parser().parse_args(
         ["--gym-config", str(_TASK_CONFIG), "--headless", "--device", "cpu"]
     )
-    request = _resolve_generation_request(args, load_config(_TASK_CONFIG))
+    request = _resolve_expansion_request(args, load_config(_TASK_CONFIG))
     assert request is not None
     profile = request[0]
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     return profile
 
 
 def test_combined_profile_decodes_canonical_shape() -> None:
     profile = _profile()
 
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     assert profile.scene_randomization.reference_family_count == 4
     assert profile.affordance.branches_per_family == 4
     assert profile.trajectory.variants_per_family == 4
@@ -67,22 +67,24 @@ def test_combined_profile_decodes_canonical_shape() -> None:
         visual_profile_ids=visual_ids,
         observation_profile_ids=profile.observation.profiles,
     )
-    generation_config = yaml.safe_load(
-        (_TASK_CONFIG.parent / "generation/repeated_pick_place.yaml").read_text(
+    expansion_config = yaml.safe_load(
+        (_TASK_CONFIG.parent / "expansion/repeated_pick_place.yaml").read_text(
             encoding="utf-8"
         )
     )
-    runtime = generation_config["runtime"]
-    lights = runtime["simulation"]["light"]["direct"]
+    runtime = expansion_config["runtime"]
+    assert "simulation" not in runtime
+    environment = load_config(_TASK_CONFIG.parent / "envs/default.yaml")
+    lights = environment["simulation"]["light"]["direct"]
     assert {light["uid"] for light in lights} == {"main_light", "rect_light"}
     assert lights[0]["light_type"] == "sun"
     assert lights[0]["intensity"] <= 10
     recorder = runtime["env"]["events"]["record_camera"]
     assert recorder["func"] == "record_camera_data"
     assert recorder["params"]["max_env_num"] == 16
-    generation_reset = runtime["env"]["events"]["generation_profile_reset"]
-    assert generation_reset["func"] == "apply_generation_profile_reset"
-    assert generation_reset["mode"] == "reset"
+    expansion_reset = runtime["env"]["events"]["expansion_profile_reset"]
+    assert expansion_reset["func"] == "apply_expansion_profile_reset"
+    assert expansion_reset["mode"] == "reset"
 
 
 def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:
@@ -90,17 +92,17 @@ def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:
     payload = profile.to_dict()
     payload["scheduling"]["candidate_budget"] = 63
     with pytest.raises(ValueError, match="m.*a.*t"):
-        CombinedGenerationProfile.from_mapping(payload)
+        CombinedExpansionProfile.from_mapping(payload)
 
     profile = _profile()
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     with pytest.raises(ValueError, match="num_envs"):
         profile.validate_for_num_envs(8)
 
 
 def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
     profile = _profile()
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     families = CubeInitialPoseProvider().enumerate(4)
     recipes = enumerate_candidate_recipes(profile, families=families)
 
@@ -127,7 +129,7 @@ def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
 
 def test_authored_pose_profile_controls_family_geometry_and_identity() -> None:
     profile = _profile()
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     provider = CubeInitialPoseProvider.from_yaml(
         resolve_config_path(profile.scene_randomization.profile_file)
     )

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Source-neutral adapter contracts for expert trajectory generation."""
+"""Source-neutral adapter contracts for expert trajectory expansion."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ SourceT = TypeVar("SourceT")
 
 @dataclass(frozen=True)
 class SourceContext:
-    """Stable source and scene identity supplied by a generation coordinator."""
+    """Stable source and scene identity supplied by a expansion coordinator."""
 
     source_id: str
     source_revision: str

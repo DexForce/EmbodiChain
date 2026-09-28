@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Host-independent grasp/qpos augmentation, coverage, and generation bookkeeping.
+"""Host-independent grasp/qpos augmentation, coverage, and expansion bookkeeping.
 
 Execution, initial-state restoration, physical validation, and durable storage
 are supplied by host integrations. These algorithms do not call Gym or a
@@ -28,12 +28,12 @@ from .cfg import (
     SPATIAL_METHODS,
     TrajectoryExpansionCfg,
     TrajectoryAugmentationCfg,
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
 )
 from .combined import (
     CandidateRecipe,
     CallRecipe,
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     CubeInitialPoseProvider,
     CycleRecipe,
     PhysicalSlotPool,
@@ -95,8 +95,8 @@ from .operators import (
     validate_motion_limits,
     via_points,
 )
-from .session import GenerationSession
-from .profile import load_generation_profile
+from .session import ExpansionSession
+from .profile import load_expansion_profile
 from .source import (
     PlanResultSourceAdapter,
     SourceAdapter,
@@ -116,7 +116,7 @@ __all__ = [
     "CandidateWorkItem",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
-    "CombinedGenerationProfile",
+    "CombinedExpansionProfile",
     "CubeInitialPoseProvider",
     "CycleRecipe",
     "MeasuredValidator",
@@ -131,7 +131,7 @@ __all__ = [
     "SceneCase",
     "TrajectoryAugmentationCfg",
     "TrajectoryExpansionCfg",
-    "TrajectoryGenerationJobCfg",
+    "TrajectoryExpansionJobCfg",
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "ValidationCheck",
@@ -165,8 +165,8 @@ __all__ = [
     "rotate_grasp_about_object_axis",
     "validate_motion_limits",
     "via_points",
-    "GenerationSession",
-    "load_generation_profile",
+    "ExpansionSession",
+    "load_expansion_profile",
     "SourceAdapter",
     "SourceContext",
     "TemplateSourceAdapter",

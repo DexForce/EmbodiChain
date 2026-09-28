@@ -145,15 +145,15 @@ Gym lifecycle bridge is :mod:`embodichain.lab.gym.envs.task_program`.
 
 .. autoclass:: TaskProgramCompileError
 
-Generation integration
+Expansion integration
 ----------------------
 
-Call-scoped generation remains outside the Task Program language. Runtime
+Call-scoped expansion remains outside the Task Program language. Runtime
 requests identify one grounded Atomic planning call, while the integration
 adapter exposes the resulting Atomic plan through the source-neutral motion
 template contract.
 
-.. currentmodule:: embodichain.lab.task_program.runtime.generation
+.. currentmodule:: embodichain.lab.task_program.runtime.expansion
 
 .. autosummary::
    :nosignatures:
@@ -167,26 +167,22 @@ template contract.
 .. autoclass:: TaskProgramPlanTransformFactory
    :members:
 
-.. currentmodule:: embodichain.lab.task_program.integrations.generation
+.. currentmodule:: embodichain.lab.task_program.integrations.expansion
 
 .. autosummary::
    :nosignatures:
 
    TaskProgramSourceAdapter
-   TaskProgramGenerationRecord
-   TaskProgramCandidatePlanTransformFactory
-   CombinedTaskProgramCandidatePlanTransformFactory
+   TaskProgramExpansionRecord
+   CombinedTaskProgramExpansionFactory
 
 .. autoclass:: TaskProgramSourceAdapter
    :members:
 
-.. autoclass:: TaskProgramGenerationRecord
+.. autoclass:: TaskProgramExpansionRecord
    :members:
 
-.. autoclass:: TaskProgramCandidatePlanTransformFactory
-   :members:
-
-.. autoclass:: CombinedTaskProgramCandidatePlanTransformFactory
+.. autoclass:: CombinedTaskProgramExpansionFactory
    :members:
 
 .. currentmodule:: embodichain.lab.task_program

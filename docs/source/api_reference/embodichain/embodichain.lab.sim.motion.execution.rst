@@ -29,12 +29,12 @@ and velocities are recomputed on the executed grid.
 
 .. autofunction:: play_joint_trajectory
 
-Generation host integration
+Expansion host integration
 ---------------------------
 
 The single-slot runner coordinates injected restore, measured-execution, and
 persistence ports. Candidate identity, budgets, coverage, and receipts remain
-owned by :class:`embodichain.lab.sim.motion.expansion.GenerationSession`.
+owned by :class:`embodichain.lab.sim.motion.expansion.ExpansionSession`.
 ``MultiSlotRunner`` adds generic compatible-slot reservation and exact release
 around the existing runner; its current drain policy is synchronous FIFO.
 

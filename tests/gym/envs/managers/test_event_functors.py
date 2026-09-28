@@ -1848,9 +1848,9 @@ def test_asset_replacement_failure_preserves_original_config() -> None:
     env.sim.remove_asset.assert_not_called()
 
 
-def test_generation_profile_reset_applies_selected_scene_and_visual_rows() -> None:
+def test_expansion_profile_reset_applies_selected_scene_and_visual_rows() -> None:
     from embodichain.lab.gym.envs.managers.events import (
-        apply_generation_profile_reset,
+        apply_expansion_profile_reset,
     )
 
     class Cube:
@@ -1882,7 +1882,7 @@ def test_generation_profile_reset_applies_selected_scene_and_visual_rows() -> No
     env = Mock(num_envs=4, sim=Sim(cube))
     pose = torch.arange(28, dtype=torch.float32).reshape(4, 7)
 
-    apply_generation_profile_reset(
+    apply_expansion_profile_reset(
         env,
         torch.tensor([1, 3]),
         cube_pose=pose,

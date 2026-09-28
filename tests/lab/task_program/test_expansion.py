@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Source-neutral Task Program generation integration tests."""
+"""Source-neutral Task Program expansion integration tests."""
 
 from __future__ import annotations
 
@@ -43,14 +43,14 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.motion.expansion import (
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     SceneCase,
     SourceAdapter,
     SourceContext,
     TrajectoryTemplate,
 )
 from embodichain.lab.task_program.integrations import (
-    CombinedTaskProgramCandidatePlanTransformFactory,
+    CombinedTaskProgramExpansionFactory,
     TaskProgramSourceAdapter,
 )
 from embodichain.lab.task_program.runtime import TaskProgramPlanRequest
@@ -107,14 +107,14 @@ class _ThreePhasePlaceAction(AtomicAction[JointPositionGoal, ActionOptions]):
         )
 
 
-def _engine() -> tuple[AtomicActionEngine, _ThreePhasePlaceAction]:
+def _engine(batch_size: int = 1) -> tuple[AtomicActionEngine, _ThreePhasePlaceAction]:
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.dof = 3
     robot.joint_names = ("j0", "j1", "j2")
     robot.control_parts = {"all": object()}
-    robot.get_qpos.return_value = torch.zeros(1, 3)
-    robot.get_qvel.return_value = torch.zeros(1, 3)
+    robot.get_qpos.return_value = torch.zeros(batch_size, 3)
+    robot.get_qvel.return_value = torch.zeros(batch_size, 3)
     robot.get_joint_ids.return_value = [0, 1, 2]
     robot.body_data = SimpleNamespace(qpos_limits=torch.tensor([[[-2.0, 2.0]] * 3]))
     generator = Mock()
@@ -127,10 +127,12 @@ def _engine() -> tuple[AtomicActionEngine, _ThreePhasePlaceAction]:
     return engine, action
 
 
-def _place_invocation(engine: AtomicActionEngine) -> ActionInvocation:
+def _place_invocation(
+    engine: AtomicActionEngine, batch_size: int = 1
+) -> ActionInvocation:
     return ActionInvocation(
         skill_id="place",
-        goal=JointPositionGoal(torch.ones(1, 3)),
+        goal=JointPositionGoal(torch.ones(batch_size, 3)),
         binding=engine.bind_control_parts(
             "place",
             {"primary": {"motion": "all"}},
@@ -168,8 +170,8 @@ def _plan_request(
     )
 
 
-def _combined_profile() -> CombinedGenerationProfile:
-    return CombinedGenerationProfile.from_mapping(
+def _combined_profile() -> CombinedExpansionProfile:
+    return CombinedExpansionProfile.from_mapping(
         {
             "source": {
                 "kind": "task_program",
@@ -184,7 +186,7 @@ def _combined_profile() -> CombinedGenerationProfile:
 
 def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> None:
     engine, invocation, _, context, _ = _planned_place()
-    factory = CombinedTaskProgramCandidatePlanTransformFactory(
+    factory = CombinedTaskProgramExpansionFactory(
         _combined_profile(),
         candidate_index=7,
         program_id="repeated_cube_pick_place",
@@ -201,7 +203,7 @@ def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> Non
 
 def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
     engine, invocation, resolved, context, plan = _planned_place()
-    factory = CombinedTaskProgramCandidatePlanTransformFactory(
+    factory = CombinedTaskProgramExpansionFactory(
         _combined_profile(),
         candidate_index=1,
         program_id="repeated_cube_pick_place",
@@ -220,3 +222,38 @@ def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
     assert record.trajectory_requested == 1
     assert record.trajectory_selected == 1
     assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)
+
+
+def test_combined_factory_expands_multi_environment_batch() -> None:
+    engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=2)
+    factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile(),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    transform = factory.create_plan_transform(request, engine=engine)
+    assert transform is not None
+
+    rebuilt = transform(resolved, context, plan)
+
+    assert rebuilt.success_all
+    assert rebuilt.joint_trajectory is not None
+    assert rebuilt.joint_trajectory.batch_size == 2
+    assert len(factory.records) == 2
+
+
+def _planned_place_batch(*, batch_size: int) -> tuple[
+    AtomicActionEngine,
+    ActionInvocation,
+    ResolvedActionRequest,
+    PlanningContext,
+    ActionPlan,
+]:
+    engine, action = _engine(batch_size=batch_size)
+    invocation = _place_invocation(engine, batch_size=batch_size)
+    context = engine.initial_context(control_dt=CONTROL_DT)
+    plan = engine.plan(invocation, context)
+    return engine, invocation, action.resolve_request(invocation), context, plan

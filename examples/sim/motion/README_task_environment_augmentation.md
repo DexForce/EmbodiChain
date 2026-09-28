@@ -27,4 +27,4 @@ Useful overrides include:
 ```
 
 This is a physical execution showcase. It does not claim confirmed dataset
-commits; use the generation coordinator and EpisodeSink flow for collection.
+commits; use the expansion coordinator and EpisodeSink flow for collection.

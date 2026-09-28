@@ -50,18 +50,11 @@ scheduling:
   policy: round_robin_fifo
   candidate_budget: 1
   reference_family_budget: 1
-  queue_max_items: 1
-  queue_max_bytes: 67108864
 
 execution:
   max_inflight: 1
   compatibility: strict
-  restore_initial_state: true
-  cancel_policy: safe_finish_and_drain
 
 persistence:
   sink: lerobot
-  output_dir: /tmp/embodichain-generation
-  write_trajectories: true
-  write_observations: false
-  write_manifest: true
+  output_dir: /tmp/embodichain-expansion

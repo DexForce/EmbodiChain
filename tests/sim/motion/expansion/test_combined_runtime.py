@@ -24,7 +24,7 @@ import torch
 from embodichain.lab.sim.motion.expansion import (
     CandidateIdentity,
     CombinedEpisodeCoordinator,
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     CubeInitialPoseProvider,
     ExpertEpisode,
     MeasuredValidator,
@@ -37,21 +37,21 @@ from embodichain.lab.sim.motion.expansion import (
 )
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
-from embodichain.lab.scripts.run_env import _create_parser, _resolve_generation_request
+from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
 
 _ROOT = Path(__file__).parents[4]
 _TASK_ROOT = _ROOT / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 
 
-def _profile() -> CombinedGenerationProfile:
+def _profile() -> CombinedExpansionProfile:
     task_config = _TASK_ROOT / "task.ur5.yaml"
     args = _create_parser().parse_args(
         ["--gym-config", str(task_config), "--headless", "--device", "cpu"]
     )
-    request = _resolve_generation_request(args, load_config(task_config))
+    request = _resolve_expansion_request(args, load_config(task_config))
     assert request is not None
     profile = request[0]
-    assert isinstance(profile, CombinedGenerationProfile)
+    assert isinstance(profile, CombinedExpansionProfile)
     return profile
 
 

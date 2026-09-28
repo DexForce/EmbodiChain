@@ -159,7 +159,7 @@ registration still matches the compiled scene/profile/catalog snapshots.
 
 Configuration-defined Task Programs separate the reusable physical environment
 from the runnable task deployment. An augmented deployment can add a
-task-facing generation declaration alongside the core owners:
+task-facing expansion declaration alongside the core owners:
 
 ```text
 repeated_pick_place/
@@ -168,7 +168,7 @@ repeated_pick_place/
 │   └── newton.yaml
 ├── task.franka.yaml
 ├── task.ur5.yaml
-├── generation/
+├── expansion/
 │   └── repeated_pick_place.yaml
 └── task_program/
     ├── integration.yaml
@@ -195,7 +195,7 @@ env:
 
 A runnable `task.<embodiment>.yaml` selects the environment variants, all three
 Task Program components, and one reusable embodiment. The UR5 deployment can
-also reference the task-facing generation declaration:
+also reference the task-facing expansion declaration:
 
 ```yaml
 id: TaskProgramRepeatedPickPlace-v1
@@ -208,13 +208,13 @@ task_program:
   execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
 embodiment:
   component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
-generation:
-  config: generation/repeated_pick_place.yaml
+expansion:
+  config: expansion/repeated_pick_place.yaml
 ```
 
-The referenced generation file is task-facing configuration rather than a
+The referenced expansion file is task-facing configuration rather than a
 second environment deployment. It owns batch runtime values, the shared
-generation policy, task-specific augmentation overrides, and candidate indices;
+expansion policy, task-specific augmentation overrides, and candidate indices;
 the runner merges it after selecting the physical backend.
 
 The callable-free `integration.yaml` owns the semantic scene binding and

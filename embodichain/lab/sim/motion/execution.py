@@ -31,7 +31,7 @@ from embodichain.utils import configclass
 from .expansion.contracts import CommitReceipt, ExpertEpisode, ValidationResult
 from .expansion.combined import PhysicalSlotPool
 from .expansion.coordinator import CandidateCoordinator, CandidateWorkItem
-from .expansion.session import GenerationSession
+from .expansion.session import ExpansionSession
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -301,7 +301,7 @@ class SingleSlotRunner:
 
     @staticmethod
     def _release_if_uncommitted(
-        session: GenerationSession,
+        session: ExpansionSession,
         item: CandidateWorkItem,
         *,
         reason: str,
@@ -316,8 +316,7 @@ class SingleSlotRunner:
         """Execute the next FIFO candidate, or report an empty queue."""
         if slot_id is not None and self._slot_id not in (None, slot_id):
             raise RuntimeError("runner is bound to a different physical slot")
-        if slot_id is not None and self._slot_id is None:
-            self._slot_id = slot_id
+        active_slot_id = self._slot_id if slot_id is None else slot_id
         item = self._coordinator.take_next()
         if item is None:
             return SingleSlotOutcome("no_candidate")
@@ -372,7 +371,7 @@ class SingleSlotRunner:
 
         try:
             prepared = self._call_host(
-                self._restorer.restore, item, slot_id=self._slot_id
+                self._restorer.restore, item, slot_id=active_slot_id
             )
             episode = self._call_host(
                 self._executor.execute,
@@ -381,7 +380,7 @@ class SingleSlotRunner:
                 episode_id=episode_id,
                 commit_id=commit_id,
                 on_rollout_started=on_rollout_started,
-                slot_id=self._slot_id,
+                slot_id=active_slot_id,
             )
             if not started:
                 raise RuntimeError("executor returned before starting the rollout")

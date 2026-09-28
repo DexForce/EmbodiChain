@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Strict configuration for the first fixed-scene generation implementation.
+"""Strict configuration for the first fixed-scene expansion implementation.
 
 These are pure job contracts, not a runnable host integration. A runner must
 still resolve registered sources, restoration profiles, physical validators,
@@ -38,7 +38,7 @@ __all__ = [
     "SPATIAL_METHODS",
     "TrajectoryExpansionCfg",
     "TrajectoryAugmentationCfg",
-    "TrajectoryGenerationJobCfg",
+    "TrajectoryExpansionJobCfg",
 ]
 
 SPATIAL_METHODS = ("joint_residual", "via_points")
@@ -493,7 +493,7 @@ class _ObservationCfg:
 
 @configclass
 class _SchedulingCfg:
-    """Candidate selection policy and bounded logical generation budget."""
+    """Candidate selection policy and bounded logical expansion budget."""
 
     policy: str = "fifo"
     candidate_budget: int = 128
@@ -685,13 +685,13 @@ class TrajectoryExpansionCfg:
         return _decode(cls, data)
 
     @classmethod
-    def from_generation_job(
+    def from_expansion_job(
         cls,
-        job: "TrajectoryGenerationJobCfg",
+        job: "TrajectoryExpansionJobCfg",
     ) -> "TrajectoryExpansionCfg":
         """Project a legacy job into the source-neutral expansion contract."""
-        if not isinstance(job, TrajectoryGenerationJobCfg):
-            raise TypeError("job must be a TrajectoryGenerationJobCfg")
+        if not isinstance(job, TrajectoryExpansionJobCfg):
+            raise TypeError("job must be a TrajectoryExpansionJobCfg")
         payload = job.to_dict()
         fields_to_keep = (
             "augmentation",
@@ -707,8 +707,8 @@ class TrajectoryExpansionCfg:
 
 
 @configclass
-class TrajectoryGenerationJobCfg:
-    """Standalone generation job configuration; control periods remain host-owned."""
+class TrajectoryExpansionJobCfg:
+    """Standalone expansion job configuration; control periods remain host-owned."""
 
     source: _SourceCfg = _SourceCfg()
     augmentation: TrajectoryAugmentationCfg = TrajectoryAugmentationCfg()
@@ -726,7 +726,7 @@ class TrajectoryGenerationJobCfg:
         self.validate_semantics()
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> TrajectoryGenerationJobCfg:
+    def from_mapping(cls, data: Mapping[str, Any]) -> TrajectoryExpansionJobCfg:
         """Decode the supported nested YAML schema and reject unknown fields.
 
         Args:

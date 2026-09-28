@@ -44,8 +44,8 @@ Use ``show-task`` before launch when a logical task has several deployments:
        --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
 
 The UR5 deployment keeps its augmentation settings in the task-facing
-``generation/repeated_pick_place.yaml`` file referenced by
-``generation.config``; the physical ``default`` and ``newton`` components stay
+``expansion/repeated_pick_place.yaml`` file referenced by
+``expansion.config``; the physical ``default`` and ``newton`` components stay
 under ``envs/``.
 
 .. toctree::

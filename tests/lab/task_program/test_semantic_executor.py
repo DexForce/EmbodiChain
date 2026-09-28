@@ -108,7 +108,7 @@ from embodichain.lab.task_program.semantics.integration import (
     SemanticValidationError,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
-from embodichain.lab.task_program.runtime.generation import (
+from embodichain.lab.task_program.runtime.expansion import (
     TaskProgramPlanRequest,
     TaskProgramPlanTransformFactory,
 )

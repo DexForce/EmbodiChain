@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Episode-level combined generation contracts.
+"""Episode-level combined expansion contracts.
 
 The contracts in this module deliberately do not depend on Gym, a simulator,
 or a renderer.  They provide the deterministic schedule that a host runner
@@ -37,7 +37,7 @@ import yaml
 from embodichain.utils import configclass
 
 __all__ = [
-    "CombinedGenerationProfile",
+    "CombinedExpansionProfile",
     "ReferenceFamilySpec",
     "CubeInitialPoseProvider",
     "CycleRecipe",
@@ -211,7 +211,7 @@ class _SceneRandomizationCfg:
                 "scene_randomization.change_scope must be cube_initial_pose_only"
             )
         if self.enabled and not self.keep_drop_targets:
-            raise ValueError("combined generation must keep authored drop targets")
+            raise ValueError("combined expansion must keep authored drop targets")
 
 
 @configclass
@@ -320,8 +320,6 @@ class _SchedulingCfg:
     policy: str = "round_robin_fifo"
     candidate_budget: int = 64
     reference_family_budget: int = 4
-    queue_max_items: int = 64
-    queue_max_bytes: int = 536870912
 
     def __post_init__(self) -> None:
         if self.policy != "round_robin_fifo":
@@ -329,8 +327,6 @@ class _SchedulingCfg:
         for name in (
             "candidate_budget",
             "reference_family_budget",
-            "queue_max_items",
-            "queue_max_bytes",
         ):
             _int(getattr(self, name), f"scheduling.{name}", 1)
 
@@ -339,25 +335,17 @@ class _SchedulingCfg:
 class _ExecutionCfg:
     max_inflight: int = 16
     compatibility: str = "strict"
-    restore_initial_state: bool = True
-    cancel_policy: str = "safe_finish_and_drain"
 
     def __post_init__(self) -> None:
         _int(self.max_inflight, "execution.max_inflight", 1)
         if self.compatibility != "strict":
             raise ValueError("execution.compatibility must be strict")
-        _bool(self.restore_initial_state, "execution.restore_initial_state")
-        if self.cancel_policy != "safe_finish_and_drain":
-            raise ValueError("execution.cancel_policy must be safe_finish_and_drain")
 
 
 @configclass
 class _PersistenceCfg:
     sink: str = "local_artifact"
-    output_dir: str = "/tmp/repeated-pick-place-generation"
-    write_trajectories: bool = True
-    write_observations: bool = True
-    write_manifest: bool = True
+    output_dir: str = "/tmp/repeated-pick-place-expansion"
 
     def __post_init__(self) -> None:
         if self.sink not in {"local_artifact", "lerobot"}:
@@ -365,8 +353,6 @@ class _PersistenceCfg:
                 "combined persistence.sink must be local_artifact or lerobot"
             )
         self.output_dir = _text(self.output_dir, "persistence.output_dir")
-        for name in ("write_trajectories", "write_observations", "write_manifest"):
-            _bool(getattr(self, name), f"persistence.{name}")
 
 
 def _construct(cls: type, data: object, name: str, allowed: set[str]) -> Any:
@@ -377,7 +363,7 @@ def _construct(cls: type, data: object, name: str, allowed: set[str]) -> Any:
 
 
 @configclass
-class CombinedGenerationProfile:
+class CombinedExpansionProfile:
     """Strict episode-level profile for the combined showcase."""
 
     schema_version: int = 1
@@ -404,10 +390,10 @@ class CombinedGenerationProfile:
                 "scheduling.reference_family_budget must cover all families"
             )
         if self.visual.enabled and not self.visual.profiles:
-            raise ValueError("enabled visual generation requires profiles")
+            raise ValueError("enabled visual expansion requires profiles")
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any]) -> "CombinedGenerationProfile":
+    def from_mapping(cls, data: Mapping[str, Any]) -> "CombinedExpansionProfile":
         """Decode the canonical combined schema without evaluating callables."""
         allowed = {
             "schema_version",
@@ -487,8 +473,6 @@ class CombinedGenerationProfile:
                     "policy",
                     "candidate_budget",
                     "reference_family_budget",
-                    "queue_max_items",
-                    "queue_max_bytes",
                 },
             ),
             "execution": _construct(
@@ -498,8 +482,6 @@ class CombinedGenerationProfile:
                 {
                     "max_inflight",
                     "compatibility",
-                    "restore_initial_state",
-                    "cancel_policy",
                 },
             ),
             "persistence": _construct(
@@ -509,9 +491,6 @@ class CombinedGenerationProfile:
                 {
                     "sink",
                     "output_dir",
-                    "write_trajectories",
-                    "write_observations",
-                    "write_manifest",
                 },
             ),
         }
@@ -540,8 +519,11 @@ class CombinedGenerationProfile:
     def validate_for_num_envs(self, num_envs: int) -> None:
         """Validate the host-owned slot capacity before simulator construction."""
         _int(num_envs, "num_envs", 1)
-        if self.execution.max_inflight > num_envs:
-            raise ValueError("execution.max_inflight cannot exceed resolved num_envs")
+        if self.execution.max_inflight != num_envs:
+            raise ValueError(
+                "execution.max_inflight must equal the resolved num_envs; "
+                "expansion executes one vectorized batch"
+            )
 
     def validate_registries(
         self,
@@ -562,17 +544,12 @@ class CombinedGenerationProfile:
             )
 
 
-def load_visual_profile_registry(
-    path: str | Path,
-    *,
-    requested_profile_ids: Sequence[str] | None = None,
-) -> tuple[str, ...]:
-    """Load and validate seedable visual profile IDs.
+def _read_visual_profile_registry(path: str | Path) -> Mapping[str, Any]:
+    """Read and validate the canonical visual profile registry mapping.
 
-    The deployment permits one explicitly declared global sun operation.  It
-    is applied to the whole simulator and therefore must be shared by every
-    row in a batch; all other unsupported global renderer mutations are
-    rejected at this boundary.
+    The deployment permits one explicitly declared global sun operation. It is
+    applied to the whole simulator and therefore must be shared by every row
+    in a batch; other unsupported global renderer mutations are rejected.
     """
     with Path(path).open(encoding="utf-8") as stream:
         data = yaml.safe_load(stream)
@@ -599,6 +576,22 @@ def load_visual_profile_registry(
                 operation_mapping,
                 f"visual profile {profile_id}.operation",
             )
+    return root
+
+
+def load_visual_profile_registry(
+    path: str | Path,
+    *,
+    requested_profile_ids: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Load and validate seedable visual profile IDs.
+
+    This compatibility helper exposes only IDs; full profile resolution uses
+    the same canonical parser through :class:`VisualProfileRegistry`.
+    """
+    root = _read_visual_profile_registry(path)
+    profiles = _mapping(root["profiles"], "visual profile registry.profiles")
+    ids = tuple(profiles)
     if requested_profile_ids is not None:
         requested = _strings(requested_profile_ids, "requested_profile_ids")
         if set(requested) != set(ids):
@@ -636,7 +629,7 @@ class ReferenceFamilySpec:
 
 
 class CubeInitialPoseProvider:
-    """Return deterministic authored cube pose families for a generation job."""
+    """Return deterministic authored cube pose families for a expansion job."""
 
     def __init__(
         self,
@@ -875,14 +868,14 @@ def _seed_digest(*values: object) -> str:
 
 
 def enumerate_candidate_recipes(
-    profile: CombinedGenerationProfile,
+    profile: CombinedExpansionProfile,
     *,
-    job_id: str = "repeated_pick_place_generation",
+    job_id: str = "repeated_pick_place_expansion",
     families: Sequence[ReferenceFamilySpec] | None = None,
 ) -> tuple[CandidateRecipe, ...]:
     """Enumerate the deterministic ``m × a × t`` episode recipes."""
-    if not isinstance(profile, CombinedGenerationProfile):
-        raise TypeError("profile must be a CombinedGenerationProfile")
+    if not isinstance(profile, CombinedExpansionProfile):
+        raise TypeError("profile must be a CombinedExpansionProfile")
     _text(job_id, "job_id")
     family_count = profile.scene_randomization.reference_family_count
     family_values = (

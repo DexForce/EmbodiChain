@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run configured Repeated Pick/Place with Generation Profile candidates."""
+"""Run configured Repeated Pick/Place with Expansion Profile candidates."""
 
 from __future__ import annotations
 
@@ -42,16 +42,16 @@ from embodichain.lab.gym.utils.registration import (
 )
 from embodichain.lab.sim.motion.expansion import (
     CombinedEpisodeCoordinator,
-    CombinedGenerationProfile,
+    CombinedExpansionProfile,
     CubeInitialPoseProvider,
     PhysicalSlotPool,
     ValidationResult,
     enumerate_candidate_recipes,
-    load_generation_profile,
+    load_expansion_profile,
     MeasuredValidator,
     VisualProfileRegistry,
 )
-from embodichain.lab.task_program.integrations import TaskProgramGenerationRecord
+from embodichain.lab.task_program.integrations import TaskProgramExpansionRecord
 from embodichain.utils.config_paths import resolve_config_path
 
 _TASK_ROOT = (
@@ -69,9 +69,9 @@ _VIDEO_LOOK_AT = (
 __all__ = ["main"]
 
 
-def _write_generation_json(
-    profile: CombinedGenerationProfile,
-    records: tuple[TaskProgramGenerationRecord, ...],
+def _write_expansion_json(
+    profile: CombinedExpansionProfile,
+    records: tuple[TaskProgramExpansionRecord, ...],
     result: DemoEpisodeResult,
     measured_validation: ValidationResult,
     path: Path,
@@ -79,7 +79,7 @@ def _write_generation_json(
     """Write one JSON-safe profile, candidate, and Task Program result record."""
     payload = {
         "profile": profile.to_dict(),
-        "generation": [record.to_metadata() for record in records],
+        "expansion": [record.to_metadata() for record in records],
         "episode": result.to_metadata(),
         "measured_validation": {
             "accepted": measured_validation.accepted,
@@ -99,8 +99,8 @@ def _write_generation_json(
     )
 
 
-def _save_generation_plot(
-    records: tuple[TaskProgramGenerationRecord, ...],
+def _save_expansion_plot(
+    records: tuple[TaskProgramExpansionRecord, ...],
     path: Path,
 ) -> None:
     """Plot every logical candidate and its phase boundaries by planning call."""
@@ -167,7 +167,7 @@ def _save_generation_plot(
 def _validate_candidate_indices(
     values: Iterable[int],
     *,
-    profile: CombinedGenerationProfile,
+    profile: CombinedExpansionProfile,
 ) -> tuple[int, ...]:
     indices = tuple(values)
     if not indices or len(set(indices)) != len(indices):
@@ -192,7 +192,7 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Configured Task Program deployment.",
     )
     parser.add_argument(
-        "--generation-profile",
+        "--expansion-profile",
         type=Path,
         default=_DEFAULT_GENERATION_PROFILE,
     )
@@ -271,7 +271,7 @@ def _write_combined_video(
                 "completed": payload["episode"]["completed"],
                 "length": payload["episode"]["length"],
                 "terminal_reason": payload["episode"]["terminal_reason"],
-                "generation": payload["generation"],
+                "expansion": payload["expansion"],
                 "video": str(output_dir / f"candidate_{index}.mp4"),
             }
         )
@@ -292,7 +292,7 @@ def _write_combined_video(
     return combined
 
 
-def _configure_generation_reset_event(
+def _configure_expansion_reset_event(
     env: object,
     params: dict[str, object],
 ) -> None:
@@ -303,16 +303,16 @@ def _configure_generation_reset_event(
     event_manager = getattr(unwrapped, "event_manager", None)
     if event_manager is None:
         raise RuntimeError(
-            "combined generation requires the generation_profile_reset event"
+            "combined expansion requires the expansion_profile_reset event"
         )
     active_functors = event_manager.active_functors
-    if "generation_profile_reset" not in active_functors.get("reset", ()):
+    if "expansion_profile_reset" not in active_functors.get("reset", ()):
         raise RuntimeError(
-            "combined generation requires the generation_profile_reset reset event"
+            "combined expansion requires the expansion_profile_reset reset event"
         )
-    current_cfg = event_manager.get_functor_cfg("generation_profile_reset")
+    current_cfg = event_manager.get_functor_cfg("expansion_profile_reset")
     event_manager.set_functor_cfg(
-        "generation_profile_reset",
+        "expansion_profile_reset",
         EventCfg(func=current_cfg.func, mode="reset", params=params),
     )
 
@@ -320,25 +320,25 @@ def _configure_generation_reset_event(
 def main(argv: list[str] | None = None) -> None:
     """Run selected candidates through the configured Task Program environment."""
     args = _create_parser().parse_args(argv)
-    if args.generation_profile is None:
-        from embodichain.lab.scripts.run_env import _resolve_generation_request
+    if args.expansion_profile is None:
+        from embodichain.lab.scripts.run_env import _resolve_expansion_request
         from embodichain.utils.config_paths import resolve_config_path
         from embodichain.utils.utility import load_config
 
         task_path = resolve_config_path(args.gym_config)
-        request = _resolve_generation_request(args, load_config(task_path))
+        request = _resolve_expansion_request(args, load_config(task_path))
         if request is None:
             raise ValueError(
-                "task config must bind a generation policy when "
-                "--generation-profile is omitted"
+                "task config must bind a expansion policy when "
+                "--expansion-profile is omitted"
             )
         profile, _, _ = request
     else:
-        profile = load_generation_profile(args.generation_profile)
-    if not isinstance(profile, CombinedGenerationProfile):
+        profile = load_expansion_profile(args.expansion_profile)
+    if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError(
             "the Task Program showcase requires a schema_version=1 "
-            "CombinedGenerationProfile"
+            "CombinedExpansionProfile"
         )
     candidate_indices = _validate_candidate_indices(
         args.candidate_indices,
@@ -353,7 +353,7 @@ def main(argv: list[str] | None = None) -> None:
     visual_registry = None
     combined_recipes = ()
     reference_families = ()
-    if isinstance(profile, CombinedGenerationProfile):
+    if isinstance(profile, CombinedExpansionProfile):
         if profile.visual.enabled:
             visual_registry = VisualProfileRegistry.from_yaml(
                 resolve_config_path(profile.visual.profile_file)
@@ -376,7 +376,7 @@ def main(argv: list[str] | None = None) -> None:
             reset_params: dict[str, object] = {}
             batch_recipes = ()
             visual_assignments: dict[int, str] = {}
-            if isinstance(profile, CombinedGenerationProfile):
+            if isinstance(profile, CombinedExpansionProfile):
                 batch_size = int(env.unwrapped.num_envs)
                 if candidate_index >= len(combined_recipes):
                     raise ValueError(
@@ -417,13 +417,13 @@ def main(argv: list[str] | None = None) -> None:
                         }
                     )
                 if reset_params:
-                    _configure_generation_reset_event(env, reset_params)
+                    _configure_expansion_reset_event(env, reset_params)
 
             env.reset(seed=args.seed, options={"save_data": False})
 
             scheduler = None
             assignments = ()
-            if isinstance(profile, CombinedGenerationProfile):
+            if isinstance(profile, CombinedExpansionProfile):
                 batch_size = int(env.unwrapped.num_envs)
                 scheduler = CombinedEpisodeCoordinator(
                     batch_recipes,
@@ -432,7 +432,7 @@ def main(argv: list[str] | None = None) -> None:
                         1,
                         len({recipe.reference_family_id for recipe in batch_recipes}),
                     ),
-                    compatibility_key="strict:configured-generation",
+                    compatibility_key="strict:configured-expansion",
                 )
                 assignments = tuple(
                     assignment
@@ -463,8 +463,8 @@ def main(argv: list[str] | None = None) -> None:
                 result = execute_demo_episode(
                     env,
                     episode_index=candidate_index,
-                    generation_profile=profile,
-                    generation_candidate_index=candidate_index,
+                    expansion_profile=profile,
+                    expansion_candidate_index=candidate_index,
                 )
                 if result.completed and bool(result.success) and all(result.success):
                     terminal_status = "accepted"
@@ -474,21 +474,21 @@ def main(argv: list[str] | None = None) -> None:
                         env.unwrapped.sim.stop_window_record()
                     env.unwrapped.sim.wait_window_record_saves()
             try:
-                records = env.unwrapped.task_program_generation_records
+                records = env.unwrapped.task_program_expansion_records
                 measured_validation = MeasuredValidator().validate_demo_result(result)
                 if not measured_validation.accepted:
                     raise RuntimeError(
                         "Measured validation rejected candidate "
                         f"{candidate_index}: {measured_validation.checks}"
                     )
-                _write_generation_json(
+                _write_expansion_json(
                     profile,
                     records,
                     result,
                     measured_validation,
                     args.output_dir / f"candidate_{candidate_index}.json",
                 )
-                _save_generation_plot(
+                _save_expansion_plot(
                     records,
                     args.output_dir / f"candidate_{candidate_index}.png",
                 )

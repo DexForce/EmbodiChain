@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Safe loading for source-neutral Generation Profile files."""
+"""Strict loading for the canonical combined Expansion Profile schema."""
 
 from __future__ import annotations
 
@@ -23,23 +23,19 @@ from pathlib import Path
 
 from embodichain.utils.utility import load_config
 
-from .cfg import TrajectoryGenerationJobCfg
-from .combined import CombinedGenerationProfile
+from .combined import CombinedExpansionProfile
 
-__all__ = ["load_generation_profile"]
+__all__ = ["load_expansion_profile"]
 
 
-def load_generation_profile(
-    path: str | Path,
-) -> TrajectoryGenerationJobCfg | CombinedGenerationProfile:
-    """Load one callable-free Generation Profile through strict decoding.
+def load_expansion_profile(path: str | Path) -> CombinedExpansionProfile:
+    """Load one callable-free combined Expansion Profile.
 
     Args:
-        path: YAML or JSON profile path. Repository-style task paths retain the
-            shared loader's installed-package resolution behavior.
+        path: YAML or JSON profile path.
 
     Returns:
-        Strictly decoded, semantically validated Generation Profile.
+        Strictly decoded and semantically validated combined profile.
 
     Raises:
         TypeError: If the serialized root is not a mapping.
@@ -49,14 +45,10 @@ def load_generation_profile(
         data = load_config(path)
         if not isinstance(data, Mapping):
             raise TypeError("profile root must be a mapping")
-        if data.get("schema_version") == 1 and "trajectory" in data:
-            return CombinedGenerationProfile.from_mapping(data)
-        profile = TrajectoryGenerationJobCfg.from_mapping(data)
-        if profile.source.kind == "task_program":
+        if data.get("schema_version") != 1 or "trajectory" not in data:
             raise ValueError(
-                "legacy task_program Generation Profiles are unsupported; "
-                "use schema_version=1 CombinedGenerationProfile"
+                "only schema_version=1 CombinedExpansionProfile is supported"
             )
-        return profile
+        return CombinedExpansionProfile.from_mapping(data)
     except (TypeError, ValueError) as error:
-        raise ValueError(f"Invalid Generation Profile {path}: {error}") from error
+        raise ValueError(f"Invalid Expansion Profile {path}: {error}") from error

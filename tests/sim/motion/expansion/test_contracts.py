@@ -40,8 +40,8 @@ from embodichain.lab.sim.motion.expansion.source import (
     SourceContext,
     TemplateSourceAdapter,
 )
-from embodichain.lab.sim.motion.expansion.cfg import TrajectoryGenerationJobCfg
-from embodichain.lab.sim.motion.expansion.session import GenerationSession
+from embodichain.lab.sim.motion.expansion.cfg import TrajectoryExpansionJobCfg
+from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 from embodichain.lab.sim.motion.planners import PlanResult
 
 
@@ -184,7 +184,7 @@ def test_plan_result_source_rejects_duplicate_template_permissions() -> None:
 
 
 def test_candidate_coordinator_queues_source_variants_with_session_identity():
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {
@@ -200,7 +200,7 @@ def test_candidate_coordinator_queues_source_variants_with_session_identity():
         }
     )
     case = _case()
-    session = GenerationSession(cfg)
+    session = ExpansionSession(cfg)
     limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
     session.register_case(case, limits, joint_names=("arm", "tool"))
     context = SourceContext(
@@ -259,11 +259,11 @@ def _coordinator_fixture(
     *,
     max_proposals: int = 100,
 ) -> tuple[
-    GenerationSession,
+    ExpansionSession,
     CandidateCoordinator,
     TrajectoryTemplate,
 ]:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {
@@ -281,7 +281,7 @@ def _coordinator_fixture(
     )
     case = _case()
     limits = torch.tensor([[-2.0, 2.0], [-2.0, 2.0]])
-    session = GenerationSession(cfg)
+    session = ExpansionSession(cfg)
     session.register_case(case, limits, joint_names=("arm", "tool"))
     coordinator = CandidateCoordinator(
         cfg,
@@ -356,7 +356,7 @@ def test_candidate_coordinator_enqueue_is_atomic() -> None:
 
 
 def test_candidate_coordinator_populates_strict_compatibility_metadata() -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "observation": {"enabled": True, "profiles": ["rgb_train"]},
             "scheduling": {"candidate_budget": 2},
@@ -367,7 +367,7 @@ def test_candidate_coordinator_populates_strict_compatibility_metadata() -> None
     template = _template(controlled_joint_indices=(0, 1))
 
     def build(backend_id: str) -> CandidateWorkItem:
-        session = GenerationSession(cfg)
+        session = ExpansionSession(cfg)
         session.register_case(case, limits, joint_names=("arm", "tool"))
         coordinator = CandidateCoordinator(
             cfg,

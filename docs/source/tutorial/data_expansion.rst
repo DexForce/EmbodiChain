@@ -1,6 +1,6 @@
-.. _tutorial_data_generation:
+.. _tutorial_data_expansion:
 
-Expert Data Generation
+Expert Data Expansion
 ======================
 
 .. currentmodule:: embodichain.lab.gym
@@ -361,7 +361,7 @@ Execution, Validation, and Persistence
 --------------------------------------
 
 Without ``--preview`` or ``--replay``, ``embodichain run-env`` performs offline
-data generation:
+data expansion:
 
 1. Resolve ``create_demo_segments()`` from the handwritten task or configured
    Task Program bridge.
@@ -417,7 +417,7 @@ and truncation annotations. Depth and segmentation observations have their own
 numeric or configured sidecar representation; see
 :doc:`/overview/gym/dataset_functors` for the complete schema.
 
-.. _tutorial_data_generation_preview:
+.. _tutorial_data_expansion_preview:
 
 Inspect Recorded LeRobot Data
 -----------------------------
@@ -467,7 +467,7 @@ Best Practices
   ``envs/default.yaml`` and ``envs/newton.yaml`` variants),
   ``task.<embodiment>.yaml``, and ``task_program/{program,integration}.yaml``
   together so physical UIDs, contracts, and canonical IDs stay aligned. Keep
-  task-facing generation overrides under ``generation/`` and reusable
+  task-facing expansion overrides under ``expansion/`` and reusable
   embodiment and execution-policy components under ``configs/components/``.
 * Move reusable motion behavior into Atomic Skills instead of copying
   task-local trajectory logic across Python tasks or registered Semantic Calls.

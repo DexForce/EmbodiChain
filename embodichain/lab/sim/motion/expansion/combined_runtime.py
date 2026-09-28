@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Host-neutral runtime contracts for combined episode generation.
+"""Host-neutral runtime contracts for combined episode expansion.
 
 These values coordinate recipe assignment and measured evidence without
 constructing a simulator. Environment integrations own the actual restore,
@@ -33,7 +33,6 @@ import random
 from types import MappingProxyType
 from typing import Any
 
-import yaml
 import torch
 import numpy as np
 
@@ -41,6 +40,7 @@ from .combined import (
     CandidateRecipe,
     PhysicalSlotPool,
     SlotReservation,
+    _read_visual_profile_registry,
     _validate_visual_operation,
 )
 from .contracts import ExpertEpisode, ValidationCheck, ValidationResult
@@ -140,13 +140,7 @@ class VisualProfileRegistry:
     @classmethod
     def from_yaml(cls, path: str | Path) -> "VisualProfileRegistry":
         """Load one closed visual registry without importing executable values."""
-        with Path(path).open(encoding="utf-8") as stream:
-            root = yaml.safe_load(stream)
-        if not isinstance(root, Mapping):
-            raise ValueError("visual registry root must be a mapping")
-        unknown = set(root) - {"profile_id", "revision", "profiles"}
-        if unknown:
-            raise ValueError(f"unknown fields in visual registry: {sorted(unknown)}")
+        root = _read_visual_profile_registry(path)
         return cls(root.get("profile_id"), root.get("revision"), root.get("profiles"))
 
     @property

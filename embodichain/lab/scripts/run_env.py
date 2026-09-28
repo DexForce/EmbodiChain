@@ -42,7 +42,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
     load_trajectory,
-    _load_generation_declaration,
+    _load_expansion_declaration,
 )
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
@@ -291,7 +291,7 @@ def generate_and_execute_action_list(
         idx: Index of the legacy action list within the current episode.
         debug_mode: Whether debug mode is enabled.
         episode_idx: Index of the current episode.
-        **kwargs: Additional arguments forwarded to action generation.
+        **kwargs: Additional arguments forwarded to action expansion.
 
     Returns:
         Whether a complete, successful episode was executed.
@@ -344,7 +344,7 @@ def generate_function(
             rows are explicitly discarded after the selected rows commit.
         execution_cfg: Continuous or independent segment-fragment persistence
             settings. Checkpoint resume is not performed in either mode.
-        **kwargs: Additional keyword arguments for data generation.
+        **kwargs: Additional keyword arguments for data expansion.
 
     Returns:
         True if continuous episodes, or at least one eligible fragment row,
@@ -359,9 +359,9 @@ def generate_function(
 
     max_attempts = int(kwargs.pop("max_attempts", 3))
     reset_before = bool(kwargs.pop("reset_before", True))
-    generation_record_sink = kwargs.pop("_generation_record_sink", None)
-    if generation_record_sink is not None and not callable(generation_record_sink):
-        raise TypeError("_generation_record_sink must be callable or None")
+    expansion_record_sink = kwargs.pop("_expansion_record_sink", None)
+    if expansion_record_sink is not None and not callable(expansion_record_sink):
+        raise TypeError("_expansion_record_sink must be callable or None")
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
@@ -398,11 +398,11 @@ def generate_function(
                 and _selected_rows_have_frames(result, normalized_save_env_ids)
             )
             if execution_cfg.mode == "segment_fragments" and fragment_env_ids:
-                if generation_record_sink is not None:
-                    generation_record_sink(
+                if expansion_record_sink is not None:
+                    expansion_record_sink(
                         tuple(
                             getattr(
-                                _env_target(env), "task_program_generation_records", ()
+                                _env_target(env), "task_program_expansion_records", ()
                             )
                         )
                     )
@@ -417,11 +417,11 @@ def generate_function(
             if execution_cfg.mode == "continuous" and (
                 successful or persistable_failure
             ):
-                if generation_record_sink is not None:
-                    generation_record_sink(
+                if expansion_record_sink is not None:
+                    expansion_record_sink(
                         tuple(
                             getattr(
-                                _env_target(env), "task_program_generation_records", ()
+                                _env_target(env), "task_program_expansion_records", ()
                             )
                         )
                     )
@@ -460,30 +460,30 @@ def generate_function(
     return False
 
 
-def _configure_generation_reset_event(
+def _configure_expansion_reset_event(
     env: Any,
     params: Mapping[str, Any],
 ) -> None:
-    """Install one generation batch payload in the reset lifecycle."""
+    """Install one expansion batch payload in the reset lifecycle."""
     from embodichain.lab.gym.envs.managers.cfg import EventCfg
 
     target = _env_target(env)
     event_manager = getattr(target, "event_manager", None)
     if event_manager is None:
-        raise RuntimeError("generation requires an event manager")
+        raise RuntimeError("expansion requires an event manager")
     active_functors = event_manager.active_functors
-    if "generation_profile_reset" not in active_functors.get("reset", ()):
+    if "expansion_profile_reset" not in active_functors.get("reset", ()):
         raise RuntimeError(
-            "generation profile requires the generation_profile_reset reset event"
+            "expansion profile requires the expansion_profile_reset reset event"
         )
-    current_cfg = event_manager.get_functor_cfg("generation_profile_reset")
+    current_cfg = event_manager.get_functor_cfg("expansion_profile_reset")
     event_manager.set_functor_cfg(
-        "generation_profile_reset",
+        "expansion_profile_reset",
         EventCfg(func=current_cfg.func, mode="reset", params=dict(params)),
     )
 
 
-def _resolve_generation_resource(anchor: Path, value: str) -> Path:
+def _resolve_expansion_resource(anchor: Path, value: str) -> Path:
     """Resolve a task-local or packaged randomization resource path."""
     from embodichain.utils.config_paths import resolve_config_path
 
@@ -495,24 +495,24 @@ def _resolve_generation_resource(anchor: Path, value: str) -> Path:
     return (anchor.parent / path).resolve()
 
 
-def _resolve_generation_request(
+def _resolve_expansion_request(
     args: Any,
     gym_config: Mapping[str, Any],
 ) -> tuple[Any, tuple[int, ...], Path] | None:
-    """Resolve a task-bound or CLI-selected Generation Profile."""
+    """Resolve a task-bound or CLI-selected Expansion Profile."""
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
     from embodichain.lab.sim.motion.expansion import (
-        CombinedGenerationProfile,
-        load_generation_profile,
+        CombinedExpansionProfile,
+        load_expansion_profile,
     )
 
     task_path = resolve_config_path(args.gym_config)
-    binding = gym_config.get("generation")
+    binding = gym_config.get("expansion")
     if binding is not None:
         if not isinstance(binding, Mapping):
-            raise ValueError("generation must be a mapping")
-        binding, generation_config_path = _load_generation_declaration(
+            raise ValueError("expansion must be a mapping")
+        binding, expansion_config_path = _load_expansion_declaration(
             binding,
             base_dir=task_path.parent,
         )
@@ -525,34 +525,34 @@ def _resolve_generation_request(
         }
         if unknown:
             raise ValueError(
-                f"generation contains unsupported fields: {sorted(unknown)}"
+                f"expansion contains unsupported fields: {sorted(unknown)}"
             )
-    cli_profile = getattr(args, "generation_profile", None)
+    cli_profile = getattr(args, "expansion_profile", None)
     binding_profile = None if binding is None else binding.get("profile")
     binding_policy = None if binding is None else binding.get("policy")
     if binding_profile is not None and binding_policy is not None:
-        raise ValueError("generation may select profile or policy, not both")
+        raise ValueError("expansion may select profile or policy, not both")
     profile_value = cli_profile if cli_profile is not None else binding_profile
     use_binding_policy = binding_policy is not None and cli_profile is None
     if profile_value is None and not use_binding_policy:
-        if getattr(args, "generation_candidate_indices", None) is not None:
-            raise ValueError("generation candidate indices require a profile")
+        if getattr(args, "expansion_candidate_indices", None) is not None:
+            raise ValueError("expansion candidate indices require a profile")
         return None
     if use_binding_policy:
         if not isinstance(binding_policy, Mapping):
-            raise ValueError("generation.policy must be a mapping")
+            raise ValueError("expansion.policy must be a mapping")
         policy_path_value = binding_policy.get("component")
         if (
             not isinstance(policy_path_value, str)
             or not policy_path_value.strip()
             or policy_path_value != policy_path_value.strip()
         ):
-            raise ValueError("generation.policy.component must be a nonempty path")
+            raise ValueError("expansion.policy.component must be a nonempty path")
         policy_path = Path(policy_path_value).expanduser()
         if not policy_path.is_absolute():
             policy_base_dir = (
-                generation_config_path.parent
-                if generation_config_path is not None
+                expansion_config_path.parent
+                if expansion_config_path is not None
                 else task_path.parent
             )
             policy_path = policy_base_dir / policy_path
@@ -560,7 +560,7 @@ def _resolve_generation_request(
         policy_data = load_config(policy_path)
         overrides = binding.get("overrides", {}) if binding is not None else {}
         if not isinstance(overrides, Mapping):
-            raise ValueError("generation.overrides must be a mapping")
+            raise ValueError("expansion.overrides must be a mapping")
 
         def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
             merged = dict(base)
@@ -569,7 +569,7 @@ def _resolve_generation_request(
                     current = merged.get(key, {})
                     if not isinstance(current, Mapping):
                         raise ValueError(
-                            f"generation.overrides.{key} cannot replace a scalar"
+                            f"expansion.overrides.{key} cannot replace a scalar"
                         )
                     merged[key] = merge(current, value)
                 else:
@@ -577,62 +577,62 @@ def _resolve_generation_request(
             return merged
 
         if not isinstance(policy_data, Mapping):
-            raise ValueError("generation policy component must be a mapping")
-        profile = CombinedGenerationProfile.from_mapping(merge(policy_data, overrides))
-        profile_path = generation_config_path or task_path
+            raise ValueError("expansion policy component must be a mapping")
+        profile = CombinedExpansionProfile.from_mapping(merge(policy_data, overrides))
+        profile_path = expansion_config_path or task_path
     else:
         if (
             not isinstance(profile_value, str)
             or not profile_value.strip()
             or profile_value != profile_value.strip()
         ):
-            raise ValueError("generation.profile must be a nonempty path")
+            raise ValueError("expansion.profile must be a nonempty path")
         profile_path = Path(profile_value).expanduser()
         if not profile_path.is_absolute():
             profile_path = (
                 Path.cwd() / profile_path
                 if cli_profile is not None
                 else (
-                    generation_config_path.parent
-                    if generation_config_path is not None
+                    expansion_config_path.parent
+                    if expansion_config_path is not None
                     else task_path.parent
                 )
                 / profile_path
             )
         profile_path = profile_path.resolve()
-        profile = load_generation_profile(profile_path)
-    candidate_values = getattr(args, "generation_candidate_indices", None)
+        profile = load_expansion_profile(profile_path)
+    candidate_values = getattr(args, "expansion_candidate_indices", None)
     if candidate_values is None and binding is not None:
         candidate_values = binding.get("candidate_indices")
     if candidate_values is None:
         candidate_indices: tuple[int, ...] = ()
     else:
         if not isinstance(candidate_values, (list, tuple)):
-            raise ValueError("generation.candidate_indices must be a sequence")
+            raise ValueError("expansion.candidate_indices must be a sequence")
         candidate_indices = tuple(candidate_values)
         if not candidate_indices or len(set(candidate_indices)) != len(
             candidate_indices
         ):
-            raise ValueError("generation candidate indices must be nonempty and unique")
+            raise ValueError("expansion candidate indices must be nonempty and unique")
         if any(type(index) is not int or index < 0 for index in candidate_indices):
             raise ValueError(
-                "generation candidate indices must be non-negative integers"
+                "expansion candidate indices must be non-negative integers"
             )
     return profile, candidate_indices, profile_path
 
 
-def _generation_candidate_indices(
+def _expansion_candidate_indices(
     profile: Any,
     configured: tuple[int, ...],
     *,
     num_envs: int,
 ) -> tuple[int, ...]:
     """Resolve and validate candidate batch starts for one profile."""
-    from embodichain.lab.sim.motion.expansion import CombinedGenerationProfile
+    from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 
     if num_envs < 1:
-        raise ValueError("generation requires at least one environment")
-    if isinstance(profile, CombinedGenerationProfile):
+        raise ValueError("expansion requires at least one environment")
+    if isinstance(profile, CombinedExpansionProfile):
         profile.validate_for_num_envs(num_envs)
         total = (
             profile.scene_randomization.reference_family_count
@@ -642,37 +642,37 @@ def _generation_candidate_indices(
         indices = configured or tuple(range(0, total, num_envs))
         if any(index >= total for index in indices):
             raise ValueError(
-                "combined generation candidate index exceeds the recipe budget"
+                "combined expansion candidate index exceeds the recipe budget"
             )
         return indices
     raise ValueError(
-        "run-task generation requires a CombinedGenerationProfile; "
+        "run-task expansion requires a CombinedExpansionProfile; "
         "direct source profiles need a source-specific provider host"
     )
 
 
-def _run_generation(
+def _run_expansion(
     env: Any,
     args: Any,
     gym_config: Mapping[str, Any],
 ) -> None:
-    """Run task-bound trajectory generation batches through the Gym lifecycle."""
+    """Run task-bound trajectory expansion batches through the Gym lifecycle."""
     from embodichain.lab.sim.motion.expansion import (
-        CombinedGenerationProfile,
+        CombinedExpansionProfile,
         CubeInitialPoseProvider,
         VisualProfileRegistry,
         enumerate_candidate_recipes,
     )
 
-    request = _resolve_generation_request(args, gym_config)
+    request = _resolve_expansion_request(args, gym_config)
     if request is None:
-        raise ValueError("run_generation requires a generation profile")
+        raise ValueError("run_expansion requires an expansion profile")
     profile, configured_indices, profile_path = request
-    if not isinstance(profile, CombinedGenerationProfile):
-        raise ValueError("run-task generation requires a CombinedGenerationProfile")
+    if not isinstance(profile, CombinedExpansionProfile):
+        raise ValueError("run-task expansion requires a CombinedExpansionProfile")
     target = _env_target(env)
     num_envs = int(getattr(target, "num_envs", 1))
-    indices = _generation_candidate_indices(
+    indices = _expansion_candidate_indices(
         profile,
         configured_indices,
         num_envs=num_envs,
@@ -680,12 +680,12 @@ def _run_generation(
     if getattr(args, "disable_sensor", False) and profile.visual.enabled:
         raise ValueError(
             "--disable-sensor cannot be used with a combined profile that "
-            "contains visual generation"
+            "contains visual expansion"
         )
 
     visual_registry = (
         VisualProfileRegistry.from_yaml(
-            _resolve_generation_resource(
+            _resolve_expansion_resource(
                 profile_path,
                 profile.visual.profile_file,
             )
@@ -694,7 +694,7 @@ def _run_generation(
         else None
     )
     if profile.scene_randomization.enabled:
-        family_path = _resolve_generation_resource(
+        family_path = _resolve_expansion_resource(
             profile_path,
             profile.scene_randomization.profile_file,
         )
@@ -707,12 +707,12 @@ def _run_generation(
         )
     recipes = enumerate_candidate_recipes(profile, families=families)
 
-    output_dir = getattr(args, "generation_output_dir", None)
+    output_dir = getattr(args, "expansion_output_dir", None)
     if output_dir is None:
         output_dir = (
             profile.persistence.output_dir
-            if isinstance(profile, CombinedGenerationProfile)
-            else str(profile_path.parent / "generation-output")
+            if isinstance(profile, CombinedExpansionProfile)
+            else str(profile_path.parent / "expansion-output")
         )
     output_path = Path(output_dir).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
@@ -760,7 +760,7 @@ def _run_generation(
                         + candidate_index,
                     }
                 )
-            _configure_generation_reset_event(env, reset_payload)
+            _configure_expansion_reset_event(env, reset_payload)
 
         env.reset(seed=args.seed, options={"save_data": False})
         batch_records: list[Any] = []
@@ -768,14 +768,14 @@ def _run_generation(
             env,
             time_id=candidate_index,
             save_path=str(output_path),
-            save_video=getattr(args, "generation_save_video", False),
+            save_video=getattr(args, "expansion_save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
             save_env_ids=tuple(range(num_envs)),
             max_attempts=int(gym_config.get("demo_max_attempts", 3)),
             reset_before=False,
-            generation_profile=profile,
-            generation_candidate_index=candidate_index,
-            _generation_record_sink=batch_records.extend,
+            expansion_profile=profile,
+            expansion_candidate_index=candidate_index,
+            _expansion_record_sink=batch_records.extend,
         )
         if not generated:
             manifest["batches"].append(
@@ -796,12 +796,12 @@ def _run_generation(
         )
     manifest["accepted_batches"] = successful_batches
     manifest["rejected_batches"] = len(indices) - successful_batches
-    (output_path / "generation_manifest.json").write_text(
+    (output_path / "expansion_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     if successful_batches == 0:
-        raise RuntimeError("all generation candidate batches were rejected")
+        raise RuntimeError("all expansion candidate batches were rejected")
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
@@ -1136,11 +1136,11 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         return
 
     if (
-        getattr(args, "generation_profile", None) is not None
-        or "generation" in gym_config
+        getattr(args, "expansion_profile", None) is not None
+        or "expansion" in gym_config
     ):
-        log_info("Generation mode enabled.", color="green")
-        _run_generation(env, args, gym_config)
+        log_info("Expansion mode enabled.", color="green")
+        _run_expansion(env, args, gym_config)
         return
 
     # Prepare one clean scene. max_episodes counts persisted per-environment
@@ -1285,7 +1285,7 @@ def _create_parser() -> argparse.ArgumentParser:
     """Create the ``run-env`` argument parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain run-env",
-        description="Run an environment for data generation or interactive preview.",
+        description="Run an environment for data expansion or interactive preview.",
     )
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -1303,46 +1303,46 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Log the structured trace for each failed demo attempt.",
     )
     parser.add_argument(
-        "--generation-profile",
-        "--generation_profile",
+        "--expansion-profile",
+        "--expansion_profile",
         type=str,
         default=None,
         help=(
-            "Generation Profile path; overrides the profile selected by the "
-            "task generation declaration."
+            "Expansion Profile path; overrides the profile selected by the "
+            "task expansion declaration."
         ),
     )
     parser.add_argument(
-        "--generation-candidate-indices",
-        "--generation_candidate_indices",
+        "--expansion-candidate-indices",
+        "--expansion_candidate_indices",
         nargs="+",
         type=int,
         default=None,
-        help="Logical generation recipe batch starts.",
+        help="Logical expansion recipe batch starts.",
     )
     parser.add_argument(
         "--output-dir",
-        "--generation-output-dir",
-        "--generation_output_dir",
-        dest="generation_output_dir",
+        "--expansion-output-dir",
+        "--expansion_output_dir",
+        dest="expansion_output_dir",
         type=str,
         default=None,
-        help="Directory for generation provenance and manifests.",
+        help="Directory for expansion provenance and manifests.",
     )
     parser.add_argument(
         "--dataset-dir",
-        "--generation-dataset-dir",
-        "--generation_dataset_dir",
-        dest="generation_dataset_dir",
+        "--expansion-dataset-dir",
+        "--expansion_dataset_dir",
+        dest="expansion_dataset_dir",
         type=str,
         default=None,
         help="Override dataset manager save_path values.",
     )
     parser.add_argument(
-        "--generation-save-video",
-        "--generation_save_video",
+        "--expansion-save-video",
+        "--expansion_save_video",
         action="store_true",
-        help="Save generation episode videos when the environment supports it.",
+        help="Save expansion episode videos when the environment supports it.",
     )
 
     parser.add_argument(
@@ -1393,7 +1393,7 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
         close_error = error
 
     # Recorder finalization is a durability barrier. Never turn a failed flush
-    # into a warning that lets an apparently successful data-generation run
+    # into a warning that lets an apparently successful data-expansion run
     # continue.
     if close_error is not None:
         if abort_error is not None:
@@ -1410,7 +1410,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for environment runner.
 
     Parses CLI arguments, builds the environment config, and launches
-    the data generation, preview, or replay workflow.
+    the data expansion, preview, or replay workflow.
 
     Args:
         argv: Arguments excluding the command name. Uses ``sys.argv`` when
@@ -1437,43 +1437,43 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
 
-    generation_request = _resolve_generation_request(args, gym_config)
-    if generation_request is not None:
-        from embodichain.lab.sim.motion.expansion import CombinedGenerationProfile
+    expansion_request = _resolve_expansion_request(args, gym_config)
+    if expansion_request is not None:
+        from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 
-        profile = generation_request[0]
+        profile = expansion_request[0]
         program = getattr(env_cfg, "task_program", None)
         if program is None:
-            raise ValueError("generation requires a configured Task Program")
+            raise ValueError("expansion requires a configured Task Program")
         if (
             profile.source.kind != "task_program"
             or profile.source.source_id != program.program_id
         ):
             raise ValueError(
-                "generation profile source must match the configured Task Program"
+                "expansion profile source must match the configured Task Program"
             )
-        if isinstance(profile, CombinedGenerationProfile):
-            _generation_candidate_indices(
+        if isinstance(profile, CombinedExpansionProfile):
+            _expansion_candidate_indices(
                 profile,
-                generation_request[1],
+                expansion_request[1],
                 num_envs=env_cfg.num_envs,
             )
             if getattr(args, "disable_sensor", False) and profile.visual.enabled:
                 raise ValueError(
                     "--disable-sensor cannot be used with a combined profile "
-                    "that contains visual generation"
+                    "that contains visual expansion"
                 )
             if profile.scene_randomization.enabled or profile.visual.enabled:
                 configured_events = getattr(env_cfg, "events", None)
-                if getattr(configured_events, "generation_profile_reset", None) is None:
+                if getattr(configured_events, "expansion_profile_reset", None) is None:
                     raise ValueError(
-                        "combined generation with scene or visual variation "
-                        "requires the generation_profile_reset event"
+                        "combined expansion with scene or visual variation "
+                        "requires the expansion_profile_reset event"
                     )
         else:
-            _generation_candidate_indices(
+            _expansion_candidate_indices(
                 profile,
-                generation_request[1],
+                expansion_request[1],
                 num_envs=env_cfg.num_envs,
             )
 

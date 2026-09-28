@@ -24,11 +24,11 @@ def test_public_core_import_uses_motion_namespace_without_creating_a_world() -> 
     script = """
 import dexsim
 from embodichain.lab.sim.motion.expansion import (
-    TrajectoryGenerationJobCfg,
-    load_generation_profile,
+    TrajectoryExpansionJobCfg,
+    load_expansion_profile,
 )
-TrajectoryGenerationJobCfg.from_mapping({})
-assert callable(load_generation_profile)
+TrajectoryExpansionJobCfg.from_mapping({})
+assert callable(load_expansion_profile)
 assert dexsim.get_world_num() == 0
 """
     completed = subprocess.run(

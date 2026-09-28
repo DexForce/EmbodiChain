@@ -1217,7 +1217,7 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["max_episodes"] = args.max_episodes
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
-    dataset_dir = getattr(args, "generation_dataset_dir", None)
+    dataset_dir = getattr(args, "expansion_dataset_dir", None)
     if dataset_dir is not None:
         if type(dataset_dir) is not str or not dataset_dir.strip():
             raise ValueError("--dataset-dir must be a nonempty path")
@@ -1269,12 +1269,12 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     return merged_config
 
 
-def _resolve_generation_config_path(value: object, *, base_dir: Path) -> Path:
-    """Resolve one task-owned generation declaration path."""
+def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
+    """Resolve one task-owned expansion declaration path."""
     from embodichain.utils.config_paths import resolve_config_path
 
     if type(value) is not str or not value.strip() or value != value.strip():
-        raise ValueError("generation.config must be a nonempty path")
+        raise ValueError("expansion.config must be a nonempty path")
     path = Path(value).expanduser()
     if path.is_absolute():
         resolved = path.resolve()
@@ -1283,102 +1283,101 @@ def _resolve_generation_config_path(value: object, *, base_dir: Path) -> Path:
     else:
         resolved = (base_dir / path).resolve()
     if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
-        raise ValueError(f"generation.config must be a YAML or JSON file: {resolved}")
+        raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
     if not resolved.is_file():
-        raise FileNotFoundError(f"generation.config is not a file: {resolved}")
+        raise FileNotFoundError(f"expansion.config is not a file: {resolved}")
     return resolved
 
 
-def _merge_generation_config(
+def _merge_expansion_config(
     base: Mapping[str, Any], patch: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Deep-merge a referenced generation config with task-local overrides."""
+    """Deep-merge a referenced expansion config with task-local overrides."""
     merged = deepcopy(dict(base))
     for key, value in patch.items():
         if isinstance(value, Mapping):
             current = merged.get(key, {})
             if not isinstance(current, Mapping):
-                raise ValueError(f"generation.{key} cannot replace a scalar")
-            merged[key] = _merge_generation_config(current, value)
+                raise ValueError(f"expansion.{key} cannot replace a scalar")
+            merged[key] = _merge_expansion_config(current, value)
         else:
             merged[key] = deepcopy(value)
     return merged
 
 
-def _load_generation_declaration(
+def _load_expansion_declaration(
     binding: Mapping[str, Any], *, base_dir: Path
 ) -> tuple[dict[str, Any], Path | None]:
-    """Load an optional task-referenced generation declaration.
+    """Load an optional task-referenced expansion declaration.
 
-    A task may keep the generation declaration inline or point ``generation``
+    A task may keep the expansion declaration inline or point ``expansion``
     at a sibling YAML/JSON file with ``config``. The referenced file contains
-    the fields below ``generation`` directly; a single outer ``generation``
+    the fields below ``expansion`` directly; a single outer ``expansion``
     mapping is accepted as a migration convenience. Only one level of
     references is resolved so malformed chains fail early.
     """
     if not isinstance(binding, Mapping):
-        raise ValueError("generation must be a mapping")
+        raise ValueError("expansion must be a mapping")
     if "config" not in binding:
         return deepcopy(dict(binding)), None
     config_value = binding["config"]
 
     from embodichain.utils.utility import load_config
 
-    config_path = _resolve_generation_config_path(config_value, base_dir=base_dir)
+    config_path = _resolve_expansion_config_path(config_value, base_dir=base_dir)
     referenced = load_config(config_path)
     if not isinstance(referenced, Mapping):
-        raise TypeError("generation config must contain a mapping")
+        raise TypeError("expansion config must contain a mapping")
     referenced = dict(referenced)
-    if "generation" in referenced:
-        if set(referenced) != {"generation"}:
+    if "expansion" in referenced:
+        if set(referenced) != {"expansion"}:
             raise ValueError(
-                "generation config may contain either generation fields or one "
-                "outer generation mapping"
+                "expansion config may contain either expansion fields or one "
+                "outer expansion mapping"
             )
-        nested = referenced["generation"]
+        nested = referenced["expansion"]
         if not isinstance(nested, Mapping):
-            raise TypeError("generation config.generation must be a mapping")
+            raise TypeError("expansion config.expansion must be a mapping")
         referenced = dict(nested)
     if "config" in referenced:
-        raise ValueError("generation.config cannot reference another generation config")
+        raise ValueError("expansion.config cannot reference another expansion config")
     local_overrides = {key: value for key, value in binding.items() if key != "config"}
-    return _merge_generation_config(referenced, local_overrides), config_path
+    return _merge_expansion_config(referenced, local_overrides), config_path
 
 
-def _apply_generation_runtime_overlay(
+def _apply_expansion_runtime_overlay(
     config: dict[str, Any], *, base_dir: Path | None = None
 ) -> dict[str, Any]:
-    """Apply task-owned generation host values after environment expansion.
+    """Apply task-owned expansion host values after environment expansion.
 
     Physical scene and backend values remain owned by the selected environment
-    component. Generation deployments may add recorder/reset managers and
-    batch runtime values without maintaining a duplicate generation-owned
+    component. Expansion deployments may add recorder/reset managers and
+    batch runtime values without maintaining a duplicate expansion-owned
     physical scene file.
     """
-    generation = config.get("generation")
-    if not isinstance(generation, Mapping):
+    expansion = config.get("expansion")
+    if not isinstance(expansion, Mapping):
         return config
-    generation, _ = _load_generation_declaration(
-        generation,
+    expansion, _ = _load_expansion_declaration(
+        expansion,
         base_dir=Path.cwd() if base_dir is None else base_dir,
     )
-    runtime = generation.get("runtime")
+    runtime = expansion.get("runtime")
     if runtime is None:
         return config
     if not isinstance(runtime, Mapping):
-        raise ValueError("generation.runtime must be a mapping")
+        raise ValueError("expansion.runtime must be a mapping")
     allowed = {
         "max_episodes",
         "max_episode_steps",
         "num_envs",
         "arena_space",
-        "simulation",
         "env",
     }
     unknown = set(runtime) - allowed
     if unknown:
         raise ValueError(
-            f"generation.runtime contains unsupported fields: {sorted(unknown)}"
+            f"expansion.runtime contains unsupported fields: {sorted(unknown)}"
         )
 
     def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
@@ -1387,9 +1386,7 @@ def _apply_generation_runtime_overlay(
             if isinstance(value, Mapping):
                 current = merged.get(key, {})
                 if not isinstance(current, Mapping):
-                    raise ValueError(
-                        f"generation.runtime.{key} cannot replace a scalar"
-                    )
+                    raise ValueError(f"expansion.runtime.{key} cannot replace a scalar")
                 merged[key] = merge(current, value)
             else:
                 merged[key] = deepcopy(value)
@@ -1399,13 +1396,13 @@ def _apply_generation_runtime_overlay(
     for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
         if key in runtime:
             resolved[key] = deepcopy(runtime[key])
-    for key in ("simulation", "env"):
+    for key in ("env",):
         if key in runtime:
             current = resolved.get(key, {})
             if not isinstance(current, Mapping) or not isinstance(
                 runtime[key], Mapping
             ):
-                raise ValueError(f"generation.runtime.{key} must be a mapping")
+                raise ValueError(f"expansion.runtime.{key} must be a mapping")
             resolved[key] = merge(current, runtime[key])
     return resolved
 
@@ -1441,7 +1438,7 @@ def build_env_cfg_from_args(
             base_dir=gym_config_source_path.parent,
             selected_backend=getattr(args, "physics", None),
         )
-    gym_config = _apply_generation_runtime_overlay(
+    gym_config = _apply_expansion_runtime_overlay(
         gym_config, base_dir=gym_config_source_path.parent
     )
     gym_config = merge_args_with_gym_config(args, gym_config)

@@ -25,9 +25,9 @@ from .environment import (
     TaskProgramRuntimeAssembly,
     PlanningObservationPort,
 )
-from .generation import (
-    CombinedTaskProgramCandidatePlanTransformFactory,
-    TaskProgramGenerationRecord,
+from .expansion import (
+    CombinedTaskProgramExpansionFactory,
+    TaskProgramExpansionRecord,
     TaskProgramSourceAdapter,
 )
 from .simulation import (
@@ -94,8 +94,8 @@ __all__ = [
     "TaskProgramEnvironmentFactory",
     "TaskProgramIntegrationCatalog",
     "TaskProgramSourceAdapter",
-    "CombinedTaskProgramCandidatePlanTransformFactory",
-    "TaskProgramGenerationRecord",
+    "CombinedTaskProgramExpansionFactory",
+    "TaskProgramExpansionRecord",
     "TaskProgramRuntimeAssembly",
     "IntegrationFingerprintMismatch",
     "ParallelCommandSafetyValidatorFactory",
