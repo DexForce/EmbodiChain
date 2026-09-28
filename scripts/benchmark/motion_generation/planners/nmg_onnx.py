@@ -55,17 +55,55 @@ class NmgOnnxAdapter(PlannerAdapter):
         }
     )
 
-    native_timing = False
-    """The rollout reports ``NeuralPlannerCfg.dt`` as a nominal constant.
-
-    The policy integrates a joint delta per step and never solves a duration,
-    so its ``dt`` carries no executable timing. Native-timing comparisons must
-    treat this row as N/A until a time parameterization is applied.
-    """
-
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
+
+    @property
+    def retime(self) -> bool:
+        """Whether this row re-parameterizes the rollout under dynamic limits."""
+        return bool(self.spec.config.get("retime", False))
+
+    @property
+    def native_timing(self) -> bool:
+        """Whether reported timing is solved rather than nominal.
+
+        Without retiming the policy integrates a joint delta per step and never
+        solves a duration, so its ``dt`` carries no executable timing and the
+        row must be reported as N/A. Retiming replaces that constant with a
+        solved parameterization, which makes the duration comparable.
+        """
+        return self.retime
+
+    def _retiming_constraints(self) -> dict[str, object]:
+        """Resolve the limits to retime against, matching the metric limits.
+
+        Velocity comes from the asset through ``robot.get_qvel_limits()`` and
+        acceleration from the suite protocol, which are the same sources
+        ``compute_case_outcomes`` validates against. Reading them from one
+        place is what keeps a satisfied result from being self-assigned.
+
+        Returns:
+            A ``ToppraPlanOptions``-shaped constraints mapping.
+
+        Raises:
+            ValueError: If the suite states no acceleration limit, which leaves
+                nothing to retime against.
+        """
+        acceleration = self.context.joint_acceleration_limit_rad_s2
+        if acceleration is None:
+            raise ValueError(
+                "retime requires protocol.joint_acceleration_limit_rad_s2; the "
+                "asset supplies no acceleration limit."
+            )
+        num_joints = int(self.spec.config.get("num_arm_joints", 7))
+        velocity = (
+            self.context.robot.get_qvel_limits(name=self.context.control_part)[0]
+            .detach()
+            .cpu()
+            .tolist()[:num_joints]
+        )
+        return {"velocity": velocity, "acceleration": acceleration}
 
     def _resolved_model_revision(self) -> str:
         """Use an explicit revision or derive one from the runtime ONNX path."""
@@ -139,6 +177,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             policy_frame_from_world=values.get("policy_frame_from_world"),
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
+            constraints=self._retiming_constraints() if self.retime else None,
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 
