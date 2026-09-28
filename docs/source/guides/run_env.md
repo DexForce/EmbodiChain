@@ -48,9 +48,9 @@ recorders inline, or select reusable components. A pure physical `env.yaml`
 component uses `environment_id` instead of `id` and is not runnable by itself.
 
 A configuration-defined Task Program deployment conventionally uses
-`task.<embodiment>.yaml`. It selects `environment.component`, all three
-`task_program` paths (`program`, `integration`, and `execution_policy`), and
-`embodiment.component`:
+`task.<embodiment>.yaml`. It selects either one `environment.component` or a
+`environment.default/newton` mapping, all three `task_program` paths (`program`,
+`integration`, and `execution_policy`), and `embodiment.component`:
 
 ```bash
 embodichain run-env \
@@ -68,10 +68,28 @@ At startup, `run-env`:
 4. creates the environment selected by the gym config's `id`; and
 5. enters rollout, preview, or replay mode.
 
-The runnable config, or its selected `environment.component`, must declare
-`physics: default` or `physics: newton`. See
-{doc}`configuration` for paired backend configuration fragments. That backend is file-owned:
-`--physics` can confirm it but cannot switch it. Omitting `--device` preserves
+Task-facing trajectory generation can be kept in a sibling configuration and
+referenced from the runnable task:
+
+```yaml
+generation:
+  config: generation/<task-profile>.yaml
+```
+
+The referenced file may contain `runtime`, `policy`, `overrides`, and
+`candidate_indices`. The runner resolves it relative to the task, applies its
+runtime overlay after expanding the selected environment variant, and merges
+task-local generation fields on top. `run-task` then uses that declaration for
+Task Program generation; `--generation-profile` and
+`--generation-candidate-indices` remain per-run overrides.
+
+The runnable config, or its selected environment component, must declare
+`physics: default` or `physics: newton`. With an `environment.default/newton`
+mapping, the requested variant is expanded before this check. See
+{doc}`configuration` for paired backend configuration fragments. That backend is
+file-owned: `--physics` selects a named variant when the task declares an
+`environment.default/newton` mapping and confirms it for a single component. It
+never rewrites the selected file. Omitting `--device` preserves
 an authored `device` or the selected backend's default; supplying `--device`
 overrides both environment tensors and backend execution, including an explicit
 CPU selection for Newton.

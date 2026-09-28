@@ -44,17 +44,19 @@ from embodichain.lab.sim.motion.expansion import (
     round_robin_recipes,
     schedule_digest,
 )
+from embodichain.utils.config_paths import resolve_config_path
+from embodichain.utils.utility import load_config
 
-_DEFAULT_PROFILE = (
+_DEFAULT_TASK_CONFIG = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation.combined.yaml"
+    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--task-config", type=Path, default=None)
-    parser.add_argument("--generation-profile", type=Path, default=_DEFAULT_PROFILE)
+    parser.add_argument("--task-config", type=Path, default=_DEFAULT_TASK_CONFIG)
+    parser.add_argument("--generation-profile", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--device", default="cpu")
@@ -86,7 +88,25 @@ def _record(recipe: CandidateRecipe) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
-    profile = load_generation_profile(args.generation_profile)
+    if args.generation_profile is None:
+        from embodichain.lab.scripts.run_env import (
+            _resolve_generation_request,
+        )
+
+        task_path = resolve_config_path(args.task_config)
+        args.gym_config = str(task_path)
+        args.generation_candidate_indices = None
+        request = _resolve_generation_request(args, load_config(task_path))
+        if request is None:
+            raise ValueError(
+                "task config must bind a generation policy when "
+                "--generation-profile is omitted"
+            )
+        profile, _, profile_anchor = request
+        profile_source = str(profile_anchor)
+    else:
+        profile = load_generation_profile(args.generation_profile)
+        profile_source = str(args.generation_profile)
     if not isinstance(profile, CombinedGenerationProfile):
         raise ValueError(
             "the combined command requires schema_version: 1 and trajectory"
@@ -94,18 +114,23 @@ def main(argv: list[str] | None = None) -> None:
     profile.validate_for_num_envs(args.num_envs)
     if args.task_config is not None and not args.task_config.is_file():
         raise FileNotFoundError(f"task config does not exist: {args.task_config}")
-    visual_registry = VisualProfileRegistry.from_yaml(
-        args.generation_profile.parent / profile.visual.profile_file,
+    visual_registry = (
+        VisualProfileRegistry.from_yaml(
+            resolve_config_path(profile.visual.profile_file),
+        )
+        if profile.visual.enabled
+        else None
     )
-    if visual_registry.profile_ids != profile.visual.profiles:
-        raise ValueError("visual registry IDs do not match the combined profile")
-    profile.validate_registries(
-        visual_profile_ids=visual_registry.profile_ids,
-        observation_profile_ids=profile.observation.profiles,
-    )
-    families = CubeInitialPoseProvider().enumerate(
-        profile.scene_randomization.reference_family_count
-    )
+    if visual_registry is not None:
+        if visual_registry.profile_ids != profile.visual.profiles:
+            raise ValueError("visual registry IDs do not match the combined profile")
+        profile.validate_registries(
+            visual_profile_ids=visual_registry.profile_ids,
+            observation_profile_ids=profile.observation.profiles,
+        )
+    families = CubeInitialPoseProvider.from_yaml(
+        resolve_config_path(profile.scene_randomization.profile_file)
+    ).enumerate(profile.scene_randomization.reference_family_count)
     recipes = enumerate_candidate_recipes(profile, families=families)
     digest = schedule_digest(recipes)
     scheduled_recipes = round_robin_recipes(
@@ -136,7 +161,7 @@ def main(argv: list[str] | None = None) -> None:
     manifest = {
         "status": "configured_preflight",
         "measured_success": False,
-        "profile": str(args.generation_profile),
+        "profile": profile_source,
         "schema_version": profile.schema_version,
         "reference_family_count": len(families),
         "candidate_count": len(scheduled_recipes),

@@ -1,8 +1,8 @@
 id: TaskProgramRepeatedPickPlace-Franka-v1
 
 environment:
-  default: env.yaml
-  newton: env.newton.yaml
+  default: envs/default.yaml
+  newton: envs/newton.yaml
 
 task_program:
   program: task_program/program.yaml

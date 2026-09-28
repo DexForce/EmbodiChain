@@ -17,10 +17,10 @@ same task:
 
 ```text
 embodichain_tasks/<category-path>/<task>.py
-configs/tasks/<category-path>/<task>/env.{json,yaml}          # inline runnable, or reusable env.yaml
-configs/tasks/<category-path>/<task>/env.<backend>.yaml       # optional backend companion
-configs/tasks/<category-path>/<task>/task.<embodiment>.yaml   # componentized runnable deployment
-configs/tasks/<category-path>/<task>/task.<embodiment>.<backend>.yaml
+configs/tasks/<category-path>/<task>/envs/default.yaml  # reusable default backend
+configs/tasks/<category-path>/<task>/envs/newton.yaml   # optional Newton backend
+configs/tasks/<category-path>/<task>/task.<embodiment>.yaml     # componentized runnable deployment
+configs/tasks/<category-path>/<task>/generation/<profile>.yaml   # task-facing generation override
 configs/tasks/<category-path>/<task>/task_program/program.yaml
 configs/tasks/<category-path>/<task>/task_program/integration.yaml
 configs/tasks/<category-path>/<task>/agents/<algorithm>.yaml
@@ -34,9 +34,9 @@ manipulation tasks can stay directly under `manipulation`. The Python entry
 stays flat beneath its owning category; the task-local configuration directory
 remains because it can own environment, Task Program, and policy artifacts.
 A simple import-registered task may keep all physical and manager values in its
-runnable `env.json` or `env.yaml`. A componentized task instead gives the pure
-physical `env.yaml` an `environment_id` and places the runnable `id` plus
-component selections in `task.<embodiment>.yaml`.
+runnable `env.json` or `env.yaml`. A componentized task instead gives each pure
+physical environment variant an `environment_id` and places the runnable `id`
+plus component selections in `task.<embodiment>.yaml`.
 A Gym deployment of any kind may select reusable `environment.component` and
 `embodiment.component` files instead of repeating environment, robot, sensor,
 and scene fields. A physical-only embodiment may omit `skill_profile`; this is
@@ -44,18 +44,37 @@ used by the CobotMagic tableware handwritten demos. Standalone
 `scene.component` and inline Gym configs remain valid, but component-owned
 fields cannot also be declared inline in the same file.
 
-A configuration-defined Task Program environment uses three explicit owners.
-The reusable `env.yaml` owns episode/environment values and physical simulation
-entities, and contains no Task Program metadata. When a backend needs native
-solver/contact values, a companion such as `env.newton.yaml` owns those values
-while retaining the same scene geometry and control cadence. The integration's
-The integration's nested `scene_binding` maps canonical `entity_id` values to physical
+A configuration-defined Task Program environment uses explicit owners. The
+selected file under `envs/` owns episode/environment values and physical
+simulation entities, and contains no Task Program metadata. When a backend needs
+native solver/contact values, `envs/newton.yaml` owns those values while
+retaining the same scene geometry and control cadence. The integration's nested
+`scene_binding` maps canonical `entity_id` values to physical
 `simulation_uid` values and owns semantic types and affordances. A thin
 `task.<embodiment>.yaml` deployment selects named `default` and `newton`
 environment variants. Both select one reusable embodiment and all three Task
-Program components (`program`,
-`integration`, and `execution_policy`). Give each backend deployment a distinct
-Gym ID because the backend is file-owned.
+Program components (`program`, `integration`, and `execution_policy`). The
+launcher selects the concrete backend from the same deployment with
+`--physics`; the selected environment file remains the owner of its backend
+fields.
+
+Task-facing trajectory generation is an optional third owner. A runnable task
+can reference it without copying the robot or environment declaration:
+
+```yaml
+generation:
+  config: generation/<task-profile>.yaml
+```
+
+The referenced file contains `runtime`, `policy`, `overrides`, and optional
+`candidate_indices`. Its mappings are merged with any task-local generation
+fields, and its runtime overlay is applied after the selected environment
+variant is expanded. This keeps generation-specific batch size, recorder
+events, and augmentation policy beside the task while keeping physical scene
+ownership in `envs/`. `run-task` loads the referenced declaration;
+relative policy and resource paths inside it resolve from the generation file.
+`--generation-profile` and `--generation-candidate-indices` remain
+command-line overrides.
 
 An embodiment owns the simulation robot and its sensor suite. Its optional
 `skill_profile` owns the logical resources, command presets, and
@@ -141,7 +160,7 @@ triggers its `@register_env` decorator and registers it in the gymnasium
 registry. Configuration-defined Task Program IDs are registered later by
 `config_to_cfg()` when their task deployment is loaded. Task listing discovers
 top-level JSON/YAML deployments by their non-empty `id` field rather than an
-`env*` filename prefix, so the pure `env.yaml` component is ignored. The
+`env*` filename prefix, so pure environment components are ignored. The
 unified CLI calls `discover_task_packages()` (from
 `embodichain.lab.gym.utils.registration`) at
 startup, which imports this package via its entry point. See the
@@ -171,8 +190,8 @@ To add a task environment:
    Task Program may omit that module and register its ID when its runnable
    config is loaded.
 3. **Write a runnable gym config** (`.json`/`.yaml`) with `id`. It may define
-   physical and manager values inline, or select a reusable `env.yaml`, an
-   embodiment, and optional Task Program components from
+   physical and manager values inline, or select reusable environment variants,
+   an embodiment, and optional Task Program components from
    `task.<embodiment>.yaml`.
 4. **Install and run**:
    ```bash

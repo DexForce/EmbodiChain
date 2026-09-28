@@ -42,6 +42,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
     load_trajectory,
+    _load_generation_declaration,
 )
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
@@ -482,6 +483,18 @@ def _configure_generation_reset_event(
     )
 
 
+def _resolve_generation_resource(anchor: Path, value: str) -> Path:
+    """Resolve a task-local or packaged randomization resource path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    if path.parts[:2] == ("embodichain_tasks", "configs"):
+        return resolve_config_path(path)
+    return (anchor.parent / path).resolve()
+
+
 def _resolve_generation_request(
     args: Any,
     gym_config: Mapping[str, Any],
@@ -495,10 +508,15 @@ def _resolve_generation_request(
         load_generation_profile,
     )
 
+    task_path = resolve_config_path(args.gym_config)
     binding = gym_config.get("generation")
     if binding is not None:
         if not isinstance(binding, Mapping):
             raise ValueError("generation must be a mapping")
+        binding, generation_config_path = _load_generation_declaration(
+            binding,
+            base_dir=task_path.parent,
+        )
         unknown = set(binding) - {
             "profile",
             "policy",
@@ -516,11 +534,12 @@ def _resolve_generation_request(
     if binding_profile is not None and binding_policy is not None:
         raise ValueError("generation may select profile or policy, not both")
     profile_value = cli_profile if cli_profile is not None else binding_profile
-    if profile_value is None and binding_policy is None:
+    use_binding_policy = binding_policy is not None and cli_profile is None
+    if profile_value is None and not use_binding_policy:
         if getattr(args, "generation_candidate_indices", None) is not None:
             raise ValueError("generation candidate indices require a profile")
         return None
-    if binding_policy is not None:
+    if use_binding_policy:
         if not isinstance(binding_policy, Mapping):
             raise ValueError("generation.policy must be a mapping")
         policy_path_value = binding_policy.get("component")
@@ -530,10 +549,14 @@ def _resolve_generation_request(
             or policy_path_value != policy_path_value.strip()
         ):
             raise ValueError("generation.policy.component must be a nonempty path")
-        task_path = resolve_config_path(args.gym_config)
         policy_path = Path(policy_path_value).expanduser()
         if not policy_path.is_absolute():
-            policy_path = task_path.parent / policy_path
+            policy_base_dir = (
+                generation_config_path.parent
+                if generation_config_path is not None
+                else task_path.parent
+            )
+            policy_path = policy_base_dir / policy_path
         policy_path = policy_path.resolve()
         policy_data = load_config(policy_path)
         overrides = binding.get("overrides", {}) if binding is not None else {}
@@ -557,7 +580,7 @@ def _resolve_generation_request(
         if not isinstance(policy_data, Mapping):
             raise ValueError("generation policy component must be a mapping")
         profile = CombinedGenerationProfile.from_mapping(merge(policy_data, overrides))
-        profile_path = task_path
+        profile_path = generation_config_path or task_path
     else:
         if (
             not isinstance(profile_value, str)
@@ -565,13 +588,17 @@ def _resolve_generation_request(
             or profile_value != profile_value.strip()
         ):
             raise ValueError("generation.profile must be a nonempty path")
-        task_path = resolve_config_path(args.gym_config)
         profile_path = Path(profile_value).expanduser()
         if not profile_path.is_absolute():
             profile_path = (
                 Path.cwd() / profile_path
                 if cli_profile is not None
-                else task_path.parent / profile_path
+                else (
+                    generation_config_path.parent
+                    if generation_config_path is not None
+                    else task_path.parent
+                )
+                / profile_path
             )
         profile_path = profile_path.resolve()
         profile = load_generation_profile(profile_path)
@@ -672,16 +699,18 @@ def _run_generation(
     if isinstance(profile, CombinedGenerationProfile):
         visual_registry = (
             VisualProfileRegistry.from_yaml(
-                profile_path.parent / profile.visual.profile_file
+                _resolve_generation_resource(
+                    profile_path,
+                    profile.visual.profile_file,
+                )
             )
             if profile.visual.enabled
             else None
         )
         if profile.scene_randomization.enabled:
-            family_path = (
-                profile_path.parent
-                / "generation_profiles"
-                / (f"{profile.scene_randomization.profile}.yaml")
+            family_path = _resolve_generation_resource(
+                profile_path,
+                profile.scene_randomization.profile_file,
             )
             families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
                 profile.scene_randomization.reference_family_count
@@ -1298,7 +1327,10 @@ def _create_parser() -> argparse.ArgumentParser:
         "--generation_profile",
         type=str,
         default=None,
-        help="Generation Profile path; overrides task.generation.profile.",
+        help=(
+            "Generation Profile path; overrides the profile selected by the "
+            "task generation declaration."
+        ),
     )
     parser.add_argument(
         "--generation-candidate-indices",

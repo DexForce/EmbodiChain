@@ -53,13 +53,14 @@ from embodichain.lab.sim.motion.expansion import (
     VisualProfileRegistry,
 )
 from embodichain.lab.task_program.integrations import TaskProgramGenerationRecord
+from embodichain.utils.config_paths import resolve_config_path
 
 _TASK_ROOT = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 )
-_DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.generation.yaml"
-_DEFAULT_GENERATION_PROFILE = _TASK_ROOT / "generation.combined.yaml"
+_DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"
+_DEFAULT_GENERATION_PROFILE = None
 _VIDEO_LOOK_AT = (
     (-1.25, -1.15, 0.95),
     (-0.25, -0.02, 0.25),
@@ -324,7 +325,21 @@ def _configure_generation_reset_event(
 def main(argv: list[str] | None = None) -> None:
     """Run selected candidates through the configured Task Program environment."""
     args = _create_parser().parse_args(argv)
-    profile = load_generation_profile(args.generation_profile)
+    if args.generation_profile is None:
+        from embodichain.lab.scripts.run_env import _resolve_generation_request
+        from embodichain.utils.config_paths import resolve_config_path
+        from embodichain.utils.utility import load_config
+
+        task_path = resolve_config_path(args.gym_config)
+        request = _resolve_generation_request(args, load_config(task_path))
+        if request is None:
+            raise ValueError(
+                "task config must bind a generation policy when "
+                "--generation-profile is omitted"
+            )
+        profile, _, _ = request
+    else:
+        profile = load_generation_profile(args.generation_profile)
     candidate_indices = _validate_candidate_indices(
         args.candidate_indices,
         profile=profile,
@@ -341,12 +356,11 @@ def main(argv: list[str] | None = None) -> None:
     if isinstance(profile, CombinedGenerationProfile):
         if profile.visual.enabled:
             visual_registry = VisualProfileRegistry.from_yaml(
-                args.generation_profile.parent / profile.visual.profile_file
+                resolve_config_path(profile.visual.profile_file)
             )
         if profile.scene_randomization.enabled:
             reference_families = CubeInitialPoseProvider.from_yaml(
-                args.generation_profile.parent
-                / "generation_profiles/cube_initial_pose.yaml",
+                resolve_config_path(profile.scene_randomization.profile_file),
                 seed=7,
             ).enumerate(profile.scene_randomization.reference_family_count)
         else:

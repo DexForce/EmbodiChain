@@ -112,8 +112,10 @@ already includes and registers the official ``embodichain_tasks`` import
 package, so no separate task installation is needed. Repository-style task
 config paths resolve from the source checkout or installed wheel. The task to
 launch is selected by the ``"id"`` field of the gym config. Pass a runnable
-config (for example ``task.ur5.yaml``), not a pure reusable ``env.yaml``
-component that has only ``environment_id``.
+config (for example ``task.ur5.yaml``), not a pure reusable environment
+component that has only ``environment_id``. A componentized task may select one
+backend with ``environment.component`` or expose ``environment.default`` and
+``environment.newton`` variants in the same deployment.
 
 ```bash
 # Run an environment with a gym config file

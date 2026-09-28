@@ -5,7 +5,7 @@ max_episode_steps: 600
 num_envs: 1
 arena_space: 3.0
 
-# Newton companion of env.yaml.  The drawer geometry, pose, and control period
+# Newton companion of envs/default.yaml. The drawer geometry, pose, and control period
 # stay unchanged so the Default and Newton traces can be compared directly.
 physics_config:
   physics_dt: 0.01

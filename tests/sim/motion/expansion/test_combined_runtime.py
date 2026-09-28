@@ -35,15 +35,22 @@ from embodichain.lab.sim.motion.expansion import (
     enumerate_candidate_recipes,
     round_robin_recipes,
 )
+from embodichain.utils.config_paths import resolve_config_path
+from embodichain.utils.utility import load_config
+from embodichain.lab.scripts.run_env import _create_parser, _resolve_generation_request
 
 _ROOT = Path(__file__).parents[4]
 _TASK_ROOT = _ROOT / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 
 
 def _profile() -> CombinedGenerationProfile:
-    from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
-
-    profile = load_generation_profile(_TASK_ROOT / "generation.combined.yaml")
+    task_config = _TASK_ROOT / "task.ur5.yaml"
+    args = _create_parser().parse_args(
+        ["--gym-config", str(task_config), "--headless", "--device", "cpu"]
+    )
+    request = _resolve_generation_request(args, load_config(task_config))
+    assert request is not None
+    profile = request[0]
     assert isinstance(profile, CombinedGenerationProfile)
     return profile
 
@@ -51,7 +58,7 @@ def _profile() -> CombinedGenerationProfile:
 def test_visual_registry_resolves_seeded_visual_profiles() -> None:
     profile = _profile()
     registry = VisualProfileRegistry.from_yaml(
-        _TASK_ROOT / "generation_profiles/rgb_visual.yaml"
+        resolve_config_path(profile.visual.profile_file)
     )
     assert registry.profile_ids == profile.visual.profiles
     resolved = registry.resolve("rgb_camera_01", seed=123)

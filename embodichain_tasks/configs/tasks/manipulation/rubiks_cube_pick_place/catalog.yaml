@@ -1,0 +1,11 @@
+task_key: rubiks_cube_pick_place
+title: Rubiks Cube Pick and Place
+summary: Move a Rubiks cube between authored target poses using a Task Program.
+tags:
+- manipulation
+- pick_place
+- task_program
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

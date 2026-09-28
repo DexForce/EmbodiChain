@@ -53,7 +53,7 @@ _CUBE_GYM_CONFIG_PATH = (
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
-_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "env.yaml"
+_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
 _COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"

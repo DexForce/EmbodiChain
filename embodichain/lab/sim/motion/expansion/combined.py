@@ -176,6 +176,10 @@ class _SceneRandomizationCfg:
     enabled: bool = True
     reference_family_count: int = 4
     profile: str = "cube_initial_pose"
+    profile_file: str = (
+        "embodichain_tasks/configs/components/randomization_profiles/"
+        "cube_initial_pose.yaml"
+    )
     change_scope: str = "cube_initial_pose_only"
     keep_drop_targets: bool = True
 
@@ -185,6 +189,7 @@ class _SceneRandomizationCfg:
             self.reference_family_count, "scene_randomization.reference_family_count", 1
         )
         _text(self.profile, "scene_randomization.profile")
+        _text(self.profile_file, "scene_randomization.profile_file")
         if self.enabled and self.change_scope != "cube_initial_pose_only":
             raise ValueError(
                 "scene_randomization.change_scope must be cube_initial_pose_only"
@@ -251,7 +256,9 @@ class _TrajectoryCfg:
 @configclass
 class _VisualCfg:
     enabled: bool = True
-    profile_file: str = "generation_profiles/rgb_visual.yaml"
+    profile_file: str = (
+        "embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml"
+    )
     profiles: tuple[str, ...] = (
         "rgb_canonical",
         "rgb_material_01",
@@ -423,6 +430,7 @@ class CombinedGenerationProfile:
                     "enabled",
                     "reference_family_count",
                     "profile",
+                    "profile_file",
                     "change_scope",
                     "keep_drop_targets",
                 },

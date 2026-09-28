@@ -1263,17 +1263,99 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
     return merged_config
 
 
-def _apply_generation_runtime_overlay(config: dict[str, Any]) -> dict[str, Any]:
+def _resolve_generation_config_path(value: object, *, base_dir: Path) -> Path:
+    """Resolve one task-owned generation declaration path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    if type(value) is not str or not value.strip() or value != value.strip():
+        raise ValueError("generation.config must be a nonempty path")
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        resolved = path.resolve()
+    elif path.parts[:2] == ("embodichain_tasks", "configs"):
+        resolved = resolve_config_path(path).resolve()
+    else:
+        resolved = (base_dir / path).resolve()
+    if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
+        raise ValueError(f"generation.config must be a YAML or JSON file: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"generation.config is not a file: {resolved}")
+    return resolved
+
+
+def _merge_generation_config(
+    base: Mapping[str, Any], patch: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge a referenced generation config with task-local overrides."""
+    merged = deepcopy(dict(base))
+    for key, value in patch.items():
+        if isinstance(value, Mapping):
+            current = merged.get(key, {})
+            if not isinstance(current, Mapping):
+                raise ValueError(f"generation.{key} cannot replace a scalar")
+            merged[key] = _merge_generation_config(current, value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _load_generation_declaration(
+    binding: Mapping[str, Any], *, base_dir: Path
+) -> tuple[dict[str, Any], Path | None]:
+    """Load an optional task-referenced generation declaration.
+
+    A task may keep the generation declaration inline or point ``generation``
+    at a sibling YAML/JSON file with ``config``. The referenced file contains
+    the fields below ``generation`` directly; a single outer ``generation``
+    mapping is accepted as a migration convenience. Only one level of
+    references is resolved so malformed chains fail early.
+    """
+    if not isinstance(binding, Mapping):
+        raise ValueError("generation must be a mapping")
+    if "config" not in binding:
+        return deepcopy(dict(binding)), None
+    config_value = binding["config"]
+
+    from embodichain.utils.utility import load_config
+
+    config_path = _resolve_generation_config_path(config_value, base_dir=base_dir)
+    referenced = load_config(config_path)
+    if not isinstance(referenced, Mapping):
+        raise TypeError("generation config must contain a mapping")
+    referenced = dict(referenced)
+    if "generation" in referenced:
+        if set(referenced) != {"generation"}:
+            raise ValueError(
+                "generation config may contain either generation fields or one "
+                "outer generation mapping"
+            )
+        nested = referenced["generation"]
+        if not isinstance(nested, Mapping):
+            raise TypeError("generation config.generation must be a mapping")
+        referenced = dict(nested)
+    if "config" in referenced:
+        raise ValueError("generation.config cannot reference another generation config")
+    local_overrides = {key: value for key, value in binding.items() if key != "config"}
+    return _merge_generation_config(referenced, local_overrides), config_path
+
+
+def _apply_generation_runtime_overlay(
+    config: dict[str, Any], *, base_dir: Path | None = None
+) -> dict[str, Any]:
     """Apply task-owned generation host values after environment expansion.
 
     Physical scene and backend values remain owned by the selected environment
     component. Generation deployments may add recorder/reset managers and
-    batch runtime values without maintaining a duplicate ``env.generation``
-    scene file.
+    batch runtime values without maintaining a duplicate generation-owned
+    physical scene file.
     """
     generation = config.get("generation")
     if not isinstance(generation, Mapping):
         return config
+    generation, _ = _load_generation_declaration(
+        generation,
+        base_dir=Path.cwd() if base_dir is None else base_dir,
+    )
     runtime = generation.get("runtime")
     if runtime is None:
         return config
@@ -1353,7 +1435,9 @@ def build_env_cfg_from_args(
             base_dir=gym_config_source_path.parent,
             selected_backend=getattr(args, "physics", None),
         )
-    gym_config = _apply_generation_runtime_overlay(gym_config)
+    gym_config = _apply_generation_runtime_overlay(
+        gym_config, base_dir=gym_config_source_path.parent
+    )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)

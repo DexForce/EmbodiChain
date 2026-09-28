@@ -5,8 +5,8 @@ max_episode_steps: 1200
 num_envs: 1
 arena_space: 2.5
 
-# This is the Newton companion to env.yaml.  Keep the control cadence and
-# scene geometry identical to the Default reference; only the backend-owned
+# This is the Newton companion to envs/default.yaml. Keep the control
+# cadence and scene geometry identical to the Default reference; only the backend-owned
 # solver/contact fields differ.
 physics_config:
   physics_dt: 0.01

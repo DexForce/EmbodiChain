@@ -8,11 +8,3 @@ deployments:
     config: task.franka.yaml
   ur5:
     config: task.ur5.yaml
-  ur5_generation:
-    config: task.ur5.generation.yaml
-  franka_rlinf:
-    config: task.franka.rlinf.yaml
-  franka_rlinf_joint:
-    config: task.franka.rlinf_joint.yaml
-  franka_rlinf_expert:
-    config: task.franka.rlinf_expert.yaml

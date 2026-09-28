@@ -1,8 +1,11 @@
 id: TaskProgramRepeatedPickPlace-v1
 
 environment:
-  default: env.yaml
-  newton: env.newton.yaml
+  default: envs/default.yaml
+  newton: envs/newton.yaml
+
+generation:
+  config: generation/repeated_pick_place.yaml
 
 task_program:
   program: task_program/program.yaml

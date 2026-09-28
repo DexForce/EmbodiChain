@@ -21,13 +21,8 @@ from __future__ import annotations
 import importlib
 from importlib.util import find_spec
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-
 import pytest
-import torch
 
-from embodichain.lab.gym.envs.managers import ActionManager
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
@@ -45,8 +40,6 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "MatchObjectContainer-v1": "embodichain_tasks.manipulation.tableware.match_object_container",
     "PlaceObjectDrawer-v1": "embodichain_tasks.manipulation.tableware.place_object_drawer",
     "PushCubeRL": "embodichain_tasks.manipulation.push_cube",
-    "RepeatedPickPlaceRlinf-Franka-v1": "embodichain_tasks.manipulation.repeated_pick_place",
-    "RepeatedPickPlaceRlinfJoint-Franka-v1": "embodichain_tasks.manipulation.repeated_pick_place",
     "ScoopIce-v1": "embodichain_tasks.manipulation.tableware.scoop_ice",
     "SimpleTask-v1": "embodichain_tasks.special.simple_task",
     "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
@@ -58,8 +51,6 @@ CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
 RL_SIMULATOR_ENV_IDS = {
     "CartPoleRL",
     "PushCubeRL",
-    "RepeatedPickPlaceRlinf-Franka-v1",
-    "RepeatedPickPlaceRlinfJoint-Franka-v1",
 }
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
@@ -74,29 +65,6 @@ TABLEWARE_CONFIG_TASKS = {
 TASK_CONFIG_ROOT = (
     Path(__file__).resolve().parents[3] / "embodichain_tasks/configs/tasks"
 )
-
-
-def _action_env() -> SimpleNamespace:
-    """Return the robot surface needed to construct RLinf action terms."""
-    joint_names = [f"joint_{index}" for index in range(8)]
-    robot = SimpleNamespace(
-        joint_names=joint_names,
-        body_data=SimpleNamespace(
-            qpos_limits=torch.tensor([[[-1.0, 1.0]] * len(joint_names)]),
-        ),
-        get_joint_ids=lambda name, remove_mimic=False: (
-            list(range(7)) if name == "arm" else [7]
-        ),
-        get_qpos=MagicMock(return_value=torch.zeros(2, len(joint_names))),
-        compute_ik=MagicMock(),
-        set_qpos=MagicMock(),
-    )
-    return SimpleNamespace(
-        num_envs=2,
-        device=torch.device("cpu"),
-        robot=robot,
-        active_joint_ids=list(range(len(joint_names))),
-    )
 
 
 def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
@@ -184,24 +152,6 @@ def test_action_docs_and_context_use_new_public_contract() -> None:
         "ParallelGripperAction",
     ):
         assert public_name in text
-
-
-@pytest.mark.parametrize(
-    ("filename", "expected_shape"),
-    [("task.franka.rlinf.yaml", (7,)), ("task.franka.rlinf_joint.yaml", (8,))],
-)
-def test_repeated_pick_place_actions_compose_flat_manager(
-    filename: str,
-    expected_shape: tuple[int, ...],
-) -> None:
-    """RLinf deployments compose ordered arm and gripper action slices."""
-    config_path = TASK_CONFIG_ROOT / "manipulation/repeated_pick_place" / filename
-    cfg = config_to_cfg(load_config(config_path), source_path=config_path)
-    manager = ActionManager(cfg.actions, _action_env())
-
-    assert manager.active_functors == ["arm_action", "gripper_action"]
-    assert manager.single_action_space.shape == expected_shape
-    assert cfg.control_parts == ["arm", "hand"]
 
 
 def test_import_registered_gym_ids_resolve_to_flat_task_modules() -> None:

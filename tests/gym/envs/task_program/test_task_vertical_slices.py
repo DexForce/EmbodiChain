@@ -384,8 +384,8 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
         _REPEATED_CUBE_GYM_CONFIG
     )
     assert default_payload["environment"] == {
-        "default": "env.yaml",
-        "newton": "env.newton.yaml",
+        "default": "envs/default.yaml",
+        "newton": "envs/newton.yaml",
     }
     assert isinstance(default_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_cfg.rigid_object[0].attrs.collision_props is None
@@ -472,8 +472,8 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
         _OPEN_DRAWER_GYM_CONFIG
     )
     assert default_drawer_payload["environment"] == {
-        "default": "env.yaml",
-        "newton": "env.newton.yaml",
+        "default": "envs/default.yaml",
+        "newton": "envs/newton.yaml",
     }
     assert isinstance(default_drawer_cfg.sim_cfg.physics_cfg, DefaultPhysicsCfg)
     assert default_drawer_cfg.articulation[0].link_attrs is None
@@ -1064,9 +1064,15 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
 ) -> None:
     """Runnable examples keep only deterministic simulation and motion inputs."""
     payload = _read_payload(relative_path)
-    environment = _read_payload(relative_path.parent / "env.yaml")
-
-    assert payload["environment"] == {"component": "env.yaml"}
+    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
+        environment = _read_payload(relative_path.parent / "envs/default.yaml")
+        assert payload["environment"] == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
+    else:
+        environment = _read_payload(relative_path.parent / "env.yaml")
+        assert payload["environment"] == {"component": "env.yaml"}
     assert set(payload["task_program"]) == {
         "program",
         "integration",
@@ -1079,7 +1085,10 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
-    assert environment["env"]["dataset"] == {}
+    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
+        assert set(environment["env"]["dataset"]) == {"lerobot"}
+    else:
+        assert environment["env"]["dataset"] == {}
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
 

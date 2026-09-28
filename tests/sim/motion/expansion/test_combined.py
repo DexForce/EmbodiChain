@@ -30,15 +30,28 @@ from embodichain.lab.sim.motion.expansion import (
 )
 from embodichain.lab.sim.motion.expansion.combined import load_visual_profile_registry
 from embodichain.lab.sim.motion.expansion.profile import load_generation_profile
+from embodichain.utils.config_paths import resolve_config_path
+from embodichain.utils.utility import load_config
+from embodichain.lab.scripts.run_env import _create_parser, _resolve_generation_request
 
-_PROFILE = Path(__file__).parents[4] / (
-    "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
-    "generation.combined.yaml"
+_TASK_CONFIG = Path(__file__).parents[4] / (
+    "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/" "task.ur5.yaml"
 )
 
 
+def _profile() -> CombinedGenerationProfile:
+    args = _create_parser().parse_args(
+        ["--gym-config", str(_TASK_CONFIG), "--headless", "--device", "cpu"]
+    )
+    request = _resolve_generation_request(args, load_config(_TASK_CONFIG))
+    assert request is not None
+    profile = request[0]
+    assert isinstance(profile, CombinedGenerationProfile)
+    return profile
+
+
 def test_combined_profile_decodes_canonical_shape() -> None:
-    profile = load_generation_profile(_PROFILE)
+    profile = _profile()
 
     assert isinstance(profile, CombinedGenerationProfile)
     assert profile.scene_randomization.reference_family_count == 4
@@ -47,17 +60,19 @@ def test_combined_profile_decodes_canonical_shape() -> None:
     assert profile.execution.max_inflight == 16
     profile.validate_for_num_envs(16)
     visual_ids = load_visual_profile_registry(
-        _PROFILE.parent / "generation_profiles/rgb_visual.yaml",
+        resolve_config_path(profile.visual.profile_file),
         requested_profile_ids=profile.visual.profiles,
     )
     profile.validate_registries(
         visual_profile_ids=visual_ids,
         observation_profile_ids=profile.observation.profiles,
     )
-    task = yaml.safe_load(
-        (_PROFILE.parent / "task.ur5.generation.yaml").read_text(encoding="utf-8")
+    generation_config = yaml.safe_load(
+        (_TASK_CONFIG.parent / "generation/repeated_pick_place.yaml").read_text(
+            encoding="utf-8"
+        )
     )
-    runtime = task["generation"]["runtime"]
+    runtime = generation_config["runtime"]
     lights = runtime["simulation"]["light"]["direct"]
     assert {light["uid"] for light in lights} == {"main_light", "rect_light"}
     assert lights[0]["light_type"] == "sun"
@@ -71,19 +86,20 @@ def test_combined_profile_decodes_canonical_shape() -> None:
 
 
 def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:
-    payload = _PROFILE.read_text(encoding="utf-8")
-    payload = payload.replace("candidate_budget: 64", "candidate_budget: 63")
+    profile = _profile()
+    payload = profile.to_dict()
+    payload["scheduling"]["candidate_budget"] = 63
     with pytest.raises(ValueError, match="m.*a.*t"):
-        CombinedGenerationProfile.from_mapping(yaml.safe_load(payload))
+        CombinedGenerationProfile.from_mapping(payload)
 
-    profile = load_generation_profile(_PROFILE)
+    profile = _profile()
     assert isinstance(profile, CombinedGenerationProfile)
     with pytest.raises(ValueError, match="num_envs"):
         profile.validate_for_num_envs(8)
 
 
 def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
-    profile = load_generation_profile(_PROFILE)
+    profile = _profile()
     assert isinstance(profile, CombinedGenerationProfile)
     families = CubeInitialPoseProvider().enumerate(4)
     recipes = enumerate_candidate_recipes(profile, families=families)
@@ -110,10 +126,10 @@ def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
 
 
 def test_authored_pose_profile_controls_family_geometry_and_identity() -> None:
-    profile = load_generation_profile(_PROFILE)
+    profile = _profile()
     assert isinstance(profile, CombinedGenerationProfile)
     provider = CubeInitialPoseProvider.from_yaml(
-        _PROFILE.parent / "generation_profiles/cube_initial_pose.yaml"
+        resolve_config_path(profile.scene_randomization.profile_file)
     )
     families = provider.enumerate(4)
     recipes = enumerate_candidate_recipes(profile, families=families)

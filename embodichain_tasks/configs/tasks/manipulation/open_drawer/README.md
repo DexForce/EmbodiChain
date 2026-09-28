@@ -1,24 +1,40 @@
 # Open Drawer
 
-The Task Program performs one registered `slide` call on the drawer handle.
-The generation deployment uses the episode-level profile schema with three
-trajectory variants. A small joint residual is authorized only for the free
-pull phase; the approach, reach, grasp, and release phases remain fixed.
+The Task Program performs one registered `slide` call on the drawer handle. Its
+configuration follows the same task-first layout as the other manipulation
+examples:
+
+```text
+envs/default.yaml       # Default physics scene
+envs/newton.yaml        # Newton physics scene and solver settings
+task.franka.yaml                # Franka Task Program deployment
+task.ur5.yaml                   # UR5 deployment and generation reference
+generation/open_drawer.yaml     # task-facing generation overrides
+task_program/{program,integration}.yaml
+```
+
+Both task deployments share the program and choose the physical backend with
+`--physics`. The selected environment file owns its backend-specific physics
+settings; the task files do not duplicate scene or solver fields.
+
+The UR5 deployment references `generation/open_drawer.yaml` through
+`generation.config`. That file selects the shared Task Program generation
+policy, permits a small joint residual only during the free pull phase, and
+requests three trajectory variants.
 
 Run the configured expansion through the formal task entry point:
 
 ```bash
 embodichain run-task \
-  --gym-config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.generation.yaml \
+  --gym-config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml \
   --disable-sensor \
   --device cpu --headless --seed 7 \
   --output-dir /tmp/open-drawer-generation \
   --dataset-dir /tmp/open-drawer-lerobot
 ```
 
-The task-bound `generation` block selects the shared Task Program policy and
-supplies the Open Drawer source/phase binding plus candidate indices `0`, `1`,
-and `2`. CLI generation options can override those values.
-
-The dataset recorder is owned by `env.yaml` and can be disabled for a run with
-`--filter-dataset-saving` (or `--filter_dataset_saving`).
+Open Drawer disables visual generation, so `--disable-sensor` is valid here.
+The dataset recorder is owned by `envs/default.yaml` and can be
+filtered for a dry run with `--filter-dataset-saving` (or
+`--filter_dataset_saving`). Use `--generation-profile` or
+`--generation-candidate-indices` to override the referenced generation values.

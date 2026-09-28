@@ -16,13 +16,16 @@ rules are described in :doc:`/overview/task_program/index`.
 What you will configure
 -----------------------
 
-A supported configuration-defined Task Program has six explicit owners:
+A supported configuration-defined Task Program has six core owners. A task that
+also collects augmented trajectories may add a separate generation declaration:
 
 1. ``program.yaml`` owns the embodiment-independent task flow and targets;
 2. ``integration.yaml`` owns task-specific semantic requirements, its nested
    ``scene_binding``, resource defaults, action options, effect monitors, and
    runtime services;
-3. ``env.yaml`` owns the physical scene and ordinary Gym environment values;
+3. a reusable environment component (for example
+   ``envs/default.yaml`` and ``envs/newton.yaml``) owns the
+   physical scene and ordinary Gym environment values;
 4. an embodiment component owns one robot, its sensors, and optional semantic
    skill profile;
 5. an execution-policy component owns motion, recovery, runner, and effect
@@ -31,19 +34,24 @@ A supported configuration-defined Task Program has six explicit owners:
    Gym ID.
 
 There is no separate physical ``scene.yaml`` or task component. In particular,
-``env.yaml`` contains no ``id`` or ``task_program`` field, so the same physical
-environment can also be selected by a handwritten-trajectory deployment.
+the reusable environment component contains no ``id`` or ``task_program``
+field, so the same physical environment can also be selected by a
+handwritten-trajectory deployment.
 
 The shared ``EmbodiedEnv`` and Task Program adapter then lower Semantic Calls
 to Atomic Skills while retaining the normal stepping, recording, and reset
 lifecycle.
 
-The official repeated Pick/Place example is a complete reference:
+The official repeated Pick/Place example is a complete reference. Its physical
+backends live under ``envs/``; the UR5 deployment additionally
+references ``generation/repeated_pick_place.yaml`` through ``generation.config``:
 
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/env.yaml``;
+* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
+  and ``envs/newton.yaml``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
 * ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
+* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/generation/repeated_pick_place.yaml``;
 * ``embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
 * ``embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
 

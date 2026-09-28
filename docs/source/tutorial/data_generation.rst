@@ -463,9 +463,11 @@ Best Practices
   earlier segments.
 * Smoke-test with ``--filter_dataset_saving`` before a long collection run,
   then inspect one committed episode before scaling ``num_envs``.
-* Keep each task's ``env.yaml``, ``task.<embodiment>.yaml``, and
-  ``task_program/{program,integration}.yaml`` together so physical UIDs,
-  contracts, and canonical IDs stay aligned. Keep reusable embodiment and
-  execution-policy components under ``configs/components/``.
+* Keep each task's reusable environment component (or its
+  ``envs/default.yaml`` and ``envs/newton.yaml`` variants),
+  ``task.<embodiment>.yaml``, and ``task_program/{program,integration}.yaml``
+  together so physical UIDs, contracts, and canonical IDs stay aligned. Keep
+  task-facing generation overrides under ``generation/`` and reusable
+  embodiment and execution-policy components under ``configs/components/``.
 * Move reusable motion behavior into Atomic Skills instead of copying
   task-local trajectory logic across Python tasks or registered Semantic Calls.
