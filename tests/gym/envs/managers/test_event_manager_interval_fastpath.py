@@ -1,4 +1,22 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
 """interval_step==1 快路径：functor 收到显式全量 ID 张量（非 None）。"""
+
+from __future__ import annotations
 
 import torch
 
@@ -41,10 +59,13 @@ def test_interval_one_fastpath_passes_explicit_all_row_ids(monkeypatch):
     )
 
     manager.apply(mode="interval")
+    # 第二次调用必须复用缓存的全行 ID 张量,而不是每步重新 arange
+    manager.apply(mode="interval")
 
-    assert len(received) == 1
+    assert len(received) == 2
     ids = received[0]
     assert ids is not None, "快路径传了 None——functor 的 len(env_ids) 会崩"
     assert ids.shape[0] == num_envs
     assert ids.dtype == torch.long
     assert torch.equal(ids, torch.arange(num_envs, dtype=torch.long))
+    assert received[1] is ids, "两次 apply 应复用 manager 缓存的同一 ID 张量"
