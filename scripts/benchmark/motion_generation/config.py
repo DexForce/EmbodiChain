@@ -117,6 +117,20 @@ class ProtocolCfg:
     confidence_level: float = 0.95
     report_schema_version: str = "1"
     seeds: list[int] = []
+    joint_acceleration_limit_rad_s2: float | list[float] | None = None
+    """Per-joint or scalar acceleration limit, or ``None`` to report N/A.
+
+    URDF carries no acceleration field and :class:`Robot` exposes no
+    ``qacc_limits``, so this limit has no asset source and must be stated by the
+    suite. FR3 publishes 10 rad/s^2 uniformly across its seven joints.
+    """
+    joint_jerk_limit_rad_s3: float | list[float] | None = None
+    """Per-joint or scalar jerk limit, or ``None`` to report N/A.
+
+    FR3 publishes 5000 rad/s^3 uniformly across its seven joints.
+    """
+    dynamic_limit_tolerance: float = 1.0e-3
+    """Relative slack on dynamic-limit utilization before a violation is flagged."""
 
 
 @configclass
@@ -403,6 +417,24 @@ class SuiteCfg:
             raise TypeError("protocol.seeds must contain integers.")
         if len(self.protocol.seeds) != len(set(self.protocol.seeds)):
             raise ValueError("protocol.seeds must not contain duplicates.")
+        for field_name in (
+            "joint_acceleration_limit_rad_s2",
+            "joint_jerk_limit_rad_s3",
+        ):
+            limit = getattr(self.protocol, field_name)
+            if limit is None:
+                continue
+            values = limit if isinstance(limit, (list, tuple)) else [limit]
+            if not values or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or float(value) <= 0.0
+                for value in values
+            ):
+                raise ValueError(f"{field_name} entries must be finite and > 0.")
+        if self.protocol.dynamic_limit_tolerance < 0.0:
+            raise ValueError("dynamic_limit_tolerance must be >= 0.")
         if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
             _validate_free_space(self.free_space)
         for track in self.tracks:

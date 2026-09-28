@@ -156,6 +156,11 @@ class ScenarioProvider(ABC):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            joint_acceleration_limit_rad_s2=(
+                suite.protocol.joint_acceleration_limit_rad_s2
+            ),
+            joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
+            dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
         )
         return ScenarioEvaluation(outcomes=outcomes)
 

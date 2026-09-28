@@ -139,7 +139,10 @@ physical task success.
 - updates rollout state through FK, which is a kinematic model loop rather than
   sensor-driven simulation or real-robot recovery;
 - reports a fixed nominal `dt`, with velocity and acceleration estimated from
-  joint-position finite differences;
+  joint-position finite differences. `PlanResult` requires `dt` whenever it
+  carries positions, so the nominal value cannot be withheld; adapters instead
+  declare `native_timing`, and a row that does not solve timing reports no
+  comparable duration;
 - has no explicit obstacle, collision, multimodal-sampling, or APG-refinement
   input/output interface yet.
 
@@ -161,7 +164,7 @@ However, it currently uses one Franka start state, fixed waypoint offsets, and
 one environment. Repeating a deterministic case mostly measures runtime
 variance, not workspace coverage or generalization. It also lacks:
 
-- joint-limit, velocity, acceleration, jerk, collision, and clearance checks;
+- collision and clearance checks;
 - path length, path efficiency, and smoothness;
 - physics execution and controller tracking;
 - Atomic Action task completion;
