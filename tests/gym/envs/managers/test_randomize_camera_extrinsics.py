@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -30,6 +31,7 @@ from embodichain.lab.gym.envs.managers.randomization import visual
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_camera_extrinsics,
 )
+from embodichain.utils.math import matrix_from_quat
 
 
 def _make_env(extrinsics: SimpleNamespace) -> SimpleNamespace:
@@ -53,7 +55,11 @@ def _attach_extrinsics() -> SimpleNamespace:
 
 def _arena_pose_extrinsics() -> SimpleNamespace:
     return SimpleNamespace(
-        parent=None, eye=None, pos=[0.0, 0.0, 0.1], quat=[0.0, 0.0, 0.0, 1.0]
+        parent=None,
+        eye=None,
+        pos=[0.0, 0.0, 0.1],
+        # A non-identity starting orientation makes Euler perturbations observable.
+        quat=[0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)],
     )
 
 
@@ -146,23 +152,34 @@ def test_attached_camera_warns_about_look_at_ranges(warnings) -> None:
 
 
 @pytest.mark.no_sim
-def test_arena_pose_camera_uses_pose_ranges(warnings) -> None:
+def test_arena_pose_camera_uses_nonzero_pose_ranges(warnings, monkeypatch) -> None:
+    def midpoint_sample(*, lower, upper, size, device):
+        return ((lower + upper) / 2).expand(size).clone()
+
+    monkeypatch.setattr(visual, "sample_uniform", midpoint_sample)
     env = _make_env(_arena_pose_extrinsics())
     randomize_camera_extrinsics(
         env,
         env_ids=None,
         entity_cfg=SceneEntityCfg(uid="cam_fixed"),
-        pos_range=([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+        pos_range=([0.02, -0.03, 0.01], [0.06, -0.01, 0.05]),
+        euler_range=([0.02, -0.04, 0.03], [0.08, 0.02, 0.09]),
     )
 
     assert warnings == []
     env.camera.set_local_pose.assert_called_once()
     (pose,) = env.camera.set_local_pose.call_args.args
     assert pose.shape == (2, 4, 4)
+    expected_position = torch.tensor([0.04, -0.02, 0.13]).repeat(2, 1)
+    assert torch.allclose(pose[:, :3, 3], expected_position)
+
     # Arena-frame poses are converted to the OpenGL frame just like Camera.reset.
-    expected_rotation = torch.diag(torch.tensor([1.0, -1.0, -1.0]))
-    assert torch.allclose(pose[0, :3, :3], expected_rotation)
-    assert torch.allclose(pose[:, :3, 3], torch.tensor([[0.0, 0.0, 0.1]]).repeat(2, 1))
+    baseline_rotation = matrix_from_quat(
+        torch.tensor(_arena_pose_extrinsics().quat).unsqueeze(0)
+    )[0]
+    baseline_rotation[:, 1] *= -1
+    baseline_rotation[:, 2] *= -1
+    assert not torch.allclose(pose[0, :3, :3], baseline_rotation)
 
 
 @pytest.mark.no_sim
