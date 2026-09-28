@@ -58,6 +58,11 @@ class Slab:
         distance = torch.maximum(distance, points[..., 2].abs() - 0.03)
         return distance <= 0, distance
 
+    def query_surface_normals(self, points):
+        normals = torch.zeros_like(points)
+        normals[..., 0] = points[..., 0].sign()
+        return normals
+
 
 def test_contact_width_is_full_gap_and_geometry_uses_actual_open() -> None:
     geometry = hand()
@@ -90,6 +95,107 @@ def test_clear_but_noncontacting_pads_are_not_a_grasp() -> None:
         torch.eye(4), poses, torch.tensor([0.02])
     )
     assert rejected.tolist() == [True]
+
+
+def test_two_pads_grazing_one_flat_surface_are_not_opposed_contact() -> None:
+    import trimesh
+
+    geometry = hand()
+    # Both inward faces touch the same horizontal face, without squeezing it.
+    geometry.pads[..., 2] = 0.02
+    mesh = trimesh.creation.box(extents=[0.3, 0.3, 0.02])
+    mesh.apply_translation([0.0, 0.0, 0.01])
+    target = TriangleTarget(
+        torch.tensor(mesh.vertices, dtype=torch.float32),
+        torch.tensor(mesh.faces, dtype=torch.int64),
+    )
+    checker = HandCollisionChecker(geometry, target)
+    rejected, _ = checker.query(torch.eye(4), torch.eye(4)[None], torch.tensor([0.02]))
+
+    assert rejected.tolist() == [True]
+    assert checker.last_counts["contact_orientation"] == 1
+
+
+def test_back_facing_contact_normals_are_rejected_before_closing_sweep() -> None:
+    target = Slab()
+    target.query_batch_points = Mock(wraps=target.query_batch_points)
+    target.query_surface_normals = Mock(
+        side_effect=lambda points: -Slab().query_surface_normals(points)
+    )
+    checker = HandCollisionChecker(hand(), target)
+    rejected, _ = checker.query(torch.eye(4), torch.eye(4)[None], torch.tensor([0.02]))
+
+    assert rejected.tolist() == [True]
+    assert checker.last_counts["contact_orientation"] == 1
+    # One endpoint batch, with no open/closing queries after rejection.
+    assert target.query_batch_points.call_count == 1
+
+
+@pytest.mark.parametrize("reverse_winding", [False, True])
+def test_triangle_normals_preserve_valid_opposed_side_contact(reverse_winding) -> None:
+    import trimesh
+
+    mesh = trimesh.creation.box(extents=[0.02, 0.3, 0.06])
+    if reverse_winding:
+        mesh.invert()
+    target = TriangleTarget(
+        torch.tensor(mesh.vertices, dtype=torch.float32),
+        torch.tensor(mesh.faces, dtype=torch.int64),
+    )
+    checker = HandCollisionChecker(hand(), target)
+    rejected, _ = checker.query(torch.eye(4), torch.eye(4)[None], torch.tensor([0.02]))
+
+    assert rejected.tolist() == [False]
+    assert checker.last_counts["contact_orientation"] == 0
+
+
+def test_normals_are_queried_only_for_near_contact_inward_pad_samples() -> None:
+    target = Slab()
+    target.query_surface_normals = Mock(wraps=target.query_surface_normals)
+    poses = torch.eye(4).repeat(2, 1, 1)
+    poses[1, 0, 3] = 0.3
+    checker = HandCollisionChecker(hand(), target)
+    rejected, _ = checker.query(torch.eye(4), poses, torch.tensor([0.02, 0.02]))
+
+    assert rejected.tolist() == [False, True]
+    target.query_surface_normals.assert_called_once()
+    assert target.query_surface_normals.call_args.args[0].shape == (2, 3)
+
+
+def test_triangle_normals_handle_independently_reversed_components() -> None:
+    import trimesh
+
+    near = trimesh.creation.box(extents=[0.02, 0.3, 0.06])
+    near.invert()
+    far = trimesh.creation.box(extents=[0.3, 0.3, 0.3])
+    far.apply_translation([1.0, 0.0, 0.0])
+    mesh = trimesh.util.concatenate([near, far])
+    assert mesh.is_watertight and mesh.is_winding_consistent and mesh.volume > 0
+    target = TriangleTarget(
+        torch.tensor(mesh.vertices).float(), torch.tensor(mesh.faces)
+    )
+    rejected, _ = HandCollisionChecker(hand(), target).query(
+        torch.eye(4), torch.eye(4)[None], torch.tensor([0.02])
+    )
+    assert rejected.tolist() == [False]
+
+
+def test_triangle_normals_point_into_nested_cavity_independent_of_winding() -> None:
+    import trimesh
+
+    outer = trimesh.creation.box(extents=[0.4, 0.4, 0.4])
+    inner = trimesh.creation.box(extents=[0.2, 0.2, 0.2])
+    # Deliberately give both shells the same winding; occupancy still defines a cavity.
+    mesh = trimesh.util.concatenate([outer, inner])
+    target = TriangleTarget(
+        torch.tensor(mesh.vertices).float(), torch.tensor(mesh.faces)
+    )
+    normals = target.query_surface_normals(
+        torch.tensor([[0.1, 0.02, 0.03], [0.2, 0.02, 0.03]])
+    )
+    torch.testing.assert_close(
+        normals, torch.tensor([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    )
 
 
 def test_triangle_target_preserves_hollow_space_and_rejects_open_mesh() -> None:
