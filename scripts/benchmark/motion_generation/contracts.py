@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from .models import BenchmarkCase, CaseOutcome
 
 __all__ = [
+    "CapabilityDecision",
     "EvaluationDomain",
     "ExecutionObservation",
     "PhysicalEvaluation",
@@ -44,6 +45,7 @@ class EvaluationDomain:
     id: str
     version: str
     kind: Literal["nominal", "robustness", "held_out"]
+    required_capabilities: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         for name in ("id", "version"):
@@ -52,6 +54,29 @@ class EvaluationDomain:
                 raise ValueError(f"domain.{name} must be a non-empty string.")
         if self.kind not in {"nominal", "robustness", "held_out"}:
             raise ValueError("domain.kind must be nominal, robustness, or held_out.")
+        for capability in self.required_capabilities:
+            if not isinstance(capability, str) or not capability.strip():
+                raise ValueError(
+                    "domain.required_capabilities must contain non-empty strings."
+                )
+
+
+@dataclass(frozen=True)
+class CapabilityDecision:
+    """Independent capability preflight result for one benchmark population."""
+
+    status: Literal["supported", "unsupported", "invalid"]
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"supported", "unsupported", "invalid"}:
+            raise ValueError(f"Unknown capability status: {self.status!r}.")
+        if self.status == "supported" and self.reason is not None:
+            raise ValueError("A supported capability decision cannot have a reason.")
+        if self.status != "supported" and not self.reason:
+            raise ValueError(
+                "Unsupported or invalid capability decisions require a reason."
+            )
 
 
 @dataclass(frozen=True)

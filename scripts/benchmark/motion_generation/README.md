@@ -105,40 +105,61 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 
 ## Atomic Skill contract foundation (#669)
 
-The first migration layer provides shared contracts while preserving existing
-skill scoring. It does not yet implement official embodiment component loading,
-new physical success criteria, segment/contact sampling, domain generation, or
-domain-level aggregation. The three existing report tables remain unchanged.
+This migration layer provides shared contracts, versioned domain populations,
+capability-aware denominators, and recomputable generalization statistics while
+preserving existing skill scoring. Official embodiment loading and new physical
+success criteria remain follow-up work. The three existing report tables remain
+unchanged; domain summaries are rendered as report metadata so the table count
+stays stable.
+
+Suites may also declare the official embodiment identity while the legacy robot
+provider remains active during migration:
+
+```yaml
+embodiment:
+  component: ../../embodichain_tasks/configs/components/embodiments/franka_panda.yaml
+  overrides: {}
+```
+
+The resolved component and overrides are recorded in `case_manifest.json`; the
+component loader and endpoint binding remain the next embodiment integration
+layer.
 
 ### Domain provenance
 
-Add `domain` alongside `scenario` in an existing track. This YAML fragment
-shows the new fields; retain the track's existing `config`:
+Add one or more `domains` alongside `scenario` in an existing track. A single
+legacy `domain` entry remains supported. This YAML fragment shows the new
+fields; retain the track's existing `config`:
 
 ```yaml
 tracks:
   - id: atomic-nominal
     scenario: atomic_task
-    domain:
-      id: nominal
-      version: v1
-      kind: nominal
+    domains:
+      - id: nominal
+        version: v1
+        kind: nominal
+      - id: held_out_objects
+        version: v1
+        kind: held_out
+        objects: [unseen_box]
 ```
 
-`domain` accepts exactly `id`, `version`, and `kind`. The kind is `nominal`,
-`robustness`, or `held_out`; IDs and versions must be nonempty strings. This
-field declares provenance only: it does not perturb scenes, select held-out
-objects, or establish training/evaluation separation. Use separate tracks for
-separate populations until domain generators are added. Existing suites without
-this declaration retain `domain: null`; randomized suites are not silently
-classified as nominal.
+The identity requires nonempty `id`, `version`, and a kind of `nominal`,
+`robustness`, or `held_out`. Optional `overrides`, `objects`,
+`required_capabilities`, perturbation metadata, and frozen-case metadata are
+resolved without mutating the source suite. Domain overrides produce separate
+effective tracks, while their `track_group` remains stable for aggregation.
+Existing suites without this declaration retain `domain: null`; randomized
+suites are not silently classified as nominal.
 
 The runner snapshots this identity onto generated cases and carries it into all
 associated lifecycle/trial records. `case_manifest.json` now uses
-`case_schema_version: 3` and contains the optional `domain` on each case. Each
-track/batch population is written before any planner evaluates that population;
-later populations extend the manifest. Planner configuration hashes stay in
-trial records, separate from planner-independent case content.
+`case_schema_version: 3` and contains the optional `domain`, `track_group`,
+embodiment, and required-capability fields on each case. The manifest also
+records the resolved embodiment and planner configuration hashes at the run
+level. Each track/batch population is written before any planner evaluates that
+population; later populations extend the manifest.
 
 ### Provider and evaluator interfaces
 
@@ -176,7 +197,9 @@ Task success requires at least one applicable stage and every applicable stage
 to pass. An all-inapplicable or incomplete result cannot establish success.
 Physical success also remains gated by motion validity and execution success.
 Raw outcomes retain `stages` and `failure_stage`; legacy outcomes have empty
-stages. Stage/domain aggregation and reporting are separate follow-up work.
+stages. Measured reports now include chained stage rates when evaluators provide
+stages, while domain summaries expose coverage, nominal success, mean, worst,
+variance, retention, and eligibility.
 
 ### Follow-up ownership
 
@@ -186,8 +209,9 @@ stages. Stage/domain aggregation and reporting are separate follow-up work.
 - **Physical evaluation:** extend `ExecutionObservation` with measured segment
   and contact evidence, implement evaluators and counterexample tests, then opt
   providers into `physical_evaluator()` individually.
-- **Framework and statistics:** add versioned domain generators and aggregation
-  after agreeing on capability eligibility, stage denominators, and retention.
+- **Framework and statistics:** add domain generators, physical observation
+  collection, and richer confidence intervals on top of the current domain
+  identity and aggregation contracts.
 
 Contract tests can run without the simulator engine:
 

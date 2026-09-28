@@ -22,7 +22,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ from .models import AlgorithmRole
 __all__ = [
     "AtomicPoseRandomizationCfg",
     "DomainCfg",
+    "EmbodimentSpecCfg",
     "BENCHMARK_ROOT",
     "FreeSpaceTrackCfg",
     "PlannerSpecCfg",
@@ -113,6 +114,9 @@ class ProtocolCfg:
     position_threshold_m: float = 0.01
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
+    confidence_level: float = 0.95
+    report_schema_version: str = "1"
+    seeds: list[int] = []
 
 
 @configclass
@@ -122,6 +126,23 @@ class RobotSpecCfg:
     id: str = "franka_panda"
     provider: str = "franka_panda"
     config: dict[str, Any] = {}
+
+
+@configclass
+class EmbodimentSpecCfg:
+    """Official embodiment component selected by a suite.
+
+    The benchmark runner still accepts the legacy ``robot`` provider while
+    component loading is migrated in the embodiment integration layer.  These
+    fields are resolved and recorded now so case manifests remain stable when
+    that loader is enabled.
+    """
+
+    component: str = ""
+    overrides: dict[str, Any] = {}
+    initial_qpos: list[float] = []
+    endpoint_bindings: dict[str, Any] = {}
+    runtime_services: dict[str, Any] = {}
 
 
 @configclass
@@ -146,6 +167,15 @@ class DomainCfg:
     id: str = ""
     version: str = ""
     kind: str = ""
+    overrides: dict[str, Any] = {}
+    required_capabilities: list[str] = []
+    applicability: list[str] = []
+    objects: list[str] = []
+    scene_layout: str | None = None
+    case_generator: str | None = None
+    frozen_cases: list[dict[str, Any]] = []
+    perturbations: dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
     def to_identity(self) -> EvaluationDomain:
         """Validate and snapshot domain provenance for a frozen case.
@@ -153,7 +183,12 @@ class DomainCfg:
         Returns:
             Immutable domain identity, independent of planner configuration.
         """
-        return EvaluationDomain(id=self.id, version=self.version, kind=self.kind)
+        return EvaluationDomain(
+            id=self.id,
+            version=self.version,
+            kind=self.kind,
+            required_capabilities=frozenset(self.required_capabilities),
+        )
 
 
 @configclass
@@ -165,6 +200,16 @@ class TrackCfg:
     enabled: bool = True
     config: dict[str, Any] = {}
     domain: DomainCfg | None = None
+    domains: list[DomainCfg] = []
+    group_id: str | None = None
+
+    def evaluation_domains(self) -> list[DomainCfg]:
+        """Return explicit domains while preserving the legacy singular field."""
+        if self.domain is not None and self.domains:
+            raise ValueError("A track cannot define both domain and domains.")
+        if self.domain is not None:
+            return [self.domain]
+        return list(self.domains)
 
 
 @configclass
@@ -177,6 +222,7 @@ class SuiteCfg:
     profile: str = "smoke"
     planners: list[PlannerSpecCfg] = []
     robot: RobotSpecCfg = RobotSpecCfg()
+    embodiment: EmbodimentSpecCfg | None = None
     protocol: ProtocolCfg = ProtocolCfg()
     tracks: list[TrackCfg] = []
     free_space: FreeSpaceTrackCfg = FreeSpaceTrackCfg()
@@ -186,6 +232,19 @@ class SuiteCfg:
         """Build and validate a suite from a YAML-compatible mapping."""
         planners = [PlannerSpecCfg(**item) for item in data.get("planners", [])]
         tracks, free_space = _resolve_tracks_and_free_space(data)
+        protocol = ProtocolCfg(**data.get("protocol", {}))
+        raw_embodiment = data.get("embodiment")
+        if raw_embodiment is not None:
+            if not isinstance(raw_embodiment, Mapping):
+                raise TypeError("embodiment must be a mapping.")
+            embodiment = EmbodimentSpecCfg(**dict(raw_embodiment))
+        else:
+            embodiment = None
+        if protocol.seeds:
+            free_space.seeds = list(protocol.seeds)
+            for track in tracks:
+                if track.scenario == "atomic_task" and "seeds" not in track.config:
+                    track.config["seeds"] = list(protocol.seeds)
         suite = cls(
             schema_version=int(data.get("schema_version", 1)),
             name=str(data.get("name", "free_space_common")),
@@ -193,7 +252,8 @@ class SuiteCfg:
             profile=str(data.get("profile", "smoke")),
             planners=planners,
             robot=RobotSpecCfg(**data.get("robot", {})),
-            protocol=ProtocolCfg(**data.get("protocol", {})),
+            embodiment=embodiment,
+            protocol=protocol,
             tracks=tracks,
             free_space=free_space,
         )
@@ -203,6 +263,44 @@ class SuiteCfg:
     def enabled_tracks(self) -> list[TrackCfg]:
         """Return enabled tracks in suite order."""
         return [track for track in self.tracks if track.enabled]
+
+    @property
+    def resolved_embodiment_id(self) -> str:
+        """Return the stable embodiment identity used in manifests."""
+        if self.embodiment is not None and self.embodiment.component:
+            return self.embodiment.component
+        return self.robot.id
+
+    def evaluation_tracks(self) -> list[TrackCfg]:
+        """Expand multi-domain tracks into deterministic evaluation tracks.
+
+        Domain expansion happens at the runner boundary.  Existing scenario
+        providers therefore keep their stable ``TrackCfg`` input while each
+        domain receives a distinct case population and track identity.
+        """
+        expanded: list[TrackCfg] = []
+        for track in self.enabled_tracks():
+            domains = track.evaluation_domains()
+            if not domains:
+                expanded.append(track)
+                continue
+            group_id = track.group_id or track.id
+            for domain in domains:
+                domain.to_identity()
+                effective_id = track.id
+                if len(domains) > 1:
+                    effective_id = f"{track.id}@{domain.id}"
+                expanded.append(
+                    replace(
+                        track,
+                        id=effective_id,
+                        config=_merge_mappings(track.config, domain.overrides),
+                        domain=domain,
+                        domains=[],
+                        group_id=group_id,
+                    )
+                )
+        return expanded
 
     def sync_track_configs(self) -> None:
         """Copy typed free-space settings into the matching track config."""
@@ -237,6 +335,15 @@ class SuiteCfg:
             AlgorithmRole(spec.role)
         if not self.robot.id or not self.robot.provider:
             raise ValueError("robot must define non-empty id and provider values.")
+        if self.embodiment is not None:
+            if not self.embodiment.component.strip():
+                raise ValueError("embodiment.component must be non-empty.")
+            if not isinstance(self.embodiment.overrides, Mapping):
+                raise TypeError("embodiment.overrides must be a mapping.")
+            if not isinstance(self.embodiment.endpoint_bindings, Mapping):
+                raise TypeError("embodiment.endpoint_bindings must be a mapping.")
+            if not isinstance(self.embodiment.runtime_services, Mapping):
+                raise TypeError("embodiment.runtime_services must be a mapping.")
         if not self.tracks:
             raise ValueError("The benchmark suite must declare at least one track.")
         track_ids = [track.id for track in self.tracks]
@@ -245,8 +352,33 @@ class SuiteCfg:
         if not self.enabled_tracks():
             raise ValueError("At least one track must be enabled.")
         for track in self.tracks:
-            if track.domain is not None:
-                track.domain.to_identity()
+            domains = track.evaluation_domains()
+            domain_ids = []
+            for domain in domains:
+                domain.to_identity()
+                if not isinstance(domain.overrides, Mapping):
+                    raise TypeError("domain.overrides must be a mapping.")
+                if not isinstance(domain.perturbations, Mapping):
+                    raise TypeError("domain.perturbations must be a mapping.")
+                if not isinstance(domain.metadata, Mapping):
+                    raise TypeError("domain.metadata must be a mapping.")
+                if any(
+                    not isinstance(capability, str) or not capability.strip()
+                    for capability in domain.required_capabilities
+                ):
+                    raise TypeError(
+                        "domain.required_capabilities must contain strings."
+                    )
+                if any(
+                    not isinstance(skill_id, str) or not skill_id.strip()
+                    for skill_id in (*domain.applicability, *domain.objects)
+                ):
+                    raise TypeError(
+                        "domain applicability and objects must contain strings."
+                    )
+                domain_ids.append(domain.id)
+            if len(domain_ids) != len(set(domain_ids)):
+                raise ValueError(f"Track {track.id!r} must not repeat domain ids.")
             if not track.id or not track.scenario:
                 raise ValueError("Every track must define a non-empty id and scenario.")
         if self.protocol.warmup_trials < 0:
@@ -263,6 +395,14 @@ class SuiteCfg:
             raise ValueError("rotation_threshold_rad must be > 0.")
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
+        if not 0.0 < self.protocol.confidence_level < 1.0:
+            raise ValueError("confidence_level must be between 0 and 1.")
+        if not self.protocol.report_schema_version.strip():
+            raise ValueError("report_schema_version must be non-empty.")
+        if any(type(seed) is not int for seed in self.protocol.seeds):
+            raise TypeError("protocol.seeds must contain integers.")
+        if len(self.protocol.seeds) != len(set(self.protocol.seeds)):
+            raise ValueError("protocol.seeds must not contain duplicates.")
         if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
             _validate_free_space(self.free_space)
         for track in self.tracks:
@@ -311,11 +451,37 @@ def _resolve_tracks_and_free_space(
                 if not isinstance(domain, Mapping):
                     raise TypeError("track.domain must be a mapping.")
                 values["domain"] = DomainCfg(**domain)
+            domains = values.get("domains")
+            if domains is not None:
+                if not isinstance(domains, Sequence) or isinstance(
+                    domains, (str, bytes)
+                ):
+                    raise TypeError("track.domains must be a sequence of mappings.")
+                resolved_domains = []
+                for item_domain in domains:
+                    if not isinstance(item_domain, Mapping):
+                        raise TypeError("Every track domain must be a mapping.")
+                    resolved_domains.append(DomainCfg(**dict(item_domain)))
+                values["domains"] = resolved_domains
             tracks.append(TrackCfg(**values))
         for track in tracks:
             if track.scenario == _FREE_SPACE_SCENARIO and track.config:
                 free_space_data = {**free_space_data, **dict(track.config)}
     return tracks, FreeSpaceTrackCfg(**free_space_data)
+
+
+def _merge_mappings(
+    base: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Recursively merge domain overrides without mutating suite input."""
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in override.items():
+        key = str(key)
+        if isinstance(merged.get(key), Mapping) and isinstance(value, Mapping):
+            merged[key] = _merge_mappings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _validate_free_space(free_space: FreeSpaceTrackCfg) -> None:
@@ -573,7 +739,39 @@ def suite_to_dict(suite: SuiteCfg) -> dict[str, Any]:
     suite.sync_track_configs()
     data = asdict(suite)
     data.pop("free_space", None)
+    if data.get("embodiment") is None:
+        data.pop("embodiment", None)
+    for track in data.get("tracks", []):
+        domain = track.get("domain")
+        if isinstance(domain, dict):
+            track["domain"] = _compact_domain_dict(domain)
+        domains = track.get("domains")
+        if isinstance(domains, list):
+            track["domains"] = [
+                _compact_domain_dict(item) if isinstance(item, dict) else item
+                for item in domains
+            ]
     return data
+
+
+def _compact_domain_dict(domain: dict[str, Any]) -> dict[str, Any]:
+    """Drop empty optional domain fields from resolved YAML output."""
+    compact = dict(domain)
+    for key in (
+        "overrides",
+        "required_capabilities",
+        "applicability",
+        "objects",
+        "frozen_cases",
+        "perturbations",
+        "metadata",
+    ):
+        if compact.get(key) in ({}, [], None):
+            compact.pop(key, None)
+    for key in ("case_generator", "scene_layout"):
+        if compact.get(key) is None:
+            compact.pop(key, None)
+    return compact
 
 
 def stable_hash(value: object) -> str:

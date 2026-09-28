@@ -98,7 +98,13 @@ def test_legacy_suite_is_not_implicitly_nominal() -> None:
         {"id": "objects", "version": "", "kind": "held_out"},
         {"id": " ", "version": "v1", "kind": "nominal"},
         {"id": "objects", "version": "v1", "kind": "unknown"},
-        {"id": "objects", "version": "v1", "kind": "nominal", "objects": ["box"]},
+        {
+            "id": "objects",
+            "version": "v1",
+            "kind": "nominal",
+            "required_capabilities": [""],
+        },
+        {"id": "objects", "version": "v1", "kind": "nominal", "unexpected": True},
         "nominal",
     ],
 )
@@ -109,8 +115,19 @@ def test_invalid_domain_is_rejected_before_execution(domain: object) -> None:
 
 def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> None:
     domain = contracts.EvaluationDomain(id="nominal", version="v1", kind="nominal")
-    case = replace(_case(), domain=domain)
-    path = write_case_manifest(tmp_path / "cases.json", [case])
+    case = replace(
+        _case(),
+        domain=domain,
+        track_group="pick",
+        embodiment_id="franka_panda",
+        required_capabilities=frozenset({"atomic_action"}),
+    )
+    path = write_case_manifest(
+        tmp_path / "cases.json",
+        [case],
+        suite=_suite(),
+        planner_config_hashes={"baseline": "abc"},
+    )
     payload = json.loads(path.read_text())
     assert payload["case_schema_version"] == 3
     assert payload["cases"][0]["domain"] == {
@@ -118,6 +135,11 @@ def test_manifest_keeps_domain_and_is_independent_of_planner(tmp_path: Path) -> 
         "version": "v1",
         "kind": "nominal",
     }
+    assert payload["cases"][0]["track_group"] == "pick"
+    assert payload["cases"][0]["embodiment_id"] == "franka_panda"
+    assert payload["cases"][0]["required_capabilities"] == ["atomic_action"]
+    assert payload["planner_config_hashes"] == {"baseline": "abc"}
+    assert payload["resolved_embodiment"]["id"] == "franka_panda"
     assert "planner_config_hash" not in payload["cases"][0]
 
 

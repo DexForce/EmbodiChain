@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from typing import cast
 
 import torch
 
@@ -33,6 +34,21 @@ __all__ = [
     "TrialPhase",
     "TrialRecord",
 ]
+
+
+def _json_value(value: object) -> object:
+    """Convert nested benchmark values into deterministic JSON values."""
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, frozenset):
+        return sorted(_json_value(item) for item in value)
+    if isinstance(value, tuple):
+        return [_json_value(item) for item in value]
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return value
 
 
 class AlgorithmRole(str, Enum):
@@ -98,6 +114,9 @@ class BenchmarkCase:
     full_start_qpos: torch.Tensor | None = None
     case_parameters: dict[str, object] = field(default_factory=dict)
     domain: EvaluationDomain | None = None
+    track_group: str | None = None
+    embodiment_id: str | None = None
+    required_capabilities: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -186,10 +205,9 @@ class TrialRecord:
     metadata: dict[str, object] = field(default_factory=dict)
     outcomes: tuple[CaseOutcome, ...] = ()
     domain: EvaluationDomain | None = None
+    track_group: str | None = None
+    embodiment_id: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable mapping while retaining numeric values."""
-        data = asdict(self)
-        data["algorithm_role"] = self.algorithm_role.value
-        data["phase"] = self.phase.value
-        return data
+        return cast(dict[str, object], _json_value(asdict(self)))
