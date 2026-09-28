@@ -639,21 +639,28 @@ def _metric_rows(
                     "jerk_violation_rate": _case_macro_rate_optional(
                         measured, group_cases, "jerk_limit_violation"
                     ),
+                    # Dynamics are summarized over every measured outcome, not
+                    # the motion-valid subset: exceeding a limit can make an
+                    # outcome invalid, so restricting the population here would
+                    # drop exactly the trajectories with the largest peaks and
+                    # pair a modest peak with a nonzero violation rate.
                     "max_joint_velocity_rad_s": _mean(
-                        outcome.max_joint_velocity_rad_s for outcome in valid_outcomes
+                        outcome.max_joint_velocity_rad_s for outcome in outcomes
                     ),
                     "max_joint_acceleration_rad_s2": _mean(
-                        outcome.max_joint_acceleration_rad_s2
-                        for outcome in valid_outcomes
+                        outcome.max_joint_acceleration_rad_s2 for outcome in outcomes
+                    ),
+                    "max_joint_jerk_rad_s3": _mean(
+                        outcome.max_joint_jerk_rad_s3 for outcome in outcomes
                     ),
                     "velocity_utilization": _mean(
-                        outcome.velocity_utilization for outcome in valid_outcomes
+                        outcome.velocity_utilization for outcome in outcomes
                     ),
                     "acceleration_utilization": _mean(
-                        outcome.acceleration_utilization for outcome in valid_outcomes
+                        outcome.acceleration_utilization for outcome in outcomes
                     ),
                     "jerk_utilization": _mean(
-                        outcome.jerk_utilization for outcome in valid_outcomes
+                        outcome.jerk_utilization for outcome in outcomes
                     ),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes

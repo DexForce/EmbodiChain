@@ -3219,6 +3219,7 @@ class AtomicTaskScenario(ScenarioProvider):
         suite: SuiteCfg,
         *,
         planning_time_ms: float,
+        timing_is_solved: bool = True,
     ) -> ScenarioEvaluation:
         """Validate motion, replay physics, and evaluate physical task success."""
         if not isinstance(result, CompiledTrajectory):
@@ -3243,6 +3244,7 @@ class AtomicTaskScenario(ScenarioProvider):
             ),
             joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
             dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
+            timing_is_solved=timing_is_solved,
         )
         provider = self._case_providers[case.case_id]
         observation = self._execute(result, case, provider)
