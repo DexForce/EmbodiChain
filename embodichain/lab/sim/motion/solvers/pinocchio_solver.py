@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import os
 import torch
 import numpy as np
@@ -22,6 +24,7 @@ from itertools import product
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 
 from embodichain.lab.sim.utility.import_utils import (
@@ -420,7 +423,7 @@ class PinocchioSolver(BaseSolver):
             target_xpos = target_xpos[0]
 
         target_xpos = self.root_base_xpos @ target_xpos
-        compute_xpos = target_xpos @ np.linalg.inv(self.tcp_xpos)
+        compute_xpos = target_xpos @ inv_transform(self.tcp_xpos)
 
         frame_index = self.robot.model.getFrameId(self.end_link_name)
         joint_index = self.robot.model.frames[frame_index].parent

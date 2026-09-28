@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from embodichain.utils.math import (
     convert_quat,
     default_orientation,
+    inv_transform,
     matrix_from_quat,
     quat_apply,
     quat_conjugate,
@@ -32,6 +34,111 @@ from embodichain.utils.math import (
     trans_matrix_to_xyz_quat,
     xyz_quat_to_4x4_matrix,
 )
+
+
+@pytest.mark.parametrize("backend", ["numpy", "torch"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("kind", ["identity", "translation", "rotation_translation"])
+def test_inv_transform_preserves_backend_dtype_and_input(backend, dtype, kind) -> None:
+    transform = np.eye(4, dtype=dtype)
+    if kind != "identity":
+        transform[:3, 3] = [0.123456789, -0.987654321, 0.13579]
+    if kind == "rotation_translation":
+        # +90 degrees about Y exposes overlapping transpose assignments.
+        transform[:3, :3] = [[0, 0, 1], [0, 1, 0], [-1, 0, 0]]
+    expected = np.linalg.inv(transform)
+    if backend == "torch":
+        transform = torch.from_numpy(transform)
+        original = transform.clone()
+    else:
+        original = transform.copy()
+
+    actual = inv_transform(transform)
+
+    assert type(actual) is type(transform)
+    assert actual.dtype == transform.dtype
+    if backend == "torch":
+        assert actual.device == transform.device
+        torch.testing.assert_close(actual, torch.from_numpy(expected))
+        torch.testing.assert_close(actual @ transform, torch.eye(4, dtype=actual.dtype))
+        torch.testing.assert_close(transform, original, atol=0, rtol=0)
+    else:
+        np.testing.assert_allclose(actual, expected, atol=1e-7)
+        np.testing.assert_allclose(actual @ transform, np.eye(4), atol=1e-7)
+        np.testing.assert_array_equal(transform, original)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "torch"])
+def test_inv_transform_accepts_noncontiguous_input(backend) -> None:
+    storage = np.zeros((8, 8), dtype=np.float64)
+    storage[::2, ::2] = [
+        [0, -1, 0, 0.2],
+        [1, 0, 0, -0.4],
+        [0, 0, 1, 0.3],
+        [0, 0, 0, 1],
+    ]
+    expected = np.linalg.inv(storage[::2, ::2])
+    if backend == "torch":
+        transform = torch.from_numpy(storage)[::2, ::2]
+        assert not transform.is_contiguous()
+        torch.testing.assert_close(inv_transform(transform), torch.from_numpy(expected))
+    else:
+        transform = storage[::2, ::2]
+        assert not transform.flags.c_contiguous
+        np.testing.assert_allclose(inv_transform(transform), expected)
+
+
+def test_inv_transform_preserves_autograd() -> None:
+    # A differentiable rigid pose: one rotation angle and three translations.
+    parameters = torch.tensor(
+        [0.4, 0.2, -0.3, 0.5], dtype=torch.float64, requires_grad=True
+    )
+
+    def inverse_from_parameters(values):
+        angle, x, y, z = values.unbind()
+        zero, one = values.new_zeros(()), values.new_ones(())
+        c, s = angle.cos(), angle.sin()
+        transform = torch.stack(
+            (
+                torch.stack((c, -s, zero, x)),
+                torch.stack((s, c, zero, y)),
+                torch.stack((zero, zero, one, z)),
+                torch.stack((zero, zero, zero, one)),
+            )
+        )
+        return inv_transform(transform)
+
+    assert torch.autograd.gradcheck(inverse_from_parameters, (parameters,))
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_inv_transform_keeps_cuda_device() -> None:
+    transform = torch.eye(4, dtype=torch.float64, device="cuda")
+    transform[:3, 3] = transform.new_tensor([0.1, -0.2, 0.3])
+
+    inverse = inv_transform(transform)
+
+    assert inverse.device == transform.device
+    torch.testing.assert_close(inverse, torch.linalg.inv(transform))
+
+
+@pytest.mark.parametrize("backend", [np.zeros, torch.zeros])
+@pytest.mark.parametrize("shape", [(3, 3), (4, 5), (1, 4, 4)])
+def test_inv_transform_rejects_non_single_pose_shapes(backend, shape) -> None:
+    with pytest.raises(ValueError, match="single.*4, 4"):
+        inv_transform(backend(shape))
+
+
+def test_inv_transform_rejects_unsupported_input_type() -> None:
+    with pytest.raises(TypeError, match="NumPy array or Torch tensor"):
+        inv_transform(np.eye(4).tolist())
+
+
+def test_inv_transform_legacy_import_is_compatible() -> None:
+    from embodichain.utils.utility import inv_transform as legacy_inv_transform
+
+    assert legacy_inv_transform is inv_transform
 
 
 def _distinct_xyzw() -> torch.Tensor:

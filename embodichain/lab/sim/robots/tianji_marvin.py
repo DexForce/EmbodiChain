@@ -30,6 +30,8 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
+    RenderCfg,
+    LightCfg,
 )
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
@@ -229,7 +231,17 @@ def _main() -> None:
             headless=True,
             device=args.device,
             num_envs=1,
+            render_cfg=RenderCfg(renderer="rt"),
             physics_cfg=physics_cfg_for_backend(args.physics),
+        )
+    )
+
+    sim.add_light(
+        LightCfg(
+            uid=f"light_",
+            intensity=60.0,
+            radius=600,
+            init_pos=[0, 0, 6.0],
         )
     )
     try:

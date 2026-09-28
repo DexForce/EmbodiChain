@@ -1993,6 +1993,39 @@ def unmake_pose(pose: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return pose[..., :3, 3], pose[..., :3, :3]
 
 
+def inv_transform(transform: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
+    """Invert a single rigid transform without modifying its input.
+
+    Uses ``[R.T, -R.T @ t; 0, 1]``. The input must represent a rigid
+    transform with an orthonormal rotation, not a general affine matrix.
+    Use :func:`pose_inv` for batched Torch transforms.
+
+    Args:
+        transform: NumPy array or Torch tensor with shape ``(4, 4)``.
+
+    Returns:
+        Inverse transform with the same array type and dtype. Torch inputs
+        also retain their device and autograd connection.
+
+    Raises:
+        TypeError: If the input is neither a NumPy array nor a Torch tensor.
+        ValueError: If the input shape is not ``(4, 4)``.
+    """
+    if not isinstance(transform, (np.ndarray, torch.Tensor)):
+        raise TypeError("transform must be a NumPy array or Torch tensor")
+    if transform.shape != (4, 4):
+        raise ValueError(f"Expected a single (4, 4) transform, got {transform.shape}")
+
+    if isinstance(transform, torch.Tensor):
+        inverse = torch.eye(4, dtype=transform.dtype, device=transform.device)
+    else:
+        inverse = np.eye(4, dtype=transform.dtype)
+    rotation_inverse = transform[:3, :3].T
+    inverse[:3, :3] = rotation_inverse
+    inverse[:3, 3] = -rotation_inverse @ transform[:3, 3]
+    return inverse
+
+
 def pose_inv(pose: torch.Tensor) -> torch.Tensor:
     """Computes the inverse of transformation matrices.
 

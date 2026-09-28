@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import torch
 
 from typing import Union, Tuple, List, TYPE_CHECKING
@@ -21,6 +23,7 @@ from dataclasses import MISSING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.lab.sim.motion.solvers.qpos_seed_sampler import QposSeedSampler
@@ -446,10 +449,7 @@ class PytorchSolver(BaseSolver):
         tcp_xpos = torch.as_tensor(
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        tcp_xpos_inv = tcp_xpos.clone()
-        # Read from the original TCP to avoid overlapping transpose assignment.
-        tcp_xpos_inv[:3, :3] = tcp_xpos[:3, :3].T
-        tcp_xpos_inv[:3, 3] = -tcp_xpos_inv[:3, :3] @ tcp_xpos[:3, 3]
+        tcp_xpos_inv = inv_transform(tcp_xpos)
         target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof

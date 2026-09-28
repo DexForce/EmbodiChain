@@ -34,6 +34,7 @@ from embodichain.lab.sim.utility.solver_utils import (
     build_reduced_pinocchio_robot,
 )
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 
 if TYPE_CHECKING:
     import pink
@@ -165,7 +166,7 @@ class PinkSolver(BaseSolver):
             self._world_from_root = np.asarray(
                 self.robot.data.oMf[root_frame_id].homogeneous, dtype=float
             ).copy()
-        self._root_from_world = np.linalg.inv(self._world_from_root)
+        self._root_from_world = inv_transform(self._world_from_root)
         self._end_frame_id = self.robot.model.getFrameId(self.end_link_name)
         if self._end_frame_id >= self.robot.model.nframes:
             raise ValueError(
@@ -241,7 +242,7 @@ class PinkSolver(BaseSolver):
             else:
                 task.set_target_from_configuration(self.pink_cfg)
 
-        self._tcp_inverse = np.linalg.inv(np.asarray(self.tcp_xpos, dtype=float))
+        self.set_tcp(self.tcp_xpos)
 
     def _validate_cfg(self) -> None:
         """Validate numerical controls before constructing optional dependencies."""
@@ -290,7 +291,10 @@ class PinkSolver(BaseSolver):
         tcp = np.asarray(xpos, dtype=float)
         if tcp.shape != (4, 4) or not np.isfinite(tcp).all():
             raise ValueError("TCP must be a finite 4x4 homogeneous matrix")
-        tcp_inverse = np.linalg.inv(tcp)
+        # Preserve rejection of singular updates before replacing the live TCP.
+        if np.linalg.det(tcp) == 0.0:
+            raise np.linalg.LinAlgError("TCP transform is singular")
+        tcp_inverse = inv_transform(tcp)
         super().set_tcp(tcp)
         self._tcp_inverse = tcp_inverse
 
