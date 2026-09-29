@@ -437,6 +437,48 @@ def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation():
     assert outcome.failure_code == "dynamic_limit_violation"
 
 
+class _PlaceholderLimitRobot(_MetricRobot):
+    """Backend that reports the float32 maximum instead of a real limit."""
+
+    qvel_limit = float(torch.finfo(torch.float32).max)
+
+
+def test_placeholder_asset_velocity_limit_reads_as_not_applicable():
+    # A backend that does not carry the URDF's limits reports float32 max.
+    # Treating that as a limit would make every velocity check pass.
+    case, positions = _valid_motion_case_and_positions()
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.velocity_utilization is None
+    assert outcome.velocity_limit_violation is None
+
+
+def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
+    case, positions = _valid_motion_case_and_positions()
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+        joint_velocity_limit_rad_s=[2.62] * 7,
+    )[0]
+    assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
+    assert outcome.velocity_limit_violation is True
+
+
 def test_hold_padded_batch_row_still_evaluates():
     # A batched planner pads a short row by repeating its final pose at a zero
     # interval. Differentiating straight through that hold steps the velocity

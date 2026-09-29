@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 __all__ = [
     "compute_case_outcomes",
     "resolve_dynamic_limit",
+    "resolve_velocity_limits",
     "compute_waypoint_errors",
     "get_pose_err",
     "make_failure_outcomes",
@@ -384,6 +385,43 @@ def _joint_limit_metrics(
     return maximum > 0.0, maximum
 
 
+# No revolute arm joint runs anywhere near 1000 rad/s (about 9500 rpm), so a
+# reported limit at or above this is a backend placeholder -- commonly the
+# float32 maximum -- rather than the asset's real limit. Treating it as a limit
+# would make every velocity check pass regardless of the trajectory.
+_PLACEHOLDER_LIMIT_RAD_S = 1.0e3
+
+
+def resolve_velocity_limits(
+    asset_limits: torch.Tensor,
+    stated_limit: float | Sequence[float] | None,
+    reference: torch.Tensor,
+) -> torch.Tensor | None:
+    """Return usable per-joint velocity limits, or ``None`` when there are none.
+
+    A limit stated by the suite wins, since it is the deliberate answer to an
+    asset that does not carry its own. Otherwise the asset's limits are used
+    only when every entry is finite and below the placeholder threshold; a
+    backend that reports the float32 maximum has not supplied a limit, and
+    reporting it as satisfied would be worse than reporting nothing.
+
+    Args:
+        asset_limits: Per-joint limits from ``robot.get_qvel_limits()``.
+        stated_limit: The suite's override, or ``None``.
+        reference: Tensor whose dtype and device the result adopts.
+
+    Returns:
+        A ``(DOF,)`` limit tensor, or ``None`` when no usable limit exists.
+    """
+    if stated_limit is not None:
+        return resolve_dynamic_limit(stated_limit, asset_limits.shape[-1], reference)
+    usable = bool(
+        torch.isfinite(asset_limits).all()
+        and (asset_limits.abs() < _PLACEHOLDER_LIMIT_RAD_S).all()
+    )
+    return asset_limits.to(reference.dtype).to(reference.device) if usable else None
+
+
 def resolve_dynamic_limit(
     limit: float | Sequence[float] | None,
     dof: int,
@@ -633,6 +671,7 @@ def compute_case_outcomes(
     position_threshold_m: float,
     rotation_threshold_rad: float,
     joint_limit_tolerance_rad: float,
+    joint_velocity_limit_rad_s: float | Sequence[float] | None = None,
     joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None,
     joint_jerk_limit_rad_s3: float | Sequence[float] | None = None,
     dynamic_limit_tolerance: float = 1.0e-3,
@@ -666,7 +705,7 @@ def compute_case_outcomes(
         )
     limits = robot.get_qpos_limits(name=control_part)
     dof = positions.shape[-1]
-    qvel_limits = robot.get_qvel_limits(name=control_part).to(positions.device)
+    asset_qvel_limits = robot.get_qvel_limits(name=control_part).to(positions.device)
     qacc_limits = resolve_dynamic_limit(joint_acceleration_limit_rad_s2, dof, positions)
     qjerk_limits = resolve_dynamic_limit(joint_jerk_limit_rad_s3, dof, positions)
     sample_dt = None if result.dt is None else result.dt.to(positions.device)
@@ -750,7 +789,11 @@ def compute_case_outcomes(
             dynamic = _dynamic_limit_metrics(
                 native_qpos,
                 None if sample_dt is None else sample_dt[env_index],
-                qvel_limits[env_index],
+                resolve_velocity_limits(
+                    asset_qvel_limits[env_index],
+                    joint_velocity_limit_rad_s,
+                    positions,
+                ),
                 qacc_limits,
                 qjerk_limits,
                 dynamic_limit_tolerance,
