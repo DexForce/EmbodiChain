@@ -217,6 +217,11 @@ snapshot; upright and stack constraints take precedence over ordinary policy.
 candidate strategy through the shared full pickup planner and retains the exact
 successful trajectory per row; endpoint IK alone is not acceptance. Explicit
 grasp poses, fixed calibrations and constrained picks retain their contracts.
+Its direction prefilter removes only candidate columns whose two roll variants
+are rejected in every environment, then delegates to shared `PickUp` and restores
+the original candidate indices. Upright adjustment and unconstrained approaches
+delegate unchanged. Keep the full environment axis; do not copy the IK loop or
+change shared defaults to optimize this GenSim selection.
 `GenSimHandOver` chooses the receiving end from the actual source attachment.
 Vertical receiving grasps try diagonal then top-down; horizontal ones reverse
 that order. Candidate, IK or path failure triggers one alternate-direction
