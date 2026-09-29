@@ -211,20 +211,30 @@ class GenSimActionEngine(AtomicActionEngine):
 
     def _plan_request(self, request: ResolvedActionRequest, context: Any = None) -> Any:
         from .motion import cartesian_approach_scope
+        from .planning_probe import initial_plan_capture
 
+        capture = initial_plan_capture(request.invocation_id)
         enabled = request.invocation_id in self._cartesian_calls
-        with cartesian_approach_scope(enabled):
-            plan = super()._plan_request(request, context)
-        return replace(
-            plan,
-            diagnostics=replace(
-                plan.diagnostics,
-                metadata={
-                    **plan.diagnostics.metadata,
-                    "gen_sim_invocation_policy": {
-                        "cartesian_approach": enabled,
-                        "sample_count": request.motion_policy.sample_count,
+        try:
+            with cartesian_approach_scope(enabled):
+                plan = super()._plan_request(request, context)
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "gen_sim_invocation_policy": {
+                            "cartesian_approach": enabled,
+                            "sample_count": request.motion_policy.sample_count,
+                        },
                     },
-                },
-            ),
-        )
+                ),
+            )
+            return (
+                plan if capture is None else capture.accept(request, plan, self.robot)
+            )
+        except Exception as exc:
+            if capture is not None:
+                capture.failed(exc)
+            raise

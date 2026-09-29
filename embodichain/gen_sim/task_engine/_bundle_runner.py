@@ -138,45 +138,66 @@ def execute_bundle(
             integration=deployment.selection,
             validation_context=deployment.integration.registration.catalog,
         )
-        deployment.integration.registration.catalog.preflight(env_cfg.task_program)
+        compiled_program = deployment.integration.registration.catalog.preflight(
+            env_cfg.task_program
+        )
         env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
         env.reset(seed=args.seed, options={"save_data": False})
         from ._task_program.cargo import capture_cargo, check_cargo
 
         cargo = capture_cargo(env, load_config(root / "components/scene.yaml"), graph)
-        probe = _isolated_initial_probe(env, deployment, env_cfg.task_program)
-        probe["integration_fingerprint"] = graph["integration_fingerprint"]
-        (output / "planning_probe.json").write_text(
-            json.dumps(probe, indent=2), encoding="utf-8"
-        )
-        if args.plan_probe_only or not any(probe["plan_success"]):
-            terminal_reasons = ["initial_plan_rejected"] * int(args.num_envs)
+
+        def publish_initial_plan(evidence: dict[str, Any]) -> None:
+            nonlocal probe
+            probe = {
+                **evidence,
+                "integration_fingerprint": graph["integration_fingerprint"],
+            }
+            (output / "planning_probe.json").write_text(
+                json.dumps(probe, indent=2), encoding="utf-8"
+            )
+
+        if args.plan_probe_only:
+            publish_initial_plan(
+                _isolated_initial_probe(env, deployment, env_cfg.task_program)
+            )
             _write_terminal_robot_state(env, output)
         else:
-            result = execute_demo_episode(env, episode_index=0, attempt_id=0)
+            from ._task_program.planning_probe import capture_initial_plan
+
+            with capture_initial_plan(
+                compiled_program, publish_initial_plan, _exception_metadata
+            ):
+                result = execute_demo_episode(env, episode_index=0, attempt_id=0)
             result_metadata = result.to_metadata()
             _write_terminal_robot_state(env, output)
             row_success = [bool(value) for value in result.success]
             terminal_reasons = list(result.terminal_reasons) or [
                 str(result.terminal_reason)
             ] * len(row_success)
-            target = getattr(env, "unwrapped", env)
-            buffer = getattr(target, "_traj_buffer", None)
-            if cargo and buffer is None:
-                raise ValueError("Cargo acceptance requires a recorded trajectory.")
-            cargo_report = check_cargo(
-                cargo,
-                len(row_success),
-                trajectory=None if buffer is None else buffer["states"],
-                step_counts=getattr(target, "_traj_steps", None),
+            initial_rejected = (
+                probe is not None
+                and bool(probe["plan_success"])
+                and not any(probe["plan_success"])
             )
-            (output / "cargo_envelope.json").write_text(
-                json.dumps(cargo_report, indent=2), encoding="utf-8"
-            )
-            for index, accepted in enumerate(cargo_report["accepted_mask"]):
-                if not accepted and row_success[index]:
-                    row_success[index] = False
-                    terminal_reasons[index] = "cargo_envelope_failed"
+            if not initial_rejected:
+                target = getattr(env, "unwrapped", env)
+                buffer = getattr(target, "_traj_buffer", None)
+                if cargo and buffer is None:
+                    raise ValueError("Cargo acceptance requires a recorded trajectory.")
+                cargo_report = check_cargo(
+                    cargo,
+                    len(row_success),
+                    trajectory=None if buffer is None else buffer["states"],
+                    step_counts=getattr(target, "_traj_steps", None),
+                )
+                (output / "cargo_envelope.json").write_text(
+                    json.dumps(cargo_report, indent=2), encoding="utf-8"
+                )
+                for index, accepted in enumerate(cargo_report["accepted_mask"]):
+                    if not accepted and row_success[index]:
+                        row_success[index] = False
+                        terminal_reasons[index] = "cargo_envelope_failed"
             if result.completed and all(row_success):
                 env.reset()
             else:
@@ -259,14 +280,29 @@ def execute_bundle(
         trajectory_root=trajectory_root,
         cargo_report=cargo_report,
     )
-    if probe is not None and not any(probe["plan_success"]) and failure is None:
+    if probe is None:
+        probe = {
+            "scope": "initial_call",
+            "planning_source": "execution",
+            "plan_success": [],
+            "task_success": None,
+            "failure": failure,
+            "integration_fingerprint": graph["integration_fingerprint"],
+            "diagnostic": "Execution did not reach initial atomic planning.",
+        }
+        (output / "planning_probe.json").write_text(
+            json.dumps(probe, indent=2), encoding="utf-8"
+        )
+    if probe["plan_success"] and not any(probe["plan_success"]) and failure is None:
         report["status"] = "rejected"
+        for row in report["environments"]:
+            row["terminal_reason"] = "initial_plan_rejected"
     write_execution_report(output, report)
     _print_json(report)
     return 0 if report["status"] == "succeeded" else 2
 
 
-from ._task_program.assembly import probe_initial_plan as _probe_initial_plan
+from ._task_program.planning_probe import probe_initial_plan as _probe_initial_plan
 
 
 def _isolated_initial_probe(env: Any, deployment: Any, program: Any) -> dict[str, Any]:

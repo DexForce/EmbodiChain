@@ -119,14 +119,22 @@ in `constraints.json.motion_samples`, then bound to compiled invocation IDs by
 `invocation_policy.py`. The base execution policy is no longer raised by scanning
 the whole program. E2/E4/E6, drawer-placement and on-support E5 recipes retain
 their staged-motion budgets without changing unrelated calls. The GenSim engine
-only selects an immutable request policy; planning, execution, recovery and
-state effects remain in the shared engine. Larger caller budgets, control dt and
+selects immutable request policies and observes the runner's initial plan;
+planning, execution, recovery and state effects remain in the shared engine.
+Larger caller budgets, control dt and
 velocity limits are preserved. Missing/stale bindings require bundle regeneration.
 Cartesian sampling is declared alongside budgets in `cartesian_calls`, bound
 to compiled invocation IDs, and enabled only within an exception-safe planning
 scope. Appending a HandOver, clearance or drawer recipe no longer switches the
 whole program's generator. Hardware, initialization, remaining option selectors
 and random-state scopes still require separate qualification.
+Normal bundle execution writes `planning_probe.json` from the actual first
+invocation via `_task_program/planning_probe.py`, without separately planning it
+again. Full-robot post-resampling velocity validation still gates that plan
+before dispatch; diagnostics distinguish execution evidence from the independent
+`--plan-probe-only` mode. The run-local observer matches the exact invocation ID,
+restores its scope on exit, and retains no executable plan. Genuine runtime
+replans continue to use fresh observations; this is not a cross-run plan cache.
 For non-drawer Place, the current `GenSimPlace` planning scope selects the same
 Cartesian sampling policy in both checked and approach motion generators. Its
 planning and recovery do not depend on unrelated E2/HandOver calls elsewhere
