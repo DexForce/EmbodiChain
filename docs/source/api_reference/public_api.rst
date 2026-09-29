@@ -1176,11 +1176,17 @@ embodichain.lab.sim.motion.planners.toppra_planner
 
 .. currentmodule:: embodichain.lab.sim.motion.planners.toppra_planner
 
+Time-optimal joint-path parameterization. The planner solves timing for
+waypoint input; :func:`retime_joint_paths` applies the same parameterization to
+paths another planner already produced, such as a closed-loop policy rollout
+whose samples carry only nominal timing.
+
 .. autosummary::
 
    ToppraPlanner
    ToppraPlannerCfg
    ToppraPlanOptions
+   retime_joint_paths
 
 embodichain.lab.sim.motion.planners.se3
 ---------------------------------------
