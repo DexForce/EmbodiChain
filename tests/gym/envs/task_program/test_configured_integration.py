@@ -283,6 +283,13 @@ def test_planner_policy_decoder_validates_backend_and_options() -> None:
             path="execution policy.planner",
         )
 
+    for field_name in ("world", "auto_gen"):
+        with pytest.raises(TypeError, match="must be a mapping"):
+            _decode_planner_config(
+                {"type": "curobo", "config": {field_name: None}},
+                path="execution policy.planner",
+            )
+
 
 @pytest.mark.parametrize("task_name", ("repeated_pick_place", "open_drawer"))
 def test_single_task_program_composes_with_ur5_and_franka(

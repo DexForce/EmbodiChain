@@ -152,8 +152,8 @@ def _planner_cfg_from_config(
         )
 
     if planner_type == "curobo":
-        world = options.get("world")
-        if world is not None:
+        if "world" in options:
+            world = options["world"]
             if not isinstance(world, Mapping):
                 raise TypeError("planner_config.config.world must be a mapping.")
             world = deepcopy(dict(world))
@@ -168,8 +168,8 @@ def _planner_cfg_from_config(
                     "runtime-owned; declare dynamic scene collision roles instead."
                 )
             options["world"] = CuroboWorldCfg(**world)
-        auto_gen = options.get("auto_gen")
-        if auto_gen is not None:
+        if "auto_gen" in options:
+            auto_gen = options["auto_gen"]
             if not isinstance(auto_gen, Mapping):
                 raise TypeError("planner_config.config.auto_gen must be a mapping.")
             options["auto_gen"] = CuroboAutoGenCfg(**deepcopy(dict(auto_gen)))
