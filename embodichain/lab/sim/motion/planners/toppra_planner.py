@@ -434,7 +434,7 @@ class ToppraPlanner(BasePlanner):
             waypoints_tensor = torch.stack([s.qpos for s in target_states], dim=1).to(
                 self.device
             )
-            if not waypoints_tensor.is_floating_point():
+            if waypoints_tensor.dtype not in (torch.float32, torch.float64):
                 waypoints_tensor = waypoints_tensor.to(torch.float64)
             try:
                 result = _retime_toppra_warp(
