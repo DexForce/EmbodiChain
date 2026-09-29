@@ -493,6 +493,26 @@ def test_retime_joint_paths_rejects_malformed_input():
         )
 
 
+def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
+    tmp_path, monkeypatch
+):
+    # The rollout emits however many steps it happened to take. Inheriting that
+    # count leaves a stretched trajectory sampled far too coarsely, so a
+    # waypoint the rollout stopped on falls between two output samples.
+    nominal = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+    duration = float(retimed.dt.sum())
+    assert duration > float(nominal.dt.sum())
+    # One sample per nominal dt over the solved duration, not one per step.
+    assert retimed.positions.shape[1] > nominal.positions.shape[1]
+    assert retimed.positions.shape[1] == pytest.approx(duration / 0.01, rel=0.05)
+
+
 def test_retimed_success_reflects_the_trajectory_actually_returned(
     tmp_path, monkeypatch
 ):
