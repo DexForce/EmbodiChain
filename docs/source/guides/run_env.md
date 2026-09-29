@@ -17,7 +17,7 @@ replaying a previously recorded trajectory.
   - No mode switch
   - Generates task actions, steps the environment, and lets configured
     dataset or video recorders save each episode.
-  - Expert demonstration generation and task smoke tests.
+  - Expert demonstration expansion and task smoke tests.
 * - Preview
   - `--preview`
   - Resets the environment and opens an interactive IPython session on
@@ -48,9 +48,9 @@ recorders inline, or select reusable components. A pure physical `env.yaml`
 component uses `environment_id` instead of `id` and is not runnable by itself.
 
 A configuration-defined Task Program deployment conventionally uses
-`task.<embodiment>.yaml`. It selects `environment.component`, all three
-`task_program` paths (`program`, `integration`, and `execution_policy`), and
-`embodiment.component`:
+`task.<embodiment>.yaml`. It selects either one `environment.component` or a
+`environment.default/newton` mapping, all three `task_program` paths (`program`,
+`integration`, and `execution_policy`), and `embodiment.component`:
 
 ```bash
 embodichain run-env \
@@ -68,10 +68,28 @@ At startup, `run-env`:
 4. creates the environment selected by the gym config's `id`; and
 5. enters rollout, preview, or replay mode.
 
-The runnable config, or its selected `environment.component`, must declare
-`physics: default` or `physics: newton`. See
-{doc}`configuration` for paired backend configuration fragments. That backend is file-owned:
-`--physics` can confirm it but cannot switch it. Omitting `--device` preserves
+Task-facing trajectory expansion can be kept in a sibling configuration and
+referenced from the runnable task:
+
+```yaml
+expansion:
+  config: expansion/<task-profile>.yaml
+```
+
+The referenced file may contain `runtime`, `policy`, `overrides`, and
+`candidate_indices`. The runner resolves it relative to the task, applies its
+runtime overlay after expanding the selected environment variant, and merges
+task-local expansion fields on top. `run-task` then uses that declaration for
+Task Program expansion; `--expansion-profile` and
+`--expansion-candidate-indices` remain per-run overrides.
+
+The runnable config, or its selected environment component, must declare
+`physics: default` or `physics: newton`. With an `environment.default/newton`
+mapping, the requested variant is expanded before this check. See
+{doc}`configuration` for paired backend configuration fragments. That backend is
+file-owned: `--physics` selects a named variant when the task declares an
+`environment.default/newton` mapping and confirms it for a single component. It
+never rewrites the selected file. Omitting `--device` preserves
 an authored `device` or the selected backend's default; supplying `--device`
 overrides both environment tensors and backend execution, including an explicit
 CPU selection for Newton.
@@ -82,7 +100,7 @@ visualization arguments.
 
 ## Preview an environment
 
-Preview mode is intended for inspection before an expensive data-generation
+Preview mode is intended for inspection before an expensive data-expansion
 run:
 
 ```bash
@@ -275,8 +293,8 @@ The reference environment leaves `env.dataset` empty, so this command is a
 rollout smoke test and does not persist a dataset. Add a `LeRobotRecorder` to
 the reusable `env.yaml` (or a copied inline deployment) to record one overall
 task plus three per-frame subtask/segment annotations. See
-{ref}`Expert Data Generation <tutorial_data_generation>` for recorder setup and
-{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
+{ref}`Expert Data Expansion <tutorial_data_expansion>` for recorder setup and
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>` for
 validation and preview.
 
 ### Choose the recording output you need
@@ -312,7 +330,7 @@ Dataset video is still structured training data; it is not interchangeable
 with a replay trajectory. Conversely, `--record_trajectory` does not configure
 a LeRobot dataset or export an MP4.
 
-For structured datasets, see {doc}`/tutorial/data_generation` and
+For structured datasets, see {doc}`/tutorial/data_expansion` and
 {doc}`/overview/gym/dataset_functors`. For human-viewable video, see
 {doc}`/overview/gym/event_functors`.
 
@@ -458,7 +476,7 @@ Use the modes in this order when bringing up a task:
 3. Replay the artifact in `kinematic` mode to inspect the exact recorded
    motion, then use `dynamic` mode if physics reproducibility matters.
 4. Remove `--filter_dataset_saving`, choose the desired episode count, and run
-   the full data-generation job.
+   the full data-expansion job.
 
 For rollout profiling, renderer selection, and every available CLI option, see
 the {ref}`CLI Reference <cli-run-environment>`.

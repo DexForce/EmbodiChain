@@ -19,9 +19,9 @@ separate child page.
      - Dual UR5 with PGI-140-80 grippers
      - Task Program expert demo
    * - Open Drawer
-     - ``TaskProgramOpenDrawer-v1`` (UR5, default),
-       ``TaskProgramOpenDrawer-Newton-v1`` (UR5, Newton), and
-       ``TaskProgramOpenDrawer-Franka-v1`` (Franka, default)
+     - ``TaskProgramOpenDrawer-v1`` (UR5) and
+       ``TaskProgramOpenDrawer-Franka-v1`` (Franka); choose ``default`` or
+       ``newton`` from the same task config with ``--physics``
      - UR5 or Franka Panda
      - Task Program expert demo
    * - Push Cube
@@ -30,8 +30,8 @@ separate child page.
      - RL
    * - Repeated Pick and Place
      - ``TaskProgramRepeatedPickPlace-v1`` and
-       ``TaskProgramRepeatedPickPlace-Franka-v1`` (default), plus their
-       ``-Newton-v1`` deployments
+       ``TaskProgramRepeatedPickPlace-Franka-v1``; choose ``default`` or
+       ``newton`` from the same task config with ``--physics``
      - UR5 or Franka Panda
      - Task Program expert demo
 
@@ -41,7 +41,12 @@ Use ``show-task`` before launch when a logical task has several deployments:
 
    embodichain show-task embodichain_tasks:repeated_pick_place
    embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.newton.yaml
+       --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml --physics newton
+
+The UR5 deployment keeps its augmentation settings in the task-facing
+``expansion/repeated_pick_place.yaml`` file referenced by
+``expansion.config``; the physical ``default`` and ``newton`` components stay
+under ``envs/``.
 
 .. toctree::
    :maxdepth: 1

@@ -23,7 +23,8 @@ import select
 import sys
 import time
 
-from collections.abc import Iterable, Iterator, Sequence, Sized
+from collections.abc import Iterable, Iterator, Mapping, Sequence, Sized
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import gymnasium
@@ -41,6 +42,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
     load_trajectory,
+    _load_expansion_declaration,
 )
 from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
@@ -289,7 +291,7 @@ def generate_and_execute_action_list(
         idx: Index of the legacy action list within the current episode.
         debug_mode: Whether debug mode is enabled.
         episode_idx: Index of the current episode.
-        **kwargs: Additional arguments forwarded to action generation.
+        **kwargs: Additional arguments forwarded to action expansion.
 
     Returns:
         Whether a complete, successful episode was executed.
@@ -342,7 +344,7 @@ def generate_function(
             rows are explicitly discarded after the selected rows commit.
         execution_cfg: Continuous or independent segment-fragment persistence
             settings. Checkpoint resume is not performed in either mode.
-        **kwargs: Additional keyword arguments for data generation.
+        **kwargs: Additional keyword arguments for data expansion.
 
     Returns:
         True if continuous episodes, or at least one eligible fragment row,
@@ -357,6 +359,9 @@ def generate_function(
 
     max_attempts = int(kwargs.pop("max_attempts", 3))
     reset_before = bool(kwargs.pop("reset_before", True))
+    expansion_record_sink = kwargs.pop("_expansion_record_sink", None)
+    if expansion_record_sink is not None and not callable(expansion_record_sink):
+        raise TypeError("_expansion_record_sink must be callable or None")
     if max_attempts < 1:
         raise ValueError(f"max_attempts must be at least 1, got {max_attempts}.")
     normalized_save_env_ids = _normalize_save_env_ids(env, save_env_ids)
@@ -393,6 +398,14 @@ def generate_function(
                 and _selected_rows_have_frames(result, normalized_save_env_ids)
             )
             if execution_cfg.mode == "segment_fragments" and fragment_env_ids:
+                if expansion_record_sink is not None:
+                    expansion_record_sink(
+                        tuple(
+                            getattr(
+                                _env_target(env), "task_program_expansion_records", ()
+                            )
+                        )
+                    )
                 _commit_pending_episode(env, fragment_env_ids)
                 commit_succeeded = True
                 if not successful:
@@ -404,6 +417,14 @@ def generate_function(
             if execution_cfg.mode == "continuous" and (
                 successful or persistable_failure
             ):
+                if expansion_record_sink is not None:
+                    expansion_record_sink(
+                        tuple(
+                            getattr(
+                                _env_target(env), "task_program_expansion_records", ()
+                            )
+                        )
+                    )
                 # reset() is the commit boundary: dataset functors consume the
                 # whole episode once, then buffers and scene state are reset.
                 _commit_pending_episode(env, normalized_save_env_ids)
@@ -437,6 +458,350 @@ def generate_function(
             )
 
     return False
+
+
+def _configure_expansion_reset_event(
+    env: Any,
+    params: Mapping[str, Any],
+) -> None:
+    """Install one expansion batch payload in the reset lifecycle."""
+    from embodichain.lab.gym.envs.managers.cfg import EventCfg
+
+    target = _env_target(env)
+    event_manager = getattr(target, "event_manager", None)
+    if event_manager is None:
+        raise RuntimeError("expansion requires an event manager")
+    active_functors = event_manager.active_functors
+    if "expansion_profile_reset" not in active_functors.get("reset", ()):
+        raise RuntimeError(
+            "expansion profile requires the expansion_profile_reset reset event"
+        )
+    current_cfg = event_manager.get_functor_cfg("expansion_profile_reset")
+    event_manager.set_functor_cfg(
+        "expansion_profile_reset",
+        EventCfg(func=current_cfg.func, mode="reset", params=dict(params)),
+    )
+
+
+def _resolve_expansion_resource(anchor: Path, value: str) -> Path:
+    """Resolve a task-local or packaged randomization resource path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    if path.parts[:2] == ("embodichain_tasks", "configs"):
+        return resolve_config_path(path)
+    return (anchor.parent / path).resolve()
+
+
+def _resolve_expansion_request(
+    args: Any,
+    gym_config: Mapping[str, Any],
+) -> tuple[Any, tuple[int, ...], Path] | None:
+    """Resolve a task-bound or CLI-selected Expansion Profile."""
+    from embodichain.utils.config_paths import resolve_config_path
+    from embodichain.utils.utility import load_config
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedExpansionProfile,
+        load_expansion_profile,
+    )
+
+    task_path = resolve_config_path(args.gym_config)
+    binding = gym_config.get("expansion")
+    if binding is not None:
+        if not isinstance(binding, Mapping):
+            raise ValueError("expansion must be a mapping")
+        binding, expansion_config_path = _load_expansion_declaration(
+            binding,
+            base_dir=task_path.parent,
+        )
+        unknown = set(binding) - {
+            "profile",
+            "policy",
+            "overrides",
+            "runtime",
+            "candidate_indices",
+        }
+        if unknown:
+            raise ValueError(
+                f"expansion contains unsupported fields: {sorted(unknown)}"
+            )
+    cli_profile = getattr(args, "expansion_profile", None)
+    binding_profile = None if binding is None else binding.get("profile")
+    binding_policy = None if binding is None else binding.get("policy")
+    if binding_profile is not None and binding_policy is not None:
+        raise ValueError("expansion may select profile or policy, not both")
+    profile_value = cli_profile if cli_profile is not None else binding_profile
+    use_binding_policy = binding_policy is not None and cli_profile is None
+    if profile_value is None and not use_binding_policy:
+        if getattr(args, "expansion_candidate_indices", None) is not None:
+            raise ValueError("expansion candidate indices require a profile")
+        return None
+    if use_binding_policy:
+        if not isinstance(binding_policy, Mapping):
+            raise ValueError("expansion.policy must be a mapping")
+        policy_path_value = binding_policy.get("component")
+        if (
+            not isinstance(policy_path_value, str)
+            or not policy_path_value.strip()
+            or policy_path_value != policy_path_value.strip()
+        ):
+            raise ValueError("expansion.policy.component must be a nonempty path")
+        policy_path = Path(policy_path_value).expanduser()
+        if not policy_path.is_absolute():
+            policy_base_dir = (
+                expansion_config_path.parent
+                if expansion_config_path is not None
+                else task_path.parent
+            )
+            policy_path = policy_base_dir / policy_path
+        policy_path = policy_path.resolve()
+        policy_data = load_config(policy_path)
+        overrides = binding.get("overrides", {}) if binding is not None else {}
+        if not isinstance(overrides, Mapping):
+            raise ValueError("expansion.overrides must be a mapping")
+
+        def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+            merged = dict(base)
+            for key, value in patch.items():
+                if isinstance(value, Mapping):
+                    current = merged.get(key, {})
+                    if not isinstance(current, Mapping):
+                        raise ValueError(
+                            f"expansion.overrides.{key} cannot replace a scalar"
+                        )
+                    merged[key] = merge(current, value)
+                else:
+                    merged[key] = value
+            return merged
+
+        if not isinstance(policy_data, Mapping):
+            raise ValueError("expansion policy component must be a mapping")
+        profile = CombinedExpansionProfile.from_mapping(merge(policy_data, overrides))
+        profile_path = expansion_config_path or task_path
+    else:
+        if (
+            not isinstance(profile_value, str)
+            or not profile_value.strip()
+            or profile_value != profile_value.strip()
+        ):
+            raise ValueError("expansion.profile must be a nonempty path")
+        profile_path = Path(profile_value).expanduser()
+        if not profile_path.is_absolute():
+            profile_path = (
+                Path.cwd() / profile_path
+                if cli_profile is not None
+                else (
+                    expansion_config_path.parent
+                    if expansion_config_path is not None
+                    else task_path.parent
+                )
+                / profile_path
+            )
+        profile_path = profile_path.resolve()
+        profile = load_expansion_profile(profile_path)
+    candidate_values = getattr(args, "expansion_candidate_indices", None)
+    if candidate_values is None and binding is not None:
+        candidate_values = binding.get("candidate_indices")
+    if candidate_values is None:
+        candidate_indices: tuple[int, ...] = ()
+    else:
+        if not isinstance(candidate_values, (list, tuple)):
+            raise ValueError("expansion.candidate_indices must be a sequence")
+        candidate_indices = tuple(candidate_values)
+        if not candidate_indices or len(set(candidate_indices)) != len(
+            candidate_indices
+        ):
+            raise ValueError("expansion candidate indices must be nonempty and unique")
+        if any(type(index) is not int or index < 0 for index in candidate_indices):
+            raise ValueError(
+                "expansion candidate indices must be non-negative integers"
+            )
+    return profile, candidate_indices, profile_path
+
+
+def _expansion_candidate_indices(
+    profile: Any,
+    configured: tuple[int, ...],
+    *,
+    num_envs: int,
+) -> tuple[int, ...]:
+    """Resolve and validate candidate batch starts for one profile."""
+    from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
+
+    if num_envs < 1:
+        raise ValueError("expansion requires at least one environment")
+    if isinstance(profile, CombinedExpansionProfile):
+        profile.validate_for_num_envs(num_envs)
+        total = (
+            profile.scene_randomization.reference_family_count
+            * profile.affordance.branches_per_family
+            * profile.trajectory.variants_per_family
+        )
+        indices = configured or tuple(range(0, total, num_envs))
+        if any(index >= total for index in indices):
+            raise ValueError(
+                "combined expansion candidate index exceeds the recipe budget"
+            )
+        return indices
+    raise ValueError(
+        "run-task expansion requires a CombinedExpansionProfile; "
+        "direct source profiles need a source-specific provider host"
+    )
+
+
+def _run_expansion(
+    env: Any,
+    args: Any,
+    gym_config: Mapping[str, Any],
+) -> None:
+    """Run task-bound trajectory expansion batches through the Gym lifecycle."""
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedExpansionProfile,
+        CubeInitialPoseProvider,
+        VisualProfileRegistry,
+        enumerate_candidate_recipes,
+    )
+
+    request = _resolve_expansion_request(args, gym_config)
+    if request is None:
+        raise ValueError("run_expansion requires an expansion profile")
+    profile, configured_indices, profile_path = request
+    if not isinstance(profile, CombinedExpansionProfile):
+        raise ValueError("run-task expansion requires a CombinedExpansionProfile")
+    target = _env_target(env)
+    num_envs = int(getattr(target, "num_envs", 1))
+    indices = _expansion_candidate_indices(
+        profile,
+        configured_indices,
+        num_envs=num_envs,
+    )
+    if getattr(args, "disable_sensor", False) and profile.visual.enabled:
+        raise ValueError(
+            "--disable-sensor cannot be used with a combined profile that "
+            "contains visual expansion"
+        )
+
+    visual_registry = (
+        VisualProfileRegistry.from_yaml(
+            _resolve_expansion_resource(
+                profile_path,
+                profile.visual.profile_file,
+            )
+        )
+        if profile.visual.enabled
+        else None
+    )
+    if profile.scene_randomization.enabled:
+        family_path = _resolve_expansion_resource(
+            profile_path,
+            profile.scene_randomization.profile_file,
+        )
+        families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
+            profile.scene_randomization.reference_family_count
+        )
+    else:
+        families = CubeInitialPoseProvider().enumerate(
+            profile.scene_randomization.reference_family_count
+        )
+    recipes = enumerate_candidate_recipes(profile, families=families)
+
+    output_dir = getattr(args, "expansion_output_dir", None)
+    if output_dir is None:
+        output_dir = (
+            profile.persistence.output_dir
+            if isinstance(profile, CombinedExpansionProfile)
+            else str(profile_path.parent / "expansion-output")
+        )
+    output_path = Path(output_dir).expanduser()
+    output_path.mkdir(parents=True, exist_ok=True)
+    manifest: dict[str, Any] = {
+        "profile": str(profile_path),
+        "candidate_indices": list(indices),
+        "num_envs": num_envs,
+        "batches": [],
+    }
+    successful_batches = 0
+
+    for candidate_index in indices:
+        if profile.scene_randomization.enabled or profile.visual.enabled:
+            family_by_id = {family.reference_family_id: family for family in families}
+            batch_recipes = tuple(
+                recipes[(candidate_index + row) % len(recipes)]
+                for row in range(num_envs)
+            )
+            reset_payload: dict[str, Any] = {}
+            if profile.scene_randomization.enabled:
+                pose = torch.tensor(
+                    [
+                        [
+                            *family_by_id[recipe.reference_family_id].cube_position,
+                            *family_by_id[
+                                recipe.reference_family_id
+                            ].cube_quaternion_xyzw,
+                        ]
+                        for recipe in batch_recipes
+                    ],
+                    dtype=torch.float32,
+                    device=target.device,
+                )
+                reset_payload["cube_pose"] = pose
+            assignments = {
+                row: recipes[(candidate_index + row) % len(recipes)].visual_profile_id
+                for row in range(num_envs)
+            }
+            if profile.visual.enabled:
+                reset_payload.update(
+                    {
+                        "visual_registry": visual_registry,
+                        "visual_assignments": assignments,
+                        "visual_seed": (args.seed if args.seed is not None else 7)
+                        + candidate_index,
+                    }
+                )
+            _configure_expansion_reset_event(env, reset_payload)
+
+        env.reset(seed=args.seed, options={"save_data": False})
+        batch_records: list[Any] = []
+        generated = generate_function(
+            env,
+            time_id=candidate_index,
+            save_path=str(output_path),
+            save_video=getattr(args, "expansion_save_video", False),
+            debug_mode=getattr(args, "debug_mode", False),
+            save_env_ids=tuple(range(num_envs)),
+            max_attempts=int(gym_config.get("demo_max_attempts", 3)),
+            reset_before=False,
+            expansion_profile=profile,
+            expansion_candidate_index=candidate_index,
+            _expansion_record_sink=batch_records.extend,
+        )
+        if not generated:
+            manifest["batches"].append(
+                {
+                    "candidate_index": candidate_index,
+                    "status": "rejected",
+                    "records": [record.to_metadata() for record in batch_records],
+                }
+            )
+            continue
+        successful_batches += 1
+        manifest["batches"].append(
+            {
+                "candidate_index": candidate_index,
+                "status": "accepted",
+                "records": [record.to_metadata() for record in batch_records],
+            }
+        )
+    manifest["accepted_batches"] = successful_batches
+    manifest["rejected_batches"] = len(indices) - successful_batches
+    (output_path / "expansion_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    if successful_batches == 0:
+        raise RuntimeError("all expansion candidate batches were rejected")
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
@@ -770,6 +1135,14 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         preview(env)
         return
 
+    if (
+        getattr(args, "expansion_profile", None) is not None
+        or "expansion" in gym_config
+    ):
+        log_info("Expansion mode enabled.", color="green")
+        _run_expansion(env, args, gym_config)
+        return
+
     # Prepare one clean scene. max_episodes counts persisted per-environment
     # episodes, not vector batches. Every successful generate_function call
     # commits exactly the selected rows and leaves the next batch ready to plan.
@@ -912,7 +1285,7 @@ def _create_parser() -> argparse.ArgumentParser:
     """Create the ``run-env`` argument parser."""
     parser = argparse.ArgumentParser(
         prog="embodichain run-env",
-        description="Run an environment for data generation or interactive preview.",
+        description="Run an environment for data expansion or interactive preview.",
     )
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)
@@ -928,6 +1301,48 @@ def _create_parser() -> argparse.ArgumentParser:
         "--debug-mode",
         action="store_true",
         help="Log the structured trace for each failed demo attempt.",
+    )
+    parser.add_argument(
+        "--expansion-profile",
+        "--expansion_profile",
+        type=str,
+        default=None,
+        help=(
+            "Expansion Profile path; overrides the profile selected by the "
+            "task expansion declaration."
+        ),
+    )
+    parser.add_argument(
+        "--expansion-candidate-indices",
+        "--expansion_candidate_indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Logical expansion recipe batch starts.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        "--expansion-output-dir",
+        "--expansion_output_dir",
+        dest="expansion_output_dir",
+        type=str,
+        default=None,
+        help="Directory for expansion provenance and manifests.",
+    )
+    parser.add_argument(
+        "--dataset-dir",
+        "--expansion-dataset-dir",
+        "--expansion_dataset_dir",
+        dest="expansion_dataset_dir",
+        type=str,
+        default=None,
+        help="Override dataset manager save_path values.",
+    )
+    parser.add_argument(
+        "--expansion-save-video",
+        "--expansion_save_video",
+        action="store_true",
+        help="Save expansion episode videos when the environment supports it.",
     )
 
     parser.add_argument(
@@ -978,7 +1393,7 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
         close_error = error
 
     # Recorder finalization is a durability barrier. Never turn a failed flush
-    # into a warning that lets an apparently successful data-generation run
+    # into a warning that lets an apparently successful data-expansion run
     # continue.
     if close_error is not None:
         if abort_error is not None:
@@ -995,7 +1410,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for environment runner.
 
     Parses CLI arguments, builds the environment config, and launches
-    the data generation, preview, or replay workflow.
+    the data expansion, preview, or replay workflow.
 
     Args:
         argv: Arguments excluding the command name. Uses ``sys.argv`` when
@@ -1021,6 +1436,51 @@ def cli(argv: Sequence[str] | None = None) -> None:
     execute_init_hooks()
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
+
+    expansion_request = None
+    if (
+        getattr(args, "expansion_profile", None) is not None
+        or "expansion" in gym_config
+    ):
+        expansion_request = _resolve_expansion_request(args, gym_config)
+    if expansion_request is not None:
+        from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
+
+        profile = expansion_request[0]
+        program = getattr(env_cfg, "task_program", None)
+        if program is None:
+            raise ValueError("expansion requires a configured Task Program")
+        if (
+            profile.source.kind != "task_program"
+            or profile.source.source_id != program.program_id
+        ):
+            raise ValueError(
+                "expansion profile source must match the configured Task Program"
+            )
+        if isinstance(profile, CombinedExpansionProfile):
+            _expansion_candidate_indices(
+                profile,
+                expansion_request[1],
+                num_envs=env_cfg.num_envs,
+            )
+            if getattr(args, "disable_sensor", False) and profile.visual.enabled:
+                raise ValueError(
+                    "--disable-sensor cannot be used with a combined profile "
+                    "that contains visual expansion"
+                )
+            if profile.scene_randomization.enabled or profile.visual.enabled:
+                configured_events = getattr(env_cfg, "events", None)
+                if getattr(configured_events, "expansion_profile_reset", None) is None:
+                    raise ValueError(
+                        "combined expansion with scene or visual variation "
+                        "requires the expansion_profile_reset event"
+                    )
+        else:
+            _expansion_candidate_indices(
+                profile,
+                expansion_request[1],
+                num_envs=env_cfg.num_envs,
+            )
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")
