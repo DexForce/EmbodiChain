@@ -90,10 +90,14 @@ from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedExpansionProfile,
+    )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
         TaskProgramEnvironmentAdapter,
+        TaskProgramExpansionRecord,
     )
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
@@ -1357,6 +1361,14 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            bridge = getattr(self, "_active_task_program_bridge", None)
+            if bridge is not None:
+                records = bridge.expansion_records
+                metadata["expansion"] = [
+                    record.to_metadata()
+                    for record in records
+                    if getattr(record, "env_id", None) in (None, env_id)
+                ]
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -2612,17 +2624,35 @@ class EmbodiedEnv(BaseEnv):
     def create_task_program_bridge(
         self,
         program: CompiledTaskProgram,
+        *,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Task Program.
+            expansion_profile: Optional episode-scoped Expansion Profile.
+            expansion_candidate_index: FIFO candidate ordinal selected from
+                each matching Atomic plan.
 
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
         """
-        return self._checked_task_program_adapter().create_bridge(program)
+        return self._checked_task_program_adapter().create_bridge(
+            program,
+            expansion_profile=expansion_profile,
+            candidate_index=expansion_candidate_index,
+        )
+
+    @property
+    def task_program_expansion_records(
+        self,
+    ) -> tuple[TaskProgramExpansionRecord, ...]:
+        """Return records owned by the active generated Task Program episode."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        return () if bridge is None else bridge.expansion_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
         """Return completed Task Program acceptance or legacy task success.
@@ -2664,6 +2694,8 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -2678,6 +2710,10 @@ class EmbodiedEnv(BaseEnv):
             *args: Positional arguments forwarded to the legacy planner.
             task_program: Optional episode-level program config or provider-free
                 compiled program.
+            expansion_profile: Optional source-neutral profile applied to
+                matching grounded Atomic calls in this episode.
+            expansion_candidate_index: FIFO candidate ordinal selected from
+                each generated reference.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
@@ -2698,9 +2734,23 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            bridge = self.create_task_program_bridge(compiled_program)
+            if expansion_profile is None and expansion_candidate_index == 0:
+                bridge = self.create_task_program_bridge(compiled_program)
+            else:
+                bridge = self.create_task_program_bridge(
+                    compiled_program,
+                    expansion_profile=expansion_profile,
+                    expansion_candidate_index=expansion_candidate_index,
+                )
             self._active_task_program_bridge = bridge
             return bridge.iter_segments()
+
+        if expansion_profile is not None:
+            raise ValueError("expansion_profile requires a selected Task Program")
+        if expansion_candidate_index != 0:
+            raise ValueError(
+                "expansion_candidate_index requires a selected Task Program"
+            )
 
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:

@@ -277,7 +277,10 @@ def test_single_task_program_composes_with_ur5_and_franka(
     assert (
         ur5_config["environment"]
         == franka_config["environment"]
-        == {"component": "env.yaml"}
+        == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
     )
     assert ur5_config["task_program"] == franka_config["task_program"]
     assert ur5.program_path == franka.program_path
@@ -304,9 +307,11 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     assert type(drawer_embodiment) is dict
     assert repeated_embodiment["component"] == drawer_embodiment["component"]
     repeated_environment = load_config(
-        _config_path("repeated_pick_place").parent / "env.yaml"
+        _config_path("repeated_pick_place").parent / "envs/default.yaml"
     )
-    drawer_environment = load_config(_config_path("open_drawer").parent / "env.yaml")
+    drawer_environment = load_config(
+        _config_path("open_drawer").parent / "envs/default.yaml"
+    )
     assert (
         repeated_environment["environment_id"] != drawer_environment["environment_id"]
     )

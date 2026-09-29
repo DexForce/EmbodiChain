@@ -2300,8 +2300,6 @@ joint-position action variants.
 
 .. autosummary::
 
-   RepeatedPickPlaceRlinfEnv
-   RepeatedPickPlaceRlinfJointEnv
 
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------

@@ -5,7 +5,16 @@ simulation:
   robot_type: panda
   uid: FrankaPanda
 
-sensor: []
+sensor:
+  - sensor_type: Camera
+    uid: cam_high
+    width: 640
+    height: 480
+    intrinsics: [488.1665, 488.1665, 320.0, 240.0]
+    extrinsics:
+      eye: [-0.50, -0.90, 0.88]
+      target: [-0.50, 0.10, 0.20]
+      up: [0.0, 0.0, 1.0]
 
 skill_profile:
   contract_id: single_arm_parallel_gripper

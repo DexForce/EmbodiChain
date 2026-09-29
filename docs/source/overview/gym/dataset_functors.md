@@ -183,7 +183,7 @@ lerobot-dataset-viz \
 The LeRobot 0.4.4 viewer does not render `subtask_index` or EmbodiChain's
 `annotation.*` fields; use the terminal preview to verify segment boundaries,
 episode steps, and terminal flags. See
-{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for the
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>` for the
 complete three-segment example, exit codes, local-root behavior, and `.rrd`
 export commands.
 

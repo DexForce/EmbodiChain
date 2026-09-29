@@ -56,7 +56,7 @@ class ProposalRejected(ValueError):
 
     Operators raise this only for outcomes that depend on the draw. Malformed
     arguments, unsatisfiable permissions and impossible configurations remain
-    plain :class:`ValueError`, so a generation loop that retries on rejection
+    plain :class:`ValueError`, so a expansion loop that retries on rejection
     does not also swallow a programming error.
     """
 

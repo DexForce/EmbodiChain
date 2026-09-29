@@ -67,7 +67,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import AtomicActionEngine
+from .engine import AtomicActionEngine, PlanTransform
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -128,6 +128,7 @@ from .runtime_commands import (
     TimedCommandSequence,
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
+from .trajectory_adapter import ActionPlanTemplateAdapter
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -283,6 +284,7 @@ __all__ = [
     "AxisAlignOptions",
     "AtomicAction",
     "AtomicActionEngine",
+    "PlanTransform",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -312,6 +314,7 @@ __all__ = [
     "EndpointCommand",
     "EndpointCommandRouter",
     "EndpointCommandTransport",
+    "ActionPlanTemplateAdapter",
     "EntityState",
     "EffectExpectationResult",
     "EffectVerificationRequest",

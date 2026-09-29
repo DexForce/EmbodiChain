@@ -222,6 +222,12 @@ def create_tutorial_argument_parser(
         help="Run the demo without waiting for keyboard input.",
     )
     parser.add_argument(
+        "--auto_play_video_path",
+        type=str,
+        default=None,
+        help="Optional explicit MP4 path for auto-play recording.",
+    )
+    parser.add_argument(
         "--robot",
         choices=TUTORIAL_ROBOTS,
         default="ur5",
@@ -2070,6 +2076,7 @@ def start_auto_play_recording(
         sim.sim_config.width = RECORD_WIDTH
         sim.sim_config.height = RECORD_HEIGHT
         if not sim.start_window_record(
+            save_path=getattr(args, "auto_play_video_path", None),
             fps=AUTO_PLAY_RECORD_FPS,
             max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
             video_prefix=video_prefix,
