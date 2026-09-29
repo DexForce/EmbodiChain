@@ -70,11 +70,25 @@ def _prepare(
                 clean[row, count, j] = points[row, i, j]
             count += 1
             last_kept = i
-    if last_kept != points.shape[1] - 1:
-        kept[row, count] = points.shape[1] - 1
-        for j in range(points.shape[2]):
-            clean[row, count, j] = points[row, points.shape[1] - 1, j]
-        count += 1
+    last = points.shape[1] - 1
+    if last_kept != last:
+        if count > 1:
+            # Same rule as the NumPy reference: a held tail moves the last kept
+            # knot onto the final sample instead of appending a zero-length
+            # segment that the cubic fit would bend back through.
+            kept[row, count - 1] = last
+            for j in range(points.shape[2]):
+                clean[row, count - 1, j] = points[row, last, j]
+        else:
+            identical = int(1)
+            for j in range(points.shape[2]):
+                if points[row, last, j] != clean[row, 0, j]:
+                    identical = 0
+            if identical == 0:
+                kept[row, count] = last
+                for j in range(points.shape[2]):
+                    clean[row, count, j] = points[row, last, j]
+                count += 1
     if count == 2:
         stationary = int(1)
         for j in range(points.shape[2]):

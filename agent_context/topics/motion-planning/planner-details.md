@@ -43,8 +43,11 @@ and otherwise selects NumPy on CPU. The config can explicitly select either
 backend. Numerical ownership is in
 `compute/trajectory/_toppra.py`, `_toppra_warp.py`, and `_warp/toppra.py`.
 Both preserve uniform not-a-knot cubic geometry, the existing waypoint
-deduplication tolerance and final knot, and signed velocity/acceleration bounds
-containing rest. Planner outputs retain float32 and quantity sampling retains
+deduplication tolerance, and signed velocity/acceleration bounds containing
+rest. A run of repeated samples at the end of a path moves the last kept knot
+onto the final sample rather than appending a zero-length end segment, so a
+batched environment that converges early and holds its pose is retimed exactly
+as if it had stopped. Planner outputs retain float32 and quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
 Interval bounds are conservative; timing need not match the former external
 TOPPRA package. Tiny real moves must retain positive duration.

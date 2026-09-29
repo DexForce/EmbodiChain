@@ -207,11 +207,14 @@ def test_cuda_matches_reference_on_nondefault_stream_without_host_waypoints(
     ("points", "kept"),
     [
         ([[0.0], [2e-7], [0.5]], [0, 2]),
-        ([[0.3], [0.3], [0.5], [0.5]], [0, 2, 3]),
+        # A held tail moves the last kept knot onto the final sample; it does
+        # not append a zero-length end segment.
+        ([[0.3], [0.3], [0.5], [0.5]], [0, 3]),
+        ([[0.0], [0.3], [0.5], [0.5], [0.5]], [0, 1, 4]),
         ([[0.0], [6e-7], [1.2e-6], [0.5]], [0, 2, 3]),
     ],
 )
-def test_legacy_waypoint_cleanup_preserves_spline_geometry(
+def test_waypoint_cleanup_fits_the_spline_through_kept_points(
     points: list[list[float]], kept: list[int]
 ) -> None:
     from scipy.interpolate import CubicSpline
@@ -230,6 +233,44 @@ def test_legacy_waypoint_cleanup_preserves_spline_geometry(
     expected = reference.sample(np.linspace(0.0, reference.duration, 128))
     for key, values in zip(("positions", "velocities", "accelerations"), expected):
         np.testing.assert_allclose(result[key][0], values, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_holding_at_the_goal_does_not_change_the_motion(device: str) -> None:
+    # A converged environment holds its pose while the rest of a batched
+    # rollout continues, so its samples end in repeats of the goal. That is
+    # one point geometrically; appending it as a knot used to reshape the
+    # whole spline and add a reversal before the goal.
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    rng = np.random.default_rng(3)
+    path = np.cumsum(rng.normal(size=(7, 3)) * 0.15, axis=0)
+    held = np.concatenate([path, np.repeat(path[-1:], 4, axis=0)])
+    plain_ref, held_ref = _NumpyToppra(path, 1.0, 2.0), _NumpyToppra(held, 1.0, 2.0)
+    assert held_ref.duration == pytest.approx(plain_ref.duration, rel=1e-12)
+    phase = np.linspace(0.0, 1.0, 501)
+    np.testing.assert_allclose(held_ref.path(phase), plain_ref.path(phase), atol=1e-12)
+    plain = _retime_toppra_warp(
+        torch.tensor(path[None], dtype=torch.float64, device=device),
+        1.0,
+        2.0,
+        sample_dt=0.01,
+    )
+    batched = _retime_toppra_warp(
+        torch.tensor(held[None], dtype=torch.float64, device=device),
+        1.0,
+        2.0,
+        sample_dt=0.01,
+    )
+    torch.testing.assert_close(batched["dt"].sum(), plain["dt"].sum())
+    torch.testing.assert_close(batched["positions"], plain["positions"])
+
+
+def test_a_held_tail_does_not_reverse_before_the_goal() -> None:
+    reference = _NumpyToppra(np.array([[0.3], [0.3], [0.5], [0.5]]), 1.0, 2.0)
+    positions, _, _ = reference.sample(np.linspace(0.0, reference.duration, 400))
+    assert np.all(np.diff(positions[:, 0]) >= -1e-12)
+    assert positions[:, 0].max() <= 0.5 + 1e-12
 
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
