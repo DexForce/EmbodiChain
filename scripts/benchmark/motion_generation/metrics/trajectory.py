@@ -19,11 +19,13 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import torch
 
+from embodichain.compute.trajectory import differentiate_positions
 from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 from ..models import BenchmarkCase, CaseOutcome
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compute_case_outcomes",
+    "resolve_dynamic_limit",
+    "resolve_velocity_limits",
     "compute_waypoint_errors",
     "get_pose_err",
     "make_failure_outcomes",
@@ -381,6 +385,225 @@ def _joint_limit_metrics(
     return maximum > 0.0, maximum
 
 
+# No revolute arm joint runs anywhere near 1000 rad/s (about 9500 rpm), so a
+# reported limit at or above this is a backend placeholder -- commonly the
+# float32 maximum -- rather than the asset's real limit. Treating it as a limit
+# would make every velocity check pass regardless of the trajectory.
+_PLACEHOLDER_LIMIT_RAD_S = 1.0e3
+
+
+def resolve_velocity_limits(
+    asset_limits: torch.Tensor,
+    stated_limit: float | Sequence[float] | None,
+    reference: torch.Tensor,
+) -> torch.Tensor | None:
+    """Return usable per-joint velocity limits, or ``None`` when there are none.
+
+    A limit stated by the suite wins, since it is the deliberate answer to an
+    asset that does not carry its own. Otherwise the asset's limits are used
+    only when every entry is finite and below the placeholder threshold; a
+    backend that reports the float32 maximum has not supplied a limit, and
+    reporting it as satisfied would be worse than reporting nothing.
+
+    Args:
+        asset_limits: Per-joint limits from ``robot.get_qvel_limits()``.
+        stated_limit: The suite's override, or ``None``.
+        reference: Tensor whose dtype and device the result adopts.
+
+    Returns:
+        A ``(DOF,)`` limit tensor, or ``None`` when no usable limit exists.
+    """
+    if stated_limit is not None:
+        return resolve_dynamic_limit(stated_limit, asset_limits.shape[-1], reference)
+    usable = bool(
+        torch.isfinite(asset_limits).all()
+        and (asset_limits.abs() < _PLACEHOLDER_LIMIT_RAD_S).all()
+    )
+    return asset_limits.to(reference.dtype).to(reference.device) if usable else None
+
+
+def resolve_dynamic_limit(
+    limit: float | Sequence[float] | None,
+    dof: int,
+    reference: torch.Tensor,
+) -> torch.Tensor | None:
+    """Expand a scalar or per-joint dynamic limit to a ``(DOF,)`` tensor."""
+    if limit is None:
+        return None
+    values = (
+        [float(limit)] * dof
+        if isinstance(limit, (int, float)) and not isinstance(limit, bool)
+        else [float(value) for value in limit]
+    )
+    if len(values) != dof:
+        raise ValueError(
+            f"Dynamic limit has {len(values)} entries but the trajectory has {dof} "
+            "joints."
+        )
+    return torch.tensor(values, dtype=reference.dtype, device=reference.device)
+
+
+def _utilization(
+    values: torch.Tensor | None,
+    limits: torch.Tensor | None,
+    tolerance: float,
+) -> tuple[float | None, float | None, bool | None]:
+    """Return peak magnitude, peak utilization, and violation against a limit."""
+    if values is None or values.numel() == 0:
+        return None, None, None
+    magnitude = values.abs()
+    peak = float(magnitude.max().item())
+    if limits is None:
+        return peak, None, None
+    utilization = float((magnitude / limits.clamp_min(1.0e-12)).max().item())
+    return peak, utilization, utilization > 1.0 + tolerance
+
+
+def _trim_hold_padding(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Drop a trailing run of unchanged samples that elapse no time.
+
+    A batched planner pads shorter rows out to the longest by repeating the
+    final pose at a zero interval. Those samples are bookkeeping, not motion:
+    differentiating through them produces a velocity step across zero elapsed
+    time, which the next differentiation stage rejects outright. Removing them
+    first keeps a legitimately padded batch evaluable.
+
+    ``dt[0]`` is an arrival offset rather than a step, so a single-sample path
+    is returned unchanged.
+    """
+    count = positions.shape[0]
+    if count < 2:
+        return positions, dt
+    last = count
+    while (
+        last > 2
+        and float(dt[last - 1]) == 0.0
+        and bool(torch.equal(positions[last - 1], positions[last - 2]))
+    ):
+        last -= 1
+    if last == count:
+        return positions, dt
+    return positions[:last], dt[:last]
+
+
+def _moves_in_zero_time(positions: torch.Tensor, dt: torch.Tensor) -> bool:
+    """Return whether the path changes position across a zero-length interval.
+
+    ``dt[0]`` is an arrival offset rather than a step and is excluded, matching
+    :func:`differentiate_positions`.
+    """
+    steps = dt[1:]
+    if steps.numel() == 0:
+        return False
+    changed = (positions.diff(dim=0) != 0).any(dim=-1)
+    return bool(((steps == 0) & changed).any().item())
+
+
+def _trajectory_derivatives(
+    positions: torch.Tensor,
+    dt: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Differentiate one joint path into velocity, acceleration, and jerk.
+
+    Derivatives are always recomputed here rather than read from
+    :class:`PlanResult`, so every planner is measured with one operator on its
+    own timing instead of with whatever convention it reported. Repeated
+    three-point differencing damps the higher derivatives, which understates
+    peak jerk equally for every candidate.
+
+    Args:
+        positions: One environment's joint path of shape ``(N, DOF)``.
+        dt: That path's arrival intervals of shape ``(N,)``.
+
+    Returns:
+        Velocity, acceleration, and jerk, each shaped like ``positions``.
+    """
+    batched_positions = positions.unsqueeze(0)
+    batched_dt = dt.unsqueeze(0).to(positions.dtype)
+    velocity = differentiate_positions(batched_positions, batched_dt)
+    acceleration = differentiate_positions(velocity, batched_dt)
+    jerk = differentiate_positions(acceleration, batched_dt)
+    return velocity[0], acceleration[0], jerk[0]
+
+
+def _dynamic_limit_metrics(
+    positions: torch.Tensor | None,
+    dt: torch.Tensor | None,
+    qvel_limits: torch.Tensor | None,
+    qacc_limits: torch.Tensor | None,
+    qjerk_limits: torch.Tensor | None,
+    tolerance: float,
+    timing_is_solved: bool = True,
+) -> dict[str, float | bool | None]:
+    """Return peak dynamics, limit utilization, and violation per derivative.
+
+    Every entry is ``None`` when the trajectory is unusable or the matching
+    limit is unconfigured. Acceleration and jerk limits have no asset source,
+    so an unset limit is reported as not applicable rather than as satisfied.
+
+    The per-derivative peaks, utilizations and violations always describe the
+    timing the planner reported. ``dynamic_limits_satisfied`` is the verdict
+    that feeds ``motion_valid``, and it additionally requires that timing to be
+    solved: a planner that reports a nominal constant has not claimed an
+    executable duration, so its trajectory is neither credited nor failed on a
+    clock it never solved. Those rows still publish their diagnostics, which is
+    what makes a nominal and a retimed run of the same policy comparable.
+    """
+    if positions is not None and dt is not None:
+        positions, dt = _trim_hold_padding(positions, dt)
+    if positions is None or dt is None or positions.shape[0] < 2:
+        velocity = acceleration = jerk = None
+    elif _moves_in_zero_time(positions, dt):
+        # A position change across a zero interval is an unbounded velocity, so
+        # report it as a definite violation instead of letting the
+        # differentiator reject the trajectory and fail the whole trial.
+        return {
+            "max_joint_velocity_rad_s": math.inf,
+            "velocity_utilization": math.inf,
+            "velocity_limit_violation": True,
+            "max_joint_acceleration_rad_s2": math.inf,
+            "acceleration_utilization": (math.inf if qacc_limits is not None else None),
+            "acceleration_limit_violation": (True if qacc_limits is not None else None),
+            "max_joint_jerk_rad_s3": math.inf,
+            "jerk_utilization": math.inf if qjerk_limits is not None else None,
+            "jerk_limit_violation": True if qjerk_limits is not None else None,
+            "dynamic_limits_satisfied": False if timing_is_solved else None,
+        }
+    else:
+        velocity, acceleration, jerk = _trajectory_derivatives(positions, dt)
+    peak_velocity, velocity_utilization, velocity_violation = _utilization(
+        velocity, qvel_limits, tolerance
+    )
+    peak_acceleration, acceleration_utilization, acceleration_violation = _utilization(
+        acceleration, qacc_limits, tolerance
+    )
+    peak_jerk, jerk_utilization, jerk_violation = _utilization(
+        jerk, qjerk_limits, tolerance
+    )
+    checks = [
+        check
+        for check in (velocity_violation, acceleration_violation, jerk_violation)
+        if check is not None
+    ]
+    return {
+        "max_joint_velocity_rad_s": peak_velocity,
+        "velocity_utilization": velocity_utilization,
+        "velocity_limit_violation": velocity_violation,
+        "max_joint_acceleration_rad_s2": peak_acceleration,
+        "acceleration_utilization": acceleration_utilization,
+        "acceleration_limit_violation": acceleration_violation,
+        "max_joint_jerk_rad_s3": peak_jerk,
+        "jerk_utilization": jerk_utilization,
+        "jerk_limit_violation": jerk_violation,
+        "dynamic_limits_satisfied": (
+            (not any(checks)) if (checks and timing_is_solved) else None
+        ),
+    }
+
+
 def _path_metrics(
     qpos: torch.Tensor,
     poses: torch.Tensor,
@@ -448,6 +671,11 @@ def compute_case_outcomes(
     position_threshold_m: float,
     rotation_threshold_rad: float,
     joint_limit_tolerance_rad: float,
+    joint_velocity_limit_rad_s: float | Sequence[float] | None = None,
+    joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None,
+    joint_jerk_limit_rad_s3: float | Sequence[float] | None = None,
+    dynamic_limit_tolerance: float = 1.0e-3,
+    timing_is_solved: bool = True,
 ) -> tuple[CaseOutcome, ...]:
     """Recompute free-space success and quality from a planner trajectory."""
     planning_success = _success_tensor(result.success, case.batch_size)
@@ -476,6 +704,11 @@ def compute_case_outcomes(
             f"case batch={case.batch_size}."
         )
     limits = robot.get_qpos_limits(name=control_part)
+    dof = positions.shape[-1]
+    asset_qvel_limits = robot.get_qvel_limits(name=control_part).to(positions.device)
+    qacc_limits = resolve_dynamic_limit(joint_acceleration_limit_rad_s2, dof, positions)
+    qjerk_limits = resolve_dynamic_limit(joint_jerk_limit_rad_s3, dof, positions)
+    sample_dt = None if result.dt is None else result.dt.to(positions.device)
     finite_paths = [
         bool(torch.isfinite(positions[env_index]).all().item())
         and positions[env_index].shape[0] > 0
@@ -552,6 +785,24 @@ def compute_case_outcomes(
             )
         else:
             joint_violation, normalized_violation = False, None
+        if finite:
+            dynamic = _dynamic_limit_metrics(
+                native_qpos,
+                None if sample_dt is None else sample_dt[env_index],
+                resolve_velocity_limits(
+                    asset_qvel_limits[env_index],
+                    joint_velocity_limit_rad_s,
+                    positions,
+                ),
+                qacc_limits,
+                qjerk_limits,
+                dynamic_limit_tolerance,
+                timing_is_solved,
+            )
+        else:
+            dynamic = _dynamic_limit_metrics(
+                None, None, None, None, None, dynamic_limit_tolerance, timing_is_solved
+            )
         validity_space = case.case_parameters.get(
             "motion_validity", "ordered_cartesian_waypoints"
         )
@@ -575,7 +826,14 @@ def compute_case_outcomes(
         # ``PlanResult.success`` is retained as a planner-stage outcome, but it
         # is not external ground truth.  A trajectory can therefore be motion
         # valid even when a backend conservatively reports planning failure.
-        motion_valid = finite and ordered and not joint_violation
+        # ``dynamic_limits_satisfied`` is ``None`` when no limit applies, which
+        # leaves ``motion_valid`` unchanged rather than failing the trajectory.
+        motion_valid = (
+            finite
+            and ordered
+            and not joint_violation
+            and dynamic["dynamic_limits_satisfied"] is not False
+        )
 
         if poses.shape[0] > 0:
             final_pos_m, final_rot_rad = get_pose_err(
@@ -609,6 +867,8 @@ def compute_case_outcomes(
             failure_code = "waypoint_miss"
         elif joint_violation:
             failure_code = "joint_limit_violation"
+        elif dynamic["dynamic_limits_satisfied"] is False:
+            failure_code = "dynamic_limit_violation"
         else:
             failure_code = None
         planner_failure_code = None if planner_ok else "planner_reported_failure"
@@ -653,6 +913,7 @@ def compute_case_outcomes(
                 ),
                 joint_limit_violation=joint_violation,
                 max_normalized_joint_violation=normalized_violation,
+                **dynamic,
                 joint_path_length_rad=joint_length,
                 cartesian_path_length_m=cartesian_length,
                 path_efficiency=efficiency,

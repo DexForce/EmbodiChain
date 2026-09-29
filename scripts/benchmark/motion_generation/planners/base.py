@@ -74,6 +74,8 @@ class PlannerAdapter(ABC):
     model_revision: str = "N/A"
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
+    native_timing: bool = True
+    """Whether this backend solves trajectory timing instead of assuming it."""
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         self.spec = spec
@@ -89,6 +91,7 @@ class PlannerAdapter(ABC):
             config_hash=stable_hash(self.spec.config),
             capabilities=self.capabilities,
             model_revision=self._resolved_model_revision(),
+            native_timing=self.native_timing,
             supported_robots=(self.context.robot_id,),
             parameters=dict(self.spec.config),
         )

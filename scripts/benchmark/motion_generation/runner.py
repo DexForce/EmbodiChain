@@ -283,6 +283,7 @@ class BenchmarkRunner:
                     self.control_part,
                     self.suite,
                     planning_time_ms=measured.cost_time_ms,
+                    timing_is_solved=metadata.native_timing,
                 )
                 outcomes = evaluation.outcomes
             except Exception as exc:  # noqa: BLE001 - metric failure is recorded

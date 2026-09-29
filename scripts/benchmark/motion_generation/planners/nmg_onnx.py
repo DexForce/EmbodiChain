@@ -55,6 +55,14 @@ class NmgOnnxAdapter(PlannerAdapter):
         }
     )
 
+    native_timing = False
+    """The rollout reports ``NeuralPlannerCfg.dt`` as a nominal constant.
+
+    The policy integrates a joint delta per step and never solves a duration,
+    so its ``dt`` carries no executable timing. Native-timing comparisons must
+    treat this row as N/A until a time parameterization is applied.
+    """
+
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
