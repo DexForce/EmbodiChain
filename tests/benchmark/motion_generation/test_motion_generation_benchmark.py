@@ -477,6 +477,8 @@ def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
     )[0]
     assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
     assert outcome.velocity_limit_violation is True
+
+
 def _nmg_adapter(**config):
     """Build an NMG adapter against a stub context, without loading a policy."""
     from scripts.benchmark.motion_generation.config import PlannerSpecCfg
@@ -487,11 +489,16 @@ def _nmg_adapter(**config):
     robot.get_qvel_limits = Mock(
         return_value=torch.tensor([[2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]])
     )
+    if config.pop("placeholder_velocity", False):
+        robot.get_qvel_limits = Mock(
+            return_value=torch.full((1, 7), float(torch.finfo(torch.float32).max))
+        )
     context = PlannerContext(
         robot=robot,
         control_part="arm",
         device=torch.device("cpu"),
         sample_interval=40,
+        joint_velocity_limit_rad_s=config.pop("velocity_limit", None),
         joint_acceleration_limit_rad_s2=config.pop("acceleration_limit", 10.0),
     )
     spec = PlannerSpecCfg(
@@ -514,6 +521,19 @@ def test_nmg_retimes_against_the_same_limits_the_metrics_check():
         [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
     )
     assert constraints["acceleration"] == pytest.approx(10.0)
+
+
+def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
+    # Retiming against float32 max would leave velocity unconstrained while
+    # reporting the row as limit-respecting.
+    adapter = _nmg_adapter(retime=True, placeholder_velocity=True)
+    with pytest.raises(ValueError, match="no usable joint velocity limit"):
+        adapter._retiming_constraints()
+
+    stated = _nmg_adapter(
+        retime=True, placeholder_velocity=True, velocity_limit=[2.62] * 7
+    )
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
 
 
 def test_nmg_retiming_requires_a_suite_acceleration_limit():
