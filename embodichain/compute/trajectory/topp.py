@@ -48,6 +48,9 @@ __all__ = [
 ]
 
 _BIG = 1.0e12
+# Floors that keep divisions finite without discarding a small nonzero value.
+_TINY_SQUARE = 1.0e-30
+_DENOMINATOR_FLOOR = 1.0e-12
 _DISCRETIZATION_SETS = {"collocation": 1, "interpolation": 2}
 
 # The parameterization only enforces its limits at grid points; between them
@@ -107,6 +110,18 @@ def _eps(dtype: torch.dtype) -> tuple[float, float]:
     return (1.0e-12, 1.0e-12) if dtype == torch.float64 else (1.0e-7, 1.0e-10)
 
 
+def _speed(sdot_sq: torch.Tensor, floor: float) -> torch.Tensor:
+    """Square root that returns exactly zero at rest and a finite gradient.
+
+    A plain floor would report a small nonzero speed where the profile is at
+    rest, such as the first sample; the inner clamp keeps the untaken branch's
+    gradient finite.
+    """
+    return torch.where(
+        sdot_sq > floor, sdot_sq.clamp_min(floor).sqrt(), torch.zeros_like(sdot_sq)
+    )
+
+
 def _constraint_rows(
     path_velocity: torch.Tensor,
     path_acceleration: torch.Tensor,
@@ -158,13 +173,11 @@ def _parameterize_torch(
     still_cap = torch.where(
         still, acceleration_limits / torch.where(still, b.abs(), one), big
     )
-    moving = path_velocity.abs() > eps
-    velocity_cap = torch.where(
-        moving,
-        velocity_limits**2
-        / torch.where(moving, path_velocity, torch.ones_like(path_velocity)) ** 2,
-        torch.full_like(path_velocity, _BIG),
-    )
+    # No threshold here: a small but nonzero dq/ds still bounds the speed, and
+    # dropping it lets a tight velocity limit be exceeded at the grid point.
+    velocity_cap = (
+        velocity_limits**2 / path_velocity.square().clamp_min(_TINY_SQUARE)
+    ).clamp_max(_BIG)
     k = k.flatten(2)
     c = c.flatten(2)
     # Every lower acceleration bound must sit below every upper one.
@@ -215,8 +228,8 @@ def _parameterize_torch(
         x.append(torch.minimum((x[i] + two * u_i).clamp_min(0.0), xmax[i + 1]))
     x_t = torch.stack(x, dim=1)
     u_t = torch.stack(u, dim=1)
-    root = x_t.clamp_min(sqrt_floor).sqrt()
-    segment_time = 2.0 * ds / (root[:, :-1] + root[:, 1:])
+    root = _speed(x_t, sqrt_floor)
+    segment_time = 2.0 * ds / (root[:, :-1] + root[:, 1:]).clamp_min(_DENOMINATOR_FLOOR)
     return x_t, u_t, segment_time
 
 
@@ -602,17 +615,21 @@ def retime_time_optimal(
             waypoints count as the same point.
 
     Returns:
-        The sampled trajectory. A row whose waypoints are all one point has
-        zero duration and two identical samples.
+        The sampled trajectory. A row whose waypoints all lie within
+        ``duplicate_tolerance`` of one another has zero duration: its first
+        sample is the first waypoint and the rest hold the last.
 
     Raises:
         ValueError: For a malformed waypoint tensor, a non-positive sample
-            interval, or any error raised by :func:`parameterize_time_optimal`.
+            interval, a non-finite or negative duplicate tolerance, or any error
+            raised by :func:`parameterize_time_optimal`.
     """
     if waypoints.dim() != 3 or waypoints.shape[1] < 1:
         raise ValueError("waypoints must have shape (B, M, J) with M >= 1.")
     if not math.isfinite(sample_interval) or sample_interval <= 0.0:
         raise ValueError("sample_interval must be finite and positive.")
+    if not math.isfinite(duplicate_tolerance) or duplicate_tolerance < 0.0:
+        raise ValueError("duplicate_tolerance must be finite and non-negative.")
     batch, _, joints = waypoints.shape
     dtype, device = waypoints.dtype, waypoints.device
 
@@ -624,7 +641,15 @@ def retime_time_optimal(
     )
     grid = torch.linspace(0.0, 1.0, int(grid_count), dtype=dtype, device=device)
 
-    positions = waypoints[:, :1].expand(batch, 2, joints).contiguous()
+    # A row with no movement beyond the tolerance starts at its first waypoint
+    # and holds its last, so it still ends exactly where it was asked to.
+    def held(length: int) -> torch.Tensor:
+        return torch.cat(
+            [waypoints[:, :1], waypoints[:, -1:].expand(batch, length - 1, joints)],
+            dim=1,
+        )
+
+    positions = held(2)
     velocities = torch.zeros_like(positions)
     accelerations = torch.zeros_like(positions)
     dt = torch.zeros(batch, 2, dtype=dtype, device=device)
@@ -684,7 +709,7 @@ def retime_time_optimal(
             profile.segment_time.shape[1] - 1,
         )
         tau = times - elapsed.gather(1, segment)
-        speed0 = profile.sdot_sq.gather(1, segment).clamp_min(_eps(dtype)[1]).sqrt()
+        speed0 = _speed(profile.sdot_sq.gather(1, segment), _eps(dtype)[1])
         accel = profile.sddot.gather(1, segment)
         s = grid[segment] + speed0 * tau + 0.5 * accel * tau**2
         speed = (speed0 + accel * tau).clamp_min(0.0)
@@ -714,8 +739,7 @@ def retime_time_optimal(
         )
 
         index = torch.tensor(moving, device=device)
-        positions = waypoints[:, :1].expand(batch, length, joints).contiguous()
-        positions = positions.index_copy(0, index, q_all)
+        positions = held(length).index_copy(0, index, q_all)
         velocities = torch.zeros_like(positions).index_copy(0, index, vel_m)
         accelerations = torch.zeros_like(positions).index_copy(0, index, acc_m)
         dt = positions.new_zeros(batch, length).index_copy(0, index, dt_m)

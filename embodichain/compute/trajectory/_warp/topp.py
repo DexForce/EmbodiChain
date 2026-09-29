@@ -60,6 +60,8 @@ def build_topp_kernels(num_joints: int, num_sets: int, double: bool) -> tuple:
     F = wp.float64 if double else wp.float32
     EPS = 1.0e-12 if double else 1.0e-7
     SQRT_FLOOR = 1.0e-12 if double else 1.0e-10
+    TINY_SQUARE = 1.0e-30
+    DENOMINATOR_FLOOR = 1.0e-12
     BIG = _BIG
 
     @wp.kernel(module="unique")
@@ -78,8 +80,7 @@ def build_topp_kernels(num_joints: int, num_sets: int, double: bool) -> tuple:
         cap = F(BIG)
         for j in range(J):
             a = qs[b, i, j]
-            if wp.abs(a) > F(EPS):
-                cap = wp.min(cap, vmax[j] * vmax[j] / (a * a))
+            cap = wp.min(cap, vmax[j] * vmax[j] / wp.max(a * a, F(TINY_SQUARE)))
         for g in range(G):
             for j in range(J):
                 a = qs[b, i, j]
@@ -159,8 +160,12 @@ def build_topp_kernels(num_joints: int, num_sets: int, double: bool) -> tuple:
             u[b, i] = ui
             x[b, i + 1] = wp.min(wp.max(xi + two * ui, F(0.0)), xmax[b, i + 1])
         for i in range(n):
-            s0 = wp.sqrt(wp.max(x[b, i], F(SQRT_FLOOR)))
-            s1 = wp.sqrt(wp.max(x[b, i + 1], F(SQRT_FLOOR)))
-            seg[b, i] = F(2.0) * ds[i] / (s0 + s1)
+            s0 = F(0.0)
+            s1 = F(0.0)
+            if x[b, i] > F(SQRT_FLOOR):
+                s0 = wp.sqrt(x[b, i])
+            if x[b, i + 1] > F(SQRT_FLOOR):
+                s1 = wp.sqrt(x[b, i + 1])
+            seg[b, i] = F(2.0) * ds[i] / wp.max(s0 + s1, F(DENOMINATOR_FLOOR))
 
     return rows_kernel, cap_kernel, sweep_kernel

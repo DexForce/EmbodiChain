@@ -286,6 +286,50 @@ def test_tiny_moves_get_a_real_duration() -> None:
     assert float(result.duration) > 0.0
 
 
+def test_a_move_below_the_duplicate_tolerance_still_ends_at_the_goal() -> None:
+    start = torch.zeros(7, dtype=torch.float64)
+    goal = torch.full((7,), 5e-7, dtype=torch.float64)
+    result = trajectory.retime_time_optimal(
+        torch.stack([start, goal])[None],
+        FR3_VELOCITY,
+        FR3_ACCELERATION,
+        sample_interval=0.01,
+        backend="torch",
+    )
+    assert float(result.duration) == 0.0
+    torch.testing.assert_close(result.positions[0, 0], start)
+    torch.testing.assert_close(result.positions[0, -1], goal)
+
+
+@pytest.mark.parametrize("backend", ["torch", "warp"])
+def test_a_tiny_path_derivative_still_bounds_the_speed(backend: str) -> None:
+    # dq/ds far below the degeneracy threshold, against a velocity limit just
+    # as small: dropping the bound would let the joint run far over it.
+    grid = torch.linspace(0.0, 1.0, 51)
+    path_velocity = torch.zeros(1, 51, 3)
+    path_velocity[..., 0] = 1e-8
+    profile = trajectory.parameterize_time_optimal(
+        path_velocity, torch.zeros_like(path_velocity), grid, 1e-5, 1e3, backend=backend
+    )
+    joint_speed = profile.sdot_sq.clamp_min(0).sqrt() * 1e-8
+    assert float(joint_speed.max()) <= 1e-5 * (1 + 1e-4)
+
+
+@pytest.mark.parametrize("backend", ["torch", "warp"])
+def test_samples_start_and_end_exactly_at_rest(backend: str) -> None:
+    result = trajectory.retime_time_optimal(
+        _random_path(7)[None],
+        FR3_VELOCITY,
+        FR3_ACCELERATION,
+        sample_interval=0.01,
+        gridpoints=300,
+        backend=backend,
+    )
+    last = int((result.dt[0] > 0).sum())
+    assert float(result.velocities[0, 0].abs().max()) == 0.0
+    assert float(result.velocities[0, last].abs().max()) == 0.0
+
+
 def test_more_joints_than_the_warp_kernels_support() -> None:
     waypoints = torch.cumsum(torch.randn(1, 5, 20, dtype=torch.float64) * 0.1, dim=1)
     result = trajectory.retime_time_optimal(
@@ -304,6 +348,15 @@ def test_more_joints_than_the_warp_kernels_support() -> None:
         (dict(sample_interval=0.0), "sample_interval"),
         (dict(sample_interval=0.01, discretization="midpoint"), "discretization"),
         (dict(sample_interval=0.01, backend="numpy"), "backend"),
+        (
+            dict(sample_interval=0.01, duplicate_tolerance=float("nan")),
+            "duplicate_tolerance",
+        ),
+        (
+            dict(sample_interval=0.01, duplicate_tolerance=float("inf")),
+            "duplicate_tolerance",
+        ),
+        (dict(sample_interval=0.01, duplicate_tolerance=-1.0), "duplicate_tolerance"),
     ],
 )
 def test_invalid_arguments_are_rejected(kwargs: dict, message: str) -> None:
