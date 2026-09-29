@@ -52,6 +52,7 @@ def test_repository_context_map_is_valid() -> None:
 def test_map_registers_the_supported_context_domains() -> None:
     topics = _topics_by_id()
     expected_topic_ids = {
+        "benchmark-framework",
         "simulation-system",
         "env-framework",
         "manager-functor",
