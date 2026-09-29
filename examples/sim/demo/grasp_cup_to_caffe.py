@@ -92,13 +92,9 @@ def initialize_simulation(args) -> SimulationManager:
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # This contact-heavy URDF scene needs Newton's collision pipeline;
-        # MuJoCo's native contact path is not reliable for these convex meshes.
         physics_cfg.solver_cfg = {
-            "solver_type": "mujoco_warp",
-            "use_mujoco_contacts": False,
-            "nconmax": 16384,
-            "njmax": 65536,
+            "solver_type": "dexuni",
+            "mujoco_options": {"nconmax": 16384, "njmax": 65536},
         }
 
     config = SimulationManagerCfg(
@@ -217,7 +213,8 @@ def create_table(sim: SimulationManager) -> RigidObject:
         attrs=RigidBodyPhysicsCfg(
             mass_props=MassPropertiesCfg(mass=0.5),
         ),
-        body_type="kinematic",
+        # This fixture never moves; static shapes also enter V2's MuJoCo view.
+        body_type="static",
         init_pos=[1.1, -0.5, 0.08],
         init_rot=[0.0, 0.0, 0.0],
     )

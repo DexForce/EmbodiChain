@@ -235,7 +235,8 @@ def create_table(sim: SimulationManager) -> RigidObject:
                 static_friction=0.95,
                 restitution=0.01,
             ),
-            body_type="kinematic",
+            # This fixture never moves; static shapes also enter V2's MuJoCo view.
+            body_type="static",
             init_pos=list(TABLE_INIT_POS),
             init_rot=list(TABLE_INIT_ROT),
         )

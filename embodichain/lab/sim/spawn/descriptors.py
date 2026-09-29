@@ -1170,9 +1170,13 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
-        mode == 1 for mode in joint_target_modes.values()
-    ):
+    if normalized_solver not in {
+        None,
+        "auto",
+        "mujoco_warp",
+        "mjwarp",
+        "dexuni",
+    } and any(mode == 1 for mode in joint_target_modes.values()):
         warnings.warn(
             f"Newton solver {newton_solver_type!r} does not consume "
             "joint_target_mode. POSITION is emulated with its configured "

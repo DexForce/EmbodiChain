@@ -581,6 +581,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "collision_filter_parent",
         "is_visible",
         "is_site",
+        "use_native_mesh_loader",
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -1063,6 +1064,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",
