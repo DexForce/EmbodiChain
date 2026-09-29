@@ -461,8 +461,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
     cfg = NewtonPhysicsCfg(
         solver_cfg={
             config_key: solver_name,
-            "iterations": 12,
-            "step_rigid_bodies": False,
+            "joint_mode": "kinematic",
+            "vbd_options": {"iterations": 12},
         }
     )
 
@@ -470,8 +470,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
-    assert dexsim_cfg.solver_cfg.iterations == 12
-    assert dexsim_cfg.solver_cfg.step_rigid_bodies is False
+    assert dexsim_cfg.solver_cfg.joint_mode == "kinematic"
+    assert dexsim_cfg.solver_cfg.vbd_options["iterations"] == 12
 
 
 @pytest.mark.no_sim
