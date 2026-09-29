@@ -71,7 +71,7 @@ never reinterpret a decoder's derived extrinsic angles as source `XYZ` angles.
 Explicit proxy fitting updates an existing matrix together with its pose fields.
 Generated deployments retain the measured settled layout instead of teleporting
 objects back to configured X/Y after settling.
-Task motion policy samples even single-EEF-target transports in Cartesian space;
+Invocation-scoped Cartesian policy also covers single-EEF-target transports;
 joint targets retain their joint-space behavior. E2 alignment preserves the
 acquired orientation during the staging lift, then turns the object aloft.
 E2 checks its final yaw-free alignment at release height before Place preserves
@@ -114,10 +114,19 @@ the observed support position while preserving the carried object's observed
 orientation. Release clearance is excluded from the resting-position target,
 which is checked relative to the support again after cleanup. This uses the
 existing E5 position/stability acceptance, not a new contact certificate; mesh
-envelope limitations remain. Directional transport, hold and lift-return routes
-retain their existing budget; programs containing the new on-support transfer
-use at least 260 motion samples, without changing control dt or velocity limits.
-Regenerate bundles after this lowerer revision.
+envelope limitations remain. Motion budgets are declared per generated segment
+in `constraints.json.motion_samples`, then bound to compiled invocation IDs by
+`invocation_policy.py`. The base execution policy is no longer raised by scanning
+the whole program. E2/E4/E6, drawer-placement and on-support E5 recipes retain
+their staged-motion budgets without changing unrelated calls. The GenSim engine
+only selects an immutable request policy; planning, execution, recovery and
+state effects remain in the shared engine. Larger caller budgets, control dt and
+velocity limits are preserved. Missing/stale bindings require bundle regeneration.
+Cartesian sampling is declared alongside budgets in `cartesian_calls`, bound
+to compiled invocation IDs, and enabled only within an exception-safe planning
+scope. Appending a HandOver, clearance or drawer recipe no longer switches the
+whole program's generator. Hardware, initialization, remaining option selectors
+and random-state scopes still require separate qualification.
 For non-drawer Place, the current `GenSimPlace` planning scope selects the same
 Cartesian sampling policy in both checked and approach motion generators. Its
 planning and recovery do not depend on unrelated E2/HandOver calls elsewhere
@@ -209,7 +218,7 @@ fails normally; no source regrasp or cross-call recovery is added. Transfer,
 release, retreat and state effects remain owned by shared HandOver. E5 paired
 grasping and E6 handle policies remain separate. These are GenSim-local skill replacements,
 not another executor or changes to shared goal/options types. Unmarked calls
-delegate unchanged; drawer-owned motion does not install the handover wrapper.
+delegate unchanged; drawer deployments install the same ordinary wrappers.
 Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
 an immutable filtered-generator view. Unscoped sampling, including HandOver,
@@ -234,8 +243,8 @@ and margin; insufficient space or an unmeasured shared floor fails preflight
 instead of assigning overlapping destinations. These are planning contracts,
 not physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
-For deployments without drawer routes, GenSim installs PickUp, MoveHeldObject,
-Place and Pour wrappers after shared engine validation; shared Lab action classes and
+GenSim installs PickUp, HandOver, MoveHeldObject, Place and Pour wrappers for all
+deployments after shared engine validation; shared Lab action classes and
 options remain unchanged. The transport wrapper stages above the target and
 returns the input attachment as its expected effect, so the existing composite
 monitor verifies retention before observed-transform reconciliation. This is
@@ -250,7 +259,8 @@ tilt is the cross product with upright, hence perpendicular to the actual jaw
 line. It samples the full tilt-and-return arc through the shared motion
 generator.
 No spout annotation is required for this tilt-and-restore contract. Receiving
-vessel position is late-bound while the source's upright heading is preserved
+vessel identity is bound per Pour invocation from that recipe's explicit staging
+reference, not from an object-wide map. Its position is late-bound while the source's upright heading is preserved
 independently of receiver yaw. Rim height, vessel radius and the declared finger
 envelope bound the clearance; E3 transports stage above the target before
 descending. E3 Place uses 0.12 m retreat/approach height without relaxing release
@@ -313,19 +323,22 @@ old global articulation-physics override.
 E6-open / E1-inside / E6-close composition is owned by
 `_task_program/drawer_binding.py`, `drawer_geometry.py`, `drawer_runtime.py`,
 and `drawer_curobo.py`.
-When drawer routes exist, the adapter creates `DrawerPlacementEngine` and does
-not install the ordinary GenSim transport/pour wrappers. The local
-`drawer_transport` lowerer keeps the v36 effectless transport contract; its
-motion command and later Place/E6 acceptance are not a new transport retention
-certificate. Engine selection and lowerer/monitor selection must change together.
-Adapter contract v4 rejects older bundles; regenerate after this merge repair.
+When drawer routes exist, the adapter creates `DrawerPlacementEngine` but keeps
+ordinary wrapper installation unchanged. Explicit drawer planning scopes delegate
+transport and Place to the original primitives. The `gen_sim.drawer_transport`
+semantic call reuses MoveHeldObject with the effectless drawer contract; ordinary
+`simulation.move_held_object` calls retain attachment verification even in the
+same program. Drawer motion and later Place/E6 acceptance are not a new transport
+retention certificate. Adapter contract v8 requires regenerated bundles with
+invocation policies and distinct drawer routing.
 Inside targets share E6's asset-qualified part/link identity, never a duplicate
 rigid root. Geometry supplies a floor/center hint, not an interior certificate.
 The GenSim adapter refreshes the placement target from actual link/object poses
 on every Place plan/replan while preserving the declared scene manifest.
-No cavity-fit or separate FCL rejection gate is installed. Drawer payload pickup
-does not screen future placement reachability. Generated bundles insert an
-explicit `simulation.move_held_object` before Place: cuRobo plans that free-space
+No cavity-fit or separate FCL rejection gate is installed. A Pick with an explicit
+downstream drawer target defers that reachability screen; a later drawer task on
+the same object does not disable ordinary Pick lookahead. Generated bundles insert an
+explicit `gen_sim.drawer_transport` before Place: cuRobo plans that free-space
 transport, while E6, pickup and final lowering/release retain their existing
 planner. The task-owned transport service snapshots live rigid objects and all
 articulation links for each plan/replan. Articulated collision components become

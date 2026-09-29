@@ -48,7 +48,7 @@ from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc, RigidBo
 from embodichain.utils import logger
 from embodichain.utils.math import pose_inv
 from .drawer_geometry import collision_meshes
-from .motion import ApproachMotionGenerator
+from .motion import CheckedMotionGenerator
 
 __all__: list[str] = []
 
@@ -302,7 +302,7 @@ class _PayloadPlanner(CuroboPlanner):
             super().close()
 
 
-class DrawerMotionGenerator(ApproachMotionGenerator):
+class DrawerMotionGenerator(CheckedMotionGenerator):
     """Use cuRobo only inside the explicit held-transport planning scope."""
 
     def __init__(self, cfg: MotionGenCfg, *, simulation: Any) -> None:
@@ -312,9 +312,21 @@ class DrawerMotionGenerator(ApproachMotionGenerator):
         self._placement_path = None
         self.transport_metadata: dict[str, Any] = {}
 
+    @property
+    def direct_place_planning(self) -> bool:
+        """Keep the explicit drawer release path free of ordinary Place staging."""
+        return self._placement_path is not None
+
+    @property
+    def direct_transport_planning(self) -> bool:
+        """Keep the explicit payload-aware transport free of ordinary lift staging."""
+        return self._transport is not None
+
     @contextmanager
     def placement_path(self, waypoints: torch.Tensor) -> Iterator[None]:
         """Preserve Place's phase/effect handling with a reverse entry retreat."""
+        if self._placement_path is not None:
+            raise RuntimeError("Drawer placement planning scopes cannot overlap.")
         self._placement_path = torch.cat((waypoints, waypoints[:, :2].flip(1)), dim=1)
         try:
             yield

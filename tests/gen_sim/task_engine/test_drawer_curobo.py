@@ -185,7 +185,7 @@ def test_transport_failure_cleans_up_without_interpolation_fallback(
     from embodichain.gen_sim.task_engine._task_program import drawer_curobo as module
 
     fallback = Mock()
-    monkeypatch.setattr(module.ApproachMotionGenerator, "generate", fallback)
+    monkeypatch.setattr(module.CheckedMotionGenerator, "generate", fallback)
     monkeypatch.setattr(module, "world_sources", lambda *args: {"drawer": object()})
     native = SimpleNamespace(
         planner=SimpleNamespace(close=Mock()),
@@ -222,16 +222,22 @@ def test_place_retreat_reverses_entry_and_clears_scope(monkeypatch) -> None:
     from embodichain.gen_sim.task_engine._task_program import drawer_curobo as module
 
     delegate = Mock(return_value="planned")
-    monkeypatch.setattr(module.ApproachMotionGenerator, "generate", delegate)
+    monkeypatch.setattr(module.CheckedMotionGenerator, "generate", delegate)
     generator = object.__new__(module.DrawerMotionGenerator)
     generator._transport = generator._placement_path = None
     poses = torch.eye(4).repeat(1, 3, 1, 1)
     poses[0, :, :3, 3] = torch.tensor([[0.2, 0, 0.9], [0, 0, 0.9], [0, 0, 0.89]])
     with generator.placement_path(poses):
+        assert generator.direct_place_planning
+        with pytest.raises(RuntimeError, match="cannot overlap"):
+            with generator.placement_path(poses):
+                pass
+        assert generator.direct_place_planning
         assert generator.generate([], None) == "planned"
         path = torch.stack([p.xpos for p in delegate.call_args.args[0]], dim=1)
         torch.testing.assert_close(path, poses[:, [0, 1, 2, 1, 0]])
     assert generator._placement_path is None
+    assert not generator.direct_place_planning
     with pytest.raises(RuntimeError):
         with generator.placement_path(poses):
             raise RuntimeError("planning failed")

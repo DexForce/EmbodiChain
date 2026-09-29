@@ -1531,7 +1531,11 @@ def test_coordinated_on_bundle_reuses_relative_height_and_live_acceptance(tmp_pa
         if s["kind"] == "coordinated_transport"
     )["routes"][0]
     assert route["reference_entity_id"] == "pad" and route["relation"] == "on"
-    assert load_config(paths.execution_policy)["motion"]["sample_count"] == 260
+    assert load_config(paths.execution_policy)["motion"]["sample_count"] == 140
+    assert load_config(paths.program.parent / "constraints.json")["motion_samples"] == {
+        "transport": 260,
+        "park": 260,
+    }
     assert route["world_displacement"] == pytest.approx([0, 0, 0.05])
     cfg = load_config(paths.program.parent / "constraints.json")["presets"][
         "gen_sim.transport.stable"
@@ -1845,7 +1849,12 @@ def test_explicit_orientation_bundle_uses_shared_preflight_and_terminal_post(
     policy = load_config(paths.execution_policy)
     assert policy["tracking"]["terminal_max_abs_error"] == pytest.approx(0.25)
     if task_type == "E4":
-        assert policy["motion"]["sample_count"] >= 260
+        assert policy["motion"]["sample_count"] == 140
+        assert set(
+            load_config(paths.program.parent / "constraints.json")[
+                "motion_samples"
+            ].values()
+        ) == {260}
     integration = load_config(paths.integration)
     if any(
         node["call"].get("call_id") == "simulation.move_held_object"
