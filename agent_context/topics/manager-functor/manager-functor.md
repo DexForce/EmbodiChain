@@ -56,7 +56,7 @@ FunctorCfg(
 
 - `func` can be a **string** (resolved via `string_to_callable` at init) or a direct reference.
 - `params` values of type `SceneEntityCfg` are auto-resolved to joint/body indices when the sim starts.
-- Subclass configs add fields such as `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, and `ObservationCfg.name`. `ActionTermCfg` has no mode field.
+- Subclass configs add fields such as `EventCfg.mode`, `EventCfg.interval_step`, `RewardCfg.weight`, and `ObservationCfg.name`. `ActionTermCfg` has no mode field and may declare a versioned semantic `contract` resolved by the current action implementation registry.
 
 ---
 
@@ -75,7 +75,9 @@ and implement the same call contract; use them for persistent state or buffers.
 | Action term | `process_actions(actions)`, then `apply_actions()` | Stores one raw slice, then writes its owned robot resources |
 
 An `ActionTerm` exposes its dimension and Box space, current raw and processed
-buffers, command type, controlled joint IDs, and immutable descriptor. Use
+buffers, command type, controlled joint IDs, and immutable descriptor. The
+descriptor carries a versioned semantic contract ID when one is registered;
+the concrete Python class is an implementation detail. Use
 `/add-functor` for the precise scaffold; do not apply the event signature to
 observations, rewards or action terms.
 
@@ -135,8 +137,10 @@ third-party terms cannot hide overlap. During sticky vectorized demos, the
 manager replaces inactive qpos rows with measured holds and inactive qvel/qf
 rows with zero before applying terms.
 
-`DefaultJointPositionAction` exposes `raw_actions`, `previous_raw_actions`, and
-`position_bias` for locomotion state construction. `EefPoseAction` owns selected
+`DefaultJointPositionAction` implements the generic
+`joint_position.default_offset@1` contract and exposes `raw_actions`,
+`previous_raw_actions`, and `position_bias` for locomotion state construction.
+`EefPoseAction` owns selected
 arm IK and `ParallelGripperAction` maps one scalar to explicit independent
 gripper joints. ActionManager dispatches selected-row reset to every term so
 untouched rows retain their action history.

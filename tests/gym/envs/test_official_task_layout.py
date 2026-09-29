@@ -135,9 +135,11 @@ def test_official_action_configs_use_new_classes_only() -> None:
         if not isinstance(config, dict):
             continue
         for term in config.get("env", {}).get("actions", {}).values():
-            assert term["func"].endswith("Action"), config_path
+            assert "func" not in term or term["func"].endswith("Action"), config_path
             assert "mode" not in term, config_path
-            if term["func"] == "DefaultJointPositionAction":
+            if term.get("contract") == "joint_position.default_offset@1":
+                assert "func" not in term, config_path
+            if term.get("func") == "DefaultJointPositionAction":
                 assert "part_name" not in term.get("params", {}), config_path
 
 

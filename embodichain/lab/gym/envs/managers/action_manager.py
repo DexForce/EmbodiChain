@@ -19,9 +19,10 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from dataclasses import replace
 from functools import cached_property
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import gymnasium as gym
 import numpy as np
@@ -42,7 +43,13 @@ __all__ = ["ActionManager", "ActionTerm"]
 
 
 class ActionTerm(Functor):
-    """Base class for one independently processed and applied action slice."""
+    """Base class for one independently processed and applied action slice.
+
+    ``contract_id`` identifies the stable action semantics; subclasses may
+    change implementation without changing that public contract.
+    """
+
+    contract_id: ClassVar[str | None] = None
 
     def __init__(self, cfg: ActionTermCfg, env: EmbodiedEnv):
         """Initialize an action term.
@@ -52,6 +59,24 @@ class ActionTerm(Functor):
             env: Owning embodied environment.
         """
         super().__init__(cfg, env)
+
+    def resolved_contract_id(self) -> str | None:
+        """Return the configured contract or the implementation's stable ID.
+
+        Raises:
+            ValueError: If a configured contract differs from the implementation
+                contract declared by the action class.
+        """
+        implementation_contract = type(self).contract_id
+        if (
+            self.cfg.contract is not None
+            and self.cfg.contract != implementation_contract
+        ):
+            raise ValueError(
+                f"Configured contract {self.cfg.contract!r} does not match "
+                f"{type(self).__name__} contract {implementation_contract!r}."
+            )
+        return self.cfg.contract or self.contract_id
 
     @property
     @abstractmethod
@@ -354,6 +379,30 @@ class ActionManager(ManagerBase):
         """Return one configured term by name."""
         return self._terms[name]
 
+    def get_term_by_contract(self, contract_id: str) -> ActionTerm:
+        """Return the unique action term implementing a semantic contract.
+
+        Args:
+            contract_id: Versioned implementation-independent contract ID.
+
+        Raises:
+            KeyError: If no term implements ``contract_id``.
+            ValueError: If multiple terms implement the same contract.
+        """
+        matches = [
+            descriptor.name
+            for descriptor in self._descriptors
+            if descriptor.term.contract == contract_id
+        ]
+        if not matches:
+            raise KeyError(f"No action term implements contract {contract_id!r}.")
+        if len(matches) != 1:
+            raise ValueError(
+                f"Action contract {contract_id!r} is implemented by multiple "
+                f"terms: {matches}."
+            )
+        return self._terms[matches[0]]
+
     def _prepare_functors(self) -> None:
         """Resolve action term classes and bind ordered slices/descriptors."""
         cfg_items = (
@@ -382,6 +431,18 @@ class ActionManager(ManagerBase):
                     f"Action term {term_name!r} must resolve to an ActionTerm class."
                 )
 
+            implementation_contract = term_cfg.func.contract_id
+            if (
+                term_cfg.contract is not None
+                and term_cfg.contract != implementation_contract
+            ):
+                raise ValueError(
+                    f"Action term {term_name!r} configured contract "
+                    f"{term_cfg.contract!r} does not match implementation "
+                    f"{term_cfg.func.__name__} contract "
+                    f"{implementation_contract!r}."
+                )
+
             self._process_functor_cfg_at_play(term_name, term_cfg)
             term = term_cfg.func
             if not isinstance(term, ActionTerm):
@@ -405,9 +466,18 @@ class ActionManager(ManagerBase):
             self._term_names.append(term_name)
             self._terms[term_name] = term
             self._slices[term_name] = slice(start, stop)
-            descriptors.append(
-                ActionDescriptor(term_name, start, stop, term.descriptor)
-            )
+            descriptor = term.descriptor
+            contract_id = term.resolved_contract_id()
+            if contract_id is not None:
+                if descriptor.contract not in {None, contract_id}:
+                    raise ValueError(
+                        f"Action term {term_name!r} descriptor contract "
+                        f"{descriptor.contract!r} does not match "
+                        f"{contract_id!r}."
+                    )
+                if descriptor.contract is None:
+                    descriptor = replace(descriptor, contract=contract_id)
+            descriptors.append(ActionDescriptor(term_name, start, stop, descriptor))
             offset = stop
 
             controlled_joint_ids = tuple(term.controlled_joint_ids)

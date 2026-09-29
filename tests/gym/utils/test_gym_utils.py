@@ -180,6 +180,50 @@ def test_config_to_cfg_rejects_removed_action_protocol(
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
+def test_config_to_cfg_migrates_published_default_position_term() -> None:
+    """Published pretrained locomotion snapshots remain loadable after renaming."""
+    config = {
+        "id": "LegacyLocomotion-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "DefaultJointPositionTerm",
+                    "params": {},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert cfg.actions.joint_position.contract == "joint_position.default_offset@1"
+    assert cfg.actions.joint_position.func.__name__ == "DefaultJointPositionAction"
+    assert cfg.actions.joint_position.params["clip"] is None
+
+
+def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
+    """A YAML action cannot silently discard either semantic declaration."""
+    config = {
+        "id": "ConflictingActionDeclarations-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "JointVelocityAction",
+                    "contract": "joint_position.absolute@1",
+                    "params": {"part_name": "arm"},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match="both 'func' and 'contract'"):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
 @pytest.mark.parametrize("backend", (None, True, "physx", " newton"))
 def test_config_to_cfg_rejects_invalid_physics_backend(backend: object) -> None:
     """Only the two exact public backend names are accepted."""
