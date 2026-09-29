@@ -27,6 +27,12 @@ the currently supported variants.
    * - :doc:`Dual-arm composition <dual_arm>`
      - ``DualArmRobotCfg``
      - Registry-based composition of compatible single-arm configs in multiple layouts.
+   * - :doc:`Aloha Mini 2 Pro <aloha_mini>`
+     - ``AlohaMiniCfg``
+     - Mobile dual-arm platform with torso, arms, and grippers.
+   * - :doc:`Tianji Marvin <tianji_marvin>`
+     - ``TianjiMarvinCfg``
+     - Dual 7-DOF arms with optional parallel-jaw grippers.
 
 .. toctree::
    :maxdepth: 1
@@ -37,17 +43,8 @@ the currently supported variants.
    dexforce_w1
    cobotmagic
    dual_arm
+   aloha_mini
+   tianji_marvin
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
-
-.. toctree::
-   :maxdepth: 1
-
-   aloha_mini
-
-
-.. toctree::
-   :maxdepth: 1
-
-   tianji_marvin
