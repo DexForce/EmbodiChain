@@ -76,8 +76,9 @@ is ``false``. During ``run-env`` expert generation:
   row contains at least one frame. The saved sidecar records ``success=false``
   and the terminal reason;
 - empty plans and exceptions are always discarded; and
-- a saved failure counts toward ``max_episodes``, so the requested dataset size
-  is not exceeded.
+- a saved failure counts toward ``collection.target_episodes`` (with legacy
+  ``max_episodes`` mapped to that target), so the requested dataset size is
+  not exceeded.
 
 When several save-mode functors are configured, enabling this option on any of
 them makes the Dataset Manager submit failed rows to all save-mode functors so

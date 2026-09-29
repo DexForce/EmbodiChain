@@ -1,7 +1,6 @@
 # Task-facing expansion overrides. Referenced by task.ur5.yaml.
 runtime:
   num_envs: 16
-  arena_space: 2.5
   env:
     events:
       expansion_profile_reset:
@@ -19,7 +18,8 @@ runtime:
           target: [-0.25, -0.02, 0.25]
           up: [0.0, 0.0, 1.0]
           max_env_num: 16
-          save_path: /tmp/repeated-pick-place-camera
+          # Debug camera videos; structured datasets use env.dataset instead.
+          save_path: /tmp/repeated-pick-place/cameras
 policy:
   component: ../../../../components/expansion_policies/task_program_episode.yaml
 overrides:
@@ -35,40 +35,30 @@ overrides:
     reference_family_count: 4
     profile: cube_initial_pose
     change_scope: cube_initial_pose_only
-    keep_drop_targets: true
   affordance:
     enabled: true
     branches_per_family: 4
     max_proposals: 128
-    fallback: next_surviving_branch
   trajectory:
     variants_per_family: 4
     spatial:
       enabled: true
       operators: [joint_residual, via_points]
       joint_offset_scale: 0.005
-      via_count: 1
-    timing:
-      enabled: false
   visual:
     enabled: true
-    profile_file: embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml
     profiles: [rgb_canonical, rgb_material_01, rgb_camera_01, rgb_light_01]
-    apply_per_rollout: true
-    balance: round_robin
-    restore_before_next_candidate: true
   observation:
     profiles: [rgb_lowres]
     capture_rgb: true
-    capture_video: false
   scheduling:
-    policy: round_robin_fifo
     candidate_budget: 64
     reference_family_budget: 4
   execution:
     max_inflight: 16
-    compatibility: strict
   persistence:
-    sink: lerobot
-    output_dir: /tmp/repeated-pick-place-expansion
-candidate_indices: [0, 16, 32, 48]
+    # Expansion manifest and provenance output; dataset rows use env.dataset.
+    output_dir: /tmp/repeated-pick-place/expansion
+
+collection:
+  target_episodes: 64

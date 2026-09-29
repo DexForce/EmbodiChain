@@ -58,3 +58,10 @@ execution:
 persistence:
   sink: lerobot
   output_dir: /tmp/embodichain-expansion
+
+collection:
+  target_episodes: 1
+  max_attempts: 3
+  selection:
+    mode: sequential
+    start_recipe_index: 0

@@ -1492,12 +1492,17 @@ def build_env_cfg_from_args(
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config,
-        manager_modules=get_manager_modules(),
-        source_path=gym_config_source_path,
-        task_program_path_override=getattr(args, "task_program", None),
-    )
+    collection_config = gym_config.pop("collection", None)
+    try:
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            gym_config,
+            manager_modules=get_manager_modules(),
+            source_path=gym_config_source_path,
+            task_program_path_override=getattr(args, "task_program", None),
+        )
+    finally:
+        if collection_config is not None:
+            gym_config["collection"] = collection_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if getattr(args, "disable_sensor", False):

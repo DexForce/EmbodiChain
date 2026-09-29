@@ -37,4 +37,9 @@ overrides:
   persistence:
     sink: lerobot
     output_dir: /tmp/open-drawer-expansion
-candidate_indices: [0, 1, 2]
+collection:
+  target_episodes: 3
+  max_attempts: 3
+  selection:
+    mode: sequential
+    start_recipe_index: 0

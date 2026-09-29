@@ -333,14 +333,15 @@ functor under ``env.dataset`` in an inline Gym config or in a reusable
 
 Important fields are:
 
-* ``max_episodes`` is the exact number of persisted per-environment episodes,
-  not the number of vector batches.
+* ``collection.target_episodes`` is the exact number of persisted environment
+  rows, not the number of vector batches. The legacy ``max_episodes`` setting
+  and ``--max_episodes`` option map to this target.
 * ``max_episode_steps`` must exceed the longest valid expert execution,
   including gripper holds and settling actions.
 * ``save_failed_episodes`` belongs beside ``func`` and ``mode``. It defaults to
   ``false``; when enabled, a failed or truncated attempt with recorded frames
   is committed with ``success=false`` metadata and counts toward
-  ``max_episodes``.
+  ``collection.target_episodes``.
 * ``params.save_path`` is the parent directory for auto-numbered datasets. If
   omitted, the default is ``~/.cache/embodichain_datasets`` or the value of
   ``EMBODICHAIN_DATASET_ROOT``.
@@ -373,14 +374,76 @@ data expansion:
    attempt with ``reset(options={"save_data": False})``.
 
 Failed attempts are discarded and retried by default, up to
-``demo_max_attempts`` (default: 3). Empty plans and exceptions are always
+``collection.max_attempts`` (with ``demo_max_attempts`` as a legacy fallback).
+Empty plans and exceptions are always
 discarded because they do not form a complete dataset transaction. With
 ``save_failed_episodes: true``, a failed or truncated attempt is retained only
 when every selected row contains recorded frames.
 
-``num_envs`` controls collection parallelism. If ``max_episodes=10`` and
-``num_envs=4``, the runner uses three vector batches and commits only two rows
-from the final batch, so it never overshoots the requested episode count.
+``collection.target_episodes`` controls the final dataset size and ``num_envs``
+controls only the parallel width. If ``target_episodes=10`` and ``num_envs=4``,
+the runner uses three vector batches and commits only two rows from the final
+batch. The legacy ``--max_episodes`` option maps to the same target field.
+
+For a configured Expansion task, keep the collection policy beside the
+task-facing expansion overrides:
+
+.. code-block:: yaml
+
+   runtime:
+     num_envs: 16
+     max_episode_steps: 1200
+   collection:
+     target_episodes: 64
+     max_attempts: 3
+     selection:
+       mode: sequential
+       start_recipe_index: 0
+
+Sequential selection consumes logical recipe IDs from the start index and
+automatically groups them into batches. Explicit selection is useful when a
+small, known set of recipes is required:
+
+.. code-block:: yaml
+
+   collection:
+     target_episodes: 4
+     selection:
+       mode: explicit
+       recipe_indices: [0, 16, 32, 48]
+
+The explicit recipe list must contain exactly ``target_episodes`` entries.
+Recipe IDs identify logical candidates; they do not represent batch offsets.
+
+Collection terms have one meaning across handwritten and Expansion tasks:
+
+.. list-table:: Collection terms
+   :header-rows: 1
+   :widths: 20 55
+
+   * - Term
+     - Meaning
+   * - ``episode``
+     - One environment row executed to completion and submitted as data.
+   * - ``attempt``
+     - One execution try. A failed attempt can be discarded and retried.
+   * - ``batch``
+     - The selected environment rows executed in one vectorized pass.
+   * - ``num_envs``
+     - The maximum number of rows available in one batch.
+   * - ``recipe_index``
+     - The stable logical ID of an Expansion candidate.
+
+Changing ``num_envs`` changes the number of batches and the parallel capacity;
+it does not change ``target_episodes``. A failed attempt and any prepare,
+commit, or discard reset also leave the target episode count unchanged.
+
+Collection accounting distinguishes successful data rows from execution
+attempts. The expansion manifest records the target, planned, committed, and
+rejected episode counts, total attempts, batch count, and prepare, commit, and
+discard reset counts. Prepare reset runs before a batch, commit reset finalizes
+selected rows, and discard reset clears a failed attempt. Reset boundaries do
+not add episodes.
 
 An episode is the complete task; a segment is one semantic subtask. Do not use
 ``generate_function(num_traj=...)`` to repeat subtasks: direct callers may pass
@@ -394,7 +457,8 @@ Useful modes and options are:
 * ``--filter_dataset_saving`` executes the expert while suppressing structured
   dataset writes.
 * ``--num_envs`` overrides collection parallelism.
-* ``--max_episodes`` overrides the configured episode target.
+* ``--max_episodes`` overrides the configured ``collection.target_episodes``.
+* ``collection.max_attempts`` controls retries for one selected batch.
 
 See :doc:`/guides/run_env` for preview, dataset recording, debug video,
 trajectory recording, and replay modes, and :doc:`/guides/cli` for the complete
