@@ -107,8 +107,21 @@ re-parameterizing an already-planned joint path under velocity and acceleration
 limits, used by planners that emit geometry without executable timing. It is
 the planner's own time parameterization, so it resamples along the fitted
 spline; recompute derived poses from its output rather than reusing the input
-samples. `compute/trajectory/timing.py` owns time-domain
-differentiation/resampling and `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
+samples.
+
+`compute/trajectory/topp.py` owns differentiable time-optimal timing:
+`parameterize_time_optimal()` on a sampled path and `retime_time_optimal()`
+from waypoints. It solves the TOPP-RA problem for joint velocity and
+acceleration box limits in closed form, so gradients reach the path; given the
+same path and grid it matches the `toppra` library for both discretizations,
+which is what its tests assert. It is rest-to-rest only, and limits hold at
+grid points rather than between them. Warp kernels need the joint count as a
+compile-time constant to unroll per-joint loops for reverse mode, capping them
+at 16 joints; the torch reference has no cap. Waypoint deduplication drops a
+held tail entirely, unlike `ToppraPlanner`, which keeps one trailing duplicate.
+
+`compute/trajectory/timing.py` owns time-domain differentiation/resampling and
+`retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time
 unchanged samples may represent padding/junctions. Time resampling preserves
 first-arrival offset and total duration but does not certify motion limits.
 

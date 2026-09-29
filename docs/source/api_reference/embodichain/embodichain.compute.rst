@@ -51,6 +51,10 @@ means trajectory deformation.
    resample_with_distance
    sort_and_padding_key_frame
    warp_trajectory_qpos
+   parameterize_time_optimal
+   retime_time_optimal
+   TimeOptimalParameterization
+   TimeOptimalTrajectory
 
 .. automodule:: embodichain.compute.trajectory
    :members:
@@ -63,6 +67,31 @@ or motion limits. ``resample_in_time`` preserves endpoints and total duration
 while sampling the original time profile; callers must recompute derivatives
 after changing samples or timing.
 
+``parameterize_time_optimal`` finds the fastest rest-to-rest timing of a
+sampled joint path under per-joint velocity and acceleration limits: the
+problem TOPP-RA solves, with its reachability sweeps written in closed form so
+the result is differentiable with respect to the path almost everywhere. Given
+the same path and grid it matches the ``toppra`` library for both the
+``interpolation`` (default) and ``collocation`` discretizations. The ``warp``
+backend runs each environment's sequential sweeps as one thread and supports
+up to 16 joints; ``torch`` is the reference with no joint limit.
+``retime_time_optimal`` wraps it end to end: it merges repeated waypoints, fits
+the not-a-knot cubic spline ``toppra.SplineInterpolator`` uses, parameterizes,
+and samples on a time grid, all differentiable with respect to the waypoints.
+Limits hold exactly at grid points and are exceeded slightly between them; the
+default density keeps that to about one percent in acceleration.
+
+.. code-block:: python
+
+   import torch
+   from embodichain.compute.trajectory import retime_time_optimal
+
+   waypoints = torch.cumsum(torch.randn(64, 12, 7) * 0.1, dim=1).requires_grad_()
+   result = retime_time_optimal(
+       waypoints, velocity_limits=2.62, acceleration_limits=10.0, sample_interval=0.01
+   )
+   result.duration.sum().backward()  # d(duration) / d(waypoints)
+
 Implementation modules
 ----------------------
 
@@ -73,6 +102,9 @@ Implementation modules
    :members:
 
 .. automodule:: embodichain.compute.trajectory.timing
+   :members:
+
+.. automodule:: embodichain.compute.trajectory.topp
    :members:
 
 .. automodule:: embodichain.compute.trajectory.warping

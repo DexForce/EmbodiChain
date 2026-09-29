@@ -12,6 +12,7 @@
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
+| Differentiable time-optimal joint-path timing | `embodichain/compute/trajectory/topp.py`, kernels in `_warp/topp.py` |
 | Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
 | Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |

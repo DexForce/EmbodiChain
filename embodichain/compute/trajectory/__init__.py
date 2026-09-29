@@ -17,7 +17,9 @@
 """Trajectory computations on arrays and tensors.
 
 Interpolation retains keyframe boundaries; resampling treats interior points
-as optional path samples. Warping applies keyframe offsets to a trajectory."""
+as optional path samples. Warping applies keyframe offsets to a trajectory.
+Time-optimal parameterization finds the fastest timing of a joint path under
+velocity and acceleration limits, differentiably with respect to the path."""
 
 from __future__ import annotations
 
@@ -27,6 +29,12 @@ from .timing import (
     differentiate_positions,
     resample_in_time,
     retime_to_control_grid,
+)
+from .topp import (
+    TimeOptimalParameterization,
+    TimeOptimalTrajectory,
+    parameterize_time_optimal,
+    retime_time_optimal,
 )
 from .warping import sort_and_padding_key_frame, warp_trajectory_qpos
 
@@ -39,4 +47,8 @@ __all__ = [
     "resample_with_distance",
     "sort_and_padding_key_frame",
     "warp_trajectory_qpos",
+    "TimeOptimalParameterization",
+    "TimeOptimalTrajectory",
+    "parameterize_time_optimal",
+    "retime_time_optimal",
 ]
