@@ -31,6 +31,7 @@ from embodichain.lab.sim.motion.planners import (
 )
 from embodichain.lab.sim.motion.planners import neural_planner as neural_planner_module
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
+from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
 from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
@@ -400,6 +401,88 @@ def test_neural_planner_returns_velocities_and_accelerations(tmp_path, monkeypat
     assert result.accelerations.shape == result.positions.shape
     assert torch.isfinite(result.velocities).all()
     assert torch.isfinite(result.accelerations).all()
+
+
+class SaturatingOnnxPolicy(FakeOnnxPolicy):
+    """Policy that always saturates, the worst case for implied velocity."""
+
+    def __call__(self, obs: torch.Tensor) -> torch.Tensor:
+        self.last_obs = obs.clone()
+        return torch.ones(obs.shape[0], NUM_ARM_JOINTS, device=obs.device)
+
+
+def _rollout(tmp_path, monkeypatch, *, policy=None, **cfg_overrides):
+    """Roll the neural planner out toward one identity pose target."""
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    if policy is not None:
+        monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", policy)
+    motion_generator = MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=NeuralPlannerCfg(
+                robot_uid="fake_robot",
+                onnx_model_path=model_path,
+                control_part="main_arm",
+                **cfg_overrides,
+            )
+        )
+    )
+    return motion_generator.generate(
+        target_states=[
+            PlanState.single(move_type=MoveType.EEF_MOVE, xpos=torch.eye(4))
+        ],
+        options=MotionGenOptions(
+            plan_opts=NeuralPlanOptions(
+                control_part="main_arm",
+                start_qpos=torch.zeros(NUM_ARM_JOINTS),
+            ),
+        ),
+    )
+
+
+def test_neural_planner_keeps_nominal_timing_without_constraints(tmp_path, monkeypatch):
+    result = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+
+    # The default path is unchanged: one nominal interval per rollout step.
+    intervals = result.dt[0, 1:]
+    assert torch.allclose(intervals, torch.full_like(intervals, 0.01))
+    # 0.2 rad per 0.01 s is 20 rad/s, which no arm can execute.
+    assert float(result.velocities.abs().max()) == pytest.approx(20.0, rel=1e-3)
+
+
+def test_neural_planner_constraints_replace_timing_and_bound_dynamics(
+    tmp_path, monkeypatch
+):
+    nominal = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+
+    assert bool(retimed.success.all())
+    assert float(retimed.velocities.abs().max()) <= 1.0 + 1e-6
+    assert float(retimed.accelerations.abs().max()) <= 2.0 + 1e-6
+    # Respecting the limits costs time; the nominal timing understated it.
+    assert float(retimed.dt.sum()) > float(nominal.dt.sum())
+    # Retiming resamples the path, so poses must track the returned positions.
+    assert retimed.xpos_list.shape[:2] == retimed.positions.shape[:2]
+
+
+def test_retime_joint_paths_rejects_malformed_input():
+    positions = torch.zeros(1, 4, NUM_ARM_JOINTS)
+    with pytest.raises(ValueError, match="velocity"):
+        retime_joint_paths(positions, constraints={"acceleration": 1.0})
+    with pytest.raises(ValueError, match=r"\(B, N, DOF\)"):
+        retime_joint_paths(
+            positions[0], constraints={"velocity": 1.0, "acceleration": 1.0}
+        )
 
 
 def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):

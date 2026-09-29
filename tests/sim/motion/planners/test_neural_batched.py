@@ -87,6 +87,7 @@ class TestNeuralPlanBatched:
                 "dt": 0.01,
                 "control_part": "arm",
                 "num_arm_joints": 7,
+                "constraints": None,
             },
         )()
 
@@ -158,6 +159,7 @@ class TestNeuralEarlyConvergenceHold:
                 "dt": 0.01,
                 "control_part": "arm",
                 "num_arm_joints": 7,
+                "constraints": None,
             },
         )()
 
