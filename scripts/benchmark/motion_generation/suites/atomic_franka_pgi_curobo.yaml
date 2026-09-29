@@ -76,6 +76,7 @@ protocol:
   joint_limit_tolerance_rad: 0.00001
   # FR3 joint-space limits, uniform across all seven joints.
   # https://frankarobotics.github.io/docs/robot_specifications.html
+  joint_velocity_limit_rad_s: [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
   joint_acceleration_limit_rad_s2: 10.0
   joint_jerk_limit_rad_s3: 5000.0
 

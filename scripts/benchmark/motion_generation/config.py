@@ -111,6 +111,14 @@ class ProtocolCfg:
     position_threshold_m: float = 0.01
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
+    joint_velocity_limit_rad_s: float | list[float] | None = None
+    """Per-joint or scalar velocity limit overriding the asset's.
+
+    The asset is the preferred source, but a backend that does not carry the
+    URDF's limits reports a placeholder instead, which would make the velocity
+    check vacuous. Stating the limit here restores it. FR3 publishes
+    2.62 / 2.62 / 2.62 / 2.62 / 5.26 / 4.18 / 5.26 rad/s.
+    """
     joint_acceleration_limit_rad_s2: float | list[float] | None = None
     """Per-joint or scalar acceleration limit, or ``None`` to report N/A.
 
@@ -252,6 +260,7 @@ class SuiteCfg:
         if self.protocol.joint_limit_tolerance_rad < 0.0:
             raise ValueError("joint_limit_tolerance_rad must be >= 0.")
         for field_name in (
+            "joint_velocity_limit_rad_s",
             "joint_acceleration_limit_rad_s2",
             "joint_jerk_limit_rad_s3",
         ):

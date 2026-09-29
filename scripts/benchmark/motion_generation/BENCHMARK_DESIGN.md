@@ -146,6 +146,14 @@ physical task success.
 - has no explicit obstacle, collision, multimodal-sampling, or APG-refinement
   input/output interface yet.
 
+The simulator does not carry the asset's joint velocity limits: a measured
+Franka run reports the float32 maximum on all seven joints, and effort limits
+as a flat 1e5, rather than the URDF's 2.62-5.26 rad/s and 12-87 Nm. A limit at
+that magnitude is a placeholder, so the suites state the published FR3 values
+and the metrics treat an unusable asset limit as not applicable rather than as
+satisfied. A velocity check that silently always passes is worse than one
+reported as unavailable.
+
 The v1 benchmark must run within these constraints while reserving
 capability-gated tracks for future features. An unsupported capability must be
 reported as `unsupported`, not silently converted into success or failure.
