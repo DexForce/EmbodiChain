@@ -497,8 +497,10 @@ def test_in_tree_planner_invalid_limits_return_failure(backend: str) -> None:
 
 @pytest.mark.no_sim
 @pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float64])
 def test_cuda_auto_backend_keeps_plan_on_device(
     monkeypatch: pytest.MonkeyPatch,
+    dtype: torch.dtype,
 ) -> None:
     from embodichain.lab.sim.motion.planners.toppra_planner import (
         ToppraPlanner,
@@ -520,7 +522,7 @@ def test_cuda_auto_backend_keeps_plan_on_device(
             [[0.0], [float("nan")]],
         ],
         device="cuda",
-        dtype=torch.float64,
+        dtype=dtype,
     )
     states = [PlanState.from_qpos(points[:, i]) for i in range(2)]
     with monkeypatch.context() as patch:
@@ -542,7 +544,9 @@ def test_cuda_auto_backend_keeps_plan_on_device(
 
 @pytest.mark.no_sim
 @pytest.mark.parametrize("backend", ["numpy", "warp"])
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.int64])
+@pytest.mark.parametrize(
+    "dtype", [torch.float16, torch.float32, torch.float64, torch.int64]
+)
 @pytest.mark.parametrize("quantity", [20, 20.0, 20.9])
 def test_legacy_planner_output_dtype_and_quantity_coercion(
     backend: str, dtype: torch.dtype, quantity: float | int
@@ -578,7 +582,7 @@ def test_legacy_planner_output_dtype_and_quantity_coercion(
 
 @pytest.mark.no_sim
 @pytest.mark.parametrize("backend", ["auto", "warp"])
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
 def test_planner_preserves_waypoint_gradients_and_duration_contract(
     backend: str,
     dtype: torch.dtype,
@@ -770,7 +774,10 @@ def test_motion_generator_keeps_toppra_gradients_through_option_copy_and_resampl
 
 @pytest.mark.no_sim
 @pytest.mark.gpu
-def test_cuda_time_planner_backward_with_float32_inputs() -> None:
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+def test_cuda_time_planner_backward_preserves_input_gradients(
+    dtype: torch.dtype,
+) -> None:
     from embodichain.lab.sim.motion.planners.toppra_planner import (
         ToppraPlanner,
         ToppraPlannerCfg,
@@ -784,7 +791,7 @@ def test_cuda_time_planner_backward_with_float32_inputs() -> None:
     planner.cfg = ToppraPlannerCfg(robot_uid="unused")
     planner.device = torch.device("cuda")
     planner._pool = None
-    distance = torch.tensor([[0.73]], device="cuda", requires_grad=True)
+    distance = torch.tensor([[0.73]], device="cuda", dtype=dtype, requires_grad=True)
     acceleration = torch.tensor(1.7, device="cuda", requires_grad=True)
     options = ToppraPlanOptions(
         constraints={"velocity": 100.0, "acceleration": acceleration},
@@ -801,5 +808,6 @@ def test_cuda_time_planner_backward_with_float32_inputs() -> None:
     duration = result.duration.sum()
     dq, da = torch.autograd.grad(duration, (distance, acceleration))
     assert result.success.all() and dq.is_cuda and da.is_cuda
-    torch.testing.assert_close(dq, duration.detach() / (2 * distance.detach()))
+    expected_dq = duration.detach().double() / (2 * distance.detach().double())
+    torch.testing.assert_close(dq, expected_dq.to(dtype))
     torch.testing.assert_close(da, -duration.detach() / (2 * acceleration.detach()))
