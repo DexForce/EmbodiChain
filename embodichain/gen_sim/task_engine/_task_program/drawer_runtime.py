@@ -25,7 +25,6 @@ import numpy as np
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
-    AtomicActionEngine,
     GraspGoal,
     HeldObjectPoseGoal,
     JointPositionTarget,
@@ -35,6 +34,7 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from .drawer_binding import DrawerRoute, ENTRY_RIM_CLEARANCE
 from .drawer_geometry import placement_pose
+from .invocation_policy import GenSimActionEngine
 
 __all__: list[str] = []
 
@@ -167,7 +167,7 @@ def prepare_place(
     )
 
 
-class DrawerPlacementEngine(AtomicActionEngine):
+class DrawerPlacementEngine(GenSimActionEngine):
     """Reuse normal planning/execution; only refresh the live drawer placement goal."""
 
     def __init__(
@@ -236,10 +236,16 @@ class DrawerPlacementEngine(AtomicActionEngine):
             and isinstance(request.skill_options, PickUpOptions)
             and any(
                 obs.route.object_id == request.goal.semantics.entity_id
+                and any(
+                    isinstance(target, SceneEntityPose)
+                    and target.entity_id == obs.route.affordance
+                    for target in request.skill_options.downstream_object_target_poses
+                )
                 for obs in self._drawer_observations
             )
         ):
-            # Attempt acquisition first; placement is planned from the acquired grasp.
+            # Only this Pick's explicit drawer continuation defers its place probe.
+            # A later drawer task on the same object must not alter ordinary picks.
             prepared = replace(
                 request,
                 skill_options=replace(

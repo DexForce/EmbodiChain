@@ -42,6 +42,12 @@ from ._task_program.articulation_binding import (
     graph_bindings,
 )
 from ._task_program.articulation_slide import preset_id
+from ._task_program.drawer_binding import DRAWER_TRANSPORT_CALL
+from ._task_program.invocation_policy import (
+    cartesian_call_declarations,
+    motion_sample_declarations,
+    pour_receiver_declarations,
+)
 from ._task_program.e6_clearance import (
     ARM_STIFFNESS,
     PASSIVE_FRICTION,
@@ -298,20 +304,6 @@ def generate_task_program_bundle(
     policy_payload = load_config(policy_source)
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
-    if drawers or any(
-        node["call"]["kind"] == "hand_over"
-        or node["task_type"] in {"E2", "E6"}
-        or (
-            node["call"].get("call_id") == _COORDINATED_TRANSPORT_CALL_ID
-            and node["call"].get("arguments", {}).get("relation") == "on"
-        )
-        for node in selected_graph["nodes"]
-    ):
-        # Leave time for staged motion and coordinated on-support transfers,
-        # without shrinking a larger budget or relaxing velocity checks.
-        policy_payload["motion"]["sample_count"] = max(
-            260, policy_payload["motion"]["sample_count"]
-        )
     save_config(paths.execution_policy, policy_payload)
 
     program_id = _program_identifier(selected_graph["task_id"])
@@ -321,6 +313,20 @@ def generate_task_program_bundle(
 
     selected_graph = rewrite_drawer_close_resources(selected_graph)
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
+    drawer_targets = {route.affordance for route in drawers}
+    drawer_groups = frozenset(
+        node["task_instance_id"]
+        for node in selected_graph["nodes"]
+        if node["call"].get("inside") in drawer_targets
+        or node["call"].get("arguments", {}).get("target") in drawer_targets
+    )
+    stability["motion_samples"] = motion_sample_declarations(
+        selected_graph, drawer_groups=drawer_groups
+    )
+    stability["cartesian_calls"] = cartesian_call_declarations(
+        selected_graph, drawer_groups=drawer_groups
+    )
+    stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
     if drawers:
         stability["drawers"] = [route.payload() for route in drawers]
     save_config(
@@ -1054,6 +1060,7 @@ def _integration_payload(
     coordinated_on_lowerer_routes: list[dict[str, Any]] = []
     coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     move_held_routes: list[dict[str, Any]] = []
+    drawer_transport_routes: list[dict[str, Any]] = []
     pour_geometry: dict[str, dict[str, Any]] = {}
     upright_move_objects: set[str] = set()
     horizontal_handover_objects: set[str] = set()
@@ -1258,18 +1265,25 @@ def _integration_payload(
             referenced_objects.add(str(arguments["object"]))
             referenced_objects.add(str(arguments["reference"]))
             has_relative_place = True
-        elif (
-            call["kind"] == "registered"
-            and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
-        ):
+        elif call["kind"] == "registered" and call["call_id"] in {
+            _MOVE_HELD_OBJECT_CALL_ID,
+            DRAWER_TRANSPORT_CALL,
+        }:
             arguments = call["arguments"]
             object_id = str(arguments["object"])
             target_id = str(arguments["target"])
             referenced_objects.add(object_id)
-            if target_id in drawers:
+            if call["call_id"] == DRAWER_TRANSPORT_CALL:
                 from ._task_program.drawer_binding import TRANSPORT_CLEARANCE
 
-                move_held_routes.append(
+                if (
+                    target_id not in drawers
+                    or drawers[target_id].object_id != object_id
+                ):
+                    raise ValueError(
+                        "Drawer transport requires its exact declared object-target route."
+                    )
+                drawer_transport_routes.append(
                     {
                         "object_id": object_id,
                         "target_id": target_id,
@@ -1598,6 +1612,11 @@ def _integration_payload(
                     else {}
                 ),
                 **(
+                    {DRAWER_TRANSPORT_CALL: {"kind": "move_held_object"}}
+                    if drawer_transport_routes
+                    else {}
+                ),
+                **(
                     {
                         _POUR_CALL_ID: {
                             "kind": "pour",
@@ -1733,7 +1752,7 @@ def _integration_payload(
                     "simulation.coordinated_transport",
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
-                    *((_MOVE_HELD_OBJECT_CALL_ID,) if not drawers else ()),
+                    _MOVE_HELD_OBJECT_CALL_ID,
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                     _UPRIGHT_PLACE_CALL_ID,
@@ -1801,13 +1820,16 @@ def _integration_payload(
                 *(
                     [
                         {
-                            "kind": (
-                                "drawer_transport" if drawers else "move_held_object"
-                            ),
+                            "kind": "move_held_object",
                             "routes": move_held_routes,
                         }
                     ]
                     if move_held_routes
+                    else []
+                ),
+                *(
+                    [{"kind": "drawer_transport", "routes": drawer_transport_routes}]
+                    if drawer_transport_routes
                     else []
                 ),
                 *(

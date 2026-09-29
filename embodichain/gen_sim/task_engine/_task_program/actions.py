@@ -593,6 +593,8 @@ class GenSimMoveHeldObject(MoveHeldObject):
     binding_contract = MoveHeldObject.binding_contract
 
     def _plan(self, request, context):
+        if getattr(self.motion_generator, "direct_transport_planning", False) is True:
+            return super()._plan(request, context)
         goal = request.goal
         target = goal.object_target_pose
         if isinstance(target, torch.Tensor) and target.ndim == 3:
@@ -649,6 +651,8 @@ class GenSimPlace(Place):
     binding_contract = Place.binding_contract
 
     def _plan(self, request, context):
+        if getattr(self.motion_generator, "direct_place_planning", False) is True:
+            return super()._plan(request, context)
         from .motion import (
             _joint_velocity_limits,
             _velocity_validity,
@@ -682,6 +686,16 @@ class GenSimPour(Pour):
     def __init__(self, pour_receivers: dict[str, str] | None = None) -> None:
         super().__init__()
         self._pour_receivers = dict(pour_receivers or {})
+
+    def _receiver_id(self, invocation_id: str | None) -> str | None:
+        if not self._pour_receivers:
+            return None
+        try:
+            return self._pour_receivers[invocation_id]
+        except KeyError as exc:
+            raise ValueError(
+                "Unbound GenSim Pour receiver; regenerate the bundle."
+            ) from exc
 
     def _plan(self, request, context):
         motion = request.binding.endpoint("primary", "motion")
@@ -730,7 +744,7 @@ class GenSimPour(Pour):
             raise ValueError(
                 "GenSim Pour requires one stable jaw-line axis across environments."
             )
-        receiver_id = self._pour_receivers.get(held.semantics.entity_id)
+        receiver_id = self._receiver_id(request.invocation_id)
         if receiver_id is not None:
             receiver = context.scene.entities.get(receiver_id)
             if receiver is None or receiver.pose is None:
@@ -853,6 +867,7 @@ class GenSimPour(Pour):
         previous = None
         metadata = {
             "pad_line_local": jaw_local.detach().cpu().tolist(),
+            "receiver_entity_id": receiver_id,
             "tilt_axis_local": axis.detach().cpu().tolist(),
             "tilt_direction_local": direction.detach().cpu().tolist(),
         }

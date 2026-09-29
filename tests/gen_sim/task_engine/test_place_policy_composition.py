@@ -27,6 +27,35 @@ from embodichain.gen_sim.task_engine._task_program.actions import GenSimPlace
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
 
 
+@pytest.mark.parametrize("kind", ["place", "transport"])
+def test_explicit_drawer_scope_preserves_its_existing_primitive(kind, monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+    )
+    from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
+        MoveHeldObject,
+    )
+
+    action_type, primitive, flag = (
+        (GenSimPlace, Place, "direct_place_planning")
+        if kind == "place"
+        else (GenSimMoveHeldObject, MoveHeldObject, "direct_transport_planning")
+    )
+    action = action_type()
+    action._planning_services = SimpleNamespace(
+        motion_generator=SimpleNamespace(**{flag: True})
+    )
+    request, context, result = object(), object(), object()
+
+    def delegated(self, actual_request, actual_context):
+        assert actual_request is request and actual_context is context
+        assert motion._PLACE_IK_RECOVERY.get() is None
+        return result
+
+    monkeypatch.setattr(primitive, "_plan", delegated)
+    assert action._plan(request, context) is result
+
+
 @pytest.mark.parametrize("cartesian_approaches", [False, True])
 def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
     monkeypatch: pytest.MonkeyPatch, cartesian_approaches: bool
@@ -60,15 +89,15 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
         ),
     )
     adapter = assembly.TaskAdapterFactory(
-        registration, "test", (), (), cartesian_approaches=cartesian_approaches
+        registration,
+        "test",
+        (),
+        (),
+        cartesian_calls=("other",) if cartesian_approaches else (),
     )
     adapter.create_adapter(SimpleNamespace(robot=robot, sim=object(), step_dt=step_dt))
     generator = captured["generator"]
-    assert type(generator) is (
-        motion.ApproachMotionGenerator
-        if cartesian_approaches
-        else motion.CheckedMotionGenerator
-    )
+    assert type(generator) is motion.CheckedMotionGenerator
 
     failed = motion.PlanResult(
         success=torch.tensor([False]),
@@ -106,7 +135,7 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
 
     monkeypatch.setattr(Place, "_plan", plan_place)
     action = GenSimPlace()
-    action._planning_services = SimpleNamespace(robot=robot)
+    action._planning_services = SimpleNamespace(robot=robot, motion_generator=generator)
     result = action._plan(object(), object())
 
     assert result.plan_success.all()

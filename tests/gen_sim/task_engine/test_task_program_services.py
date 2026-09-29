@@ -692,8 +692,10 @@ def test_place_planning_exception_does_not_leak_recovery_scope(monkeypatch):
         raise RuntimeError("planner failed")
 
     monkeypatch.setattr(Place, "_plan", fail)
+    action = GenSimPlace()
+    action._planning_services = SimpleNamespace(motion_generator=SimpleNamespace())
     with pytest.raises(RuntimeError, match="planner failed"):
-        GenSimPlace()._plan(object(), object())
+        action._plan(object(), object())
     assert motion._PLACE_IK_RECOVERY.get() is None
 
 
@@ -741,7 +743,9 @@ def test_recovered_place_checks_final_resampled_commands(
     from embodichain.lab.sim.atomic_actions.primitives.place import Place
 
     action = GenSimPlace()
-    action._planning_services = SimpleNamespace(robot=object())
+    action._planning_services = SimpleNamespace(
+        robot=object(), motion_generator=SimpleNamespace()
+    )
     failed = object()
     monkeypatch.setattr(action, "failed_plan", Mock(return_value=failed))
     monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))

@@ -628,6 +628,7 @@ class _MoveHeldObjectLowerer(RegisteredSemanticLowerer):
 class _DrawerTransportLowerer(_MoveHeldObjectLowerer):
     """Keep v36 drawer transport effectless; the drawer engine owns its path."""
 
+    call_id: ClassVar[str] = "gen_sim.drawer_transport"
     effect_contract_kind: ClassVar[SemanticEffectKind | None] = None
     preserves_symbolic_state: ClassVar[bool] = True
 
@@ -689,7 +690,8 @@ class _MoveHeldObjectLowererFactory(RegisteredSemanticLowererFactory):
 class _DrawerTransportLowererFactory(_MoveHeldObjectLowererFactory):
     """An explicit decoder route for the unmodified drawer transport contract."""
 
-    revision: ClassVar[str] = "drawer-1"
+    call_id: ClassVar[str] = _DrawerTransportLowerer.call_id
+    revision: ClassVar[str] = "drawer-2"
 
     def create(
         self,

@@ -51,8 +51,15 @@ __all__: list[str] = []
 from .adaptive_grasp import ADAPTIVE_GRASP_REVISION
 from .coordinated_grasp import COORDINATED_GRASP_REVISION
 from .coordinated_motion import COORDINATED_MOTION_REVISION, GenSimCoordinatedPickment
+from .invocation_policy import (
+    INVOCATION_POLICY_REVISION,
+    GenSimActionEngine,
+    bind_cartesian_calls,
+    bind_motion_samples,
+    bind_pour_receivers,
+)
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v4"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
 
 
 def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
@@ -146,6 +153,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         adaptive_pick: bool = False,
         pick_purposes: tuple[tuple[str, str], ...] = (),
         coordinated_motion: bool = False,
+        motion_samples: tuple[tuple[str, int], ...] = (),
+        cartesian_calls: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -153,6 +162,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._adaptive_pick = adaptive_pick
         self._pick_purposes = pick_purposes
         self._coordinated_motion = coordinated_motion
+        self._motion_samples = motion_samples
+        self._cartesian_calls = cartesian_calls
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -196,22 +207,39 @@ class _TaskFactory(SimulationTaskProgramFactory):
             GenSimPour,
         )
 
+        from embodichain.lab.task_program.semantics import RobotSkillProfile
+
+        if (
+            not isinstance(profile, RobotSkillProfile)
+            or profile.profile_id != self.robot_profile_id
+        ):
+            raise ValueError(
+                "Invocation policies require the registered robot profile."
+            )
+        motion = self._create_motion_generator()
+        if motion.robot is not self._robot:
+            raise ValueError(
+                "The invocation policy engine must own the selected robot."
+            )
         if self._drawers:
             from .drawer_runtime import DrawerPlacementEngine
 
             engine = DrawerPlacementEngine(
-                self._create_motion_generator(),
+                motion,
                 control_profiles=profile.action_control_profiles(),
                 grasp_pose_generators=self._grasp_pose_generators,
                 drawer_observations=self._drawers,
+                motion_samples=self._motion_samples,
+                cartesian_calls=self._cartesian_calls,
             )
-            engine.register(GenSimPickUp(), replace=True)
-            if self._coordinated_motion:
-                engine.register(GenSimCoordinatedPickment(), replace=True)
-            self.task_program_registration.validate_engine(engine)
-            return engine
-
-        engine = super().create_atomic_action_engine(profile)
+        else:
+            engine = GenSimActionEngine(
+                motion,
+                control_profiles=profile.action_control_profiles(),
+                grasp_pose_generators=self._grasp_pose_generators,
+                motion_samples=self._motion_samples,
+                cartesian_calls=self._cartesian_calls,
+            )
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
         pick.pick_purposes = dict(self._pick_purposes)
@@ -237,13 +265,14 @@ class TaskAdapterFactory:
     integration_fingerprint: str
     constraints: tuple[tuple[str, StabilityConstraint], ...]
     grasp_factories: tuple[tuple[str, Any], ...]
-    cartesian_approaches: bool = False
     articulation_bindings: tuple = ()
     pour_receivers: tuple[tuple[str, str], ...] = ()
     drawer_routes: tuple = ()
     adaptive_pick: bool = False
     pick_purposes: tuple[tuple[str, str], ...] = ()
     coordinated_grasp: bool = False
+    motion_samples: tuple[tuple[str, int], ...] = ()
+    cartesian_calls: tuple[str, ...] = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -293,14 +322,9 @@ class TaskAdapterFactory:
         else:
             from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
             from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
-            from .motion import ApproachMotionGenerator, CheckedMotionGenerator
+            from .motion import CheckedMotionGenerator
 
-            generator_type = (
-                ApproachMotionGenerator
-                if self.cartesian_approaches
-                else CheckedMotionGenerator
-            )
-            motion_factory = lambda: generator_type(
+            motion_factory = lambda: CheckedMotionGenerator(
                 MotionGenCfg(
                     planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
                 )
@@ -372,6 +396,8 @@ class TaskAdapterFactory:
             adaptive_pick=self.adaptive_pick,
             pick_purposes=self.pick_purposes,
             coordinated_motion=self.coordinated_grasp,
+            motion_samples=self.motion_samples,
+            cartesian_calls=self.cartesian_calls,
         )
         return factory.create_adapter()
 
@@ -393,9 +419,24 @@ def load_deployment(
     payload = load_config(path)
     if (
         type(payload) is not dict
-        or not {"schema_version", "presets"}.issubset(payload)
+        or not {
+            "schema_version",
+            "presets",
+            "motion_samples",
+            "cartesian_calls",
+            "pour_receivers",
+        }.issubset(payload)
         or set(payload)
-        - {"schema_version", "presets", "drawers", "adaptive_pick", "pick_purposes"}
+        - {
+            "schema_version",
+            "presets",
+            "drawers",
+            "adaptive_pick",
+            "pick_purposes",
+            "motion_samples",
+            "cartesian_calls",
+            "pour_receivers",
+        }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
         raise ValueError(
@@ -492,9 +533,9 @@ def load_deployment(
         registration,
         program=program,
         constraints=constraints,
-        verify_retention=not drawers,
+        verify_retention=True,
     )
-    from .release_clearance import CLEAR_RELEASED_CALL, with_release_clearance
+    from .release_clearance import with_release_clearance
 
     registration = with_release_clearance(registration, program=program)
     if any(cfg.kind == "stack" for cfg in constraints.values()):
@@ -516,31 +557,19 @@ def load_deployment(
         )
     )
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
+    motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
+    cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
         in {"simulation.coordinated_hold", "simulation.coordinated_transport"}
         for item in program["program"]["items"]
     )
-    cartesian_approaches = any(
-        item.get("steps", {}).get("call", {}).get("kind") == "hand_over"
-        or item.get("steps", {}).get("call", {}).get("call_id")
-        in {CLEAR_RELEASED_CALL, "gen_sim.articulation_withdraw"}
-        for item in program["program"]["items"]
-    )
-    pour_receivers = tuple(
-        (
-            str(item["steps"]["call"]["arguments"]["object"]),
-            str(item["steps"]["call"]["arguments"]["reference"]),
-        )
-        for item in program["program"]["items"]
-        if item.get("steps", {}).get("call", {}).get("call_id")
-        == "simulation.move_held_object"
-        and "reference" in item.get("steps", {}).get("call", {}).get("arguments", {})
-    )
+    pour_receivers = bind_pour_receivers(payload["pour_receivers"], compiled)
     fingerprint = canonical_hash(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
+            "invocation_policy_revision": INVOCATION_POLICY_REVISION,
             **(
                 {
                     "coordinated_grasp_revision": COORDINATED_GRASP_REVISION,
@@ -568,7 +597,7 @@ def load_deployment(
             "registration": registration.fingerprint,
             "task_constraints": payload,
             "program": program,
-            "cartesian_approaches": cartesian_approaches,
+            "cartesian_calls": cartesian_calls,
             "pour_receivers": pour_receivers,
             "grasp_pose_generators": {
                 name: asdict(factory) for name, factory in grasp_factories
@@ -580,13 +609,14 @@ def load_deployment(
         fingerprint,
         tuple(constraints.items()),
         grasp_factories,
-        cartesian_approaches,
-        articulation_bindings,
-        pour_receivers,
-        drawers,
+        articulation_bindings=articulation_bindings,
+        pour_receivers=pour_receivers,
+        drawer_routes=drawers,
         adaptive_pick=adaptive_pick,
         pick_purposes=pick_purposes,
         coordinated_grasp=coordinated,
+        motion_samples=motion_samples,
+        cartesian_calls=cartesian_calls,
     )
     integration = replace(
         base.integration,
