@@ -346,16 +346,18 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             phase_intervals.append(dt)
             offset = stop
 
+        validation_messages: tuple[str, ...] = ()
         if self.motion_generator.supports_joint_trajectory_validation:
             obstacle_poses = getattr(
                 request.motion_policy.plan_opts, "dynamic_obstacle_poses", None
             )
             dynamic_obstacle_ids = self.motion_generator.dynamic_collision_entity_ids
+            obstacle_poses = {} if obstacle_poses is None else dict(obstacle_poses)
+            missing_ids = set(dynamic_obstacle_ids).difference(obstacle_poses)
             if (
-                obstacle_poses is None
+                missing_ids
                 and request.motion_policy.dynamic_collision_mode
                 is not DynamicCollisionMode.OFF
-                and dynamic_obstacle_ids
             ):
                 # ik_interp bypasses backend planning options, but validating its
                 # final samples still needs the live collision-world snapshot.
@@ -364,17 +366,37 @@ class Press(AtomicAction[PressGoal, PressOptions]):
                     device=context.robot.qpos.device,
                     dtype=context.robot.qpos.dtype,
                 )
-                obstacle_poses = {
-                    entity_id: scene_obstacle_poses[entity_id]
-                    for entity_id in dynamic_obstacle_ids
-                    if entity_id in scene_obstacle_poses
-                }
-            validity = self.motion_generator.validate_joint_trajectory(
-                full[:, :, arm_joint_ids],
-                control_part=control_part,
-                obstacle_poses=obstacle_poses,
-            )
-            success = success & validity.all(dim=1)
+                obstacle_poses.update(
+                    {
+                        entity_id: scene_obstacle_poses[entity_id]
+                        for entity_id in missing_ids
+                        if entity_id in scene_obstacle_poses
+                    }
+                )
+                missing_ids.difference_update(obstacle_poses)
+            if missing_ids:
+                # Exact validation cannot certify any row with an incomplete
+                # world. OFF deliberately forbids filling gaps from the scene.
+                success = torch.zeros_like(success)
+                validation_messages = (
+                    "Press cannot validate the final trajectory: missing dynamic "
+                    f"obstacle poses {sorted(missing_ids)} "
+                    f"(dynamic_collision_mode={request.motion_policy.dynamic_collision_mode.value}).",
+                )
+            else:
+                validity = self.motion_generator.validate_joint_trajectory(
+                    full[:, :, arm_joint_ids],
+                    control_part=control_part,
+                    obstacle_poses=(
+                        {
+                            entity_id: obstacle_poses[entity_id]
+                            for entity_id in dynamic_obstacle_ids
+                        }
+                        if dynamic_obstacle_ids
+                        else None
+                    ),
+                )
+                success = success & validity.all(dim=1)
         elif (
             request.motion_policy.strategy == "motion_gen"
             and self.motion_generator.collision_world_info is not None
@@ -396,6 +418,7 @@ class Press(AtomicAction[PressGoal, PressOptions]):
             expected_effects=StateDelta(),
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name,
+                messages=validation_messages,
                 metadata={"affordance_sample": contact_sample.metadata},
             ),
             segment_lengths={

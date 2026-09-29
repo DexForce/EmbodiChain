@@ -179,7 +179,10 @@ def retime_to_control_grid(
         raise ValueError("The first arrival interval must be zero.")
 
     destination_dt = float(control_dt)
-    durations = dt[:, 1:].sum(dim=1)
+    # Use the same accumulated timeline for durations and interpolation knots.
+    # A separate reduction can round differently, missing the terminal knot.
+    source_times = dt.cumsum(dim=1)
+    durations = source_times[:, -1]
     interval_counts: list[int] = []
     for duration in durations.detach().cpu().tolist():
         ratio = duration / destination_dt
@@ -203,7 +206,6 @@ def retime_to_control_grid(
     fractions = sample_indices.unsqueeze(0) / count_tensor.clamp_min(1).unsqueeze(1)
     fractions = fractions.clamp(max=1)
 
-    source_times = dt.cumsum(dim=1)
     query = durations.unsqueeze(1) * fractions
     upper = torch.searchsorted(
         source_times.contiguous(), query.contiguous(), right=True
@@ -224,7 +226,8 @@ def retime_to_control_grid(
     retimed[:, 0] = positions[:, 0]
     terminal_indices = valid_counts.sub(1)
     rows = torch.arange(positions.shape[0], device=positions.device)
-    retimed[rows, terminal_indices] = positions[:, -1]
+    terminal_mask = sample_indices.unsqueeze(0) >= terminal_indices.unsqueeze(1)
+    retimed = torch.where(terminal_mask.unsqueeze(-1), positions[:, -1:], retimed)
 
     intervals = torch.zeros(
         positions.shape[0], sample_count, dtype=dt.dtype, device=dt.device

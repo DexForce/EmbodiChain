@@ -3813,6 +3813,39 @@ def test_press_combined_split_accepts_stationary_single_sample() -> None:
         )
 
 
+def test_press_split_retimes_different_row_boundaries() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Press())
+    native_count = 24
+    path = torch.zeros(NUM_ENVS, native_count, ARM_DOF)
+    path[:, :, 0] = torch.arange(native_count) * 0.01
+    dt = torch.full(path.shape[:2], CONTROL_DT)
+    dt[:, 0] = 0.0
+    boundaries = ((0, 6, 12, 18, 23), (0, 7, 15, 21, 23))
+    targets = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    for row, indices in enumerate(boundaries):
+        targets[row, :, :3, 3] = path[row, list(indices[1:-1]), :3]
+
+    def path_fk(*, qpos, name, to_matrix):
+        poses = torch.eye(4).repeat(NUM_ENVS, native_count, 1, 1)
+        poses[:, :, :3, 3] = qpos[:, :, :3]
+        return poses
+
+    generator.robot.compute_batch_fk.side_effect = path_fk
+    phases = action._split_motion_path(
+        path, dt, targets, "arm", (2, 2, 2, 2), CONTROL_DT
+    )
+
+    for phase_index, (positions, intervals) in enumerate(phases):
+        for row, indices in enumerate(boundaries):
+            start, stop = indices[phase_index : phase_index + 2]
+            torch.testing.assert_close(positions[row, 0], path[row, start])
+            terminal = stop - start
+            holds = positions[row, terminal:]
+            assert torch.equal(holds, path[row, stop].expand_as(holds))
+            assert torch.count_nonzero(intervals[row, terminal + 1 :]) == 0
+
+
 def test_press_retiming_preserves_backend_dwell_and_arrival_offset() -> None:
     path = torch.tensor([[[0.0], [1.0], [1.0], [2.0]]]).expand(NUM_ENVS, -1, -1)
     # The repeated pose must dwell for 0.8 s; row 1 also starts with a 0.2 s hold.
@@ -3827,15 +3860,29 @@ def test_press_retiming_preserves_backend_dwell_and_arrival_offset() -> None:
 
 
 @pytest.mark.parametrize("supports_validation", (True, False))
+@pytest.mark.parametrize("pose_state", ["complete", "none", "empty", "partial"])
 def test_press_requires_collision_validation_of_exact_final_samples(
     supports_validation: bool,
+    pose_state: str,
 ) -> None:
     generator = _motion_generator()
     generator.planner.supports_joint_trajectory_validation = supports_validation
-    generator.planner.collision_world_info = CollisionWorldInfo()
-    obstacle_poses = {"wall": torch.eye(4).repeat(NUM_ENVS, 1, 1)}
+    generator.planner.collision_world_info = CollisionWorldInfo(
+        entity_ids=("wall", "table"),
+        dynamic_entity_ids=("wall", "table"),
+        supports_updates=True,
+    )
+    obstacle_poses = {
+        entity_id: torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        for entity_id in ("wall", "table")
+    }
     plan_options = PlanOptions()
-    plan_options.dynamic_obstacle_poses = obstacle_poses
+    plan_options.dynamic_obstacle_poses = {
+        "complete": obstacle_poses,
+        "none": None,
+        "empty": {},
+        "partial": {"wall": obstacle_poses["wall"]},
+    }[pose_state]
     native_path = torch.zeros(NUM_ENVS, 2, ARM_DOF)
     native_path[0, -1, 0] = 1.0
     generator.generate = Mock(
@@ -3848,6 +3895,7 @@ def test_press_requires_collision_validation_of_exact_final_samples(
 
     def validate(trajectory, *, control_part, obstacle_poses):
         assert control_part == "arm"
+        assert set(obstacle_poses) == {"wall", "table"}
         torch.testing.assert_close(
             obstacle_poses["wall"], plan_options.dynamic_obstacle_poses["wall"]
         )
@@ -3868,7 +3916,10 @@ def test_press_requires_collision_validation_of_exact_final_samples(
         goal=PressGoal(semantics, torch.eye(4)),
         binding=_binding(action),
         motion_policy=MotionPolicy(
-            strategy="motion_gen", sample_count=21, plan_opts=plan_options
+            strategy="motion_gen",
+            sample_count=21,
+            plan_opts=plan_options,
+            dynamic_collision_mode="off",
         ),
         skill_options=PressOptions(hand_interp_steps=3),
     )
@@ -3877,6 +3928,17 @@ def test_press_requires_collision_validation_of_exact_final_samples(
             _plan_action(action, invocation, context)
         return
     plan = _plan_action(action, invocation, context)
+
+    if pose_state != "complete":
+        assert plan.plan_success.tolist() == [False, False]
+        generator.planner.validate_joint_trajectory.assert_not_called()
+        assert "table" in plan.diagnostics.messages[0]
+        trajectory = _joint_trajectory(plan)
+        assert torch.equal(
+            trajectory.positions,
+            context.robot.qpos[:, None].expand_as(trajectory.positions),
+        )
+        return
 
     generator.planner.validate_joint_trajectory.assert_called_once()
     checked = generator.planner.validate_joint_trajectory.call_args.args[0]
@@ -3891,12 +3953,16 @@ def test_press_requires_collision_validation_of_exact_final_samples(
     )
 
 
-def test_press_ik_interp_validates_only_configured_dynamic_obstacle_poses() -> None:
+@pytest.mark.parametrize("mode", ["auto", "off"])
+@pytest.mark.parametrize("dynamic_ids", [(), ("wall",), ("wall", "missing")])
+def test_press_validation_requires_complete_poses_and_respects_off(
+    mode: str, dynamic_ids: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
+) -> None:
     generator = _motion_generator()
     generator.planner.supports_joint_trajectory_validation = True
     generator.planner.collision_world_info = CollisionWorldInfo(
-        entity_ids=("wall",),
-        dynamic_entity_ids=("wall",),
+        entity_ids=dynamic_ids,
+        dynamic_entity_ids=dynamic_ids,
         batch_mode="per_env",
         supports_updates=True,
     )
@@ -3916,10 +3982,19 @@ def test_press_ik_interp_validates_only_configured_dynamic_obstacle_poses() -> N
 
     def validate(trajectory, *, control_part, obstacle_poses):
         assert control_part == "arm"
-        assert tuple(obstacle_poses) == ("wall",)
-        torch.testing.assert_close(obstacle_poses["wall"], obstacle_poses_expected)
+        if dynamic_ids:
+            assert tuple(obstacle_poses) == ("wall",)
+            torch.testing.assert_close(obstacle_poses["wall"], obstacle_poses_expected)
+        else:
+            assert obstacle_poses is None
         return torch.ones(trajectory.shape[:2], dtype=torch.bool)
 
+    if mode == "off":
+        monkeypatch.setattr(
+            SceneSnapshot,
+            "collision_obstacle_poses",
+            Mock(side_effect=AssertionError("OFF must not read scene obstacle poses")),
+        )
     obstacle_poses_expected = obstacle_poses.clone()
     generator.planner.validate_joint_trajectory.side_effect = validate
     action = _bind_action(generator, Press())
@@ -3933,14 +4008,28 @@ def test_press_ik_interp_validates_only_configured_dynamic_obstacle_poses() -> N
         skill_id="press",
         goal=PressGoal(semantics, torch.eye(4)),
         binding=_binding(action),
-        motion_policy=MotionPolicy(strategy="ik_interp", sample_count=21),
+        motion_policy=MotionPolicy(
+            strategy="ik_interp", sample_count=21, dynamic_collision_mode=mode
+        ),
         skill_options=PressOptions(hand_interp_steps=3),
     )
 
     plan = _plan_action(action, invocation, _context(scene=scene))
 
-    assert plan.plan_success.tolist() == [True, True]
-    generator.planner.validate_joint_trajectory.assert_called_once()
+    missing = (
+        dynamic_ids
+        if mode == "off"
+        else tuple(entity_id for entity_id in dynamic_ids if entity_id != "wall")
+    )
+    if missing:
+        assert plan.plan_success.tolist() == [False, False]
+        generator.planner.validate_joint_trajectory.assert_not_called()
+        assert all(entity_id in plan.diagnostics.messages[0] for entity_id in missing)
+        for frame in plan.commands.frames:
+            assert not frame.active_mask.any()
+    else:
+        assert plan.plan_success.tolist() == [True, True]
+        generator.planner.validate_joint_trajectory.assert_called_once()
 
 
 def test_press_plans_from_rigid_object_pose_snapshot_with_option_position() -> None:

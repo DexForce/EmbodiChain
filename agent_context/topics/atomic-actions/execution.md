@@ -122,6 +122,11 @@ Each phase retains its native time profile while retiming to the control grid;
 requested phase counts are minima, so long phases expand rather than speeding
 up. Press validates its final assembled arm samples through a capable backend
 and rejects collision-aware backend paths without that validation capability.
+Exact validation needs poses for every configured dynamic obstacle. Missing
+poses fail the plan with diagnostics; they never permit unchecked success.
+`dynamic_collision_mode=off` forbids filling missing poses from the scene, so
+such validation requires complete explicit obstacle poses or a backend world
+without dynamic obstacles.
 It does not promise continuous collision freedom, a straight path between
 endpoints, or a fallback to IK.
 
