@@ -118,6 +118,13 @@ class FakeRobot:
         return torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]).repeat(batch, 1)
 
 
+def _fake_batch_fk(self, qpos, name=None, env_ids=None, to_matrix=False):
+    return torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1)
+
+
+FakeRobot.compute_batch_fk = _fake_batch_fk
+
+
 class FakeSimulationManager:
     def __init__(self):
         self.robot = FakeRobot()

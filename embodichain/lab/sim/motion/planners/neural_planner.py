@@ -700,19 +700,16 @@ class NeuralPlanner(BasePlanner):
             device=self.device,
         )
         retimed_positions = retimed.positions
-        poses = torch.stack(
-            [
-                self._fk_matrix(retimed_positions[:, index], control_part)
-                for index in range(retimed_positions.shape[1])
-            ],
-            dim=1,
+        # One batched FK over every sample; the waypoint re-check reuses it.
+        poses = self.robot.compute_batch_fk(
+            qpos=retimed_positions, name=control_part, to_matrix=True
         )
         success = success & retimed.success.to(success.device)
         success = success & self._retimed_is_executable(
             retimed_positions, retimed.dt, qpos_limits
         )
         success = success & self._retimed_reaches_waypoints(
-            retimed_positions, control_part, waypoints, episode_k
+            retimed_positions, poses, waypoints, episode_k
         )
         return PlanResult(
             success=success,
@@ -747,7 +744,7 @@ class NeuralPlanner(BasePlanner):
     def _retimed_reaches_waypoints(
         self,
         positions: torch.Tensor,
-        control_part: str,
+        poses: torch.Tensor,
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
     ) -> torch.Tensor:
@@ -765,13 +762,16 @@ class NeuralPlanner(BasePlanner):
             rot_mask,
             joint_mask,
         ) = waypoints
-        batch = positions.shape[0]
+        batch, samples = positions.shape[:2]
+        policy_poses = self._policy_pose_xyzw(poses.flatten(0, 1)).view(
+            batch, samples, -1
+        )
         active_idx = torch.zeros(batch, dtype=torch.long, device=self.device)
-        for index in range(positions.shape[1]):
+        for index in range(samples):
             qpos = positions[:, index]
             reached = self._is_active_reached(
                 qpos[:, : self._action_dim],
-                self._fk_pose_xyzw(qpos, control_part),
+                policy_poses[:, index],
                 waypoints_pos,
                 waypoints_quat,
                 waypoints_joint,
@@ -893,7 +893,11 @@ class NeuralPlanner(BasePlanner):
 
     def _fk_pose_xyzw(self, qpos: torch.Tensor, control_part: str) -> torch.Tensor:
         """Return the policy-frame FK pose as ``xyz + xyzw``."""
-        fk = self._to_policy_frame(self._fk_matrix(qpos, control_part))
+        return self._policy_pose_xyzw(self._fk_matrix(qpos, control_part))
+
+    def _policy_pose_xyzw(self, fk_matrix: torch.Tensor) -> torch.Tensor:
+        """Map ``(M, 4, 4)`` runtime TCP poses to policy-frame ``xyz + xyzw``."""
+        fk = self._to_policy_frame(fk_matrix)
         pos = fk[:, :3, 3]
         # ``quat_from_matrix`` is an EmbodiChain ``xyzw`` producer; converting
         # it again would turn a valid pose into a different rotation.
