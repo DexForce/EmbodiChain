@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from typing import ClassVar
 
 import pytest
 import json
@@ -28,6 +29,385 @@ import torch
 
 from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
+
+
+@pytest.mark.parametrize(
+    "targets, expected",
+    [
+        ([[0.01, 0.01], [0.01, 0.2]], [True, False]),
+        ([[0.2, 0.01], [0.01, 0.2]], [False, False]),
+        ([[0.01, 0.01], [0.01, 0.01]], [True, True]),
+    ],
+)
+def test_initial_velocity_gate_masks_real_session_before_dispatch(
+    monkeypatch, targets, expected
+):
+    from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
+        ActionOptions,
+        AtomicAction,
+        JointPositionGoal,
+        SkillBindingContract,
+        SkillResourceSlot,
+        SkillEndpointRequirement,
+        JOINT_POSITION_CAPABILITY,
+        TimedTrajectory,
+    )
+    from embodichain.gen_sim.task_engine._task_program import planning_probe
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+
+    class FixtureAction(AtomicAction[JointPositionGoal, ActionOptions]):
+        skill_id: ClassVar[str] = "fixture"
+        GoalType: ClassVar[type] = JointPositionGoal
+        binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
+            slots=(
+                SkillResourceSlot(
+                    slot_id="primary",
+                    endpoints=(
+                        SkillEndpointRequirement(
+                            endpoint_id="motion",
+                            capabilities=frozenset({JOINT_POSITION_CAPABILITY}),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+        def _plan(self, request, context):
+            torch.rand(4)
+            return self.build_plan(
+                request,
+                context,
+                success=torch.ones(2, dtype=torch.bool),
+                trajectory=TimedTrajectory.from_uniform_step(
+                    torch.stack((context.robot.qpos, request.goal.target), dim=1),
+                    env_ids=context.env_ids,
+                    step_dt=context.require_control_dt(),
+                ),
+            )
+
+    robot = Mock(device=torch.device("cpu"), dof=2, control_parts={"all": object()})
+    robot.get_qpos.return_value = torch.zeros(2, 2)
+    robot.get_qvel.return_value = torch.zeros(2, 2)
+    robot.get_joint_ids.return_value = [0, 1]
+    generator = Mock(robot=robot, device=torch.device("cpu"))
+    generator.planner.cfg.planner_type = "fixture"
+    engine = GenSimActionEngine(generator, load_builtins=False)
+    engine.register(FixtureAction())
+    request_id = "test/segment-0:0"
+    invocation = ActionInvocation(
+        skill_id="fixture",
+        invocation_id=request_id,
+        goal=JointPositionGoal(torch.tensor(targets)),
+        binding=engine.bind_control_parts("fixture", {"primary": {"motion": "all"}}),
+    )
+    compiled = SimpleNamespace(
+        program_id="test",
+        preflight_analyses=lambda: (
+            SimpleNamespace(kind="sequential", calls=(object(),)),
+        ),
+        iter_segments=lambda: iter(
+            (
+                SimpleNamespace(
+                    segment_id="segment-0",
+                    calls=(SimpleNamespace(segment_call_index=0),),
+                ),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        planning_probe, "_joint_velocity_limits", lambda *a: torch.ones(2, 2)
+    )
+    evidence = []
+    context = engine.initial_context(control_dt=0.04)
+    with torch.random.fork_rng():
+        torch.manual_seed(17)
+        torch.rand(4)
+        expected_rng = torch.random.get_rng_state().clone()
+        torch.manual_seed(17)
+        with planning_probe.capture_initial_plan(
+            compiled, evidence.append, _exception_metadata
+        ):
+            session = engine.start((invocation,), context)
+            tick = session.tick(context)
+        assert torch.equal(torch.random.get_rng_state(), expected_rng)
+    assert evidence[0]["plan_success"] == expected
+    assert len(session.plan_attempts) == 1
+    if any(expected):
+        assert tick.command.active_mask.tolist() == expected
+    else:
+        assert tick.command is None
+        assert not session.plan_attempts[0].plan.diagnostics.failure.retryable
+    assert not session.task_state.held_objects
+    assert planning_probe.initial_plan_capture(request_id) is None
+
+
+@pytest.mark.parametrize("error", [RuntimeError, KeyboardInterrupt])
+def test_initial_capture_restores_outer_scope_on_failure_or_cancel(error):
+    from embodichain.gen_sim.task_engine._task_program.planning_probe import (
+        capture_initial_plan,
+        initial_plan_capture,
+    )
+
+    def program(name):
+        return SimpleNamespace(
+            program_id=name,
+            preflight_analyses=lambda: (
+                SimpleNamespace(kind="sequential", calls=(object(),)),
+            ),
+            iter_segments=lambda: iter(
+                (
+                    SimpleNamespace(
+                        segment_id="segment",
+                        calls=(SimpleNamespace(segment_call_index=0),),
+                    ),
+                )
+            ),
+        )
+
+    with capture_initial_plan(program("outer"), Mock(), _exception_metadata) as outer:
+        with pytest.raises(error):
+            with capture_initial_plan(
+                program("inner"), Mock(), _exception_metadata
+            ) as inner:
+                assert initial_plan_capture(outer.invocation_id) is None
+                assert initial_plan_capture(inner.invocation_id) is inner
+                raise error()
+        assert initial_plan_capture(outer.invocation_id) is outer
+    assert initial_plan_capture(outer.invocation_id) is None
+
+
+def test_initial_capture_counts_sequential_workflows_not_segments():
+    from embodichain.gen_sim.task_engine._task_program.planning_probe import (
+        InitialPlanCapture,
+    )
+
+    segments = tuple(
+        SimpleNamespace(
+            segment_id=f"segment-{i}", calls=(SimpleNamespace(segment_call_index=0),)
+        )
+        for i in range(3)
+    )
+    compiled = SimpleNamespace(
+        program_id="test",
+        iter_segments=lambda: iter(segments),
+        preflight_analyses=lambda: (
+            SimpleNamespace(kind="sequential", calls=tuple(object() for _ in range(3))),
+        ),
+    )
+    records = []
+    capture = InitialPlanCapture(compiled, records.append, _exception_metadata)
+    capture.failed(ValueError("fixture"))
+    assert records[0]["analysis_call_count"] == 3
+    assert records[0]["unplanned_call_indices"] == [1, 2]
+    assert records[0]["remaining_analysis_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "probe_only, outcome",
+    [
+        (False, "success"),
+        (True, "success"),
+        (False, "planning_failure"),
+        (False, "velocity_failure"),
+        (False, "exception"),
+    ],
+)
+def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outcome):
+    import gymnasium
+    from dataclasses import dataclass
+    from embodichain.lab.gym.envs import demo
+    from embodichain.lab.gym.utils import gym_utils, registration
+    from embodichain.lab.task_program import language
+    from embodichain.lab.sim.atomic_actions import (
+        AtomicActionEngine,
+        MotionPolicy,
+        PlannerDiagnostics,
+        PlanningFailure,
+    )
+    from embodichain.lab.sim.sim_manager import SimulationManager
+    from embodichain.gen_sim.task_engine._task_program import assembly, cargo
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
+    )
+
+    @dataclass
+    class Plan:
+        plan_success: torch.Tensor
+        joint_trajectory: object
+        diagnostics: PlannerDiagnostics
+
+    root = tmp_path / "bundle"
+    (root / "task_program").mkdir(parents=True)
+    for name in (
+        "task_program_deployment.yaml",
+        "task_program/program.yaml",
+        "semantic_task_graph.json",
+        "integration_fingerprint.json",
+    ):
+        (root / name).touch()
+    graph = {
+        "task_id": "test",
+        "integration_fingerprint": "0" * 64,
+        "nodes": [{"id": "first"}],
+        "task_groups": [{"id": "step", "node_ids": ["first"]}],
+    }
+    segment = SimpleNamespace(
+        segment_id="segment-0", calls=(SimpleNamespace(segment_call_index=0),)
+    )
+    compiled = SimpleNamespace(
+        program_id="test",
+        iter_segments=lambda: iter((segment,)),
+        preflight_analyses=lambda: (
+            SimpleNamespace(kind="sequential", calls=(object(),)),
+        ),
+    )
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            registration=SimpleNamespace(
+                catalog=SimpleNamespace(preflight=lambda p: compiled)
+            )
+        ),
+        selection=None,
+    )
+    robot_file = tmp_path / "robot.urdf"
+    robot_file.write_text(
+        '<robot><joint name="arm"><limit velocity="1"/></joint></robot>'
+    )
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(robot_file)),
+        joint_names=["arm"],
+        get_joint_ids=lambda **kw: [0],
+        get_qvel_limits=lambda **kw: torch.ones(1, 1),
+    )
+    engine = object.__new__(GenSimActionEngine)
+    engine._cartesian_calls = frozenset()
+    engine._planning_services = SimpleNamespace(robot=robot)
+    request = SimpleNamespace(
+        invocation_id="test/segment-0:0",
+        motion_policy=MotionPolicy(),
+        skill_options=SimpleNamespace(),
+    )
+    positions = torch.zeros(1, 2, 1)
+    if outcome == "velocity_failure":
+        positions[0, 1, 0] = 0.2
+    planning = Mock(
+        return_value=Plan(
+            torch.tensor([outcome != "planning_failure"]),
+            SimpleNamespace(positions=positions, dt=torch.tensor([[0.0, 0.04]])),
+            PlannerDiagnostics(
+                backend="test",
+                failure=(
+                    PlanningFailure("fixture_unreachable")
+                    if outcome == "planning_failure"
+                    else None
+                ),
+            ),
+        )
+    )
+    if outcome == "exception":
+        planning.side_effect = ValueError("fixture planning exception")
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", planning)
+    env = SimpleNamespace(reset=Mock(), close=Mock())
+    monkeypatch.setattr(gymnasium, "make", lambda **kw: env)
+    monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(assembly, "register_deployment", lambda *a, **kw: None)
+    monkeypatch.setattr(language, "load_task_program", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        gym_utils,
+        "build_env_cfg_from_args",
+        lambda *a, **kw: (SimpleNamespace(), {"id": "fixture"}, {}),
+    )
+    monkeypatch.setattr(SimulationManager, "flush_cleanup_queue", lambda: None)
+    rejected = outcome in {"planning_failure", "velocity_failure"}
+    monkeypatch.setattr(
+        cargo, "capture_cargo", lambda *a: [object()] if rejected else []
+    )
+    cargo_check = Mock(return_value={"accepted_mask": [True], "contents": []})
+    monkeypatch.setattr(cargo, "check_cargo", cargo_check)
+    monkeypatch.setattr(_bundle_runner, "_verify_source", lambda *a: None)
+    monkeypatch.setattr(_bundle_runner, "validate_semantic_task_graph", lambda d: graph)
+    monkeypatch.setattr(_bundle_runner, "_read_json", lambda p: {})
+    monkeypatch.setattr(
+        _bundle_runner, "_verify_integration_fingerprint", lambda *a: deployment
+    )
+    monkeypatch.setattr(_bundle_runner, "_verify_program_projection", lambda *a: None)
+    monkeypatch.setattr(
+        _bundle_runner,
+        "load_config",
+        lambda *a: {"id": "fixture", "max_episode_steps": 100},
+    )
+    monkeypatch.setattr(_bundle_runner, "_write_terminal_robot_state", lambda *a: None)
+    monkeypatch.setattr(
+        _bundle_runner, "_preserve_failed_execution_recording", lambda *a, **kw: None
+    )
+    monkeypatch.setattr(_bundle_runner, "_print_json", lambda *a: None)
+
+    def probe(*args):
+        plan = engine._plan_request(request)
+        return {"plan_success": plan.plan_success.tolist()}
+
+    probe_call = Mock(side_effect=probe)
+    monkeypatch.setattr(_bundle_runner, "_isolated_initial_probe", probe_call)
+
+    dispatched = []
+
+    def execute(*args, **kwargs):
+        plan = engine._plan_request(request)
+        if plan.plan_success.any():
+            dispatched.append(plan)
+        return SimpleNamespace(
+            success=plan.plan_success.tolist(),
+            terminal_reasons=["success"],
+            completed=True,
+            to_metadata=lambda: {
+                "segments": [
+                    {
+                        "name": "first",
+                        "active": [True],
+                        "successes": plan.plan_success.tolist(),
+                    }
+                ]
+            },
+        )
+
+    execute_call = Mock(side_effect=execute)
+    monkeypatch.setattr(demo, "execute_demo_episode", execute_call)
+    assert _bundle_runner.execute_bundle(
+        root,
+        ["--plan-probe-only"] if probe_only else (),
+        execution_output=tmp_path / "execution",
+    ) == (0 if outcome == "success" else 2)
+    assert planning.call_count == 1
+    assert probe_call.call_count == int(probe_only)
+    assert execute_call.call_count == int(not probe_only)
+    report = json.loads((tmp_path / "execution/planning_probe.json").read_text())
+    assert report["plan_success"] == (
+        [] if outcome == "exception" else [outcome == "success"]
+    )
+    assert len(dispatched) == int(not probe_only and outcome == "success")
+    if rejected:
+        cargo_check.assert_not_called()
+    if not probe_only:
+        assert report["planning_source"] == "execution"
+        from embodichain.gen_sim.task_engine._task_program.planning_probe import (
+            initial_plan_capture,
+        )
+
+        assert initial_plan_capture(request.invocation_id) is None
+        execution_report = json.loads(
+            (tmp_path / "execution/execution_report.json").read_text()
+        )
+        assert execution_report["status"] == (
+            "succeeded"
+            if outcome == "success"
+            else "failed" if outcome == "exception" else "rejected"
+        )
+    if outcome == "exception":
+        assert report["failure"]["message"] == "fixture planning exception"
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -70,7 +450,7 @@ def test_initial_probe_plans_without_dispatch_or_effect_commit(
     success: bool, monkeypatch
 ) -> None:
     from embodichain.gen_sim.task_engine._task_program import (
-        assembly as assembly_module,
+        planning_probe as assembly_module,
     )
 
     monkeypatch.setattr(

@@ -39,12 +39,7 @@ from .grasp_filter import (
     install_e6_approach_filters,
     install_grasp_filters,
 )
-from .motion import (
-    MOTION_VALIDATION_REVISION,
-    _joint_velocity_limits,
-    _velocity_diagnostics,
-    _velocity_validity,
-)
+from .motion import MOTION_VALIDATION_REVISION
 
 __all__: list[str] = []
 
@@ -60,84 +55,6 @@ from .invocation_policy import (
 )
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
-
-
-def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
-    """Plan the initial call without dispatching commands or committing effects."""
-    from embodichain.lab.sim.atomic_actions.state import TaskState
-
-    unwrapped = getattr(env, "unwrapped", env)
-    adapter = deployment.integration.adapter_factory.create_adapter(unwrapped)
-    compiled = adapter.compile(program)
-    analyses = compiled.preflight_analyses()
-    if not analyses or analyses[0].kind == "parallel_branch":
-        raise ValueError("Initial probe requires a non-empty sequential workflow.")
-    assembly = adapter.assemble_runtime(deployment.selection)
-    qpos = unwrapped.robot.get_qpos()
-    context = assembly.observation_provider.observe(
-        TaskState(batch_size=qpos.shape[0], device=qpos.device)
-    )
-    first = next(compiled.iter_segments())
-    workflow = assembly.compiler.analyze(
-        analyses[0].calls, workflow_id=f"{compiled.program_id}/{first.segment_id}"
-    )
-    grounded = assembly.compiler.ground(workflow, 0, context)
-    plan = assembly.engine.plan(grounded.invocation, context)
-    final_velocity = _validate_final_plan_velocity(plan, unwrapped.robot)
-    return {
-        "scope": "initial_call",
-        "call_index": 0,
-        "analysis_call_count": len(workflow.calls),
-        "initial_downstream_target_count": len(
-            workflow.calls[0].downstream_object_targets
-        ),
-        "unplanned_call_indices": list(range(1, len(workflow.calls))),
-        "remaining_analysis_count": len(analyses) - 1,
-        "planned_grasp_candidates": _planned_grasp_candidates(plan),
-        "plan_success": (plan.plan_success & final_velocity["valid_mask"])
-        .detach()
-        .cpu()
-        .tolist(),
-        "final_command_velocity": {
-            "scope": "initial_call_full_robot_post_resampling",
-            "valid_mask": final_velocity["valid_mask"].detach().cpu().tolist(),
-            "diagnostics": final_velocity["diagnostics"],
-        },
-        "task_success": None,
-    }
-
-
-def _planned_grasp_candidates(plan: Any) -> list[dict[str, Any]]:
-    """Expose immutable planning proposals without claiming an acquired grasp."""
-    effects = getattr(plan, "expected_effects", None)
-    updates = getattr(effects, "held_object_updates", {})
-    return [
-        {
-            "evidence_scope": "proposal_only_not_observed_attachment",
-            "resource": resource,
-            "object_id": held.semantics.entity_id,
-            "object_to_eef": held.object_to_eef.detach().cpu().tolist(),
-            "grasp_xpos": held.grasp_xpos.detach().cpu().tolist(),
-        }
-        for resource, held in updates.items()
-        if held is not None
-    ]
-
-
-def _validate_final_plan_velocity(plan: Any, robot: Any) -> dict[str, Any]:
-    """Validate the final arm/hand samples, not only the planner's intermediate path."""
-    trajectory = plan.joint_trajectory
-    if trajectory is None:
-        if plan.plan_success.any():
-            raise ValueError("Initial plan requires final joint trajectory evidence.")
-        return {"valid_mask": plan.plan_success.clone(), "diagnostics": []}
-    limits = _joint_velocity_limits(robot, None).to(trajectory.positions)
-    return {
-        "valid_mask": _velocity_validity(trajectory.positions, trajectory.dt, limits),
-        "diagnostics": _velocity_diagnostics(
-            trajectory.positions, trajectory.dt, limits
-        ),
-    }
 
 
 class _TaskFactory(SimulationTaskProgramFactory):
