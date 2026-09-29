@@ -123,7 +123,7 @@ def test_contact_sensor_guard_uses_backend_capability() -> None:
     [
         ("mujoco_warp", "cuda:0", True),
         ("mujoco_warp", "cpu", False),
-        ("dexuni", "cuda:0", False),
+        ("dexuni", "cuda:0", True),
         ("xpbd", "cpu", True),
     ],
 )
@@ -135,6 +135,37 @@ def test_newton_contact_sensor_capability_depends_on_runtime(
     backend = NewtonPhysicsBackend(SimpleNamespace())
     backend._configured_solver_type = solver_type
     backend._runtime_device = runtime_device
+
+    assert backend.supports_contact_sensor is expected
+
+
+@pytest.mark.parametrize(
+    ("solver_path", "use_mujoco_cpu", "expected"),
+    [
+        ("pure_mujoco", False, True),
+        ("pure_mujoco", True, False),
+        ("pure_vbd", False, True),
+        ("coupled", False, True),
+        ("mjvbd_kinematic_soft", False, True),
+    ],
+)
+def test_dexuni_contact_sensor_capability_follows_resolved_path(
+    monkeypatch: pytest.MonkeyPatch,
+    solver_path: str,
+    use_mujoco_cpu: bool,
+    expected: bool,
+) -> None:
+    world = object()
+    native = SimpleNamespace(
+        solver_type="dexuni",
+        solver=SimpleNamespace(features=SimpleNamespace(backend=solver_path)),
+        mujoco_solver=SimpleNamespace(use_mujoco_cpu=use_mujoco_cpu),
+    )
+    monkeypatch.setattr(
+        "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
+        lambda candidate: native if candidate is world else None,
+    )
+    backend = NewtonPhysicsBackend(SimpleNamespace(_world=world))
 
     assert backend.supports_contact_sensor is expected
 
