@@ -1361,6 +1361,9 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            collection_stats = getattr(self, "_collection_stats", None)
+            if isinstance(collection_stats, Mapping):
+                metadata["collection"] = dict(collection_stats)
             bridge = getattr(self, "_active_task_program_bridge", None)
             if bridge is not None:
                 records = bridge.expansion_records
@@ -2627,6 +2630,7 @@ class EmbodiedEnv(BaseEnv):
         *,
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
+        expansion_recipe_indices: tuple[int, ...] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
@@ -2644,6 +2648,7 @@ class EmbodiedEnv(BaseEnv):
             program,
             expansion_profile=expansion_profile,
             candidate_index=expansion_candidate_index,
+            recipe_indices=expansion_recipe_indices,
         )
 
     @property
@@ -2696,6 +2701,7 @@ class EmbodiedEnv(BaseEnv):
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
         expansion_profile: CombinedExpansionProfile | None = None,
         expansion_candidate_index: int = 0,
+        expansion_recipe_indices: tuple[int, ...] | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -2734,13 +2740,18 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            if expansion_profile is None and expansion_candidate_index == 0:
+            if (
+                expansion_profile is None
+                and expansion_candidate_index == 0
+                and expansion_recipe_indices is None
+            ):
                 bridge = self.create_task_program_bridge(compiled_program)
             else:
                 bridge = self.create_task_program_bridge(
                     compiled_program,
                     expansion_profile=expansion_profile,
                     expansion_candidate_index=expansion_candidate_index,
+                    expansion_recipe_indices=expansion_recipe_indices,
                 )
             self._active_task_program_bridge = bridge
             return bridge.iter_segments()
@@ -2750,6 +2761,10 @@ class EmbodiedEnv(BaseEnv):
         if expansion_candidate_index != 0:
             raise ValueError(
                 "expansion_candidate_index requires a selected Task Program"
+            )
+        if expansion_recipe_indices is not None:
+            raise ValueError(
+                "expansion_recipe_indices requires a selected Task Program"
             )
 
         actions = self.create_demo_action_list(*args, **kwargs)

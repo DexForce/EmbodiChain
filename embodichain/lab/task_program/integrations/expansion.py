@@ -270,6 +270,7 @@ class CombinedTaskProgramExpansionFactory:
         profile: CombinedExpansionProfile,
         *,
         candidate_index: int,
+        recipe_indices: tuple[int, ...] | None = None,
         program_id: str,
         integration_id: str,
         robot_profile_id: str,
@@ -278,6 +279,14 @@ class CombinedTaskProgramExpansionFactory:
             raise TypeError("profile must be a CombinedExpansionProfile")
         if type(candidate_index) is not int or candidate_index < 0:
             raise ValueError("candidate_index must be a non-negative integer")
+        if recipe_indices is not None:
+            recipe_indices = tuple(recipe_indices)
+            if not recipe_indices or any(
+                type(index) is not int or index < 0 for index in recipe_indices
+            ):
+                raise ValueError("recipe_indices must contain non-negative integers")
+            if len(set(recipe_indices)) != len(recipe_indices):
+                raise ValueError("recipe_indices must be unique")
         for value, name in (
             (program_id, "program_id"),
             (integration_id, "integration_id"),
@@ -290,8 +299,13 @@ class CombinedTaskProgramExpansionFactory:
         recipes = enumerate_candidate_recipes(profile)
         if candidate_index >= len(recipes):
             raise ValueError("candidate_index is outside combined recipes")
+        if recipe_indices is not None and any(
+            index >= len(recipes) for index in recipe_indices
+        ):
+            raise ValueError("recipe_indices contain an out-of-range recipe")
         self._profile = profile
         self._candidate_index = candidate_index
+        self._recipe_indices = recipe_indices
         self._recipes = recipes
         self._recipe = recipes[candidate_index]
         self._program_id = program_id
@@ -301,6 +315,10 @@ class CombinedTaskProgramExpansionFactory:
 
     def _recipe_for_row(self, row_index: int) -> CandidateRecipe:
         """Map a physical batch row to a deterministic logical recipe."""
+        if self._recipe_indices is not None:
+            if row_index >= len(self._recipe_indices):
+                raise ValueError("recipe_indices do not cover the active batch")
+            return self._recipes[self._recipe_indices[row_index]]
         return self._recipes[(self._candidate_index + row_index) % len(self._recipes)]
 
     @property

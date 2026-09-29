@@ -49,6 +49,8 @@ def load_expansion_profile(path: str | Path) -> CombinedExpansionProfile:
             raise ValueError(
                 "only schema_version=1 CombinedExpansionProfile is supported"
             )
-        return CombinedExpansionProfile.from_mapping(data)
+        profile_data = dict(data)
+        profile_data.pop("collection", None)
+        return CombinedExpansionProfile.from_mapping(profile_data)
     except (TypeError, ValueError) as error:
         raise ValueError(f"Invalid Expansion Profile {path}: {error}") from error

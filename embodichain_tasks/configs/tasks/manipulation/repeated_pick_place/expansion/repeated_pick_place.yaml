@@ -1,6 +1,7 @@
 # Task-facing expansion overrides. Referenced by task.ur5.yaml.
 runtime:
   num_envs: 16
+  max_episode_steps: 1200
   arena_space: 2.5
   env:
     events:
@@ -71,4 +72,10 @@ overrides:
   persistence:
     sink: lerobot
     output_dir: /tmp/repeated-pick-place-expansion
-candidate_indices: [0, 16, 32, 48]
+
+collection:
+  target_episodes: 64
+  max_attempts: 3
+  selection:
+    mode: sequential
+    start_recipe_index: 0

@@ -39,7 +39,7 @@ embodichain run-env \
 `task.ur5.yaml` references `expansion/repeated_pick_place.yaml` through its
 `expansion.config` field. The expansion file contains the Task Program policy,
 scene/affordance/trajectory/visual overrides, runtime recorder events, and the
-candidate batch starts. The task config remains the only file that selects the
+collection target. The task config remains the only file that selects the
 robot and environment.
 
 Run the complete 64-recipe batch schedule through the formal task entry point:
@@ -53,9 +53,13 @@ embodichain run-task \
 ```
 
 `--expansion-profile` replaces the profile selected by the task expansion
-file. `--expansion-candidate-indices` replaces its candidate starts; the
-configured starts `0`, `16`, `32`, and `48` cover all 64 recipes on sixteen
-rows. The recorder is owned by the selected environment component and can be
+file. Collection uses `target_episodes` as the final data count and `num_envs`
+as batch capacity. The default sequential policy collects 64 rows in four
+batches of sixteen. For a small explicit selection, use
+`--expansion-recipe-indices 0 16 32 48`; the legacy
+`--expansion-candidate-indices` spelling remains accepted. Explicit recipe
+selection requires the list length to equal `collection.target_episodes`.
+The recorder is owned by the selected environment component and can be
 filtered for a dry run with `--filter-dataset-saving`.
 
 The Python showcase remains available for visual debugging and uses the same

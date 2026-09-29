@@ -214,8 +214,10 @@ expansion:
 
 The referenced expansion file is task-facing configuration rather than a
 second environment deployment. It owns batch runtime values, the shared
-expansion policy, task-specific augmentation overrides, and candidate indices;
-the runner merges it after selecting the physical backend.
+expansion policy, task-specific augmentation overrides, and the collection
+target and recipe selection; the runner merges it after selecting the physical
+backend. `collection.target_episodes` is the final committed row count, while
+`num_envs` only controls the width of each batch.
 
 The callable-free `integration.yaml` owns the semantic scene binding and
 task-specific profile additions. Its canonical identities map explicitly to
