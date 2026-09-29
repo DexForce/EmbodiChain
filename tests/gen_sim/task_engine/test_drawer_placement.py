@@ -35,13 +35,11 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     from types import SimpleNamespace
     from unittest.mock import Mock
     from embodichain.gen_sim.task_engine._task_program.assembly import _TaskFactory
-    from embodichain.gen_sim.task_engine._task_program import drawer_runtime
+    from embodichain.gen_sim.task_engine._task_program import assembly, drawer_runtime
     from embodichain.gen_sim.task_engine._task_program.coordinated_motion import (
         GenSimCoordinatedPickment,
     )
-    from embodichain.lab.task_program.integrations.simulation.environment import (
-        SimulationTaskProgramFactory,
-    )
+    from embodichain.lab.task_program.semantics import RobotSkillProfile
     from embodichain.gen_sim.task_engine._task_program.actions import (
         GenSimPickUp,
         GenSimHandOver,
@@ -53,9 +51,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     standard, drawer = Mock(), Mock()
     parent = Mock(return_value=standard)
     constructor = Mock(return_value=drawer)
-    monkeypatch.setattr(
-        SimulationTaskProgramFactory, "create_atomic_action_engine", parent
-    )
+    monkeypatch.setattr(assembly, "GenSimActionEngine", parent)
     monkeypatch.setattr(drawer_runtime, "DrawerPlacementEngine", constructor)
     registration = SimpleNamespace(validate_engine=Mock())
     factory = object.__new__(_TaskFactory)
@@ -64,32 +60,36 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._adaptive_pick = False
     factory._pick_purposes = ()
     factory._coordinated_motion = coordinated
-    factory._create_motion_generator = Mock(return_value=object())
+    factory._motion_samples = (("call", 260),)
+    factory._cartesian_calls = ("drawer_call",)
+    factory._robot = object()
+    factory._robot_profile_binding = SimpleNamespace(profile_id="profile")
+    factory._create_motion_generator = Mock(
+        return_value=SimpleNamespace(robot=factory._robot)
+    )
     factory._grasp_pose_generators = {}
     factory._registration = registration
-    profile = SimpleNamespace(action_control_profiles=lambda: {})
+    profile = Mock(spec=RobotSkillProfile, profile_id="profile")
+    profile.action_control_profiles.return_value = {}
     result = _TaskFactory.create_atomic_action_engine(factory, profile)
     if has_drawers:
         assert result is drawer
         constructor.assert_called_once()
+        assert constructor.call_args.kwargs["motion_samples"] == factory._motion_samples
         parent.assert_not_called()
-        assert [type(c.args[0]) for c in drawer.register.call_args_list] == [
-            GenSimPickUp
-        ] + ([GenSimCoordinatedPickment] if coordinated else [])
-        assert all(
-            c.kwargs == {"replace": True} for c in drawer.register.call_args_list
-        )
     else:
         assert result is standard
         parent.assert_called_once()
+        assert parent.call_args.kwargs["motion_samples"] == factory._motion_samples
         constructor.assert_not_called()
-        assert [type(c.args[0]) for c in standard.register.call_args_list] == [
-            GenSimPickUp,
-            GenSimHandOver,
-            GenSimMoveHeldObject,
-            GenSimPlace,
-            GenSimPour,
-        ] + ([GenSimCoordinatedPickment] if coordinated else [])
+    assert [type(c.args[0]) for c in result.register.call_args_list] == [
+        GenSimPickUp,
+        GenSimHandOver,
+        GenSimMoveHeldObject,
+        GenSimPlace,
+        GenSimPour,
+    ] + ([GenSimCoordinatedPickment] if coordinated else [])
+    assert all(c.kwargs == {"replace": True} for c in result.register.call_args_list)
 
 
 def drawer_meshes() -> list[trimesh.Trimesh]:
@@ -213,18 +213,24 @@ def test_part_identity_survives_chained_step_results() -> None:
     assert _bound_part(steps["close"], "object", bindings, steps) == "part_top"
 
 
-def test_drawer_pick_does_not_require_future_place_feasibility(monkeypatch) -> None:
+@pytest.mark.parametrize("destination", ["drawer_target", "ordinary_target"])
+def test_drawer_pick_does_not_require_future_place_feasibility(
+    monkeypatch, destination
+) -> None:
     from dataclasses import dataclass
     from types import SimpleNamespace
     from embodichain.lab.sim.atomic_actions import (
-        AtomicActionEngine,
         AntipodalAffordance,
         GraspGoal,
         ObjectSemantics,
         PickUpOptions,
+        SceneEntityPose,
     )
     from embodichain.gen_sim.task_engine._task_program.drawer_runtime import (
         DrawerPlacementEngine,
+    )
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        GenSimActionEngine,
     )
 
     mesh = trimesh.creation.box(extents=[0.1] * 3)
@@ -244,7 +250,7 @@ def test_drawer_pick_does_not_require_future_place_feasibility(monkeypatch) -> N
 
     request = Request(
         GraspGoal(semantics),
-        PickUpOptions(downstream_object_target_poses=(torch.eye(4),)),
+        PickUpOptions(downstream_object_target_poses=(SceneEntityPose(destination),)),
     )
     recorded = []
 
@@ -252,12 +258,16 @@ def test_drawer_pick_does_not_require_future_place_feasibility(monkeypatch) -> N
         recorded.append(prepared)
         return SimpleNamespace(plan_success=torch.tensor([False]))
 
-    monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
+    monkeypatch.setattr(GenSimActionEngine, "_plan_request", plan)
     engine = object.__new__(DrawerPlacementEngine)
     engine._planning_services = SimpleNamespace(robot=object())
     engine._drawer_observations = (
-        SimpleNamespace(route=SimpleNamespace(object_id="cube")),
+        SimpleNamespace(
+            route=SimpleNamespace(object_id="cube", affordance="drawer_target")
+        ),
     )
     engine.plan_request(request, object())
-    assert recorded[0].skill_options.downstream_object_target_poses == ()
+    assert len(recorded[0].skill_options.downstream_object_target_poses) == (
+        0 if destination == "drawer_target" else 1
+    )
     assert len(request.skill_options.downstream_object_target_poses) == 1

@@ -36,7 +36,7 @@ from .drawer_geometry import drawer_region
 
 __all__: list[str] = []
 
-DRAWER_TRANSPORT_CALL = "simulation.move_held_object"
+DRAWER_TRANSPORT_CALL = "gen_sim.drawer_transport"
 TRANSPORT_CLEARANCE = 0.12
 ENTRY_RIM_CLEARANCE = 0.12
 # The transport endpoint is deliberately outside the active drawer.  The
@@ -120,6 +120,12 @@ def prepare_drawer_graph(graph: dict[str, Any], scene: Any) -> dict[str, Any]:
                 "resources": deepcopy(call["resources"]),
             }
             if transport_id in by_id:
+                existing = by_id[transport_id]["call"]
+                if existing == {
+                    **transport_call,
+                    "call_id": "simulation.move_held_object",
+                }:
+                    existing["call_id"] = DRAWER_TRANSPORT_CALL
                 if by_id[transport_id]["call"] != transport_call or node[
                     "depends_on"
                 ] != [transport_id]:

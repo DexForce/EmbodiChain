@@ -42,7 +42,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 5
+MOTION_VALIDATION_REVISION = 6
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 
@@ -54,6 +54,22 @@ class _PlaceIKRecovery:
 _PLACE_IK_RECOVERY: ContextVar[_PlaceIKRecovery | None] = ContextVar(
     "gen_sim_place_ik_recovery", default=None
 )
+
+_CARTESIAN_APPROACH: ContextVar[bool] = ContextVar(
+    "gen_sim_cartesian_approach", default=False
+)
+
+
+@contextmanager
+def cartesian_approach_scope(enabled: bool) -> Iterator[None]:
+    """Select one invocation's planner behavior and restore it even on failure."""
+    if type(enabled) is not bool:
+        raise TypeError("Cartesian planning mode must be a bool.")
+    token = _CARTESIAN_APPROACH.set(enabled)
+    try:
+        yield
+    finally:
+        _CARTESIAN_APPROACH.reset(token)
 
 
 @contextmanager
@@ -191,7 +207,7 @@ class CheckedMotionGenerator(MotionGenerator):
     def generate(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
     ) -> PlanResult:
-        if _PLACE_IK_RECOVERY.get() is not None:
+        if _CARTESIAN_APPROACH.get() or _PLACE_IK_RECOVERY.get() is not None:
             return _generate_cartesian_approach(self, target_states, options)
         return self._generate_checked(target_states, options)
 

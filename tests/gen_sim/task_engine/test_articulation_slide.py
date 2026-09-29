@@ -1152,7 +1152,7 @@ def test_drawer_open_place_close_builds_one_link_owned_container(
     transport_factory = next(
         f
         for f in deployment.integration.registration.registered_semantic_lowerer_factories
-        if f.call_id == "simulation.move_held_object"
+        if f.call_id == "gen_sim.drawer_transport"
     )
     from embodichain.lab.task_program.semantics import RegisteredSemanticCall
     from embodichain.lab.sim.atomic_actions import MoveHeldObjectOptions
@@ -1177,16 +1177,32 @@ def test_drawer_open_place_close_builds_one_link_owned_container(
         option_template=MoveHeldObjectOptions(),
     )
     assert lowered.registered_effect is None
-    assert load_config(paths.execution_policy)["motion"]["sample_count"] >= 260
+    assert load_config(paths.execution_policy)["motion"]["sample_count"] == 140
+    assert set(
+        load_config(paths.program.parent / "constraints.json")[
+            "motion_samples"
+        ].values()
+    ) == {260}
     assert binding.containers[0].parent_id == route.binding.link_id
     assert route.binding.part_id
     transport = [
         n
         for n in graph["nodes"]
-        if n["call"].get("call_id") == "simulation.move_held_object"
+        if n["call"].get("call_id") == "gen_sim.drawer_transport"
         and n["call"]["arguments"]["target"] == route.affordance
     ]
     assert len(transport) == 1
+    assert "gen_sim.drawer_transport" not in integration["profile"]["effect_monitors"]
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        prepare_drawer_graph,
+    )
+
+    assert prepare_drawer_graph(graph, drawer_container_scene) == graph
+    legacy = deepcopy(graph)
+    legacy_transport = next(n for n in legacy["nodes"] if n["id"] == transport[0]["id"])
+    legacy_transport["call"]["call_id"] = "simulation.move_held_object"
+    assert prepare_drawer_graph(legacy, drawer_container_scene) == graph
+    assert legacy_transport["call"]["call_id"] == "simulation.move_held_object"
     place_node = next(n for n in graph["nodes"] if n["call"].get("kind") == "place")
     assert place_node["depends_on"] == [transport[0]["id"]]
     slides = [
@@ -1204,6 +1220,74 @@ def test_drawer_open_place_close_builds_one_link_owned_container(
     )
     assert placement["post"][0]["preset"] == "contained_rigid_object"
     assert items[-1]["validators"][0]["kind"] == "articulation_joint_position"
+
+
+def test_drawer_suffix_preserves_ordinary_transport_effect(
+    drawer_container_scene: PreparedScene, tmp_path: Path
+) -> None:
+    graph = _drawer_composite_graph(drawer_container_scene)
+    place = next(n for n in graph["nodes"] if n["call"].get("kind") == "place")
+    staging_id = "ordinary_staging"
+    staging = {
+        **deepcopy(place),
+        "id": staging_id,
+        "call": {
+            "kind": "registered",
+            "call_id": "simulation.move_held_object",
+            "arguments": {"object": "cube", "target": "inspection"},
+            "resources": deepcopy(place["call"]["resources"]),
+        },
+    }
+    graph["nodes"].insert(graph["nodes"].index(place), staging)
+    place["depends_on"] = [staging_id]
+    group = next(g for g in graph["task_groups"] if place["id"] in g["node_ids"])
+    group["node_ids"].insert(group["node_ids"].index(place["id"]), staging_id)
+    graph["targets"]["inspection"] = {
+        "kind": "cyclic_pose",
+        "values": [{"position": [0.1, 0.2, 1.0], "quaternion_xyzw": [0, 0, 0, 1]}],
+    }
+    _, paths = generate_task_program_bundle(
+        graph, drawer_container_scene, tmp_path / "mixed", robot_profile="dual_franka"
+    )
+    integration = load_config(paths.integration)
+    assert "simulation.move_held_object" in integration["profile"]["effect_monitors"]
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    factories = {
+        f.call_id: f
+        for f in deployment.integration.registration.registered_semantic_lowerer_factories
+    }
+    robot = object()
+    from embodichain.lab.task_program.semantics import SemanticEffectKind
+    from embodichain.lab.sim.atomic_actions import MoveHeldObjectOptions
+
+    for call_id, target, effect in (
+        ("simulation.move_held_object", "inspection", SemanticEffectKind.ATTACH),
+        (
+            "gen_sim.drawer_transport",
+            deployment.integration.adapter_factory.drawer_routes[0].affordance,
+            None,
+        ),
+    ):
+        lowerer = factories[call_id].create(
+            simulation=None,
+            robot=robot,
+            scene_registry=SimpleNamespace(
+                resolve=lambda *a, **kw: None, lookup=lambda *a: None
+            ),
+            engine=SimpleNamespace(robot=robot),
+        )
+        assert lowerer.effect_contract_kind == effect
+        lowered = lowerer.lower(
+            RegisteredSemanticCall(call_id=call_id, arguments={"target": target}),
+            context=None,
+            bound=None,
+            option_template=MoveHeldObjectOptions(),
+        )
+        assert (lowered.registered_effect is None) == (effect is None)
 
 
 def test_composite_unifies_implicit_and_explicit_same_part(
