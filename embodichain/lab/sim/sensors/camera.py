@@ -146,6 +146,7 @@ class Camera(BaseSensor):
         *,
         owner: SimulationManager,
     ) -> None:
+        owner._require_native_renderer("Native cameras")
         self._world = owner.get_world()
         self._arenas = [owner.get_env(i) for i in range(owner.num_envs)]
         if len(self._arenas) == 0:
@@ -425,7 +426,9 @@ class Camera(BaseSensor):
             env_ids (Sequence[int] | None): The environment IDs to set the look at for. If None, set for all environments.
         """
         if up is None:
-            up = torch.tensor([[0.0, 0.0, 1.0]]).repeat(eye.shape[0], 1)
+            up = torch.tensor([[0.0, 0.0, 1.0]], device=eye.device).repeat(
+                eye.shape[0], 1
+            )
 
         pose = look_at_to_pose(eye, target, up)
         # To opengl coordinate system.
@@ -485,25 +488,35 @@ class Camera(BaseSensor):
 
         if self.cfg.extrinsics.eye is not None:
             eye = (
-                torch.tensor(self.cfg.extrinsics.eye, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.eye, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             target = (
-                torch.tensor(self.cfg.extrinsics.target, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.target, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
             )
             up = (
-                torch.tensor(self.cfg.extrinsics.up, dtype=torch.float32)
+                torch.tensor(
+                    self.cfg.extrinsics.up, dtype=torch.float32, device=self.device
+                )
                 .squeeze_(0)
                 .repeat(self.num_instances, 1)
                 if self.cfg.extrinsics.up is not None
                 else None
             )
+            if env_ids is not None:
+                eye, target = eye[env_ids], target[env_ids]
+                if up is not None:
+                    up = up[env_ids]
             self.look_at(eye, target, up, env_ids=env_ids)
         else:
-            pose = self.cfg.extrinsics.transformation
+            pose = self.cfg.extrinsics.transformation.to(self.device)
             pose = pose.unsqueeze_(0).repeat(self.num_instances, 1, 1)
 
             if self.cfg.extrinsics.parent is None:
@@ -511,4 +524,6 @@ class Camera(BaseSensor):
                 pose[:, :3, 1] = -pose[:, :3, 1]
                 pose[:, :3, 2] = -pose[:, :3, 2]
 
-            self.set_local_pose(pose, env_ids=env_ids)
+            self.set_local_pose(
+                pose if env_ids is None else pose[env_ids], env_ids=env_ids
+            )

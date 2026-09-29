@@ -193,7 +193,8 @@ def test_unitree_deployments_preserve_task_physics(
     )
     assert isinstance(config.sim_cfg.physics_cfg, physics_type)
     assert config.sim_cfg.physics_dt == pytest.approx(0.005)
-    assert config.sim_cfg.scene_node_capacity == 262144
+    expected_capacity = None if (robot, backend) == ("g1", "newton") else 262144
+    assert config.sim_cfg.scene_node_capacity == expected_capacity
     if backend == "default":
         assert config.sim_cfg.physics_cfg.to_dexsim_args()["cache_material"] is True
     else:

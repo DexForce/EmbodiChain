@@ -32,6 +32,7 @@ from dexsim.types import (
     ArticulationFlag,
     DriveType,
 )
+
 from dexsim.engine import MaterialInst
 
 from embodichain.lab.sim import VisualMaterialInst, VisualMaterial, ReuseSegmentState
@@ -284,20 +285,25 @@ class ArticulationData:
         self._qf = torch.zeros(
             (self.num_instances, self.dof), dtype=torch.float32, device=self.device
         )
-        self._qpos_limits = torch.as_tensor(
-            np.array([entity.get_joint_position_limits() for entity in self.entities]),
+        self._qpos_limits = torch.empty(
+            (self.num_instances, self.dof, 2),
             dtype=torch.float32,
             device=self.device,
         )
-        self._qvel_limits = torch.as_tensor(
-            np.array([entity.get_joint_velocity_limit() for entity in self.entities]),
+        self._qvel_limits = torch.empty(
+            (self.num_instances, self.dof),
             dtype=torch.float32,
             device=self.device,
         )
-        self._qf_limits = torch.as_tensor(
-            np.array([entity.get_joint_effort_limit() for entity in self.entities]),
+        self._qf_limits = torch.empty(
+            (self.num_instances, self.dof),
             dtype=torch.float32,
             device=self.device,
+        )
+        self.articulation_view.fetch_joint_properties(
+            position_limits=self._qpos_limits,
+            velocity_limit=self._qvel_limits,
+            effort_limit=self._qf_limits,
         )
 
     @property
@@ -307,6 +313,34 @@ class ArticulationData:
     @property
     def is_ready(self) -> bool:
         return self.articulation_view.is_ready
+
+    def fetch_state(self) -> dict[str, torch.Tensor]:
+        """Read current joint and root state together into reusable buffers.
+
+        Returns:
+            A mapping with ``qpos``, ``qvel``, ``root_pose``, ``root_lin_vel``,
+            and ``root_ang_vel``. Poses use ``xyz + xyzw`` and root velocities
+            are in the world frame. Tensor storage belongs to this data object
+            and is overwritten by subsequent reads of the same fields. Clone
+            a returned tensor when retaining a historical snapshot.
+
+        This call always fetches live data; it does not reuse a previous step's
+        values. Scene views delegate to DexSim's batched state reader.
+        """
+        self.articulation_view.fetch_state(
+            self._qpos,
+            self._qvel,
+            self._root_pose,
+            self._root_lin_vel,
+            self._root_ang_vel,
+        )
+        return {
+            "qpos": self._qpos,
+            "qvel": self._qvel,
+            "root_pose": self._root_pose,
+            "root_lin_vel": self._root_lin_vel,
+            "root_ang_vel": self._root_ang_vel,
+        }
 
     @property
     def root_pose(self) -> torch.Tensor:
@@ -571,6 +605,15 @@ class ArticulationData:
         self._default_inertia = inertia.to(self.device, dtype=torch.float32).clone()
         self._default_com_pose = com_pose.to(self.device, dtype=torch.float32).clone()
 
+    def _read_joint_property(self, field_name: str) -> torch.Tensor:
+        values = torch.empty(
+            (self.num_instances, self.dof),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.articulation_view.fetch_joint_properties(**{field_name: values})
+        return values
+
     @property
     def joint_stiffness(self) -> torch.Tensor:
         """Get the joint stiffness of the articulation.
@@ -578,13 +621,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The joint stiffness of the articulation with shape (N, dof).
         """
-        return torch.as_tensor(
-            np.array(
-                [self._entity_drive_properties(entity)[0] for entity in self.entities]
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._read_joint_property("stiffness")
 
     @property
     def joint_damping(self) -> torch.Tensor:
@@ -593,13 +630,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The joint damping of the articulation with shape (N, dof).
         """
-        return torch.as_tensor(
-            np.array(
-                [self._entity_drive_properties(entity)[1] for entity in self.entities]
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._read_joint_property("damping")
 
     @property
     def joint_friction(self) -> torch.Tensor:
@@ -608,13 +639,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The joint friction of the articulation with shape (N, dof).
         """
-        return torch.as_tensor(
-            np.array(
-                [self._entity_drive_properties(entity)[4] for entity in self.entities]
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._read_joint_property("friction")
 
     @property
     def joint_armature(self) -> torch.Tensor:
@@ -623,13 +648,7 @@ class ArticulationData:
         Returns:
             torch.Tensor: The joint armature of the articulation with shape (N, dof).
         """
-        return torch.as_tensor(
-            np.array(
-                [self._entity_drive_properties(entity)[5] for entity in self.entities]
-            ),
-            dtype=torch.float32,
-            device=self.device,
-        )
+        return self._read_joint_property("armature")
 
     @property
     def qpos_limits(self) -> torch.Tensor:
@@ -1796,6 +1815,96 @@ class Articulation(BatchEntity):
                 f"set_joint_effort_limit failed for envs {failed_envs} and joint_ids {joint_ids_np.tolist()}."
             )
 
+    def set_state(
+        self,
+        *,
+        env_ids: Sequence[int] | torch.Tensor | None = None,
+        joint_ids: Sequence[int] | torch.Tensor | None = None,
+        root_pose: torch.Tensor | None = None,
+        qpos: torch.Tensor | None = None,
+        target_qpos: torch.Tensor | None = None,
+        qvel: torch.Tensor | None = None,
+        target_qvel: torch.Tensor | None = None,
+        qf: torch.Tensor | None = None,
+        root_velocity: torch.Tensor | None = None,
+        clear_dynamics: bool = False,
+    ) -> None:
+        """Write selected physical state in one backend operation.
+
+        Args:
+            env_ids: Environment rows; None selects all environments.
+            joint_ids: Joint columns for all supplied joint tensors.
+            root_pose: Environment-local xyz + xyzw, shape (N, 7).
+            qpos: Current joint positions, shape (N, J), clipped to limits.
+            target_qpos: Position targets, shape (N, J), clipped to limits.
+            qvel: Current joint velocities, shape (N, J).
+            target_qvel: Velocity targets, shape (N, J).
+            qf: Generalized joint efforts, shape (N, J).
+            root_velocity: Root world linear + angular velocity, shape (N, 6).
+            clear_dynamics: Clear velocities, forces and solver history for
+                selected environments and hold their final joint positions.
+                Explicit fields override these defaults.
+
+        Unspecified positions and unselected environments retain their values.
+        Scene backends validate all field shapes before changing physics state.
+        Joint/root positions are propagated after the final fields are written.
+
+        Raises:
+            ValueError: A supplied field has an incompatible shape.
+            RuntimeError: The backend cannot write the selected state.
+        """
+        local_env_ids = self._resolve_env_ids(env_ids)
+        local_joint_ids = self._resolve_joint_ids(joint_ids)
+        fields: dict[str, torch.Tensor] = {}
+        limits = None
+        for name, value in (
+            ("qpos", qpos),
+            ("target_qpos", target_qpos),
+            ("qvel", qvel),
+            ("target_qvel", target_qvel),
+            ("qf", qf),
+        ):
+            if value is None:
+                continue
+            value = torch.as_tensor(value, dtype=torch.float32, device=self.device)
+            if value.ndim == 1:
+                value = value.unsqueeze(0)
+            expected = (len(local_env_ids), len(local_joint_ids))
+            if tuple(value.shape) != expected:
+                raise ValueError(
+                    f"Expected {name} shape {expected}, got {tuple(value.shape)}."
+                )
+            if name in ("qpos", "target_qpos"):
+                if limits is None:
+                    limits = self.body_data.qpos_limits[local_env_ids][
+                        :, local_joint_ids
+                    ]
+                value = value.clamp(limits[..., 0], limits[..., 1])
+            fields[name] = value
+        for name, value, width in (
+            ("root_pose", root_pose, 7),
+            ("root_velocity", root_velocity, 6),
+        ):
+            if value is not None:
+                value = torch.as_tensor(value, device=self.device, dtype=torch.float32)
+                expected = (len(local_env_ids), width)
+                if tuple(value.shape) != expected:
+                    raise ValueError(
+                        f"Expected {name} shape {expected}, got {tuple(value.shape)}."
+                    )
+                fields[name] = value
+        self._data.articulation_view.apply_state(
+            None if env_ids is None else local_env_ids,
+            joint_ids,
+            clear_dynamics=clear_dynamics,
+            **fields,
+        )
+        for name, velocity in (("target_qpos", False), ("target_qvel", True)):
+            if name in fields:
+                self._stabilize_newton_mimic_target_write(
+                    fields[name], local_env_ids, local_joint_ids, velocity=velocity
+                )
+
     def set_qpos(
         self,
         qpos: torch.Tensor,
@@ -1814,46 +1923,11 @@ class Articulation(BatchEntity):
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qpos`.
         """
-        # TODO: Refactor this part to use a more generic and extensible approach,
-        # such as a class decorator that can automatically convert ndarray to torch.Tensor
-        # and handle dimension padding for specified member functions.
-        # This will make the codebase cleaner and reduce repetitive type checks/conversions.
-        # (e.g., support specifying which methods should be decorated for auto-conversion.)
-        if not isinstance(qpos, torch.Tensor):
-            qpos = torch.as_tensor(qpos, dtype=torch.float32, device=self.device)
-        else:
-            qpos = qpos.to(device=self.device, dtype=torch.float32)
-
-        local_joint_ids = self._resolve_joint_ids(joint_ids)
-        local_env_ids = self._resolve_env_ids(env_ids)
-
-        # Make sure qpos is 2D tensor
-        if qpos.dim() == 1:
-            qpos = qpos.unsqueeze(0)
-
-        if len(local_env_ids) != len(qpos):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match qpos length {len(qpos)}. "
-                f"env_ids: {local_env_ids}, qpos.shape: {qpos.shape}"
-            )
-
-        selected_limits = self.body_data.qpos_limits[local_env_ids][
-            :, local_joint_ids, :
-        ]
-        qpos = qpos.clamp(selected_limits[..., 0], selected_limits[..., 1])
-        self._data.articulation_view.apply_qpos(
-            qpos,
-            None if env_ids is None else local_env_ids,
-            None if joint_ids is None else local_joint_ids,
-            target=target,
+        self.set_state(
+            env_ids=env_ids,
+            joint_ids=joint_ids,
+            **{"target_qpos" if target else "qpos": qpos},
         )
-        if target:
-            self._stabilize_newton_mimic_target_write(
-                qpos,
-                local_env_ids,
-                local_joint_ids,
-                velocity=False,
-            )
 
     def get_qvel(self, target: bool = False) -> torch.Tensor:
         """Get the current velocities (qvel) or target velocities (target_qvel) of the articulation.
@@ -1903,36 +1977,11 @@ class Articulation(BatchEntity):
         Raises:
             ValueError: If the length of `env_ids` does not match the length of `qvel`.
         """
-        local_env_ids = self._resolve_env_ids(env_ids)
-
-        if not isinstance(qvel, torch.Tensor):
-            qvel = torch.as_tensor(qvel, dtype=torch.float32, device=self.device)
-        else:
-            qvel = qvel.to(device=self.device, dtype=torch.float32)
-
-        if qvel.dim() == 1:
-            qvel = qvel.unsqueeze(0)
-
-        if len(local_env_ids) != len(qvel):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match qvel length {len(qvel)}."
-            )
-
-        local_joint_ids = self._resolve_joint_ids(joint_ids)
-
-        self._data.articulation_view.apply_qvel(
-            qvel,
-            None if env_ids is None else local_env_ids,
-            None if joint_ids is None else local_joint_ids,
-            target=target,
+        self.set_state(
+            env_ids=env_ids,
+            joint_ids=joint_ids,
+            **{"target_qvel" if target else "qvel": qvel},
         )
-        if target:
-            self._stabilize_newton_mimic_target_write(
-                qvel,
-                local_env_ids,
-                local_joint_ids,
-                velocity=True,
-            )
 
     def set_qf(
         self,
@@ -1947,28 +1996,7 @@ class Articulation(BatchEntity):
             joint_ids (Sequence[int] | None, optional): Joint indices to apply the efforts. If None, applies to all joints.
             env_ids (Sequence[int] | None, optional): Environment indices. Defaults to all indices.
         """
-        local_env_ids = self._resolve_env_ids(env_ids)
-
-        if not isinstance(qf, torch.Tensor):
-            qf = torch.as_tensor(qf, dtype=torch.float32, device=self.device)
-        else:
-            qf = qf.to(device=self.device, dtype=torch.float32)
-
-        if qf.dim() == 1:
-            qf = qf.unsqueeze(0)
-
-        if len(local_env_ids) != len(qf):
-            logger.log_error(
-                f"Length of env_ids {len(local_env_ids)} does not match qf length {len(qf)}."
-            )
-
-        local_joint_ids = self._resolve_joint_ids(joint_ids)
-
-        self._data.articulation_view.apply_qf(
-            qf,
-            None if env_ids is None else local_env_ids,
-            None if joint_ids is None else local_joint_ids,
-        )
+        self.set_state(env_ids=env_ids, joint_ids=joint_ids, qf=qf)
 
     def get_qf(self) -> torch.Tensor:
         """Get the current generalized efforts (qf) of the articulation.

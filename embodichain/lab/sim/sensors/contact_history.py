@@ -36,6 +36,19 @@ if TYPE_CHECKING:
 __all__ = ["ContactHistory"]
 
 
+def _current_warp_stream(device: torch.device) -> wp.Stream | None:
+    """Reuse a registered Warp stream when Torch is already running on it."""
+    if device.type != "cuda":
+        return None
+    current = torch.cuda.current_stream(device)
+    stream = wp.get_stream(str(device))
+    # A temporary second Warp wrapper unregisters the shared native handle on
+    # destruction in Warp 1.17, invalidating an enclosing capture.
+    if stream.cuda_stream == current.cuda_stream:
+        return stream
+    return wp.stream_from_torch(current)
+
+
 class ContactHistory:
     """Accumulate selected contacts across one control interval.
 
@@ -132,11 +145,7 @@ class ContactHistory:
             dim=dim,
             inputs=inputs,
             device=str(self.actor_ids.device),
-            stream=(
-                wp.stream_from_torch(self.actor_ids.device)
-                if self.actor_ids.is_cuda
-                else None
-            ),
+            stream=_current_warp_stream(self.actor_ids.device),
         )
 
     def _finish_sample(self, dt: float) -> None:
@@ -214,7 +223,13 @@ class ContactHistory:
         Args:
             env_ids: Rows to clear. None selects every environment.
         """
-        ids = slice(None) if env_ids is None else env_ids
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).to(
+                self.contact.device, non_blocking=True
+            )
+        )
         for value in (
             self.contact,
             self.found,
@@ -227,4 +242,7 @@ class ContactHistory:
             self._hits,
             self._env_hits,
         ):
-            value[ids] = 0
+            if ids is None:
+                value.zero_()
+            else:
+                value.index_fill_(0, ids, 0)
