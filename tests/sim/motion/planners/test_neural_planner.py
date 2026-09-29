@@ -476,6 +476,30 @@ def test_neural_planner_constraints_replace_timing_and_bound_dynamics(
     assert retimed.xpos_list.shape[:2] == retimed.positions.shape[:2]
 
 
+def test_retiming_grid_density_controls_how_closely_limits_are_met():
+    # The reconstructed acceleration only approaches its constraint as the
+    # parameterization grid is refined, so the density is what makes a
+    # limit-respecting claim true rather than approximate.
+    torch.manual_seed(0)
+    path = torch.cumsum(torch.randn(1, 14, 7) * 0.12, dim=1)
+    limits = {"velocity": [2.62] * 7, "acceleration": 10.0}
+
+    def peak(gridpoints):
+        result = retime_joint_paths(
+            path,
+            constraints=limits,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.01,
+            gridpoints=gridpoints,
+        )
+        return float(result.accelerations.abs().max())
+
+    coarse, fine = peak(140), peak(3000)
+    assert coarse > 10.0
+    assert fine < coarse
+    assert fine == pytest.approx(10.0, abs=0.01)
+
+
 def test_retime_joint_paths_rejects_malformed_input():
     positions = torch.zeros(1, 4, NUM_ARM_JOINTS)
     limits = {"velocity": 1.0, "acceleration": 1.0}

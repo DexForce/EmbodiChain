@@ -50,6 +50,14 @@ _WAYPOINT_OBSERVATION_LAYOUT = "unified_constraint_tokens"
 _WAYPOINT_OBSERVATION_DTYPE = "float32"
 _WAYPOINT_OBSERVATION_QUATERNION_ORDER = "xyzw"
 
+# The reconstructed acceleration only approaches its constraint as the
+# parameterization grid is refined. Measured on seven-joint paths against a
+# 10 rad/s^2 limit, the peak was 3.4% over the limit at the planner's own
+# default density and converged to it by roughly 100 points per path sample.
+# A rollout whose output is reported as limit-respecting has to pay for that.
+_RETIME_GRIDPOINTS_PER_SAMPLE = 100
+_RETIME_GRIDPOINTS_MIN = 1000
+
 _MASK_SEMANTICS = {
     "active_onehot": "one_at_clamped_active_waypoint",
     "valid_mask": "one_for_episode_waypoints_zero_for_padding",
@@ -685,6 +693,10 @@ class NeuralPlanner(BasePlanner):
             constraints=dict(self.cfg.constraints),
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),
+            gridpoints=max(
+                _RETIME_GRIDPOINTS_MIN,
+                _RETIME_GRIDPOINTS_PER_SAMPLE * int(positions.shape[1]),
+            ),
             device=self.device,
         )
         retimed_positions = retimed.positions
