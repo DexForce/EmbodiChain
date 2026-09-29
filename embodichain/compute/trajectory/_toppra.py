@@ -87,14 +87,23 @@ class _NumpyToppra:
             raise ValueError("waypoints must be finite")
         self.vlim = _limits(velocity, points.shape[1])
         self.alim = _limits(acceleration, points.shape[1])
-        # Preserve the planner's historical tolerance and final knot, including
-        # a repeated endpoint: dropping it changes the fitted cubic geometry.
+        # A run of samples within the tolerance is one point. When the run ends
+        # the path, move the last kept knot onto the final sample instead of
+        # appending it: a repeated end knot is a zero-length segment the cubic
+        # fit must bend back through, and it changes every knot's spacing. A
+        # converged environment holding its pose in a batched rollout produces
+        # exactly that tail. A lone first point still gains the final sample
+        # when they differ at all, so a tiny move keeps a real duration.
         keep = [0]
         for i in range(1, len(points)):
             if np.max(np.abs(points[i] - points[keep[-1]])) >= 1e-6:
                 keep.append(i)
-        if keep[-1] != len(points) - 1:
-            keep.append(len(points) - 1)
+        last = len(points) - 1
+        if keep[-1] != last:
+            if len(keep) > 1:
+                keep[-1] = last
+            elif np.any(points[last] != points[0]):
+                keep.append(last)
         self.points = points[keep].astype(np.float64)
         self.duration = 0.0
         if np.all(self.points == self.points[0]):

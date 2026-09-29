@@ -98,6 +98,22 @@ class TestToppraWorker:
         assert out["success"] is True
         assert out["positions"].shape == (20, 6)
 
+    def test_solve_one_env_held_tail_keeps_the_motion(self):
+        # The planner-level entry point shares the reference cleanup.
+        rng = np.random.default_rng(5)
+        path = np.cumsum(rng.normal(size=(6, 6)) * 0.1, axis=0)
+        held = np.concatenate([path, np.repeat(path[-1:], 5, axis=0)])
+        solve = lambda wp: _toppra_solve_one_env(
+            waypoints=wp,
+            vel_constraint=1.0,
+            acc_constraint=2.0,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.01,
+        )
+        plain, holding = solve(path), solve(held)
+        assert plain["success"] and holding["success"]
+        assert holding["dt"].sum() == pytest.approx(plain["dt"].sum(), rel=1e-9)
+
 
 class TestToppraCfgFields:
     def test_cfg_defaults(self):
