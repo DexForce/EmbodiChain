@@ -59,9 +59,10 @@ def build_topp_kernels(num_joints: int, num_sets: int, double: bool) -> tuple:
     G = int(num_sets)
     F = wp.float64 if double else wp.float32
     EPS = 1.0e-12 if double else 1.0e-7
-    SQRT_FLOOR = 1.0e-12 if double else 1.0e-10
+    # Smallest normal number: squared speeds below it are rest, anything above
+    # is a real speed, however slow.
+    TINY = 2.2250738585072014e-308 if double else 1.1754943508222875e-38
     TINY_SQUARE = 1.0e-30
-    DENOMINATOR_FLOOR = 1.0e-12
     BIG = _BIG
 
     @wp.kernel(module="unique")
@@ -162,10 +163,10 @@ def build_topp_kernels(num_joints: int, num_sets: int, double: bool) -> tuple:
         for i in range(n):
             s0 = F(0.0)
             s1 = F(0.0)
-            if x[b, i] > F(SQRT_FLOOR):
+            if x[b, i] > F(TINY):
                 s0 = wp.sqrt(x[b, i])
-            if x[b, i + 1] > F(SQRT_FLOOR):
+            if x[b, i + 1] > F(TINY):
                 s1 = wp.sqrt(x[b, i + 1])
-            seg[b, i] = F(2.0) * ds[i] / wp.max(s0 + s1, F(DENOMINATOR_FLOOR))
+            seg[b, i] = F(2.0) * ds[i] / wp.max(s0 + s1, F(TINY))
 
     return rows_kernel, cap_kernel, sweep_kernel

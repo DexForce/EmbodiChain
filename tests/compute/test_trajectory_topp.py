@@ -286,19 +286,47 @@ def test_tiny_moves_get_a_real_duration() -> None:
     assert float(result.duration) > 0.0
 
 
-def test_a_move_below_the_duplicate_tolerance_still_ends_at_the_goal() -> None:
+def test_a_move_below_the_duplicate_tolerance_is_timed_not_teleported() -> None:
+    # Merging it into a hold would either miss the goal or change the pose
+    # across a zero interval; either is wrong for a real, if tiny, move.
     start = torch.zeros(7, dtype=torch.float64)
     goal = torch.full((7,), 5e-7, dtype=torch.float64)
     result = trajectory.retime_time_optimal(
         torch.stack([start, goal])[None],
         FR3_VELOCITY,
         FR3_ACCELERATION,
-        sample_interval=0.01,
+        sample_interval=0.0001,
         backend="torch",
     )
-    assert float(result.duration) == 0.0
+    assert float(result.duration) > 0.0
     torch.testing.assert_close(result.positions[0, 0], start)
     torch.testing.assert_close(result.positions[0, -1], goal)
+    moved = (result.positions[0, 1:] - result.positions[0, :-1]).abs().amax(-1) > 0
+    assert bool((result.dt[0, 1:][moved] > 0).all())
+
+
+def test_identical_waypoints_hold_without_moving() -> None:
+    pose = _random_path(8, count=1)[0]
+    result = trajectory.retime_time_optimal(
+        pose.expand(1, 5, 7), FR3_VELOCITY, FR3_ACCELERATION, sample_interval=0.01
+    )
+    assert float(result.duration) == 0.0
+    torch.testing.assert_close(result.positions[0], pose.expand_as(result.positions[0]))
+
+
+@pytest.mark.parametrize("backend", ["torch", "warp"])
+def test_a_slow_velocity_limit_is_timed_not_treated_as_rest(backend: str) -> None:
+    # dq/ds = 1 against a 5e-7 rad/s limit puts the squared path speed near
+    # 2.5e-13: slow, but a speed. Treating it as rest would report zero
+    # velocity and time the segments from a floor instead of the profile.
+    grid = torch.linspace(0.0, 1.0, 51, dtype=torch.float64)
+    path_velocity = torch.zeros(1, 51, 3, dtype=torch.float64)
+    path_velocity[..., 0] = 1.0
+    profile = trajectory.parameterize_time_optimal(
+        path_velocity, torch.zeros_like(path_velocity), grid, 5e-7, 1e3, backend=backend
+    )
+    assert float(profile.duration) == pytest.approx(1.0 / 5e-7, rel=0.05)
+    assert float(profile.sdot_sq[0, 25].sqrt()) == pytest.approx(5e-7, rel=1e-6)
 
 
 @pytest.mark.parametrize("backend", ["torch", "warp"])

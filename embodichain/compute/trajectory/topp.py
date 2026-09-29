@@ -48,9 +48,8 @@ __all__ = [
 ]
 
 _BIG = 1.0e12
-# Floors that keep divisions finite without discarding a small nonzero value.
+# Floor that keeps a division finite without discarding a small nonzero value.
 _TINY_SQUARE = 1.0e-30
-_DENOMINATOR_FLOOR = 1.0e-12
 _DISCRETIZATION_SETS = {"collocation": 1, "interpolation": 2}
 
 # The parameterization only enforces its limits at grid points; between them
@@ -105,20 +104,23 @@ class TimeOptimalTrajectory:
     success: torch.Tensor
 
 
-def _eps(dtype: torch.dtype) -> tuple[float, float]:
-    """Return the degeneracy threshold and square-root floor for a dtype."""
-    return (1.0e-12, 1.0e-12) if dtype == torch.float64 else (1.0e-7, 1.0e-10)
+def _eps(dtype: torch.dtype) -> float:
+    """Return the degeneracy threshold on a path derivative for a dtype."""
+    return 1.0e-12 if dtype == torch.float64 else 1.0e-7
 
 
-def _speed(sdot_sq: torch.Tensor, floor: float) -> torch.Tensor:
-    """Square root that returns exactly zero at rest and a finite gradient.
+def _speed(sdot_sq: torch.Tensor) -> torch.Tensor:
+    """Square root that is exactly zero at rest and has a finite gradient.
 
-    A plain floor would report a small nonzero speed where the profile is at
-    rest, such as the first sample; the inner clamp keeps the untaken branch's
-    gradient finite.
+    Only squared speeds below the dtype's smallest normal number count as
+    rest. A larger floor would report a slow but real speed as zero -- a tight
+    velocity limit can legitimately put the squared speed below 1e-12 -- and
+    would then time those segments from the floor instead of the profile. The
+    inner clamp keeps the untaken branch's gradient finite.
     """
+    tiny = torch.finfo(sdot_sq.dtype).tiny
     return torch.where(
-        sdot_sq > floor, sdot_sq.clamp_min(floor).sqrt(), torch.zeros_like(sdot_sq)
+        sdot_sq > tiny, sdot_sq.clamp_min(tiny).sqrt(), torch.zeros_like(sdot_sq)
     )
 
 
@@ -157,7 +159,7 @@ def _parameterize_torch(
     num_sets: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Reference implementation; the Warp kernels compute the same values."""
-    eps, sqrt_floor = _eps(path_velocity.dtype)
+    eps = _eps(path_velocity.dtype)
     batch, count, _ = path_velocity.shape
     n = count - 1
     a, b = _constraint_rows(path_velocity, path_acceleration, ds, num_sets)
@@ -228,8 +230,10 @@ def _parameterize_torch(
         x.append(torch.minimum((x[i] + two * u_i).clamp_min(0.0), xmax[i + 1]))
     x_t = torch.stack(x, dim=1)
     u_t = torch.stack(u, dim=1)
-    root = _speed(x_t, sqrt_floor)
-    segment_time = 2.0 * ds / (root[:, :-1] + root[:, 1:]).clamp_min(_DENOMINATOR_FLOOR)
+    root = _speed(x_t)
+    segment_time = (
+        2.0 * ds / (root[:, :-1] + root[:, 1:]).clamp_min(torch.finfo(x_t.dtype).tiny)
+    )
     return x_t, u_t, segment_time
 
 
@@ -570,8 +574,14 @@ def _distinct_waypoints(waypoints: torch.Tensor, tolerance: float) -> list[list[
         for index in range(1, row.shape[0]):
             if abs(row[index] - row[kept[-1]]).max() >= tolerance:
                 kept.append(index)
-        if len(kept) > 1 and kept[-1] != row.shape[0] - 1:
-            kept[-1] = row.shape[0] - 1
+        last = row.shape[0] - 1
+        if kept[-1] != last:
+            if len(kept) > 1:
+                kept[-1] = last
+            elif (row[last] != row[0]).any():
+                # Even a move below the tolerance is a move: time it rather
+                # than let the pose change across a zero-length interval.
+                kept.append(last)
         rows.append(kept)
     return rows
 
@@ -615,9 +625,9 @@ def retime_time_optimal(
             waypoints count as the same point.
 
     Returns:
-        The sampled trajectory. A row whose waypoints all lie within
-        ``duplicate_tolerance`` of one another has zero duration: its first
-        sample is the first waypoint and the rest hold the last.
+        The sampled trajectory. A row whose waypoints are all identical has
+        zero duration and holds that pose; any difference between its first
+        and last waypoint, however small, is timed as a move.
 
     Raises:
         ValueError: For a malformed waypoint tensor, a non-positive sample
@@ -641,13 +651,10 @@ def retime_time_optimal(
     )
     grid = torch.linspace(0.0, 1.0, int(grid_count), dtype=dtype, device=device)
 
-    # A row with no movement beyond the tolerance starts at its first waypoint
-    # and holds its last, so it still ends exactly where it was asked to.
+    # Only a row whose waypoints are all identical stays here, so holding its
+    # first waypoint never moves the pose across a zero interval.
     def held(length: int) -> torch.Tensor:
-        return torch.cat(
-            [waypoints[:, :1], waypoints[:, -1:].expand(batch, length - 1, joints)],
-            dim=1,
-        )
+        return waypoints[:, :1].expand(batch, length, joints).contiguous()
 
     positions = held(2)
     velocities = torch.zeros_like(positions)
@@ -709,7 +716,7 @@ def retime_time_optimal(
             profile.segment_time.shape[1] - 1,
         )
         tau = times - elapsed.gather(1, segment)
-        speed0 = _speed(profile.sdot_sq.gather(1, segment), _eps(dtype)[1])
+        speed0 = _speed(profile.sdot_sq.gather(1, segment))
         accel = profile.sddot.gather(1, segment)
         s = grid[segment] + speed0 * tau + 0.5 * accel * tau**2
         speed = (speed0 + accel * tau).clamp_min(0.0)
