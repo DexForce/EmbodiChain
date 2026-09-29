@@ -45,7 +45,7 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
 )
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
-from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp, PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.state import TaskState
@@ -108,6 +108,57 @@ class GenSimPickUp(PickUp):
     binding_contract = PickUp.binding_contract
     adaptive_unconstrained = False
     pick_purposes: dict[str, str] | None = None
+
+    def _select_feasible_grasp_variants(
+        self,
+        grasp_xpos: torch.Tensor,
+        start_qpos: torch.Tensor,
+        object_poses: torch.Tensor,
+        manipulator: JointPositionTarget,
+        options: PickUpOptions,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Prefilter grasp columns, leaving IK and roll selection to shared PickUp."""
+        if (
+            options.rotate_upright is not None
+            or options.approach_alignment_max_angle is None
+        ):
+            return super()._select_feasible_grasp_variants(
+                grasp_xpos,
+                start_qpos,
+                object_poses,
+                manipulator,
+                options,
+                approach_direction,
+            )
+        mirrored = grasp_xpos.clone()
+        mirrored[..., :3, :2] *= -1
+        variants = torch.stack((grasp_xpos, mirrored), dim=2)
+        eef_variants = variants @ options.grasp_frame_to_eef.to(
+            device=self.device, dtype=grasp_xpos.dtype
+        )
+        aligned = self._approach_alignment_mask(
+            eef_variants, options, approach_direction
+        )
+        # Keep the full environment axis and both roll variants of a retained
+        # candidate. Only columns rejected by every row can be removed safely.
+        keep = aligned.any(dim=(0, 2))
+        selected = eef_variants[:, :, 0].clone()
+        success = torch.zeros(
+            grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
+        )
+        if keep.any():
+            poses, valid = super()._select_feasible_grasp_variants(
+                grasp_xpos[:, keep],
+                start_qpos,
+                object_poses,
+                manipulator,
+                options,
+                approach_direction,
+            )
+            selected[:, keep] = poses
+            success[:, keep] = valid
+        return selected, success
 
     def _plan(self, request, context):
         if self.adaptive_unconstrained:
