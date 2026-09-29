@@ -1531,6 +1531,49 @@ def test_adapter_factory_binds_registration_to_initialized_environment(
     }
 
 
+def test_adapter_factory_forwards_policy_planner_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execution-policy planner data reaches the live simulation factory."""
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    planner_config = {"type": "toppra", "config": {"max_workers": 2}}
+    factory = SimulationTaskProgramAdapterFactory(
+        registration,
+        planner_config=planner_config,
+    )
+    captured: dict[str, object] = {}
+
+    def _create_adapter(bound_environment: object, **kwargs: object):
+        captured["environment"] = bound_environment
+        captured.update(kwargs)
+        return object.__new__(TaskProgramEnvironmentAdapter)
+
+    monkeypatch.setattr(
+        simulation_environment_module,
+        "create_simulation_task_program_adapter",
+        _create_adapter,
+    )
+
+    factory.create_adapter(object())
+
+    assert captured["planner_config"] == planner_config
+
+
+def test_planner_config_decodes_to_typed_runtime_cfg() -> None:
+    """A serialized planner selection becomes the selected planner config type."""
+    planner_cfg = simulation_environment_module._planner_cfg_from_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        robot_uid="robot",
+    )
+
+    assert isinstance(planner_cfg, simulation_environment_module.ToppraPlannerCfg)
+    assert planner_cfg.robot_uid == "robot"
+    assert planner_cfg.max_workers == 2
+
+
 def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:
     """The standard path preserves exact ownership through live assembly."""
     robot = _Robot()

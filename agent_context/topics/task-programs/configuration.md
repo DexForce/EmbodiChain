@@ -72,8 +72,10 @@ Ownership is explicit rather than a generic deep merge:
 - `configs/components/embodiments/*.yaml` owns simulation robot construction,
   the sensor suite, and an optional `skill_profile` containing logical
   resources/endpoints, command presets, and embodiment-specific services;
-- `configs/components/execution_policies/*.yaml` owns motion, tracking,
-  recovery, runner, and effect-assurance policy.
+- `configs/components/execution_policies/*.yaml` owns planner
+  selection/configuration, motion, tracking, recovery, runner, and
+  effect-assurance policy. Planner collision objects are attached from the
+  selected live scene and are not serialized in the policy.
 
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
