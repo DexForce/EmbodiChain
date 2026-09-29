@@ -390,6 +390,7 @@ class BenchmarkRunner:
             device=self.device,
             sample_interval=self.suite.protocol.sample_interval,
             robot_id=self.suite.robot.id,
+            joint_velocity_limit_rad_s=self.suite.protocol.joint_velocity_limit_rad_s,
             joint_acceleration_limit_rad_s2=(
                 self.suite.protocol.joint_acceleration_limit_rad_s2
             ),

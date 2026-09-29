@@ -66,6 +66,8 @@ class PlannerContext:
     device: torch.device
     sample_interval: int
     robot_id: str = "unknown"
+    joint_velocity_limit_rad_s: float | Sequence[float] | None = None
+    """The suite's velocity limit override, or ``None`` to use the asset's."""
     joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None
     """The suite's acceleration limit, or ``None`` when it states none.
 
