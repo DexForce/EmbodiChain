@@ -471,12 +471,25 @@ class SemanticTaskPlanner:
                         result_objects=result_objects,
                         steps_by_id=steps_by_id,
                     )
-                displacement = self._transport_world_displacement(
-                    step,
-                    object_id=object_id,
-                    target_id=target_id,
-                    objects=objects,
-                )
+                transport_arguments = {
+                    "object": object_id,
+                    "target": f"{step_id}_coordinated_target",
+                }
+                if target_id is not None and step.get("relation") == "on":
+                    if terminal_behavior != "place":
+                        raise UnsupportedSemanticCapabilityError(
+                            "E5 on-support placement requires terminal_behavior=place."
+                        )
+                    transport_arguments.update(reference=target_id, relation="on")
+                else:
+                    transport_arguments["world_displacement"] = (
+                        self._transport_world_displacement(
+                            step,
+                            object_id=object_id,
+                            target_id=target_id,
+                            objects=objects,
+                        )
+                    )
                 calls = [
                     {
                         "kind": "registered",
@@ -485,11 +498,7 @@ class SemanticTaskPlanner:
                             if terminal_behavior == "place"
                             else _COORDINATED_HOLD_CALL_ID
                         ),
-                        "arguments": {
-                            "object": object_id,
-                            "target": f"{step_id}_coordinated_target",
-                            "world_displacement": displacement,
-                        },
+                        "arguments": transport_arguments,
                         "resources": {"left": "left", "right": "right"},
                     }
                 ]

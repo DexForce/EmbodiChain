@@ -299,11 +299,16 @@ def generate_task_program_bundle(
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     if drawers or any(
-        node["call"]["kind"] == "hand_over" or node["task_type"] in {"E2", "E6"}
+        node["call"]["kind"] == "hand_over"
+        or node["task_type"] in {"E2", "E6"}
+        or (
+            node["call"].get("call_id") == _COORDINATED_TRANSPORT_CALL_ID
+            and node["call"].get("arguments", {}).get("relation") == "on"
+        )
         for node in selected_graph["nodes"]
     ):
-        # Leave motion time for drawer/E6 motion, handover and upright staging
-        # without shrinking a larger budget. Keep the velocity checks intact.
+        # Leave time for staged motion and coordinated on-support transfers,
+        # without shrinking a larger budget or relaxing velocity checks.
         policy_payload["motion"]["sample_count"] = max(
             260, policy_payload["motion"]["sample_count"]
         )
@@ -525,6 +530,12 @@ def _task_stability_payload(
             graph, scene, settled=True, upright_only=True
         )
     }
+    coordinated_on_routes = {
+        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        for r in _relative_place_route_payloads(
+            graph, scene, settled=True, coordinated_only=True
+        )
+    }
     motion_parts = {
         resource["resource_id"]: next(
             endpoint["control_part"]
@@ -670,6 +681,27 @@ def _task_stability_payload(
             _COORDINATED_TRANSPORT_CALL_ID,
         }:
             object_id = str(arguments["object"])
+            if "reference" in arguments:
+                reference_id = str(arguments["reference"])
+                route = coordinated_on_routes[
+                    (object_id, reference_id, arguments["relation"])
+                ]
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "placement",
+                    "entity": object_id,
+                    "reference": reference_id,
+                    "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+                coordinated_positions[object_id] = [
+                    value + delta
+                    for value, delta in zip(
+                        _position(objects[reference_id]),
+                        route["world_displacement"],
+                        strict=True,
+                    )
+                ]
+                continue
             position = coordinated_positions.get(
                 object_id, list(_position(objects[object_id]))
             )
@@ -1015,6 +1047,11 @@ def _integration_payload(
     inside_routes: list[tuple[str, str, str, str]] = []
     on_routes: list[tuple[str, str, str]] = []
     coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
+    coordinated_on_routes = {
+        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        for r in _relative_place_route_payloads(graph, scene, coordinated_only=True)
+    }
+    coordinated_on_lowerer_routes: list[dict[str, Any]] = []
     coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     move_held_routes: list[dict[str, Any]] = []
     pour_geometry: dict[str, dict[str, Any]] = {}
@@ -1097,6 +1134,16 @@ def _integration_payload(
             arguments = call["arguments"]
             object_id = str(arguments["object"])
             referenced_objects.add(object_id)
+            if "reference" in arguments:
+                reference_id = str(arguments["reference"])
+                referenced_objects.add(reference_id)
+                route = coordinated_on_routes[
+                    (object_id, reference_id, arguments["relation"])
+                ]
+                coordinated_on_lowerer_routes.append(
+                    {**route, "target_id": str(arguments["target"])}
+                )
+                continue
             displacement = tuple(
                 float(value)
                 for value in arguments.get(
@@ -1438,7 +1485,9 @@ def _integration_payload(
             for object_id, target_id, displacement in routes
         ]
 
-    lowerer_routes = coordinated_lowerer_routes(coordinated_routes)
+    lowerer_routes = (
+        coordinated_lowerer_routes(coordinated_routes) + coordinated_on_lowerer_routes
+    )
     hold_lowerer_routes = coordinated_lowerer_routes(coordinated_hold_routes)
     if len(pour_objects) > 1:
         raise ValueError("One generated bundle currently supports one Pour object.")
@@ -2161,6 +2210,7 @@ def _relative_place_route_payloads(
     *,
     settled: bool = False,
     upright_only: bool = False,
+    coordinated_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Project each release using only orientation changes preceding that call."""
     axis_align_objects: set[str] = set()
@@ -2181,13 +2231,26 @@ def _relative_place_route_payloads(
         ):
             axis_align_objects.add(str(call["arguments"]["object"]))
         selected_calls = (
-            {_UPRIGHT_PLACE_CALL_ID}
-            if upright_only
-            else {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}
+            {_COORDINATED_TRANSPORT_CALL_ID}
+            if coordinated_only
+            else (
+                {_UPRIGHT_PLACE_CALL_ID}
+                if upright_only
+                else {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}
+            )
         )
         if call["call_id"] not in selected_calls:
             continue
         arguments = call["arguments"]
+        if coordinated_only and "reference" not in arguments:
+            continue
+        if coordinated_only and (
+            arguments.get("relation") != "on"
+            or arguments["reference"] == arguments["object"]
+        ):
+            raise ValueError(
+                "Coordinated relative placement requires on a distinct rigid support."
+            )
         selector = (
             str(arguments["object"]),
             str(arguments["reference"]),
@@ -2233,7 +2296,9 @@ def _relative_place_route_payloads(
                 axis_align_objects=axis_align_objects,
                 table_top_z=scene.table_top_z,
             )
-            if settled and call["call_id"] == _STACK_PLACE_CALL_ID:
+            if settled and (
+                call["call_id"] == _STACK_PLACE_CALL_ID or coordinated_only
+            ):
                 displacement[2] -= _PLACEMENT_CLEARANCE
         route = {
             "object_id": object_id,

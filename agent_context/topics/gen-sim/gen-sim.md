@@ -107,6 +107,17 @@ two verified grasps of the same object are retained through motion, and hands
 open only at release. Missing or conflicting held state cannot fall back to
 re-picking. Consecutive E5 relative targets accumulate for terminal checks;
 release retreat exceeds the unchanged separation threshold with tracking margin.
+E5 `terminal_behavior=place` with `relation=on` retains the bound rigid support
+instead of converting it into an initial-pose direction. Bundle generation
+reuses E1 relative-placement height geometry; the coordinated lowerer targets
+the observed support position while preserving the carried object's observed
+orientation. Release clearance is excluded from the resting-position target,
+which is checked relative to the support again after cleanup. This uses the
+existing E5 position/stability acceptance, not a new contact certificate; mesh
+envelope limitations remain. Directional transport, hold and lift-return routes
+retain their existing budget; programs containing the new on-support transfer
+use at least 260 motion samples, without changing control dt or velocity limits.
+Regenerate bundles after this lowerer revision.
 For non-drawer Place, the current `GenSimPlace` planning scope selects the same
 Cartesian sampling policy in both checked and approach motion generators. Its
 planning and recovery do not depend on unrelated E2/HandOver calls elsewhere
