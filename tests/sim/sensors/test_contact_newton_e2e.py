@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import torch
 import warp as wp
@@ -175,6 +177,33 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse() -> None:
         assert torch.isfinite(data["position"][valid]).all()
         assert torch.isfinite(data["normal"][valid]).all()
         assert (data["impulse"][valid] > 1.0e-7).any()
+
+        # Cross-check the adapter against DexUni's native force report.  The
+        # sensor's normal impulse is the normal component of that force over
+        # the solver substep, so this catches axis/sign/unit regressions that
+        # finite-value assertions cannot detect.
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+        from newton import Contacts
+
+        backend = get_newton_backend(sim._world)
+        assert backend.solver.features.backend == "pure_mujoco"
+        report = Contacts(
+            backend.mujoco_solver.get_max_contact_count(),
+            0,
+            device=backend.model.device,
+            requested_attributes={"force"},
+        )
+        backend.mujoco_solver.update_contacts(report, backend.state_0)
+        raw_count = int(report.rigid_contact_count.numpy()[0])
+        raw_forces = report.force.numpy()[:raw_count, :3]
+        raw_normals = report.rigid_contact_normal.numpy()[:raw_count]
+        substep_dt = float(backend.cfg.dt) / int(backend.cfg.num_substeps)
+        raw_normal_impulse = abs((raw_forces * raw_normals).sum(axis=1)) * substep_dt
+        raw_normal_impulse = raw_normal_impulse[raw_normal_impulse > 1.0e-7]
+        sensor_total = float(data["impulse"][valid].sum().item())
+        raw_total = float(raw_normal_impulse.sum())
+        assert raw_total > 0.0
+        assert math.isclose(sensor_total, raw_total, rel_tol=2.0e-3, abs_tol=2.0e-4)
     finally:
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
