@@ -479,6 +479,100 @@ def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
     assert outcome.velocity_limit_violation is True
 
 
+def _nmg_adapter(**config):
+    """Build an NMG adapter against a stub context, without loading a policy."""
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qvel_limits = Mock(
+        return_value=torch.tensor([[2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]])
+    )
+    if config.pop("placeholder_velocity", False):
+        robot.get_qvel_limits = Mock(
+            return_value=torch.full((1, 7), float(torch.finfo(torch.float32).max))
+        )
+    context = PlannerContext(
+        robot=robot,
+        control_part="arm",
+        device=torch.device("cpu"),
+        sample_interval=40,
+        joint_velocity_limit_rad_s=config.pop("velocity_limit", None),
+        joint_acceleration_limit_rad_s2=config.pop("acceleration_limit", 10.0),
+    )
+    spec = PlannerSpecCfg(
+        id="nmg", adapter="nmg_onnx", role="candidate", enabled=True, config=config
+    )
+    return NmgOnnxAdapter(spec, context)
+
+
+def test_nmg_rows_declare_timing_by_whether_they_retime():
+    assert _nmg_adapter().native_timing is False
+    assert _nmg_adapter(retime=True).native_timing is True
+
+
+def test_nmg_retimes_against_the_same_limits_the_metrics_check():
+    # A self-assigned limit would make a satisfied result meaningless, so the
+    # adapter reads velocity from the asset and acceleration from the protocol
+    # -- the two sources compute_case_outcomes validates against.
+    constraints = _nmg_adapter(retime=True)._retiming_constraints()
+    assert constraints["velocity"] == pytest.approx(
+        [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
+    )
+    assert constraints["acceleration"] == pytest.approx(10.0)
+
+
+def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
+    # Retiming against float32 max would leave velocity unconstrained while
+    # reporting the row as limit-respecting.
+    adapter = _nmg_adapter(retime=True, placeholder_velocity=True)
+    with pytest.raises(ValueError, match="no usable joint velocity limit"):
+        adapter._retiming_constraints()
+
+    stated = _nmg_adapter(
+        retime=True, placeholder_velocity=True, velocity_limit=[2.62] * 7
+    )
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
+
+
+def test_nmg_retiming_requires_a_suite_acceleration_limit():
+    adapter = _nmg_adapter(retime=True, acceleration_limit=None)
+    with pytest.raises(ValueError, match="joint_acceleration_limit_rad_s2"):
+        adapter._retiming_constraints()
+
+
+def test_nmg_cli_overrides_reach_every_nmg_row():
+    # A checkpoint supplied on the command line must reach the paired row too;
+    # otherwise its availability check skips it and no comparison runs.
+    suite = load_suite("scripts/benchmark/motion_generation/suites/smoke.yaml")
+    _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
+    rows = {
+        spec.id: (spec.config["onnx_model_path"], spec.config["pos_eps"])
+        for spec in suite.planners
+        if spec.adapter == "nmg_onnx"
+    }
+    assert set(rows) == {"nmg", "nmg_retimed"}
+    assert rows["nmg"] == rows["nmg_retimed"] == ("/tmp/policy.onnx", 0.02)
+
+
+@pytest.mark.parametrize("suite_name", ["coverage", "smoke"])
+def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
+    suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
+    rows = {
+        spec.id: bool(spec.config.get("retime", False))
+        for spec in suite.planners
+        if spec.adapter == "nmg_onnx"
+    }
+    assert rows == {"nmg": False, "nmg_retimed": True}
+    # The paired arm must not diverge from the baseline anywhere else, or the
+    # comparison would measure the configuration difference too.
+    specs = {spec.id: dict(spec.config) for spec in suite.planners if spec.id in rows}
+    baseline = specs["nmg"]
+    retimed = {k: v for k, v in specs["nmg_retimed"].items() if k != "retime"}
+    assert retimed == baseline
+
+
 def test_hold_padded_batch_row_still_evaluates():
     # A batched planner pads a short row by repeating its final pose at a zero
     # interval. Differentiating straight through that hold steps the velocity

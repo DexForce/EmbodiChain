@@ -390,6 +390,11 @@ class BenchmarkRunner:
             device=self.device,
             sample_interval=self.suite.protocol.sample_interval,
             robot_id=self.suite.robot.id,
+            joint_velocity_limit_rad_s=self.suite.protocol.joint_velocity_limit_rad_s,
+            joint_acceleration_limit_rad_s2=(
+                self.suite.protocol.joint_acceleration_limit_rad_s2
+            ),
+            joint_jerk_limit_rad_s3=self.suite.protocol.joint_jerk_limit_rad_s3,
         )
         adapter = create_planner_adapter(spec, context)
         metadata = adapter.metadata

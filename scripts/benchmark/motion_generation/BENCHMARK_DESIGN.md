@@ -380,6 +380,19 @@ IK interpolation and TOPPRA should be enabled only through
 `--extra-baselines` or suite configuration. If enabled, they must still appear
 in reports and the leaderboard with role `diagnostic_baseline`.
 
+The free-space suites additionally carry a paired NMG arm, `nmg` and
+`nmg_retimed`, which differ only by `retime`. The retimed row re-parameterizes
+the same rollout under velocity from the asset and acceleration from the
+protocol, read from the sources `compute_case_outcomes` uses so that a
+satisfied result is not self-assigned. Retiming constrains those two only: the
+suites also state a jerk limit and the metrics validate against it, so a
+retimed row can still be reported as exceeding jerk. That is a real result
+about the policy's path, which retiming cannot smooth, rather than a failure of
+the velocity and acceleration guarantee. The pair separates the policy's path, which both rows share,
+from its timing, which only one row solves; because the nominal row reports no
+solved timing, its dynamic diagnostics are published but do not decide
+`motion_valid`.
+
 Use three paired tracks:
 
 1. **Free-space common input**: cuRobo uses an empty collision world. Both

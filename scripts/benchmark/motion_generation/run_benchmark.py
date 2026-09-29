@@ -220,8 +220,12 @@ def _apply_overrides(
     if rotation_threshold_rad is not None:
         suite.protocol.rotation_threshold_rad = rotation_threshold_rad
 
-    nmg = next((spec for spec in suite.planners if spec.id == "nmg"), None)
-    if nmg is not None:
+    # Every NMG row, not just the one named "nmg": a suite can pair a nominal
+    # and a retimed arm, and leaving the paired row without a checkpoint would
+    # silently drop it from availability and run no comparison at all. The
+    # paired rows must also keep identical tolerances, or the comparison would
+    # measure a tolerance difference alongside the timing one.
+    for nmg in (spec for spec in suite.planners if spec.adapter == "nmg_onnx"):
         if nmg_pos_eps is not None:
             nmg.config["pos_eps"] = nmg_pos_eps
         if nmg_rot_eps is not None:

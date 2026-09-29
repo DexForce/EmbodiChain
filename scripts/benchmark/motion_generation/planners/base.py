@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -65,6 +66,18 @@ class PlannerContext:
     device: torch.device
     sample_interval: int
     robot_id: str = "unknown"
+    joint_velocity_limit_rad_s: float | Sequence[float] | None = None
+    """The suite's velocity limit override, or ``None`` to use the asset's."""
+    joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None
+    """The suite's acceleration limit, or ``None`` when it states none.
+
+    An adapter that constrains its own output must use the same limits the
+    metrics check it against, or a satisfied result says nothing. Velocity
+    limits come from ``robot.get_qvel_limits()``, which the metrics also use;
+    acceleration has no asset source and is suite-owned.
+    """
+    joint_jerk_limit_rad_s3: float | Sequence[float] | None = None
+    """The suite's jerk limit, or ``None`` when it states none."""
 
 
 class PlannerAdapter(ABC):
