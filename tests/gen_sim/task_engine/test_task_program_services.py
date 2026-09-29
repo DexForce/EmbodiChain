@@ -319,9 +319,11 @@ def test_motion_velocity_guard_rejects_joint_branch_jumps_per_environment() -> N
 
 
 def test_final_plan_velocity_rejects_resampled_and_hand_jumps(monkeypatch) -> None:
-    from embodichain.gen_sim.task_engine._task_program import assembly
+    from embodichain.gen_sim.task_engine._task_program import planning_probe
 
-    monkeypatch.setattr(assembly, "_joint_velocity_limits", lambda *a: torch.ones(1, 2))
+    monkeypatch.setattr(
+        planning_probe, "_joint_velocity_limits", lambda *a: torch.ones(1, 2)
+    )
     for joint in (0, 1):
         positions = torch.zeros(1, 2, 2)
         positions[0, 1, joint] = 0.2
@@ -331,14 +333,14 @@ def test_final_plan_velocity_rejects_resampled_and_hand_jumps(monkeypatch) -> No
                 positions=positions, dt=torch.tensor([[0.0, 0.04]])
             ),
         )
-        result = assembly._validate_final_plan_velocity(plan, object())
+        result = planning_probe._validate_final_plan_velocity(plan, object())
         assert result["valid_mask"].tolist() == [False]
         assert result["diagnostics"][0]["control_joint_index"] == joint
         assert plan.plan_success.tolist() == [True]
 
 
 def test_failed_plan_can_expose_grasp_proposals_without_claiming_attachment() -> None:
-    from embodichain.gen_sim.task_engine._task_program.assembly import (
+    from embodichain.gen_sim.task_engine._task_program.planning_probe import (
         _planned_grasp_candidates,
     )
 
@@ -365,7 +367,7 @@ def test_failed_plan_can_expose_grasp_proposals_without_claiming_attachment() ->
 
 
 def test_initial_success_requires_final_trajectory_evidence() -> None:
-    from embodichain.gen_sim.task_engine._task_program.assembly import (
+    from embodichain.gen_sim.task_engine._task_program.planning_probe import (
         _validate_final_plan_velocity,
     )
 
