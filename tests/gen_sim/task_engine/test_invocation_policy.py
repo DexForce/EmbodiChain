@@ -134,6 +134,7 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
     engine = object.__new__(GenSimActionEngine)
     engine._cartesian_calls = frozenset({"special", "fails"})
+    engine._articulation_calls = {}
 
     def request(name):
         return SimpleNamespace(

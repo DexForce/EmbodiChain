@@ -148,6 +148,22 @@ Cartesian plans do not enter local IK recovery;
 the fallback preserves Cartesian samples, control timing and random state,
 and rechecks full-robot velocity after Place resampling. This is a bounded
 kinematic recovery, not collision or physical-placement qualification.
+E6 recovery is bound to exact registered Slide/withdraw invocation IDs, not
+all calls of those underlying skills. Failed single-environment CPU
+`PytorchSolver` / `ik_interp` pull-and-release plans can screen up to four
+terminal configurations, solve the contact path backwards, then connect a
+free-space joint approach. Slide recovery is capped at 1.5 times the request
+and 390 command frames; larger caller budgets are not shortened. Failed E6
+withdrawal can try local IK without changing its targets or frame budget.
+The shared skills still rebuild arm/hand commands and the shared executor
+still owns execution. Both routes retain tolerances, restore RNG/planning
+scope, validate final full-robot velocity, and require fresh discrete mesh
+clearance for the changed free-space motion. This is not continuous collision
+or zero non-target-contact certification. Successful plans, other semantic
+calls, collision-planner routes and shared Lab defaults remain unchanged.
+Recovery needs the GenSim `yourdfpy`/`python-fcl` dependencies; unavailable or
+unsupported geometry fails closed. Regenerate E6 bundles for the recovery
+fingerprint revision; non-E6 fingerprints are unchanged.
 E2 release preserves the observed aligned heading instead of adding another
 fixed yaw during descent; an upright instruction does not require that rotation.
 Generated E1/E2 deployments, including light E5 compositions, cap only grippers

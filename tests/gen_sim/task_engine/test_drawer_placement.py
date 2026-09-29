@@ -62,6 +62,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._coordinated_motion = coordinated
     factory._motion_samples = (("call", 260),)
     factory._cartesian_calls = ("drawer_call",)
+    factory._articulation_calls = (("drawer_call", "slide"),)
     factory._robot = object()
     factory._robot_profile_binding = SimpleNamespace(profile_id="profile")
     factory._create_motion_generator = Mock(
@@ -76,11 +77,18 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         assert result is drawer
         constructor.assert_called_once()
         assert constructor.call_args.kwargs["motion_samples"] == factory._motion_samples
+        assert (
+            constructor.call_args.kwargs["articulation_calls"]
+            == factory._articulation_calls
+        )
         parent.assert_not_called()
     else:
         assert result is standard
         parent.assert_called_once()
         assert parent.call_args.kwargs["motion_samples"] == factory._motion_samples
+        assert (
+            parent.call_args.kwargs["articulation_calls"] == factory._articulation_calls
+        )
         constructor.assert_not_called()
     assert [type(c.args[0]) for c in result.register.call_args_list] == [
         GenSimPickUp,

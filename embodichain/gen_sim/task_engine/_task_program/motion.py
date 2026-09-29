@@ -207,9 +207,18 @@ class CheckedMotionGenerator(MotionGenerator):
     def generate(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
     ) -> PlanResult:
+        from .articulation_recovery import motion_scope
+
+        scope = motion_scope(self)
+        if scope is not None and scope.tracks is not None:
+            return scope.replay(target_states, options)
         if _CARTESIAN_APPROACH.get() or _PLACE_IK_RECOVERY.get() is not None:
-            return _generate_cartesian_approach(self, target_states, options)
-        return self._generate_checked(target_states, options)
+            result = _generate_cartesian_approach(self, target_states, options)
+        else:
+            result = self._generate_checked(target_states, options)
+        if scope is not None:
+            scope.record(target_states, options)
+        return result
 
     def _generate_checked(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None

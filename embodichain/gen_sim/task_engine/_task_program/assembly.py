@@ -52,6 +52,7 @@ from .invocation_policy import (
     bind_cartesian_calls,
     bind_motion_samples,
     bind_pour_receivers,
+    bind_articulation_calls,
 )
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
@@ -72,6 +73,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         coordinated_motion: bool = False,
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
+        articulation_calls: tuple[tuple[str, str], ...] = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -81,6 +83,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._coordinated_motion = coordinated_motion
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
+        self._articulation_calls = articulation_calls
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -148,6 +151,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 drawer_observations=self._drawers,
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
+                articulation_calls=self._articulation_calls,
             )
         else:
             engine = GenSimActionEngine(
@@ -156,6 +160,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 grasp_pose_generators=self._grasp_pose_generators,
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
+                articulation_calls=self._articulation_calls,
             )
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
@@ -190,6 +195,7 @@ class TaskAdapterFactory:
     coordinated_grasp: bool = False
     motion_samples: tuple[tuple[str, int], ...] = ()
     cartesian_calls: tuple[str, ...] = ()
+    articulation_calls: tuple[tuple[str, str], ...] = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
@@ -315,6 +321,7 @@ class TaskAdapterFactory:
             coordinated_motion=self.coordinated_grasp,
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
+            articulation_calls=self.articulation_calls,
         )
         return factory.create_adapter()
 
@@ -476,6 +483,7 @@ def load_deployment(
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
+    articulation_calls = bind_articulation_calls(compiled)
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
@@ -483,10 +491,17 @@ def load_deployment(
         for item in program["program"]["items"]
     )
     pour_receivers = bind_pour_receivers(payload["pour_receivers"], compiled)
+    from .articulation_recovery import ARTICULATION_RECOVERY_REVISION
+
     fingerprint = canonical_hash(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {"articulation_recovery_revision": ARTICULATION_RECOVERY_REVISION}
+                if articulation_calls
+                else {}
+            ),
             **(
                 {
                     "coordinated_grasp_revision": COORDINATED_GRASP_REVISION,
@@ -534,6 +549,7 @@ def load_deployment(
         coordinated_grasp=coordinated,
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
+        articulation_calls=articulation_calls,
     )
     integration = replace(
         base.integration,
