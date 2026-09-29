@@ -1108,6 +1108,108 @@ def test_upright_alignment_lifts_before_rotating(
     assert (result.registered_effect is not None) is verify_retention
 
 
+def test_coordinated_legacy_reference_tuple_still_normalizes():
+    from embodichain.gen_sim.task_engine._task_program.services import (
+        _coordinated_transport_route,
+    )
+
+    route = _coordinated_transport_route(
+        ("tray", "goal", "table", tuple(torch.eye(4).flatten().tolist())), index=0
+    )
+    assert route.reference_entity_id == "table"
+    assert route.relation is None
+
+
+def test_coordinated_on_follows_observed_support_and_preserves_object_heading():
+    from embodichain.gen_sim.task_engine._task_program.services import (
+        _CoordinatedTransportLowerer,
+    )
+    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+
+    route = {
+        "object_id": "small",
+        "target_id": "landing",
+        "reference_entity_id": "large",
+        "relation": "on",
+        "world_displacement": [0, 0, 0.06],
+    }
+    factory = decode_task_lowerer(
+        {"kind": "coordinated_transport", "routes": [route]}, path="test"
+    )
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, label="plate", entity_id="small"
+    )
+    lowerer = _CoordinatedTransportLowerer(factory.routes, (semantics,))
+    obj = torch.eye(4)[None]
+    obj[:, :2, :2] = torch.tensor([[0.0, -1.0], [1.0, 0.0]])
+    ref = torch.eye(4)[None]
+    ref[:, :3, 3] = torch.tensor([0.2, -0.3, 0.7])
+    context = PlanningContext(
+        robot=RobotObservation(
+            timestamp=1.0, qpos=torch.zeros(1, 1), qvel=torch.zeros(1, 1)
+        ),
+        task=TaskState(batch_size=1, device="cpu"),
+        scene=SceneSnapshot(
+            timestamp=1.0,
+            version=1,
+            entities={"small": EntityState(obj), "large": EntityState(ref)},
+        ),
+        env_ids=torch.tensor([0]),
+    )
+    call = RegisteredSemanticCall(
+        call_id="simulation.coordinated_transport",
+        arguments={
+            "object": "small",
+            "target": "landing",
+            "reference": "large",
+            "relation": "on",
+        },
+    )
+    result = lowerer.lower(
+        call,
+        context=context,
+        bound=None,
+        option_template=CoordinatedPickmentOptions(release=True),
+    )
+    resolved = resolve_pose_goal(
+        result.goal.object_target_pose, context=context, name="target"
+    )
+    torch.testing.assert_close(resolved[:, :3, 3], torch.tensor([[0.2, -0.3, 0.76]]))
+    torch.testing.assert_close(resolved[:, :3, :3], obj[:, :3, :3])
+    from dataclasses import replace
+
+    shifted = ref.clone()
+    shifted[:, 0, 3] += 0.1
+    moved_context = replace(
+        context,
+        scene=SceneSnapshot(
+            timestamp=2.0,
+            version=2,
+            entities={"small": EntityState(obj), "large": EntityState(shifted)},
+        ),
+    )
+    moved = resolve_pose_goal(
+        result.goal.object_target_pose, context=moved_context, name="target"
+    )
+    torch.testing.assert_close(moved[:, :3, 3], torch.tensor([[0.3, -0.3, 0.76]]))
+    assert all(
+        e.relation is HeldObjectRelation.DETACHED
+        for e in result.registered_effect.held_objects
+    )
+    with pytest.raises(ValueError, match="on placement"):
+        decode_task_lowerer(
+            {"kind": "coordinated_hold", "routes": [route]}, path="test"
+        )
+    with pytest.raises(ValueError):
+        decode_task_lowerer(
+            {
+                "kind": "coordinated_transport",
+                "routes": [{**route, "relation": "inside"}],
+            },
+            path="test",
+        )
+
+
 def test_coordinated_hold_lowerer_retains_both_verified_attachments() -> None:
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(),
