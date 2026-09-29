@@ -198,9 +198,10 @@ held-object guard. Existing verifier callbacks remain compatible.
 
 Atomic Skill primitives continue to declare only an
 `EffectVerificationRequirement`; they do not read simulator objects or mutate
-physical state. Benchmark evaluators, Task Program effect monitors, and future
-Gym/RL reward views can consume the same evidence provider through separate
-adapters.
+physical state. Benchmark stage evaluators and runtime Atomic Action verifiers
+can consume the same evidence provider through separate adapters. Task Program,
+Gym/RL, and external decision-model adapters remain outside this benchmark
+foundation.
 
 Return one `PhysicalEvaluation` per environment, each containing the same ordered
 stage IDs. `StageOutcome.status` distinguishes `passed`, `failed`, `not_reached`,
