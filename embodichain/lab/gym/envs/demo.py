@@ -999,7 +999,7 @@ def execute_demo_episode(
 
             if action_error is not None:
                 raise RuntimeError(
-                    "Demo action expansion/generation, processing, or execution failed "
+                    "Demo action generation/expansion, processing, or execution failed "
                     "after an emergency safe-stop attempt."
                 ) from action_error
 

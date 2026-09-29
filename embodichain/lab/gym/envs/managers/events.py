@@ -127,7 +127,10 @@ def apply_expansion_profile_reset(
         cube = env.sim.get_rigid_object("cube")
         if cube is None:
             raise ValueError("expansion reset requires a rigid object named 'cube'")
-        pose_env_ids = row_ids.to(device=getattr(env, "device", "cpu"))
+        env_device = getattr(env, "device", None)
+        if not isinstance(env_device, (torch.device, str)):
+            env_device = selected_pose.device
+        pose_env_ids = row_ids.to(device=env_device)
         cube.set_local_pose(selected_pose, env_ids=pose_env_ids)
 
     if visual_registry is not None:

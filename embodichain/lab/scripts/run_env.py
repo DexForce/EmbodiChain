@@ -1437,7 +1437,12 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
 
-    expansion_request = _resolve_expansion_request(args, gym_config)
+    expansion_request = None
+    if (
+        getattr(args, "expansion_profile", None) is not None
+        or "expansion" in gym_config
+    ):
+        expansion_request = _resolve_expansion_request(args, gym_config)
     if expansion_request is not None:
         from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 
