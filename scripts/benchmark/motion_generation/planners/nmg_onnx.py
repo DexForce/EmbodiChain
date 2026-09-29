@@ -191,6 +191,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
             constraints=self._retiming_constraints() if self.retime else None,
+            retime_backend=str(values.get("retime_backend", "toppra")),
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 

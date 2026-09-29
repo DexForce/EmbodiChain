@@ -507,6 +507,50 @@ def test_retiming_grid_density_controls_how_closely_limits_are_met():
     assert fine == pytest.approx(10.0, abs=0.01)
 
 
+@pytest.mark.parametrize("backend", ["toppra", "differentiable"])
+def test_neural_planner_retime_backends_bound_dynamics(tmp_path, monkeypatch, backend):
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+        retime_backend=backend,
+    )
+    assert bool(retimed.success.all())
+    # Every joint the policy moved is retimed: the trajectory still starts
+    # where the rollout started and ends where it ended, joint by joint.
+    nominal = _rollout(tmp_path, monkeypatch, policy=SaturatingOnnxPolicy)
+    torch.testing.assert_close(retimed.positions[:, 0], nominal.positions[:, 0])
+    torch.testing.assert_close(retimed.positions[:, -1], nominal.positions[:, -1])
+    assert bool((retimed.velocities.abs().amax(dim=1) > 0).all())
+    assert float(retimed.velocities.abs().max()) <= 1.0 + 1e-6
+    # toppra's default grid overshoots between points; the differentiable
+    # solver's default density keeps it to about a percent.
+    assert float(retimed.accelerations.abs().max()) <= 2.0 * 1.05
+    assert retimed.xpos_list.shape[:2] == retimed.positions.shape[:2]
+
+
+def test_neural_planner_retime_backends_agree_on_duration(tmp_path, monkeypatch):
+    durations = {
+        backend: float(
+            _rollout(
+                tmp_path,
+                monkeypatch,
+                policy=SaturatingOnnxPolicy,
+                constraints={"velocity": 1.0, "acceleration": 2.0},
+                retime_backend=backend,
+            ).dt.sum()
+        )
+        for backend in ("toppra", "differentiable")
+    }
+    assert durations["differentiable"] == pytest.approx(durations["toppra"], rel=0.02)
+
+
+def test_neural_planner_rejects_an_unknown_retime_backend(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match="retime_backend"):
+        _rollout(tmp_path, monkeypatch, retime_backend="cubic")
+
+
 def test_retime_joint_paths_rejects_malformed_input():
     positions = torch.zeros(1, 4, NUM_ARM_JOINTS)
     limits = {"velocity": 1.0, "acceleration": 1.0}

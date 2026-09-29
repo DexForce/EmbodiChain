@@ -81,7 +81,13 @@ and overshoots a typical arm's velocity limit several times over. Setting
 `constraints` swaps that nominal timing for a TOPPRA parameterization through
 the shared entry point below; it resamples the path, so positions and poses
 change with the timing, and it cannot reduce the path's own jerk. Default
-remains `None`, which preserves the nominal-timing behavior.
+remains `None`, which preserves the nominal-timing behavior. `retime_backend`
+selects the solver: `toppra` (default) fits each environment on the CPU;
+`differentiable` uses `compute/trajectory/topp.py`, batched on the planner's
+device. They agree on the retimed trajectory except for batches in which an
+environment converges early and holds: `toppra`'s deduplication keeps one
+trailing duplicate knot, which lengthens that environment's motion, while the
+differentiable solver drops the held tail.
 
 Runtime/training frame differences must be expressed through explicit policy
 frame and TCP transforms. Target/FK quaternions follow the shared

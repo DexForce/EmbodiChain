@@ -19,7 +19,7 @@ from dataclasses import MISSING, dataclass
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Literal, Mapping
 import numpy as np
 import torch
 
@@ -354,6 +354,18 @@ class NeuralPlannerCfg(BasePlannerCfg):
     the path's own jerk -- only the duration over which it is traversed.
     """
 
+    retime_backend: Literal["toppra", "differentiable"] = "toppra"
+    """Implementation used when :attr:`constraints` is set.
+
+    ``toppra`` fits the rollout with the ``toppra`` library on the CPU, one
+    environment at a time. ``differentiable`` uses
+    :func:`embodichain.compute.trajectory.retime_time_optimal`, which solves the
+    same time-optimal problem batched on the planner's device and is
+    differentiable with respect to the rollout positions. It also drops a
+    held tail entirely, so an environment that converged early and holds its
+    pose inside a batch is retimed exactly as if it had stopped.
+    """
+
 
 @configclass
 class NeuralPlanOptions(PlanOptions):
@@ -393,6 +405,12 @@ class NeuralPlanner(BasePlanner):
         self.cfg: NeuralPlannerCfg = cfg
         if cfg.onnx_model_path is MISSING or not str(cfg.onnx_model_path):
             logger.log_error("onnx_model_path is required", ValueError)
+        if cfg.retime_backend not in ("toppra", "differentiable"):
+            logger.log_error(
+                "retime_backend must be 'toppra' or 'differentiable', got "
+                f"{cfg.retime_backend!r}.",
+                ValueError,
+            )
         self._load_onnx_model(Path(cfg.onnx_model_path))
 
     def default_plan_options(self) -> NeuralPlanOptions:
@@ -681,24 +699,27 @@ class NeuralPlanner(BasePlanner):
         Returns:
             PlanResult with solved timing, derivatives and recomputed poses.
         """
-        from .toppra_planner import retime_joint_paths
-
         # Sample the solved trajectory on the configured control period rather
         # than on the rollout's step count. The rollout emits however many
         # steps it happened to take, which is far too coarse once the duration
         # stretches: a waypoint the rollout stopped on then falls between two
         # output samples and is reported as missed.
-        retimed = retime_joint_paths(
-            positions,
-            constraints=dict(self.cfg.constraints),
-            sample_method=TrajectorySampleMethod.TIME,
-            sample_interval=float(self.cfg.dt),
-            gridpoints=max(
-                _RETIME_GRIDPOINTS_MIN,
-                _RETIME_GRIDPOINTS_PER_SAMPLE * int(positions.shape[1]),
-            ),
-            device=self.device,
-        )
+        if self.cfg.retime_backend == "differentiable":
+            retimed = self._retime_differentiable(positions)
+        else:
+            from .toppra_planner import retime_joint_paths
+
+            retimed = retime_joint_paths(
+                positions,
+                constraints=dict(self.cfg.constraints),
+                sample_method=TrajectorySampleMethod.TIME,
+                sample_interval=float(self.cfg.dt),
+                gridpoints=max(
+                    _RETIME_GRIDPOINTS_MIN,
+                    _RETIME_GRIDPOINTS_PER_SAMPLE * int(positions.shape[1]),
+                ),
+                device=self.device,
+            )
         retimed_positions = retimed.positions
         # One batched FK over every sample; the waypoint re-check reuses it.
         poses = self.robot.compute_batch_fk(
@@ -718,6 +739,58 @@ class NeuralPlanner(BasePlanner):
             accelerations=retimed.accelerations,
             xpos_list=poses,
             dt=retimed.dt,
+        )
+
+    def _retime_differentiable(self, positions: torch.Tensor) -> PlanResult:
+        """Retime with the batched, differentiable time-optimal solver.
+
+        Only the joints the limits describe are retimed. Any further joints in
+        the control part are not moved by the policy, so they are held at their
+        rollout values across the new time grid.
+        """
+        from embodichain.compute.trajectory import retime_time_optimal
+
+        constraints = self.cfg.constraints
+
+        def limit(value: float | list[float]) -> torch.Tensor:
+            tensor = torch.as_tensor(
+                value, dtype=positions.dtype, device=positions.device
+            )
+            return tensor.reshape(()) if tensor.numel() == 1 else tensor.reshape(-1)
+
+        velocity = limit(constraints["velocity"])
+        acceleration = limit(constraints["acceleration"])
+        # A per-joint limit fixes how many joints are retimed; scalar limits
+        # apply to every joint the policy drives.
+        joints = (
+            max(
+                velocity.numel() if velocity.dim() else 0,
+                acceleration.numel() if acceleration.dim() else 0,
+            )
+            or self._action_dim
+        )
+        result = retime_time_optimal(
+            positions[..., :joints],
+            velocity,
+            acceleration,
+            sample_interval=float(self.cfg.dt),
+        )
+        retimed = result.positions
+        extra = positions.shape[-1] - joints
+        if extra > 0:
+            held = positions[:, -1:, joints:].expand(-1, retimed.shape[1], -1)
+            zeros = torch.zeros_like(held)
+            retimed = torch.cat([retimed, held], dim=-1)
+            velocities = torch.cat([result.velocities, zeros], dim=-1)
+            accelerations = torch.cat([result.accelerations, zeros], dim=-1)
+        else:
+            velocities, accelerations = result.velocities, result.accelerations
+        return PlanResult(
+            success=result.success,
+            positions=retimed,
+            velocities=velocities,
+            accelerations=accelerations,
+            dt=result.dt,
         )
 
     def _retimed_is_executable(
