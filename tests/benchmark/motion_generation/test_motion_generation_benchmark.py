@@ -522,6 +522,20 @@ def test_nmg_retiming_requires_a_suite_acceleration_limit():
         adapter._retiming_constraints()
 
 
+def test_nmg_cli_overrides_reach_every_nmg_row():
+    # A checkpoint supplied on the command line must reach the paired row too;
+    # otherwise its availability check skips it and no comparison runs.
+    suite = load_suite("scripts/benchmark/motion_generation/suites/smoke.yaml")
+    _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
+    rows = {
+        spec.id: (spec.config["onnx_model_path"], spec.config["pos_eps"])
+        for spec in suite.planners
+        if spec.adapter == "nmg_onnx"
+    }
+    assert set(rows) == {"nmg", "nmg_retimed"}
+    assert rows["nmg"] == rows["nmg_retimed"] == ("/tmp/policy.onnx", 0.02)
+
+
 @pytest.mark.parametrize("suite_name", ["coverage", "smoke"])
 def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
     suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
