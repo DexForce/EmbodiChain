@@ -56,6 +56,7 @@ _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
         "force_refresh",
     }
 )
+_PLANNER_TYPES = frozenset({"curobo", "neural", "toppra", "trapezoidal"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +69,7 @@ class _ConfiguredTaskProgramDeployment:
     selection: TaskProgramIntegrationCfg
     integration: _ConfiguredTaskProgramIntegration
     scene_binding: dict[str, object]
+    planner_config: dict[str, object] | None
 
 
 def _component_path(
@@ -111,6 +113,33 @@ def _load_yaml_component(path: Path, *, field_name: str) -> dict[str, object]:
     if path.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError(f"{field_name} must be a YAML file: {path}.")
     return _owned_mapping(load_config(path), path=field_name)
+
+
+def _decode_planner_config(value: object, *, path: str) -> dict[str, object]:
+    """Decode an executable-free planner selection from an execution policy."""
+    config = _mapping(
+        value,
+        path=path,
+        required=frozenset({"type"}),
+        optional=frozenset({"config"}),
+    )
+    planner_type = _identifier(config["type"], path=f"{path}.type")
+    if planner_type not in _PLANNER_TYPES:
+        raise ValueError(
+            f"{path}.type must be one of {sorted(_PLANNER_TYPES)}, "
+            f"got {planner_type!r}."
+        )
+    options = config.get("config", {})
+    if not isinstance(options, Mapping):
+        raise TypeError(f"{path}.config must be a mapping.")
+    planner_config = {
+        "type": planner_type,
+        "config": deepcopy(dict(options)),
+    }
+    from .simulation.environment import _planner_cfg_from_config
+
+    _planner_cfg_from_config(planner_config, robot_uid="__configured_policy__")
+    return planner_config
 
 
 def _merge_runtime_services(
@@ -270,9 +299,23 @@ def _resolve_task_program_components(
                 "effect_assurance",
             }
         ),
-        optional=frozenset({"required_planner"}),
+        optional=frozenset({"required_planner", "planner"}),
     )
     _identifier(policy["policy_id"], path="execution policy.policy_id")
+    if "planner" in policy:
+        policy["planner"] = _decode_planner_config(
+            policy["planner"],
+            path="execution policy.planner",
+        )
+        required_planner = policy.get("required_planner")
+        if (
+            required_planner is not None
+            and required_planner != policy["planner"]["type"]
+        ):
+            raise ValueError(
+                "execution policy.required_planner must match "
+                "execution policy.planner.type when both are declared."
+            )
     return program_path, integration, policy
 
 
@@ -347,7 +390,9 @@ def _compose_integration_payload(
         "effect_assurance": deepcopy(policy["effect_assurance"]),
         "effect_monitors": deepcopy(profile["effect_monitors"]),
     }
-    if "required_planner" in policy:
+    if "planner" in policy:
+        preset["required_planner"] = deepcopy(policy["planner"]["type"])
+    elif "required_planner" in policy:
         preset["required_planner"] = deepcopy(policy["required_planner"])
 
     scene_payload = {
@@ -416,7 +461,11 @@ def _load_configured_task_program_deployment(
         skill_profile=selected_skill_profile,
         scene=scene_binding,
     )
-    integration = _decode_configured_task_program_integration(payload)
+    planner_config = deepcopy(policy.get("planner"))
+    integration = _decode_configured_task_program_integration(
+        payload,
+        planner_config=planner_config,
+    )
     integration_id = _identifier(
         task["integration_id"],
         path="task integration.integration_id",
@@ -440,4 +489,5 @@ def _load_configured_task_program_deployment(
         selection=selection,
         integration=integration,
         scene_binding=deepcopy(dict(scene_binding)),
+        planner_config=planner_config,
     )

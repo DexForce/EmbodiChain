@@ -2185,8 +2185,17 @@ class _ConfiguredTaskProgramIntegration:
 
 def _decode_configured_task_program_integration(
     value: object,
+    *,
+    planner_config: Mapping[str, object] | None = None,
 ) -> _ConfiguredTaskProgramIntegration:
-    """Decode one composable, callable-free Task Program integration."""
+    """Decode one composable, callable-free Task Program integration.
+
+    Args:
+        value: Provider-free scene, robot-profile, and runtime-service payload.
+        planner_config: Optional execution-policy planner declaration retained
+            for the live simulation adapter. It is deliberately kept outside
+            the semantic integration payload.
+    """
     path = "integration"
     config = _mapping(
         value,
@@ -2225,6 +2234,7 @@ def _decode_configured_task_program_integration(
     fingerprint_payload = {
         "registration": registration.fingerprint,
         "grasp_pose_generators": grasp_fingerprint,
+        "planner_config": deepcopy(planner_config),
     }
     integration_fingerprint = hashlib.sha256(
         json.dumps(
@@ -2238,6 +2248,7 @@ def _decode_configured_task_program_integration(
     delegate = SimulationTaskProgramAdapterFactory(
         registration,
         grasp_pose_generator_factories=dict(services.grasp_pose_generators),
+        planner_config=planner_config,
     )
     adapter_factory = _ConfiguredTaskProgramAdapterFactory(
         delegate=delegate,
