@@ -101,6 +101,20 @@ def bind_cartesian_calls(declarations: object, program: Any) -> tuple[str, ...]:
     return tuple(ids[name] for name in declarations)
 
 
+def bind_articulation_calls(program: Any) -> tuple[tuple[str, str], ...]:
+    """Grant recovery only to the exact registered E6 call occurrences."""
+    ids = _invocation_ids(program)
+    kinds = {
+        "gen_sim.articulation_slide": "slide",
+        "gen_sim.articulation_withdraw": "withdraw",
+    }
+    return tuple(
+        (ids[segment.name], kinds[segment.calls[0].call.call_id])
+        for segment in program.iter_segments()
+        if getattr(segment.calls[0].call, "call_id", None) in kinds
+    )
+
+
 def pour_receiver_declarations(graph: dict[str, Any]) -> dict[str, str]:
     """Keep a recipe's explicit staging reference local to its Pour occurrence."""
     staged = {}
@@ -177,12 +191,21 @@ class GenSimActionEngine(AtomicActionEngine):
         *args: Any,
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
+        articulation_calls: tuple[tuple[str, str], ...] = (),
         **kwargs: Any,
     ) -> None:
         self._motion_samples = dict(motion_samples)
         if any(type(value) is not str or not value for value in cartesian_calls):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
+        self._articulation_calls = dict(articulation_calls)
+        if len(self._articulation_calls) != len(articulation_calls) or any(
+            not isinstance(key, str) or not key or value not in {"slide", "withdraw"}
+            for key, value in articulation_calls
+        ):
+            raise ValueError(
+                "E6 recovery requires unique invocation IDs and known call kinds."
+            )
         if len(self._motion_samples) != len(motion_samples) or any(
             type(key) is not str or not key or type(value) is not int or value < 2
             for key, value in motion_samples
@@ -217,7 +240,27 @@ class GenSimActionEngine(AtomicActionEngine):
         enabled = request.invocation_id in self._cartesian_calls
         try:
             with cartesian_approach_scope(enabled):
-                plan = super()._plan_request(request, context)
+                kind = self._articulation_calls.get(request.invocation_id)
+                if (
+                    kind is not None
+                    and enabled
+                    and context is not None
+                    and context.batch_size == 1
+                    and request.motion_policy.strategy == "ik_interp"
+                    and request.motion_policy.dynamic_collision_mode == "off"
+                ):
+                    from .articulation_recovery import planning_scope, recover
+
+                    def build(selected: Any) -> Any:
+                        return super(GenSimActionEngine, self)._plan_request(
+                            selected, context
+                        )
+
+                    with planning_scope(self.motion_generator, kind) as scope:
+                        plan = build(request)
+                        plan = recover(scope, request, context, plan, build)
+                else:
+                    plan = super()._plan_request(request, context)
             plan = replace(
                 plan,
                 diagnostics=replace(
