@@ -32,6 +32,7 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.lab.sim.motion.planners import neural_planner as neural_planner_module
 from embodichain.lab.sim.motion.planners.neural_planner import NeuralPlanOptions
 from embodichain.lab.sim.motion.planners.toppra_planner import retime_joint_paths
+from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 from embodichain.lab.sim.sim_manager import SimulationManager
 
 NUM_ARM_JOINTS = 7
@@ -477,12 +478,38 @@ def test_neural_planner_constraints_replace_timing_and_bound_dynamics(
 
 def test_retime_joint_paths_rejects_malformed_input():
     positions = torch.zeros(1, 4, NUM_ARM_JOINTS)
+    limits = {"velocity": 1.0, "acceleration": 1.0}
     with pytest.raises(ValueError, match="velocity"):
         retime_joint_paths(positions, constraints={"acceleration": 1.0})
     with pytest.raises(ValueError, match=r"\(B, N, DOF\)"):
+        retime_joint_paths(positions[0], constraints=limits)
+    # The default interval is a sample count; reading it as seconds would
+    # silently collapse a dense path to two samples.
+    with pytest.raises(ValueError, match="TIME sampling"):
         retime_joint_paths(
-            positions[0], constraints={"velocity": 1.0, "acceleration": 1.0}
+            positions,
+            constraints=limits,
+            sample_method=TrajectorySampleMethod.TIME,
         )
+
+
+def test_retimed_success_reflects_the_trajectory_actually_returned(
+    tmp_path, monkeypatch
+):
+    # A joint limit the rollout clamps against is also a limit the spline must
+    # respect, and the resampled grid must still reach the goal. Success is
+    # re-derived from the returned samples rather than inherited.
+    retimed = _rollout(
+        tmp_path,
+        monkeypatch,
+        policy=SaturatingOnnxPolicy,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+    arm = retimed.positions[..., :NUM_ARM_JOINTS]
+    # FakeRobot declares +-2.0 rad on every joint.
+    assert float(arm.max()) <= 2.0 + 1e-6
+    assert float(arm.min()) >= -2.0 - 1e-6
+    assert float(retimed.dt.sum()) > 0.0
 
 
 def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
