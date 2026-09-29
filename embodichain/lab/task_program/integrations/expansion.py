@@ -285,8 +285,8 @@ class CombinedTaskProgramExpansionFactory:
                 type(index) is not int or index < 0 for index in recipe_indices
             ):
                 raise ValueError("recipe_indices must contain non-negative integers")
-            if len(set(recipe_indices)) != len(recipe_indices):
-                raise ValueError("recipe_indices must be unique")
+            # CollectionSelection validates logical selections for uniqueness;
+            # physical padding rows may intentionally repeat a recipe.
         for value, name in (
             (program_id, "program_id"),
             (integration_id, "integration_id"),

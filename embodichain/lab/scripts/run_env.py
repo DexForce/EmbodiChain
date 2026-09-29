@@ -185,16 +185,23 @@ def resolve_collection_plan(
                 "collection.selection.recipe_indices conflicts with legacy candidate_indices"
             )
     if selection_data or legacy_indices:
+        selection_mode = selection_data.get("mode")
+        declared_recipe_indices = selection_data.get("recipe_indices")
+        if legacy_indices:
+            # CLI and legacy candidate-index overrides select logical recipes
+            # explicitly, even when the referenced profile defaults to the
+            # sequential schedule.
+            selection_mode = "explicit"
+            if declared_recipe_indices is None:
+                declared_recipe_indices = legacy_indices
         selection = CollectionSelection(
-            mode=selection_data.get(
-                "mode", "explicit" if legacy_indices else "sequential"
-            ),
+            mode=selection_mode or "sequential",
             start_recipe_index=selection_data.get("start_recipe_index", 0),
-            recipe_indices=tuple(selection_data.get("recipe_indices", legacy_indices)),
+            recipe_indices=tuple(declared_recipe_indices or ()),
         )
     else:
         selection = CollectionSelection()
-    return CollectionPlan(int(target), int(attempts), selection)
+    return CollectionPlan(target, attempts, selection)
 
 
 def _indeterminate_progress(actions: Iterable[Any], description: str) -> Iterator[Any]:
@@ -649,10 +656,27 @@ def _load_expansion_collection(path: Path) -> Mapping[str, Any]:
     return data.get("collection", {}) if isinstance(data, Mapping) else {}
 
 
+def _pad_expansion_recipe_indices(
+    selected: Sequence[int], *, num_envs: int
+) -> tuple[int, ...]:
+    """Fill an undersized physical batch without changing committed recipes.
+
+    Expansion planning remains vectorized across the constructed environment.
+    Rows beyond the collection target therefore receive a repeat of the last
+    selected recipe and are discarded at the commit boundary.
+    """
+    selected = tuple(selected)
+    if not selected:
+        raise ValueError("an expansion batch must select at least one recipe")
+    if type(num_envs) is not int or num_envs < len(selected):
+        raise ValueError("num_envs must cover the selected expansion recipes")
+    return selected + (selected[-1],) * (num_envs - len(selected))
+
+
 def _resolve_expansion_request(
     args: Any,
     gym_config: Mapping[str, Any],
-) -> tuple[Any, tuple[int, ...], Path] | None:
+) -> tuple[Any, tuple[int, ...], Path, Mapping[str, Any]] | None:
     """Resolve a task-bound or CLI-selected Expansion Profile."""
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
@@ -734,10 +758,14 @@ def _resolve_expansion_request(
 
         if not isinstance(policy_data, Mapping):
             raise ValueError("expansion policy component must be a mapping")
+        policy_collection = policy_data.get("collection", {})
+        if not isinstance(policy_collection, Mapping):
+            raise ValueError("expansion.collection must be a mapping")
         profile_data = dict(policy_data)
         profile_data.pop("collection", None)
         profile = CombinedExpansionProfile.from_mapping(merge(profile_data, overrides))
         profile_path = expansion_config_path or task_path
+        expansion_collection = binding.get("collection", policy_collection)
     else:
         if (
             not isinstance(profile_value, str)
@@ -759,6 +787,12 @@ def _resolve_expansion_request(
             )
         profile_path = profile_path.resolve()
         profile = load_expansion_profile(profile_path)
+        profile_collection = _load_expansion_collection(profile_path)
+        expansion_collection = (
+            binding.get("collection", profile_collection)
+            if binding is not None
+            else profile_collection
+        )
     candidate_values = getattr(args, "expansion_recipe_indices", None)
     if candidate_values is None:
         candidate_values = getattr(args, "expansion_candidate_indices", None)
@@ -782,7 +816,9 @@ def _resolve_expansion_request(
             raise ValueError(
                 "expansion candidate indices must be non-negative integers"
             )
-    return profile, candidate_indices, profile_path
+    if not isinstance(expansion_collection, Mapping):
+        raise ValueError("expansion.collection must be a mapping")
+    return profile, candidate_indices, profile_path, expansion_collection
 
 
 def _validate_expansion_collection_plan(
@@ -830,7 +866,7 @@ def _run_expansion(
     request = _resolve_expansion_request(args, gym_config)
     if request is None:
         raise ValueError("run_expansion requires an expansion profile")
-    profile, configured_indices, profile_path = request
+    profile, configured_indices, profile_path, expansion_collection = request
     if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError("run-task expansion requires a CombinedExpansionProfile")
     target = _env_target(env)
@@ -839,7 +875,7 @@ def _run_expansion(
     plan = resolve_collection_plan(
         args,
         gym_config,
-        expansion_collection=_load_expansion_collection(profile_path),
+        expansion_collection=expansion_collection,
         legacy_recipe_indices=configured_indices,
     )
     _validate_expansion_collection_plan(profile, plan, num_envs=num_envs)
@@ -910,7 +946,8 @@ def _run_expansion(
         selected = plan.selection.take(cursor, batch_size)
         if any(index >= len(recipes) for index in selected):
             raise ValueError("collection selection contains an out-of-range recipe")
-        batch_recipes = tuple(recipes[index] for index in selected)
+        full_recipe_indices = _pad_expansion_recipe_indices(selected, num_envs=num_envs)
+        batch_recipes = tuple(recipes[index] for index in full_recipe_indices)
         reset_payload: dict[str, Any] = {}
         family_by_id = {family.reference_family_id: family for family in families}
         if profile.scene_randomization.enabled:
@@ -952,8 +989,13 @@ def _run_expansion(
             reset_before=False,
             expansion_profile=profile,
             expansion_candidate_index=selected[0] if selected else 0,
-            expansion_recipe_indices=selected,
-            _expansion_record_sink=batch_records.extend,
+            expansion_recipe_indices=full_recipe_indices,
+            _expansion_record_sink=lambda records: batch_records.extend(
+                record
+                for record in records
+                if getattr(record, "env_id", None) is None
+                or int(record.env_id) < batch_size
+            ),
         )
         stats["batch_count"] += 1
         batch_record = {
@@ -1650,7 +1692,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
         expansion_plan = resolve_collection_plan(
             args,
             gym_config,
-            expansion_collection=_load_expansion_collection(expansion_request[2]),
+            expansion_collection=expansion_request[3],
             legacy_recipe_indices=expansion_request[1],
         )
         if isinstance(profile, CombinedExpansionProfile):

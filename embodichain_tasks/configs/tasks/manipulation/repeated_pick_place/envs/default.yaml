@@ -49,9 +49,8 @@ env:
       func: LeRobotRecorder
       mode: save
       params:
-        save_path: /tmp/repeated-pick-place-lerobot
-        robot_meta:
-          robot_type: UR5
+        # Structured dataset output; robot_type comes from the selected embodiment.
+        save_path: /tmp/repeated-pick-place/datasets
         instruction:
           lang: Move the cube through the repeated pick and place program.
         extra:

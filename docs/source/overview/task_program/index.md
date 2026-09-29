@@ -190,7 +190,13 @@ simulation:
 env:
   sim_steps_per_control: 4
   events: {}
-  dataset: {}
+  dataset:
+    lerobot:
+      func: LeRobotRecorder
+      mode: save
+      params:
+        save_path: /tmp/repeated-pick-place/datasets
+        # robot_type is filled from the selected embodiment.
 ```
 
 A runnable `task.<embodiment>.yaml` selects the environment variants, all three

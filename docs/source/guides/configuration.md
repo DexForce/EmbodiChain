@@ -129,10 +129,11 @@ For RL training and data expansion, EmbodiChain uses file-based configs (`.json`
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
-For offline expert expansion, `max_episodes` counts persisted
-per-environment episodes rather than vector batches. Thus `num_envs: 4` and
-`max_episodes: 10` produce two full four-row commits plus a final two-row
-commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
+For offline expert expansion, `collection.target_episodes` counts persisted
+environment rows rather than vector batches. Thus `num_envs: 4` and
+`target_episodes: 10` produce two full four-row commits plus a final two-row
+commit. The legacy `max_episodes` field and CLI option map to the same target.
+Failed rows count only when the relevant `DatasetFunctorCfg` sets
 `save_failed_episodes: true`.
 
 Example paths in the repository:
@@ -150,7 +151,9 @@ When a training config references a gym config (via `trainer.gym_config`), the n
 {
     "id": "EmbodiedEnv-v1",
     "num_envs": 4,
-    "max_episodes": 100,
+    "collection": {
+        "target_episodes": 100
+    },
     "max_episode_steps": 600,
     "physics": "default",
     "device": "cpu",
@@ -392,13 +395,16 @@ canonical `entity_id` to physical `simulation_uid` mapping.
 
 The optional `expansion.config` reference keeps task-facing augmentation
 settings in a separate file. That file may define `runtime`, `policy`,
-`overrides`, and `candidate_indices`; the runner deep-merges task-local fields,
-applies the runtime overlay after resolving the selected environment variant,
-and then constructs the common environment. `--physics` selects `default` or
-`newton` from the task mapping, while `--expansion-profile` and
-`--expansion-candidate-indices` override the referenced expansion values.
-Relative policy and resource paths inside the expansion file resolve from that
-file's directory.
+`overrides`, and `collection`; `collection.target_episodes` is the final
+committed row count, while `collection.selection` chooses sequential or
+explicit logical recipes. The runner deep-merges task-local fields, applies
+the runtime overlay after resolving the selected environment variant, and then
+constructs the common environment. `--physics` selects `default` or `newton`
+from the task mapping, while `--expansion-profile` and
+`--expansion-recipe-indices` override the referenced expansion values. The
+legacy `candidate_indices` spelling remains accepted as an explicit recipe
+selection alias. Relative policy and resource paths inside the expansion file
+resolve from that file's directory.
 
 Component ownership is exclusive. Do not combine `environment.component` with
 inline environment or scene fields, and do not combine `embodiment.component`

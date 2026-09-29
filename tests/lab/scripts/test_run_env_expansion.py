@@ -24,6 +24,7 @@ from embodichain.lab.scripts.run_env import (
     CollectionPlan,
     CollectionSelection,
     _create_parser,
+    _pad_expansion_recipe_indices,
     _resolve_expansion_request,
     resolve_collection_plan,
 )
@@ -47,13 +48,14 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
         "task.ur5.yaml"
     )
     assert request is not None
-    profile, candidate_indices, _ = request
+    profile, candidate_indices, _, collection = request
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "repeated_cube_pick_place"
     assert profile.source.call_count == 6
     assert profile.scene_randomization.reference_family_count == 4
     assert profile.trajectory.spatial.joint_offset_scale == 0.005
     assert candidate_indices == ()
+    assert collection["target_episodes"] == 64
     plan = resolve_collection_plan(
         args=_create_parser().parse_args(
             ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
@@ -70,13 +72,14 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
         "embodichain_tasks/configs/tasks/manipulation/open_drawer/" "task.ur5.yaml"
     )
     assert request is not None
-    profile, candidate_indices, _ = request
+    profile, candidate_indices, _, collection = request
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "slide_open_drawer"
     assert profile.source.call_count == 1
     assert profile.source.phase_permissions["pull"] == ("joint_residual",)
     assert profile.visual.enabled is False
     assert candidate_indices == ()
+    assert collection["target_episodes"] == 3
 
 
 def test_task_expansion_config_accepts_local_candidate_override() -> None:
@@ -98,6 +101,55 @@ def test_task_expansion_config_accepts_local_candidate_override() -> None:
     assert request is not None
     assert request[1] == ()
     assert request[2].name == "repeated_pick_place.yaml"
+    assert request[3]["target_episodes"] == 1
+    assert request[3]["selection"]["recipe_indices"] == [32]
+
+
+def test_collection_plan_cli_recipe_override_uses_explicit_mode() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--max_episodes",
+            "4",
+            "--expansion-recipe-indices",
+            "0",
+            "16",
+            "32",
+            "48",
+            "--headless",
+            "--device",
+            "cpu",
+        ]
+    )
+    plan = resolve_collection_plan(
+        args,
+        {},
+        expansion_collection={
+            "target_episodes": 64,
+            "selection": {"mode": "sequential", "start_recipe_index": 0},
+        },
+        legacy_recipe_indices=(0, 16, 32, 48),
+    )
+
+    assert plan.target_episodes == 4
+    assert plan.selection.mode == "explicit"
+    assert plan.selection.recipe_indices == (0, 16, 32, 48)
+
+
+def test_collection_plan_rejects_non_integer_numeric_values() -> None:
+    args = _create_parser().parse_args(
+        ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+    )
+    with pytest.raises(ValueError, match="target_episodes"):
+        resolve_collection_plan(
+            args,
+            {"collection": {"target_episodes": 4.5}},
+        )
+
+
+def test_expansion_recipe_padding_preserves_selected_rows() -> None:
+    assert _pad_expansion_recipe_indices((4, 16), num_envs=4) == (4, 16, 16, 16)
 
 
 def test_collection_plan_separates_target_from_parallel_capacity() -> None:
