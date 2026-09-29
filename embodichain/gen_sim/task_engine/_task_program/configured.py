@@ -255,13 +255,26 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         "reference_entity_id",
                         "relative_pose",
                         "world_displacement",
+                        "relation",
                     }
                 ),
             )
             has_reference = "reference_entity_id" in route
             has_pose = "relative_pose" in route
             has_displacement = "world_displacement" in route
-            if has_reference != has_pose or has_reference == has_displacement:
+            on_support = "relation" in route
+            if on_support:
+                if (
+                    kind != "coordinated_transport"
+                    or route["relation"] != "on"
+                    or not has_reference
+                    or not has_displacement
+                    or has_pose
+                ):
+                    raise ValueError(
+                        f"{route_path}: on placement requires a rigid reference and world_displacement."
+                    )
+            elif has_reference != has_pose or has_reference == has_displacement:
                 raise ValueError(
                     f"{route_path} must declare exactly one of "
                     "reference_entity_id with relative_pose or "
@@ -275,6 +288,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     target_id=_identifier(
                         route["target_id"], path=f"{route_path}.target_id"
                     ),
+                    relation=route.get("relation"),
                     reference_entity_id=(
                         _identifier(
                             route["reference_entity_id"],

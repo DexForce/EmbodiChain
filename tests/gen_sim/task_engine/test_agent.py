@@ -130,6 +130,50 @@ def test_e5_return_location_is_not_a_scene_object(reference: str) -> None:
     validate_instruction_intent({"steps": [step]})
 
 
+def test_e5_on_preserves_the_bound_support_for_late_placement() -> None:
+    step = _step(reference="small plate")
+    step.update(
+        task_type="E5",
+        required_arm="none",
+        orientation_goal="none",
+        target=_selector("scene_ref", reference="large plate"),
+        relation="on",
+        terminal_behavior="place",
+    )
+    candidate = TaskAgent(interpreter=lambda *a, **kw: _result(step)).generate(
+        "two_plates", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "two_plates",
+            "candidate_id": candidate["candidate_id"],
+            "role_bindings": {},
+            "reference_bindings": {
+                "step_01.object": ["small"],
+                "step_01.target": ["large"],
+            },
+        },
+        [
+            {"runtime_uid": "small", "init_pos": [0, -0.4, 0.7]},
+            {"runtime_uid": "large", "init_pos": [0, 0, 0.7]},
+        ],
+    )
+    call = graph["nodes"][0]["call"]
+    assert call["call_id"] == "simulation.coordinated_transport"
+    assert call["arguments"] == {
+        "object": "small",
+        "target": "step_01_coordinated_target",
+        "reference": "large",
+        "relation": "on",
+    }
+    assert [n["call"]["resources"]["primary"] for n in graph["nodes"][1:]] == [
+        "left",
+        "right",
+    ]
+
+
 def test_task_agent_generates_concurrently_deduplicates_and_counts_votes():
     barrier = threading.Barrier(3)
     lock = threading.Lock()

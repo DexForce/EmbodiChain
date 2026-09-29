@@ -93,9 +93,25 @@ _PICK_CALL_ID = "simulation.pick"
 
 @dataclass(frozen=True, slots=True)
 class _CoordinatedTransportRoute(_SharedCoordinatedTransportRoute):
-    """Allow a lift-and-return recipe with zero net object displacement."""
+    """Add on-support placement and zero-net-displacement return routes."""
+
+    relation: str | None = None
 
     def __post_init__(self) -> None:
+        if self.relation is not None:
+            if self.relation != "on" or self.relative_pose is not None:
+                raise ValueError(
+                    "Coordinated relative placement only supports on with a world offset."
+                )
+            _identifier(self.object_id, field_name="object_id")
+            _identifier(self.target_id, field_name="target_id")
+            _identifier(self.reference_entity_id, field_name="reference_entity_id")
+            if self.reference_entity_id == self.object_id:
+                raise ValueError("An object cannot be its own placement support.")
+            object.__setattr__(
+                self, "world_displacement", _world_displacement(self.world_displacement)
+            )
+            return
         if (
             type(self.world_displacement) is tuple
             and len(self.world_displacement) == 3
@@ -115,7 +131,14 @@ class _CoordinatedTransportRoute(_SharedCoordinatedTransportRoute):
 def _coordinated_transport_route(value: Any, *, index: int) -> Any:
     if type(value) is _CoordinatedTransportRoute:
         return value
-    return _shared_coordinated_transport_route(value, index=index)
+    route = _shared_coordinated_transport_route(value, index=index)
+    return _CoordinatedTransportRoute(
+        object_id=route.object_id,
+        target_id=route.target_id,
+        reference_entity_id=route.reference_entity_id,
+        relative_pose=route.relative_pose,
+        world_displacement=route.world_displacement,
+    )
 
 
 def _point(
@@ -923,10 +946,11 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
         if set(arguments) not in (
             {"object", "target"},
             {"object", "target", "world_displacement"},
+            {"object", "target", "reference", "relation"},
         ):
             raise ValueError(
-                f"{self.call_id} arguments must contain object, target, and an "
-                "optional world_displacement."
+                f"{self.call_id} requires object and target, optionally with "
+                "world_displacement or reference/relation."
             )
         route = (arguments["object"], arguments["target"])
         resolved = self._routes.get(route)
@@ -935,6 +959,19 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 f"{self.call_id} does not declare object-target route {route!r}."
             )
         route_cfg, semantics = resolved
+        if route_cfg.relation is not None:
+            if (
+                not self.release
+                or arguments.get("reference") != route_cfg.reference_entity_id
+                or arguments.get("relation") != route_cfg.relation
+            ):
+                raise ValueError(
+                    "Coordinated placement must match its configured support relation."
+                )
+        elif "reference" in arguments:
+            raise ValueError(
+                "Coordinated placement has no configured support relation."
+            )
         if "world_displacement" in arguments:
             declared = tuple(float(value) for value in arguments["world_displacement"])
             if declared != route_cfg.world_displacement:
@@ -971,7 +1008,14 @@ class _CoordinatedTransportLowerer(RegisteredSemanticLowerer):
                 dtype=object_target_pose.dtype,
                 device=object_target_pose.device,
             )
-            object_target_pose[:, :3, 3] += displacement
+            if route_cfg.relation == "on":
+                object_target_pose = SceneEntityPose(
+                    route_cfg.reference_entity_id,
+                    world_displacement=displacement,
+                    world_orientation=object_pose[:, :3, :3],
+                )
+            else:
+                object_target_pose[:, :3, 3] += displacement
         else:
             assert route_cfg.reference_entity_id is not None
             assert route_cfg.relative_pose is not None
@@ -1024,7 +1068,7 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
     """Create configured dual-arm transport routes from canonical scene refs."""
 
     call_id: ClassVar[str] = _COORDINATED_TRANSPORT_CALL_ID
-    revision: ClassVar[str] = "1"
+    revision: ClassVar[str] = "2"
     target_descriptor: ClassVar[SkillDescriptor] = CoordinatedPickment.descriptor()
     lowerer_type: ClassVar[type[_CoordinatedTransportLowerer]] = (
         _CoordinatedTransportLowerer
@@ -1074,7 +1118,22 @@ class _CoordinatedTransportLowererFactory(RegisteredSemanticLowererFactory):
                 object_ref,
                 capability=GRASP_AFFORDANCE_CAPABILITY,
             )
-            if route.world_displacement is not None:
+            if route.relation is not None:
+                reference = scene_registry.resolve(
+                    route.reference_entity_id, expected_type=SceneObjectRef
+                )
+                if not self.lowerer_type.release:
+                    raise ValueError("Coordinated on placement requires release.")
+                canonical_routes.append(
+                    _CoordinatedTransportRoute(
+                        object_id=object_ref.entity_id,
+                        target_id=route.target_id,
+                        reference_entity_id=reference.entity_id,
+                        world_displacement=route.world_displacement,
+                        relation=route.relation,
+                    )
+                )
+            elif route.world_displacement is not None:
                 canonical_routes.append(
                     _CoordinatedTransportRoute(
                         object_id=object_ref.entity_id,

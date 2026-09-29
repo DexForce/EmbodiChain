@@ -1457,6 +1457,92 @@ def _prepared_axis_scene(
     return scene
 
 
+def test_coordinated_on_bundle_reuses_relative_height_and_live_acceptance(tmp_path):
+    scene = _prepared_axis_scene(tmp_path)
+    path = tmp_path / "pad.glb"
+    trimesh.creation.box(extents=[0.4, 0.02, 0.4]).export(path)
+    pad = {
+        "uid": "pad",
+        "shape": {"shape_type": "Mesh", "fpath": str(path)},
+        "init_pos": [0.2, 0.3, 0.74],
+        "init_rot": [0, 0, 90],
+    }
+    scene = replace(
+        scene,
+        rigid_objects=(*scene.rigid_objects, pad),
+        planner_objects=(
+            *scene.planner_objects,
+            {**pad, "runtime_uid": "pad", "role": "rigid_object"},
+        ),
+        uid_map={**scene.uid_map, "pad": "pad"},
+    )
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "id": "transport",
+            "task_type": "E5",
+            "task_instance_id": "carry",
+            "role": "primary",
+            "depends_on": [],
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.coordinated_transport",
+                "arguments": {
+                    "object": "bottle",
+                    "target": "landing",
+                    "reference": "pad",
+                    "relation": "on",
+                },
+                "resources": {"left": "left", "right": "right"},
+            },
+        }
+    ]
+    graph["nodes"].append(
+        {
+            "id": "park",
+            "task_type": "E5",
+            "task_instance_id": "carry",
+            "role": "cleanup",
+            "depends_on": ["transport"],
+            "call": {
+                "kind": "registered",
+                "call_id": "simulation.park",
+                "arguments": {},
+                "resources": {"primary": "left"},
+            },
+        }
+    )
+    graph["task_groups"] = [
+        {
+            "id": "carry",
+            "task_type": "E5",
+            "depends_on": [],
+            "node_ids": ["transport", "park"],
+            "success": {"kind": "call_completed"},
+        }
+    ]
+    _, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    integration = load_config(paths.integration)
+    route = next(
+        s
+        for s in integration["runtime_services"]["registered_semantic_lowerers"]
+        if s["kind"] == "coordinated_transport"
+    )["routes"][0]
+    assert route["reference_entity_id"] == "pad" and route["relation"] == "on"
+    assert load_config(paths.execution_policy)["motion"]["sample_count"] == 260
+    assert route["world_displacement"] == pytest.approx([0, 0, 0.05])
+    cfg = load_config(paths.program.parent / "constraints.json")["presets"][
+        "gen_sim.transport.stable"
+    ]
+    assert cfg["reference"] == "pad" and "target_position" not in cfg
+    assert cfg["displacement"] == pytest.approx([0, 0, 0.04])
+    assert cfg["position_tolerance"] == 0.05
+    program = load_config(paths.program)["program"]["items"]
+    assert program[-1]["post"] == [program[0]["post"][-1]]
+
+
 def test_upright_after_placement_has_stage_specific_support_geometry(
     tmp_path: Path,
 ) -> None:
@@ -1934,6 +2020,7 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         max_episode_steps=max_episode_steps,
     )
     deployment = load_config(paths.deployment)
+    assert load_config(paths.execution_policy)["motion"]["sample_count"] == 140
     assert deployment["max_episode_steps"] == (
         10000 if max_episode_steps is None else max_episode_steps
     )
