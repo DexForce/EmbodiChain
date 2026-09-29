@@ -129,11 +129,9 @@ def _decode_planner_config(value: object, *, path: str) -> dict[str, object]:
             f"{path}.type must be one of {sorted(_PLANNER_TYPES)}, "
             f"got {planner_type!r}."
         )
-    options = _mapping(
-        config.get("config", {}),
-        path=f"{path}.config",
-        required=frozenset(),
-    )
+    options = config.get("config", {})
+    if not isinstance(options, Mapping):
+        raise TypeError(f"{path}.config must be a mapping.")
     planner_config = {
         "type": planner_type,
         "config": deepcopy(dict(options)),

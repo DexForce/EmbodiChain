@@ -270,8 +270,13 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     )
 
 
-def test_planner_policy_decoder_rejects_unknown_backend() -> None:
-    """Planner backends remain an explicit closed configuration set."""
+def test_planner_policy_decoder_validates_backend_and_options() -> None:
+    """Planner backends remain closed while typed options stay configurable."""
+    assert _decode_planner_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        path="execution policy.planner",
+    ) == {"type": "toppra", "config": {"max_workers": 2}}
+
     with pytest.raises(ValueError, match="execution policy.planner.type"):
         _decode_planner_config(
             {"type": "custom_callable", "config": {}},

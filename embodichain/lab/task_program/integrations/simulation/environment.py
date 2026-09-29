@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 from types import MappingProxyType
 from typing import Protocol, TYPE_CHECKING
@@ -936,15 +936,22 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             objects[binding.entity_id] = entity
 
         world = planner_cfg.world
-        world.rigid_objects = objects or None
-        world.dynamic_obstacle_names = [
+        dynamic_obstacle_names = [
             binding.entity_id
             for binding in collision_bindings
             if binding.collision_role is SceneCollisionRole.DYNAMIC
         ]
+        world_values = {
+            field.name: getattr(world, field.name) for field in fields(CuroboWorldCfg)
+        }
+        world_values["rigid_objects"] = objects or None
+        world_values["dynamic_obstacle_names"] = dynamic_obstacle_names
         collision_mode = self._scene_binding.collision_world_mode
         if collision_mode is not None:
-            world.multi_env = collision_mode is SceneCollisionWorldMode.PER_ENV
+            world_values["multi_env"] = (
+                collision_mode is SceneCollisionWorldMode.PER_ENV
+            )
+        planner_cfg.world = CuroboWorldCfg(**world_values)
 
 
 @dataclass(frozen=True, slots=True, init=False)
