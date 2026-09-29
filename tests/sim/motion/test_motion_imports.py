@@ -33,7 +33,14 @@ import pytest
 def test_motion_import_order_and_config_resolution(first_module: str) -> None:
     script = """
 import importlib
+import importlib.abc
 import sys
+
+class BlockExternalToppra(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "toppra" or fullname.startswith("toppra."):
+            raise AssertionError("External toppra must not be imported")
+sys.meta_path.insert(0, BlockExternalToppra())
 import dexsim
 
 importlib.import_module(sys.argv[1])
@@ -75,6 +82,38 @@ assert dexsim.get_world_num() == 0
 """
     result = subprocess.run(
         [sys.executable, "-c", script, first_module],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_toppra_planning_and_backward_work_without_external_package() -> None:
+    script = """
+import importlib.abc
+import sys
+class BlockExternalToppra(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "toppra" or fullname.startswith("toppra."):
+            raise AssertionError("External toppra must not be imported")
+sys.meta_path.insert(0, BlockExternalToppra())
+import numpy as np
+import torch
+from embodichain.compute.trajectory._toppra import _NumpyToppra
+from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+points = torch.tensor([[[0.0], [0.73]]], dtype=torch.float64, requires_grad=True)
+acceleration = torch.tensor(1.7, dtype=torch.float64, requires_grad=True)
+reference = _NumpyToppra(points.detach().numpy()[0], 1.0, 1.7)
+result = _retime_toppra_warp(points, 1.0, acceleration, sample_dt=0.13)
+assert result["success"].all()
+assert np.isclose(result["dt"].sum().item(), reference.duration)
+result["dt"].sum().backward()
+assert torch.isfinite(points.grad).all() and torch.isfinite(acceleration.grad)
+assert "toppra" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         timeout=60,
