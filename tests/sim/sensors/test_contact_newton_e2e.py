@@ -176,6 +176,15 @@ def test_dexuni_pure_mujoco_contact_sensor_reports_impulse() -> None:
         assert valid.any()
         assert torch.isfinite(data["position"][valid]).all()
         assert torch.isfinite(data["normal"][valid]).all()
+        assert torch.isfinite(data["friction"][valid]).all()
+        assert torch.isfinite(data["impulse"][valid]).all()
+        assert torch.isfinite(data["distance"][valid]).all()
+        normal = data["normal"][valid]
+        normal_norm = torch.linalg.vector_norm(normal, dim=-1)
+        assert torch.allclose(normal_norm, torch.ones_like(normal_norm), atol=1.0e-4)
+        tangent_residual = (data["friction"][valid] * normal).sum(dim=-1).abs()
+        assert tangent_residual.max() < 1.0e-4
+        assert (data["user_ids"][valid] >= 0).all()
         assert (data["impulse"][valid] > 1.0e-7).any()
 
         # Cross-check the adapter against DexUni's native force report.  The
@@ -268,6 +277,7 @@ def test_dexuni_vbd_contact_sensor_exposes_geometry_only() -> None:
         assert valid.any()
         assert torch.isfinite(data["position"][valid]).all()
         assert torch.isfinite(data["normal"][valid]).all()
+        assert torch.isfinite(data["distance"][valid]).all()
         assert torch.count_nonzero(data["impulse"][valid]) == 0
         assert torch.count_nonzero(data["friction"][valid]) == 0
     finally:
