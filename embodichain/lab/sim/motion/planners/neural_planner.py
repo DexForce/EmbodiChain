@@ -316,7 +316,26 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """
 
     dt: float = 0.01
-    """Nominal timestep reported in PlanResult."""
+    """Nominal timestep reported in PlanResult when no retiming is requested.
+
+    The rollout integrates a joint delta per step and never solves a duration,
+    so this value is bookkeeping rather than executable timing: at the default
+    ``action_scale`` a saturated step implies ``action_scale / dt`` rad/s,
+    which exceeds a typical arm's joint velocity limit several times over. Set
+    :attr:`constraints` to replace it with a solved time parameterization.
+    """
+
+    constraints: dict | None = None
+    """Optional ``velocity`` and ``acceleration`` limits for output retiming.
+
+    ``None`` keeps the rollout's nominal timing and current behavior. When set,
+    the closed-loop samples are treated as a geometric path and re-parameterized
+    under these limits, so the returned timing and derivatives are executable.
+    Keys and value shapes match :class:`ToppraPlanOptions`: a scalar or one
+    value per controlled joint. Retiming resamples the path, so it changes the
+    reported positions and poses as well as the timing, and it cannot reduce
+    the path's own jerk -- only the duration over which it is traversed.
+    """
 
 
 @configclass
@@ -583,10 +602,12 @@ class NeuralPlanner(BasePlanner):
         dt[:, 0] = 0.0
         positions_t = positions_t.permute(1, 0, 2)
         xpos_t = xpos_t.permute(1, 0, 2, 3)
+        success = active_idx >= episode_k
+        if self.cfg.constraints is not None:
+            return self._retimed_result(success, positions_t, control_part)
         velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
             positions_t, dt
         )
-        success = active_idx >= episode_k
         return PlanResult(
             success=success,
             positions=positions_t,
@@ -594,6 +615,50 @@ class NeuralPlanner(BasePlanner):
             accelerations=accelerations_t,
             xpos_list=xpos_t,
             dt=dt,
+        )
+
+    def _retimed_result(
+        self,
+        success: torch.Tensor,
+        positions: torch.Tensor,
+        control_part: str,
+    ) -> PlanResult:
+        """Re-parameterize the rollout path under the configured limits.
+
+        Retiming resamples the path, so poses are recomputed from the returned
+        positions rather than carried over from the rollout. An environment
+        whose path cannot be parameterized is reported as failed: the caller
+        asked for limit-respecting output and none is available for that row.
+
+        Args:
+            success: Per-env rollout convergence of shape ``(B,)``.
+            positions: Rollout joint samples of shape ``(B, N, DOF)``.
+            control_part: Robot control part used for forward kinematics.
+
+        Returns:
+            PlanResult with solved timing, derivatives and recomputed poses.
+        """
+        from .toppra_planner import retime_joint_paths
+
+        retimed = retime_joint_paths(
+            positions,
+            constraints=dict(self.cfg.constraints),
+            device=self.device,
+        )
+        poses = torch.stack(
+            [
+                self._fk_matrix(retimed.positions[:, index], control_part)
+                for index in range(retimed.positions.shape[1])
+            ],
+            dim=1,
+        )
+        return PlanResult(
+            success=success & retimed.success.to(success.device),
+            positions=retimed.positions,
+            velocities=retimed.velocities,
+            accelerations=retimed.accelerations,
+            xpos_list=poses,
+            dt=retimed.dt,
         )
 
     def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
