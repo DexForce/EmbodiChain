@@ -325,7 +325,7 @@ class NeuralPlannerCfg(BasePlannerCfg):
     :attr:`constraints` to replace it with a solved time parameterization.
     """
 
-    constraints: dict | None = None
+    constraints: dict[str, float | list[float]] | None = None
     """Optional ``velocity`` and ``acceleration`` limits for output retiming.
 
     ``None`` keeps the rollout's nominal timing and current behavior. When set,
@@ -604,7 +604,21 @@ class NeuralPlanner(BasePlanner):
         xpos_t = xpos_t.permute(1, 0, 2, 3)
         success = active_idx >= episode_k
         if self.cfg.constraints is not None:
-            return self._retimed_result(success, positions_t, control_part)
+            return self._retimed_result(
+                success,
+                positions_t,
+                control_part,
+                waypoints=(
+                    waypoints_pos,
+                    waypoints_quat,
+                    waypoints_joint,
+                    pos_mask,
+                    rot_mask,
+                    joint_mask,
+                ),
+                episode_k=episode_k,
+                qpos_limits=(lower, upper),
+            )
         velocities_t, accelerations_t = self._compute_vel_acc_via_finite_diff(
             positions_t, dt
         )
@@ -622,18 +636,30 @@ class NeuralPlanner(BasePlanner):
         success: torch.Tensor,
         positions: torch.Tensor,
         control_part: str,
+        *,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+        qpos_limits: tuple[torch.Tensor, torch.Tensor],
     ) -> PlanResult:
         """Re-parameterize the rollout path under the configured limits.
 
-        Retiming resamples the path, so poses are recomputed from the returned
-        positions rather than carried over from the rollout. An environment
-        whose path cannot be parameterized is reported as failed: the caller
-        asked for limit-respecting output and none is available for that row.
+        Retiming fits a spline through the rollout samples and resamples it, so
+        the returned trajectory is not the one the rollout verified. Success is
+        therefore re-derived from the samples actually returned rather than
+        carried over: the resampled grid can step past a waypoint the rollout
+        stopped on, and a spline through samples clamped at a joint limit can
+        overshoot that limit between them. A row is reported as successful only
+        when its returned trajectory parameterizes, moves in nonzero time,
+        stays inside the joint limits, and still reaches every waypoint.
 
         Args:
             success: Per-env rollout convergence of shape ``(B,)``.
             positions: Rollout joint samples of shape ``(B, N, DOF)``.
             control_part: Robot control part used for forward kinematics.
+            waypoints: Parsed waypoint targets and masks from
+                :meth:`_parse_waypoints`.
+            episode_k: Number of waypoints this episode must reach.
+            qpos_limits: Lower and upper joint-position limits.
 
         Returns:
             PlanResult with solved timing, derivatives and recomputed poses.
@@ -645,21 +671,93 @@ class NeuralPlanner(BasePlanner):
             constraints=dict(self.cfg.constraints),
             device=self.device,
         )
+        retimed_positions = retimed.positions
         poses = torch.stack(
             [
-                self._fk_matrix(retimed.positions[:, index], control_part)
-                for index in range(retimed.positions.shape[1])
+                self._fk_matrix(retimed_positions[:, index], control_part)
+                for index in range(retimed_positions.shape[1])
             ],
             dim=1,
         )
+        success = success & retimed.success.to(success.device)
+        success = success & self._retimed_is_executable(
+            retimed_positions, retimed.dt, qpos_limits
+        )
+        success = success & self._retimed_reaches_waypoints(
+            retimed_positions, control_part, waypoints, episode_k
+        )
         return PlanResult(
-            success=success & retimed.success.to(success.device),
-            positions=retimed.positions,
+            success=success,
+            positions=retimed_positions,
             velocities=retimed.velocities,
             accelerations=retimed.accelerations,
             xpos_list=poses,
             dt=retimed.dt,
         )
+
+    def _retimed_is_executable(
+        self,
+        positions: torch.Tensor,
+        dt: torch.Tensor,
+        qpos_limits: tuple[torch.Tensor, torch.Tensor],
+    ) -> torch.Tensor:
+        """Return whether each retimed row has real timing and legal positions.
+
+        The shared retiming kernel returns a zero-duration result for a path
+        whose endpoints nearly coincide, which would claim a move with no time
+        to execute it. Spline interpolation through samples the rollout clamped
+        at a joint limit can also overshoot that limit between them, since the
+        fit sees only the sampled values.
+        """
+        lower, upper = qpos_limits
+        arm = positions[..., : self._action_dim]
+        moves = (arm - arm[:, :1]).abs().amax(dim=(1, 2)) > 1.0e-9
+        timed = dt.sum(dim=-1) > 0.0
+        within = ((arm >= lower) & (arm <= upper)).all(dim=-1).all(dim=-1)
+        return within & (timed | ~moves)
+
+    def _retimed_reaches_waypoints(
+        self,
+        positions: torch.Tensor,
+        control_part: str,
+        waypoints: tuple[torch.Tensor, ...],
+        episode_k: int,
+    ) -> torch.Tensor:
+        """Return whether each retimed row still reaches every waypoint in order.
+
+        Applies the rollout's own arrival test to the resampled grid, so a
+        trajectory that passes a waypoint only between output samples is not
+        reported as reaching it.
+        """
+        (
+            waypoints_pos,
+            waypoints_quat,
+            waypoints_joint,
+            pos_mask,
+            rot_mask,
+            joint_mask,
+        ) = waypoints
+        batch = positions.shape[0]
+        active_idx = torch.zeros(batch, dtype=torch.long, device=self.device)
+        for index in range(positions.shape[1]):
+            qpos = positions[:, index]
+            reached = self._is_active_reached(
+                qpos[:, : self._action_dim],
+                self._fk_pose_xyzw(qpos, control_part),
+                waypoints_pos,
+                waypoints_quat,
+                waypoints_joint,
+                pos_mask,
+                rot_mask,
+                joint_mask,
+                active_idx,
+            )
+            active_idx = torch.where(
+                reached & (active_idx < episode_k), active_idx + 1, active_idx
+            )
+            if bool((active_idx >= episode_k).all()):
+                break
+        return active_idx >= episode_k
 
     def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
         torch.Tensor,

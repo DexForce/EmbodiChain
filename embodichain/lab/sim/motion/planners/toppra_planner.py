@@ -224,8 +224,9 @@ def retime_joint_paths(
             one value per joint, matching :class:`ToppraPlanOptions`.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
-            ``None`` keeps the input sample count, which leaves array shapes
-            unchanged while the timing behind them changes.
+            ``None`` keeps the input sample count and is only meaningful for
+            ``QUANTITY``, which leaves array shapes unchanged while the timing
+            behind them changes.
         device: Device for the assembled tensors; defaults to the input's.
 
     Returns:
@@ -233,8 +234,9 @@ def retime_joint_paths(
         not parameterize that path.
 
     Raises:
-        ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor or the
-            constraints omit ``velocity`` or ``acceleration``.
+        ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor, the
+            constraints omit ``velocity`` or ``acceleration``, or ``TIME``
+            sampling is requested without an explicit interval in seconds.
     """
     if positions.dim() != 3:
         raise ValueError(
@@ -243,6 +245,13 @@ def retime_joint_paths(
     missing = sorted({"velocity", "acceleration"}.difference(constraints))
     if missing:
         raise ValueError(f"constraints is missing required keys: {missing}.")
+    if sample_interval is None and sample_method is TrajectorySampleMethod.TIME:
+        # The default is a sample count; reading it as seconds would silently
+        # collapse a dense path to two samples whenever its duration is shorter.
+        raise ValueError(
+            "sample_interval is required for TIME sampling; it is a duration in "
+            "seconds, not the sample count the default supplies."
+        )
     resolved_device = positions.device if device is None else device
     resolved_interval = (
         int(positions.shape[1]) if sample_interval is None else sample_interval
