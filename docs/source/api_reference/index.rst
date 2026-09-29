@@ -84,4 +84,5 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 1
 
    public_api
+   embodichain/embodichain.lab.mcp
    locomotion_tasks

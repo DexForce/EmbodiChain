@@ -6,6 +6,20 @@ defaults:
   - conventions/naming.md
   - conventions/topic-lifecycle.md
 topics:
+- id: mcp
+  title: MCP Integration
+  aliases: [MCP integration, model context protocol, 仿真 MCP, MCP 接口]
+  keywords: [EmbodiChainMCPService, SimulationManagerBackend, InMemorySimulationBackend, embodichain mcp,
+    world_id, scene_revision, run_id, snapshot_id]
+  paths: [topics/mcp/mcp.md]
+  source_of_truth:
+  - embodichain/lab/mcp/server.py
+  - embodichain/lab/mcp/service.py
+  - embodichain/lab/mcp/backend.py
+  - embodichain/cli/main.py
+  watch_paths: [embodichain/lab/mcp/, tests/lab/mcp/, pyproject.toml]
+  related_topics: [simulation-system, env-framework, robot-system, ik-solvers, motion-planning, data-pipeline]
+  status: active
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]

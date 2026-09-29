@@ -119,6 +119,11 @@ COMMANDS = (
         target="embodichain.lab.scripts.analyze_workspace:cli",
         help="Analyze a robot's reachable workspace from a URDF/USD asset.",
     ),
+    Command(
+        name="mcp",
+        target="embodichain.lab.mcp.server:cli",
+        help="Expose simulation and motion capabilities over MCP.",
+    ),
 )
 
 

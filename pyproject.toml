@@ -68,6 +68,9 @@ gensim = [
   "scipy",
   "matplotlib",
 ]
+mcp = [
+  "mcp>=2,<3",
+]
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
