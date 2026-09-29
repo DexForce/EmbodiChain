@@ -446,7 +446,7 @@ def test_multi_part_bundle_keeps_distinct_bindings(
 
 @pytest.mark.parametrize("states", [("open",), ("closed",), ("open", "closed")])
 def test_e6_bundle_uses_standard_registration_and_complete_recipe(
-    scene: PreparedScene, tmp_path: Path, states: tuple
+    scene: PreparedScene, tmp_path: Path, states: tuple, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if "closed" in states:
         stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
@@ -503,6 +503,9 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     )
     assert deployment.integration.registration.catalog is not None
     assert len(deployment.integration.adapter_factory.articulation_bindings) == 1
+    assert [
+        kind for _, kind in deployment.integration.adapter_factory.articulation_calls
+    ] == ["slide", "withdraw"] * len(states)
     items = load_config(paths.program)["program"]["items"]
     assert all(
         item["validators"][0]["kind"] == "articulation_joint_position" for item in items
@@ -510,6 +513,19 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     if len(states) == 2:
         assert graph["nodes"][3]["depends_on"] == [graph["nodes"][2]["id"]]
         assert graph["nodes"][3]["call"]["resources"] == {"primary": "left"}
+    from embodichain.gen_sim.task_engine._task_program import articulation_recovery
+    from embodichain.gen_sim.task_engine._bundle_runner import (
+        _verify_integration_fingerprint,
+    )
+
+    monkeypatch.setattr(articulation_recovery, "ARTICULATION_RECOVERY_REVISION", 999)
+    with pytest.raises(ValueError, match="fingerprint drifted"):
+        _verify_integration_fingerprint(
+            paths.root,
+            paths.deployment,
+            graph,
+            load_config(paths.integration_fingerprint),
+        )
 
 
 def test_e6_closed_target_rejects_unannotated_endpoint(

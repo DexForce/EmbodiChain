@@ -2131,6 +2131,7 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
     source_extents: tuple[float, float, float],
     expected_axis: list[float],
     resource: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The merged E2 route passes real configured composition and preflight."""
     from embodichain.lab.sim.cfg import RobotCfg
@@ -2268,6 +2269,19 @@ def test_generated_e2_bundle_shares_release_route_with_axis_acceptance(
         task_program=load_config(paths.deployment)["task_program"],
         skill_profile=load_config(paths.embodiment)["skill_profile"],
         base_dir=paths.deployment.parent,
+    )
+    from embodichain.gen_sim.task_engine._task_program import articulation_recovery
+
+    assert deployment.integration.adapter_factory.articulation_calls == ()
+    monkeypatch.setattr(articulation_recovery, "ARTICULATION_RECOVERY_REVISION", 999)
+    unchanged = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.deployment.parent,
+    )
+    assert (
+        unchanged.integration.integration_fingerprint
+        == deployment.integration.integration_fingerprint
     )
     registration = deployment.integration.registration
     for preset in registration.robot_profile_binding.presets:

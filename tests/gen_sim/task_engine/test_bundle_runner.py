@@ -284,6 +284,7 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     )
     engine = object.__new__(GenSimActionEngine)
     engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
     engine._planning_services = SimpleNamespace(robot=robot)
     request = SimpleNamespace(
         invocation_id="test/segment-0:0",
