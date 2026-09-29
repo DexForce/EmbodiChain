@@ -30,10 +30,12 @@ import yaml
 
 from embodichain.utils import configclass
 
+from .contracts import EvaluationDomain
 from .models import AlgorithmRole
 
 __all__ = [
     "AtomicPoseRandomizationCfg",
+    "DomainCfg",
     "BENCHMARK_ROOT",
     "FreeSpaceTrackCfg",
     "PlannerSpecCfg",
@@ -134,6 +136,27 @@ class FreeSpaceTrackCfg:
 
 
 @configclass
+class DomainCfg:
+    """Explicit provenance for one track's existing case population.
+
+    This declaration labels cases; it does not generate perturbations or
+    establish that a population was held out during model development.
+    """
+
+    id: str = ""
+    version: str = ""
+    kind: str = ""
+
+    def to_identity(self) -> EvaluationDomain:
+        """Validate and snapshot domain provenance for a frozen case.
+
+        Returns:
+            Immutable domain identity, independent of planner configuration.
+        """
+        return EvaluationDomain(id=self.id, version=self.version, kind=self.kind)
+
+
+@configclass
 class TrackCfg:
     """One enabled benchmark track and its scenario provider."""
 
@@ -141,6 +164,7 @@ class TrackCfg:
     scenario: str = ""
     enabled: bool = True
     config: dict[str, Any] = {}
+    domain: DomainCfg | None = None
 
 
 @configclass
@@ -221,6 +245,8 @@ class SuiteCfg:
         if not self.enabled_tracks():
             raise ValueError("At least one track must be enabled.")
         for track in self.tracks:
+            if track.domain is not None:
+                track.domain.to_identity()
             if not track.id or not track.scenario:
                 raise ValueError("Every track must define a non-empty id and scenario.")
         if self.protocol.warmup_trials < 0:
@@ -277,7 +303,15 @@ def _resolve_tracks_and_free_space(
     else:
         if not isinstance(tracks_data, list):
             raise TypeError("tracks must be a list of track mappings.")
-        tracks = [TrackCfg(**item) for item in tracks_data]
+        tracks = []
+        for item in tracks_data:
+            values = dict(item)
+            domain = values.get("domain")
+            if domain is not None:
+                if not isinstance(domain, Mapping):
+                    raise TypeError("track.domain must be a mapping.")
+                values["domain"] = DomainCfg(**domain)
+            tracks.append(TrackCfg(**values))
         for track in tracks:
             if track.scenario == _FREE_SPACE_SCENARIO and track.config:
                 free_space_data = {**free_space_data, **dict(track.config)}

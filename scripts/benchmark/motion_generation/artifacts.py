@@ -22,6 +22,7 @@ import importlib.metadata
 import json
 import platform
 import subprocess
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -137,6 +138,7 @@ def _case_to_dict(case: BenchmarkCase) -> dict[str, Any]:
         ),
         "target_waypoints": case.target_waypoints.detach().cpu().tolist(),
         "case_parameters": _to_json_value(case.case_parameters),
+        "domain": None if case.domain is None else asdict(case.domain),
         "validity_evidence": {
             "method": (
                 "reference_qpos_fk"
@@ -168,7 +170,7 @@ def write_case_manifest(path: str | Path, cases: list[BenchmarkCase]) -> Path:
     return write_json(
         path,
         {
-            "case_schema_version": 2,
+            "case_schema_version": 3,
             "cases": [_case_to_dict(case) for case in cases],
         },
     )

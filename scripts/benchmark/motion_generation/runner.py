@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -179,6 +179,7 @@ class BenchmarkRunner:
             "task_difficulty": case.task_difficulty,
             "primary_success": case.primary_success,
             "phase": phase,
+            "domain": case.domain,
         }
 
     def _record_unavailable(
@@ -567,7 +568,16 @@ class BenchmarkRunner:
                     cases = provider.generate_cases(
                         self.suite, track, robot, self.control_part, batch_size
                     )
+                    if track.domain is not None:
+                        domain = track.domain.to_identity()
+                        if any(case.domain not in (None, domain) for case in cases):
+                            raise ValueError(
+                                "Provider domain conflicts with track.domain."
+                            )
+                        cases = [replace(case, domain=domain) for case in cases]
                     self.cases.extend(cases)
+                    # Persist each frozen population before evaluating candidates.
+                    write_case_manifest(run_dir / "case_manifest.json", self.cases)
                     for spec in self.planner_specs:
                         self._run_adapter(
                             writer,
