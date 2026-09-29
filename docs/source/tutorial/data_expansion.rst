@@ -415,6 +415,29 @@ small, known set of recipes is required:
 The explicit recipe list must contain exactly ``target_episodes`` entries.
 Recipe IDs identify logical candidates; they do not represent batch offsets.
 
+Collection terms have one meaning across handwritten and Expansion tasks:
+
+.. list-table:: Collection terms
+   :header-rows: 1
+   :widths: 20 55
+
+   * - Term
+     - Meaning
+   * - ``episode``
+     - One environment row executed to completion and submitted as data.
+   * - ``attempt``
+     - One execution try. A failed attempt can be discarded and retried.
+   * - ``batch``
+     - The selected environment rows executed in one vectorized pass.
+   * - ``num_envs``
+     - The maximum number of rows available in one batch.
+   * - ``recipe_index``
+     - The stable logical ID of an Expansion candidate.
+
+Changing ``num_envs`` changes the number of batches and the parallel capacity;
+it does not change ``target_episodes``. A failed attempt and any prepare,
+commit, or discard reset also leave the target episode count unchanged.
+
 Collection accounting distinguishes successful data rows from execution
 attempts. The expansion manifest records the target, planned, committed, and
 rejected episode counts, total attempts, batch count, and prepare, commit, and

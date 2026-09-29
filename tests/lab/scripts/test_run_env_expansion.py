@@ -125,7 +125,7 @@ def test_collection_plan_prefers_task_target_over_legacy_environment_default() -
     assert plan.target_episodes == 4
 
 
-def test_collection_plan_rejects_conflicting_cli_target() -> None:
+def test_collection_plan_cli_target_overrides_task_target() -> None:
     args = _create_parser().parse_args(
         [
             "--gym-config",
@@ -137,11 +137,9 @@ def test_collection_plan_rejects_conflicting_cli_target() -> None:
             "5",
         ]
     )
-    with pytest.raises(ValueError, match="CLI --max-episodes"):
-        resolve_collection_plan(
-            args,
-            {"collection": {"target_episodes": 4}},
-        )
+    plan = resolve_collection_plan(args, {"collection": {"target_episodes": 4}})
+
+    assert plan.target_episodes == 5
 
 
 def test_collection_plan_rejects_conflicting_task_and_expansion_targets() -> None:
@@ -154,6 +152,27 @@ def test_collection_plan_rejects_conflicting_task_and_expansion_targets() -> Non
             {"collection": {"target_episodes": 4}},
             expansion_collection={"target_episodes": 8},
         )
+
+
+def test_cli_collection_target_overrides_task_target() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--max_episodes",
+            "5",
+            "--headless",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    plan = resolve_collection_plan(
+        args,
+        {"collection": {"target_episodes": 64}},
+    )
+
+    assert plan.target_episodes == 5
 
 
 def test_collection_plan_maps_legacy_max_episodes_as_fallback() -> None:

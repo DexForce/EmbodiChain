@@ -81,5 +81,12 @@ synchronous 4×4 camera grid for sixteen environments. Combined expansion with
 visual variation requires the configured sensors; use `--disable-sensor` only
 with a expansion override that disables visual capture.
 
+The expansion manifest reports the collection boundary separately from the
+recipe schedule. `target_episodes` and `committed_episodes` describe the final
+dataset size; `batch_count` describes parallel execution; `attempts` includes
+failed retries; and the prepare, commit, and discard reset counts describe
+reset boundaries. These counters let a run be compared across different
+`num_envs` values without treating a batch or a reset as an episode.
+
 The task-local `catalog.yaml` names the two robot deployments; expansion is a
 capability of the UR5 deployment rather than a third deployment entry.

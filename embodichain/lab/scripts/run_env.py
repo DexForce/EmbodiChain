@@ -163,10 +163,6 @@ def resolve_collection_plan(
     legacy_target = gym_config.get("max_episodes")
     if cli_target is not None:
         target = cli_target
-        if any(value != target for value in target_values):
-            raise ValueError(
-                "CLI --max-episodes conflicts with collection.target_episodes"
-            )
     elif target_values:
         if len(set(target_values)) != 1:
             raise ValueError("collection.target_episodes is declared more than once")
@@ -326,10 +322,12 @@ def _reset_episode_rows(
 def _abort_pending_episode(
     env: Any,
     env_ids: Sequence[int] | torch.Tensor | None = None,
+    *,
+    count_discard: bool = True,
 ) -> None:
     """Discard buffered data before retrying or closing an environment."""
     stats = getattr(_env_target(env), "_collection_stats", None)
-    if isinstance(stats, dict):
+    if count_discard and isinstance(stats, dict):
         stats["discard_reset_count"] = stats.get("discard_reset_count", 0) + 1
     _reset_episode_rows(env, env_ids, save_data=False)
 
@@ -1323,7 +1321,7 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         return
 
     plan = resolve_collection_plan(args, gym_config)
-    _abort_pending_episode(env)
+    _abort_pending_episode(env, count_discard=False)
     num_envs = int(getattr(_env_target(env), "num_envs", 1))
     if num_envs < 1:
         raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
@@ -1570,7 +1568,7 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
     abort_error: BaseException | None = None
     close_error: BaseException | None = None
     try:
-        _abort_pending_episode(env)
+        _abort_pending_episode(env, count_discard=False)
     except BaseException as error:
         abort_error = error
     try:
