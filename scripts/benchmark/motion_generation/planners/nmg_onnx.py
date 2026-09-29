@@ -35,6 +35,7 @@ from embodichain.lab.sim.motion.planners import (
 )
 
 from ..config import PlannerSpecCfg
+from ..metrics.trajectory import resolve_velocity_limits
 from ..models import BenchmarkCase
 from ..registry import register_planner_adapter
 from .base import PlannerAdapter, PlannerContext
@@ -97,13 +98,25 @@ class NmgOnnxAdapter(PlannerAdapter):
                 "asset supplies no acceleration limit."
             )
         num_joints = int(self.spec.config.get("num_arm_joints", 7))
-        velocity = (
-            self.context.robot.get_qvel_limits(name=self.context.control_part)[0]
-            .detach()
-            .cpu()
-            .tolist()[:num_joints]
+        asset_limits = self.context.robot.get_qvel_limits(
+            name=self.context.control_part
+        )[0][:num_joints]
+        velocity = resolve_velocity_limits(
+            asset_limits,
+            self.context.joint_velocity_limit_rad_s,
+            asset_limits,
         )
-        return {"velocity": velocity, "acceleration": acceleration}
+        if velocity is None:
+            raise ValueError(
+                "retime found no usable joint velocity limit: the asset reports a "
+                "placeholder and protocol.joint_velocity_limit_rad_s is unset. "
+                "Retiming against a placeholder would leave velocity "
+                "unconstrained while reporting the result as limit-respecting."
+            )
+        return {
+            "velocity": velocity.detach().cpu().tolist(),
+            "acceleration": acceleration,
+        }
 
     def _resolved_model_revision(self) -> str:
         """Use an explicit revision or derive one from the runtime ONNX path."""
