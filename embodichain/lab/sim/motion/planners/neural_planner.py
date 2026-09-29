@@ -30,7 +30,12 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     _infer_batch_size,
     validate_plan_options,
 )
-from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
+from embodichain.lab.sim.motion.planners.utils import (
+    MoveType,
+    PlanResult,
+    PlanState,
+    TrajectorySampleMethod,
+)
 from embodichain.utils import configclass, logger
 from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
@@ -316,13 +321,17 @@ class NeuralPlannerCfg(BasePlannerCfg):
     """
 
     dt: float = 0.01
-    """Nominal timestep reported in PlanResult when no retiming is requested.
+    """Output sampling period in seconds.
+
+    Without :attr:`constraints` this is bookkeeping rather than executable
+    timing.
 
     The rollout integrates a joint delta per step and never solves a duration,
     so this value is bookkeeping rather than executable timing: at the default
     ``action_scale`` a saturated step implies ``action_scale / dt`` rad/s,
     which exceeds a typical arm's joint velocity limit several times over. Set
-    :attr:`constraints` to replace it with a solved time parameterization.
+    :attr:`constraints` to replace it with a solved time parameterization, in
+    which case this becomes the period that trajectory is sampled on.
     """
 
     constraints: dict[str, float | list[float]] | None = None
@@ -666,9 +675,16 @@ class NeuralPlanner(BasePlanner):
         """
         from .toppra_planner import retime_joint_paths
 
+        # Sample the solved trajectory on the configured control period rather
+        # than on the rollout's step count. The rollout emits however many
+        # steps it happened to take, which is far too coarse once the duration
+        # stretches: a waypoint the rollout stopped on then falls between two
+        # output samples and is reported as missed.
         retimed = retime_joint_paths(
             positions,
             constraints=dict(self.cfg.constraints),
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=float(self.cfg.dt),
             device=self.device,
         )
         retimed_positions = retimed.positions
