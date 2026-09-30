@@ -778,7 +778,7 @@ def test_phase_one_bundle_rejects_unsupported_robot_profile(tmp_path: Path) -> N
         )
 
 
-@pytest.mark.parametrize("task_type", ["E7", "E8", "E9"])
+@pytest.mark.parametrize("task_type", ["E7", "E8"])
 def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     tmp_path: Path, task_type: str
 ) -> None:
@@ -788,7 +788,7 @@ def test_bundle_rejects_out_of_scope_tasks_before_writing_assets(
     for group in graph["task_groups"]:
         group["task_type"] = task_type
     output = tmp_path / "bundle"
-    with pytest.raises(ValueError, match="only E1-E6"):
+    with pytest.raises(ValueError, match="E1-E6 and E9"):
         generate_task_program_bundle(graph, None, output, robot_profile="dual_franka")
     assert not output.exists()
 

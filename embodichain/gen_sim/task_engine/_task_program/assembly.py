@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,32 @@ from .invocation_policy import (
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
 
 
+def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
+    """Hash physical values and asset contents, never publication locations."""
+    scene_path = Path(base_dir) / "components/scene.yaml"
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key == "fpath" and isinstance(item, str):
+                    asset = Path(item)
+                    if not asset.is_absolute():
+                        asset = scene_path.parent / asset
+                    result[key] = {
+                        "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
+                        "format": asset.suffix.lower(),
+                    }
+                else:
+                    result[key] = normalize(item)
+            return result
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    return normalize(load_config(scene_path))
+
+
 class _TaskFactory(SimulationTaskProgramFactory):
     """Select task-owned observation services, not a different executor."""
 
@@ -74,6 +101,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        press_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -84,6 +112,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
+        self._press_routes = press_routes
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -115,6 +144,16 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
             self._drawers = tuple(
                 DrawerObservation(route, self._simulation) for route in drawer_routes
+            )
+        if press_routes:
+            from .press_runtime import PressAcceptancePort
+
+            self._task_post_port = PressAcceptancePort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                press_routes[0],
+                self.step_dt,
             )
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
@@ -172,6 +211,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         if self._coordinated_motion:
             engine.register(GenSimCoordinatedPickment(), replace=True)
+        if self._press_routes:
+            from .press_runtime import GenSimPress
+
+            engine.register(GenSimPress(), replace=True)
         self.task_program_registration.validate_engine(engine)
         return engine
 
@@ -196,10 +239,17 @@ class TaskAdapterFactory:
     motion_samples: tuple[tuple[str, int], ...] = ()
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
+    press_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
         self.registration.assert_unchanged()
+        if self.press_routes:
+            from .press_runtime import SENSOR_UID, ensure_sensor
+
+            environment.sensors[SENSOR_UID] = ensure_sensor(
+                environment.sim, environment.robot, self.press_routes[0]
+            )
         motion_factory = None
         if any(
             preset.motion_policy.strategy == "motion_gen"
@@ -322,6 +372,7 @@ class TaskAdapterFactory:
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
+            press_routes=self.press_routes,
         )
         return factory.create_adapter()
 
@@ -407,6 +458,34 @@ def load_deployment(
         if type(f) is ArticulationWithdrawFactory
     ]
     articulation_bindings = ()
+    from .press_runtime import PressFactory, PressPrepareFactory
+
+    presses = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is PressFactory
+    ]
+    preparations = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is PressPrepareFactory
+    ]
+    press_routes = ()
+    if presses or preparations:
+        if (
+            len(presses) != 1
+            or len(preparations) != 1
+            or presses[0].route != preparations[0].route
+        ):
+            raise ValueError(
+                "E9 prepare and Press must share exactly one source-qualified route."
+            )
+        press_routes = (presses[0].route,)
+        for phase in ("ready", "pressed"):
+            name = press_routes[0].preset(phase)
+            if name in settle_presets:
+                raise ValueError("E9 post-policies cannot replace existing presets.")
+            settle_presets[name] = settle_presets["rigid_object"].snapshot()
     if slides or withdrawals:
         if (
             len(slides) != 1
@@ -451,6 +530,10 @@ def load_deployment(
     from embodichain.lab.task_program.language import load_task_program
     from .adaptive_grasp import bind_pick_purposes
 
+    if press_routes:
+        from .press_binding import validate_program
+
+        validate_program(program, press_routes[0])
     from .align_held import with_held_alignment
 
     registration = with_held_alignment(
@@ -523,6 +606,12 @@ def load_deployment(
                 else {}
             ),
             "adapter_contract": ADAPTER_CONTRACT,
+            **({"press_runtime_revision": 2} if press_routes else {}),
+            **(
+                {"press_scene_configuration": _press_scene_identity(base_dir)}
+                if press_routes
+                else {}
+            ),
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
             "core_integration": base.integration.integration_fingerprint,
@@ -550,6 +639,7 @@ def load_deployment(
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
+        press_routes=press_routes,
     )
     integration = replace(
         base.integration,
