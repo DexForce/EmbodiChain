@@ -138,7 +138,10 @@ from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
 )
-from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+from embodichain.lab.task_program.semantics.scene import (
+    SceneCollisionRole,
+    SceneObjectRef,
+)
 
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
@@ -1535,6 +1538,83 @@ def test_adapter_factory_binds_registration_to_initialized_environment(
         "registration": registration,
         "grasp_pose_generators": {},
     }
+
+
+def test_adapter_factory_forwards_policy_planner_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execution-policy planner data reaches the live simulation factory."""
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    planner_config = {"type": "toppra", "config": {"max_workers": 2}}
+    factory = SimulationTaskProgramAdapterFactory(
+        registration,
+        planner_config=planner_config,
+    )
+    captured: dict[str, object] = {}
+
+    def _create_adapter(bound_environment: object, **kwargs: object):
+        captured["environment"] = bound_environment
+        captured.update(kwargs)
+        return object.__new__(TaskProgramEnvironmentAdapter)
+
+    monkeypatch.setattr(
+        simulation_environment_module,
+        "create_simulation_task_program_adapter",
+        _create_adapter,
+    )
+
+    factory.create_adapter(object())
+
+    assert captured["planner_config"] == planner_config
+
+
+def test_planner_config_decodes_to_typed_runtime_cfg() -> None:
+    """A serialized planner selection becomes the selected planner config type."""
+    planner_cfg = simulation_environment_module._planner_cfg_from_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        robot_uid="robot",
+    )
+
+    assert isinstance(planner_cfg, simulation_environment_module.ToppraPlannerCfg)
+    assert planner_cfg.robot_uid == "robot"
+    assert planner_cfg.max_workers == 2
+
+
+def test_curobo_scene_binding_preserves_live_object_references() -> None:
+    """Configured cuRobo worlds survive config copies without cloning handles."""
+    robot = _Robot()
+    cube = _RigidObject()
+    simulation = _Simulation(robot, {"cube_native": cube})
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            registry_id="scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="cube_native",
+                    collision_role=SceneCollisionRole.STATIC,
+                ),
+            ),
+        ),
+        _profile_binding(),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,  # type: ignore[arg-type]
+        robot,  # type: ignore[arg-type]
+        registration,
+        step_dt=_STEP_DT,
+        planner_cfg=simulation_environment_module.CuroboPlannerCfg(robot_uid=robot.uid),
+    )
+
+    assert factory._planner_cfg is not None
+    factory._bind_curobo_scene(factory._planner_cfg)
+    copied = factory._planner_cfg.copy()
+
+    assert copied.world.rigid_objects is not None
+    assert copied.world.rigid_objects["cube"] is cube
 
 
 def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:

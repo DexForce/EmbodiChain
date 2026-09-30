@@ -101,6 +101,69 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     assert all(c.kwargs == {"replace": True} for c in result.register.call_args_list)
 
 
+def test_close_resource_rewrite_is_scoped_to_bound_drawer() -> None:
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        rewrite_drawer_close_resources,
+    )
+
+    def e6_nodes(object_id: str, part: str) -> list[dict]:
+        arguments = {"object": object_id, "state": "closed", "part": part}
+        return [
+            {
+                "id": f"{object_id}_{index}",
+                "task_type": "E6",
+                "call": {
+                    "kind": "registered",
+                    "call_id": call_id,
+                    "arguments": arguments,
+                    "resources": {"primary": "left"},
+                },
+            }
+            for index, call_id in enumerate(
+                (
+                    "gen_sim.articulation_slide",
+                    "gen_sim.articulation_withdraw",
+                    "gen_sim.articulation_park",
+                )
+            )
+        ]
+
+    drawer_nodes = e6_nodes("cabinet", "part_test")
+    ordinary_nodes = e6_nodes("other_articulation", "part_other")
+    graph = {
+        "nodes": [
+            {
+                "id": "ordinary_place",
+                "task_type": "E1",
+                "call": {"kind": "place", "object": "cube"},
+            },
+            *drawer_nodes,
+            *ordinary_nodes,
+        ],
+        "task_groups": [
+            {"task_type": "E6", "node_ids": [node["id"] for node in drawer_nodes]},
+            {
+                "task_type": "E6",
+                "node_ids": [node["id"] for node in ordinary_nodes],
+            },
+        ],
+    }
+
+    rewritten = rewrite_drawer_close_resources(
+        graph,
+        drawer_bindings=frozenset({("cabinet", "part_test")}),
+    )
+
+    assert all(
+        node["call"]["resources"]["primary"] == "right"
+        for node in rewritten["nodes"][1:4]
+    )
+    assert all(
+        node["call"]["resources"]["primary"] == "left"
+        for node in rewritten["nodes"][4:7]
+    )
+
+
 def drawer_meshes() -> list[trimesh.Trimesh]:
     return [
         trimesh.creation.box(
@@ -263,7 +326,10 @@ def test_drawer_pick_does_not_require_future_place_feasibility(
     )
     recorded = []
 
-    def plan(_self, prepared, context):
+    transform = lambda request, context, plan: plan
+
+    def plan(_self, prepared, context, *, plan_transform=None):
+        assert plan_transform is transform
         recorded.append(prepared)
         return SimpleNamespace(plan_success=torch.tensor([False]))
 
@@ -275,7 +341,7 @@ def test_drawer_pick_does_not_require_future_place_feasibility(
             route=SimpleNamespace(object_id="cube", affordance="drawer_target")
         ),
     )
-    engine.plan_request(request, object())
+    engine.plan_request(request, object(), plan_transform=transform)
     assert len(recorded[0].skill_options.downstream_object_target_poses) == (
         0 if destination == "drawer_target" else 1
     )

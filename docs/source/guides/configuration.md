@@ -73,7 +73,7 @@ class FunctorCfg:
 | `ObservationCfg` | `mode`, `name` | ObservationManager |
 | `EventCfg` | `mode`, `interval_step`, `is_global` | EventManager |
 | `RewardCfg` | `weight`, `mode` | RewardManager |
-| `ActionTermCfg` | `mode` | ActionManager |
+| `ActionTermCfg` | *(no extra fields)* | ActionManager |
 | `DatasetFunctorCfg` | `mode` | DatasetManager |
 
 ### Python Config Example
@@ -125,14 +125,15 @@ class MyEventCfg:
 
 ## JSON and YAML Configuration
 
-For RL training and data generation, EmbodiChain uses file-based configs (`.json`, `.yaml`, or `.yml`). The file format mirrors the Python config structure but uses string names instead of direct function references.
+For RL training and data expansion, EmbodiChain uses file-based configs (`.json`, `.yaml`, or `.yml`). The file format mirrors the Python config structure but uses string names instead of direct function references.
 
 Configs are loaded with `embodichain.utils.utility.load_config`, which selects the parser from the file extension. Both formats produce the same in-memory dictionary and are passed to `config_to_cfg()` for environment setup.
 
-For offline expert generation, `max_episodes` counts persisted
-per-environment episodes rather than vector batches. Thus `num_envs: 4` and
-`max_episodes: 10` produce two full four-row commits plus a final two-row
-commit. Failed rows count only when the relevant `DatasetFunctorCfg` sets
+For offline expert expansion, `collection.target_episodes` counts persisted
+environment rows rather than vector batches. Thus `num_envs: 4` and
+`target_episodes: 10` produce two full four-row commits plus a final two-row
+commit. The legacy `max_episodes` field and CLI option map to the same target.
+Failed rows count only when the relevant `DatasetFunctorCfg` sets
 `save_failed_episodes: true`.
 
 Example paths in the repository:
@@ -150,7 +151,9 @@ When a training config references a gym config (via `trainer.gym_config`), the n
 {
     "id": "EmbodiedEnv-v1",
     "num_envs": 4,
-    "max_episodes": 100,
+    "collection": {
+        "target_episodes": 100
+    },
     "max_episode_steps": 600,
     "physics": "default",
     "device": "cpu",
@@ -201,8 +204,8 @@ When a training config references a gym config (via `trainer.gym_config`), the n
         "control_parts": ["arm"],
         "actions": {
             "delta_qpos": {
-                "func": "DeltaQposTerm",
-                "params": {"scale": 0.1}
+                "func": "RelativeJointPositionAction",
+                "params": {"part_name": "arm", "scale": 0.1}
             }
         },
         "events": {
@@ -298,17 +301,17 @@ physics_config:
 
 Omit `solver_cfg` to let Newton's AutoSolver select from the complete scene at
 `prepare()`. For componentized tasks, place these backend declarations in
-separate physical environment files, such as `env.default.yaml` and
-`env.newton.yaml`, and point each deployment's `environment.component` at the
-appropriate file. Do not repeat `physics` or `physics_config` in those
-deployments. Keep the control period equal when comparing the two tasks.
+`envs/default.yaml` and `envs/newton.yaml`, then point the
+deployment's `environment.default` and `environment.newton` entries at those
+files. Do not repeat `physics` or `physics_config` in the deployment. Keep the
+control period equal when comparing the two backends.
 
 | Entry point | Backend selection | Backend parameters |
 | :--- | :--- | :--- |
 | Python `SimulationManagerCfg` | Concrete `physics_cfg` type | Fields of `DefaultPhysicsCfg` or `NewtonPhysicsCfg`. |
 | Inline runnable Gym file | Required `physics` | Flat `physics_config`, decoded against that backend. |
 | Componentized deployment | Selected environment component's `physics` | The same environment component owns `physics_config`. |
-| Launcher `--physics` | Confirms the file-owned value | Cannot convert a task to a different backend. |
+| Launcher `--physics` | Selects a declared variant or confirms a single component | Cannot synthesize a backend that has no file. |
 
 The `visualization` section is optional and defaults to
 `{"backend": "none"}`. Setting `"backend": "viser"` starts browser
@@ -334,19 +337,23 @@ layout separates a reusable environment from runnable deployment choices:
 
 ```text
 <task>/
-├── env.yaml
+├── envs/
+│   ├── default.yaml
+│   └── newton.yaml
 ├── task.franka.yaml
 ├── task.ur5.yaml
+├── expansion/
+│   └── <task-profile>.yaml
 └── task_program/
     ├── integration.yaml
     └── program.yaml
 ```
 
-The pure `env.yaml` component owns the physics backend, physical scene entities,
-and ordinary Gym values. It requires `environment_id`, `physics`, `simulation`,
-and `env`, may include `physics_config` and run controls such as
-`max_episode_steps`, and contains no runnable `id`, robot, sensor, or Task
-Program selection:
+Each pure environment variant under `envs/` owns one physics backend,
+physical scene entities, and ordinary Gym values. It requires
+`environment_id`, `physics`, `simulation`, and `env`, may include
+`physics_config` and run controls such as `max_episode_steps`, and contains no
+runnable `id`, robot, sensor, or Task Program selection:
 
 ```yaml
 environment_id: repeated_pick_place
@@ -361,20 +368,23 @@ env:
   dataset: {}
 ```
 
-A runnable deployment has `id` and selects one environment and embodiment. A
-configuration-defined Task Program additionally selects its program,
-integration, and execution policy:
+A runnable deployment has `id` and selects its environment variant(s) and
+embodiment. A configuration-defined Task Program additionally selects its
+program, integration, and execution policy:
 
 ```yaml
 id: TaskProgramRepeatedPickPlace-v1
 environment:
-  component: env.yaml
+  default: envs/default.yaml
+  newton: envs/newton.yaml
 task_program:
   program: task_program/program.yaml
   integration: task_program/integration.yaml
   execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
 embodiment:
   component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+expansion:
+  config: expansion/<task-profile>.yaml
 ```
 
 All references above resolve relative to the runnable deployment file. An
@@ -382,6 +392,19 @@ embodiment component owns its simulation robot and sensor suite; it may also
 own a `skill_profile` when Task Program needs semantic resources. The
 task-local `integration.yaml` owns its nested `scene_binding`, including each
 canonical `entity_id` to physical `simulation_uid` mapping.
+
+The optional `expansion.config` reference keeps task-facing augmentation
+settings in a separate file. That file may define `runtime`, `policy`,
+`overrides`, and `collection`; `collection.target_episodes` is the final
+committed row count, while `collection.selection` chooses sequential or
+explicit logical recipes. The runner deep-merges task-local fields, applies
+the runtime overlay after resolving the selected environment variant, and then
+constructs the common environment. `--physics` selects `default` or `newton`
+from the task mapping, while `--expansion-profile` and
+`--expansion-recipe-indices` override the referenced expansion values. The
+legacy `candidate_indices` spelling remains accepted as an explicit recipe
+selection alias. Relative policy and resource paths inside the expansion file
+resolve from that file's directory.
 
 Component ownership is exclusive. Do not combine `environment.component` with
 inline environment or scene fields, and do not combine `embodiment.component`
@@ -436,8 +459,8 @@ class has no separate variant field.
             "num_envs": 4,
             "actions": {
                 "delta_qpos": {
-                    "func": "DeltaQposTerm",
-                    "params": {"scale": 0.1}
+                    "func": "RelativeJointPositionAction",
+                    "params": {"part_name": "arm", "scale": 0.1}
                 }
             }
         }
@@ -499,7 +522,7 @@ algorithm:
 In JSON and YAML configs, functor functions are specified by name (string). EmbodiChain resolves these strings at runtime by searching registered modules. For example:
 
 - `"distance_between_objects"` resolves to `embodichain.lab.gym.envs.managers.rewards.distance_between_objects`
-- `"DeltaQposTerm"` resolves to `embodichain.lab.gym.envs.managers.actions.DeltaQposTerm`
+- `"RelativeJointPositionAction"` resolves to `embodichain.lab.gym.envs.managers.actions.RelativeJointPositionAction`
 - `"get_object_pose"` resolves to `embodichain.lab.gym.envs.managers.observations.get_object_pose`
 
 When writing custom functors, make sure they are imported in the module's `__init__.py` so the resolver can find them.
@@ -524,10 +547,12 @@ This is automatically converted to a `SceneEntityCfg` object at runtime.
 2. **Use Python configs for development.** They provide IDE auto-completion and type checking.
 3. **Use JSON or YAML configs for experiments.** YAML is often easier to read for nested structures; JSON remains fully supported.
 4. **Validate configs early.** Run your environment with a short episode count to catch config errors before long training runs.
-5. **Keep ownership explicit.** Put the reusable physical environment in
-   `env.yaml`, runnable choices in `task.<embodiment>.yaml`, and Task Program
-   intent plus semantic integration in `task_program/{program,integration}.yaml`.
-   Keep shared embodiments and execution policies under `configs/components/`.
+5. **Keep ownership explicit.** Put each reusable physical backend in
+   `envs/<backend>.yaml`, runnable choices in
+   `task.<embodiment>.yaml`, and Task Program intent plus semantic integration
+   in `task_program/{program,integration}.yaml`. Keep shared embodiments and
+   execution policies under `configs/components/`, and keep task-facing
+   expansion overrides under `expansion/`.
 
 ---
 

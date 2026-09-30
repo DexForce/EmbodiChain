@@ -1,7 +1,11 @@
 id: TaskProgramOpenDrawer-v1
 
 environment:
-  component: env.yaml
+  default: envs/default.yaml
+  newton: envs/newton.yaml
+
+expansion:
+  config: expansion/open_drawer.yaml
 
 task_program:
   program: task_program/program.yaml

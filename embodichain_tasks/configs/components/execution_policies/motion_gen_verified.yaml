@@ -4,6 +4,10 @@ preset_id: safe
 requires:
   embodiment_contract: dual_arm_parallel_gripper
 
+planner:
+  type: toppra
+  config: {}
+
 motion:
   strategy: motion_gen
   sample_count: 140

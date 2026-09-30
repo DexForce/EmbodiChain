@@ -54,7 +54,7 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 | `randomize_emission_light` | Emission light props | (varies) |
 | `randomize_indirect_lighting` | Indirect lighting | (varies) |
 
-- Camera extrinsics auto-detect mode: if `extrinsics.parent` is set → attach mode (pos/euler perturbation via `set_local_pose`); if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`).
+- Camera extrinsics auto-detect the representation and frame: if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`); otherwise → pose mode (pos/euler perturbation via `set_local_pose`), with `extrinsics.parent` selecting parent-relative pose and `parent=None` selecting arena-frame pose.
 - `set_rigid_object_visual_material` is deterministic (not random) but uses the same functor mechanism for fixed material assignment at reset.
 - Light randomization applies the **same values across all envs** (documented limitation).
 - ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``). Use ``direction_range`` instead.

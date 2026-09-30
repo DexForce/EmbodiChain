@@ -53,7 +53,21 @@ _Y_UP_TO_Z_UP = np.array(
 def render_scene_visual_evidence(
     source: str | Path, output_dir: str | Path
 ) -> dict[str, Any]:
-    """Render in an isolated EGL process and return the auditable manifest."""
+    """Render UID-labeled scene evidence in an isolated EGL process.
+
+    Args:
+        source: Supported scene export directory or scene configuration path.
+        output_dir: Directory in which to write the manifest and rendered images.
+
+    Returns:
+        Evidence manifest containing source hashes, view metadata, and absolute
+        paths to the catalog, views, object crops, and segmentation masks.
+
+    Raises:
+        RuntimeError: The rendering subprocess fails, including unavailable EGL.
+        subprocess.TimeoutExpired: Rendering exceeds the 180-second limit.
+        ValueError: The returned manifest is malformed or has an invalid schema.
+    """
     scene_path = Path(source).expanduser().resolve()
     output = Path(output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)

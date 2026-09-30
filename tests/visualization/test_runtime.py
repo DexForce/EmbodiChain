@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from time import monotonic, sleep
 
 import numpy as np
+import pytest
 
 from embodichain.lab.visualization import (
     CameraImage,
@@ -323,6 +324,66 @@ def test_runtime_keeps_backend_lifecycle_on_update_thread() -> None:
     assert runtime.stats.published_frames >= 1
     assert runtime.stats.captured_image_frames == 1
     assert runtime.stats.published_image_frames == 1
+
+
+@pytest.mark.parametrize("due", ["none", "pose", "deformable", "image", "forced"])
+def test_capture_publishes_source_once_and_only_when_a_consumer_is_due(due):
+    published = threading.Event()
+    exporter = _Exporter(published)
+    runtime = VisualizationRuntime(
+        exporter,
+        VisualizationCfg(backend="viser"),
+        backend=_Backend(published, threading.Event()),
+    )
+    runtime.start()
+    try:
+        runtime._next_capture_time = 0.0 if due == "pose" else float("inf")
+        runtime._next_deformable_capture_time = (
+            0.0 if due == "deformable" else float("inf")
+        )
+        runtime._next_image_capture_time = 0.0 if due == "image" else float("inf")
+        calls = []
+
+        def publish():
+            # Publication precedes both scene reads and camera rendering.
+            assert exporter.dynamic_capture_flags == []
+            assert exporter.image_capture_count == 0
+            calls.append("publish")
+
+        captured = runtime.capture(
+            sim_step=1,
+            sim_time=0.01,
+            force=due == "forced",
+            before_capture=publish,
+        )
+        assert captured is (due != "none")
+        assert calls == ([] if due == "none" else ["publish"])
+    finally:
+        runtime.stop()
+
+
+def test_failed_source_publication_does_not_consume_capture_deadlines():
+    published = threading.Event()
+    runtime = VisualizationRuntime(
+        _Exporter(published),
+        VisualizationCfg(backend="viser"),
+        backend=_Backend(published, threading.Event()),
+    )
+    runtime.start()
+    try:
+        runtime._next_capture_time = 0.0
+        runtime._next_deformable_capture_time = float("inf")
+        runtime._next_image_capture_time = float("inf")
+
+        def fail():
+            raise RuntimeError("publication failed")
+
+        with pytest.raises(RuntimeError, match="publication failed"):
+            runtime.capture(sim_step=1, sim_time=0.01, before_capture=fail)
+        assert runtime._next_capture_time == 0.0
+        assert runtime.capture(sim_step=1, sim_time=0.01)
+    finally:
+        runtime.stop()
 
 
 def test_runtime_publishes_latest_replay_state_on_update_thread() -> None:

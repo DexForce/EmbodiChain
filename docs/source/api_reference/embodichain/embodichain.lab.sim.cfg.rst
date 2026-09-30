@@ -104,3 +104,27 @@ Constructors and ``from_dict()`` accept only the current fields. Surface-element
 properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
+
+World-level configuration module
+--------------------------------
+
+The same world-level configuration types and backend selectors are available
+from ``embodichain.lab.sim.cfg.simulation``. For manager-owned Newton steps,
+``sync_to_renderer=None`` or ``False`` publishes only for visual consumers;
+``True`` additionally requests publication on steps without consumers. An open
+window remains a consumer regardless of this automatic policy.
+
+.. currentmodule:: embodichain.lab.sim.cfg.simulation
+
+.. autosummary::
+
+   DLSSCfg
+   RenderCfg
+   GPUMemoryCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonCollisionPipelineCfg
+   NewtonPhysicsCfg
+   physics_cfg_for_backend
+   physics_backend_from_cfg
+   validate_physics_cfg

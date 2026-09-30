@@ -634,6 +634,7 @@ class CoordinatedPickment(
                 "CoordinatedPickment requires an AntipodalAffordance to sample "
                 "dual-arm grasps."
             )
+        semantics.affordance.require_whole_object_mesh()
         approach_direction = options.approach_direction.to(
             device=self.device, dtype=torch.float32
         )

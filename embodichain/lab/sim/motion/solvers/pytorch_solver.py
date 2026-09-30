@@ -23,6 +23,7 @@ from dataclasses import MISSING
 from copy import deepcopy
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.motion.solvers import SolverCfg, BaseSolver
 from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.lab.sim.motion.solvers.qpos_seed_sampler import QposSeedSampler
@@ -52,7 +53,7 @@ class PytorchSolverCfg(SolverCfg):
     class_type: str = "PytorchSolver"
 
     # Solver iteration parameters
-    pos_eps: float = 5e-3
+    pos_eps: float = 5e-4
     """Tolerance for convergence for position"""
 
     rot_eps: float = 5e-4
@@ -450,10 +451,7 @@ class PytorchSolver(BaseSolver):
         tcp_xpos = torch.as_tensor(
             self.tcp_xpos, device=self.device, dtype=torch.float32
         )
-        # Do not transpose the rotation into its own overlapping tensor view.
-        # That corrupts non-symmetric rotations (for example the 90-degree TCP
-        # used by parallel grippers) before IK sees the link-frame target.
-        tcp_xpos_inv = torch.linalg.inv(tcp_xpos)
+        tcp_xpos_inv = inv_transform(tcp_xpos)
         target_xpos = target_xpos @ tcp_xpos_inv
 
         # Get joint limits and ensure shape matches dof

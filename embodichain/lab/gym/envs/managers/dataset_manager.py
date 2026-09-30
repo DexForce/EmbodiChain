@@ -21,7 +21,7 @@ from __future__ import annotations
 import inspect
 import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import torch
 from prettytable import PrettyTable
@@ -92,9 +92,9 @@ class DatasetManager(ManagerBase):
         # Call base class to parse functors
         super().__init__(cfg, env)
 
-        ## TODO: fix configurable_action.py to avoid getting env.metadata['dataset']
+        self._inject_robot_metadata()
+
         # Extract robot_meta and instruction from functor params or plain config and add to env.metadata for backward compatibility
-        # This allows legacy code (like action_bank) to access robot_meta via env.metadata["dataset"]["robot_meta"]
         robot_meta_found = False
 
         # First, try to extract from functor params
@@ -148,6 +148,37 @@ class DatasetManager(ManagerBase):
             f"DatasetManager initialized with {sum(len(v) for v in self._mode_functor_names.values())} functors"
         )
 
+    def _inject_robot_metadata(self) -> None:
+        """Fill missing LeRobot robot metadata from the selected embodiment.
+
+        Physical environment components are shared by multiple robot
+        deployments. The recorder therefore derives a missing ``robot_type``
+        from the finalized robot configuration while preserving explicit
+        recorder metadata supplied by a deployment.
+        """
+        robot_cfg = getattr(getattr(self._env, "robot", None), "cfg", None)
+        robot_type = getattr(robot_cfg, "robot_type", None)
+        if not isinstance(robot_type, str) or not robot_type.strip():
+            return
+
+        for mode_cfgs in self._mode_functor_cfgs.values():
+            for functor_cfg in mode_cfgs:
+                func = functor_cfg.func
+                if not inspect.isclass(func) or func.__name__ not in {
+                    "LeRobotRecorder",
+                    "AsyncLeRobotRecorder",
+                }:
+                    continue
+                params = functor_cfg.params
+                robot_meta = params.get("robot_meta", {})
+                if robot_meta is None:
+                    robot_meta = {}
+                if not isinstance(robot_meta, Mapping):
+                    raise TypeError("dataset robot_meta must be a mapping")
+                resolved_meta = dict(robot_meta)
+                resolved_meta.setdefault("robot_type", robot_type)
+                params["robot_meta"] = resolved_meta
+
     def __str__(self) -> str:
         """Returns: A string representation for dataset manager."""
         msg = f"<DatasetManager> contains {len(self._functor_names)} active functors.\n"
@@ -195,6 +226,25 @@ class DatasetManager(ManagerBase):
             functor_cfg.save_failed_episodes
             for functor_cfg in self._mode_functor_cfgs.get("save", [])
         )
+
+    @property
+    def requires_raw_actions(self) -> bool:
+        """Whether a recorder needs pre-controller policy actions."""
+        return any(
+            bool(getattr(functor_cfg.func, "requires_raw_actions", False))
+            for functor_cfg in self._mode_functor_cfgs.get("save", [])
+        )
+
+    def validate_policy_action(self, action: torch.Tensor) -> None:
+        """Validate a live policy action for every descriptor-driven recorder.
+
+        Args:
+            action: Flat policy tensor before ActionManager processing.
+        """
+        for functor_cfg in self._mode_functor_cfgs.get("save", []):
+            validator = getattr(functor_cfg.func, "validate_policy_action", None)
+            if callable(validator):
+                validator(action)
 
     """
     Operations.

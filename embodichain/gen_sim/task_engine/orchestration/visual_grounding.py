@@ -77,7 +77,12 @@ VisualTransport = Callable[..., Mapping[str, Any]]
 
 
 def visual_grounding_available() -> bool:
-    """Use the same model configuration as text grounding."""
+    """Check whether the shared text-grounding model settings can be loaded.
+
+    Returns:
+        Whether Task Engine LLM configuration is available. This does not contact
+        the provider or verify image support, service health, or EGL capability.
+    """
     from embodichain.gen_sim.task_engine.interpretation import _load_llm_settings
 
     try:
@@ -177,7 +182,25 @@ def make_visual_grounding_caller(
     *,
     transport: VisualTransport | None = None,
 ) -> Callable[..., Mapping[str, Any]]:
-    """Wrap one VLM so existing UID and compatibility validators stay authoritative."""
+    """Create an audited visual caller without replacing semantic validation.
+
+    Args:
+        evidence: Manifest returned by
+            :func:`~embodichain.gen_sim.task_engine.orchestration.visual_evidence.render_scene_visual_evidence`.
+        audit_dir: Directory for per-call prompts, image hashes, and responses.
+        transport: Optional injected transport accepting ``prompt``, ``schema``,
+            ``model``, and ``image_paths``. Otherwise use Task Engine LLM settings.
+
+    Returns:
+        A caller accepting keyword-only ``prompt``, ``schema``, and ``model``.
+        Each invocation rechecks source and image hashes, audits the response,
+        and returns bindings for the existing grounding compatibility checks.
+
+    Raises:
+        ValueError: The evidence schema is unsupported or default model settings
+            are unavailable. Invoking the caller also rejects stale evidence
+            and malformed or visually unsupported bindings.
+    """
     if evidence.get("schema_version") != "gen_sim.visual-grounding-evidence/v1":
         raise ValueError("Visual grounding evidence schema is unsupported.")
     if transport is None and not visual_grounding_available():

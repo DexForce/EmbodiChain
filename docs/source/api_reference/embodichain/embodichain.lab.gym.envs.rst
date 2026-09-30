@@ -120,10 +120,10 @@ without changing the policy-facing Gym action space.
 Controller-ready Actions
 ------------------------
 
-``ControllerAction`` marks commands that already crossed the raw-policy
-preprocessing boundary. The environment validates these commands and skips
-``ActionManager`` terms in ``pre`` mode while retaining the normal Gym step and
-``post`` processing lifecycle.
+``ControllerAction`` marks controller-ready qpos/qvel/qf commands. The
+environment keeps the envelope through preprocessing, validates it, and applies
+it directly without invoking ``ActionManager``. Ordinary flat policy tensors
+are processed and applied by the manager before physics advances.
 
 .. currentmodule:: embodichain.lab.gym.envs.types
 

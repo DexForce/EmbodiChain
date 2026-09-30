@@ -293,13 +293,24 @@ class _PayloadPlanner(CuroboPlanner):
         return backend
 
     def close(self) -> None:
+        first_error: Exception | None = None
         try:
             for managers in self._attachments.values():
                 for manager in managers:
-                    manager.detach(link_name=PAYLOAD_LINK)
+                    try:
+                        manager.detach(link_name=PAYLOAD_LINK)
+                    except Exception as exc:
+                        if first_error is None:
+                            first_error = exc
         finally:
             self._attachments.clear()
-            super().close()
+            try:
+                super().close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
 
 class DrawerMotionGenerator(CheckedMotionGenerator):

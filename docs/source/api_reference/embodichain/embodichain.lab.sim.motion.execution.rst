@@ -15,9 +15,46 @@ and velocities are recomputed on the executed grid.
 
    JointTrajectoryPlaybackCfg
    play_joint_trajectory
+   InitialStatePort
+   MeasuredExecutor
+   EpisodeSink
+   FixedSceneInitialStatePort
+   SingleSlotOutcome
+   SingleSlotRunner
+   MultiSlotRunner
 
 .. autoclass:: JointTrajectoryPlaybackCfg
     :members:
     :exclude-members: __init__, copy, replace, to_dict, validate
 
 .. autofunction:: play_joint_trajectory
+
+Expansion host integration
+---------------------------
+
+The single-slot runner coordinates injected restore, measured-execution, and
+persistence ports. Candidate identity, budgets, coverage, and receipts remain
+owned by :class:`embodichain.lab.sim.motion.expansion.ExpansionSession`.
+``MultiSlotRunner`` adds generic compatible-slot reservation and exact release
+around the existing runner; its current drain policy is synchronous FIFO.
+
+.. autoclass:: InitialStatePort
+   :members:
+
+.. autoclass:: MeasuredExecutor
+   :members:
+
+.. autoclass:: EpisodeSink
+   :members:
+
+.. autoclass:: FixedSceneInitialStatePort
+   :members:
+
+.. autoclass:: SingleSlotOutcome
+   :members:
+
+.. autoclass:: SingleSlotRunner
+   :members:
+
+.. autoclass:: MultiSlotRunner
+   :members:

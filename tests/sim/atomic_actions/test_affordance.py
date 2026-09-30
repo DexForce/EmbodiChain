@@ -232,6 +232,17 @@ class TestAntipodalAffordance:
         assert torch.abs(axes[0, 2]) > 0.99
         assert torch.abs(axes[1, 0]) > 0.99
 
+    def test_link_scoped_mesh_cannot_supply_whole_object_axis(self):
+        vertices, triangles = self._long_box_mesh()
+        affordance = AntipodalAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+            mesh_scope="link",
+        )
+
+        with pytest.raises(ValueError, match="whole-object geometry"):
+            affordance.get_object_longest_axis(torch.eye(4).unsqueeze(0))
+
 
 class TestAxisAlignAffordance:
     def test_extends_antipodal_affordance_with_owned_internal_axis(self):

@@ -56,7 +56,7 @@ from .tracking import (
 )
 
 if TYPE_CHECKING:
-    from .engine import AtomicActionEngine
+    from .engine import AtomicActionEngine, PlanTransform
 
 
 class ExecutionStatus(str, Enum):
@@ -325,11 +325,15 @@ class ExecutionSession:
         context: PlanningContext,
         *,
         eligible_mask: torch.Tensor | None = None,
+        plan_transform: PlanTransform | None = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
         engine._validate_context(context)
+        if plan_transform is not None and not callable(plan_transform):
+            raise TypeError("plan_transform must be callable or None.")
         self._engine = engine
+        self._plan_transform = plan_transform
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
             engine._resolve(invocation) for invocation in invocations
         )
@@ -607,6 +611,7 @@ class ExecutionSession:
         replacement_plan = self._engine.plan_request(
             replacement,
             replacement_context,
+            plan_transform=self._plan_transform,
         )
         self._validate_destination_continuity(
             replacement_plan,
@@ -1148,7 +1153,11 @@ class ExecutionSession:
     ) -> None:
         """Plan the current invocation from the latest observation."""
         request = self._requests[self._invocation_index]
-        plan = self._engine._plan_request(request, context)
+        plan = self._engine._plan_request(
+            request,
+            context,
+            plan_transform=self._plan_transform,
+        )
         self._install_plan(plan, context, event_kind)
 
     def _install_plan(

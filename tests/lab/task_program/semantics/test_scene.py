@@ -174,6 +174,8 @@ class _Simulation:
     """Minimal simulation lookup surface with selected and unselected assets."""
 
     def __init__(self) -> None:
+        self.rigid_object_lookups: list[str] = []
+        self.articulation_lookups: list[str] = []
         self.rigid_objects = {
             "sim_cube": _SimulationEntity(torch.eye(4)),
             "ignored": _SimulationEntity(torch.eye(4) * 2.0),
@@ -187,9 +189,11 @@ class _Simulation:
         }
 
     def get_rigid_object(self, uid: str) -> _SimulationEntity | None:
+        self.rigid_object_lookups.append(uid)
         return self.rigid_objects.get(uid)
 
     def get_articulation(self, uid: str) -> _SimulationEntity | None:
+        self.articulation_lookups.append(uid)
         return self.articulations.get(uid)
 
 
@@ -1132,6 +1136,84 @@ def test_from_simulation_publishes_named_articulation_qpos() -> None:
     state = snapshot.articulation_joints[("drawer", "slide")]
     assert torch.equal(state.position, torch.tensor([[0.25]]))
     assert state.valid_mask is not None and state.valid_mask.tolist() == [True]
+
+
+def test_from_simulation_registers_articulation_as_object() -> None:
+    simulation = _Simulation()
+    simulation.articulations["native_cube"] = _SimulationEntity(torch.eye(4))
+
+    registry = SceneRegistry.from_simulation(
+        simulation,  # type: ignore[arg-type]
+        articulation_objects={"rubiks_cube": "native_cube"},
+    )
+
+    registration = registry.lookup(SceneObjectRef("rubiks_cube"))
+    assert registration.aliases == ("native_cube",)
+    assert registration.joint_state_provider is None
+    assert simulation.articulation_lookups == ["native_cube"]
+    assert simulation.rigid_object_lookups == []
+
+
+@pytest.mark.parametrize("other_field", ["rigid_objects", "articulations"])
+def test_from_simulation_rejects_duplicate_articulation_object_id(
+    other_field: str,
+) -> None:
+    with pytest.raises(ValueError, match="globally unique"):
+        SceneRegistry.from_simulation(
+            _Simulation(),  # type: ignore[arg-type]
+            articulation_objects={"cube": "articulated_cube"},
+            **{other_field: {"cube": "other_cube"}},
+        )
+
+
+def test_from_simulation_rejects_non_mapping_articulation_objects() -> None:
+    with pytest.raises(TypeError, match="articulation_objects must be a mapping"):
+        SceneRegistry.from_simulation(
+            _Simulation(),  # type: ignore[arg-type]
+            articulation_objects=("cube",),  # type: ignore[arg-type]
+        )
+
+
+def test_from_simulation_requires_articulation_getter_for_object() -> None:
+    with pytest.raises(TypeError, match=r"provide get_articulation\(\)"):
+        SceneRegistry.from_simulation(
+            object(),  # type: ignore[arg-type]
+            articulation_objects={"cube": "native_cube"},
+        )
+
+
+def test_from_simulation_requires_articulation_object_uid_to_exist() -> None:
+    with pytest.raises(KeyError, match="missing"):
+        SceneRegistry.from_simulation(
+            _Simulation(),  # type: ignore[arg-type]
+            articulation_objects={"cube": "missing"},
+        )
+
+
+def test_from_simulation_accepts_articulation_object_metadata() -> None:
+    simulation = _Simulation()
+    simulation.articulations["native_cube"] = _SimulationEntity(torch.eye(4))
+
+    registry = SceneRegistry.from_simulation(
+        simulation,  # type: ignore[arg-type]
+        articulation_objects={"cube": "native_cube"},
+        collision_roles={"cube": SceneCollisionRole.STATIC},
+        geometry_providers={"cube": _GeometryProvider()},
+    )
+
+    assert registry.collision_geometry_by_id() == {"cube": {"kind": "box"}}
+
+
+@pytest.mark.parametrize("mapping_name", ["collision_roles", "geometry_providers"])
+def test_from_simulation_rejects_unknown_articulation_object_metadata_key(
+    mapping_name: str,
+) -> None:
+    with pytest.raises(KeyError, match="unselected registry IDs"):
+        SceneRegistry.from_simulation(
+            _Simulation(),  # type: ignore[arg-type]
+            articulation_objects={"cube": "sim_drawer"},
+            **{mapping_name: {"other": object()}},
+        )
 
 
 def test_from_simulation_derives_live_geometry_only_for_explicit_collision_role() -> (

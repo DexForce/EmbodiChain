@@ -19,8 +19,11 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 from PIL import Image
+import pytest
 import trimesh
 
 from embodichain.gen_sim.task_engine.orchestration.scene_source import scene_revision_id
@@ -64,7 +67,30 @@ def _scene_export(tmp_path: Path) -> Path:
     return root
 
 
-def test_visual_evidence_renders_current_assets_with_uid_masks(tmp_path: Path) -> None:
+@pytest.fixture
+def egl_renderer() -> None:
+    """Probe the renderer in isolation so CPU lanes need not provide EGL."""
+    try:
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os; os.environ['PYOPENGL_PLATFORM']='egl'; import pyrender; r=pyrender.OffscreenRenderer(1, 1); r.delete()",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("EGL renderer probe timed out.")
+    if probe.returncode:
+        pytest.skip(f"EGL renderer unavailable: {probe.stderr[-500:]}")
+
+
+@pytest.mark.renderer
+def test_visual_evidence_renders_current_assets_with_uid_masks(
+    tmp_path: Path, egl_renderer: None
+) -> None:
     source = _scene_export(tmp_path)
     before = hashlib.sha256((source / "scene_config.json").read_bytes()).hexdigest()
 

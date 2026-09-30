@@ -87,9 +87,9 @@ scene_binding:
 
 The three identities have distinct roles. The parent `entity_id` (`cube`) is
 the canonical semantic object used by calls such as `Pick(object="cube")`.
-`simulation_uid` selects the physical object declared in the reusable
-`env.yaml`. `cube_grasp` is the globally unique canonical ID of one semantic
-child that can be passed as an explicit grasp or named by
+`simulation_uid` selects the physical object declared in the selected
+environment component. `cube_grasp` is the globally unique canonical ID of a
+semantic child that can be passed as an explicit grasp or named by
 `default_grasp_affordance`. The child ID remains necessary because one entity
 may expose multiple affordances and every affordance remains directly
 addressable in the flat Scene Registry. Deployment composition rejects a

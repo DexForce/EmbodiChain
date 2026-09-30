@@ -17,7 +17,8 @@ identifier within its manager.
 The five manager types are :class:`ObservationManager` (``compute(obs)``),
 :class:`RewardManager` (``compute(obs, action, info)``),
 :class:`EventManager` (``apply(mode, env_ids)``, the home of all randomization
-functors), :class:`ActionManager` (``process_actions(actions)``), and
+functors), :class:`ActionManager` (``process_action(action)`` then
+``apply_action()``), and
 :class:`DatasetManager` (``step``/``save`` for LeRobot recording).
 
    .. rubric:: Submodules
@@ -45,13 +46,17 @@ functors), :class:`ActionManager` (``process_actions(actions)``), and
       ActionManager
       DatasetManager
       ActionTerm
-      DeltaQposTerm
-      QposTerm
-      QposDenormalizedTerm
-      QposNormalizedTerm
-      EefPoseTerm
-      QvelTerm
-      QfTerm
+      ActionDescriptor
+      ActionTermDescriptor
+      ActionTrace
+      DefaultJointPositionAction
+      EefPoseAction
+      JointEffortAction
+      JointPositionAction
+      JointPositionToLimitsAction
+      JointVelocityAction
+      ParallelGripperAction
+      RelativeJointPositionAction
       LeRobotRecorder
       AsyncLeRobotRecorder
 
@@ -75,6 +80,10 @@ functors), :class:`ActionManager` (``process_actions(actions)``), and
       randomization.spatial.randomize_rigid_object_pose
       randomization.spatial.randomize_robot_eef_pose
       randomization.spatial.randomize_robot_qpos
+      actions.register_action_contract
+      actions.resolve_action_contract
+      register_action_contract
+      resolve_action_contract
 
 .. currentmodule:: embodichain.lab.gym.envs.managers
 
@@ -158,40 +167,56 @@ Action Terms
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: DeltaQposTerm
+.. autoclass:: DefaultJointPositionAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QposTerm
+.. autoclass:: EefPoseAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QposDenormalizedTerm
+.. autoclass:: JointEffortAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QposNormalizedTerm
+.. autoclass:: JointPositionAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: EefPoseTerm
+.. autoclass:: JointPositionToLimitsAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QvelTerm
+.. autoclass:: JointVelocityAction
     :members:
     :inherited-members:
     :show-inheritance:
 
-.. autoclass:: QfTerm
+.. autoclass:: ParallelGripperAction
     :members:
     :inherited-members:
     :show-inheritance:
+
+.. autoclass:: RelativeJointPositionAction
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
+Action Descriptors
+------------------
+
+.. autoclass:: ActionDescriptor
+    :members:
+
+.. autoclass:: ActionTermDescriptor
+
+.. autoclass:: ActionTrace
+    :members:
 
 Observation Functions
 ---------------------

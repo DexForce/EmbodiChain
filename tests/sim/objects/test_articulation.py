@@ -227,6 +227,33 @@ def test_get_joint_type_uses_backend_neutral_descriptor_adapter(
 
 
 @pytest.mark.no_sim
+def test_get_joint_type_prefers_descriptor_api_over_legacy_info() -> None:
+    """Default DexSim must not emit the deprecated JointInfo warning."""
+    joint = SimpleNamespace(
+        name="hinge",
+        joint_type=SimpleNamespace(name="REVOLUTE"),
+    )
+    legacy_called = False
+
+    def legacy_info(_: str) -> object:
+        nonlocal legacy_called
+        legacy_called = True
+        raise AssertionError("deprecated get_joint_info() was called")
+
+    entity = SimpleNamespace(
+        get_joint_names=lambda: [joint.name],
+        get_joint_info=legacy_info,
+        get_joint_desc=lambda _: joint,
+    )
+    articulation = object.__new__(Articulation)
+    articulation._entities = [entity]
+    articulation._data = SimpleNamespace(is_newton_backend=False)
+
+    assert articulation.get_joint_type("hinge") == "revolute"
+    assert not legacy_called
+
+
+@pytest.mark.no_sim
 def test_get_joint_type_rejects_unknown_joint() -> None:
     """Joint type queries fail before touching a native descriptor for bad names."""
     entity = SimpleNamespace(get_joint_names=lambda: ["hinge"])
@@ -350,10 +377,15 @@ def test_get_parent_joint_chain_returns_backend_neutral_child_to_root_values():
         upper_limit=2.0,
     )
     joint_infos = {fixed.name: fixed, hinge.name: hinge}
+
+    def legacy_info(_: str) -> object:
+        raise AssertionError("deprecated get_joint_info() was called")
+
     articulation._entities = [
         SimpleNamespace(
             get_joint_names=lambda: [fixed.name, hinge.name],
-            get_joint_info=joint_infos.get,
+            get_joint_info=legacy_info,
+            get_joint_desc=joint_infos.__getitem__,
         )
     ]
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PlanTransform
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionInvocation,
     ResolvedActionRequest,
@@ -232,7 +232,13 @@ class GenSimActionEngine(AtomicActionEngine):
             )
         return super()._resolve(invocation)
 
-    def _plan_request(self, request: ResolvedActionRequest, context: Any = None) -> Any:
+    def _plan_request(
+        self,
+        request: ResolvedActionRequest,
+        context: Any = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+    ) -> Any:
         from .motion import cartesian_approach_scope
         from .planning_probe import initial_plan_capture
 
@@ -253,14 +259,16 @@ class GenSimActionEngine(AtomicActionEngine):
 
                     def build(selected: Any) -> Any:
                         return super(GenSimActionEngine, self)._plan_request(
-                            selected, context
+                            selected, context, plan_transform=plan_transform
                         )
 
                     with planning_scope(self.motion_generator, kind) as scope:
                         plan = build(request)
                         plan = recover(scope, request, context, plan, build)
                 else:
-                    plan = super()._plan_request(request, context)
+                    plan = super()._plan_request(
+                        request, context, plan_transform=plan_transform
+                    )
             plan = replace(
                 plan,
                 diagnostics=replace(

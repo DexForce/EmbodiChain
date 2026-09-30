@@ -41,9 +41,10 @@ def get_joint_descriptor(
         except (KeyError, StopIteration, NotImplementedError):
             pass
     get_joint_info = getattr(entity, "get_joint_info", None)
-    native = get_joint_info(joint_name) if callable(get_joint_info) else None
-    if native is not None:
-        return native
+    if callable(get_joint_info):
+        native = get_joint_info(joint_name)
+        if native is not None:
+            return native
     return _required_descriptor(entity, joint_name)
 
 

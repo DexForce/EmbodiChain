@@ -18,8 +18,6 @@ There are two supported caller paths:
 and robot-profile contracts, effects, and evidence declarations. It is not an
 execution facade.
 
-ActionBank is a separate Gym subsystem and is outside this topic.
-
 ## Ownership graph
 
 ```text

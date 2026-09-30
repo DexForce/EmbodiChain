@@ -101,6 +101,21 @@ def test_pour_target_uses_upright_geometry_not_receiver_yaw(
     assert pivot_height - radius > 0.15 + 0.015
 
 
+@pytest.mark.parametrize("declared", [None, 1e-4])
+def test_gensim_position_tolerance_is_local_and_preserves_explicit_values(declared):
+    from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolverCfg
+
+    solver = {"class_type": "PytorchSolver"}
+    if declared is not None:
+        solver["pos_eps"] = declared
+    embodiment = {
+        "simulation": {"init_pos": [0.0, 0.0, 0.0], "solver_cfg": {"arm": solver}}
+    }
+    _bind_embodiment_to_scene(embodiment, table_top_z=0.7)
+    assert solver["pos_eps"] == (5e-3 if declared is None else declared)
+    assert PytorchSolverCfg().pos_eps == 5e-4
+
+
 def _graph() -> dict:
     return {
         "schema_version": "semantic_task_graph/v1",
