@@ -5684,6 +5684,13 @@
             "urdf-assembly",
             "convex-decomposition"
           ]
+        },
+        {
+          "id": "integration",
+          "label": "Agent integration",
+          "node_ids": [
+            "mcp-server"
+          ]
         }
       ]
     },
