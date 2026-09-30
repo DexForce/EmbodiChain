@@ -511,12 +511,12 @@ class SemanticTaskPlanner:
                 from ._task_program.articulation_binding import recipe
 
                 requested = str(step.get("required_arm", "auto"))
+                part_id = _bound_part(step, "object", bindings, steps_by_id)
                 resource = (
-                    self._nearest_resource(object_id, objects)
+                    self._nearest_resource(object_id, objects, part_id=part_id)
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
-                part_id = _bound_part(step, "object", bindings, steps_by_id)
                 calls = recipe(
                     object_id,
                     str(step["target_state"]),
@@ -725,11 +725,16 @@ class SemanticTaskPlanner:
         objects: Mapping[str, Mapping[str, Any]],
         *,
         target_id: str | None = None,
+        part_id: str | None = None,
     ) -> str:
         item = objects.get(object_id)
         if item is None:
             raise ValueError(f"Scene metadata is missing object {object_id!r}.")
         position = item.get("init_pos")
+        if part_id is not None:
+            position = item.get("_articulation_part_positions", {}).get(
+                part_id, position
+            )
         if not isinstance(position, Sequence) or len(position) != 3:
             raise ValueError(f"Scene object {object_id!r} has no three-value init_pos.")
         lateral = float(position[1])
@@ -995,9 +1000,13 @@ def _expand_multi_object_steps(
             and step["relation"] == "none"
             and step["direction"] == "none"
         )
-        if (step["task_type"] not in {"E1", "E2"} and not e5_return) or step[
-            "layout"
-        ] != "none":
+        e6_parts = step["task_type"] == "E6" and all(
+            uid.rpartition("::")[0] and uid.rpartition("::")[2].startswith("part_")
+            for uid in uids
+        )
+        if (
+            step["task_type"] not in {"E1", "E2"} and not e5_return and not e6_parts
+        ) or step["layout"] != "none":
             raise UnsupportedSemanticCapabilityError(
                 f"{reference_id} cannot lower multiple objects for this task route."
             )
@@ -1036,6 +1045,9 @@ def _expand_multi_object_steps(
                 list(step["depends_on"]) if previous_id is None else [previous_id]
             )
             expanded_steps.append(copy)
+            if e6_parts:
+                uid, _, part_id = uid.rpartition("::")
+                expanded_bindings["role_bindings"][f"{copy_id}.object"] = part_id
             expanded_bindings["reference_bindings"][f"{copy_id}.object"] = [uid]
             if step["target"]["kind"] == "scene_ref":
                 expanded_bindings["reference_bindings"][f"{copy_id}.target"] = list(

@@ -177,6 +177,62 @@ def test_side_by_side_parts_do_not_gain_false_vertical_ranks() -> None:
     assert by_uid["cabinet::part_right"]["attributes"]["lateral_rank"] == "right"
 
 
+@pytest.mark.parametrize(
+    "centers,expected",
+    [
+        ([[0, 0, 1.0], [0, 0, 0.8], [0, 0, 0.9]], [1, 2, 0]),
+        ([[0, -0.2, 0.801], [0, 0, 0.8], [0, 0.2, 0.8004]], [0, 1, 2]),
+        (
+            [[0, -0.2, 1.0], [0, 0.2, 0.8], [0, 0.2, 1.001], [0, -0.2, 0.802]],
+            [1, 3, 0, 2],
+        ),
+        ([[0, 0, 1.0], [], [0, 0, 0.8]], [0, 1, 2]),
+        ([[0, 0, 1.0], [0, 0, float("nan")], [0, 0, 0.8]], [0, 1, 2]),
+    ],
+    ids=[
+        "vertical",
+        "horizontal",
+        "two_rows",
+        "missing_geometry",
+        "nonfinite_geometry",
+    ],
+)
+def test_open_part_set_uses_height_not_names_and_preserves_same_row_order(
+    centers: list[list[float]], expected: list[int]
+) -> None:
+    parts = [
+        {
+            "part_id": f"part_{i}",
+            "joint": f"misleading_drawer_{100-i}",
+            "handle_center_world": center,
+        }
+        for i, center in enumerate(centers)
+    ]
+    catalogs = {"cabinet": parts}
+    uids = [f"cabinet::{part['part_id']}" for part in parts]
+    assert scene_adapter_module._order_open_parts_bottom_up(uids, catalogs) == tuple(
+        uids[i] for i in expected
+    )
+    assert [part["handle_center_world"] for part in parts] == centers
+
+
+def test_open_part_sort_does_not_move_parts_across_cabinets() -> None:
+    catalogs = {
+        cabinet: [
+            {"part_id": "high", "handle_center_world": [0, 0, 1.0]},
+            {"part_id": "low", "handle_center_world": [0, 0, 0.8]},
+        ]
+        for cabinet in ("a", "b")
+    }
+    uids = ["a::high", "b::low", "a::low", "b::high"]
+    assert scene_adapter_module._order_open_parts_bottom_up(uids, catalogs) == (
+        "a::low",
+        "b::low",
+        "a::high",
+        "b::high",
+    )
+
+
 @pytest.fixture
 def scene_export(tmp_path: Path) -> Path:
     export = tmp_path / "scene_export"

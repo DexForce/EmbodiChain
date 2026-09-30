@@ -365,9 +365,13 @@ def test_discover_prismatic_parts_returns_all_enabled_parts(
     assert all(len(part.handle_paths) == 1 for part in parts)
 
 
+@pytest.mark.parametrize(
+    "selection", ["separate", "all", "count", "cabinet", "close_all"]
+)
 def test_multi_part_bundle_keeps_distinct_bindings(
-    scene: PreparedScene, tmp_path: Path
+    scene: PreparedScene, tmp_path: Path, selection: str
 ) -> None:
+    as_set = selection != "separate"
     stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
     right = UsdGeom.Xform.Define(stage, "/fixture/right_drawer")
     UsdPhysics.RigidBodyAPI.Apply(right.GetPrim())
@@ -386,6 +390,10 @@ def test_multi_part_bundle_keeps_distinct_bindings(
     joint.GetPrim().CreateAttribute(
         "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
     ).Set(0.0)
+    if selection == "close_all":
+        stage.GetPrimAtPath("/fixture/slide").CreateAttribute(
+            "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+        ).Set(0.0)
     stage.GetRootLayer().Save()
     parts = discover_prismatic_parts(scene.articulations[0])
     part_ids = {part.joint: part.part_id for part in parts}
@@ -418,6 +426,14 @@ def test_multi_part_bundle_keeps_distinct_bindings(
             "depends_on": ["step_01"],
         },
     ]
+    if as_set:
+        steps = [steps[0]]
+        steps[0]["object"]["quantifier"] = "all"
+        steps[0]["object"]["reference"] = "drawers"
+        if selection == "count":
+            steps[0]["object"].update(quantifier="count", count=2)
+        if selection == "close_all":
+            steps[0]["target_state"] = "closed"
     candidate = TaskAgent(caller=lambda **kw: {"steps": steps}).generate(
         "multi", "operate both drawers", candidate_count=1
     )["candidates"][0]
@@ -434,7 +450,79 @@ def test_multi_part_bundle_keeps_distinct_bindings(
             "step_02.object": part_ids["right_slide"],
         },
     }
+    if as_set:
+        from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
+            _augment_grounding_objects,
+            _ground_candidate,
+        )
+        from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+            SceneInventory,
+        )
+
+        catalogs = {
+            "drawer": [
+                {**part.payload(), "handle_center_world": [0.0, 0.0, 1.0 - index * 0.2]}
+                for index, part in enumerate(parts)
+            ]
+        }
+        objects = _augment_grounding_objects(scene.planner_objects, catalogs)
+        uids = [f"drawer::{part.part_id}" for part in parts]
+        if selection == "cabinet":
+            uids = ["drawer"]
+        audit, resolved = _ground_candidate(
+            candidate,
+            instruction=candidate["draft"]["instruction"],
+            inventory=SceneInventory(objects, robot_profile="dual_franka"),
+            scene_objects=objects,
+            model=None,
+            caller=lambda **kw: {
+                "bindings": [
+                    {
+                        "reference_id": "step_01.object",
+                        "status": "resolved",
+                        "uids": uids,
+                        "confidence": 1.0,
+                    }
+                ]
+            },
+            force_most_likely=False,
+            part_catalogs=catalogs,
+        )
+        if selection == "cabinet":
+            assert resolved is None
+            assert "explicit articulation parts" in audit["reasons"][0]
+            return
+        assert resolved is not None, audit
+        expected_uids = uids if selection == "close_all" else list(reversed(uids))
+        assert resolved[0]["step_01.object"] == tuple(expected_uids)
+        from embodichain.gen_sim.task_engine.orchestration.contracts import (
+            validate_binding_report,
+            BINDING_REPORT_SCHEMA,
+        )
+
+        validate_binding_report(
+            {
+                "schema_version": BINDING_REPORT_SCHEMA,
+                "task_id": "multi",
+                "status": "bound",
+                "selected_candidate_id": candidate["candidate_id"],
+                "selection_reason": "single_bindable_candidate",
+                "candidates": [audit],
+            }
+        )
+        bindings["reference_bindings"] = {
+            key: list(value) for key, value in resolved[0].items()
+        }
+        bindings["role_bindings"] = resolved[1]
     graph = SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
+    if as_set:
+        slides = [
+            node for node in graph["nodes"] if node["call"]["call_id"] == SLIDE_CALL
+        ]
+        assert {node["call"]["arguments"]["part"] for node in slides} == set(
+            part_ids.values()
+        )
+        assert all(node["call"]["arguments"]["object"] == "drawer" for node in slides)
     _, paths = generate_task_program_bundle(
         graph, scene, tmp_path / "multi_bundle", robot_profile="dual_franka"
     )
@@ -442,6 +530,53 @@ def test_multi_part_bundle_keeps_distinct_bindings(
     assert len(integration["scene_binding"]["links"]) == 2
     lowerers = integration["runtime_services"]["registered_semantic_lowerers"]
     assert len(lowerers[0]["bindings"]) == 2
+    terminal_checks = load_config(paths.program)["program"]["items"][-1]["validators"]
+    assert {check["joint"] for check in terminal_checks} == {"slide", "right_slide"}
+    assert len(terminal_checks) == 2
+    from embodichain.lab.task_program.language import load_task_program
+    from embodichain.lab.task_program.integrations import (
+        SimulationArticulationBinding,
+        SimulationSceneBinding,
+    )
+    from embodichain.lab.task_program.integrations.simulation.policies import (
+        SimulationSegmentPolicyPort,
+    )
+
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    catalog = deployment.integration.registration.catalog
+    compiled = catalog.preflight(
+        load_task_program(
+            paths.program, integration=deployment.selection, validation_context=catalog
+        )
+    )
+    terminal = list(compiled.iter_segments())[-1]
+    names = [check["joint"] for check in terminal_checks]
+    qpos = torch.tensor(
+        [[(c["minimum_position"] + c["maximum_position"]) / 2 for c in terminal_checks]]
+    )
+    articulation = SimpleNamespace(joint_names=names, get_qpos=lambda: qpos)
+    port = SimulationSegmentPolicyPort(
+        SimpleNamespace(get_articulation=lambda uid: articulation),
+        SimpleNamespace(get_qpos=lambda **kwargs: torch.zeros(1, 2)),
+        SimulationSceneBinding(
+            registry_id="test_scene",
+            articulations=(
+                SimulationArticulationBinding(
+                    entity_id="drawer", simulation_uid="drawer"
+                ),
+            ),
+        ),
+        step_dt=0.04,
+    )
+    assert all(port.validate(v, segment=terminal).item() for v in terminal.validators)
+    qpos[0, names.index("slide")] = -0.2 if selection == "close_all" else 0.0
+    assert not all(
+        port.validate(v, segment=terminal).item() for v in terminal.validators
+    )
 
 
 @pytest.mark.parametrize("states", [("open",), ("closed",), ("open", "closed")])
@@ -513,6 +648,10 @@ def test_e6_bundle_uses_standard_registration_and_complete_recipe(
     if len(states) == 2:
         assert graph["nodes"][3]["depends_on"] == [graph["nodes"][2]["id"]]
         assert graph["nodes"][3]["call"]["resources"] == {"primary": "left"}
+        # The last close replaces the earlier open, rather than requiring both.
+        assert len(items[-1]["validators"]) == 1
+        assert items[-1]["validators"][0]["minimum_position"] == pytest.approx(-0.03)
+        assert items[-1]["validators"][0]["maximum_position"] == pytest.approx(0.03)
     from embodichain.gen_sim.task_engine._task_program import articulation_recovery
     from embodichain.gen_sim.task_engine._bundle_runner import (
         _verify_integration_fingerprint,
@@ -1039,6 +1178,105 @@ def test_articulation_declarations_reject_unknown_fields(scene: PreparedScene) -
             {"kind": "articulation_slide", "bindings": [value], "options": {}},
             path="test",
         )
+
+
+@pytest.mark.parametrize(
+    "closed,initial,expected",
+    [
+        (0.0, None, "closed"),
+        (-0.4, None, "open"),
+        (None, None, None),
+        (-0.1, None, None),
+        (float("nan"), None, None),
+        (0.0, [-0.1], None),
+        (0.0, [0.0], None),
+    ],
+)
+def test_grounding_part_state_requires_reset_and_authored_endpoint(
+    scene: PreparedScene,
+    closed: float | None,
+    initial: list[float] | None,
+    expected: str | None,
+) -> None:
+    from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
+        _augment_grounding_objects,
+        _discover_part_catalogs,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.grounding import (
+        _grounding_inventory,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+        SceneInventory,
+    )
+
+    config = scene.articulations[0]
+    config["init_qpos"] = initial
+    stage = Usd.Stage.Open(config["fpath"])
+    if closed is not None:
+        stage.GetPrimAtPath("/fixture/slide").CreateAttribute(
+            "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+        ).Set(closed)
+        stage.GetRootLayer().Save()
+    original = deepcopy(config)
+    catalogs = _discover_part_catalogs(scene)
+    augmented = _augment_grounding_objects(scene.planner_objects, catalogs)
+    inventory = _grounding_inventory(
+        SceneInventory(augmented, robot_profile="dual_franka"), augmented
+    )
+    part = next(item for item in inventory if "::" in item["uid"])
+    assert part["initial_state"] == ({} if expected is None else {"openness": expected})
+    assert ("state_evidence" in part["attributes"]) == (expected is not None)
+    assert (
+        next(item for item in inventory if item["uid"] == "drawer")["initial_state"]
+        == {}
+    )
+    assert config == original
+
+
+@pytest.mark.parametrize("limits", [(0.1, 0.4), (-1e-6, 0.0)])
+def test_grounding_reset_outside_limits_or_near_both_endpoints_stays_unknown(
+    scene: PreparedScene, limits: tuple[float, float]
+) -> None:
+    from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
+        _discover_part_catalogs,
+    )
+
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    joint = UsdPhysics.PrismaticJoint(stage.GetPrimAtPath("/fixture/slide"))
+    joint.GetLowerLimitAttr().Set(limits[0])
+    joint.GetUpperLimitAttr().Set(limits[1])
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(limits[1])
+    stage.GetRootLayer().Save()
+    assert _discover_part_catalogs(scene)["drawer"][0]["initial_state"] == {}
+
+
+def test_grounding_handle_position_uses_explicit_runtime_matrix(
+    scene: PreparedScene,
+) -> None:
+    from embodichain.gen_sim.task_engine.orchestration.scene_adapter import (
+        _part_handle_center_world,
+    )
+
+    config = deepcopy(scene.articulations[0])
+    stage = Usd.Stage.Open(config["fpath"])
+    UsdGeom.Xformable(stage.GetPrimAtPath("/fixture/drawer")).AddTranslateOp().Set(
+        (0.0, 0.0, 0.2)
+    )
+    stage.GetRootLayer().Save()
+    # The runtime matrix, not the conflicting Euler/position fields, owns
+    # rotation and translation of the scaled native link offset.
+    config["init_local_pose"] = [
+        [0.0, 0.0, 1.0, 0.4],
+        [0.0, 1.0, 0.0, 0.6],
+        [-1.0, 0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    part = discover_prismatic_parts(config)[0]
+    assert _part_handle_center_world(config, part.part_id) == pytest.approx(
+        [0.5, 0.6, 1.0]
+    )
 
 
 @pytest.fixture

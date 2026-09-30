@@ -888,6 +888,20 @@ def _program_payload(
                 terminal.setdefault("post", []).extend(deepcopy(policies))
                 terminal.setdefault("validators", []).extend(deepcopy(validators))
             break
+    # Later recipes can disturb an earlier drawer. Check each joint's last
+    # requested state again at the end, including after non-articulation work.
+    final_joints: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        for validator in item.get("validators", ()):
+            if validator["kind"] == "articulation_joint_position":
+                final_joints[(validator["articulation"], validator["joint"])] = (
+                    validator
+                )
+    if final_joints:
+        terminal_validators = items[-1].setdefault("validators", [])
+        for validator in final_joints.values():
+            if validator not in terminal_validators:
+                terminal_validators.append(deepcopy(validator))
     return {
         "program_id": program_id,
         "targets": deepcopy(graph["targets"]),
