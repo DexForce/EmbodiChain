@@ -455,7 +455,33 @@ def discover_task_packages() -> list[str]:
                 f"Failed to import task package '{ep.name}' ({ep.value})",
                 exc_info=True,
             )
+    _normalize_nested_task_modules()
     return imported
+
+
+def _normalize_nested_task_modules() -> None:
+    """Expose task modules under their flat public names after shadowed imports.
+
+    A legacy editable installation can import the bundled package as
+    ``embodichain_tasks.embodichain_tasks`` before entry-point discovery runs.
+    The registered classes then retain that nested ``__module__`` even after
+    the real top-level package is loaded. Alias those already-loaded modules
+    and update registered task classes so the public task-module contract stays
+    flat in mixed editable-install environments.
+    """
+
+    nested_prefix = "embodichain_tasks.embodichain_tasks."
+    for spec in REGISTERED_ENVS.values():
+        module_name = spec.cls.__module__
+        if not module_name.startswith(nested_prefix):
+            continue
+        flat_name = "embodichain_tasks." + module_name[len(nested_prefix) :]
+        module = sys.modules.get(module_name)
+        if module is not None:
+            sys.modules.setdefault(flat_name, module)
+            module.__name__ = flat_name
+            module.__package__ = flat_name.rpartition(".")[0]
+        spec.cls.__module__ = flat_name
 
 
 def execute_init_hooks() -> list[str]:
