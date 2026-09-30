@@ -179,6 +179,7 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
 
     tools, templates, prompts, result = asyncio.run(inspect_server())
     tool_names = {tool.name for tool in tools}
+    tool_by_name = {tool.name: tool for tool in tools}
     template_uris = {template.uri_template for template in templates}
     prompt_names = {prompt.name for prompt in prompts}
 
@@ -187,6 +188,7 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     assert "start_rollout" in tool_names
     assert "generate_robot_trajectory" in tool_names
     assert "record_trajectory" in tool_names
+    assert "status" in tool_by_name["solve_ik"].output_schema["properties"]
     assert "embodichain://worlds/{world_id}/manifest" in template_uris
     assert prompt_names == {
         "inspect_robot",

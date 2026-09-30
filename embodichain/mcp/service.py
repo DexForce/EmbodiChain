@@ -29,9 +29,48 @@ from time import time
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from typing_extensions import TypedDict
+
 from .backend import InMemorySimulationBackend, SimulationBackend
 
 __all__ = ["EmbodiChainMCPService"]
+
+
+class ToolEnvelope(TypedDict, total=False):
+    """Common structured result schema published by MCP tools."""
+
+    status: str
+    result: dict[str, Any]
+    backend: str
+    frame: str
+    units: dict[str, str]
+    diagnostics: list[dict[str, Any]]
+    artifacts: list[dict[str, Any]]
+    world_id: str
+    scene_revision: int | None
+    seed: int | None
+
+
+class ServerInfoResult(TypedDict):
+    """Schema for the server information tool."""
+
+    name: str
+    phase: str
+    backend: str
+    transports: list[str]
+    scope: str
+
+
+class HealthResult(TypedDict):
+    """Schema for the health probe tool."""
+
+    status: str
+    server: str
+    phase: str
+    backend: str
+    active_rollouts: int
+    known_runs: int
+    scope: str
 
 
 TaskProvider = Callable[[], Sequence[Mapping[str, Any]]]
@@ -130,7 +169,7 @@ class EmbodiChainMCPService:
                 run.cancel_event.set()
         self._executor.shutdown(wait=True, cancel_futures=True)
 
-    def server_info(self) -> dict[str, Any]:
+    def server_info(self) -> ServerInfoResult:
         """Return protocol and backend metadata."""
         return {
             "name": "embodichain-mcp",
@@ -140,7 +179,7 @@ class EmbodiChainMCPService:
             "scope": "simulation_and_read_only_analysis",
         }
 
-    def health(self) -> dict[str, Any]:
+    def health(self) -> HealthResult:
         """Return a lightweight service health snapshot.
 
         The probe does not start a simulator or execute a rollout. It only
@@ -238,7 +277,7 @@ class EmbodiChainMCPService:
 
     def create_world(
         self, *, backend: str | None = None, seed: int | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Create a world handle with explicit backend and seed metadata."""
         selected_backend = backend or getattr(
             self.backend,
@@ -255,7 +294,7 @@ class EmbodiChainMCPService:
         task_id: str | None = None,
         scene: Mapping[str, Any] | None = None,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Load an existing task reference or JSON-compatible scene manifest."""
         self._check_scene_revision(world_id, expected_scene_revision)
         if task_id is not None:
@@ -299,14 +338,14 @@ class EmbodiChainMCPService:
 
     def reset_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Reset dynamic world state."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.reset_world(world_id), world_id=world_id)
 
     def destroy_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Destroy a world handle."""
         self._check_scene_revision(world_id, expected_scene_revision)
         with self._lock:
@@ -324,14 +363,14 @@ class EmbodiChainMCPService:
 
     def get_world_state(
         self, world_id: str, *, expected_scene_revision: int | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Return a detached world state with protocol metadata."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.get_world_state(world_id), world_id=world_id)
 
     def snapshot_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Create a snapshot handle for a world."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.snapshot_world(world_id), world_id=world_id)
@@ -342,7 +381,7 @@ class EmbodiChainMCPService:
         snapshot_id: str,
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Restore a snapshot belonging to the requested world."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -355,7 +394,7 @@ class EmbodiChainMCPService:
         *,
         steps: int = 1,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Advance a world by a positive number of backend steps."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -369,7 +408,7 @@ class EmbodiChainMCPService:
         qpos: Sequence[float],
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Compute FK through the backend adapter."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -384,7 +423,7 @@ class EmbodiChainMCPService:
         target_pose: Mapping[str, Any],
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Compute IK through the backend adapter."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -399,7 +438,7 @@ class EmbodiChainMCPService:
         target_pose: Mapping[str, Any],
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Check reachability without implying collision-free execution."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -414,7 +453,7 @@ class EmbodiChainMCPService:
         qpos: Sequence[float],
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Run backend collision validation for a robot configuration."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -430,7 +469,7 @@ class EmbodiChainMCPService:
         *,
         samples: int = 32,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Generate a backend trajectory between two joint configurations."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -448,7 +487,7 @@ class EmbodiChainMCPService:
         *,
         samples_per_segment: int = 32,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Generate and validate a multi-waypoint joint trajectory.
 
         Args:
@@ -500,7 +539,7 @@ class EmbodiChainMCPService:
             self._trajectories[trajectory_id] = deepcopy(record)
         return self._envelope(record, world_id=world_id)
 
-    def execute_trajectory(self, trajectory_id: str) -> dict[str, Any]:
+    def execute_trajectory(self, trajectory_id: str) -> ToolEnvelope:
         """Execute a stored trajectory as one coarse-grained backend operation.
 
         The backend owns the high-frequency loop. Codex sees one operation and
@@ -534,7 +573,7 @@ class EmbodiChainMCPService:
         *,
         fps: int = 30,
         include_depth: bool = True,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Execute a stored trajectory while recording an offscreen camera."""
         with self._lock:
             try:
@@ -566,7 +605,7 @@ class EmbodiChainMCPService:
         positions: Sequence[Sequence[float]],
         *,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Validate a trajectory through the backend adapter."""
         self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
@@ -580,7 +619,7 @@ class EmbodiChainMCPService:
         *,
         steps: int = 1,
         expected_scene_revision: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Start a bounded asynchronous rollout job."""
         if type(steps) is not int or not 1 <= steps <= 1_000_000:
             raise ValueError("steps must be an integer between 1 and 1000000")
@@ -726,7 +765,7 @@ class EmbodiChainMCPService:
 
     def _envelope(
         self, value: Mapping[str, Any], *, world_id: str | None = None
-    ) -> dict[str, Any]:
+    ) -> ToolEnvelope:
         """Add common result metadata to a backend response."""
         world_state = (
             self.backend.get_world_state(world_id) if world_id is not None else None

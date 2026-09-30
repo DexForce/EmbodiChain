@@ -24,6 +24,12 @@ inside the backend; MCP calls operate on worlds, trajectories, and rollout
 jobs, and offscreen camera recordings. The default server uses `SimulationManagerBackend`; the deterministic
 `InMemorySimulationBackend` is intended for protocol tests and examples.
 
+`health` reports the service and backend scope without starting a simulation.
+World operations accept optional `expected_scene_revision` values and reject
+stale callers before touching simulator state. Trajectories retain the scene
+revision observed during generation and are rejected at execution time when
+the world has changed.
+
 Phase one does not expose real-device control, arbitrary code execution, or
 per-physics-step Agent calls. Tool annotations describe risk, but authorization
 and safety enforcement remain execution-layer responsibilities. The package
