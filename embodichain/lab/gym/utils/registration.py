@@ -377,18 +377,18 @@ def _import_task_package(ep: importlib.metadata.EntryPoint):
     Legacy editable installs from before official tasks were bundled in the
     main distribution can expose two editable projects from the same checkout.
     The repository-level ``embodichain_tasks/`` container may then be picked up
-    as a namespace or regular outer package that shadows the real
+    as a namespace package that shadows the real
     ``embodichain_tasks/embodichain_tasks/`` package.
 
     A namespace package never executes ``__init__.py``, so the package's
     ``import_packages()`` call -- which triggers every ``@register_env`` --
     is skipped and no environments are registered.
 
-    When such shadowing is detected, this helper locates the real
-    ``__init__.py`` beneath one of the package's search locations
-    (``<location>/<top_level>/__init__.py``) and loads it directly under the
-    expected top-level name so registration and task module names remain flat.
-    This is a no-op for regular, non-shadowed installs.
+    When such shadowing is detected (the imported module has no ``__file__``),
+    this helper locates the real ``__init__.py`` beneath one of the namespace's
+    search locations (``<location>/<top_level>/__init__.py``) and loads it
+    directly so registration runs. This is a no-op for regular, non-shadowed
+    installs.
 
     Args:
         ep: The ``embodichain.tasks`` entry point to import.
@@ -400,22 +400,20 @@ def _import_task_package(ep: importlib.metadata.EntryPoint):
     module_name = ep.value
     top_level = module_name.partition(".")[0]
     mod = importlib.import_module(module_name)
+    if getattr(mod, "__file__", None) is not None:
+        return mod
+
     # Only top-level packages can be reliably force-loaded here; dotted entry
     # point values fall back to the plain import above.
     if module_name != top_level:
         return mod
 
-    module_file = getattr(mod, "__file__", None)
-    # Namespace or outer-package shadowing: search each package location for
-    # the real package's __init__.py and load it in place of the outer module.
+    # Namespace shadowing: search each namespace location for the real
+    # package's __init__.py and load it in place of the namespace module.
     for location in list(getattr(mod, "__path__", [])):
         init_path = os.path.join(location, top_level, "__init__.py")
         if not os.path.isfile(init_path):
             continue
-        if module_file is not None and os.path.realpath(
-            module_file
-        ) == os.path.realpath(init_path):
-            return mod
         pkg_dir = os.path.dirname(init_path)
         spec = importlib.util.spec_from_file_location(
             top_level, init_path, submodule_search_locations=[pkg_dir]
@@ -455,31 +453,7 @@ def discover_task_packages() -> list[str]:
                 f"Failed to import task package '{ep.name}' ({ep.value})",
                 exc_info=True,
             )
-    _normalize_nested_task_modules()
     return imported
-
-
-def _normalize_nested_task_modules() -> None:
-    """Expose task modules under their flat public names after shadowed imports.
-
-    A legacy editable installation can import the bundled package as
-    ``embodichain_tasks.embodichain_tasks`` before entry-point discovery runs.
-    The registered classes then retain that nested ``__module__`` even after
-    the real top-level package is loaded. Alias those already-loaded modules
-    and update registered task classes so the public task-module contract stays
-    flat in mixed editable-install environments.
-    """
-
-    nested_prefix = "embodichain_tasks.embodichain_tasks."
-    for spec in REGISTERED_ENVS.values():
-        module_name = spec.cls.__module__
-        if not module_name.startswith(nested_prefix):
-            continue
-        flat_name = "embodichain_tasks." + module_name[len(nested_prefix) :]
-        module = sys.modules.get(module_name)
-        if module is not None:
-            sys.modules.setdefault(flat_name, module)
-        spec.cls.__module__ = flat_name
 
 
 def execute_init_hooks() -> list[str]:

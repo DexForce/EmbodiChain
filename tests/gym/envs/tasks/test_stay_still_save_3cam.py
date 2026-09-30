@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import torch
 
-from embodichain_tasks.embodichain_tasks.special.stay_still_save_3cam import (
+from embodichain_tasks.special.stay_still_save_3cam import (
     StayStillSave3CamEnv,
 )
 
