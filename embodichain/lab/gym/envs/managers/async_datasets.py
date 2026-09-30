@@ -304,7 +304,14 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             self._save_queue.put(payload)
             enqueue_elapsed = time.perf_counter() - enqueue_start
         with self._queue_metrics_lock:
-            self._max_queue_depth = max(self._max_queue_depth, self._save_queue.qsize())
+            self._max_queue_depth = max(
+                self._max_queue_depth,
+                (
+                    self.async_queue_maxsize
+                    if queue_was_full
+                    else self._save_queue.qsize()
+                ),
+            )
             if queue_was_full:
                 self._backpressure_events += 1
                 self._backpressure_s += enqueue_elapsed

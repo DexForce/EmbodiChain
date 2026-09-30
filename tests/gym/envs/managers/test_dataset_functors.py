@@ -336,6 +336,32 @@ class TestLeRobotRecorderInitialization:
         with Image.open(path) as decoded:
             np.testing.assert_array_equal(np.asarray(decoded), image)
 
+    def test_image_compress_level_reaches_async_image_writer(self, tmp_path):
+        """The configured level reaches a real LeRobot image-writer thread."""
+        from lerobot.datasets.image_writer import AsyncImageWriter
+        from embodichain.lab.gym.envs.managers import datasets
+
+        image = np.zeros((8, 10, 3), dtype=np.uint8)
+        image[2:6, 3:8] = (13, 101, 247)
+        dataset = datasets._ImageCompressionLeRobotDataset.__new__(
+            datasets._ImageCompressionLeRobotDataset
+        )
+        writer = AsyncImageWriter(num_processes=0, num_threads=2)
+        dataset.image_writer = writer
+        dataset.image_compress_level = 3
+        path = tmp_path / "async_image.png"
+
+        try:
+            dataset._save_image(image, path, compress_level=6)
+            writer.wait_until_done()
+        finally:
+            writer.stop()
+
+        from PIL import Image
+
+        with Image.open(path) as decoded:
+            np.testing.assert_array_equal(np.asarray(decoded), image)
+
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_non_integer_environment_frequency_is_rejected(self, mock_lerobot_dataset):
         """LeRobot recording rejects cadence that its integer FPS cannot encode."""
