@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,32 @@ from .motion import (
 __all__: list[str] = []
 
 ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v4"
+
+
+def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
+    """Hash physical values and asset contents, never publication locations."""
+    scene_path = Path(base_dir) / "components/scene.yaml"
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key == "fpath" and isinstance(item, str):
+                    asset = Path(item)
+                    if not asset.is_absolute():
+                        asset = scene_path.parent / asset
+                    result[key] = {
+                        "sha256": hashlib.sha256(asset.read_bytes()).hexdigest(),
+                        "format": asset.suffix.lower(),
+                    }
+                else:
+                    result[key] = normalize(item)
+            return result
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return value
+
+    return normalize(load_config(scene_path))
 
 
 def probe_initial_plan(env: Any, deployment: Any, program: Any) -> dict[str, Any]:
@@ -136,10 +163,12 @@ class _TaskFactory(SimulationTaskProgramFactory):
         articulation_bindings: tuple = (),
         pour_receivers: dict[str, str] | None = None,
         drawer_routes: tuple = (),
+        press_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._pour_receivers = dict(pour_receivers or {})
+        self._press_routes = press_routes
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -172,6 +201,16 @@ class _TaskFactory(SimulationTaskProgramFactory):
             self._drawers = tuple(
                 DrawerObservation(route, self._simulation) for route in drawer_routes
             )
+        if press_routes:
+            from .press_runtime import PressAcceptancePort
+
+            self._task_post_port = PressAcceptancePort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                press_routes[0],
+                self.step_dt,
+            )
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
         """Keep drawer-owned transport separate from ordinary GenSim wrappers."""
@@ -195,6 +234,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(GenSimMoveHeldObject(), replace=True)
         engine.register(GenSimPlace(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
+        if self._press_routes:
+            from .press_runtime import GenSimPress
+
+            engine.register(GenSimPress(), replace=True)
         self.task_program_registration.validate_engine(engine)
         return engine
 
@@ -214,10 +257,17 @@ class TaskAdapterFactory:
     articulation_bindings: tuple = ()
     pour_receivers: tuple[tuple[str, str], ...] = ()
     drawer_routes: tuple = ()
+    press_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
         self.registration.assert_unchanged()
+        if self.press_routes:
+            from .press_runtime import SENSOR_UID, ensure_sensor
+
+            environment.sensors[SENSOR_UID] = ensure_sensor(
+                environment.sim, environment.robot, self.press_routes[0]
+            )
         motion_factory = None
         if any(
             preset.motion_policy.strategy == "motion_gen"
@@ -333,6 +383,7 @@ class TaskAdapterFactory:
             articulation_bindings=self.articulation_bindings,
             pour_receivers=dict(self.pour_receivers),
             drawer_routes=self.drawer_routes,
+            press_routes=self.press_routes,
         )
         return factory.create_adapter()
 
@@ -399,6 +450,34 @@ def load_deployment(
         if type(f) is ArticulationWithdrawFactory
     ]
     articulation_bindings = ()
+    from .press_runtime import PressFactory, PressPrepareFactory
+
+    presses = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is PressFactory
+    ]
+    preparations = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is PressPrepareFactory
+    ]
+    press_routes = ()
+    if presses or preparations:
+        if (
+            len(presses) != 1
+            or len(preparations) != 1
+            or presses[0].route != preparations[0].route
+        ):
+            raise ValueError(
+                "E9 prepare and Press must share exactly one source-qualified route."
+            )
+        press_routes = (presses[0].route,)
+        for phase in ("ready", "pressed"):
+            name = press_routes[0].preset(phase)
+            if name in settle_presets:
+                raise ValueError("E9 post-policies cannot replace existing presets.")
+            settle_presets[name] = settle_presets["rigid_object"].snapshot()
     if slides or withdrawals:
         if (
             len(slides) != 1
@@ -440,6 +519,10 @@ def load_deployment(
         relation_grounders=(),
     )
     program = load_config(base.program_path)
+    if press_routes:
+        from .press_binding import validate_program
+
+        validate_program(program, press_routes[0])
     from .align_held import with_held_alignment
 
     registration = with_held_alignment(
@@ -526,6 +609,12 @@ def load_deployment(
                 else {}
             ),
             "adapter_contract": ADAPTER_CONTRACT,
+            **({"press_runtime_revision": 2} if press_routes else {}),
+            **(
+                {"press_scene_configuration": _press_scene_identity(base_dir)}
+                if press_routes
+                else {}
+            ),
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
             "core_integration": base.integration.integration_fingerprint,
@@ -548,6 +637,7 @@ def load_deployment(
         articulation_bindings,
         pour_receivers,
         drawers,
+        press_routes,
     )
     integration = replace(
         base.integration,
