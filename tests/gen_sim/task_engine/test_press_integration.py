@@ -483,6 +483,188 @@ def test_contact_sensor_never_drives_button_even_after_full_press(scene, contact
     assert commands == []
 
 
+@pytest.fixture
+def press_acceptance(scene, monkeypatch):
+    from dataclasses import asdict
+    from embodichain.gen_sim.task_engine._task_program import press_runtime
+    from embodichain.gen_sim.task_engine._task_program.press import PressSample
+
+    route = discover_press(scene.articulations[0])
+    route = replace(
+        route,
+        binding=replace(
+            route.binding,
+            axis=(1.0, 0.0, 0.0),
+            press_position=(0.0, 0.0, 0.0),
+            limits=(0.0, 0.005),
+            released_position=0.0,
+            pressed_position=0.005,
+        ),
+    )
+    state = SimpleNamespace(position=[-0.1, 0.0, 0.0])
+
+    def hand_pose(*args, **kwargs):
+        pose = torch.eye(4).unsqueeze(0)
+        pose[0, :3, 3] = torch.tensor(state.position)
+        return pose
+
+    robot = SimpleNamespace(
+        get_qpos=lambda **kw: torch.zeros(1, 1),
+        compute_fk=hand_pose,
+        get_link_pose=hand_pose,
+        get_link_vert_face=lambda name: (
+            torch.tensor([[-0.005] * 3, [0.005] * 3]),
+            None,
+        ),
+    )
+    art = SimpleNamespace(
+        link_names=[route.binding.link, route.binding.parent],
+        get_qpos=lambda: torch.zeros(1, 1),
+        get_link_pose=lambda *args, **kw: torch.eye(4).unsqueeze(0),
+        get_link_vert_face=lambda name: (torch.tensor([[-0.02] * 3, [0.02] * 3]), None),
+    )
+    samples = [
+        PressSample(0.0, 0.0, "prepare", False),
+        PressSample(0.1, 0.0, "press", True),
+        PressSample(0.2, 0.0001, "press", True),
+        PressSample(0.3, 0.0, "cleanup", False),
+        PressSample(0.4, 0.0, "cleanup", False),
+    ]
+    sensor = SimpleNamespace(
+        robot=robot,
+        art=art,
+        samples=samples,
+        trace=[{**asdict(s), "parent_contact": False} for s in samples],
+        finger_names=["finger"],
+        joint_index=0,
+        retreat_verified=False,
+        _sim=SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.1)),
+    )
+    monkeypatch.setattr(press_runtime, "ensure_sensor", lambda *a: sensor)
+    port = press_runtime.PressAcceptancePort(None, None, robot, route, 0.1)
+    policy = SimpleNamespace(
+        cfg=SimpleNamespace(kind="wait_stable", preset=route.preset("pressed")),
+        entity=SimpleNamespace(entity_id=route.binding.object_id),
+    )
+
+    def check(terminal=False):
+        call_id = press_runtime.PARK_CALL if terminal else PRESS_CALL
+        segment = SimpleNamespace(
+            calls=[SimpleNamespace(call=SimpleNamespace(semantic_id=call_id))]
+        )
+        list(port.actions(policy, segment=segment, active_mask=torch.tensor([True])))
+        return port.post_policy_metadata(policy, segment=segment)
+
+    return state, sensor, check
+
+
+def test_park_accepts_sideways_return_only_after_verified_axial_retreat(
+    press_acceptance,
+):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    result = check(terminal=True)
+    assert result["accepted"]
+    assert result["retreat_clearance"] < 0
+    assert result["terminal_clearance"] > 0.04
+    assert result["retreat_verified"]
+
+
+@pytest.mark.parametrize(
+    "terminal,verified,position,reason",
+    [
+        (False, False, [0.1, 0.3, 0.0], "retreat_clearance_insufficient"),
+        (True, False, [0.1, 0.3, 0.0], "retreat_not_verified"),
+        (True, True, [0.0, 0.064, 0.0], "terminal_clearance_insufficient"),
+        (True, True, [0.0, 0.0, 0.0], "terminal_clearance_insufficient"),
+    ],
+)
+def test_park_relaxation_preserves_retreat_and_spatial_guards(
+    press_acceptance, terminal, verified, position, reason
+):
+    state, sensor, check = press_acceptance
+    state.position = position
+    sensor.retreat_verified = verified
+    result = check(terminal)
+    assert not result["accepted"]
+    assert result["reason"] == reason
+
+
+def test_park_rejects_housing_contact_despite_no_button_contact(press_acceptance):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    sensor.trace[-1]["parent_contact"] = True
+    result = check(terminal=True)
+    assert not result["accepted"]
+    assert result["contact_released"]
+    assert result["reason"] == "housing_contact_not_released"
+
+
+def test_park_rejects_invalid_evidence_after_successful_retreat(press_acceptance):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    sensor.samples[-1] = replace(sensor.samples[-1], valid=False)
+    result = check(terminal=True)
+    assert not result["accepted"]
+    assert result["reason"] == "invalid_observation"
+
+
+def test_park_rejects_renewed_button_contact(press_acceptance):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    sensor.samples[-1] = replace(sensor.samples[-1], target_contact=True)
+    result = check(terminal=True)
+    assert not result["accepted"]
+    assert result["reason"] == "contact_not_released"
+
+
+def test_park_checks_other_appliance_links_not_just_button(press_acceptance):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    sensor.art.link_names.append("lid")
+    original_pose = sensor.art.get_link_pose
+    sensor.art.get_link_pose = lambda name, **kw: (
+        sensor.robot.get_link_pose("finger")
+        if name == "lid"
+        else original_pose(name, **kw)
+    )
+    result = check(terminal=True)
+    assert not result["accepted"]
+    assert result["terminal_clearance"] == 0.0
+
+
+def test_park_retreat_proof_does_not_leak_between_episodes(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program.press_runtime import (
+        ContactSensor,
+        PressContactSensor,
+    )
+
+    monkeypatch.setattr(ContactSensor, "reset", lambda *a: None)
+    sensor = object.__new__(PressContactSensor)
+    sensor.route = object()
+    sensor.armed = True
+    sensor.retreat_verified = True
+    PressContactSensor.reset(sensor)
+    assert not sensor.armed
+    assert not sensor.retreat_verified
+
+
+@pytest.mark.parametrize("bad", ["empty", "nan"])
+def test_park_fails_closed_without_finite_appliance_geometry(press_acceptance, bad):
+    state, sensor, check = press_acceptance
+    assert check()["accepted"]
+    state.position = [0.1, 0.3, 0.0]
+    vertices = torch.empty(0, 3) if bad == "empty" else torch.full((2, 3), float("nan"))
+    sensor.art.get_link_vert_face = lambda name: (vertices, None)
+    with pytest.raises(ValueError, match="geometry"):
+        check(terminal=True)
+
+
 def test_e9_rejects_mixed_recipe_without_changing_shared_policy(scene):
     from embodichain.gen_sim.task_engine._task_program.press_binding import graph_routes
 
