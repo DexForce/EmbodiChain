@@ -254,8 +254,10 @@ class EmbodiChainMCPService:
         *,
         task_id: str | None = None,
         scene: Mapping[str, Any] | None = None,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Load an existing task reference or JSON-compatible scene manifest."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         if task_id is not None:
             task = self.get_task_info(task_id)
             if scene is None:
@@ -295,12 +297,18 @@ class EmbodiChainMCPService:
             raise ValueError(f"Task config must contain a mapping: {config_ref}")
         return dict(value)
 
-    def reset_world(self, world_id: str) -> dict[str, Any]:
+    def reset_world(
+        self, world_id: str, *, expected_scene_revision: int | None = None
+    ) -> dict[str, Any]:
         """Reset dynamic world state."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.reset_world(world_id), world_id=world_id)
 
-    def destroy_world(self, world_id: str) -> dict[str, Any]:
+    def destroy_world(
+        self, world_id: str, *, expected_scene_revision: int | None = None
+    ) -> dict[str, Any]:
         """Destroy a world handle."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         with self._lock:
             active = [
                 run.run_id
@@ -314,57 +322,101 @@ class EmbodiChainMCPService:
         self.backend.destroy_world(world_id)
         return {"status": "succeeded", "world_id": world_id}
 
-    def get_world_state(self, world_id: str) -> dict[str, Any]:
+    def get_world_state(
+        self, world_id: str, *, expected_scene_revision: int | None = None
+    ) -> dict[str, Any]:
         """Return a detached world state with protocol metadata."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.get_world_state(world_id), world_id=world_id)
 
-    def snapshot_world(self, world_id: str) -> dict[str, Any]:
+    def snapshot_world(
+        self, world_id: str, *, expected_scene_revision: int | None = None
+    ) -> dict[str, Any]:
         """Create a snapshot handle for a world."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(self.backend.snapshot_world(world_id), world_id=world_id)
 
-    def restore_world(self, world_id: str, snapshot_id: str) -> dict[str, Any]:
+    def restore_world(
+        self,
+        world_id: str,
+        snapshot_id: str,
+        *,
+        expected_scene_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Restore a snapshot belonging to the requested world."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.restore_world(world_id, snapshot_id), world_id=world_id
         )
 
-    def step_simulation(self, world_id: str, *, steps: int = 1) -> dict[str, Any]:
+    def step_simulation(
+        self,
+        world_id: str,
+        *,
+        steps: int = 1,
+        expected_scene_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Advance a world by a positive number of backend steps."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.step_simulation(world_id, steps=steps), world_id=world_id
         )
 
     def forward_kinematics(
-        self, world_id: str, robot_id: str, qpos: Sequence[float]
+        self,
+        world_id: str,
+        robot_id: str,
+        qpos: Sequence[float],
+        *,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Compute FK through the backend adapter."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.forward_kinematics(world_id, robot_id, qpos),
             world_id=world_id,
         )
 
     def solve_ik(
-        self, world_id: str, robot_id: str, target_pose: Mapping[str, Any]
+        self,
+        world_id: str,
+        robot_id: str,
+        target_pose: Mapping[str, Any],
+        *,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Compute IK through the backend adapter."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.solve_ik(world_id, robot_id, dict(target_pose)),
             world_id=world_id,
         )
 
     def check_reachability(
-        self, world_id: str, robot_id: str, target_pose: Mapping[str, Any]
+        self,
+        world_id: str,
+        robot_id: str,
+        target_pose: Mapping[str, Any],
+        *,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Check reachability without implying collision-free execution."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.check_reachability(world_id, robot_id, dict(target_pose)),
             world_id=world_id,
         )
 
     def check_collision(
-        self, world_id: str, robot_id: str, qpos: Sequence[float]
+        self,
+        world_id: str,
+        robot_id: str,
+        qpos: Sequence[float],
+        *,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Run backend collision validation for a robot configuration."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.check_collision(world_id, robot_id, qpos), world_id=world_id
         )
@@ -377,8 +429,10 @@ class EmbodiChainMCPService:
         goal_qpos: Sequence[float],
         *,
         samples: int = 32,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Generate a backend trajectory between two joint configurations."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.plan_motion(
                 world_id, robot_id, start_qpos, goal_qpos, samples=samples
@@ -393,6 +447,7 @@ class EmbodiChainMCPService:
         waypoints: Sequence[Sequence[float]],
         *,
         samples_per_segment: int = 32,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Generate and validate a multi-waypoint joint trajectory.
 
@@ -415,7 +470,7 @@ class EmbodiChainMCPService:
             or not 2 <= samples_per_segment <= 10000
         ):
             raise ValueError("samples_per_segment must be between 2 and 10000")
-        self.backend.get_world_state(world_id)
+        world_state = self._check_scene_revision(world_id, expected_scene_revision)
         segments: list[list[list[float]]] = []
         for start, goal in zip(waypoints, waypoints[1:]):
             result = self.backend.plan_motion(
@@ -433,6 +488,7 @@ class EmbodiChainMCPService:
         record = {
             "trajectory_id": trajectory_id,
             "world_id": world_id,
+            "scene_revision": world_state.get("scene_revision"),
             "robot_id": robot_id,
             "positions": positions,
             "waypoints": [list(waypoint) for waypoint in waypoints],
@@ -458,6 +514,10 @@ class EmbodiChainMCPService:
                 raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
         if not trajectory["validation"]["valid"]:
             raise ValueError("Cannot execute an invalid trajectory")
+        self._check_scene_revision(
+            world_id=trajectory["world_id"],
+            expected_scene_revision=trajectory["scene_revision"],
+        )
         result = self.backend.execute_trajectory(
             trajectory["world_id"],
             trajectory["robot_id"],
@@ -483,6 +543,10 @@ class EmbodiChainMCPService:
                 raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
         if not trajectory["validation"]["valid"]:
             raise ValueError("Cannot record an invalid trajectory")
+        self._check_scene_revision(
+            world_id=trajectory["world_id"],
+            expected_scene_revision=trajectory["scene_revision"],
+        )
         result = self.backend.record_trajectory(
             trajectory["world_id"],
             trajectory["robot_id"],
@@ -500,18 +564,27 @@ class EmbodiChainMCPService:
         world_id: str,
         robot_id: str,
         positions: Sequence[Sequence[float]],
+        *,
+        expected_scene_revision: int | None = None,
     ) -> dict[str, Any]:
         """Validate a trajectory through the backend adapter."""
+        self._check_scene_revision(world_id, expected_scene_revision)
         return self._envelope(
             self.backend.validate_trajectory(world_id, robot_id, positions),
             world_id=world_id,
         )
 
-    def start_rollout(self, world_id: str, *, steps: int = 1) -> dict[str, Any]:
+    def start_rollout(
+        self,
+        world_id: str,
+        *,
+        steps: int = 1,
+        expected_scene_revision: int | None = None,
+    ) -> dict[str, Any]:
         """Start a bounded asynchronous rollout job."""
         if type(steps) is not int or not 1 <= steps <= 1_000_000:
             raise ValueError("steps must be an integer between 1 and 1000000")
-        self.backend.get_world_state(world_id)
+        self._check_scene_revision(world_id, expected_scene_revision)
         run = _Run(
             run_id=f"run-{uuid.uuid4().hex[:12]}", world_id=world_id, steps=steps
         )
@@ -655,6 +728,9 @@ class EmbodiChainMCPService:
         self, value: Mapping[str, Any], *, world_id: str | None = None
     ) -> dict[str, Any]:
         """Add common result metadata to a backend response."""
+        world_state = (
+            self.backend.get_world_state(world_id) if world_id is not None else None
+        )
         result = {
             "status": "succeeded",
             "result": deepcopy(dict(value)),
@@ -668,6 +744,24 @@ class EmbodiChainMCPService:
         }
         if world_id is not None:
             result["world_id"] = world_id
-            result["scene_revision"] = value.get("scene_revision")
-            result["seed"] = value.get("seed")
+            result["scene_revision"] = value.get(
+                "scene_revision",
+                None if world_state is None else world_state.get("scene_revision"),
+            )
+            result["seed"] = value.get(
+                "seed", None if world_state is None else world_state.get("seed")
+            )
         return result
+
+    def _check_scene_revision(
+        self, world_id: str, expected_scene_revision: int | None
+    ) -> dict[str, Any]:
+        """Validate an optional optimistic-concurrency scene revision."""
+        state = self.backend.get_world_state(world_id)
+        actual = state.get("scene_revision")
+        if expected_scene_revision is not None and expected_scene_revision != actual:
+            raise ValueError(
+                f"scene_revision mismatch for {world_id}: expected "
+                f"{expected_scene_revision}, current {actual}"
+            )
+        return state

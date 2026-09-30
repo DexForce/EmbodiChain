@@ -67,6 +67,21 @@ def test_world_snapshot_restore_preserves_scene_revision(service):
     assert restored["result"]["time_s"] == pytest.approx(0.0)
 
 
+def test_stale_scene_revision_is_rejected(service):
+    world = service.create_world()
+    world_id = world["world_id"]
+    service.load_task_or_scene(world_id, task_id="demo:reach")
+
+    with pytest.raises(ValueError, match="scene_revision mismatch"):
+        service.step_simulation(world_id, expected_scene_revision=0)
+
+    current = service.get_world_state(world_id)["scene_revision"]
+    stepped = service.step_simulation(
+        world_id, steps=1, expected_scene_revision=current
+    )
+    assert stepped["scene_revision"] == current
+
+
 def test_kinematics_and_trajectory_contracts_are_structured(service):
     world_id = service.create_world()["world_id"]
     ik = service.solve_ik(world_id, DEMO_ROBOT, TARGET_POSE)
@@ -85,6 +100,7 @@ def test_kinematics_and_trajectory_contracts_are_structured(service):
     )
     assert len(plan["result"]["positions"]) == 4
     assert validation["result"]["valid"] is True
+    assert validation["scene_revision"] == 0
 
 
 def test_resource_templates_return_json(service):

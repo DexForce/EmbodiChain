@@ -371,16 +371,22 @@ class InMemorySimulationBackend:
     def check_collision(
         self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
-        """Validate inputs and report that this backend has no collision model."""
+        """Check joint limits and report the absence of a geometry model."""
         self._world(world_id)
         self._check_robot(robot_id)
         values = self._finite_values(qpos, "qpos")
         if len(values) != 2:
             raise ValueError("demo_planar_arm expects exactly two joint values")
+        joint_limits_valid = all(
+            lower <= value <= upper
+            for value, (lower, upper) in zip(values, self._JOINT_LIMITS)
+        )
         return {
             "collision": False,
-            "checked": False,
-            "scope": "no_geometry_registered",
+            "checked": True,
+            "joint_limits_valid": joint_limits_valid,
+            "collision_checked": False,
+            "scope": "joint_limits_only_no_geometry_registered",
             "qpos": values,
         }
 
@@ -547,8 +553,10 @@ class SimulationManagerBackend:
         """Construct a headless manager without importing DexSim at module load."""
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
         from embodichain.lab.sim.cfg import physics_cfg_for_backend
+        from embodichain.utils import set_seed
 
-        del seed  # Seed application belongs to the environment/task owner.
+        if seed is not None:
+            set_seed(seed)
         cfg = SimulationManagerCfg(
             headless=True,
             enable_entity_gizmo=False,
@@ -860,13 +868,27 @@ class SimulationManagerBackend:
     def check_collision(
         self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
-        """Report the absence of a generic manager collision query."""
+        """Check joint limits and report the absence of a generic geometry query."""
         self._manager(world_id)
-        self._robot(world_id, robot_id)
+        robot = self._robot(world_id, robot_id)
+        import torch
+
+        values = torch.as_tensor(qpos, dtype=torch.float32)
+        if values.ndim != 1:
+            raise ValueError("qpos must have shape (dof,)")
+        limits = robot.get_qpos_limits()[0].detach().cpu()
+        if values.shape[0] != limits.shape[0]:
+            raise ValueError("qpos width does not match robot qpos limits")
+        finite = bool(torch.isfinite(values).all().item())
+        joint_limits_valid = finite and bool(
+            ((limits[:, 0] <= values) & (values <= limits[:, 1])).all().item()
+        )
         return {
             "collision": False,
-            "checked": False,
-            "scope": "no_generic_simulation_manager_collision_query",
+            "checked": True,
+            "joint_limits_valid": joint_limits_valid,
+            "collision_checked": False,
+            "scope": "joint_limits_only_no_generic_geometry_query",
         }
 
     def plan_motion(
