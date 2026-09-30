@@ -916,6 +916,12 @@ def _bridge(
     return bridge, runtime, clock
 
 
+def test_bridge_without_expansion_provider_has_no_records() -> None:
+    bridge, _, _ = _bridge(duration=STEP_DT)
+
+    assert bridge.expansion_records == ()
+
+
 @pytest.mark.parametrize(
     "overrides, expected_total",
     [
@@ -1620,7 +1626,7 @@ def test_sequential_start_failure_before_first_command_preserves_cause() -> None
     bridge = TaskProgramDemoBridge(_FakeProgram(_FakeSegment()), runtime, sink, clock)
     env = _BridgeExecutorEnv(bridge)
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -1660,7 +1666,7 @@ def test_parallel_construction_failure_before_first_command_preserves_cause(
         classmethod(fail_construction),
     )
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)
@@ -1725,7 +1731,7 @@ def test_post_policy_generator_error_replays_safe_hold_before_propagating() -> N
     )
     env = _BridgeExecutorEnv(bridge)
 
-    with pytest.raises(RuntimeError, match="action generation") as error:
+    with pytest.raises(RuntimeError, match="action expansion") as error:
         execute_demo_episode(env)
 
     assert isinstance(error.value.__cause__, RuntimeError)

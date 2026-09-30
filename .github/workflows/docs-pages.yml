@@ -177,6 +177,10 @@ jobs:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref != '' && inputs.ref || 'main' }}
       - uses: ./.github/actions/activate-conda
 
+      - name: Trust checked-out repository
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Restore full multi-version docs site
         uses: actions/cache/restore@v4
         with:

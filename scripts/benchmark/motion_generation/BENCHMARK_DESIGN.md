@@ -25,10 +25,18 @@ and covers `MoveEndEffector`, `MoveJoints`, antipodal-grasp `PickUp`,
 `AtomicActionEngine`; scenario code never calls cuRobo directly.
 The `atomic_franka_pgi_curobo_smoke_v3` contact cases use the same articulated
 assets and placements as their Atomic Action tutorials. `Press` and `Twist`
-interact with the Microwave's `button_cap`/`start_button_press` and
-`cap_1`/`power_knob_rotation` link/joint pairs; `Slide` interacts with the
-Drawer's `large_handle_bar`/`cabinet_to_drawer` pair. Cases freeze targets
-derived from the actual link geometry rather than synthetic semantic targets.
+use `Microwave/microwave.urdf`; `Slide` uses
+`Drawer/model_split_links_with_inertials.urdf`. Their target and sampling
+configuration is:
+
+| Skill | Target link | Target joint | `sample_count` | `hand_interp_steps` |
+|---|---|---|---:|---:|
+| `Press` | `button_link` | `button_joint` | 256 | 12 |
+| `Slide` | `large_handle_bar` | `cabinet_to_drawer` | 140 | 12 |
+| `Twist` | `knob_link` | `knob_joint` | 256 | 20 |
+
+Cases freeze targets derived from the actual link geometry rather than
+synthetic semantic targets.
 
 Physical replay samples the target joint from each action's effect segment
 through release, retract, and the final hold. Peak signed displacement remains
@@ -48,6 +56,13 @@ Microwave/Drawer root translation before freezing the live target-link pose;
 Slide samples one PGI grasp once in target-local coordinates and screens its
 translated copies together. General per-row geometry-sampled antipodal
 candidate selection remains a future extension.
+
+The pose-batch suite uses the asset, target, and sampling settings above. The
+six-skill `atomic_franka_pgi_curobo_randomized` suite uses the same `Press`
+settings. All three suites configure `physics.hold_steps=80` and
+`physics.hold_sim_steps=2` for the final pose hold. The standalone `Press` and
+`Twist` tutorials each use 256 final-pose updates, also with two physics steps
+per update.
 
 The shared runner now selects planners, scenarios, robots, Atomic Action case
 providers, and object kinds through registries. Cases freeze the full robot

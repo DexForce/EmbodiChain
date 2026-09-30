@@ -28,7 +28,8 @@ def test_standard_step_schedules_sensor_after_each_physics_substep(enabled):
     env.cfg = SimpleNamespace(sim_steps_per_control=3)
     env.sim_cfg = SimpleNamespace(physics_dt=0.01)
 
-    def update(dt, n, *, after_substep=None):
+    def update(dt, n, *, after_substep=None, render_final_step=True):
+        assert render_final_step is False
         events.append(("manager", dt, n))
         for _ in range(n):
             events.append(("physics", dt))

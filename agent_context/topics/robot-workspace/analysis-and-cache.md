@@ -88,6 +88,39 @@
 - Cost is negligible: batched Jacobian + determinant is ~10 ms per 470
   configurations on GPU.
 
+### Manipulability visualization
+
+- `align_manipulability_scores(results)` is the only supported way to attach
+  scores to points. Joint-space results align one-to-one with
+  `workspace_points`; Cartesian/plane results align with `reachable_points` and
+  are scattered onto `all_points` through `reachability_mask` when
+  `retain_diagnostics=True`. The helper raises rather than rendering when
+  `all_points[mask]` does not reproduce `reachable_points`.
+- `normalize_manipulability` clips to a percentile window (default 2–98) and
+  optionally normalizes `log10(w)`. It reports the untouched `raw_range`
+  alongside the `clip_range` color-bar bounds in raw units, so the visualization
+  never hides magnitudes behind clipping. Empty/all-unreachable input yields NaN
+  ranges; constant input maps to a flat `0.5`.
+- Unreachable points keep a distinct desaturated color and smaller marker rather
+  than being dropped. Ellipsoids are translational only
+  (`select_jacobian_rows(J, "translational")`) and are computed for the
+  explicit/top-N/bottom-N selection through a single `jacobian_fn` call, never
+  for the full cloud.
+- `scripts/tutorials/sim/workspace_manipulability_visualization.py` runs the
+  whole path headlessly on a solver-backed robot adapter and writes the
+  `docs/source/_static/tutorials/workspace_manipulability_*.png` figures.
+  `analyze-workspace --vis-type manipulability` instead colors a simulated
+  robot's own workspace in the native viewer or Viser, with
+  `--manipulability-log-scale` and `--manipulability-percentile` selecting the
+  normalization. Scene-level manipulability has no separate runner.
+- `MANIPULABILITY` is the only non-point-cloud type Viser renders directly;
+  every other type still falls back to `point_cloud` there. Both forwarding
+  backends receive RGB only, so per-point alpha/marker size, the color bar and
+  the ellipsoid detail plots stay Matplotlib features; point size means screen
+  pixels natively but scene units in Viser, and the analyzer picks the matching
+  `VisualizationConfig` field per backend. A published cloud is static, so
+  moving the robot base requires reanalysis.
+
 ### Seed selection for Cartesian/plane IK
 
 Cartesian and plane analysis verify reachability through the solver's

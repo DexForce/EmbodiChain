@@ -353,6 +353,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
         if not isinstance(goal.semantics.affordance, AntipodalAffordance):
             raise ValueError("HandOver requires an AntipodalAffordance.")
+        goal.semantics.affordance.require_whole_object_mesh()
 
         # A semantic handover is also the continuation point after an explicit
         # Pick call.  In that case the source attachment is already verified by

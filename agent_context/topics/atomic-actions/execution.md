@@ -112,8 +112,23 @@ resample fractional durations.
 `MotionPolicy` forwards the explicit strategy unchanged. `ik_interp` rejects
 backend `plan_opts`; `motion_gen` always invokes the backend. Segments requesting
 `cartesian_linear=True` preserve caller-supplied Cartesian samples and currently
-require `ik_interp`, including Press, Slide, PushObject and OpenDoor. A planner
-policy for such a segment raises instead of silently bypassing backend timing.
+require `ik_interp`, as used by Slide, PushObject and OpenDoor. A planner policy
+for such a segment raises instead of silently bypassing backend timing.
+Press supports both strategies: `ik_interp` preserves the contact/press/retract
+Cartesian samples; `motion_gen` sends approach/contact/press/retract targets to
+the selected backend in one ordered request, then aligns the three internal
+boundaries chronologically on native samples.
+Each phase retains its native time profile while retiming to the control grid;
+requested phase counts are minima, so long phases expand rather than speeding
+up. Press validates its final assembled arm samples through a capable backend
+and rejects collision-aware backend paths without that validation capability.
+Exact validation needs poses for every configured dynamic obstacle. Missing
+poses fail the plan with diagnostics; they never permit unchecked success.
+`dynamic_collision_mode=off` forbids filling missing poses from the scene, so
+such validation requires complete explicit obstacle poses or a backend world
+without dynamic obstacles.
+It does not promise continuous collision freedom, a straight path between
+endpoints, or a fallback to IK.
 
 Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds

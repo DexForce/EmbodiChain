@@ -39,20 +39,30 @@ Read this when the request needs these details. [Topic overview](env-framework.m
 
 ### Action boundary (`types.py`, `embodied_env.py`)
 
-- Raw policy actions run through `ActionManager` terms in `pre` mode.
-- `ControllerAction` wraps a command that already completed raw-policy
-  preprocessing. `EmbodiedEnv` unwraps it and skips only `pre` terms.
-- Both paths converge at `_prepare_controller_action()`, which validates the
-  vector batch, control keys (`qpos`, `qvel`, `qf`), active/full joint width,
-  floating dtype, and environment device before robot control.
-- `ControllerAction` does not bypass `env.step()` or `ActionManager` terms in
-  `post` mode. Task Program uses this boundary so runtime commands, wait
-  holds, and abort-safe holds retain the normal Gym lifecycle.
+- Raw policy actions are flat floating tensors. `ActionManager.process_action()`
+  validates and slices them in configuration order; `_step_action()` then calls
+  `ActionManager.apply_action()` once before physics.
+- `ControllerAction` wraps a controller-ready qpos/qvel/qf command.
+  `EmbodiedEnv` keeps the envelope through preprocessing so `_step_action()` can
+  bypass `ActionManager` and apply it through the direct controller boundary.
+- `_prepare_controller_action()` validates controller batch, keys, active/full
+  joint width, floating dtype, and device. Policy tensors use the manager's
+  flat shape/device validation instead.
+- Task Program runtime commands, waits, and abort-safe holds use
+  `ControllerAction`; they retain the ordinary Gym lifecycle without becoming
+  policy actions.
+- Descriptor-driven policy recording and policy-width trajectory recording do
+  not accept `ControllerAction`; mixing those fixed layouts fails before action
+  processing. Expert recording continues to use `ExpertActionSpec`.
+- For raw-policy vector demos with staggered completion, ActionManager masks
+  inactive rows after processing: selected qpos resources hold measured values,
+  while qvel/qf resources receive zero commands.
 - A structured controller `TensorDict` may carry auxiliary fields such as
   `ik_success`, but it must contain at least one supported control key.
-- Position-velocity expert actions are canonicalized only after validation and
-  demo row masking, so recorded targets match the commands actually sent to the
-  controller. A missing qvel is an error before physics advances.
+- Explicit controller actions and position-velocity expert actions are encoded
+  only after validation and demo row masking, so recorded targets match the
+  commands actually sent to the controller. A missing qvel in position-velocity
+  mode is an error before physics advances.
 
 ### Task Program completion (`embodied_env.py`, `task_program/bridge.py`)
 
@@ -137,6 +147,7 @@ reset(options)
   │     ├── event_manager.apply("reset", env_ids)
   │     ├── observation_manager.reset(env_ids)
   │     └── reward_manager.reset(env_ids)
+  ├── _reset_physical_objective(env_ids) # after persistence and reset events
   ├── _elapsed_steps[env_ids] = 0
   └── return get_obs(), get_info()
 ```
@@ -146,19 +157,21 @@ reset(options)
 ```
 step(action)
   ├── _preprocess_action(action)
-  │     ├── raw action → ActionManager "pre"
-  │     ├── ControllerAction → unwrap and skip "pre"
-  │     └── _prepare_controller_action() validation
-  ├── _step_action(action)           # subclass sends control to sim
+  │     ├── flat policy action → ActionManager.process_action()
+  │     └── ControllerAction → validate and preserve envelope
+  ├── _step_action(action)
+  │     ├── policy → ActionManager.apply_action()
+  │     └── ControllerAction → direct qpos/qvel/qf application
   ├── sim.update(dt, sim_steps_per_control)
   ├── _update_sim_state()            # event_manager "interval" mode
+  ├── _update_physical_objective()   # optional, once per control step
   ├── get_obs()
   │     ├── robot.get_proprioception()[:, active_joint_ids]
   │     ├── _get_sensor_obs()
   │     └── _extend_obs()            # ObservationManager.compute()
   ├── get_info() → evaluate()
   ├── get_reward() + _extend_reward()  # RewardManager.compute()
-  ├── _postprocess_action(action)
+  ├── _postprocess_action(action)     # BaseEnv no-op; no action post mode
   ├── elapsed_steps += 1
   ├── compute terminateds (success | fail), truncateds (time limit)
   ├── _hook_after_sim_step()         # rollout buffer write
@@ -206,12 +219,29 @@ from the event config before the event manager is created.
 
 ## Recording & Replay
 
+### Independent measured objectives
+
+`EmbodiedEnv.physical_objective` is optional. Its per-row ordered milestone
+history advances once after interval events, while final-region truth can become
+false again. `get_info()["physical_objective"]` clones tensor snapshots;
+`get_demo_episode_metadata()` includes a JSON-compatible row snapshot. Querying
+either does not advance progress. Reset clears only selected rows after existing
+recording consumption and episode reset logic. These results never overwrite
+`compute_task_state()`, `is_task_success()`, segment validation or dataset decisions.
+Stable pose/velocity does not prove gripper detachment.
+
+`embodichain.lab.scripts.evaluate_task_objective` runs one explicit deployment
+through the expert bridge and dynamic replay, recording independent outcomes,
+resolved config/component snapshots and actual initial pose variation. It does
+not orchestrate multiple experiments or qualify kinematic playback.
+
 `EmbodiedEnv` can record per-object kinematic trajectories and replay them later.
 
 - **Recording**: set `cfg.record_trajectory = True`. A dedicated per-env
   `self._traj_buffer` (TensorDict: `states` = robot root_pose+qpos, articulations,
-  rigid objects; `actions` = the **pre-process** action in position mode, or
-  effective flat `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
+  rigid objects; `actions` = the flat raw policy action when ActionManager is
+  configured, active qpos for position-mode experts, or effective flat
+  `[qpos, qvel]` targets in position-velocity expert mode) is written each step via
   `_write_trajectory_step` (called from `_hook_after_sim_step`). A per-env
   `self._traj_steps` counter means **async parallel envs** (different reset times)
   don't corrupt each other. `cfg.trajectory_uids` restricts which non-robot objects
@@ -223,15 +253,19 @@ from the event config before the event manager is created.
   `close()` (best-effort: IO errors warn + skip, never crash the episode).
 - **Replay**: `ReplayWrapper(env, trajectory, mode)` wraps any `EmbodiedEnv`.
   `kinematic` disables physics and writes recorded states (obs only, exact
-  reproduction); `dynamic` feeds recorded actions through `env.step` so the
-  `ActionManager` re-applies the transform (faithful even with delta/eef_pose
-  actions); `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay
-  env must use the same robot/objects/`actions` config as the recording env.
+  reproduction); `dynamic` feeds raw-policy actions through `env.step` so the
+  `ActionManager` re-applies the transform. An expert trajectory with
+  `action_kind: expert` validates its schema, joint layout and cadence and
+  decodes `ControllerAction`; the legacy `expert_controller` marker remains
+  accepted. Objective-enabled dynamic replay requires one row and a full reset.
+  `control` exposes `go_to_step(step)` for O(1) scrubbing. The replay env must
+  use the same robot/objects/`actions` config as the recording env.
 - **Decoupled from `rollout_buffer`**: the trajectory buffer is separate from the
   shared `rollout_buffer` (obs/actions/rewards) used by LeRobot/RL.
   `current_rollout_step`, LeRobot recorder, and RL mode are untouched.
-- **Expert action space**: expert rollout/trajectory buffers use a private
-  stored-action layout, leaving the policy-facing Gym `action_space` unchanged.
+- **Fixed action layout**: an ActionManager-backed trajectory uses the batched
+  policy action space; a controller/expert trajectory uses the private
+  `ExpertActionSpec` layout. One trajectory cannot mix these schemas.
 - **CLI**: `run-env --replay --replay_trajectory <path> --replay_mode {kinematic,dynamic,control}`.
 
 ---

@@ -5,12 +5,30 @@ and readiness reporting. Return to the [simulation overview](simulation-system.m
 
 ## Rendering does not advance physics
 
-`NewtonPhysicsCfg.sync_to_renderer=None` preserves DexSim's consumer-aware
-per-step policy. Camera rendering and reset observations explicitly synchronize
-on demand; correctness must not depend on continuous render sync in headless
-training. `SimulationManager.sync_render_state()` and backend render hooks
-publish state without advancing physics time. Marker publication while paused
-uses `capture_visualization(force=True)`.
+`SimulationManager.render_frame()` owns a read-only consumption phase after
+physics, interval events or reset writes. An open native window, nonempty camera
+groups, due simulation-time recording and due Viser captures share one state
+publication in that phase. Empty camera groups alone are not consumers; an open
+window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Viser decides whether a frame is due before invoking its publication callback.
+
+`update()` renders after each substep by default. Gym uses
+`update(render_final_step=False)` and enters `render_frame()` around observations
+after interval events, so the final camera, recording and Viser reads share the
+post-event state. Standalone callers combining those consumers can use the same
+sequence. Reset completes all writes before a new frame with forced Viser capture.
+An independent camera/capture call still publishes fresh state. No publication
+cache survives a frame, so paused edits and direct writes between frames do not
+need mutation counters. State edits inside a read-only frame require an explicit
+`sync_render_state()` before further reads; that API always publishes.
+
+The Newton backend step hook suppresses automatic DexSim publication during
+manager-owned updates to avoid publishing twice. The manager honors explicit
+`sync_to_renderer=True` even without consumers; `None`/`False` publish only for
+consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+Render-thread recording only consumes already-published state and must never
+call the blocking physics-to-render bridge. Marker publication while paused uses
+`capture_visualization(force=True)` without advancing physics.
 
 Viser forces headless mode and is mutually exclusive with the native window.
 An empty server may start before assets are declared; it must not finalize

@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Owned values for fixed-scene trajectory generation, independent of hosts.
+"""Owned values for fixed-scene trajectory expansion, independent of hosts.
 
 Tensor inputs are detached and copied at construction. Frozen dataclasses prevent
 field replacement; consumers must still treat their owned tensors as read-only.
@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import hashlib
+import json
 import math
 from types import MappingProxyType
 from typing import Literal
@@ -37,12 +39,20 @@ __all__ = [
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "CandidateIdentity",
+    "ProposalRequest",
+    "CandidateSpec",
     "CandidateTrajectoryBatch",
     "ValidationCheck",
     "ValidationResult",
     "ExpertEpisode",
     "CommitReceipt",
 ]
+
+
+def _digest(*values: object) -> str:
+    return hashlib.sha256(
+        json.dumps(values, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _text(value: str, name: str) -> None:
@@ -309,6 +319,75 @@ class CandidateIdentity:
             _text(self.parent_id, "parent_id")
             if self.parent_id == self.candidate_id:
                 raise ValueError("a candidate cannot be its own parent")
+
+
+@dataclass(frozen=True)
+class ProposalRequest:
+    """Validated input for one transactional candidate identity allocation."""
+
+    scene_case_id: str
+    initial_state_id: str
+    source_id: str
+    source_revision: str
+    template_id: str
+    operator_id: str
+    geometry_family_id: str | None = None
+    parent_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "scene_case_id",
+            "initial_state_id",
+            "source_id",
+            "source_revision",
+            "template_id",
+            "operator_id",
+        ):
+            _text(getattr(self, name), name)
+        for name in ("geometry_family_id", "parent_id"):
+            value = getattr(self, name)
+            if value is not None:
+                _text(value, name)
+
+
+@dataclass(frozen=True)
+class CandidateSpec:
+    """Source-neutral physical candidate lineage before slot assignment.
+
+    Affordance and trajectory factors remain independently inspectable, while
+    the coordinator assigns one final candidate identity.  Observation
+    profiles describe post-rollout fan-out and do not create additional
+    physical candidates.
+    """
+
+    identity: CandidateIdentity
+    affordance_selection: Mapping[str, object] = field(default_factory=dict)
+    trajectory_variant: Mapping[str, object] = field(default_factory=dict)
+    compatibility_key: str = "default"
+    estimated_cost: float = 0.0
+    observation_profiles: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, CandidateIdentity):
+            raise TypeError("identity must be a CandidateIdentity.")
+        for name in ("affordance_selection", "trajectory_variant"):
+            value = getattr(self, name)
+            if not isinstance(value, Mapping):
+                raise TypeError(f"{name} must be a mapping.")
+            object.__setattr__(self, name, MappingProxyType(dict(_json(value))))
+        _text(self.compatibility_key, "compatibility_key")
+        if (
+            type(self.estimated_cost) not in (int, float)
+            or not math.isfinite(float(self.estimated_cost))
+            or self.estimated_cost < 0
+        ):
+            raise ValueError("estimated_cost must be finite and non-negative")
+        profiles = tuple(self.observation_profiles)
+        if any(type(profile) is not str or not profile for profile in profiles):
+            raise ValueError("observation_profiles must contain non-empty strings")
+        if len(set(profiles)) != len(profiles):
+            raise ValueError("observation_profiles must be unique")
+        object.__setattr__(self, "observation_profiles", profiles)
 
 
 @dataclass(frozen=True)

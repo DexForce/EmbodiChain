@@ -9,8 +9,14 @@
    cleared. `finalize()` is a storage barrier only; it never commits a live rollout
    implicitly.
    Expert actions follow the environment's stored-action schema: active qpos by
-   default, or flat `[qpos, qvel]` with matching feature names and metadata when
-   position-velocity mode is enabled. The policy action space is not resized.
+   default, rejecting qvel/qf-only commands, or flat `[qpos, qvel]` with matching
+   feature names and metadata when position-velocity mode is enabled. The policy
+   action space is not resized.
+   Omitting recorder `action_contract` retains this schema exactly. An explicit
+   version-1 expert contract selects `joint_position` or
+   `joint_position_velocity`. Policy contracts select descriptor-driven
+   `eef_pose_parallel_gripper` or `joint_position_parallel_gripper`; they also
+   switch segment language to LeRobot's per-frame `task` / `task_index` mapping.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent
@@ -31,6 +37,12 @@
 8. Async enqueue clones all tensor payloads to CPU and deep-copies metadata in the caller
    before reset reuses the buffer. One FIFO worker is the sole LeRobot accessor and assigns
    deterministic episode order.
+   Policy contracts snapshot the manager-owned flat raw action after validation
+   and before the next control step. Synchronous, asynchronous, and fragment
+   persistence retain identical descriptor order and clone before live buffers
+   can be reused. Vector batches transfer to CPU once per step before their rows
+   enter per-environment history. Invalid EEF/gripper values fail before manager
+   processing and are checked again before sync writes or async enqueue.
 9. The async worker records per-payload errors but continues draining later items. Finalize
    rejects new work, queues a sentinel after all existing payloads, joins the worker, calls
    base finalization, and aggregates background plus storage errors. Its queue is unbounded,

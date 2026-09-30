@@ -125,7 +125,7 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
 
     observed = []
 
-    def plan(self, request, context=None):
+    def plan(self, request, context=None, *, plan_transform=None):
         observed.append(motion._CARTESIAN_APPROACH.get())
         if request.invocation_id == "fails":
             raise RuntimeError("injected")

@@ -36,6 +36,7 @@ EmbodiChain data cache.
    CoordinatedPlacementAndPickment
    DeformableDemoData
    MultiW1Data
+   RubiksCube
    ScoopIceNewEnv
 
 embodichain.data.assets.planner_assets
@@ -46,6 +47,21 @@ embodichain.data.assets.planner_assets
 .. autosummary::
 
    download_neural_planner_checkpoint
+
+embodichain.data.assets.policy_assets
+-------------------------------------
+
+Resolve one official model ID to a pinned repository snapshot and materialize
+its native RUN files inside the model cache. The returned provenance records
+the exact repository and revision used for evaluation.
+
+.. currentmodule:: embodichain.data.assets.policy_assets
+
+.. autosummary::
+
+   download_pretrained_policy
+
+.. autofunction:: download_pretrained_policy
 
 embodichain.data.assets.solver_assets
 -------------------------------------
@@ -306,6 +322,40 @@ Engine planning and simulator loading.
    resolve_gym_config_path
    resolve_source_scene
 
+embodichain.gen_sim.task_engine.orchestration.visual_evidence
+--------------------------------------------------------------
+
+Visual evidence rendering runs in an isolated EGL process and records UID-labeled
+views, object crops, masks, and source hashes. Articulation proxies are visual
+identity evidence, not observations of live joint state or physical capability.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.visual_evidence
+
+.. autosummary::
+
+   render_scene_visual_evidence
+
+.. autofunction:: render_scene_visual_evidence
+
+embodichain.gen_sim.task_engine.orchestration.visual_grounding
+---------------------------------------------------------------
+
+Visual grounding reuses Task Engine model configuration, verifies evidence
+hashes before each call, and records the model response for audit. Responses
+remain subject to UID visibility and semantic compatibility checks; configuration
+availability alone does not establish service health or physical task success.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.visual_grounding
+
+.. autosummary::
+
+   make_visual_grounding_caller
+   visual_grounding_available
+
+.. autofunction:: make_visual_grounding_caller
+
+.. autofunction:: visual_grounding_available
+
 embodichain.gen_sim.task_engine.reporting
 ------------------------------------------
 
@@ -435,6 +485,21 @@ embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 
    prepare_scene_edit_assets
 
+embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene
+---------------------------------------------------------
+
+Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene
+
+.. autosummary::
+
+   USD_SCENE_SCHEMA
+   UsdEntityBinding
+   UsdEntityDesc
+   UsdSceneBinding
+   UsdSceneIndex
+
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------
 
@@ -509,13 +574,71 @@ embodichain.lab.gym.envs.managers.actions
 
 .. autosummary::
 
-   DeltaQposTerm
-   QposTerm
-   QposDenormalizedTerm
-   QposNormalizedTerm
-   EefPoseTerm
-   QvelTerm
-   QfTerm
+   DefaultJointPositionAction
+   EefPoseAction
+   JointEffortAction
+   JointPositionAction
+   JointPositionToLimitsAction
+   JointVelocityAction
+   ParallelGripperAction
+   RelativeJointPositionAction
+
+embodichain.lab.gym.envs.managers.action_types
+----------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.managers.action_types
+
+.. autosummary::
+
+   ActionDescriptor
+   ActionTermDescriptor
+   ActionTrace
+
+embodichain.lab.gym.envs.objectives
+---------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives
+
+Optional measured objectives observe ordered stable placement regions independently
+of Task Program completion, segment acceptance and dataset persistence. Progress
+advances once per control step; snapshots are pure and partial resets are isolated
+per environment. Stable region occupancy does not establish gripper detachment.
+
+.. autosummary::
+
+   GoalRegionCfg
+   OrderedPlacementObjectiveCfg
+   MeasuredRigidObjectState
+   OrderedPlacementObjective
+
+embodichain.lab.gym.envs.objectives.config
+---------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.config
+
+Strict declaration decoding resolves a deployment's objective component relative
+to its owning configuration and rejects unknown fields and invalid thresholds.
+
+.. autosummary::
+
+   GoalRegionCfg
+   OrderedPlacementObjectiveCfg
+   decode_objective
+   load_objective_component
+
+embodichain.lab.gym.envs.objectives.ordered_placement
+-------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.objectives.ordered_placement
+
+The evaluator consumes measured positions and velocities. Historical milestone
+progress remains recorded when final-region truth becomes false; returning to the
+final region requires the configured stable hold duration again.
+
+.. autosummary::
+
+   MeasuredRigidObjectState
+   OrderedPlacementObjective
 
 embodichain.lab.gym.envs.wrapper.replay
 ---------------------------------------
@@ -984,9 +1107,11 @@ embodichain.lab.sim.atomic_actions.sim_adapter
 
 .. autosummary::
 
+   create_rigidized_articulation_antipodal_semantics
    create_simulation_atomic_action_engine
    RigidObjectSceneProvider
    RigidObjectSceneProviderCfg
+   SceneEntity
    SceneSnapshotSupplier
    SimulationExecutionAdapter
 
@@ -1841,6 +1966,28 @@ embodichain.lab.sim.motion.workspace.visualizers.base_visualizer
    IVisualizer
    BaseVisualizer
 
+embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+---------------------------------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer
+
+.. autosummary::
+
+   ManipulabilityColorCfg
+   ManipulabilityPointSet
+   ManipulabilityNormalization
+   ManipulabilityColorMapping
+   InspectionSelection
+   PointInspection
+   ManipulabilityVisualizer
+   align_manipulability_scores
+   normalize_manipulability
+   map_manipulability_colors
+   select_inspection_indices
+   inspect_points
+   translational_manipulability_ellipsoid
+   ellipsoid_surface
+
 embodichain.lab.sim.motion.workspace.visualizers.point_cloud_visualizer
 -----------------------------------------------------------------------
 
@@ -2360,6 +2507,17 @@ embodichain_tasks.manipulation.push_cube
 
    PushCubeEnv
 
+embodichain_tasks.manipulation.repeated_pick_place
+--------------------------------------------------
+
+RLinf-facing repeated pick-and-place task registrations with explicit EEF and
+joint-position action variants.
+
+.. currentmodule:: embodichain_tasks.manipulation.repeated_pick_place
+
+.. autosummary::
+
+
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------
 
@@ -2463,7 +2621,7 @@ embodichain_tasks.utils.importer
    import_packages
 
 Standalone simulation command-line options
------------------------------------------
+---------------------------------------------
 
 ``embodichain.cli.sim`` builds simulation arguments without importing the
 simulation runtime. Gym launchers compose these options with configuration

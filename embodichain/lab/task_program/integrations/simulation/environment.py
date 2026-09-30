@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 from types import MappingProxyType
 from typing import Protocol, TYPE_CHECKING
@@ -52,7 +52,15 @@ from embodichain.lab.sim.atomic_actions import (
     TaskState,
 )
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
-from embodichain.lab.sim.motion.planners import BasePlannerCfg, ToppraPlannerCfg
+from embodichain.lab.sim.motion.planners import (
+    BasePlannerCfg,
+    CuroboAutoGenCfg,
+    CuroboPlannerCfg,
+    CuroboWorldCfg,
+    NeuralPlannerCfg,
+    ToppraPlannerCfg,
+    TrapezoidalPlannerCfg,
+)
 from embodichain.lab.task_program.compiler.lowering import (
     RegisteredSemanticLowerer,
 )
@@ -67,6 +75,8 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
 )
 from embodichain.lab.task_program.semantics.profiles import RobotSkillProfile
 from embodichain.lab.task_program.semantics.scene import (
+    SceneCollisionRole,
+    SceneCollisionWorldMode,
     RegistrySceneProvider,
     SceneRegistry,
 )
@@ -91,6 +101,87 @@ if TYPE_CHECKING:
 
 MotionGeneratorFactory = Callable[[], MotionGenerator]
 """Zero-argument factory that must return one fresh motion generator."""
+
+_PLANNER_CFG_TYPES: Mapping[str, type[BasePlannerCfg]] = {
+    "curobo": CuroboPlannerCfg,
+    "neural": NeuralPlannerCfg,
+    "toppra": ToppraPlannerCfg,
+    "trapezoidal": TrapezoidalPlannerCfg,
+}
+
+
+def _planner_cfg_from_config(
+    value: Mapping[str, object] | None,
+    *,
+    robot_uid: str,
+) -> BasePlannerCfg | None:
+    """Build one typed planner config from an execution-policy declaration.
+
+    The robot UID and simulation-manager instance are runtime-owned values and
+    are deliberately excluded from the serialized policy.  cuRobo's live
+    collision objects are likewise attached by the simulation factory after
+    the selected environment has been initialized.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("planner_config must be a mapping or None.")
+    unknown = sorted(set(value).difference({"type", "config"}))
+    if unknown:
+        raise ValueError(f"planner_config contains unsupported fields: {unknown}.")
+    planner_type = value.get("type")
+    if type(planner_type) is not str or not planner_type:
+        raise ValueError("planner_config.type must be a non-empty string.")
+    cfg_type = _PLANNER_CFG_TYPES.get(planner_type)
+    if cfg_type is None:
+        raise ValueError(
+            f"planner_config.type {planner_type!r} is unsupported; "
+            f"supported types are {sorted(_PLANNER_CFG_TYPES)}."
+        )
+    options = value.get("config", {})
+    if not isinstance(options, Mapping):
+        raise TypeError("planner_config.config must be a mapping.")
+    options = deepcopy(dict(options))
+    reserved = sorted(
+        {"planner_type", "robot_uid", "sim_instance_id"}.intersection(options)
+    )
+    if reserved:
+        raise ValueError(
+            "planner_config.config cannot override runtime-owned fields: "
+            f"{reserved}."
+        )
+
+    if planner_type == "curobo":
+        if "world" in options:
+            world = options["world"]
+            if not isinstance(world, Mapping):
+                raise TypeError("planner_config.config.world must be a mapping.")
+            world = deepcopy(dict(world))
+            if "rigid_objects" in world:
+                raise ValueError(
+                    "planner_config.config.world.rigid_objects is runtime-owned; "
+                    "declare scene collision roles instead."
+                )
+            if "dynamic_obstacle_names" in world:
+                raise ValueError(
+                    "planner_config.config.world.dynamic_obstacle_names is "
+                    "runtime-owned; declare dynamic scene collision roles instead."
+                )
+            options["world"] = CuroboWorldCfg(**world)
+        if "auto_gen" in options:
+            auto_gen = options["auto_gen"]
+            if not isinstance(auto_gen, Mapping):
+                raise TypeError("planner_config.config.auto_gen must be a mapping.")
+            options["auto_gen"] = CuroboAutoGenCfg(**deepcopy(dict(auto_gen)))
+
+    try:
+        planner_cfg = cfg_type(robot_uid=robot_uid, **options)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Invalid planner_config for planner type {planner_type!r}: {exc}"
+        ) from exc
+    planner_cfg.validate()
+    return planner_cfg
 
 
 class SimulationTaskProgramEnvironment(Protocol):
@@ -461,6 +552,9 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         joint_command_mode: Environment-owned expert joint command mode.
         planner_cfg: Explicit planner configuration.  ``None`` selects TOPPRA
             for ``robot.uid``.
+        planner_config: Optional executable-free planner declaration from an
+            execution policy. It is converted to ``planner_cfg`` after the
+            selected runtime robot is known.
         motion_generator_factory: Optional fresh-generator factory.  It is
             mutually exclusive with ``planner_cfg`` and intended for custom
             planners and isolated tests.
@@ -580,6 +674,7 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
         *,
         registration: SimulationTaskProgramRegistration,
         planner_cfg: BasePlannerCfg | None = None,
+        planner_config: Mapping[str, object] | None = None,
         motion_generator_factory: MotionGeneratorFactory | None = None,
         grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
         translation_threshold: float = 1.0e-4,
@@ -594,6 +689,13 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
             raise TypeError("environment must expose step_dt.") from exc
         if simulation is None or robot is None:
             raise TypeError("environment must expose non-None sim and robot values.")
+        if planner_cfg is not None and planner_config is not None:
+            raise ValueError("planner_cfg and planner_config are mutually exclusive.")
+        if planner_config is not None:
+            planner_cfg = _planner_cfg_from_config(
+                planner_config,
+                robot_uid=_robot_uid(robot),
+            )
         expert_trajectory_cfg = getattr(
             getattr(environment, "cfg", None),
             "expert_trajectory",
@@ -832,12 +934,71 @@ class SimulationTaskProgramFactory(TaskProgramEnvironmentFactory):
                 else deepcopy(self._planner_cfg)
             )
             planner_cfg.sim_instance_id = self._simulation.instance_id
+            if isinstance(planner_cfg, CuroboPlannerCfg):
+                self._bind_curobo_scene(planner_cfg)
             generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
         if not isinstance(generator, MotionGenerator):
             raise TypeError(
                 "motion_generator_factory must return a MotionGenerator instance."
             )
         return generator
+
+    def _bind_curobo_scene(self, planner_cfg: CuroboPlannerCfg) -> None:
+        """Attach live scene collision objects to a configured cuRobo planner."""
+        if planner_cfg.world.rigid_objects is not None:
+            return
+        collision_bindings = tuple(
+            binding
+            for binding in self._scene_binding.rigid_objects
+            if binding.collision_role is not SceneCollisionRole.NONE
+        )
+        unsupported_bindings = tuple(
+            binding.entity_id
+            for bindings in (
+                self._scene_binding.rigidized_articulations,
+                self._scene_binding.articulations,
+                self._scene_binding.links,
+            )
+            for binding in bindings
+            if binding.collision_role is not SceneCollisionRole.NONE
+        )
+        if unsupported_bindings:
+            raise ValueError(
+                "Configured cuRobo collision worlds support only rigid-object "
+                "scene bindings; unsupported collision entities: "
+                f"{sorted(unsupported_bindings)}."
+            )
+
+        objects: dict[str, object] = {}
+        get_rigid_object = getattr(self._simulation, "get_rigid_object", None)
+        if collision_bindings and not callable(get_rigid_object):
+            raise TypeError("simulation must provide get_rigid_object().")
+        for binding in collision_bindings:
+            entity = get_rigid_object(binding.simulation_uid)
+            if entity is None:
+                raise KeyError(
+                    f"Simulation UID {binding.simulation_uid!r} selected for "
+                    f"collision entity {binding.entity_id!r} was not found."
+                )
+            objects[binding.entity_id] = entity
+
+        world = planner_cfg.world
+        dynamic_obstacle_names = [
+            binding.entity_id
+            for binding in collision_bindings
+            if binding.collision_role is SceneCollisionRole.DYNAMIC
+        ]
+        world_values = {
+            field.name: getattr(world, field.name) for field in fields(CuroboWorldCfg)
+        }
+        world_values["rigid_objects"] = objects or None
+        world_values["dynamic_obstacle_names"] = dynamic_obstacle_names
+        collision_mode = self._scene_binding.collision_world_mode
+        if collision_mode is not None:
+            world_values["multi_env"] = (
+                collision_mode is SceneCollisionWorldMode.PER_ENV
+            )
+        planner_cfg.world = CuroboWorldCfg(**world_values)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -848,6 +1009,8 @@ class SimulationTaskProgramAdapterFactory:
         registration: Immutable provider-free task integration.
         grasp_pose_generator_factories: Zero-argument factories keyed by runtime
             grasp endpoint target ID. Each environment receives fresh services.
+        planner_config: Optional execution-policy planner declaration. The live
+            factory supplies the selected robot and simulation instance values.
     """
 
     _registration: SimulationTaskProgramRegistration
@@ -855,6 +1018,7 @@ class SimulationTaskProgramAdapterFactory:
         str,
         Callable[[], GraspPoseGenerator],
     ]
+    _planner_config: Mapping[str, object] | None
 
     def __init__(
         self,
@@ -863,6 +1027,7 @@ class SimulationTaskProgramAdapterFactory:
         grasp_pose_generator_factories: (
             Mapping[str, Callable[[], GraspPoseGenerator]] | None
         ) = None,
+        planner_config: Mapping[str, object] | None = None,
     ) -> None:
         if type(registration) is not SimulationTaskProgramRegistration:
             raise TypeError(
@@ -873,6 +1038,8 @@ class SimulationTaskProgramAdapterFactory:
             Mapping,
         ):
             raise TypeError("grasp_pose_generator_factories must be a mapping or None.")
+        if planner_config is not None and not isinstance(planner_config, Mapping):
+            raise TypeError("planner_config must be a mapping or None.")
         factories: dict[str, Callable[[], GraspPoseGenerator]] = {}
         for target_id, factory in (grasp_pose_generator_factories or {}).items():
             if (
@@ -894,6 +1061,15 @@ class SimulationTaskProgramAdapterFactory:
             self,
             "_grasp_pose_generator_factories",
             MappingProxyType(factories),
+        )
+        object.__setattr__(
+            self,
+            "_planner_config",
+            (
+                None
+                if planner_config is None
+                else MappingProxyType(deepcopy(dict(planner_config)))
+            ),
         )
 
     @property
@@ -918,11 +1094,13 @@ class SimulationTaskProgramAdapterFactory:
                     "GraspPoseGenerator instance."
                 )
             generators[target_id] = generator
-        return create_simulation_task_program_adapter(
-            environment,
-            registration=self._registration,
-            grasp_pose_generators=generators,
-        )
+        kwargs: dict[str, object] = {
+            "registration": self._registration,
+            "grasp_pose_generators": generators,
+        }
+        if self._planner_config is not None:
+            kwargs["planner_config"] = self._planner_config
+        return create_simulation_task_program_adapter(environment, **kwargs)
 
 
 def create_simulation_task_program_adapter(
@@ -930,6 +1108,7 @@ def create_simulation_task_program_adapter(
     *,
     registration: SimulationTaskProgramRegistration,
     planner_cfg: BasePlannerCfg | None = None,
+    planner_config: Mapping[str, object] | None = None,
     motion_generator_factory: MotionGeneratorFactory | None = None,
     grasp_pose_generators: Mapping[str, GraspPoseGenerator] | None = None,
     translation_threshold: float = 1.0e-4,
@@ -946,6 +1125,8 @@ def create_simulation_task_program_adapter(
             ``robot``, and ``step_dt``.
         registration: Required immutable task registration.
         planner_cfg: Optional planner configuration owned by the factory.
+        planner_config: Optional executable-free planner declaration from an
+            execution policy.
         motion_generator_factory: Optional factory for one fresh motion generator.
         grasp_pose_generators: Standalone grasp-pose services keyed by grasp
             endpoint target ID.
@@ -959,6 +1140,7 @@ def create_simulation_task_program_adapter(
         environment,
         registration=registration,
         planner_cfg=planner_cfg,
+        planner_config=planner_config,
         motion_generator_factory=motion_generator_factory,
         grasp_pose_generators=grasp_pose_generators,
         translation_threshold=translation_threshold,

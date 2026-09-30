@@ -119,6 +119,15 @@ class PhysicsBackend(ABC):
         """
         del result
 
+    def _step(self, physics_dt: float) -> None:
+        """Advance physics; the manager owns subsequent visual consumption."""
+        self._manager._world.update(physics_dt)
+
+    @property
+    def _requires_step_render_sync(self) -> bool:
+        """Whether the caller explicitly requested publication on every step."""
+        return False
+
     def prepare_for_teardown(self) -> None:
         """Release backend-owned views before Spawn releases their parents.
 

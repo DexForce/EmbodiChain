@@ -19,7 +19,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import gymnasium as gym
+import pytest
 import torch
+from tensordict import TensorDict
 
 from embodichain.learning.rl.runtime import (
     _GymEnvironmentRuntime,
@@ -99,8 +101,24 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     assert runtime.env_cfg.sim_cfg.render_cfg.renderer == "hybrid"
 
 
-def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(monkeypatch):
+@pytest.mark.parametrize(
+    ("manager_dim", "action_dim"),
+    [
+        pytest.param(2, 2, id="managed-actions"),
+        pytest.param(0, 17, id="humanoid-empty-manager"),
+        pytest.param(None, 17, id="custom-actions-without-manager"),
+    ],
+)
+def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(
+    monkeypatch, manager_dim, action_dim
+):
     env = GymEnvironment()
+    env.action_manager = (
+        SimpleNamespace(total_action_dim=manager_dim)
+        if manager_dim is not None
+        else None
+    )
+    env.action_space = gym.spaces.Box(-1.0, 1.0, shape=(1, action_dim))
     task = _GymEnvironmentRuntime(
         env=env,
         env_id="Example",
@@ -124,4 +142,7 @@ def test_gym_runtime_uses_the_same_task_spaces_for_policy_build(monkeypatch):
 
     assert runtime.env is env
     assert runtime.policy.actor[0].in_features == 3
-    assert runtime.policy.actor[-1].out_features == 2
+    assert runtime.policy.actor[-1].out_features == action_dim
+    sampled = runtime.policy(TensorDict({"obs": torch.zeros(1, 3)}, batch_size=[1]))
+    assert sampled["action"].shape == env.action_space.shape
+    assert torch.isfinite(sampled["action"]).all()

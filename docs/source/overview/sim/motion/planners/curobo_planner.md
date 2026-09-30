@@ -388,7 +388,6 @@ Supported scope is limited as follows:
 - Non-control joints must remain at the matching cuRobo V2 `lock_joints`
   values. The adapter does not yet validate cross-model locked-joint name/value
   equivalence automatically.
-- The legacy Gym ActionBank path is unsupported.
 - CPU execution of cuRobo itself and cuRobo V1 compatibility are unsupported.
   CPU physics is supported because tensors are transferred to CUDA only for
   planning and the resulting trajectory is copied back to the simulation

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 import math
 from numbers import Real
-from typing import Any, ClassVar, TYPE_CHECKING
+from typing import Any, ClassVar, Literal, TYPE_CHECKING
 
 import torch
 
@@ -28,6 +28,7 @@ from .affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
     AffordanceSamplingContext,
+    _pose_sampling_metadata,
     _roll_poses,
     _sample_pose_candidates,
     _validate_range,
@@ -78,12 +79,13 @@ class Affordance:
         """Select poses from a legal candidate set for each logical branch.
 
         Args:
-            candidates: Batched poses, costs, and validity produced by geometry.
+            candidates: Batched world poses, costs, and validity produced by geometry.
             sampling: Optional reproducible branch stream. ``None`` selects the
                 lowest-cost candidate in every row.
             env_ids: Stable environment identities matching candidate rows.
             key: Sampling operation identity.
-            reference_poses: Optional frames used to compare candidate geometry.
+            reference_poses: Optional world poses of frames used to compare
+                candidate geometry and recorded in the sampling provenance.
 
         Returns:
             Per-row success, selected poses, and selection metadata.
@@ -124,21 +126,31 @@ class Affordance:
 class AntipodalAffordance(Affordance):
     """Antipodal grasp affordance for parallel-jaw grippers.
 
-    The affordance owns only target-local triangle-mesh data. Simulator entity
-    handles and live poses belong to scene grounding, not semantic geometry.
+    The affordance owns only target-local triangle-mesh data. Its mesh may
+    describe either the whole object or one selected articulation link;
+    operations that infer whole-object geometry reject the latter. Simulator
+    entity handles and live poses belong to scene grounding.
     """
 
     mesh_vertices: torch.Tensor | None = None
-    """Object mesh vertices, shape [N, 3]."""
+    """Target-local mesh vertices, shape [N, 3]."""
 
     mesh_triangles: torch.Tensor | None = None
-    """Object mesh triangle indices, shape [M, 3]."""
+    """Target-local mesh triangle indices, shape [M, 3]."""
+
+    mesh_scope: Literal["object", "link"] = "object"
+    """Whether the mesh describes the whole object or one selected link."""
 
     MAX_SURFACE_POINT_COUNT: ClassVar[int] = 1000
     """Maximum point-cloud size used for geometry-distribution analysis."""
 
     def __post_init__(self) -> None:
         """Validate optional target-local geometry without owning a generator."""
+        if type(self.mesh_scope) is not str or self.mesh_scope not in (
+            "object",
+            "link",
+        ):
+            raise ValueError("mesh_scope must be 'object' or 'link'.")
         if self.mesh_vertices is None and self.mesh_triangles is None:
             return
         if self.mesh_vertices is None or self.mesh_triangles is None:
@@ -282,6 +294,7 @@ class AntipodalAffordance(Affordance):
         max_points: int = 1000,
     ) -> torch.Tensor:
         """Return the widest surface-point distribution axis in world space."""
+        self.require_whole_object_mesh()
         if obj_poses.ndim != 3 or obj_poses.shape[1:] != (4, 4):
             raise ValueError("obj_poses must have shape (B, 4, 4).")
         points = self.sample_surface_points(max_points=max_points).to(
@@ -300,6 +313,18 @@ class AntipodalAffordance(Affordance):
         if torch.any(singular_values[:, 0] <= 1.0e-8):
             raise ValueError("Object surface point distribution has no principal axis.")
         return torch.nn.functional.normalize(vh[:, 0, :], dim=1)
+
+    def require_whole_object_mesh(self) -> None:
+        """Reject a link-only grasp mesh where whole-object geometry is required.
+
+        Raises:
+            ValueError: If this affordance contains only a selected link mesh.
+        """
+        if self.mesh_scope != "object":
+            raise ValueError(
+                "This operation requires whole-object geometry; the antipodal "
+                "affordance contains only a selected articulation link mesh."
+            )
 
     @staticmethod
     def _evenly_subsample_points(
@@ -523,10 +548,12 @@ class TwistAffordance(Affordance):
                 key=key,
             ).to(nominal)
         poses = _roll_poses(nominal, rolls - self.grasp_roll)
+        success = torch.ones(len(poses), dtype=torch.bool, device=poses.device)
         return AffordanceSample(
-            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            success=success,
             poses=poses,
             metadata={
+                **_pose_sampling_metadata(poses, success, env_ids, target_pose),
                 "key": key,
                 "sampling": None if sampling is None else sampling.metadata(),
                 "roll": rolls.cpu().tolist(),
@@ -920,10 +947,12 @@ class PressAffordance(Affordance):
                 key=key,
             ).to(poses)
             poses = _roll_poses(poses, rolls)
+        success = torch.ones(len(poses), dtype=torch.bool, device=poses.device)
         return AffordanceSample(
-            success=torch.ones(len(poses), dtype=torch.bool, device=poses.device),
+            success=success,
             poses=poses,
             metadata={
+                **_pose_sampling_metadata(poses, success, env_ids, target_pose),
                 "key": key,
                 "sampling": None if sampling is None else sampling.metadata(),
                 "roll": rolls.cpu().tolist(),

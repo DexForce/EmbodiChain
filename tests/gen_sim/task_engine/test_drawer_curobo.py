@@ -146,6 +146,32 @@ def test_native_attachment_detaches_even_when_cleanup_raises(monkeypatch) -> Non
     planner._backend_cache = {}
 
 
+def test_native_attachment_detaches_all_managers_when_one_cleanup_raises(
+    monkeypatch,
+) -> None:
+    from unittest.mock import Mock
+
+    from embodichain.gen_sim.task_engine._task_program.drawer_curobo import (
+        _PayloadPlanner,
+    )
+    from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
+
+    first = SimpleNamespace(detach=Mock(side_effect=RuntimeError("first detach")))
+    second = SimpleNamespace(detach=Mock())
+    closed = Mock()
+    monkeypatch.setattr(CuroboPlanner, "close", closed)
+    planner = object.__new__(_PayloadPlanner)
+    planner._attachments = {0: (first, second)}
+    planner._backend_cache = {}
+
+    with pytest.raises(RuntimeError, match="first detach"):
+        planner.close()
+
+    first.detach.assert_called_once()
+    second.detach.assert_called_once()
+    closed.assert_called_once()
+
+
 def test_attachment_updates_every_distinct_rollout_sphere_buffer() -> None:
     def model():
         return SimpleNamespace(

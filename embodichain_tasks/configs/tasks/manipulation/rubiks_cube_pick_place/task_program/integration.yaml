@@ -1,0 +1,34 @@
+integration_id: rubiks_cube_pick_place_v1
+program_id: rubiks_cube_pick_place
+
+requires:
+  scene_contract: repeated_pick_place_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+
+scene_binding:
+  contract_id: repeated_pick_place_scene_v1
+  registry_id: task_program_rubiks_cube_pick_place
+  rigidized_articulations:
+    - entity_id: rubiks_cube
+      simulation_uid: rubiks_cube
+      locked_qpos:
+        top_turn: 0.0
+      dynamics: dynamic
+      semantic_type: rubiks_cube
+      affordances:
+        - entity_id: rubiks_cube_grasp
+          kind: antipodal_grasp
+          grasp_link: lower_two_layers
+
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+    place:
+      kind: place
+  effect_monitors: {}

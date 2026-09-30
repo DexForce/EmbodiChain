@@ -148,12 +148,15 @@ def prepare_drawer_graph(graph: dict[str, Any], scene: Any) -> dict[str, Any]:
     return result
 
 
-def rewrite_drawer_close_resources(graph: dict[str, Any]) -> dict[str, Any]:
+def rewrite_drawer_close_resources(
+    graph: dict[str, Any],
+    *,
+    drawer_bindings: frozenset[tuple[str, str]] = frozenset(),
+) -> dict[str, Any]:
     """Use the free arm for the closing E6 after a composite placement."""
     result = deepcopy(graph)
     nodes = {node["id"]: node for node in result["nodes"]}
-    has_place = any(node["call"].get("kind") == "place" for node in result["nodes"])
-    if not has_place:
+    if not drawer_bindings:
         return result
     for group in result.get("task_groups", ()):
         ids = group.get("node_ids", ())
@@ -161,6 +164,14 @@ def rewrite_drawer_close_resources(graph: dict[str, Any]) -> dict[str, Any]:
             continue
         first = nodes[ids[0]]["call"]
         if first.get("arguments", {}).get("state") != "closed":
+            continue
+        arguments = first.get("arguments", {})
+        object_id = str(arguments.get("object", ""))
+        part_id = str(arguments.get("part", ""))
+        if not any(
+            bound_object == object_id and (not part_id or bound_part == part_id)
+            for bound_object, bound_part in drawer_bindings
+        ):
             continue
         primary = first.get("resources", {}).get("primary")
         # The right arm is the alternate in the supported dual-arm profile.
