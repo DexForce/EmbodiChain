@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -180,6 +181,7 @@ def _make_recorder(
     mock_dataset: _MockDataset,
     *,
     action_contract: dict[str, object] | None = None,
+    async_queue_maxsize: int | None = None,
 ) -> AsyncLeRobotRecorder:
     """Build an AsyncLeRobotRecorder with the LeRobotDataset.create patched out."""
     from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
@@ -194,6 +196,8 @@ def _make_recorder(
     }
     if action_contract is not None:
         params["action_contract"] = action_contract
+    if async_queue_maxsize is not None:
+        params["async_queue_maxsize"] = async_queue_maxsize
     cfg = DatasetFunctorCfg(func=AsyncLeRobotRecorder, params=params)
     with patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset") as mock_cls:
         mock_cls.create.return_value = mock_dataset
@@ -203,6 +207,64 @@ def _make_recorder(
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 class TestAsyncLeRobotRecorder:
     """Tests for AsyncLeRobotRecorder enqueue/drain behavior."""
+
+    def test_configures_bounded_queue_and_reports_stats(self):
+        """A positive queue limit enables backpressure without changing drain order."""
+        env = _MockEnv(num_envs=1, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        try:
+            assert recorder._save_queue.maxsize == 1
+            stats = recorder.async_stats
+            assert stats["queue_maxsize"] == 1
+            assert stats["queue_size"] == 0
+            assert stats["queue_peak"] == 0
+            assert stats["backpressure_events"] == 0
+        finally:
+            recorder.finalize()
+
+    def test_rejects_negative_queue_limit(self):
+        """Negative queue limits fail before starting a background worker."""
+        env = _MockEnv(num_envs=1, steps=1)
+        with pytest.raises(ValueError, match="async_queue_maxsize"):
+            _make_recorder(env, _MockDataset(), async_queue_maxsize=-1)
+
+    def test_bounded_queue_blocks_until_worker_catches_up(self):
+        """A full queue blocks the producer and records the backpressure time."""
+        env = _MockEnv(num_envs=3, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        worker_entered = threading.Event()
+        release_worker = threading.Event()
+
+        def persist_payload(*args, **kwargs):
+            worker_entered.set()
+            assert release_worker.wait(timeout=2.0)
+            return True
+
+        recorder._persist_episode_payload = Mock(side_effect=persist_payload)
+        enqueue_done = threading.Event()
+
+        def enqueue_payloads() -> None:
+            recorder(env, env_ids=torch.tensor([0, 1, 2]))
+            enqueue_done.set()
+
+        enqueue_thread = threading.Thread(target=enqueue_payloads)
+        enqueue_thread.start()
+
+        try:
+            assert worker_entered.wait(timeout=2.0)
+            assert not enqueue_done.wait(timeout=0.05)
+        finally:
+            release_worker.set()
+            enqueue_thread.join(timeout=2.0)
+            env.current_rollout_step = 0
+            recorder.finalize()
+
+        assert enqueue_done.is_set()
+        stats = recorder.async_stats
+        assert stats["queue_maxsize"] == 1
+        assert stats["queue_peak"] == 1
+        assert stats["backpressure_events"] >= 1
+        assert stats["backpressure_s"] > 0.0
 
     def test_call_accepts_construction_only_kwargs(self):
         """``__call__`` must accept image_writer_threads/processes (regression).
