@@ -67,15 +67,15 @@ class SimulationBackend(Protocol):
     def step_simulation(self, world_id: str, *, steps: int) -> dict[str, Any]: ...
 
     def forward_kinematics(
-        self, robot_id: str, qpos: Sequence[float]
+        self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]: ...
 
     def solve_ik(
-        self, robot_id: str, target_pose: dict[str, Any]
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
     ) -> dict[str, Any]: ...
 
     def check_reachability(
-        self, robot_id: str, target_pose: dict[str, Any]
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
     ) -> dict[str, Any]: ...
 
     def check_collision(
@@ -84,11 +84,21 @@ class SimulationBackend(Protocol):
 
     def plan_motion(
         self,
+        world_id: str,
         robot_id: str,
         start_qpos: Sequence[float],
         goal_qpos: Sequence[float],
         *,
         samples: int,
+    ) -> dict[str, Any]: ...
+
+    def execute_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        cancel_event: threading.Event,
     ) -> dict[str, Any]: ...
 
     def validate_trajectory(
@@ -257,9 +267,10 @@ class InMemorySimulationBackend:
         return result
 
     def forward_kinematics(
-        self, robot_id: str, qpos: Sequence[float]
+        self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
         """Compute planar end-effector position for the demo arm."""
+        self._world(world_id)
         self._check_robot(robot_id)
         values = self._finite_values(qpos, "qpos")
         if len(values) != 2:
@@ -279,8 +290,11 @@ class InMemorySimulationBackend:
             "yaw_rad": round(shoulder + elbow, 9),
         }
 
-    def solve_ik(self, robot_id: str, target_pose: dict[str, Any]) -> dict[str, Any]:
+    def solve_ik(
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
+    ) -> dict[str, Any]:
         """Solve position-only planar IK for the demo arm."""
+        self._world(world_id)
         self._check_robot(robot_id)
         position = target_pose.get("position_m")
         if not isinstance(position, Sequence) or isinstance(position, (str, bytes)):
@@ -318,10 +332,10 @@ class InMemorySimulationBackend:
         }
 
     def check_reachability(
-        self, robot_id: str, target_pose: dict[str, Any]
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
     ) -> dict[str, Any]:
         """Check geometric reachability without claiming collision freedom."""
-        result = self.solve_ik(robot_id, target_pose)
+        result = self.solve_ik(world_id, robot_id, target_pose)
         return {
             "reachable": bool(result["reachable"]),
             "reason": result.get("reason", "geometrically_reachable"),
@@ -351,6 +365,7 @@ class InMemorySimulationBackend:
 
     def plan_motion(
         self,
+        world_id: str,
         robot_id: str,
         start_qpos: Sequence[float],
         goal_qpos: Sequence[float],
@@ -358,6 +373,7 @@ class InMemorySimulationBackend:
         samples: int,
     ) -> dict[str, Any]:
         """Create a linearly interpolated joint path for the demo arm."""
+        self._world(world_id)
         self._check_robot(robot_id)
         start = self._finite_values(start_qpos, "start_qpos")
         goal = self._finite_values(goal_qpos, "goal_qpos")
@@ -408,6 +424,36 @@ class InMemorySimulationBackend:
             "violations": violations,
             "collision_checked": False,
             "scope": "finite_values_and_joint_limits",
+        }
+
+    def execute_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        cancel_event: threading.Event,
+    ) -> dict[str, Any]:
+        """Execute a validated path inside the deterministic world state."""
+        world = self._world(world_id)
+        self._check_robot(robot_id)
+        if not positions:
+            raise ValueError("positions must contain at least one sample")
+        normalized = [
+            self._finite_values(row, "trajectory sample") for row in positions
+        ]
+        if any(len(row) != 2 for row in normalized):
+            raise ValueError("demo_planar_arm expects two joint values")
+        for row in normalized:
+            if cancel_event.is_set():
+                return {"status": "cancelled", "steps": 0}
+            world["state"]["qpos"] = row
+            world["time_s"] += 0.01
+        return {
+            "status": "succeeded",
+            "steps": len(normalized),
+            "final_qpos": normalized[-1],
+            "final_time_s": world["time_s"],
         }
 
     def run_rollout(
@@ -551,6 +597,7 @@ class SimulationManagerBackend:
             RigidObjectCfg,
             RobotCfg,
         )
+        from embodichain.lab.sim.robots import FrankaPandaCfg
 
         robot_values = scene.get("robots", scene.get("robot", []))
         if isinstance(robot_values, dict):
@@ -559,7 +606,16 @@ class SimulationManagerBackend:
             for robot_value in robot_values:
                 if not isinstance(robot_value, dict):
                     raise ValueError("scene.robots entries must be mappings")
-                manager.add_robot(RobotCfg.from_dict(dict(robot_value)))
+                robot_data = dict(robot_value)
+                robot_class = robot_data.pop(
+                    "robot_class", robot_data.pop("class_type", None)
+                )
+                if robot_class in {"FrankaPanda", "FrankaPandaCfg"} or (
+                    robot_class is None and robot_data.get("robot_type") == "panda"
+                ):
+                    manager.add_robot(FrankaPandaCfg.from_dict(robot_data))
+                else:
+                    manager.add_robot(RobotCfg.from_dict(robot_data))
 
         object_values = scene.get("rigid_object", scene.get("background", []))
         if isinstance(object_values, dict):
@@ -681,29 +737,29 @@ class SimulationManagerBackend:
             manager.update(step=steps, render_final_step=False)
         return self.get_world_state(world_id)
 
-    def _robot(self, robot_id: str) -> Any:
-        with self._lock:
-            managers = tuple(self._managers.values())
-        for manager in managers:
-            robot = manager.get_robot(robot_id)
-            if robot is not None:
-                return robot
-        raise ValueError(f"Unknown robot_id: {robot_id}")
+    def _robot(self, world_id: str, robot_id: str) -> Any:
+        manager = self._manager(world_id)
+        robot = manager.get_robot(robot_id)
+        if robot is None:
+            raise ValueError(f"Unknown robot_id in world {world_id}: {robot_id}")
+        return robot
 
     def forward_kinematics(
-        self, robot_id: str, qpos: Sequence[float]
+        self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
         """Compute FK through the registered robot's configured solver."""
         import torch
 
-        robot = self._robot(robot_id)
+        robot = self._robot(world_id, robot_id)
         qpos_tensor = torch.as_tensor(qpos, dtype=torch.float32)
         if qpos_tensor.ndim == 1:
             qpos_tensor = qpos_tensor.unsqueeze(0)
         result = robot.compute_fk(qpos_tensor)
         return {"robot_id": robot_id, "pose_xyz_xyzw": result.detach().cpu().tolist()}
 
-    def solve_ik(self, robot_id: str, target_pose: dict[str, Any]) -> dict[str, Any]:
+    def solve_ik(
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
+    ) -> dict[str, Any]:
         """Compute IK through the registered robot's configured solver."""
         import torch
 
@@ -713,7 +769,7 @@ class SimulationManagerBackend:
         quaternion = target_pose.get("quaternion_xyzw", [0.0, 0.0, 0.0, 1.0])
         if not isinstance(quaternion, Sequence) or len(quaternion) != 4:
             raise ValueError("target_pose.quaternion_xyzw must contain four values")
-        robot = self._robot(robot_id)
+        robot = self._robot(world_id, robot_id)
         pose = torch.as_tensor([list(position) + list(quaternion)], dtype=torch.float32)
         success, qpos = robot.compute_ik(pose)
         return {
@@ -725,10 +781,10 @@ class SimulationManagerBackend:
         }
 
     def check_reachability(
-        self, robot_id: str, target_pose: dict[str, Any]
+        self, world_id: str, robot_id: str, target_pose: dict[str, Any]
     ) -> dict[str, Any]:
         """Check configured IK reachability without collision certification."""
-        result = self.solve_ik(robot_id, target_pose)
+        result = self.solve_ik(world_id, robot_id, target_pose)
         return {
             "reachable": result["reachable"],
             "scope": "configured_ik_no_collision",
@@ -739,7 +795,7 @@ class SimulationManagerBackend:
     ) -> dict[str, Any]:
         """Report the absence of a generic manager collision query."""
         self._manager(world_id)
-        self._robot(robot_id)
+        self._robot(world_id, robot_id)
         return {
             "collision": False,
             "checked": False,
@@ -748,6 +804,7 @@ class SimulationManagerBackend:
 
     def plan_motion(
         self,
+        world_id: str,
         robot_id: str,
         start_qpos: Sequence[float],
         goal_qpos: Sequence[float],
@@ -760,7 +817,7 @@ class SimulationManagerBackend:
         planner-specific adapter can replace this method with MotionGenerator
         or cuRobo while retaining the same MCP output schema.
         """
-        self._robot(robot_id)
+        self._robot(world_id, robot_id)
         start = [float(value) for value in start_qpos]
         goal = [float(value) for value in goal_qpos]
         if len(start) != len(goal) or not start:
@@ -780,12 +837,17 @@ class SimulationManagerBackend:
             "planner": "linear_interpolation",
         }
 
-    def validate_trajectory(
-        self, world_id: str, robot_id: str, positions: Sequence[Sequence[float]]
+    def execute_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        cancel_event: threading.Event,
     ) -> dict[str, Any]:
-        """Validate finite samples against the robot's configured qpos limits."""
-        self._manager(world_id)
-        robot = self._robot(robot_id)
+        """Apply a joint trajectory inside the manager's explicit update loop."""
+        manager = self._manager(world_id)
+        robot = self._robot(world_id, robot_id)
         import torch
 
         trajectory = torch.as_tensor(positions, dtype=torch.float32)
@@ -793,13 +855,49 @@ class SimulationManagerBackend:
             raise ValueError("positions must have shape (samples, dof)")
         if not bool(torch.isfinite(trajectory).all().item()):
             raise ValueError("positions must contain finite values")
-        limits = robot.qpos_limits[0].detach().cpu()
+        expected_dof = int(robot.get_qpos().shape[-1])
+        if trajectory.shape[1] != expected_dof:
+            raise ValueError(
+                f"trajectory width {trajectory.shape[1]} does not match robot "
+                f"width {expected_dof}"
+            )
+        for position in trajectory:
+            if cancel_event.is_set():
+                return {"status": "cancelled", "steps": 0}
+            robot.set_qpos(position.unsqueeze(0))
+            manager.update(step=1, render_final_step=False)
+        return {
+            "status": "succeeded",
+            "steps": int(trajectory.shape[0]),
+            "final_qpos": trajectory[-1].detach().cpu().tolist(),
+        }
+
+    def validate_trajectory(
+        self, world_id: str, robot_id: str, positions: Sequence[Sequence[float]]
+    ) -> dict[str, Any]:
+        """Validate finite samples against the robot's configured qpos limits."""
+        self._manager(world_id)
+        robot = self._robot(world_id, robot_id)
+        import torch
+
+        trajectory = torch.as_tensor(positions, dtype=torch.float32)
+        if trajectory.ndim != 2 or trajectory.shape[0] == 0:
+            raise ValueError("positions must have shape (samples, dof)")
+        if not bool(torch.isfinite(trajectory).all().item()):
+            raise ValueError("positions must contain finite values")
+        limits = robot.get_qpos_limits()[0].detach().cpu()
         if trajectory.shape[1] != limits.shape[0]:
             raise ValueError("trajectory width does not match robot qpos limits")
         violations = []
+        tolerance = 1.0e-6
         for sample, row in enumerate(trajectory):
             for joint, value in enumerate(row):
-                if not bool((limits[joint, 0] <= value <= limits[joint, 1]).item()):
+                if not bool(
+                    (
+                        (limits[joint, 0] - tolerance <= value)
+                        & (value <= limits[joint, 1] + tolerance)
+                    ).item()
+                ):
                     violations.append({"sample": sample, "joint": joint})
         return {
             "valid": not violations,

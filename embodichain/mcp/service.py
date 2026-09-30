@@ -116,6 +116,7 @@ class EmbodiChainMCPService:
         self.backend = backend or InMemorySimulationBackend()
         self._task_provider = task_provider or _default_task_provider
         self._runs: dict[str, _Run] = {}
+        self._trajectories: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
@@ -160,6 +161,8 @@ class EmbodiChainMCPService:
             "check_reachability",
             "check_collision",
             "plan_motion",
+            "generate_robot_trajectory",
+            "execute_trajectory",
             "validate_trajectory",
             "start_rollout",
             "get_run_status",
@@ -303,21 +306,30 @@ class EmbodiChainMCPService:
         )
 
     def forward_kinematics(
-        self, robot_id: str, qpos: Sequence[float]
+        self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
         """Compute FK through the backend adapter."""
-        return self._envelope(self.backend.forward_kinematics(robot_id, qpos))
+        return self._envelope(
+            self.backend.forward_kinematics(world_id, robot_id, qpos),
+            world_id=world_id,
+        )
 
-    def solve_ik(self, robot_id: str, target_pose: Mapping[str, Any]) -> dict[str, Any]:
+    def solve_ik(
+        self, world_id: str, robot_id: str, target_pose: Mapping[str, Any]
+    ) -> dict[str, Any]:
         """Compute IK through the backend adapter."""
-        return self._envelope(self.backend.solve_ik(robot_id, dict(target_pose)))
+        return self._envelope(
+            self.backend.solve_ik(world_id, robot_id, dict(target_pose)),
+            world_id=world_id,
+        )
 
     def check_reachability(
-        self, robot_id: str, target_pose: Mapping[str, Any]
+        self, world_id: str, robot_id: str, target_pose: Mapping[str, Any]
     ) -> dict[str, Any]:
         """Check reachability without implying collision-free execution."""
         return self._envelope(
-            self.backend.check_reachability(robot_id, dict(target_pose))
+            self.backend.check_reachability(world_id, robot_id, dict(target_pose)),
+            world_id=world_id,
         )
 
     def check_collision(
@@ -330,6 +342,7 @@ class EmbodiChainMCPService:
 
     def plan_motion(
         self,
+        world_id: str,
         robot_id: str,
         start_qpos: Sequence[float],
         goal_qpos: Sequence[float],
@@ -338,8 +351,91 @@ class EmbodiChainMCPService:
     ) -> dict[str, Any]:
         """Generate a backend trajectory between two joint configurations."""
         return self._envelope(
-            self.backend.plan_motion(robot_id, start_qpos, goal_qpos, samples=samples)
+            self.backend.plan_motion(
+                world_id, robot_id, start_qpos, goal_qpos, samples=samples
+            ),
+            world_id=world_id,
         )
+
+    def generate_robot_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        waypoints: Sequence[Sequence[float]],
+        *,
+        samples_per_segment: int = 32,
+    ) -> dict[str, Any]:
+        """Generate and validate a multi-waypoint joint trajectory.
+
+        Args:
+            world_id: World containing the selected robot.
+            robot_id: Robot UID registered in that world.
+            waypoints: Ordered joint-position waypoints. The first waypoint is
+                the starting configuration and each following waypoint is a
+                requested target.
+            samples_per_segment: Samples for each interpolated segment,
+                including segment endpoints.
+
+        Returns:
+            A trajectory handle, samples, validation report, and metadata.
+        """
+        if len(waypoints) < 2:
+            raise ValueError("waypoints must contain a start and at least one goal")
+        if (
+            type(samples_per_segment) is not int
+            or not 2 <= samples_per_segment <= 10000
+        ):
+            raise ValueError("samples_per_segment must be between 2 and 10000")
+        self.backend.get_world_state(world_id)
+        segments: list[list[list[float]]] = []
+        for start, goal in zip(waypoints, waypoints[1:]):
+            result = self.backend.plan_motion(
+                world_id,
+                robot_id,
+                start,
+                goal,
+                samples=samples_per_segment,
+            )
+            positions = result["positions"]
+            segments.append(positions if not segments else positions[1:])
+        positions = [sample for segment in segments for sample in segment]
+        validation = self.backend.validate_trajectory(world_id, robot_id, positions)
+        trajectory_id = f"trajectory-{uuid.uuid4().hex[:12]}"
+        record = {
+            "trajectory_id": trajectory_id,
+            "world_id": world_id,
+            "robot_id": robot_id,
+            "positions": positions,
+            "waypoints": [list(waypoint) for waypoint in waypoints],
+            "samples_per_segment": samples_per_segment,
+            "validation": validation,
+            "planner": "linear_interpolation",
+        }
+        with self._lock:
+            self._trajectories[trajectory_id] = deepcopy(record)
+        return self._envelope(record, world_id=world_id)
+
+    def execute_trajectory(self, trajectory_id: str) -> dict[str, Any]:
+        """Execute a stored trajectory as one coarse-grained backend operation.
+
+        The backend owns the high-frequency loop. Codex sees one operation and
+        receives a terminal summary instead of sending one MCP request per
+        physics step.
+        """
+        with self._lock:
+            try:
+                trajectory = deepcopy(self._trajectories[trajectory_id])
+            except KeyError as exc:
+                raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
+        if not trajectory["validation"]["valid"]:
+            raise ValueError("Cannot execute an invalid trajectory")
+        result = self.backend.execute_trajectory(
+            trajectory["world_id"],
+            trajectory["robot_id"],
+            trajectory["positions"],
+            cancel_event=threading.Event(),
+        )
+        return self._envelope(result, world_id=trajectory["world_id"])
 
     def validate_trajectory(
         self,
@@ -408,6 +504,18 @@ class EmbodiChainMCPService:
         metrics = [self.get_run_metrics(run_id) for run_id in run_ids]
         return {"run_ids": list(run_ids), "runs": metrics}
 
+    @staticmethod
+    def codex_trajectory_demo_scene() -> dict[str, Any]:
+        """Return the built-in Franka scene used by the Codex demo."""
+        return {
+            "robot": {
+                "robot_class": "FrankaPandaCfg",
+                "robot_type": "panda",
+                "init_pos": [0.0, 0.0, 0.0],
+                "init_rot": [0.0, 0.0, 0.0],
+            }
+        }
+
     def read_resource(self, uri: str) -> str:
         """Read a JSON resource exposed by the service.
 
@@ -426,6 +534,8 @@ class EmbodiChainMCPService:
         parts = [part for part in parsed.path.split("/") if part]
         if parsed.netloc == "tasks" and parts == ["catalog"]:
             value: Any = self.list_tasks()
+        elif parsed.netloc == "demos" and parts == ["codex-trajectory", "scene"]:
+            value = self.codex_trajectory_demo_scene()
         elif parsed.netloc == "robots" and len(parts) == 2 and parts[1] == "config":
             value = self.get_robot_info(parts[0])
         elif parsed.netloc == "worlds" and len(parts) == 2 and parts[1] == "manifest":
@@ -434,6 +544,13 @@ class EmbodiChainMCPService:
             value = self.get_run_status(parts[0])
         elif parsed.netloc == "runs" and len(parts) == 2 and parts[1] == "metrics":
             value = self.get_run_metrics(parts[0])
+        elif (
+            parsed.netloc == "trajectories"
+            and len(parts) == 1
+            and parts[0] in self._trajectories
+        ):
+            with self._lock:
+                value = deepcopy(self._trajectories[parts[0]])
         else:
             raise ValueError(f"Unknown resource URI: {uri}")
         return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)

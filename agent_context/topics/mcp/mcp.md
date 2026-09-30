@@ -13,11 +13,12 @@ adapter; future adapters remain domain-owned.
 | Tool/resource/prompt facade | `embodichain/mcp/service.py` |
 | Backend contract and adapters | `embodichain/mcp/backend.py` |
 | CLI command | `embodichain/cli/main.py` (`embodichain mcp`) |
+| Codex trajectory demo | `examples/mcp/codex_trajectory_demo/` |
 
 ## Phase-one boundary
 
 The simulation adapter uses explicit `world_id`, `scene_revision`, `run_id`, and
-`snapshot_id` handles. Results carry backend, frame, units, seed, diagnostics,
+`snapshot_id`, and `trajectory_id` handles. Results carry backend, frame, units, seed, diagnostics,
 and artifact metadata. High-frequency physics and controller loops remain
 inside the backend; MCP calls operate on worlds, trajectories, and rollout
 jobs. The default server uses `SimulationManagerBackend`; the deterministic

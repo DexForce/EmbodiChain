@@ -68,10 +68,12 @@ def test_world_snapshot_restore_preserves_scene_revision(service):
 
 
 def test_kinematics_and_trajectory_contracts_are_structured(service):
-    ik = service.solve_ik(DEMO_ROBOT, TARGET_POSE)
-    fk = service.forward_kinematics(DEMO_ROBOT, ik["result"]["qpos"])
-    plan = service.plan_motion(DEMO_ROBOT, [0.0, 0.0], ik["result"]["qpos"], samples=4)
     world_id = service.create_world()["world_id"]
+    ik = service.solve_ik(world_id, DEMO_ROBOT, TARGET_POSE)
+    fk = service.forward_kinematics(world_id, DEMO_ROBOT, ik["result"]["qpos"])
+    plan = service.plan_motion(
+        world_id, DEMO_ROBOT, [0.0, 0.0], ik["result"]["qpos"], samples=4
+    )
     validation = service.validate_trajectory(
         world_id, DEMO_ROBOT, plan["result"]["positions"]
     )
@@ -95,6 +97,25 @@ def test_resource_templates_return_json(service):
     assert "demo_planar_arm" in service.read_resource(
         "embodichain://robots/demo_planar_arm/config"
     )
+
+
+def test_generate_and_execute_trajectory_returns_handle(service):
+    world_id = service.create_world()["world_id"]
+    result = service.generate_robot_trajectory(
+        world_id,
+        DEMO_ROBOT,
+        [[0.0, 0.0], [0.2, 0.1], [0.0, 0.3]],
+        samples_per_segment=4,
+    )
+    trajectory_id = result["result"]["trajectory_id"]
+
+    assert result["result"]["validation"]["valid"] is True
+    resource = service.read_resource(f"embodichain://trajectories/{trajectory_id}")
+    assert trajectory_id in resource
+    execution = service.execute_trajectory(trajectory_id)
+
+    assert execution["result"]["status"] == "succeeded"
+    assert execution["result"]["steps"] == 7
 
 
 def test_rollout_job_reaches_terminal_state(service):
@@ -122,6 +143,7 @@ def test_unknown_resource_and_robot_fail_at_service_boundary(service):
 
 def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     pytest.importorskip("mcp")
+    world_id = service.create_world()["world_id"]
     server = create_server(service)
 
     async def inspect_server():
@@ -130,7 +152,11 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
         prompts = await server.list_prompts()
         result = await server.call_tool(
             "check_reachability",
-            {"robot_id": DEMO_ROBOT, "target_pose": TARGET_POSE},
+            {
+                "world_id": world_id,
+                "robot_id": DEMO_ROBOT,
+                "target_pose": TARGET_POSE,
+            },
         )
         return tools, templates, prompts, result
 
@@ -141,8 +167,13 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
 
     assert "solve_ik" in tool_names
     assert "start_rollout" in tool_names
+    assert "generate_robot_trajectory" in tool_names
     assert "embodichain://worlds/{world_id}/manifest" in template_uris
-    assert prompt_names == {"inspect_robot", "validate_motion"}
+    assert prompt_names == {
+        "inspect_robot",
+        "validate_motion",
+        "generate_robot_trajectory",
+    }
     assert result.is_error is False
     assert result.structured_content["result"]["reachable"] is True
 
@@ -236,9 +267,13 @@ def test_simulation_manager_backend_adapts_lifecycle_and_kinematics():
     world_id = state["world_id"]
 
     assert backend.list_robots()[0]["robot_id"] == "fake_robot"
-    assert backend.forward_kinematics("fake_robot", [0.1, 0.2])["pose_xyz_xyzw"]
+    assert backend.forward_kinematics(world_id, "fake_robot", [0.1, 0.2])[
+        "pose_xyz_xyzw"
+    ]
     assert (
-        backend.solve_ik("fake_robot", {"position_m": [0.0, 0.0, 0.0]})["reachable"]
+        backend.solve_ik(world_id, "fake_robot", {"position_m": [0.0, 0.0, 0.0]})[
+            "reachable"
+        ]
         is True
     )
     backend.step_simulation(world_id, steps=3)

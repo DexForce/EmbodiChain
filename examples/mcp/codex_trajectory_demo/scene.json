@@ -1,0 +1,8 @@
+{
+  "robot": {
+    "robot_class": "FrankaPandaCfg",
+    "robot_type": "panda",
+    "init_pos": [0.0, 0.0, 0.0],
+    "init_rot": [0.0, 0.0, 0.0]
+  }
+}

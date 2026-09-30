@@ -81,6 +81,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
         "check_reachability",
         "check_collision",
         "validate_trajectory",
+        "generate_robot_trajectory",
         "get_run_status",
         "get_run_metrics",
         "compare_runs",
@@ -120,6 +121,8 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     register_tool("check_reachability", service.check_reachability)
     register_tool("check_collision", service.check_collision)
     register_tool("plan_motion", service.plan_motion)
+    register_tool("generate_robot_trajectory", service.generate_robot_trajectory)
+    register_tool("execute_trajectory", service.execute_trajectory)
     register_tool("validate_trajectory", service.validate_trajectory)
     register_tool("start_rollout", service.start_rollout)
     register_tool("get_run_status", service.get_run_status)
@@ -130,6 +133,12 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     @server.resource("embodichain://tasks/catalog", mime_type="application/json")
     def task_catalog() -> str:
         return service.read_resource("embodichain://tasks/catalog")
+
+    @server.resource(
+        "embodichain://demos/codex-trajectory/scene", mime_type="application/json"
+    )
+    def codex_trajectory_scene() -> str:
+        return service.read_resource("embodichain://demos/codex-trajectory/scene")
 
     @server.resource(
         "embodichain://robots/{robot_id}/config", mime_type="application/json"
@@ -153,6 +162,12 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     def run_metrics(run_id: str) -> str:
         return service.read_resource(f"embodichain://runs/{run_id}/metrics")
 
+    @server.resource(
+        "embodichain://trajectories/{trajectory_id}", mime_type="application/json"
+    )
+    def trajectory(trajectory_id: str) -> str:
+        return service.read_resource(f"embodichain://trajectories/{trajectory_id}")
+
     @server.prompt(name="inspect_robot")
     def inspect_robot(robot_id: str) -> str:
         return (
@@ -167,6 +182,16 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
             f"Validate a motion for robot {robot_id} in world {world_id}. "
             "Read the current world state, solve or inspect the target, plan a "
             "trajectory, and call validate_trajectory before reporting success."
+        )
+
+    @server.prompt(name="generate_robot_trajectory")
+    def generate_robot_trajectory(world_id: str, robot_id: str) -> str:
+        return (
+            f"Generate a joint trajectory for robot {robot_id} in world {world_id}. "
+            "Read the world state, choose safe waypoints, call "
+            "generate_robot_trajectory, inspect its validation report, and "
+            "return the trajectory resource URI. Ask before calling "
+            "execute_trajectory if the user did not explicitly request execution."
         )
 
     return server
