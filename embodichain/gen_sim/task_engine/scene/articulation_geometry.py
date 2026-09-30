@@ -204,7 +204,7 @@ def fit_articulation_to_proxy(
     """
     if not _fixed_base(config) or not np.isfinite(table_top_z):
         raise ValueError("Proxy fitting requires a fixed base and measured tabletop.")
-    proxy = np.asarray(proxy_vertices, dtype=float)
+    proxy = np.array(proxy_vertices, dtype=float, copy=True)
     if (
         proxy.ndim != 2
         or proxy.shape[1] != 3
@@ -221,7 +221,8 @@ def fit_articulation_to_proxy(
         )
     yaw = float(np.rad2deg(np.arctan2(matrix[1, 0], matrix[0, 0])))
     rotation = Rotation.from_euler("XYZ", [0.0, 0.0, yaw], degrees=True)
-    actual, proxy = rotation.apply(geometry.vertices), rotation.apply(proxy)
+    actual = rotation.apply(np.array(geometry.vertices, dtype=float, copy=True))
+    proxy = rotation.apply(proxy)
     actual_extent, proxy_extent = np.ptp(actual, axis=0), np.ptp(proxy, axis=0)
     if (
         not np.isfinite(actual_extent).all()

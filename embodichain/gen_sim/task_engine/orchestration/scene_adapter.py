@@ -427,7 +427,7 @@ class SceneAdapter:
         model: str | None = None,
         grounding_caller: GroundingCaller | None = None,
         adjudicator: Adjudicator | None = None,
-        robot_profile: str = "franka",
+        robot_profile: str = "dual_franka",
         scene_engine_adapter: SceneEngineV1Adapter | None = None,
         audit_dir: str | Path | None = None,
     ) -> None:

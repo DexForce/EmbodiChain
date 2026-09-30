@@ -510,8 +510,9 @@ def ground_scene_references(
                 "output fields bindings/reference_id/status/uids/confidence and "
                 "match_evidence, "
                 "cover every requested reference exactly once, and select only "
-                "UIDs from the supplied candidate inventory. Validation error: "
-                f"{first_error}"
+                "UIDs from the supplied candidate inventory. The previous "
+                f"validation failed with {type(first_error).__name__}; return a "
+                "fresh object that satisfies the schema."
             )
         try:
             response = caller(

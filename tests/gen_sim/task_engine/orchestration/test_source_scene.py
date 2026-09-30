@@ -31,6 +31,14 @@ from embodichain.gen_sim.task_engine.orchestration.source_scene import (
 from embodichain.lab.sim.cfg import RigidObjectCfg
 
 
+def test_scene_source_defaults_to_phase_one_robot_profile() -> None:
+    from embodichain.gen_sim.task_engine.orchestration.scene_source import (
+        SceneSourceRef,
+    )
+
+    assert SceneSourceRef("scene").robot_profile == "dual_franka"
+
+
 @pytest.mark.parametrize("ids", [["other"], ["cup", "cup"], ["cup"]])
 def test_scene_export_rejects_mixed_companion_ids(
     tmp_path: Path, ids: list[str]
