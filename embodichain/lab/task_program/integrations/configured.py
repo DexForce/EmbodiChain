@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from enum import Enum
 import hashlib
