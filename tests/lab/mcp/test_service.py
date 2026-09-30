@@ -151,6 +151,37 @@ def test_rollout_job_reaches_terminal_state(service):
     assert service.get_run_metrics(run_id)["final_time_s"] == pytest.approx(0.1)
 
 
+def test_rollout_cancellation_reaches_terminal_state():
+    from embodichain.mcp import InMemorySimulationBackend
+
+    backend = InMemorySimulationBackend()
+
+    def slow_rollout(world_id, *, steps, cancel_event):
+        for index in range(steps):
+            if cancel_event.is_set():
+                return {"status": "cancelled", "steps": index}
+            time.sleep(0.001)
+            backend.step_simulation(world_id, steps=1)
+        return {"status": "succeeded", "steps": steps}
+
+    backend.run_rollout = slow_rollout
+    instance = EmbodiChainMCPService(backend=backend)
+    try:
+        world_id = instance.create_world()["world_id"]
+        run_id = instance.start_rollout(world_id, steps=1000)["run_id"]
+        instance.cancel_run(run_id)
+
+        deadline = time.monotonic() + 2.0
+        status = instance.get_run_status(run_id)
+        while status["status"] in {"queued", "running"}:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+            status = instance.get_run_status(run_id)
+        assert status["status"] == "cancelled"
+    finally:
+        instance.close()
+
+
 def test_unknown_resource_and_robot_fail_at_service_boundary(service):
     with pytest.raises(ValueError, match="Unknown robot_id"):
         service.get_robot_info("missing")
@@ -160,6 +191,8 @@ def test_unknown_resource_and_robot_fail_at_service_boundary(service):
 
 def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     pytest.importorskip("mcp")
+    from mcp.server.mcpserver.exceptions import ToolError
+
     world_id = service.create_world()["world_id"]
     server = create_server(service)
 
@@ -197,6 +230,18 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     }
     assert result.is_error is False
     assert result.structured_content["result"]["reachable"] is True
+
+    with pytest.raises(ToolError, match="Unknown world_id"):
+        asyncio.run(
+            server.call_tool(
+                "check_reachability",
+                {
+                    "world_id": "missing-world",
+                    "robot_id": DEMO_ROBOT,
+                    "target_pose": TARGET_POSE,
+                },
+            )
+        )
 
 
 def test_health_reports_service_state(service):

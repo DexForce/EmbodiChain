@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from functools import wraps
 from typing import Any
 
 from .backend import SimulationManagerBackend
@@ -49,6 +50,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     """
     try:
         from mcp.server import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
         from mcp.types import ToolAnnotations
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError(
@@ -90,8 +92,15 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     }
 
     def register_tool(name: str, function: Any) -> None:
+        @wraps(function)
+        def guarded_tool(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return function(*args, **kwargs)
+            except (KeyError, NotImplementedError, RuntimeError, ValueError) as error:
+                raise ToolError(str(error)) from error
+
         server.add_tool(
-            function,
+            guarded_tool,
             name=name,
             structured_output=True,
             annotations=ToolAnnotations(
