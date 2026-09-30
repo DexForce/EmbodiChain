@@ -175,5 +175,6 @@
             ]
         }
     ],
-    "rigid_object": []
+    "rigid_object": [],
+    "max_episode_steps": 301
 }
