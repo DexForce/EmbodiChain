@@ -15,7 +15,7 @@ step.
 From the repository root:
 
 ```bash
-python -m pip install -e '.[mcp]'
+python -m pip install -e '.[mcp-demo]'
 codex mcp add embodichain -- python -m embodichain mcp
 codex mcp list
 ```
@@ -32,9 +32,12 @@ Use the EmbodiChain MCP server to run the Franka trajectory demo.
 5. Use the waypoints in examples/mcp/codex_trajectory_demo/trajectory.json.
 6. Call generate_robot_trajectory with those waypoints and samples_per_segment=24.
 7. Report the trajectory_id, number of samples, validation result, and resource URI.
-8. Only after reporting a valid trajectory, call execute_trajectory for that ID.
-9. Read the world state again and summarize the final qpos.
-10. Destroy the world after the result is reported.
+8. Call list_cameras and confirm trajectory_camera is an offscreen RGB/depth camera.
+9. Report the trajectory_id, number of samples, validation result, and resource URI.
+10. Call record_trajectory with camera_id=trajectory_camera,
+    output_path=outputs/mcp/codex_franka.mp4, fps=30, include_depth=true.
+11. Read the world state again and summarize the final qpos and video artifact.
+12. Destroy the world after the result is reported.
 ```
 
 The built-in scene resource and the checked-in JSON files describe the same
@@ -52,7 +55,8 @@ read scene resource
   -> get_world_state
   -> generate_robot_trajectory
   -> validate joint limits
-  -> execute_trajectory
+  -> list_cameras
+  -> record_trajectory (RGB MP4 + optional depth NPZ)
   -> get_world_state
   -> destroy_world
 ```
@@ -63,8 +67,9 @@ uses deterministic joint interpolation for this free-space example. The
 validation checks finite values and configured joint limits; it reports that a
 generic collision query is not available for this adapter.
 
-`execute_trajectory` is one MCP call. The backend applies samples and advances
-the simulator internally, so Codex remains at task-level control granularity.
+`record_trajectory` is one MCP call. The backend applies samples, renders an
+offscreen CameraGroup, and writes the video internally, so Codex remains at
+task-level control granularity.
 
 ## Local protocol smoke test
 
@@ -72,9 +77,11 @@ The MCP server can also be inspected without an LLM:
 
 ```bash
 python -m pytest -q tests/lab/mcp/test_service.py
+python examples/mcp/codex_trajectory_demo/run_demo.py --record
 ```
 
 The test covers tool discovery, resource templates, trajectory handles, and
 the deterministic in-memory backend. A real headless Franka smoke run requires
 the cached Franka asset and the simulator dependencies installed by the main
-EmbodiChain environment.
+EmbodiChain environment. `--record` writes `outputs/mcp/codex_franka.mp4` and
+`outputs/mcp/codex_franka.depth.npz`.

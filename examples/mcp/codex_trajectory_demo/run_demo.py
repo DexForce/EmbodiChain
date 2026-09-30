@@ -43,7 +43,7 @@ def _structured(result: Any) -> dict[str, Any]:
     return value
 
 
-async def run(*, execute: bool) -> None:
+async def run(*, record: bool) -> None:
     """Run the demo with an MCP client and the local stdio server."""
     root = _root()
     demo_dir = root / "examples/mcp/codex_trajectory_demo"
@@ -94,16 +94,22 @@ async def run(*, execute: bool) -> None:
                     },
                 )
             )
-            record = trajectory["result"]
-            print(json.dumps(record, indent=2, ensure_ascii=False))
-            if execute:
-                execution = _structured(
+            trajectory_record = trajectory["result"]
+            print(json.dumps(trajectory_record, indent=2, ensure_ascii=False))
+            if record:
+                recording = _structured(
                     await client.call_tool(
-                        "execute_trajectory",
-                        {"trajectory_id": record["trajectory_id"]},
+                        "record_trajectory",
+                        {
+                            "trajectory_id": trajectory_record["trajectory_id"],
+                            "camera_id": "trajectory_camera",
+                            "output_path": str(root / "outputs/mcp/codex_franka.mp4"),
+                            "fps": 30,
+                            "include_depth": True,
+                        },
                     )
                 )
-                print(json.dumps(execution, indent=2, ensure_ascii=False))
+                print(json.dumps(recording, indent=2, ensure_ascii=False))
         finally:
             await client.call_tool("destroy_world", {"world_id": world_id})
 
@@ -112,12 +118,12 @@ def main() -> None:
     """Parse command-line options and run the demo."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--execute",
+        "--record",
         action="store_true",
-        help="Execute the generated trajectory after validation.",
+        help="Record and execute the generated trajectory with the offscreen camera.",
     )
     args = parser.parse_args()
-    asyncio.run(run(execute=args.execute))
+    asyncio.run(run(record=args.record))
 
 
 if __name__ == "__main__":

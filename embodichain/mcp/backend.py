@@ -22,6 +22,7 @@ import math
 import threading
 import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
 __all__ = [
@@ -43,6 +44,8 @@ class SimulationBackend(Protocol):
     def list_robots(self) -> list[dict[str, Any]]: ...
 
     def list_physics_backends(self) -> list[dict[str, Any]]: ...
+
+    def list_cameras(self, world_id: str) -> list[dict[str, Any]]: ...
 
     def create_world(self, *, backend: str, seed: int | None) -> dict[str, Any]: ...
 
@@ -98,6 +101,19 @@ class SimulationBackend(Protocol):
         robot_id: str,
         positions: Sequence[Sequence[float]],
         *,
+        cancel_event: threading.Event,
+    ) -> dict[str, Any]: ...
+
+    def record_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        camera_id: str,
+        output_path: str,
+        fps: int,
+        include_depth: bool,
         cancel_event: threading.Event,
     ) -> dict[str, Any]: ...
 
@@ -158,6 +174,11 @@ class InMemorySimulationBackend:
                 "scope": "deterministic protocol backend",
             }
         ]
+
+    def list_cameras(self, world_id: str) -> list[dict[str, Any]]:
+        """Return no cameras because this backend has no renderer."""
+        self._world(world_id)
+        return []
 
     def create_world(self, *, backend: str, seed: int | None) -> dict[str, Any]:
         """Create a world handle and return its initial state."""
@@ -456,6 +477,24 @@ class InMemorySimulationBackend:
             "final_time_s": world["time_s"],
         }
 
+    def record_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        camera_id: str,
+        output_path: str,
+        fps: int,
+        include_depth: bool,
+        cancel_event: threading.Event,
+    ) -> dict[str, Any]:
+        """Reject camera recording because the deterministic backend is headless."""
+        del positions, camera_id, output_path, fps, include_depth, cancel_event
+        self._world(world_id)
+        self._check_robot(robot_id)
+        raise NotImplementedError("The in-memory backend has no offscreen camera")
+
     def run_rollout(
         self,
         world_id: str,
@@ -545,6 +584,25 @@ class SimulationManagerBackend:
             {"name": "default", "available": True},
             {"name": "newton", "available": True},
         ]
+
+    def list_cameras(self, world_id: str) -> list[dict[str, Any]]:
+        """List cameras registered in a SimulationManager world."""
+        manager = self._manager(world_id)
+        result = []
+        for camera_id in manager.get_sensor_uid_list():
+            sensor = manager.get_sensor(camera_id)
+            if sensor is None or getattr(sensor.cfg, "sensor_type", None) != "Camera":
+                continue
+            result.append(
+                {
+                    "camera_id": camera_id,
+                    "width": sensor.cfg.width,
+                    "height": sensor.cfg.height,
+                    "data_types": sensor.cfg.get_data_types(),
+                    "role": sensor.cfg.visualization_role,
+                }
+            )
+        return result
 
     def create_world(self, *, backend: str, seed: int | None) -> dict[str, Any]:
         """Create a headless SimulationManager world."""
@@ -654,6 +712,15 @@ class SimulationManagerBackend:
                     raise ValueError("scene.light entries must be mappings")
                 manager.add_light(LightCfg(**dict(light_value)))
         manager.prepare()
+        sensor_values = scene.get("sensor", [])
+        if isinstance(sensor_values, dict):
+            sensor_values = [sensor_values]
+        for sensor_value in sensor_values or []:
+            if not isinstance(sensor_value, dict):
+                raise ValueError("scene.sensor entries must be mappings")
+            from embodichain.lab.sim.sensors import SensorCfg
+
+            manager.add_sensor(SensorCfg.from_dict(dict(sensor_value)))
         self._prepared_worlds.add(world_id)
         with self._lock:
             metadata = self._world_metadata[world_id]
@@ -871,6 +938,80 @@ class SimulationManagerBackend:
             "steps": int(trajectory.shape[0]),
             "final_qpos": trajectory[-1].detach().cpu().tolist(),
         }
+
+    def record_trajectory(
+        self,
+        world_id: str,
+        robot_id: str,
+        positions: Sequence[Sequence[float]],
+        *,
+        camera_id: str,
+        output_path: str,
+        fps: int,
+        include_depth: bool,
+        cancel_event: threading.Event,
+    ) -> dict[str, Any]:
+        """Execute a trajectory while recording an offscreen camera."""
+        if type(fps) is not int or not 1 <= fps <= 240:
+            raise ValueError("fps must be an integer between 1 and 240")
+        manager = self._manager(world_id)
+        robot = self._robot(world_id, robot_id)
+        camera = manager.get_sensor(camera_id)
+        if camera is None or getattr(camera.cfg, "sensor_type", None) != "Camera":
+            raise ValueError(f"Unknown camera_id in world {world_id}: {camera_id}")
+        try:
+            import imageio.v2 as imageio
+        except ModuleNotFoundError as error:
+            raise ModuleNotFoundError(
+                "Camera recording requires the optional dependency: "
+                "pip install 'embodichain[mcp-demo]'"
+            ) from error
+        import numpy as np
+        import torch
+
+        trajectory = torch.as_tensor(positions, dtype=torch.float32)
+        if trajectory.ndim != 2 or trajectory.shape[0] == 0:
+            raise ValueError("positions must have shape (samples, dof)")
+        if not bool(torch.isfinite(trajectory).all().item()):
+            raise ValueError("positions must contain finite values")
+        expected_dof = int(robot.get_qpos().shape[-1])
+        if trajectory.shape[1] != expected_dof:
+            raise ValueError(
+                f"trajectory width {trajectory.shape[1]} does not match robot "
+                f"width {expected_dof}"
+            )
+        frames: list[np.ndarray] = []
+        depth_frames: list[np.ndarray] = []
+        for position in trajectory:
+            if cancel_event.is_set():
+                return {"status": "cancelled", "frames": len(frames)}
+            robot.set_qpos(position.unsqueeze(0))
+            manager.update(step=1, render_final_step=False)
+            manager.sync_render_state()
+            camera.update()
+            data = camera.get_data()
+            color = data["color"][0].detach().cpu().numpy()
+            frames.append(color[..., :3])
+            if include_depth and "depth" in data:
+                depth_frames.append(data["depth"][0].detach().cpu().numpy())
+        if not frames:
+            raise ValueError("trajectory produced no camera frames")
+        output = Path(output_path).expanduser().resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        imageio.mimsave(output, frames, fps=fps, macro_block_size=1)
+        result: dict[str, Any] = {
+            "status": "succeeded",
+            "artifact_path": str(output),
+            "frames": len(frames),
+            "fps": fps,
+            "width": int(frames[0].shape[1]),
+            "height": int(frames[0].shape[0]),
+        }
+        if depth_frames:
+            depth_path = output.with_suffix(".depth.npz")
+            np.savez_compressed(depth_path, depth=np.stack(depth_frames, axis=0))
+            result["depth_artifact_path"] = str(depth_path)
+        return result
 
     def validate_trajectory(
         self, world_id: str, robot_id: str, positions: Sequence[Sequence[float]]

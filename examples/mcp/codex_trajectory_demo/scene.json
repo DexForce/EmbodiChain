@@ -4,5 +4,21 @@
     "robot_type": "panda",
     "init_pos": [0.0, 0.0, 0.0],
     "init_rot": [0.0, 0.0, 0.0]
-  }
+  },
+  "sensor": [
+    {
+      "sensor_type": "Camera",
+      "uid": "trajectory_camera",
+      "width": 320,
+      "height": 240,
+      "enable_color": true,
+      "enable_depth": true,
+      "intrinsics": [260.0, 260.0, 160.0, 120.0],
+      "extrinsics": {
+        "eye": [1.5, -1.5, 1.2],
+        "target": [0.0, 0.0, 0.6],
+        "up": [0.0, 0.0, 1.0]
+      }
+    }
+  ]
 }

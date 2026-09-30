@@ -75,6 +75,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
         "list_tasks",
         "get_task_info",
         "list_physics_backends",
+        "list_cameras",
         "get_world_state",
         "forward_kinematics",
         "solve_ik",
@@ -108,6 +109,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     register_tool("list_tasks", service.list_tasks)
     register_tool("get_task_info", service.get_task_info)
     register_tool("list_physics_backends", service.list_physics_backends)
+    register_tool("list_cameras", service.list_cameras)
     register_tool("create_world", service.create_world)
     register_tool("load_task_or_scene", service.load_task_or_scene)
     register_tool("reset_world", service.reset_world)
@@ -123,6 +125,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
     register_tool("plan_motion", service.plan_motion)
     register_tool("generate_robot_trajectory", service.generate_robot_trajectory)
     register_tool("execute_trajectory", service.execute_trajectory)
+    register_tool("record_trajectory", service.record_trajectory)
     register_tool("validate_trajectory", service.validate_trajectory)
     register_tool("start_rollout", service.start_rollout)
     register_tool("get_run_status", service.get_run_status)

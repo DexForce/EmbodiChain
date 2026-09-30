@@ -148,6 +148,7 @@ class EmbodiChainMCPService:
             "list_tasks",
             "get_task_info",
             "list_physics_backends",
+            "list_cameras",
             "create_world",
             "load_task_or_scene",
             "reset_world",
@@ -163,6 +164,7 @@ class EmbodiChainMCPService:
             "plan_motion",
             "generate_robot_trajectory",
             "execute_trajectory",
+            "record_trajectory",
             "validate_trajectory",
             "start_rollout",
             "get_run_status",
@@ -206,6 +208,10 @@ class EmbodiChainMCPService:
     def list_physics_backends(self) -> list[dict[str, Any]]:
         """List physics backends available to the injected backend."""
         return deepcopy(self.backend.list_physics_backends())
+
+    def list_cameras(self, world_id: str) -> list[dict[str, Any]]:
+        """List offscreen cameras registered in a World."""
+        return deepcopy(self.backend.list_cameras(world_id))
 
     def create_world(
         self, *, backend: str | None = None, seed: int | None = None
@@ -437,6 +443,35 @@ class EmbodiChainMCPService:
         )
         return self._envelope(result, world_id=trajectory["world_id"])
 
+    def record_trajectory(
+        self,
+        trajectory_id: str,
+        camera_id: str,
+        output_path: str,
+        *,
+        fps: int = 30,
+        include_depth: bool = True,
+    ) -> dict[str, Any]:
+        """Execute a stored trajectory while recording an offscreen camera."""
+        with self._lock:
+            try:
+                trajectory = deepcopy(self._trajectories[trajectory_id])
+            except KeyError as exc:
+                raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
+        if not trajectory["validation"]["valid"]:
+            raise ValueError("Cannot record an invalid trajectory")
+        result = self.backend.record_trajectory(
+            trajectory["world_id"],
+            trajectory["robot_id"],
+            trajectory["positions"],
+            camera_id=camera_id,
+            output_path=output_path,
+            fps=fps,
+            include_depth=include_depth,
+            cancel_event=threading.Event(),
+        )
+        return self._envelope(result, world_id=trajectory["world_id"])
+
     def validate_trajectory(
         self,
         world_id: str,
@@ -513,7 +548,23 @@ class EmbodiChainMCPService:
                 "robot_type": "panda",
                 "init_pos": [0.0, 0.0, 0.0],
                 "init_rot": [0.0, 0.0, 0.0],
-            }
+            },
+            "sensor": [
+                {
+                    "sensor_type": "Camera",
+                    "uid": "trajectory_camera",
+                    "width": 320,
+                    "height": 240,
+                    "enable_color": True,
+                    "enable_depth": True,
+                    "intrinsics": [260.0, 260.0, 160.0, 120.0],
+                    "extrinsics": {
+                        "eye": [1.5, -1.5, 1.2],
+                        "target": [0.0, 0.0, 0.6],
+                        "up": [0.0, 0.0, 1.0],
+                    },
+                }
+            ],
         }
 
     def read_resource(self, uri: str) -> str:

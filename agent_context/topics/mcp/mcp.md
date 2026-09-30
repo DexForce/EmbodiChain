@@ -21,7 +21,7 @@ The simulation adapter uses explicit `world_id`, `scene_revision`, `run_id`, and
 `snapshot_id`, and `trajectory_id` handles. Results carry backend, frame, units, seed, diagnostics,
 and artifact metadata. High-frequency physics and controller loops remain
 inside the backend; MCP calls operate on worlds, trajectories, and rollout
-jobs. The default server uses `SimulationManagerBackend`; the deterministic
+jobs, and offscreen camera recordings. The default server uses `SimulationManagerBackend`; the deterministic
 `InMemorySimulationBackend` is intended for protocol tests and examples.
 
 Phase one does not expose real-device control, arbitrary code execution, or
@@ -33,6 +33,7 @@ SDK. Domain runtime imports belong inside the adapter operations that need them.
 ## Validation
 
 Focused protocol coverage is in `tests/lab/mcp/test_service.py`. Run it with
-the optional `mcp` dependency installed; tests that exercise the protocol SDK
+the optional `mcp` dependency installed; camera recording additionally uses
+the `mcp-demo` extra for ImageIO/FFmpeg. Tests that exercise the protocol SDK
 skip when that optional dependency is unavailable. Run the public API checker
 after changing the MCP package exports.

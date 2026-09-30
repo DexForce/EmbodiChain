@@ -90,6 +90,7 @@ def test_kinematics_and_trajectory_contracts_are_structured(service):
 def test_resource_templates_return_json(service):
     world_id = service.create_world(seed=7)["world_id"]
 
+    assert service.list_cameras(world_id) == []
     world_resource = service.read_resource(f"embodichain://worlds/{world_id}/manifest")
 
     assert f'"world_id": "{world_id}"' in world_resource
@@ -168,6 +169,7 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     assert "solve_ik" in tool_names
     assert "start_rollout" in tool_names
     assert "generate_robot_trajectory" in tool_names
+    assert "record_trajectory" in tool_names
     assert "embodichain://worlds/{world_id}/manifest" in template_uris
     assert prompt_names == {
         "inspect_robot",

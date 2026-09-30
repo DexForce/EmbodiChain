@@ -71,6 +71,11 @@ gensim = [
 mcp = [
   "mcp>=2,<3",
 ]
+mcp-demo = [
+  "mcp>=2,<3",
+  "imageio>=2.34",
+  "imageio-ffmpeg>=0.4",
+]
 
 [project.scripts]
 # Unified EmbodiChain CLI with sub-commands (mirrors ``python -m embodichain``).
