@@ -195,6 +195,28 @@ After UID grounding, independent E1 placement, E2 upright, and E5
 lift-and-return `count`/`all` sets lower to ordered single-object steps;
 line layout, E5 terminal hold, other task routes, and a downstream
 `step_result` consumer still reject implicit expansion.
+E6 `count`/`all` sets retain their qualified synthetic part UIDs through
+binding, then expand to ordered Slide/withdraw/Park recipes with a distinct
+part binding per step. Cabinet-root sets do not stand in for drawer parts.
+For opening sets, measured world-space handle heights order parts bottom-to-top
+within each cabinet. The existing 1 cm spatial tolerance groups same-height
+parts, retaining their original lateral order, including horizontal rows and
+multi-column layouts. Missing geometry leaves that cabinet's order unchanged.
+Explicit separate steps and closing sets are not reordered. This is a default
+sequence preference, not a collision-free planning guarantee.
+E6 uses each qualified handle's position for automatic arm
+preference rather than the shared cabinet center; explicit arms take precedence.
+This code-owned geometry stays outside the model prompt and runtime scene config.
+The final program segment rechecks the last requested position of every E6
+joint, so later manipulation cannot silently invalidate an earlier drawer.
+Repeated open/close commands on one joint retain only its last terminal target.
+Regenerate existing E6 bundles to include these terminal checks.
+Part inventory exposes a configured initial open/closed endpoint only when
+the runtime default zero reset matches an explicitly authored, validated
+`gen_sim:closedPosition` endpoint or its opposite endpoint. Missing endpoint
+semantics, explicit `init_qpos` vectors (unqualified joint ordering), and
+non-endpoint resets remain unknown. This is configuration evidence, not a
+settled-state/contact observation; no asset or reset value is changed.
 For an unbound existing Gym scene, Task Engine automatically renders the
 current GLB assets into UID-labeled overviews, segmentation masks and crops,
 then retries grounding with the same LLM transport configured for text binding

@@ -422,6 +422,86 @@ def test_target_requirements_describe_capabilities_not_concrete_roles(
     assert target["affordances"] == expected_affordances
 
 
+@pytest.mark.parametrize(
+    "uids,quantifier,count,error",
+    [
+        (["cabinet_a", "cabinet_b"], "all", 0, "cannot lower multiple"),
+        (["cabinet::part_a", "cabinet::part_b"], "count", 3, "cardinality"),
+        (["cabinet::part_a", "cabinet::part_b"], "one", 0, "cardinality"),
+    ],
+)
+def test_e6_set_expansion_preserves_selector_constraints(
+    uids: list[str], quantifier: str, count: int, error: str
+) -> None:
+    step = _step(reference="drawers")
+    step.update(task_type="E6", orientation_goal="none", target_state="open")
+    step["object"].update(quantifier=quantifier, count=count)
+    candidate = TaskAgent(interpreter=lambda *args, **kwargs: _result(step)).generate(
+        "drawers", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    with pytest.raises(ValueError, match=error):
+        SemanticTaskPlanner().plan(
+            candidate,
+            {
+                "schema_version": ROLE_BINDINGS_SCHEMA,
+                "task_id": "drawers",
+                "candidate_id": candidate["candidate_id"],
+                "reference_bindings": {"step_01.object": uids},
+                "role_bindings": {},
+            },
+            [],
+        )
+
+
+@pytest.mark.parametrize(
+    "arm,expected",
+    [
+        ("auto", ["left", "right"]),
+        ("left_arm", ["left", "left"]),
+        ("right_arm", ["right", "right"]),
+    ],
+)
+@pytest.mark.parametrize("as_set", [True, False])
+def test_e6_auto_arm_uses_each_handle_and_preserves_explicit_arm(
+    arm: str, expected: list[str], as_set: bool
+) -> None:
+    step = _step(reference="drawers")
+    step.update(
+        task_type="E6", orientation_goal="none", target_state="open", required_arm=arm
+    )
+    step["object"].update(quantifier="all" if as_set else "one")
+    candidate = TaskAgent(interpreter=lambda *args, **kwargs: _result(step)).generate(
+        "drawers", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "drawers",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {
+                "step_01.object": (
+                    ["cabinet::part_a", "cabinet::part_b"] if as_set else ["cabinet"]
+                )
+            },
+            "role_bindings": {} if as_set else {"step_01.object": "part_b"},
+        },
+        [
+            {
+                "uid": "cabinet",
+                "init_pos": [0.0, -0.1, 0.7],
+                "_articulation_part_positions": {
+                    "part_a": [0.0, -0.2, 0.8],
+                    "part_b": [0.0, 0.2, 0.8],
+                },
+            }
+        ],
+    )
+    assert [n["call"]["resources"]["primary"] for n in graph["nodes"][::3]] == (
+        expected if as_set else expected[-1:]
+    )
+
+
 def test_semantic_planner_rejects_multi_object_pour_expansion():
     def interpreter(_instruction, **_kwargs):
         step = _step(reference="all bottles")
