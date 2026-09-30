@@ -26,7 +26,8 @@ jobs. The default server uses `SimulationManagerBackend`; the deterministic
 Phase one does not expose real-device control, arbitrary code execution, or
 per-physics-step Agent calls. Tool annotations describe risk, but authorization
 and safety enforcement remain execution-layer responsibilities. The package
-must remain importable without importing a domain adapter at module import time.
+must remain importable without loading simulation libraries or the optional MCP
+SDK. Domain runtime imports belong inside the adapter operations that need them.
 
 ## Validation
 

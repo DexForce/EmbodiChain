@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+import subprocess
+import sys
 import time
 
 import pytest
@@ -146,6 +149,26 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
 
 def test_legacy_lab_import_path_reexports_top_level_service():
     assert LegacyMCPService is EmbodiChainMCPService
+
+
+def test_top_level_import_does_not_load_simulation_or_optional_sdk():
+    """The public MCP entry point must work before a domain runtime is loaded."""
+    script = """
+import sys
+from embodichain.mcp import EmbodiChainMCPService, create_server
+
+assert "embodichain.lab" not in sys.modules
+assert "dexsim" not in sys.modules
+assert "mcp" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_simulation_manager_backend_adapts_lifecycle_and_kinematics():
