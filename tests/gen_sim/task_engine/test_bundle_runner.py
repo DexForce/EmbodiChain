@@ -266,9 +266,10 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     )
     deployment = SimpleNamespace(
         integration=SimpleNamespace(
+            adapter_factory=SimpleNamespace(press_routes=()),
             registration=SimpleNamespace(
                 catalog=SimpleNamespace(preflight=lambda p: compiled)
-            )
+            ),
         ),
         selection=None,
     )

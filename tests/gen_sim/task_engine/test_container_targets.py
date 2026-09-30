@@ -34,7 +34,8 @@ def test_landing_uses_arm_side_and_erodes_by_full_footprint(side: float) -> None
 
     assert target is not None
     radius = np.linalg.norm(child[:, :2], axis=1).max()
-    assert target[0] == pytest.approx(side * (0.25 - radius - 0.02))
+    wall_margin = 0.035
+    assert target[0] == pytest.approx(side * (0.25 - radius - wall_margin))
     assert target[1] == pytest.approx(0.0)
     assert target[2] == pytest.approx(0.005 + 0.04 + 0.001)
 

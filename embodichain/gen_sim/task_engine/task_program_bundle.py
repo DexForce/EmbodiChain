@@ -179,14 +179,21 @@ def generate_task_program_bundle(
         raise TypeError("fit_grasp_assets must be a boolean.")
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
-        - {"E1", "E2", "E3", "E4", "E5", "E6"}
+        - {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}
     )
     if unsupported:
-        raise ValueError(f"Task Engine supports only E1-E6, not {unsupported}.")
+        raise ValueError(f"Task Engine supports E1-E6 and E9, not {unsupported}.")
     from ._task_program.drawer_binding import prepare_drawer_graph, drawer_routes
 
     selected_graph = prepare_drawer_graph(selected_graph, prepared_scene)
     articulation_bindings = graph_bindings(selected_graph, prepared_scene)
+    from ._task_program.press_binding import (
+        graph_routes,
+        calibrate_scene,
+        prepare_press_scene,
+    )
+
+    source_press_routes = graph_routes(selected_graph, prepared_scene)
     normalized_profile = str(robot_profile).strip()
     try:
         embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
@@ -234,6 +241,17 @@ def generate_task_program_bundle(
             ),
         )
     scene = normalize_scene_assets(prepared_scene, root)
+    scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+    press_routes = graph_routes(selected_graph, scene)
+    if press_adaptation:
+        _write_json(
+            root / "press_adaptation.json",
+            {
+                "schema_version": "gen_sim.press-adaptation/v1",
+                "policy": "unit_scale_preserve_support_and_calibration",
+                "records": press_adaptation,
+            },
+        )
     if adaptation is not None:
         provenance = {item["uid"]: item for item in scene.asset_provenance}
         for record in adaptation["records"]:
@@ -302,6 +320,12 @@ def generate_task_program_bundle(
     save_config(paths.embodiment, embodiment_payload)
     drawers = drawer_routes(selected_graph, scene)
     policy_payload = load_config(policy_source)
+    if press_routes:
+        # Press has no symbolic effects. Physical truth is owned by mandatory
+        # contact-event/retreat post-policies, not a vacuous effect projection.
+        policy_payload["policy_id"] = "gen_sim_press_v1"
+        policy_payload["preset_id"] = "gen_sim_press_motion"
+        policy_payload["effect_assurance"] = "projected"
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     save_config(paths.execution_policy, policy_payload)
@@ -354,6 +378,11 @@ def generate_task_program_bundle(
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
+    press_calibration = calibrate_scene(
+        scene_payload, press_routes, source_routes=source_press_routes
+    )
+    if press_calibration:
+        _write_json(root / "press_calibration.json", {"routes": press_calibration})
     bound_uids = {binding.object_id for binding in articulation_bindings.values()}
     for articulation in scene_payload["simulation"]["articulation"]:
         if articulation["uid"] not in bound_uids:
@@ -812,6 +841,19 @@ def _program_payload(
     by_name = {item["name"]: item for item in items}
     articulation_bindings = graph_bindings(graph, scene)
     for group in graph["task_groups"]:
+        if group.get("task_type") == "E9":
+            from ._task_program.press_binding import graph_routes
+
+            route = graph_routes(graph, scene)[0]
+            for index, node_id in enumerate(group["node_ids"]):
+                by_name[node_id]["post"] = [
+                    {
+                        "kind": "wait_stable",
+                        "entity": route.binding.object_id,
+                        "preset": route.preset("ready" if index == 0 else "pressed"),
+                    }
+                ]
+            continue
         if group.get("task_type") == "E6":
             first = next(n for n in graph["nodes"] if n["id"] == group["node_ids"][0])
             args = first["call"]["arguments"]
@@ -1034,6 +1076,9 @@ def _integration_payload(
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
+    from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
+
+    press_routes = graph_routes(graph, scene)
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
@@ -1380,6 +1425,12 @@ def _integration_payload(
                 not in articulation_bindings
             ):
                 raise ValueError("Articulation calls require an inspected E6 recipe.")
+        elif call["kind"] == "registered" and call["call_id"] in {
+            PREPARE_CALL,
+            PRESS_CALL,
+        }:
+            if node["task_type"] != "E9" or not press_routes:
+                raise ValueError("Press calls require an inspected E9 recipe.")
         elif call["kind"] == "registered":
             raise ValueError(
                 f"Unsupported generated registered call {call['call_id']!r}."
@@ -1535,32 +1586,45 @@ def _integration_payload(
                 for uid in sorted(
                     {b.object_id for b in articulation_bindings.values()}
                     | spatial_articulations
+                    | {r.binding.object_id for r in press_routes}
                 )
             ],
             "links": [
-                {
-                    "entity_id": b.link_id,
-                    "articulation_id": b.object_id,
-                    "native_link_name": b.link,
-                    **(
-                        {
-                            "affordances": [
-                                {
-                                    "entity_id": r.affordance,
-                                    "kind": "container",
-                                    "native_name": r.affordance,
-                                    "object_target_pose": drawer_poses[r.affordance],
-                                    "release_clearance": 0.0,
-                                }
-                                for r in drawers.values()
-                                if r.binding == b
-                            ]
-                        }
-                        if any(r.binding == b for r in drawers.values())
-                        else {}
-                    ),
-                }
-                for b in articulation_bindings.values()
+                *[
+                    {
+                        "entity_id": r.link_id,
+                        "articulation_id": r.binding.object_id,
+                        "native_link_name": r.binding.link,
+                    }
+                    for r in press_routes
+                ],
+                *[
+                    {
+                        "entity_id": b.link_id,
+                        "articulation_id": b.object_id,
+                        "native_link_name": b.link,
+                        **(
+                            {
+                                "affordances": [
+                                    {
+                                        "entity_id": r.affordance,
+                                        "kind": "container",
+                                        "native_name": r.affordance,
+                                        "object_target_pose": drawer_poses[
+                                            r.affordance
+                                        ],
+                                        "release_clearance": 0.0,
+                                    }
+                                    for r in drawers.values()
+                                    if r.binding == b
+                                ]
+                            }
+                            if any(r.binding == b for r in drawers.values())
+                            else {}
+                        ),
+                    }
+                    for b in articulation_bindings.values()
+                ],
             ],
         },
         "profile": {
@@ -1804,6 +1868,11 @@ def _integration_payload(
                 }
             ],
             "registered_semantic_lowerers": [
+                *[
+                    {"kind": kind, "route": route.payload()}
+                    for route in press_routes
+                    for kind in ("press_prepare", "press")
+                ],
                 *(
                     [
                         {

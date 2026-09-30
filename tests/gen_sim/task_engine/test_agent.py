@@ -1739,7 +1739,7 @@ def test_semantic_planner_keeps_articulation_execution_gated(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "drawer_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E6"):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="E1-E6 and E9"):
         SemanticTaskPlanner().plan(
             candidate,
             {
@@ -1757,7 +1757,6 @@ def test_semantic_planner_keeps_articulation_execution_gated(
     ("task_type", "call_id", "argument_key", "argument_value"),
     [
         ("E8", "simulation.articulation_link_twist", "target_setting", 2),
-        ("E9", "simulation.articulation_link_press", "target_state", "activated"),
     ],
 )
 def test_semantic_planner_rejects_out_of_scope_calibrated_articulation_call(
@@ -1779,7 +1778,7 @@ def test_semantic_planner_rejects_out_of_scope_calibrated_articulation_call(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "control_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="only E1-E6"):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="E1-E6 and E9"):
         SemanticTaskPlanner().plan(
             candidate,
             {

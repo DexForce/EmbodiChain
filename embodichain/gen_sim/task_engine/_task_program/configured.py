@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task Engine-owned E1-E6 service decoding and deployment composition."""
+"""Task Engine-owned E1-E6/E9 service decoding and deployment composition."""
 
 from __future__ import annotations
 
@@ -137,10 +137,17 @@ def _decode_goal_pose(
 
 
 def decode_task_lowerer(value: object, *, path: str) -> Any:
-    """Decode only the E1-E6 task-owned routes or established shared services."""
+    """Decode only the E1-E6/E9 task-owned routes or established shared services."""
     if type(value) is not dict:
         raise TypeError(f"{path} must be a mapping.")
     kind = _identifier(value.get("kind"), path=f"{path}.kind")
+    if kind in {"press", "press_prepare"}:
+        from .press_binding import PressRoute
+        from .press_runtime import PressFactory, PressPrepareFactory
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "route"}))
+        factory = PressFactory if kind == "press" else PressPrepareFactory
+        return factory(PressRoute.decode(config["route"]))
     if kind == "pick":
         config = _mapping(
             value,
@@ -408,7 +415,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
     if kind in {"park", "pour", "axis_align"}:
         return _decode_shared_lowerer(value, path=path)
     raise ValueError(
-        f"{path}: unsupported Task Engine service {kind!r}; expected E1-E6 services."
+        f"{path}: unsupported Task Engine service {kind!r}; expected E1-E6/E9 services."
     )
 
 
@@ -433,7 +440,7 @@ class TaskDeployment:
 def compose_deployment(
     *, task_program: object, skill_profile: object, base_dir: str | Path
 ) -> TaskDeployment:
-    """Reuse component contracts while owning E1-E6 service decoding locally."""
+    """Reuse component contracts while owning E1-E6/E9 service decoding locally."""
     program_path, task, policy = _resolve_task_program_components(
         task_program,
         base_dir=Path(base_dir).expanduser(),
@@ -477,9 +484,15 @@ def compose_deployment(
                 target_descriptor=factory.target_descriptor,
             )
         )
+    from .press_runtime import PressFactory, with_press_options
+
+    press_routes = tuple(f.route for f in lowerers if type(f) is PressFactory)
+    robot_profile = with_press_options(
+        _decode_robot_profile(payload["robot_profile"]), press_routes
+    )
     registration = SimulationTaskProgramRegistration(
         scene_binding=_decode_scene(payload["scene"]),
-        robot_profile_binding=_decode_robot_profile(payload["robot_profile"]),
+        robot_profile_binding=robot_profile,
         call_catalog=call_catalog,
         handover_pose_providers=services.handover_pose_providers,
         control_part_evidence_factory=services.control_part_evidence,
