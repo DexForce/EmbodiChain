@@ -33,7 +33,7 @@ __all__: list[str] = []
 
 PREPARE_CALL = "gen_sim.press_prepare"
 PRESS_CALL = "gen_sim.press"
-PRESS_REVISION = "13"
+PRESS_REVISION = "14"
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,7 +407,7 @@ def calibrate_scene(
                 **route.payload(),
                 "schema": "gen_sim.press_calibration/v1",
                 "model_origin": "generated_release_bias_not_source_mechanism",
-                "success_criterion": "contact_press_0.25mm_not_activation",
+                "success_criterion": "contact_press_0.05mm_not_activation",
                 "mass_policy": "preserve_pre_resize_calibration",
                 "calibration_scale": source.binding.scale,
                 "source_mass": route.moving_mass,
