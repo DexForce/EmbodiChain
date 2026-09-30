@@ -253,8 +253,8 @@ def evaluate_press_event(
     direction = math.copysign(1.0, binding.pressed_position - binding.released_position)
     result: dict[str, Any] = {
         "accepted": False,
-        "criterion": "contact_press_0.25mm",
-        "minimum_contact_stroke_m": 0.00025,
+        "criterion": "contact_press_0.05mm",
+        "minimum_contact_stroke_m": 0.00005,
         "activation_verified": False,
         "reason": "missing_samples",
         "max_stroke": 0.0,

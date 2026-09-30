@@ -203,9 +203,9 @@ def test_transient_contact_press_succeeds_without_persistent_activation(button):
 
 
 @pytest.mark.parametrize(
-    "travel,accepted", [(0.000249, False), (0.000250, True), (0.000251, True)]
+    "travel,accepted", [(0.000049, False), (0.000050, True), (0.000051, True)]
 )
-def test_contact_press_uses_absolute_quarter_millimetre_threshold(
+def test_contact_press_uses_absolute_fifty_micrometre_threshold(
     button, travel, accepted
 ):
     samples = [
@@ -216,7 +216,8 @@ def test_contact_press_uses_absolute_quarter_millimetre_threshold(
     ]
     result = evaluate_press_event(binding(button), samples)
     assert result["accepted"] is accepted
-    assert result["minimum_contact_stroke_m"] == 0.00025
+    assert result["minimum_contact_stroke_m"] == 0.00005
+    assert result["criterion"] == "contact_press_0.05mm"
     assert result["activation_verified"] is False
 
 
@@ -224,14 +225,14 @@ def test_separate_subthreshold_contacts_do_not_accumulate(button):
     samples = [
         PressSample(0.0, 0.0, "prepare", False),
         PressSample(0.1, 0.0, "press", True),
-        PressSample(0.2, -0.00015, "press", True),
-        PressSample(0.3, -0.00015, "press", False),
-        PressSample(0.4, -0.00015, "press", True),
-        PressSample(0.5, -0.00030, "press", True),
+        PressSample(0.2, -0.00003, "press", True),
+        PressSample(0.3, -0.00003, "press", False),
+        PressSample(0.4, -0.00003, "press", True),
+        PressSample(0.5, -0.00006, "press", True),
     ]
     result = evaluate_press_event(binding(button), samples)
     assert not result["accepted"]
-    assert result["contact_stroke"] == pytest.approx(0.00015)
+    assert result["contact_stroke"] == pytest.approx(0.00003)
 
 
 def test_event_supports_positive_joint_travel(button):
@@ -267,13 +268,13 @@ def test_event_evidence_ablations_fail_closed(button, ablation, reason):
     elif ablation == "passive":
         samples[1] = replace(samples[1], qpos=-0.004)
     elif ablation == "contact_gap":
-        samples[3] = replace(samples[3], qpos=-0.00015, target_contact=False)
-        samples[4] = replace(samples[4], qpos=-0.00030)
+        samples[3] = replace(samples[3], qpos=-0.000015, target_contact=False)
+        samples[4] = replace(samples[4], qpos=-0.000030)
     elif ablation == "late_contact":
         samples[2] = replace(samples[2], target_contact=False)
     elif ablation == "short_stroke":
-        samples[3] = replace(samples[3], qpos=-0.00010)
-        samples[4] = replace(samples[4], qpos=-0.00020)
+        samples[3] = replace(samples[3], qpos=-0.000010)
+        samples[4] = replace(samples[4], qpos=-0.000020)
     elif ablation == "stale_time":
         samples[3] = replace(samples[3], timestamp=samples[2].timestamp)
     elif ablation == "nan":
