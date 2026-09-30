@@ -48,6 +48,31 @@ from embodichain.gen_sim.task_engine.agent import (
 _UPRIGHT_CAN_INSTRUCTION = "test-instruction"
 
 
+def test_scene_adapter_defaults_to_phase_one_robot_profile() -> None:
+    assert SceneAdapter().robot_profile == "dual_franka"
+
+
+def test_task_engine_cli_defaults_to_phase_one_robot_profile() -> None:
+    from embodichain.gen_sim.task_engine.cli import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "run-all",
+            "--mode",
+            "scene",
+            "--task-id",
+            "demo",
+            "--instruction",
+            "pick the can",
+            "--scene",
+            "scene",
+            "--output-root",
+            "output",
+        ]
+    )
+    assert args.robot_profile == "dual_franka"
+
+
 def test_grounding_receives_support_evidence_without_changing_source() -> None:
     from embodichain.gen_sim.task_engine.orchestration.grounding import (
         _grounding_inventory,
