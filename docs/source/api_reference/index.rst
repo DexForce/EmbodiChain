@@ -66,6 +66,7 @@ top-level packages:
    lab
    toolkits
    learning
+   mcp
    utils
 
 Public API Coverage
