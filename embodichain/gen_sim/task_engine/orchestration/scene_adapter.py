@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from pathlib import Path
@@ -28,7 +28,6 @@ from tempfile import mkdtemp
 from typing import Any
 
 import numpy as np
-from scipy.spatial.transform import Rotation
 
 from embodichain.gen_sim.task_engine.orchestration.grounding import (
     GroundingCaller,
@@ -43,6 +42,7 @@ from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
     inspect_prismatic_part,
 )
 from embodichain.gen_sim.task_engine.scene.articulation_geometry import (
+    _root_pose,
     read_articulation_geometry,
 )
 from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
@@ -112,6 +112,7 @@ def _discover_part_catalogs(
         payloads = []
         for part in parts:
             payload = part.payload()
+            payload["initial_state"] = _configured_part_state(config, part.part_id)
             try:
                 payload["handle_center_world"] = _part_handle_center_world(
                     config, part.part_id
@@ -125,6 +126,30 @@ def _discover_part_catalogs(
     return catalogs
 
 
+def _configured_part_state(config: Mapping[str, Any], part_id: str) -> dict[str, str]:
+    """Describe a qualified reset endpoint, not an observed/settled joint state."""
+    # Articulation.reset uses zero for every joint when init_qpos is absent.
+    # Explicit vectors need runtime joint ordering; do not guess that mapping.
+    if config.get("init_qpos") is not None:
+        return {}
+    try:
+        binding = inspect_prismatic_part(dict(config), part_id)
+    except (KeyError, TypeError, ValueError):
+        return {}
+    # A zero reset alone does not identify which endpoint means closed.
+    if (
+        binding.closed_position is None
+        or not binding.limits[0] <= 0 <= binding.limits[1]
+    ):
+        return {}
+    matches = [
+        state
+        for state in ("closed", "open")
+        if np.isclose(binding.target(state), 0.0, atol=1e-6, rtol=0.0)
+    ]
+    return {"openness": matches[0]} if len(matches) == 1 else {}
+
+
 def _part_handle_center_world(config: Mapping[str, Any], part_id: str) -> list[float]:
     binding = inspect_prismatic_part(dict(config), part_id)
     geometry = read_articulation_geometry(config["fpath"])
@@ -133,12 +158,8 @@ def _part_handle_center_world(config: Mapping[str, Any], part_id: str) -> list[f
     center = (
         vertices.mean(axis=0) @ link_pose[:3, :3].T + link_pose[:3, 3] * binding.scale
     )
-    rotation = Rotation.from_euler(
-        "XYZ", config.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
-    )
-    center = rotation.apply(center) + np.asarray(
-        config.get("init_pos", [0.0, 0.0, 0.0]), dtype=float
-    )
+    root_pose = _root_pose(config)
+    center = root_pose[:3, :3] @ center + root_pose[:3, 3]
     if center.shape != (3,) or not np.isfinite(center).all():
         raise ValueError("Articulation handle center must be finite and 3D.")
     return [float(value) for value in center]
@@ -191,6 +212,43 @@ def _rank_parts_by_lateral_position(
     return tuple(ranked)
 
 
+def _order_open_parts_bottom_up(
+    uids: Sequence[str],
+    part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> tuple[str, ...]:
+    """Order an unordered opening set by measured height within each cabinet."""
+    ordered = list(uids)
+    for articulation_id, parts in part_catalogs.items():
+        by_uid = {f"{articulation_id}::{part['part_id']}": part for part in parts}
+        indices = [index for index, uid in enumerate(uids) if uid in by_uid]
+        if len(indices) < 2:
+            continue
+        centers = {
+            index: np.asarray(
+                by_uid[uids[index]].get("handle_center_world", ()), dtype=float
+            )
+            for index in indices
+        }
+        if any(
+            center.shape != (3,) or not np.isfinite(center).all()
+            for center in centers.values()
+        ):
+            continue
+        # Match the existing 1 cm spatial-label tolerance. Stable height bands
+        # preserve lateral order instead of sorting same-row numerical noise.
+        levels: dict[int, int] = {}
+        floor = -float("inf")
+        level = -1
+        for index in sorted(indices, key=lambda index: centers[index][2]):
+            if centers[index][2] - floor > 0.01:
+                floor = float(centers[index][2])
+                level += 1
+            levels[index] = level
+        for target, source in zip(indices, sorted(indices, key=levels.__getitem__)):
+            ordered[target] = uids[source]
+    return tuple(ordered)
+
+
 def _augment_grounding_objects(
     scene_objects: Sequence[Mapping[str, Any]],
     part_catalogs: Mapping[str, Sequence[Mapping[str, Any]]],
@@ -231,6 +289,12 @@ def _augment_grounding_objects(
             for rank in ("vertical_rank", "lateral_rank"):
                 if rank in part:
                     attributes[rank] = str(part[rank])
+            initial_state = dict(part.get("initial_state", {}))
+            if initial_state:
+                attributes["state_evidence"] = {
+                    "source": "runtime_default_zero_reset_and_authored_closed_endpoint",
+                    "scope": "configured_initial_state_not_settled_observation",
+                }
             result.append(
                 {
                     "runtime_uid": f"{articulation_id}::{part_id}",
@@ -243,6 +307,7 @@ def _augment_grounding_objects(
                         f"{parent.get('name', articulation_id)}"
                     ),
                     "attributes": attributes,
+                    "initial_state": initial_state,
                     "init_pos": list(
                         part.get(
                             "handle_center_world",
@@ -447,6 +512,26 @@ class SceneAdapter:
             adjudicator=adjudicator,
             force_most_likely=force_most_likely,
             part_catalogs=part_catalogs,
+        )
+        # Keep native part positions code-owned, outside the grounding prompt
+        # and simulator configuration, for per-part automatic arm preference.
+        prepared = replace(
+            prepared,
+            planner_objects=tuple(
+                (
+                    {
+                        **item,
+                        "_articulation_part_positions": {
+                            str(part["part_id"]): list(part["handle_center_world"])
+                            for part in part_catalogs[str(item["runtime_uid"])]
+                            if "handle_center_world" in part
+                        },
+                    }
+                    if str(item["runtime_uid"]) in part_catalogs
+                    else item
+                )
+                for item in prepared.planner_objects
+            ),
         )
         return SceneAdaptation(
             scene_manifest=manifest,
@@ -797,7 +882,47 @@ def _ground_candidate(
         for part in parts
     }
     normalized_bindings: dict[str, tuple[str, ...]] = {}
+    e6_references = {
+        f"{step['id']}.object"
+        for step in candidate["draft"]["steps"]
+        if step["task_type"] == "E6"
+    }
+    set_references = {
+        f"{step['id']}.object"
+        for step in candidate["draft"]["steps"]
+        if step["object"].get("quantifier") in {"all", "count"}
+    }
+    opening_references = {
+        f"{step['id']}.object"
+        for step in candidate["draft"]["steps"]
+        if step["task_type"] == "E6" and step["target_state"] == "open"
+    }
     for reference_id, uids in raw_bindings.items():
+        if reference_id in e6_references and (
+            len(uids) > 1
+            or (
+                reference_id in set_references
+                and any(len((part_catalogs or {}).get(uid, ())) > 1 for uid in uids)
+            )
+        ):
+            # Preserve part identity until the planner expands the set. Mapping
+            # every part to its cabinet here loses all but the last part ID.
+            if not all(uid in synthetic_parts for uid in uids):
+                return (
+                    _candidate_audit(
+                        candidate,
+                        "unresolved",
+                        [],
+                        [f"{reference_id} requires explicit articulation parts."],
+                    ),
+                    None,
+                )
+            normalized_bindings[reference_id] = tuple(uids)
+            if reference_id in set_references & opening_references:
+                normalized_bindings[reference_id] = _order_open_parts_bottom_up(
+                    uids, part_catalogs or {}
+                )
+            continue
         normalized: list[str] = []
         for uid in uids:
             parent_part = synthetic_parts.get(uid)
@@ -848,6 +973,15 @@ def _ground_candidate(
         response = response_by_id[reference_id]
         audit_reasons = list(compatibility_reasons)
         if (
+            reference_id in set_references & opening_references
+            and len(uids) > 1
+            and tuple(response["uids"]) != tuple(uids)
+        ):
+            audit_reasons.append(
+                "Ordered selected parts bottom-to-top within each articulation; "
+                "preserved same-height order."
+            )
+        if (
             force_most_likely
             and response.get("status") == "ambiguous"
             and response.get("uids")
@@ -862,7 +996,12 @@ def _ground_candidate(
                 "status": ("incompatible" if compatibility_reasons else "resolved"),
                 "confidence": float(response["confidence"]),
                 "candidate_uids": [
-                    synthetic_parts.get(uid, (uid, ""))[0] for uid in response["uids"]
+                    (
+                        uid
+                        if reference_id in e6_references and len(uids) > 1
+                        else synthetic_parts.get(uid, (uid, ""))[0]
+                    )
+                    for uid in response["uids"]
                 ],
                 "selected_uids": ([] if compatibility_reasons else list(uids)),
                 "reasons": audit_reasons,
