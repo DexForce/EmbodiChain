@@ -142,7 +142,7 @@ Version 3 adds the support object's stable window and a final failed-attempt
 camera fetch before reset. The v2 physical runs are retained as historical
 evidence, not qualification of this revised acceptance behavior.
 
-E1-E6 are the Task Engine execution scope. E7-E9 routing is rejected before
+E1-E6 and standalone E9 are the Task Engine execution scope. E7/E8 routing is rejected before
 semantic graph generation and bundle asset writing. Initial E6 support requires
 one environment and a fixed-base, single-prismatic, self-contained metre-authored
 USD with uniform scale, a zero closed endpoint, and one identifiable collision
@@ -153,6 +153,39 @@ movement independent of current state. A one-second window must stay within
 Park. Withdrawal also requires measured hand-open posture. This proves neither
 contact-supported sliding nor geometric hand separation or in-flight safety.
 Arbitrary scenes and robots are not physically qualified by these checks.
+
+### E9 正式接入
+
+正常入口是 `python -m embodichain.gen_sim.task_engine prepare/run-all/run`。
+E9 使用 `gen_sim.press_prepare`、`gen_sim.press`、Park 三个显式段落，沿用
+Task Program/Gym 执行，不创建第二执行器。部署必须保留释放初态检查、按压
+事件检查及 Park 后的撤离检查；缺少其中任何一个都不能加载。
+
+绑定仅支持 fixed-base、直接连接根刚体的 prismatic button、米制自包含 USD
+和均匀缩放；当前只支持一个环境、一个独立 E9 任务，不隐式扩展混合配方。
+`press_calibration.json` 记录生成部署的缩放限位、运动部件质量/惯量校准及释放偏置。
+这是显式实验物理校准，不冒充源资产原有的弹簧或自锁机构。源 USD 和共享物理默认值不变。
+不根据 STOP/emergency 名称生成自锁驱动；接触传感器仅观察，不驱动按钮。
+正常重力、速度检查和准确的手指/按钮接触身份均保留。手爪闭合后的几何前缘
+用于补偿 grasp TCP，避免把抓取 TCP 当作按压指尖。
+按钮、外壳和指垫保留声明或原生接触参数，不覆盖 contact/rest offset。
+正常 prepare/run-all 会将绑定的 E9 按钮总成 body_scale 设为 [1, 1, 1]，
+保持 XY、朝向和原支撑底面；其他物体不变，源 USD 不覆盖。
+press_adaptation.json 记录原始/部署尺度与位置；越出桌面或与其他物体包围盒重叠时拒绝生成。
+质量和释放驱动沿用单位化之前的场景校准，避免单纯改变尺寸时同时改变按压阻力。
+这是显式生成部署适配，不代表源资产原样通过，也不是按夹爪自动估算尺寸。
+E9 物理配置指纹使用资源内容而非绝对存放路径，事务发布及 final/bundle 复制不会改变身份；
+修改物理参数或资源内容仍会触发指纹拒绝。旧 E9 bundle 需要重新生成。
+显式 route 可声明 `extra_press_distance`（0--0.010 m，默认额外 10 mm）。
+它仅增加公共 Press 的命令下压量，不改变按钮目标、限位、物理参数或验收阈值，
+并纳入部署指纹。50/100 mm 越程实验不再作为可用部署配置。
+这个参数上限不代表目标具有相应碰撞余量，也不构成硬件安全认证。
+成功必须包含释放初态、press 阶段连续真实接触支持的至少 0.25 mm 位移，
+不能由 Runner 完成、被动下沉、已有按下状态或空接触替代。
+不要求按到完整机械端点；按压事件在回弹和撤离后保留，不要求最终持续按下。
+普通 Task Program 报告与 `press_evidence.json` 分别记录调用结果及物理子步证据；
+记录按钮特写与全景视频。成功含义仅为 `contact_press_0.25mm`，不宣称功能激活或自锁。
+旧独立 probe 入口已移除，所有运行验收使用正常 Task Engine。
 
 Physical acceptance requires the user's complete can-stacking and original
 tray-holding CLI runs, with measured stable end states and recorded failures.

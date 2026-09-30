@@ -127,6 +127,26 @@ def execute_bundle(
 
         def configure_environment(value: dict[str, Any]) -> None:
             _configure_recording(value, output)
+            routes = deployment.integration.adapter_factory.press_routes
+            if routes:
+                source = load_config(root / "components/scene.yaml")["simulation"]
+                art = next(
+                    a
+                    for a in source["articulation"]
+                    if a["uid"] == routes[0].binding.object_id
+                )
+                position = np.asarray(art["init_local_pose"], dtype=float)[:3, 3]
+                target = position + np.array([0.0, 0.0, 0.05])
+                camera = deepcopy(value["env"]["events"]["record_camera"])
+                camera["params"].update(
+                    name="e9_button_view",
+                    resolution=[960, 540],
+                    intrinsics=[800.0, 800.0, 480.0, 270.0],
+                    eye=(target + np.array([0.30, -0.25, 0.20])).tolist(),
+                    target=target.tolist(),
+                    up=[0.0, 0.0, 1.0],
+                )
+                value["env"]["events"]["record_press_camera"] = camera
             value.pop("task_program", None)
 
         env_cfg, gym_config, action_config = build_env_cfg_from_args(
@@ -202,6 +222,54 @@ def execute_bundle(
                 failure["abort_error"] = _exception_metadata(abort_error)
     finally:
         if env is not None:
+            try:
+                from ._task_program.press_runtime import SENSOR_UID, PressContactSensor
+
+                sensor = (
+                    getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
+                    if getattr(
+                        deployment.integration.adapter_factory, "press_routes", ()
+                    )
+                    else None
+                )
+                if isinstance(sensor, PressContactSensor):
+                    (output / "press_evidence.json").write_text(
+                        json.dumps(
+                            {
+                                "route": sensor.route.payload(),
+                                "acceptance": sensor.acceptance,
+                                "target_actor_id": sensor.target_actor,
+                                "parent_actor_id": sensor.parent_actor,
+                                "contact_envelopes": sensor.contact_envelopes,
+                                "finger_actor_ids": sorted(sensor.finger_actors),
+                                "runtime_mass": sensor.art.get_mass(
+                                    sensor.route.binding.link
+                                ).tolist(),
+                                "runtime_limits": sensor.art.get_qpos_limits()[
+                                    0, sensor.joint_index
+                                ].tolist(),
+                                "runtime_drive": [
+                                    v.tolist()
+                                    for v in sensor.art.get_joint_drive(
+                                        joint_ids=[sensor.joint_index]
+                                    )
+                                ],
+                                "trace": sensor.trace,
+                            },
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+            except Exception as evidence_error:
+                evidence_failure = {
+                    "type": type(evidence_error).__name__,
+                    "message": str(evidence_error),
+                }
+                if failure is None:
+                    failure = evidence_failure
+                else:
+                    failure["press_evidence_error"] = evidence_failure
+                row_success = [False] * int(args.num_envs)
             try:
                 getattr(env, "unwrapped", env).close(exit_process=False)
             except Exception as cleanup_error:
