@@ -479,8 +479,6 @@ def _normalize_nested_task_modules() -> None:
         module = sys.modules.get(module_name)
         if module is not None:
             sys.modules.setdefault(flat_name, module)
-            module.__name__ = flat_name
-            module.__package__ = flat_name.rpartition(".")[0]
         spec.cls.__module__ = flat_name
 
 
