@@ -344,8 +344,8 @@ until execution integration.
 Persisted candidates must match the current intent and exactly derived scene
 request. Regenerate legacy E7 closing candidates and E6/E7 candidates with old
 capability declarations; do not silently relabel them. The serialized field
-layout is unchanged. Execution admits E1-E6; E7-E9 remain rejected before graph
-generation and bundle publication. E6 uses the explicit registered
+layout is unchanged. Execution admits E1-E6 and standalone E9; E7/E8 remain
+rejected before graph generation and bundle publication. E6 uses the explicit registered
 Slide/withdraw/Park recipe in `_task_program/articulation_binding.py` and
 `articulation_slide.py`. Its first supported binding is one fixed-base,
 single-prismatic, self-contained metre-authored USD with uniform scale and an
@@ -353,6 +353,37 @@ unambiguous handle mesh, in one simulation environment. Asset hashes, joint
 ownership, and declared limits are checked again at runtime. Public Slide owns
 planning; public Task Program and Gym own execution. Joint-target retention is
 checked after every recipe call; this is not in-flight contact qualification.
+
+E9 is owned by `_task_program/press_binding.py` and `press_runtime.py`: an
+explicitly bound, fixed-root prismatic button lowers to prepare/Press/Park
+through the ordinary Task Program and Gym runtime. Generated deployments audit
+scaled limits, pre-resize calibrated moving-link mass and an explicit release bias;
+source USD and shared physics defaults remain unchanged. No synthetic latch is
+inferred from a STOP label; the sensor never commands the button. Grasp TCP is offset to
+the closed fingers' leading geometry. Mandatory post-policies verify released
+stability, at least 0.05 mm continuous contact-backed travel and actual finger
+withdrawal, again after Park. Rebound does not erase the event; full mechanical
+travel, device activation and self-latching are not claimed. Only the empty symbolic effects
+use projected bookkeeping; these physical post-policies cannot be removed.
+One button/one environment is supported; mixed recipes and ambiguous controls
+remain rejected. The old standalone press probe was removed; qualification uses
+the normal Task Engine route. Regenerate E9 bundles after lowerer revisions.
+E9 preserves the declared/native button, housing and finger contact envelopes;
+it does not override contact or rest offsets. Normal E9 generation sets only
+the selected button assembly to unit body scale, preserving XY, rotation and
+the original support bottom. Other objects and source USD remain unchanged.
+Table-footprint or object-AABB conflicts reject the deployment. The audit in
+press_adaptation.json records original and deployed geometry; mass and release
+drive retain their pre-resize calibration. This explicit deployment policy is
+not gripper-driven size estimation or proof of original-scene success.
+E9 physical configuration identity hashes resource contents rather than their
+absolute locations, so nested transaction publication and final-bundle copies
+preserve identity without allowing physical-parameter or asset-content drift.
+An explicit E9 route may declare 0--10 mm extra commanded press travel;
+the requested default is 10 mm. This changes only public Press's
+command distance, not button limits, target state, physics or acceptance. The
+extra distance is included in the route fingerprint; the bound is not a
+collision-clearance or hardware-safety certificate.
 
 `task_engine/scene/articulation_geometry.py` measures Z-up, metre-authored USD
 collision meshes in the native base-link frame, not the default prim's world
