@@ -14,17 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""MCP adapters for EmbodiChain's simulation and motion capabilities."""
+"""Compatibility imports for the top-level :mod:`embodichain.mcp` package."""
 
 from __future__ import annotations
 
-from .backend import (
+from embodichain.mcp import (
+    EmbodiChainMCPService,
     InMemorySimulationBackend,
     SimulationBackend,
     SimulationManagerBackend,
+    cli,
+    create_server,
+    serve,
 )
-from .server import cli, create_server, serve
-from .service import EmbodiChainMCPService
 
 __all__ = [
     "EmbodiChainMCPService",

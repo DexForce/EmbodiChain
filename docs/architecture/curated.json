@@ -2513,7 +2513,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -3198,6 +3198,34 @@
           "label": "Convex decomposition documentation"
         }
       ]
+    },
+    {
+      "id": "mcp-server",
+      "label": "MCP access layer",
+      "kind": "module",
+      "topic_ids": [
+        "mcp"
+      ],
+      "summary": "Registers cross-domain MCP tools, resources, and prompts over injected EmbodiChain adapters.",
+      "boundaries": [
+        "The protocol layer does not implement simulation, planning, learning, or device control."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/mcp/server.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"MCP protocol adapter and command-line entry point.\n\nThe server owns protocol registration and delegates domain behavior to\ninjected adapters. Simulation is the first adapter; future Task Program, RL,\ndata, visualization, and device adapters can register beside it.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.mcp",
+          "label": "MCP API reference"
+        }
+      ],
+      "details": "The top-level MCP package is an Agent-facing integration boundary. It owns protocol registration and common handles while domain adapters retain simulation, motion, learning, data, visualization, and device ownership."
     }
   ],
   "edges": [
@@ -5435,7 +5463,8 @@
         "device-controller",
         "grasp-tools",
         "urdf-assembly",
-        "convex-decomposition"
+        "convex-decomposition",
+        "mcp-server"
       ],
       "edge_ids": [
         "adapter-calls-compiler",

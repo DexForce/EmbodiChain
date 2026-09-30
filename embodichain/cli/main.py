@@ -121,7 +121,7 @@ COMMANDS = (
     ),
     Command(
         name="mcp",
-        target="embodichain.lab.mcp.server:cli",
+        target="embodichain.mcp.server:cli",
         help="Expose simulation and motion capabilities over MCP.",
     ),
 )

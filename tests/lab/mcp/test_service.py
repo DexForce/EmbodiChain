@@ -24,11 +24,12 @@ import time
 import pytest
 import torch
 
-from embodichain.lab.mcp import (
+from embodichain.mcp import (
     EmbodiChainMCPService,
     SimulationManagerBackend,
     create_server,
 )
+from embodichain.lab.mcp import EmbodiChainMCPService as LegacyMCPService
 
 DEMO_ROBOT = "demo_planar_arm"
 TARGET_POSE = {"position_m": [0.6, 0.2, 0.0]}
@@ -141,6 +142,10 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     assert prompt_names == {"inspect_robot", "validate_motion"}
     assert result.is_error is False
     assert result.structured_content["result"]["reachable"] is True
+
+
+def test_legacy_lab_import_path_reexports_top_level_service():
+    assert LegacyMCPService is EmbodiChainMCPService
 
 
 def test_simulation_manager_backend_adapts_lifecycle_and_kinematics():

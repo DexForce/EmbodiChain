@@ -1,11 +1,11 @@
-embodichain.lab.mcp
-===================
+embodichain.mcp
+===============
 
 The MCP adapter exposes phase-one, coarse-grained simulation and motion
 operations.  The protocol layer is optional; install the ``mcp`` extra before
 starting the command-line server.
 
-.. currentmodule:: embodichain.lab.mcp
+.. currentmodule:: embodichain.mcp
 
 .. autosummary::
 
@@ -34,20 +34,38 @@ starting the command-line server.
 
 .. autofunction:: cli
 
-embodichain.lab.mcp.backend
-===========================
+embodichain.mcp.backend
+=======================
+
+.. automodule:: embodichain.mcp.backend
+   :members:
+
+embodichain.mcp.server
+======================
+
+.. automodule:: embodichain.mcp.server
+   :members:
+
+embodichain.mcp.service
+=======================
+
+.. automodule:: embodichain.mcp.service
+   :members:
+
+Compatibility imports
+=====================
+
+The original ``embodichain.lab.mcp`` import path remains available for
+callers that adopted the initial phase-one preview.
+
+.. automodule:: embodichain.lab.mcp
+   :members:
 
 .. automodule:: embodichain.lab.mcp.backend
    :members:
 
-embodichain.lab.mcp.server
-==========================
-
 .. automodule:: embodichain.lab.mcp.server
    :members:
-
-embodichain.lab.mcp.service
-===========================
 
 .. automodule:: embodichain.lab.mcp.service
    :members:

@@ -14,18 +14,24 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility imports for MCP backend adapters."""
+"""Cross-domain MCP access layer for EmbodiChain capabilities."""
 
 from __future__ import annotations
 
-from embodichain.mcp.backend import (
+from .backend import (
     InMemorySimulationBackend,
     SimulationBackend,
     SimulationManagerBackend,
 )
+from .server import cli, create_server, serve
+from .service import EmbodiChainMCPService
 
 __all__ = [
+    "EmbodiChainMCPService",
     "InMemorySimulationBackend",
     "SimulationBackend",
     "SimulationManagerBackend",
+    "cli",
+    "create_server",
+    "serve",
 ]
