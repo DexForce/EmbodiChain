@@ -124,9 +124,9 @@ class SemanticTaskPlanner:
         for step in steps:
             step_id = str(step["id"])
             task_type = str(step["task_type"])
-            if task_type not in {"E1", "E2", "E3", "E4", "E5", "E6"}:
+            if task_type not in {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}:
                 raise UnsupportedSemanticCapabilityError(
-                    f"Task Engine currently supports only E1-E6, not {task_type}."
+                    f"Task Engine currently supports E1-E6 and E9, not {task_type}."
                 )
             object_id = self._resolve_step_entity(
                 step,
@@ -497,6 +497,16 @@ class SemanticTaskPlanner:
                     cleanup_resources = ("left", "right")
                 else:
                     held_by[object_id] = "coordinated"
+            elif task_type == "E9":
+                from ._task_program.press_binding import recipe as press_recipe
+
+                requested = str(step.get("required_arm", "auto"))
+                resource = (
+                    self._nearest_resource(object_id, objects)
+                    if requested in {"auto", "none"}
+                    else _resource(requested, field="required_arm")
+                )
+                calls = press_recipe(object_id, resource)
             elif task_type == "E6":
                 from ._task_program.articulation_binding import recipe
 
@@ -590,7 +600,15 @@ class SemanticTaskPlanner:
                         calls.append(alignment)
                 upright_objects.add(object_id)
             call_roles = [
-                (call, "cleanup" if task_type == "E6" and index > 0 else "primary")
+                (
+                    call,
+                    (
+                        "cleanup"
+                        if (task_type == "E6" and index > 0)
+                        or (task_type == "E9" and index > 1)
+                        else "primary"
+                    ),
+                )
                 for index, call in enumerate(calls)
             ]
             if cleanup_resources and (

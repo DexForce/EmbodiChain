@@ -56,6 +56,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory = object.__new__(_TaskFactory)
     factory._drawers = (object(),) if has_drawers else ()
     factory._pour_receivers = {}
+    factory._press_routes = ()
     factory._create_motion_generator = Mock(return_value=object())
     factory._grasp_pose_generators = {}
     factory._registration = registration
