@@ -1,0 +1,13 @@
+task_key: g1_flat
+title: Unitree G1 Flat Velocity
+summary: Track planar velocity and yaw-rate commands with the Unitree G1 humanoid on flat terrain.
+tags:
+- locomotion
+- reinforcement_learning
+- humanoid
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  newton:
+    config: env.newton.yaml

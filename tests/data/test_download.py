@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Regression coverage for robot asset discovery through the download CLI."""
+"""Regression coverage for asset discovery through the download CLI."""
 
 from __future__ import annotations
 
@@ -34,6 +34,14 @@ LOCOMOTION_ASSETS = (
     "UnitreeGo2Locomotion",
     "UnitreeH1_2Locomotion",
 )
+
+
+@pytest.mark.no_sim
+def test_rubiks_cube_asset_is_shared_by_config_and_download_registries() -> None:
+    """Task configs and the data CLI resolve the same Rubik's-cube bundle."""
+    demo_assets = dict(download.get_registry()["demo"])
+
+    assert demo_assets["RubiksCube"] is get_data_class("RubiksCube")
 
 
 @pytest.mark.no_sim

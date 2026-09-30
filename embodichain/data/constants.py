@@ -27,8 +27,12 @@ __all__ = [
 ]
 
 EMBODICHAIN_DOWNLOAD_PREFIX = (
-    "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/"
+    os.environ.get("EMBODICHAIN_DOWNLOAD_PREFIX")
+    or "https://hf-mirror.com/datasets/DexForceAI/embodichain_data/resolve/main/"
 )
+# Some consumers append "robot_assets/..." directly, so always end with "/".
+if not EMBODICHAIN_DOWNLOAD_PREFIX.endswith("/"):
+    EMBODICHAIN_DOWNLOAD_PREFIX += "/"
 EMBODICHAIN_DEFAULT_DATA_ROOT = os.environ.get(
     "EMBODICHAIN_DATA_ROOT", str(Path.home() / ".cache" / "embodichain_data")
 )

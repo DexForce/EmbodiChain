@@ -121,7 +121,10 @@ def test_engine_gates_recovery_before_touching_other_planning(
     engine._cartesian_calls = {call} if enabled else set()
     seen = []
 
-    def original(self, request, context=None):
+    transform = lambda request, context, plan: plan
+
+    def original(self, request, context=None, *, plan_transform=None):
+        assert plan_transform is transform
         seen.append(recovery.motion_scope(generator) is not None)
         return Plan(plan_success=torch.tensor([True]))
 
@@ -132,7 +135,9 @@ def test_engine_gates_recovery_before_touching_other_planning(
             strategy=strategy, dynamic_collision_mode=collision, sample_count=260
         ),
     )
-    result = engine._plan_request(request, NS(batch_size=batch))
+    result = engine._plan_request(
+        request, NS(batch_size=batch), plan_transform=transform
+    )
     assert seen == [expected]
     assert result.plan_success.tolist() == [True]
     assert recovery.motion_scope(generator) is None

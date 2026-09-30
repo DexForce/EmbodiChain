@@ -64,8 +64,8 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     run_tutorial,
 )
 
-MICROWAVE_ASSET = "MicrowaveOven/microwave_oven_with_inertials.urdf"
-HANDLE_LINK_NAME = "door_handle"
+MICROWAVE_ASSET = "Microwave/microwave.urdf"
+HANDLE_LINK_NAME = "handle_link"
 MICROWAVE_SCENE_ENTITY_ID = "microwave"
 MICROWAVE_POSITION = (-1.0, 0.20, 0.4)
 MICROWAVE_ORIENTATION = (0.0, 0.0, 90.0)  # degrees
@@ -118,10 +118,10 @@ def create_microwave(sim: SimulationManager) -> Articulation:
 
 
 def create_door_handle_semantics(microwave: Articulation) -> ObjectSemantics:
-    """Resolve the first parent revolute joint from ``door_handle``.
+    """Resolve the parent door hinge from ``handle_link``.
 
-    Only the handle link is configured. ``OpenDoorAffordance`` traverses the
-    fixed ``door_to_door_handle_fixed`` joint and resolves ``door_hinge``.
+    For ``Microwave/microwave.urdf``, ``OpenDoorAffordance`` traverses the
+    fixed ``door_handle_fixed_joint`` and resolves ``door_hinge``.
     """
     affordance = OpenDoorAffordance.from_articulation(
         microwave,

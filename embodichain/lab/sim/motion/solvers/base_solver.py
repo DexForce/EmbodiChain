@@ -23,6 +23,7 @@ import numpy as np
 import torch
 
 from embodichain.utils import configclass, logger
+from embodichain.utils.math import inv_transform
 
 if TYPE_CHECKING:
     from typing import Self
@@ -70,6 +71,7 @@ class SolverCfg:
     """The tool center point (TCP) position as a 4x4 homogeneous matrix.
 
     This represents the position and orientation of the tool in the robot's end-effector frame.
+    It must be a finite SE(3) rigid transform; affine transforms are not supported.
     """
 
     ik_nearest_weight: List[float] | None = None
@@ -91,7 +93,7 @@ class SolverCfg:
         pass
 
     def _get_tcp_as_numpy(self) -> np.ndarray:
-        """Convert TCP to numpy array.
+        """Convert TCP to a numpy array and validate its rigid-transform contract.
 
         This helper method handles the conversion of TCP from torch.Tensor to numpy
         if needed. Used by subclass init_solver methods to set TCP on the solver.
@@ -100,8 +102,11 @@ class SolverCfg:
             np.ndarray: The TCP as a numpy array.
         """
         if isinstance(self.tcp, torch.Tensor):
-            return self.tcp.cpu().numpy()
-        return self.tcp
+            tcp = self.tcp.cpu().numpy()
+        else:
+            tcp = np.asarray(self.tcp)
+        inv_transform(tcp)
+        return tcp
 
     @classmethod
     def from_dict(cls, init_dict: Dict[str, Any]) -> "SolverCfg":
@@ -153,6 +158,8 @@ class BaseSolver(metaclass=ABCMeta):
             **kwargs: Additional keyword arguments for customization.
         """
         self.cfg = cfg
+        # Reject invalid configured TCPs before allocating solver/backend state.
+        cfg._get_tcp_as_numpy()
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -488,18 +495,19 @@ class BaseSolver(metaclass=ABCMeta):
             "upper_qpos_limits": self.upper_qpos_limits.tolist(),
         }
 
-    def set_tcp(self, xpos: np.ndarray):
+    def set_tcp(self, xpos: np.ndarray) -> None:
         r"""Sets the TCP position with the given 4x4 homogeneous matrix.
 
         Args:
             xpos (np.ndarray): The 4x4 homogeneous matrix to be set as the TCP position.
 
         Raises:
-            ValueError: If the input is not a 4x4 numpy array.
+            ValueError: If the input is not a finite 4x4 SE(3) transform.
+            numpy.linalg.LinAlgError: If the transform is singular.
         """
         xpos = np.array(xpos)
-        if xpos.shape != (4, 4):
-            raise ValueError("Input must be a 4x4 homogeneous matrix")
+        # Validate before replacing the active TCP or any subclass IK caches.
+        inv_transform(xpos)
         self.tcp_xpos = xpos
 
     def get_tcp(self) -> np.ndarray:

@@ -27,6 +27,7 @@ import numpy as np
 import torch
 
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.learning.rl.policy_evaluation.camera import PolicyViewerCameraCfg
 from embodichain.utils.math import quat_apply, quat_apply_inverse
 
 from .._robot import apply_task_joint_drive_properties
@@ -64,6 +65,7 @@ def _select_single_command_axis(
 class EmbodiChainVelocityEnv(EmbodiedEnv):
     """Connect one pure Torch velocity task to EmbodiChain and DexSim state."""
 
+    policy_viewer_camera_cfg: PolicyViewerCameraCfg | None = None
     velocity_task_config: Any = None
     state_type: type[Any]
     build_observations_fn: Callable[..., tuple[torch.Tensor, torch.Tensor]]
@@ -88,6 +90,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             if term_cfg is not None:
                 mapping = {
                     "joint_names": self.velocity_task_config.joint_names,
+                    "preserve_order": True,
                     "offset": self.velocity_task_config.default_joint_position,
                     "scale": self.velocity_task_config.action_scale,
                 }
@@ -98,6 +101,15 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
                 cfg.robot.joint_drive_props.stiffness = 0.0
                 cfg.robot.joint_drive_props.damping = 0.0
         super().__init__(cfg, **kwargs)
+
+    def get_policy_viewer_target_pose(self) -> np.ndarray:
+        """Return the first robot's world root pose for native Viewer tracking.
+
+        Returns:
+            A copied seven-element array containing XYZ position and XYZW
+            orientation. The native policy Viewer requires a single environment.
+        """
+        return self.robot.body_data.root_pose[0].detach().cpu().numpy().copy()
 
     def _init_sim_state(self, **kwargs) -> None:
         config = self.velocity_task_config
@@ -196,10 +208,7 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
         self._command_steps_remaining = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
-        action_term = self.action_manager.get_term("joint_position")
-        self.locomotion_action = action_term.action
-        self.last_locomotion_action = action_term.previous_action
-        self.encoder_bias = action_term.position_bias
+        self._bind_locomotion_action_state()
         bias = config.data.get("events", {}).get("encoder_bias")
         if bias is not None:
             minimum, maximum = bias["params"]["bias_range"]
@@ -241,6 +250,50 @@ class EmbodiChainVelocityEnv(EmbodiedEnv):
             shape=(config.action_dim,),
             dtype=np.float32,
         )
+
+    def _bind_locomotion_action_state(self) -> None:
+        """Bind task state to the default-position action term buffers.
+
+        Older custom deployments identify this compatible term by the stable
+        ``joint_position`` name without declaring a contract. Keep that
+        name-based path when its state interface is present, then fall back to
+        the versioned contract for migrated configurations.
+        """
+        contract_id = "joint_position.default_offset@1"
+        required_state = ("raw_actions", "previous_raw_actions", "position_bias")
+
+        action_term = None
+        get_term = getattr(self.action_manager, "get_term", None)
+        if callable(get_term):
+            try:
+                named_term = get_term("joint_position")
+            except KeyError:
+                named_term = None
+            if named_term is not None:
+                resolved_contract = getattr(named_term, "contract_id", None)
+                resolve_contract = getattr(named_term, "resolved_contract_id", None)
+                if callable(resolve_contract):
+                    resolved_contract = resolve_contract()
+                if resolved_contract in {None, contract_id} and all(
+                    hasattr(named_term, attribute) for attribute in required_state
+                ):
+                    action_term = named_term
+
+        if action_term is None:
+            action_term = self.action_manager.get_term_by_contract(contract_id)
+        missing_state = [
+            attribute
+            for attribute in required_state
+            if not hasattr(action_term, attribute)
+        ]
+        if missing_state:
+            raise TypeError(
+                f"Locomotion action term must expose {required_state}; "
+                f"missing {missing_state}."
+            )
+        self.locomotion_action = action_term.raw_actions
+        self.last_locomotion_action = action_term.previous_raw_actions
+        self.encoder_bias = action_term.position_bias
 
     def velocity_command_bounds(self) -> tuple[np.ndarray, np.ndarray]:
         """Return configured planar and yaw command bounds in SI units."""

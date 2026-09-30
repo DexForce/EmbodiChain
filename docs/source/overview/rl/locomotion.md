@@ -15,6 +15,12 @@ Locomotion environments use the same task registration, configuration loader, ac
 Paths in this table are relative to `embodichain_tasks/configs/tasks/`.
 Each directory contains `env.yaml` and `agents/ppo.yaml` for the default backend, plus `env.newton.yaml` and `agents/ppo.newton.yaml` for Newton. Capability registration is `RL`.
 
+The six velocity task deployments declare the generic
+`joint_position.default_offset@1` action contract. The contract describes the
+normalized default-pose joint mapping; it is independent of the current
+`ActionManager` implementation class. Older pretrained bundles that contain
+`DefaultJointPositionTerm` are migrated to this contract while loading.
+
 ## Assets and cache
 
 The download classes resolve seven published ZIP archives in the `robot_assets/` directory of [DexForceAI/embodichain_data](https://huggingface.co/datasets/DexForceAI/embodichain_data). Models are downloaded on first use and cached outside the Python wheel.

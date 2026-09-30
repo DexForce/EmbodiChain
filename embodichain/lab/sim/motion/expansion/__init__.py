@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Host-independent grasp/qpos augmentation, coverage, and generation bookkeeping.
+"""Host-independent grasp/qpos augmentation, coverage, and expansion bookkeeping.
 
 Execution, initial-state restoration, physical validation, and durable storage
 are supplied by host integrations. These algorithms do not call Gym or a
@@ -24,13 +24,42 @@ initialization and requires the simulation package dependencies.
 
 from __future__ import annotations
 
-from .cfg import TrajectoryAugmentationCfg, TrajectoryGenerationJobCfg
+from .cfg import (
+    SPATIAL_METHODS,
+    TrajectoryExpansionCfg,
+    TrajectoryAugmentationCfg,
+    TrajectoryExpansionJobCfg,
+)
+from .combined import (
+    CandidateRecipe,
+    CallRecipe,
+    CombinedExpansionProfile,
+    CubeInitialPoseProvider,
+    CycleRecipe,
+    PhysicalSlotPool,
+    ReferenceFamilySpec,
+    SlotReservation,
+    enumerate_candidate_recipes,
+    load_visual_profile_registry,
+    schedule_digest,
+)
+from .combined_runtime import (
+    CombinedAssignment,
+    CombinedEpisodeCoordinator,
+    MeasuredValidator,
+    VisualProfileApplication,
+    VisualProfileRegistry,
+    round_robin_recipes,
+)
+from .coordinator import CandidateCoordinator, CandidateWorkItem
 from .contracts import (
     CandidateIdentity,
+    CandidateSpec,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
     MotionSnapshot,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     TrajectoryTemplate,
@@ -38,23 +67,71 @@ from .contracts import (
     ValidationResult,
 )
 from .coverage import CoverageIndex, TrajectoryDescriptor, describe_trajectory
+from .manipulability import (
+    GuidedResidual,
+    ManipulabilityBands,
+    ManipulabilityProfile,
+    describe_manipulability,
+    manipulability_guided_residual,
+)
+from .variants import (
+    NOMINAL_OPERATOR,
+    TrajectoryVariant,
+    TrajectoryVariantSet,
+    apply_trajectory_variant,
+    default_variant_factors,
+    expand_trajectory_variants,
+    plan_trajectory_variants,
+    sample_approach_cone,
+)
 from .operators import (
+    TIMING_PROFILES,
+    ProposalRejected,
     joint_residual,
+    nullspace_residual,
+    perturb_approach_direction,
     retime,
     rotate_grasp_about_object_axis,
     validate_motion_limits,
+    via_points,
 )
-from .session import GenerationSession
+from .session import ExpansionSession
+from .profile import load_expansion_profile
+from .source import (
+    PlanResultSourceAdapter,
+    SourceAdapter,
+    SourceContext,
+    TemplateSourceAdapter,
+)
 
 __all__ = [
+    "SPATIAL_METHODS",
     "CandidateIdentity",
+    "CandidateRecipe",
+    "CallRecipe",
+    "CombinedAssignment",
+    "CombinedEpisodeCoordinator",
+    "CandidateSpec",
+    "CandidateCoordinator",
+    "CandidateWorkItem",
     "CandidateTrajectoryBatch",
     "CommitReceipt",
+    "CombinedExpansionProfile",
+    "CubeInitialPoseProvider",
+    "CycleRecipe",
+    "MeasuredValidator",
+    "PhysicalSlotPool",
     "ExpertEpisode",
     "MotionSnapshot",
+    "ProposalRequest",
+    "ReferenceFamilySpec",
+    "SlotReservation",
+    "VisualProfileApplication",
+    "VisualProfileRegistry",
     "SceneCase",
     "TrajectoryAugmentationCfg",
-    "TrajectoryGenerationJobCfg",
+    "TrajectoryExpansionCfg",
+    "TrajectoryExpansionJobCfg",
     "TrajectoryPhase",
     "TrajectoryTemplate",
     "ValidationCheck",
@@ -62,9 +139,36 @@ __all__ = [
     "CoverageIndex",
     "TrajectoryDescriptor",
     "describe_trajectory",
+    "GuidedResidual",
+    "ManipulabilityBands",
+    "ManipulabilityProfile",
+    "describe_manipulability",
+    "manipulability_guided_residual",
+    "NOMINAL_OPERATOR",
+    "TrajectoryVariant",
+    "TrajectoryVariantSet",
+    "apply_trajectory_variant",
+    "default_variant_factors",
+    "expand_trajectory_variants",
+    "plan_trajectory_variants",
+    "sample_approach_cone",
+    "enumerate_candidate_recipes",
+    "load_visual_profile_registry",
+    "schedule_digest",
+    "round_robin_recipes",
+    "TIMING_PROFILES",
+    "ProposalRejected",
     "joint_residual",
+    "nullspace_residual",
+    "perturb_approach_direction",
     "retime",
     "rotate_grasp_about_object_axis",
     "validate_motion_limits",
-    "GenerationSession",
+    "via_points",
+    "ExpansionSession",
+    "load_expansion_profile",
+    "SourceAdapter",
+    "SourceContext",
+    "TemplateSourceAdapter",
+    "PlanResultSourceAdapter",
 ]

@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     HeldObjectPoseGoal,
     JointPositionTarget,
     PickUpOptions,
+    PlanTransform,
     PlaceGoal,
     SceneEntityPose,
 )
@@ -179,7 +180,13 @@ class DrawerPlacementEngine(GenSimActionEngine):
         super().__init__(*args, **kwargs)
         self._drawer_observations = drawer_observations
 
-    def _plan_request(self, request: Any, context: Any = None) -> Any:
+    def _plan_request(
+        self,
+        request: Any,
+        context: Any = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+    ) -> Any:
         current = self.initial_context() if context is None else context
         if isinstance(request.goal, HeldObjectPoseGoal) and isinstance(
             request.goal.object_target_pose, SceneEntityPose
@@ -210,7 +217,9 @@ class DrawerPlacementEngine(GenSimActionEngine):
                 )
                 motion = endpoint.require_target(JointPositionTarget)
                 with self.motion_generator.transport(observation, motion, current):
-                    plan = super()._plan_request(prepared, current)
+                    plan = super()._plan_request(
+                        prepared, current, plan_transform=plan_transform
+                    )
                 return replace(
                     plan,
                     scene_dependencies=tuple(
@@ -254,9 +263,13 @@ class DrawerPlacementEngine(GenSimActionEngine):
             )
         if prepared is not request and isinstance(request.goal, PlaceGoal):
             with self.motion_generator.placement_path(prepared.goal.xpos):
-                plan = super()._plan_request(prepared, current)
+                plan = super()._plan_request(
+                    prepared, current, plan_transform=plan_transform
+                )
         else:
-            plan = super()._plan_request(prepared, current)
+            plan = super()._plan_request(
+                prepared, current, plan_transform=plan_transform
+            )
         if (
             prepared is request
             or not isinstance(request.goal, PlaceGoal)

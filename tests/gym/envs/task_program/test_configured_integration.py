@@ -49,6 +49,7 @@ from embodichain.lab.task_program.integrations.configured import (
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
+    _decode_planner_config,
     _load_configured_task_program_deployment,
     _resolve_task_program_components,
 )
@@ -107,6 +108,11 @@ _REPOSITORY_ROOT = Path(__file__).parents[4]
 _CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
+    "rubiks_cube_pick_place": (
+        "task_program_rubiks_cube_pick_place",
+        "ur5_dh_pgi_140_80",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
     "repeated_pick_place": (
         "task_program_repeated_pick_place",
         "ur5_dh_pgi_140_80",
@@ -283,6 +289,44 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
+def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
+    """The policy-owned planner selection stays outside semantic payloads."""
+    deployment = _deployment_from_path(
+        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+    )
+
+    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    delegate = deployment.integration.adapter_factory.delegate
+    assert delegate._planner_config == deployment.planner_config
+    assert (
+        deployment.integration.registration.robot_profile_binding.presets[
+            0
+        ].required_planner
+        == "toppra"
+    )
+
+
+def test_planner_policy_decoder_validates_backend_and_options() -> None:
+    """Planner backends remain closed while typed options stay configurable."""
+    assert _decode_planner_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        path="execution policy.planner",
+    ) == {"type": "toppra", "config": {"max_workers": 2}}
+
+    with pytest.raises(ValueError, match="execution policy.planner.type"):
+        _decode_planner_config(
+            {"type": "custom_callable", "config": {}},
+            path="execution policy.planner",
+        )
+
+    for field_name in ("world", "auto_gen"):
+        with pytest.raises(TypeError, match="must be a mapping"):
+            _decode_planner_config(
+                {"type": "curobo", "config": {field_name: None}},
+                path="execution policy.planner",
+            )
+
+
 @pytest.mark.parametrize("task_name", ("repeated_pick_place", "open_drawer"))
 def test_single_task_program_composes_with_ur5_and_franka(
     task_name: str,
@@ -308,7 +352,10 @@ def test_single_task_program_composes_with_ur5_and_franka(
     assert (
         ur5_config["environment"]
         == franka_config["environment"]
-        == {"component": "env.yaml"}
+        == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
     )
     assert ur5_config["task_program"] == franka_config["task_program"]
     assert ur5.program_path == franka.program_path
@@ -335,9 +382,11 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     assert type(drawer_embodiment) is dict
     assert repeated_embodiment["component"] == drawer_embodiment["component"]
     repeated_environment = load_config(
-        _config_path("repeated_pick_place").parent / "env.yaml"
+        _config_path("repeated_pick_place").parent / "envs/default.yaml"
     )
-    drawer_environment = load_config(_config_path("open_drawer").parent / "env.yaml")
+    drawer_environment = load_config(
+        _config_path("open_drawer").parent / "envs/default.yaml"
+    )
     assert (
         repeated_environment["environment_id"] != drawer_environment["environment_id"]
     )
@@ -1138,12 +1187,15 @@ def test_pick_option_rejects_malformed_fixed_object_to_eef() -> None:
 def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
     task_name: str,
     registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Config loading creates a runnable ID without a task environment class."""
     env_id = f"Configured-{task_name.replace('_', '-')}-v1"
     registered_test_ids.append(env_id)
     config = _gym_config(task_name)
     config["id"] = env_id
+    if task_name == "rubiks_cube_pick_place":
+        monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
 
     cfg = config_to_cfg(config, source_path=_config_path(task_name))
     spec = REGISTERED_ENVS[env_id]
@@ -1163,6 +1215,52 @@ def test_all_examples_register_plain_embodied_env_under_config_selected_ids(
         spec.task_program_registration.robot_profile_binding.profile_id
     )
     assert env_id in gym_registry
+
+
+def test_rubiks_cube_example_registers_rigidized_articulation_scene(
+    registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    env_id = config["id"]
+    assert type(env_id) is str
+    registered_test_ids.append(env_id)
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+
+    config_to_cfg(config, source_path=path)
+    spec = REGISTERED_ENVS[env_id]
+    registration = spec.task_program_registration
+
+    assert gym_registry[env_id].id == "TaskProgramRubiksCubePickPlace-v1"
+    assert registration is not None
+    assert (
+        registration.scene_binding.rigidized_articulations[0].simulation_uid
+        == "rubiks_cube"
+    )
+    assert (
+        registration.scene_binding.rigidized_articulation_grasps[0].grasp_link
+        == "lower_two_layers"
+    )
+
+
+def test_rubiks_cube_physical_config_applies_declared_joint_lock(
+    registered_test_ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime applies the coincident limits required by scene binding."""
+    path = _config_path("rubiks_cube_pick_place")
+    config = _gym_config("rubiks_cube_pick_place")
+    env_id = config["id"]
+    assert type(env_id) is str
+    registered_test_ids.append(env_id)
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+
+    cfg = config_to_cfg(config, source_path=path)
+    cube_cfg = next(item for item in cfg.articulation if item.uid == "rubiks_cube")
+
+    assert cube_cfg.asset_physics_mode == "overlay"
+    assert cube_cfg.qpos_limits == {"top_turn": [0.0, 0.0]}
 
 
 def test_grasp_generator_resolves_named_model_and_library_defaults() -> None:
@@ -1299,6 +1397,163 @@ def test_scene_shorthand_derives_native_ids_and_affordance_metadata() -> None:
     assert binding.antipodal_grasps[0].native_name == "cube_grasp"
     assert binding.antipodal_grasps[0].revision == "1"
     assert binding.antipodal_grasps[0].object_id == "cube"
+
+
+def _rigidized_articulation_payload() -> dict[str, object]:
+    """Return an integration whose object is a locked native articulation."""
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    scene = payload["scene"]
+    assert type(scene) is dict
+    scene["rigidized_articulations"] = [
+        {
+            "entity_id": "rubiks_cube",
+            "simulation_uid": "cube_articulation",
+            "locked_qpos": {"top_turn": 0.0},
+            "dynamics": "dynamic",
+            "semantic_type": "rubiks_cube",
+            "affordances": [
+                {
+                    "kind": "antipodal_grasp",
+                    "entity_id": "rubiks_cube_grasp",
+                    "grasp_link": "lower_two_layers",
+                }
+            ],
+        }
+    ]
+    return payload
+
+
+def test_rigidized_articulation_scene_decodes_link_backed_grasp() -> None:
+    binding = _decode_configured_task_program_integration(
+        _rigidized_articulation_payload()
+    ).registration.scene_binding
+
+    assert dict(binding.rigidized_articulations[0].locked_qpos) == {"top_turn": 0.0}
+    assert binding.rigidized_articulation_grasps[0].grasp_link == "lower_two_layers"
+
+
+@pytest.mark.parametrize("collision_role", ("static", "dynamic"))
+def test_rigidized_articulation_config_rejects_unavailable_collision_geometry(
+    collision_role: str,
+) -> None:
+    """Configured articulation objects cannot claim a planner collision role."""
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["collision_role"] = collision_role
+
+    with pytest.raises(ValueError, match="rigidized.*collision_role.*none"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_requires_locked_qpos() -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root.pop("locked_qpos")
+
+    with pytest.raises(ValueError, match="missing required fields.*locked_qpos"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    ("locked_qpos", "exception", "message"),
+    [
+        ({}, ValueError, "must not be empty"),
+        ([], TypeError, "must be a mapping"),
+        ({"top_turn": True}, TypeError, "finite number"),
+        ({"top_turn": float("inf")}, ValueError, "must be finite"),
+    ],
+)
+def test_rigidized_articulation_rejects_invalid_locked_qpos(
+    locked_qpos: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["locked_qpos"] = locked_qpos
+
+    with pytest.raises(exception, match=message):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("joint_position_tolerance", "link_transform_tolerance"),
+)
+def test_rigidized_articulation_rejects_unsafe_large_tolerance(
+    field_name: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root[field_name] = 10.0
+
+    with pytest.raises(ValueError, match=f"{field_name}.*at most"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_grasp_requires_grasp_link() -> None:
+    payload = _rigidized_articulation_payload()
+    grasp = payload["scene"]["rigidized_articulations"][0]["affordances"][0]
+    grasp.pop("grasp_link")
+
+    with pytest.raises(ValueError, match="missing required fields.*grasp_link"):
+        _decode_configured_task_program_integration(payload)
+
+
+@pytest.mark.parametrize("field_name", ("mesh_env_id", "internal_axis"))
+def test_rigidized_articulation_grasp_rejects_rigid_object_fields(
+    field_name: str,
+) -> None:
+    payload = _rigidized_articulation_payload()
+    grasp = payload["scene"]["rigidized_articulations"][0]["affordances"][0]
+    grasp[field_name] = 0 if field_name == "mesh_env_id" else [1.0, 0.0, 0.0]
+
+    with pytest.raises(ValueError, match=f"unsupported fields.*{field_name}"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigid_object_grasp_rejects_grasp_link() -> None:
+    payload = deepcopy(_integration_payload("repeated_pick_place"))
+    grasp = payload["scene"]["rigid_objects"][0]["affordances"][0]
+    grasp["grasp_link"] = "lower_two_layers"
+
+    with pytest.raises(ValueError, match="unsupported fields.*grasp_link"):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_accepts_nested_placement_affordance() -> None:
+    payload = _rigidized_articulation_payload()
+    root = payload["scene"]["rigidized_articulations"][0]
+    root["affordances"].append(
+        {
+            "kind": "support_surface",
+            "entity_id": "rubiks_cube_top",
+            "native_name": "top",
+        }
+    )
+
+    binding = _decode_configured_task_program_integration(
+        payload
+    ).registration.scene_binding
+
+    assert binding.support_surfaces[0].parent_id == "rubiks_cube"
+
+
+def test_scene_rejects_flat_rigidized_articulation_grasps() -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulation_grasps"] = []
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported fields.*rigidized_articulation_grasps",
+    ):
+        _decode_configured_task_program_integration(payload)
+
+
+def test_rigidized_articulation_rejects_unknown_root_field() -> None:
+    payload = _rigidized_articulation_payload()
+    payload["scene"]["rigidized_articulations"][0]["unexpected"] = True
+
+    with pytest.raises(ValueError, match="unsupported fields.*unexpected"):
+        _decode_configured_task_program_integration(payload)
 
 
 def test_scene_entity_nesting_derives_all_affordance_parents() -> None:
@@ -1564,8 +1819,13 @@ def test_integration_registration_rejects_reusing_an_id_for_changed_config(
 
 
 def test_examples_have_no_importable_task_environment_modules() -> None:
-    """All three environment implementations are now serialized configuration."""
-    for task_name in _TASKS:
+    """Pure configuration-defined examples do not need Python task modules.
+
+    ``repeated_pick_place`` also ships import-registered RLinf variants, so
+    its task module is intentional even though the original Task Program
+    deployments remain configuration-defined.
+    """
+    for task_name in ("open_drawer", "hand_over"):
         module_name = f"embodichain_tasks.manipulation.{task_name}"
         assert importlib.util.find_spec(module_name) is None
 

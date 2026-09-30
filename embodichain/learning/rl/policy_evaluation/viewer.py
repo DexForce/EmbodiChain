@@ -43,6 +43,9 @@ from embodichain.learning.rl.evaluation import (
 )
 from embodichain.learning.rl.runtime import PolicyRuntime
 
+from ._viewer_camera import _ViewerCamera
+from .camera import PolicyViewerCameraCfg
+
 __all__ = [
     "EmbodiChainTaskEnvironment",
     "EmbodiChainTaskPolicyAdapter",
@@ -131,6 +134,8 @@ class EmbodiChainTaskEnvironment:
         self._seed = seed
         self._first_reset = True
         self._reset_key_down = False
+        self._tracking_key_down = False
+        self._camera: _ViewerCamera | None = None
         self._control_step = 0
         self._frame: EvaluationFrame | None = None
         self._episode_return = 0.0
@@ -180,9 +185,27 @@ class EmbodiChainTaskEnvironment:
 
     def open_viewer(self, title: str) -> None:
         """Apply the evaluation title to the task Viewer."""
-        self._world().get_windows().set_window_title(title)
+        from dexsim.types import InputKey
+
+        window = self._world().get_windows()
+        window.set_window_title(title)
+        cfg = getattr(self._base_env, "policy_viewer_camera_cfg", None)
+        if cfg is not None:
+            target_pose = getattr(self._base_env, "get_policy_viewer_target_pose", None)
+            task_name = type(self._base_env).__name__
+            if not isinstance(cfg, PolicyViewerCameraCfg) or not callable(target_pose):
+                raise ValueError(
+                    f"{task_name} camera tracking requires PolicyViewerCameraCfg "
+                    "and get_policy_viewer_target_pose()"
+                )
+            self._camera = _ViewerCamera(window, cfg, target_pose)
+            self._tracking_key_down = bool(
+                window.native().key_state(InputKey.SCANCODE_T)
+            )
         if self._keyboard is not None:
-            print_controls(self._keyboard.keymap)
+            print_controls(
+                self._keyboard.keymap, tracking_toggle=self._camera is not None
+            )
 
     def reset(self) -> EvaluationFrame:
         """Run the task's original reset and return its observation."""
@@ -196,6 +219,8 @@ class EmbodiChainTaskEnvironment:
         self._episode_return = 0.0
         self._episode_length = 0
         self._frame = self._make_frame(observation, {"info": info})
+        if self._camera is not None:
+            self._camera.reset()
         return self._frame
 
     def poll(self) -> str | None:
@@ -207,10 +232,17 @@ class EmbodiChainTaskEnvironment:
 
         native = world.get_windows().native()
         if self._keyboard is not None:
-            self._keyboard.poll(native, self._command)
+            self._keyboard.poll(
+                native, self._command, tracking_toggle=self._camera is not None
+            )
             self._apply_velocity_command()
         if native.key_state(InputKey.SCANCODE_ESCAPE):
             return "viewer closed"
+        if self._camera is not None:
+            tracking_down = bool(native.key_state(InputKey.SCANCODE_T))
+            if tracking_down and not self._tracking_key_down:
+                self._camera.toggle()
+            self._tracking_key_down = tracking_down
         reset_down = bool(native.key_state(InputKey.SCANCODE_BACKSPACE))
         reset_pressed = reset_down and not self._reset_key_down
         self._reset_key_down = reset_down
@@ -239,6 +271,8 @@ class EmbodiChainTaskEnvironment:
             "info": info,
         }
         self._frame = self._make_frame(observation, task_state)
+        if self._camera is not None:
+            self._camera.update()
         reason = _termination_reason(info, terminated_value, truncated_value)
         metrics = _step_metrics(info, reward_value)
         self._reported_metrics.update(metrics)
@@ -305,6 +339,7 @@ class EmbodiChainTaskEnvironment:
         """Close the original task Environment."""
         if self._closed:
             return
+        self._camera = None
         if self._previous_no_auto_reset is _MISSING:
             delattr(self._base_env, "_demo_no_auto_reset")
         else:

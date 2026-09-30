@@ -57,8 +57,14 @@ from scripts.tutorials.atomic_action.tutorial_utils import (
     initialize_pre_pick_robot_pose,
     make_clear_dynamics_callback,
     prepare_tutorial_scene,
+    expand_tutorial_trajectory_variants,
+    log_trajectory_variant_diagnostics,
+    parse_trajectory_variant_arguments,
     replay_trajectory,
     run_tutorial,
+    save_tool_path_view,
+    save_variant_joint_plot,
+    trajectory_variant_rows,
 )
 from scripts.tutorials.atomic_action.tutorial_utils import (
     compute_pick_close_end_step,
@@ -78,9 +84,9 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments for the Place tutorial."""
     parser = create_tutorial_argument_parser(
         "Pick up a cube and place it at a target pose.",
-        features=("grasp_sampling", "visualize_axes"),
+        features=("grasp_sampling", "trajectory_variants", "visualize_axes"),
     )
-    return parser.parse_args()
+    return parse_trajectory_variant_arguments(parser)
 
 
 def create_pick_object(sim) -> RigidObject:
@@ -212,13 +218,44 @@ def main() -> None:
         logger.log_warning("Failed to plan Place demo trajectory.")
         return
 
+    # Each row replays a different way of executing the same plan. Only the
+    # free motion changes: the grasp and the release keep their planned
+    # waypoints, so every row picks and places the cube identically.
+    variants = expand_tutorial_trajectory_variants(
+        compiled,
+        robot,
+        args,
+        phase_kinds=(
+            {"approach": "free", "close": "contact", "lift": "free"},
+            {"approach": "free", "release": "contact", "retract": "free"},
+        ),
+        # Retiming anything before the lift would move the step index at which
+        # the executor clears the cube's dynamics.
+        retimable=(("lift",), ("approach", "retract")),
+    )
+    log_trajectory_variant_diagnostics(variants, args.trajectory_variants)
+
+    if args.variant_plot_dir:
+        # Capture before replay so the still shows the starting scene and the
+        # paths the variants are about to take.
+        save_variant_joint_plot(
+            variants, robot, f"{args.variant_plot_dir}/place_variant_joints.png"
+        )
+        save_tool_path_view(
+            robot,
+            variants,
+            f"{args.variant_plot_dir}/place_variant_tool_paths.png",
+            target_object=obj,
+            object_size=OBJECT_SIZE,
+        )
+
     if wait_for_user:
         input("Press Enter to replay the Place demo...")
     clear_after_step = compiled.segment(0, "lift").start
     replay_trajectory(
         sim,
         robot,
-        compiled.trajectory,
+        trajectory_variant_rows(variants, args.num_envs),
         args,
         video_prefix="place_auto_play",
         hold_steps=POST_TRAJECTORY_STEPS,

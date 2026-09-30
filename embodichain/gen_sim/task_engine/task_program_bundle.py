@@ -335,7 +335,12 @@ def generate_task_program_bundle(
     selected_graph = _refine_e3_return_targets(selected_graph, scene)
     from ._task_program.drawer_binding import rewrite_drawer_close_resources
 
-    selected_graph = rewrite_drawer_close_resources(selected_graph)
+    selected_graph = rewrite_drawer_close_resources(
+        selected_graph,
+        drawer_bindings=frozenset(
+            (route.binding.object_id, route.binding.part_id) for route in drawers
+        ),
+    )
     stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
     drawer_targets = {route.affordance for route in drawers}
     drawer_groups = frozenset(
@@ -2299,6 +2304,10 @@ def _bind_embodiment_to_scene(
     simulation = embodiment.get("simulation")
     if not isinstance(simulation, dict):
         raise ValueError("Embodiment component has no simulation mapping.")
+    # Keep the qualified GenSim tolerance local instead of relaxing shared IK.
+    for solver in simulation.get("solver_cfg", {}).values():
+        if solver.get("class_type") == "PytorchSolver":
+            solver.setdefault("pos_eps", 5e-3)
     init_pos = simulation.get("init_pos")
     if not isinstance(init_pos, list) or len(init_pos) != 3:
         raise ValueError("Embodiment simulation.init_pos must contain three values.")

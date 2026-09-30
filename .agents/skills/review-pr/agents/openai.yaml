@@ -1,4 +1,4 @@
 interface:
   display_name: "Review EmbodiChain PR"
-  short_description: "Find actionable regressions in EmbodiChain changes"
-  default_prompt: "Use $review-pr to review this EmbodiChain pull request, report evidence-backed findings, summarize each finding in a Markdown table, and finish with a separate review-summary table."
+  short_description: "Coordinate expert reviews of EmbodiChain changes"
+  default_prompt: "Use $review-pr to review this EmbodiChain pull request with the expert protocol, dispatch relevant independent reviewers when available, and report verified findings, findings and review-summary tables, and role coverage with any fallback disclosed."

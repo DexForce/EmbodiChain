@@ -23,6 +23,7 @@ import torch
 
 from embodichain.lab.sim import Profiler, ProfilerCfg, SimulationManager
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg
+from embodichain.lab.sim.physics.default import DefaultPhysicsBackend
 
 pytestmark = pytest.mark.no_sim
 
@@ -46,6 +47,9 @@ def _make_sim_update_probe(profiler: Profiler) -> SimulationManager:
     sim.device = torch.device("cpu")
     sim._is_initialized_gpu_physics = False
     sim._world = _WorldUpdateProbe()
+    sim.physics = DefaultPhysicsBackend(sim)
+    sim.is_window_opened = False
+    sim._pending_record_dt = 0.0
     sim._window_record_state = None
     sim._visualization_runtime = None
     sim._visualization_sim_step = 0
@@ -67,6 +71,7 @@ def test_standalone_sim_update_is_profile_root() -> None:
 
     sim.update(step=2)
 
+    assert sim._world.update_calls == 2
     assert "sim_update" in profiler._stats
     assert "sim_update.gpu_physics_check" in profiler._stats
     assert "sim_update.physics_steps" in profiler._stats
@@ -98,7 +103,7 @@ def test_visualization_capture_is_profiled_per_sim_step() -> None:
     sim = _make_sim_update_probe(profiler)
     sim.sim_config.visualization.backend = "viser"
     camera_capture_flags: list[bool] = []
-    sim.capture_visualization_safely = lambda *, capture_camera_images: (
+    sim.capture_visualization_safely = lambda *, capture_camera_images, force=False: (
         camera_capture_flags.append(capture_camera_images)
     )
 

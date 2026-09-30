@@ -27,3 +27,11 @@ sampled target surface is noise, not direction evidence.
 The adapter returns `ArticulationAffordanceGeometry`; convert it with
 `to_object_geometry()` only when constructing `ObjectSemantics`. Keep random
 sampling and semantic geometry keys out of `objects/articulation.py`.
+
+For a locked floating articulation treated as one object,
+`create_rigidized_articulation_antipodal_affordance()` transforms only the
+selected grasp link's mesh into the root frame and marks its `mesh_scope` as
+`link`. PickUp may sample that region, while HandOver and CoordinatedPickment
+reject it because their whole-object shape analysis cannot use one link as a
+proxy for the complete articulation. This grasp mesh is not planner collision
+geometry.

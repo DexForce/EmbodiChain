@@ -396,6 +396,10 @@ def build_analyzer_config(
         viser_point_size=getattr(args, "viser_point_size", 0.01),
         voxel_size=args.voxel_size,
         show_unreachable_points=not args.hide_unreachable,
+        manipulability_log_scale=getattr(args, "manipulability_log_scale", False),
+        manipulability_percentile_clip=tuple(
+            getattr(args, "manipulability_percentile", (2.0, 98.0))
+        ),
     )
     cache = CacheConfig(
         enabled=not args.no_cache,
@@ -1022,9 +1026,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     viz.add_argument(
         "--vis-type",
         type=str,
-        choices=["point_cloud", "voxel", "sphere", "axis"],
+        choices=["point_cloud", "voxel", "sphere", "axis", "manipulability"],
         default="point_cloud",
-        help="Visualization type (default: point_cloud).",
+        help=(
+            "Visualization type (default: point_cloud). 'manipulability' colors "
+            "reachable points by Yoshikawa score and enables that metric; it "
+            "renders in the native viewer and in Viser."
+        ),
+    )
+    viz.add_argument(
+        "--manipulability-log-scale",
+        action="store_true",
+        help=(
+            "Color manipulability on log10(w). Scores span orders of magnitude, "
+            "so a linear ramp collapses the near-singular shell."
+        ),
+    )
+    viz.add_argument(
+        "--manipulability-percentile",
+        type=float,
+        nargs=2,
+        metavar=("LOW", "HIGH"),
+        default=(2.0, 98.0),
+        help=(
+            "Percentile window bounding the manipulability color scale "
+            "(default: 2 98). Use 0 100 for a plain min/max scale."
+        ),
     )
     viz.add_argument(
         "--point-size", type=float, default=4.0, help="Point size (default: 4.0)."

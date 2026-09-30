@@ -166,6 +166,7 @@ class BaseSolverTest:
         SimulationManager.flush_cleanup_queue()
 
 
+@pytest.mark.no_sim
 class TestPinkSolverUnit:
     """Exercise PinkSolver without a live simulation."""
 

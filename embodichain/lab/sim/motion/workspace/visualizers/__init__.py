@@ -16,7 +16,13 @@
 
 """Workspace result visualizers deriving from ``BaseVisualizer``.
 
-Built-in visualizers: point-cloud, voxel, sphere, and axis, plus a ``VisualizerFactory`` and ``create_visualizer`` helper.
+Built-in visualizers: point-cloud, voxel, sphere, axis, and manipulability, plus a ``VisualizerFactory`` and ``create_visualizer`` helper.
+
+The manipulability path additionally exports its pure mapping helpers
+(:func:`align_manipulability_scores`, :func:`normalize_manipulability`,
+:func:`map_manipulability_colors`, :func:`select_inspection_indices`,
+:func:`inspect_points`, :func:`translational_manipulability_ellipsoid`) so score
+mapping can be reused and tested without a renderer.
 """
 
 from embodichain.lab.sim.motion.workspace.visualizers.base_visualizer import (
@@ -43,6 +49,23 @@ from embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer import (
     AxisVisualizer,
 )
 
+from embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer import (
+    InspectionSelection,
+    ManipulabilityColorCfg,
+    ManipulabilityColorMapping,
+    ManipulabilityNormalization,
+    ManipulabilityPointSet,
+    ManipulabilityVisualizer,
+    PointInspection,
+    align_manipulability_scores,
+    ellipsoid_surface,
+    inspect_points,
+    map_manipulability_colors,
+    normalize_manipulability,
+    select_inspection_indices,
+    translational_manipulability_ellipsoid,
+)
+
 from embodichain.lab.sim.motion.workspace.visualizers.visualizer_factory import (
     VisualizerFactory,
     create_visualizer,
@@ -56,6 +79,20 @@ __all__ = [
     "VoxelVisualizer",
     "SphereVisualizer",
     "AxisVisualizer",
+    "ManipulabilityVisualizer",
+    "ManipulabilityColorCfg",
+    "ManipulabilityColorMapping",
+    "ManipulabilityNormalization",
+    "ManipulabilityPointSet",
+    "InspectionSelection",
+    "PointInspection",
+    "align_manipulability_scores",
+    "normalize_manipulability",
+    "map_manipulability_colors",
+    "select_inspection_indices",
+    "inspect_points",
+    "translational_manipulability_ellipsoid",
+    "ellipsoid_surface",
     "VisualizerFactory",
     "create_visualizer",
 ]

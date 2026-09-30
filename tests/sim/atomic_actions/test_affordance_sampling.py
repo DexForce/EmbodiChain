@@ -19,10 +19,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 
 import pytest
 import torch
 
+import embodichain.lab.sim.atomic_actions.affordance_sampling as sampling_module
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordancePoseCandidates,
     AffordanceSample,
@@ -53,6 +55,7 @@ def _poses(batch_size: int, candidate_count: int | None = None) -> torch.Tensor:
         ("seed", -1),
         ("episode_id", 1.5),
         ("attempt_id", -1),
+        ("branch_override", 2),
     ],
 )
 def test_sampling_context_rejects_invalid_stream_identity(field: str, value: object):
@@ -76,6 +79,25 @@ def test_sampling_context_uses_private_reproducible_generators():
     assert torch.equal(first, second)
     assert not torch.equal(first, changed)
     assert torch.equal(torch.random.get_rng_state(), global_state)
+
+
+def test_sampling_context_can_pin_a_logical_branch_across_environment_rows():
+    context = AffordanceSamplingContext(
+        count=4,
+        seed=3,
+        episode_id=2,
+        branch_override=2,
+    )
+
+    assert context.branch_for(0) == 2
+    assert context.branch_for(17) == 2
+    values = context.sample_range(
+        0.0,
+        (-1.0, 1.0),
+        env_ids=torch.tensor([0, 17]),
+        key="pick",
+    )
+    assert torch.equal(values[0:1], values[1:2])
 
 
 def test_pose_candidates_from_rows_preserves_empty_and_nonfinite_validity():
@@ -178,6 +200,7 @@ def test_affordance_is_the_only_public_candidate_sampling_entry_point():
         costs=costs,
         valid=torch.ones_like(costs, dtype=torch.bool),
     )
+    global_state = torch.random.get_rng_state().clone()
 
     sample = Affordance().sample_candidates(
         candidates,
@@ -193,6 +216,21 @@ def test_affordance_is_the_only_public_candidate_sampling_entry_point():
     assert len(set(sample.metadata["candidate_ids"])) == batch_size
     assert sample.metadata["candidate_ids"][0] == 0
     torch.testing.assert_close(sample.poses[:, 1, 3], objects[:, 1, 3])
+    assert sample.metadata["pose_frame"] == "world"
+    assert sample.metadata["env_ids"] == list(range(batch_size))
+    assert sample.metadata["success"] == [True] * batch_size
+    assert torch.equal(torch.random.get_rng_state(), global_state)
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["selected_poses"]), sample.poses
+    )
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["reference_poses"]), objects
+    )
+    assert json.loads(json.dumps(sample.metadata, allow_nan=False)) == sample.metadata
+    objects.zero_()
+    sample.poses.zero_()
+    assert sample.metadata["selected_poses"][0][0][0] == 1.0
+    assert sample.metadata["reference_poses"][0][0][0] == 1.0
 
 
 def test_affordance_candidate_sampling_preserves_failed_rows_and_metadata():
@@ -214,6 +252,9 @@ def test_affordance_candidate_sampling_preserves_failed_rows_and_metadata():
     assert sample.success.tolist() == [True, False]
     assert sample.metadata["candidate_ids"] == [0, -1]
     assert sample.metadata["sampling"] == _sampling(2).metadata()
+    assert sample.metadata["success"] == [True, False]
+    assert sample.metadata["reference_poses"] is None
+    assert sample.metadata["selected_poses"][1] == torch.eye(4).tolist()
     torch.testing.assert_close(sample.poses[1], torch.eye(4))
 
 
@@ -265,6 +306,62 @@ def test_press_sampling_rotates_only_contact_frame_roll():
     torch.testing.assert_close(torch.linalg.det(sample.poses[:, :3, :3]), torch.ones(4))
     assert sample.metadata["roll"][0] == 0.0
     assert len(torch.unique(sample.poses[:, :3, 0], dim=0)) == 4
+    assert sample.metadata["pose_frame"] == "world"
+    assert sample.metadata["env_ids"] == [0, 1, 2, 3]
+    assert sample.metadata["success"] == [True] * 4
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["reference_poses"]), targets
+    )
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["selected_poses"]), sample.poses
+    )
+
+
+@pytest.mark.parametrize("sampler", ["twist", "press"])
+def test_nominal_sampling_rejects_misaligned_provenance_rows(sampler: str) -> None:
+    targets = _poses(2)
+    env_ids = torch.tensor([0], dtype=torch.long)
+
+    with pytest.raises(ValueError, match="matching rows"):
+        if sampler == "twist":
+            TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                axis_origin=(0.0, 0.0, 0.0),
+            ).sample_grasp_pose(
+                targets,
+                sampling=None,
+                env_ids=env_ids,
+            )
+        else:
+            PressAffordance(
+                press_axis=torch.tensor([0.0, 0.0, 1.0]),
+                press_position=(0.0, 0.0, 0.0),
+            ).sample_press_pose(
+                targets,
+                sampling=None,
+                env_ids=env_ids,
+            )
+
+
+def test_pose_sampling_metadata_rejects_misaligned_reference_rows() -> None:
+    with pytest.raises(ValueError, match="reference_poses must match"):
+        sampling_module._pose_sampling_metadata(
+            _poses(2),
+            torch.ones(2, dtype=torch.bool),
+            torch.arange(2),
+            _poses(1),
+        )
+
+
+@pytest.mark.gpu
+def test_pose_sampling_metadata_rejects_mismatched_devices() -> None:
+    with pytest.raises(ValueError, match="share a device"):
+        sampling_module._pose_sampling_metadata(
+            _poses(2),
+            torch.ones(2, dtype=torch.bool),
+            torch.arange(2, device="cuda"),
+            None,
+        )
 
 
 def test_twist_sampling_requires_explicit_roll_symmetry():
@@ -297,6 +394,19 @@ def test_twist_sampling_requires_explicit_roll_symmetry():
     torch.testing.assert_close(sample.poses[:, :3, 3], nominal[:, :3, 3])
     torch.testing.assert_close(sample.poses[:, :3, 2], nominal[:, :3, 2])
     assert not torch.equal(sample.poses, nominal)
+    assert sample.metadata["pose_frame"] == "world"
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["reference_poses"]), targets
+    )
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["selected_poses"]), sample.poses
+    )
+    torch.testing.assert_close(
+        torch.tensor(sample.metadata["roll"]),
+        _sampling(4).sample_range(
+            0.0, (-0.2, 0.2), env_ids=torch.arange(4), key="twist"
+        ),
+    )
 
 
 def test_assembly_sampling_uses_only_declared_rotational_symmetry():

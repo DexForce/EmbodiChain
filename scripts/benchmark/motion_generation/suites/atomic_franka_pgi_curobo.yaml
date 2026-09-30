@@ -93,7 +93,7 @@ tracks:
         grasp_qpos: [0.040]
       articulations:
         - id: microwave
-          asset_path: MicrowaveOven/microwave_oven_with_inertials.urdf
+          asset_path: Microwave/microwave.urdf
           position: [-1.0, -0.30, 0.4]
           rotation_deg: [0.0, 0.0, 90.0]
           init_qpos: [0.0, 0.0, 0.0, 0.0]
@@ -221,13 +221,13 @@ tracks:
                 translation_m: 0.14
                 object_preheld: true
         - id: press
-          sample_count: 140
+          sample_count: 256
           hand_interp_steps: 12
           approach_distance_m: 0.12
           press_distance_m: 0.03
           articulation: microwave
-          target_link: button_cap
-          target_joint: start_button_press
+          target_link: button_link
+          target_joint: button_joint
           effect_joint_sign: 1.0
           minimum_joint_delta_m: 0.004
           geometry_seed: 11
@@ -263,14 +263,14 @@ tracks:
                 translation_distance_m: 0.18
                 direction: pull
         - id: twist
-          sample_count: 140
-          hand_interp_steps: 12
+          sample_count: 256
+          hand_interp_steps: 20
           twist_waypoint_count: 8
           pre_grasp_distance_m: 0.12
           twist_angle_rad: -0.7853981634
           articulation: microwave
-          target_link: cap_1
-          target_joint: power_knob_rotation
+          target_link: knob_link
+          target_joint: knob_joint
           effect_joint_sign: 1.0
           minimum_joint_delta_rad: 0.5
           geometry_seed: 11

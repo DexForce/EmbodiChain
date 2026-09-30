@@ -32,6 +32,7 @@ from .articulation_geometry import (
     ArticulationAffordanceGeometry,
     ArticulationGeometryProvider,
     ArticulationJointGeometry,
+    create_rigidized_articulation_antipodal_affordance,
     sample_initial_articulation_geometry,
 )
 from .affordance import (
@@ -67,7 +68,7 @@ from .control import (
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
-from .engine import AtomicActionEngine
+from .engine import AtomicActionEngine, PlanTransform
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -128,6 +129,7 @@ from .runtime_commands import (
     TimedCommandSequence,
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
+from .trajectory_adapter import ActionPlanTemplateAdapter
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -239,6 +241,8 @@ from .runner import (
 )
 from .scene import SceneProvider
 from .sim_adapter import (
+    SceneEntity,
+    create_rigidized_articulation_antipodal_semantics,
     create_simulation_atomic_action_engine,
     RigidObjectSceneProvider,
     RigidObjectSceneProviderCfg,
@@ -273,6 +277,7 @@ __all__ = [
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
     "AxisAlignAffordance",
+    "create_rigidized_articulation_antipodal_affordance",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
@@ -281,6 +286,7 @@ __all__ = [
     "AxisAlignOptions",
     "AtomicAction",
     "AtomicActionEngine",
+    "PlanTransform",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -292,6 +298,8 @@ __all__ = [
     "CommandSink",
     "ControlCommand",
     "ControlPartCommandProfile",
+    "SceneEntity",
+    "create_rigidized_articulation_antipodal_semantics",
     "create_simulation_atomic_action_engine",
     "CoordinatedHeldObjectState",
     "CoordinatedPickGoal",
@@ -308,6 +316,7 @@ __all__ = [
     "EndpointCommand",
     "EndpointCommandRouter",
     "EndpointCommandTransport",
+    "ActionPlanTemplateAdapter",
     "EntityState",
     "EffectExpectationResult",
     "EffectVerificationRequest",

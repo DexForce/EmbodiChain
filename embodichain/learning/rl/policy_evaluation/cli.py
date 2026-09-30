@@ -57,6 +57,7 @@ class EvaluationInput:
     run: Path | None
     requested_checkpoint: str
     selected_checkpoint: str
+    pretrained: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("run", nargs="?", help="EmbodiChain training run directory.")
     parser.add_argument("--profile", help="Registered external Policy Profile.")
+    parser.add_argument("--pretrained", help="Official pretrained model ID.")
+    parser.add_argument(
+        "--revision", help="HF revision for --pretrained (default: tested commit)."
+    )
     parser.add_argument(
         "--checkpoint",
         help="latest, best, or a checkpoint path; defaults to latest with RUN.",
@@ -109,7 +114,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=("pause", "continue", "auto_reset"),
     )
     parser.add_argument("--viewer", action="store_true")
-    parser.add_argument("--cache-dir")
+    parser.add_argument(
+        "--cache-dir", help="Model cache root for --pretrained, or Profile cache."
+    )
     parser.add_argument("--offline", action="store_true")
     parser.add_argument("--output", help="Evaluation output parent directory.")
     return parser.parse_args(argv)
@@ -145,6 +152,10 @@ def cli(argv: Sequence[str] | None = None) -> None:
 
 
 def _resolve_input(args: argparse.Namespace) -> EvaluationInput:
+    if args.revision is not None and args.pretrained is None:
+        raise ValueError("--revision requires --pretrained")
+    if args.pretrained is not None:
+        return _resolve_pretrained(args)
     if args.run is not None:
         manifest = RunManifest.load(args.run)
         requested = args.checkpoint or "latest"
@@ -187,6 +198,40 @@ def _resolve_input(args: argparse.Namespace) -> EvaluationInput:
         run=None,
         requested_checkpoint=args.checkpoint,
         selected_checkpoint="explicit",
+    )
+
+
+def _resolve_pretrained(args: argparse.Namespace) -> EvaluationInput:
+    from embodichain.data.assets.policy_assets import download_pretrained_policy
+
+    if any(
+        value is not None
+        for value in (
+            args.run,
+            args.profile,
+            args.checkpoint,
+            args.config,
+            args.gym_config,
+        )
+    ):
+        raise ValueError(
+            "--pretrained cannot be combined with RUN, --profile, --checkpoint, "
+            "--config or --gym-config"
+        )
+    _validate_native_options(args)
+    run_path, source = download_pretrained_policy(
+        args.pretrained, revision=args.revision, cache_dir=args.cache_dir
+    )
+    manifest = RunManifest.load(run_path)
+    selected, checkpoint = manifest.select_checkpoint()
+    return EvaluationInput(
+        checkpoint=checkpoint,
+        profile=None,
+        configs=manifest.configs,
+        run=manifest.root,
+        requested_checkpoint="latest",
+        selected_checkpoint=selected,
+        pretrained=source,
     )
 
 
@@ -365,7 +410,7 @@ def _validate_native_options(args: argparse.Namespace) -> None:
         "--resource-root": args.resource_root,
         "--physics-backend": args.physics_backend,
         "--scene-config": args.scene_config,
-        "--cache-dir": args.cache_dir,
+        "--cache-dir": args.cache_dir if args.pretrained is None else None,
         "--offline": args.offline,
     }
     selected = [
@@ -429,13 +474,15 @@ def _flush_simulator(enabled: bool) -> None:
 def _output_parent(configured: str | None, resolved: EvaluationInput) -> Path:
     if configured is not None:
         return Path(configured)
+    if resolved.pretrained is not None:
+        return Path.cwd() / "outputs" / "policy_eval" / resolved.pretrained["model_id"]
     if resolved.run is not None:
         return resolved.run / "evaluations"
     return resolved.checkpoint.parent / "evaluations"
 
 
 def _checkpoint_inputs(resolved: EvaluationInput) -> dict[str, Any]:
-    return {
+    inputs = {
         "run": resolved.run,
         "checkpoint": {
             "path": resolved.checkpoint,
@@ -444,6 +491,9 @@ def _checkpoint_inputs(resolved: EvaluationInput) -> dict[str, Any]:
         },
         "configs": resolved.configs,
     }
+    if resolved.pretrained is not None:
+        inputs["pretrained"] = dict(resolved.pretrained)
+    return inputs
 
 
 def _headless_report(
