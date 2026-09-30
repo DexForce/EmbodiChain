@@ -361,8 +361,11 @@ scaled limits, pre-resize calibrated moving-link mass and an explicit release bi
 source USD and shared physics defaults remain unchanged. No synthetic latch is
 inferred from a STOP label; the sensor never commands the button. Grasp TCP is offset to
 the closed fingers' leading geometry. Mandatory post-policies verify released
-stability, at least 0.05 mm continuous contact-backed travel and actual finger
-withdrawal, again after Park. Rebound does not erase the event; full mechanical
+stability, at least 0.05 mm continuous contact-backed travel and 40 mm axial
+finger withdrawal. Park requires that episode's verified withdrawal, released
+button/housing contact, and 40 mm world mesh-AABB separation between every
+finger and target articulation link, not the same axial half-space. This is a
+conservative geometric bound, not exact collision-mesh distance. Rebound does not erase the event; full mechanical
 travel, device activation and self-latching are not claimed. Only the empty symbolic effects
 use projected bookkeeping; these physical post-policies cannot be removed.
 One button/one environment is supported; mixed recipes and ambiguous controls

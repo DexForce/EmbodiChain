@@ -392,6 +392,7 @@ class PressContactSensor(ContactSensor):
                 }
         self.clock = 0.0
         self.armed = False
+        self.retreat_verified = False
         self.phase = "press"
         self.samples: list[PressSample] = []
         self.trace: list[dict[str, Any]] = []
@@ -453,6 +454,7 @@ class PressContactSensor(ContactSensor):
         self.samples.clear()
         self.trace.clear()
         self.acceptance = {}
+        self.retreat_verified = False
         self.phase = "press"
         self.update()
         try:
@@ -470,6 +472,7 @@ class PressContactSensor(ContactSensor):
         super().reset(env_ids)
         if hasattr(self, "route"):
             self.armed = False
+            self.retreat_verified = False
 
 
 def ensure_sensor(simulation: Any, robot: Any, route: PressRoute) -> PressContactSensor:
@@ -504,6 +507,28 @@ def ensure_sensor(simulation: Any, robot: Any, route: PressRoute) -> PressContac
         simulation.SUPPORTED_SENSOR_TYPES = factories
     sensor.configure(route, robot)
     return sensor
+
+
+def _park_clearance(art: Any, finger_bounds: list[torch.Tensor]) -> float:
+    """Conservative world-space mesh-AABB separation, not an axial projection."""
+    if not finger_bounds or any(not torch.isfinite(b).all() for b in finger_bounds):
+        raise ValueError("E9 Park requires finite finger geometry.")
+    distances = []
+    for name in art.link_names:
+        vertices, _ = art.get_link_vert_face(name)
+        if vertices.numel() == 0:
+            continue
+        pose = art.get_link_pose(name, to_matrix=True)[0]
+        world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
+        if not torch.isfinite(world).all():
+            raise ValueError("E9 Park requires finite target geometry.")
+        low, high = world.amin(0), world.amax(0)
+        for bounds in finger_bounds:
+            gap = torch.maximum(low - bounds[1], bounds[0] - high).clamp_min(0)
+            distances.append(float(torch.linalg.vector_norm(gap)))
+    if not distances:
+        raise ValueError("E9 Park requires measured target geometry.")
+    return min(distances)
 
 
 class PressAcceptancePort:
@@ -600,28 +625,60 @@ class PressAcceptancePort:
             )[0, :3, 3]
             tcp_clearance = float(torch.dot(point - tcp, inward))
             clearances = []
+            finger_bounds = []
             for name in sensor.finger_names:
                 pose = self.robot.get_link_pose(name, to_matrix=True)[0]
                 vertices, _ = self.robot.get_link_vert_face(name)
                 world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
                 clearances.append(float(((point - world) @ inward).min()))
+                finger_bounds.append(torch.stack((world.amin(0), world.amax(0))))
             clearance = min(clearances)
+            release_steps = max(1, math.ceil(0.15 / sensor._sim.sim_config.physics_dt))
             no_contact = bool(sensor.samples) and all(
                 s.target_contact is False and s.valid
-                for s in sensor.samples[
-                    -max(1, math.ceil(0.15 / sensor._sim.sim_config.physics_dt)) :
-                ]
+                for s in sensor.samples[-release_steps:]
             )
             terminal = any(call.call.semantic_id == PARK_CALL for call in segment.calls)
+            no_housing_contact = bool(sensor.trace) and all(
+                s["parent_contact"] is False and s["valid"]
+                for s in sensor.trace[-release_steps:]
+            )
+            terminal_clearance = (
+                _park_clearance(sensor.art, finger_bounds) if terminal else None
+            )
+            required_clearance = terminal_clearance if terminal else clearance
             qpos = float(sensor.art.get_qpos()[0, sensor.joint_index])
-            good = bool(event["accepted"] and no_contact and clearance >= 0.04)
+            reason = event["reason"]
+            good = False
+            if event["accepted"]:
+                if not no_contact:
+                    reason = "contact_not_released"
+                elif terminal and not sensor.retreat_verified:
+                    reason = "retreat_not_verified"
+                elif terminal and not no_housing_contact:
+                    reason = "housing_contact_not_released"
+                elif not math.isfinite(required_clearance) or required_clearance < 0.04:
+                    reason = (
+                        "terminal_clearance_insufficient"
+                        if terminal
+                        else "retreat_clearance_insufficient"
+                    )
+                else:
+                    good = True
+            if not terminal:
+                sensor.retreat_verified = good
             result = {
                 **event,
                 "accepted": good,
+                "reason": reason,
                 "event_accepted": event["accepted"],
                 "retreat_clearance": clearance,
+                "retreat_verified": sensor.retreat_verified,
+                "terminal_clearance": terminal_clearance,
+                "terminal_clearance_metric": "world_mesh_aabb_separation",
                 "tcp_clearance": tcp_clearance,
                 "contact_released": no_contact,
+                "housing_contact_released": no_housing_contact,
                 "terminal": terminal,
                 "observed_joint_position": qpos,
             }
