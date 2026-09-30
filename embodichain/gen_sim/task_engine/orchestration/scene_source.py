@@ -47,7 +47,7 @@ class SceneSourceRef:
     """Reference an existing scene without copying or owning its files."""
 
     path: Path | str
-    robot_profile: str = "franka"
+    robot_profile: str = "dual_franka"
     z_rotation_degrees: float | None = None
     body_scale_policy: str = "preserve"
     body_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)

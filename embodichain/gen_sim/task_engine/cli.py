@@ -116,7 +116,7 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--robot-profile",
         choices=_ROBOT_PROFILES,
-        default="franka",
+        default="dual_franka",
     )
     _add_failure_policy_argument(parser)
 
