@@ -140,9 +140,32 @@ class EmbodiChainMCPService:
             "scope": "simulation_and_read_only_analysis",
         }
 
+    def health(self) -> dict[str, Any]:
+        """Return a lightweight service health snapshot.
+
+        The probe does not start a simulator or execute a rollout. It only
+        reports service-owned state and the injected backend identity so an
+        MCP Host can distinguish a live server from an unavailable backend.
+        """
+        with self._lock:
+            active_rollouts = sum(
+                run.status in {"queued", "running"} for run in self._runs.values()
+            )
+            known_runs = len(self._runs)
+        return {
+            "status": "ok",
+            "server": "embodichain-mcp",
+            "phase": self.protocol_version,
+            "backend": getattr(self.backend, "name", type(self.backend).__name__),
+            "active_rollouts": active_rollouts,
+            "known_runs": known_runs,
+            "scope": "simulation_and_read_only_analysis",
+        }
+
     def capabilities(self) -> list[str]:
         """Return the first-phase operation names exposed by the service."""
         return [
+            "health",
             "list_robots",
             "get_robot_info",
             "list_tasks",

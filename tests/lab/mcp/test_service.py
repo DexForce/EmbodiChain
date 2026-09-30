@@ -167,6 +167,7 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     prompt_names = {prompt.name for prompt in prompts}
 
     assert "solve_ik" in tool_names
+    assert "health" in tool_names
     assert "start_rollout" in tool_names
     assert "generate_robot_trajectory" in tool_names
     assert "record_trajectory" in tool_names
@@ -178,6 +179,39 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     }
     assert result.is_error is False
     assert result.structured_content["result"]["reachable"] is True
+
+
+def test_health_reports_service_state(service):
+    health = service.health()
+
+    assert health["status"] == "ok"
+    assert health["backend"] == "in-memory"
+    assert health["active_rollouts"] == 0
+    assert health["known_runs"] == 0
+
+
+def test_stdio_client_can_discover_and_call_health():
+    mcp = pytest.importorskip("mcp")
+    del mcp
+    import sys
+
+    from mcp import Client, StdioServerParameters
+
+    async def run_client():
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "embodichain", "mcp"],
+        )
+        async with Client(parameters) as client:
+            tools = await client.list_tools()
+            health = await client.call_tool("health", {})
+            return {tool.name for tool in tools.tools}, health
+
+    tools, health = asyncio.run(run_client())
+
+    assert "health" in tools
+    assert health.is_error is False
+    assert health.structured_content["status"] == "ok"
 
 
 def test_legacy_lab_import_path_reexports_top_level_service():

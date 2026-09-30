@@ -69,6 +69,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
 
     read_only_tools = {
         "server_info",
+        "health",
         "list_capabilities",
         "list_robots",
         "get_robot_info",
@@ -103,6 +104,7 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
         )
 
     register_tool("server_info", service.server_info)
+    register_tool("health", service.health)
     register_tool("list_capabilities", service.capabilities)
     register_tool("list_robots", service.list_robots)
     register_tool("get_robot_info", service.get_robot_info)
