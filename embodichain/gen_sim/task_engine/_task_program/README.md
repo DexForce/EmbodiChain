@@ -142,8 +142,8 @@ Version 3 adds the support object's stable window and a final failed-attempt
 camera fetch before reset. The v2 physical runs are retained as historical
 evidence, not qualification of this revised acceptance behavior.
 
-E1-E6 and standalone E9 are the Task Engine execution scope. E7/E8 routing is rejected before
-semantic graph generation and bundle asset writing. Initial E6 support requires
+E1-E6, calibrated standalone E8, and standalone E9 are the Task Engine execution scope. E7
+routing is rejected before semantic graph generation and bundle asset writing. Initial E6 support requires
 one environment and a fixed-base, single-prismatic, self-contained metre-authored
 USD with uniform scale, a zero closed endpoint, and one identifiable collision
 handle. Opening and closing select absolute native joint endpoints, not a fixed
@@ -153,6 +153,28 @@ movement independent of current state. A one-second window must stay within
 Park. Withdrawal also requires measured hand-open posture. This proves neither
 contact-supported sliding nor geometric hand separation or in-flight safety.
 Arbitrary scenes and robots are not physically qualified by these checks.
+
+### E8 正式接入
+
+正常入口是 `python -m embodichain.gen_sim.task_engine run-all`。E8 使用公共
+`Twist` 的 prepare/ bounded-Twist-chunks / Park 轨迹，不创建第二执行器。每个
+bounded chunk 默认不超过 5 度，并在下一个 semantic segment 编译前重新读取旋钮
+qpos 与接触证据。绑定要求 fixed-base、
+直接拥有旋钮 link 的 revolute joint、米制自包含 USD，以及源哈希命中的刻度校准。
+`target_setting` 是打印标签编号，不是角度；标签到关节角由旋钮指针和标签几何测量，
+未校准或多解资产直接拒绝。
+
+首次 Twist 规划会在 E8 专用的绕轴姿态和轴向抓取位置候选中，按双指垫目标接近度、
+parent 几何接近惩罚和关节运动量排序，而不是采用第一个 IK 成功候选。首段没有
+target contact 时，最多再尝试 3 个已排序候选；一旦出现 target contact 就锁定候选，
+后续 chunk 不再切换姿态。
+
+生成部署只在 GenSim bundle 内做均匀尺度适配，源 USD 和共享机器人默认值不改。
+粗粒度模式的物理验收要求释放初态、target contact 期间累计绝对关节路径超过 30 度；
+不要求最终到达目标档位或保持目标方向。持续 parent 接触只记录 warning，
+释放后目标仍稳定且手指与所有目标 link 保持至少 40 mm 保守网格包围盒间距。
+`twist_evidence.json` 保存接触、关节、目标误差和撤离证据；视频、规划成功和返回码
+不能单独证明 E8 成功。`no_twist`、`centroid` 等仅用于消融，不是默认部署策略。
 
 ### E9 正式接入
 

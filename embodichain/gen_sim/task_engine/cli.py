@@ -49,6 +49,7 @@ _ROBOT_PROFILES = (
     "dual_ur10",
     "franka",
     "dual_franka",
+    "dual_franka_pgi",
 )
 _MODES: Final = ("image", "image-edit", "scene", "scene-edit")
 

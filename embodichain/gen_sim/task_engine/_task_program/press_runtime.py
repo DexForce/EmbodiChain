@@ -21,7 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 import math
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TYPE_CHECKING
 
 import torch
 from embodichain.utils import logger
@@ -66,6 +66,8 @@ from .press_binding import PREPARE_CALL, PRESS_CALL, PRESS_REVISION, PressRoute
 from .articulation_binding import PARK_CALL
 
 __all__: list[str] = []
+if TYPE_CHECKING:
+    from .twist_binding import TwistRoute
 SENSOR_UID = "gen_sim_press_evidence"
 
 
@@ -362,7 +364,7 @@ class PressContactSensor(ContactSensor):
         # rather than synchronizing CUDA separately for each scalar predicate.
         super().__init__(config, torch.device("cpu"), owner=owner)
 
-    def configure(self, route: PressRoute, robot: Any) -> None:
+    def configure(self, route: PressRoute | TwistRoute, robot: Any) -> None:
         self.route, self.robot = route, robot
         self.art = self._sim.get_articulation(route.binding.object_id)
         self.joint_index = self.art.joint_names.index(route.binding.joint)
@@ -446,7 +448,7 @@ class PressContactSensor(ContactSensor):
         )
         if len(self.trace) % 200 == 0:
             logger.log_info(
-                f"E9 observed substeps={len(self.trace)}, qpos={q:.6f}, contact={contact}, valid={valid}"
+                f"{type(self).__name__} observed substeps={len(self.trace)}, qpos={q:.6f}, contact={contact}, valid={valid}"
             )
         return sample
 

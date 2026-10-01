@@ -128,6 +128,8 @@ def execute_bundle(
         def configure_environment(value: dict[str, Any]) -> None:
             _configure_recording(value, output)
             routes = deployment.integration.adapter_factory.press_routes
+            twists = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+            routes = routes or twists
             if routes:
                 source = load_config(root / "components/scene.yaml")["simulation"]
                 art = next(
@@ -137,9 +139,15 @@ def execute_bundle(
                 )
                 position = np.asarray(art["init_local_pose"], dtype=float)[:3, 3]
                 target = position + np.array([0.0, 0.0, 0.05])
+                if twists:
+                    pose = np.asarray(art["init_local_pose"], dtype=float)
+                    target = (
+                        pose[:3, :3] @ np.asarray(twists[0].binding.outer_point)
+                        + position
+                    )
                 camera = deepcopy(value["env"]["events"]["record_camera"])
                 camera["params"].update(
-                    name="e9_button_view",
+                    name="e8_knob_view" if twists else "e9_button_view",
                     resolution=[960, 540],
                     intrinsics=[800.0, 800.0, 480.0, 270.0],
                     eye=(target + np.array([0.30, -0.25, 0.20])).tolist(),
@@ -245,16 +253,31 @@ def execute_bundle(
         if env is not None:
             try:
                 from ._task_program.press_runtime import SENSOR_UID, PressContactSensor
+                from ._task_program.twist_runtime import SENSOR_UID as TWIST_SENSOR_UID
+
+                twist_routes = getattr(
+                    deployment.integration.adapter_factory, "twist_routes", ()
+                )
 
                 sensor = (
-                    getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
-                    if getattr(
+                    getattr(env, "unwrapped", env).sim.get_sensor(
+                        TWIST_SENSOR_UID if twist_routes else SENSOR_UID
+                    )
+                    if twist_routes
+                    or getattr(
                         deployment.integration.adapter_factory, "press_routes", ()
                     )
                     else None
                 )
                 if isinstance(sensor, PressContactSensor):
-                    (output / "press_evidence.json").write_text(
+                    (
+                        output
+                        / (
+                            "twist_evidence.json"
+                            if twist_routes
+                            else "press_evidence.json"
+                        )
+                    ).write_text(
                         json.dumps(
                             {
                                 "route": sensor.route.payload(),

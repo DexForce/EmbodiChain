@@ -344,8 +344,8 @@ until execution integration.
 Persisted candidates must match the current intent and exactly derived scene
 request. Regenerate legacy E7 closing candidates and E6/E7 candidates with old
 capability declarations; do not silently relabel them. The serialized field
-layout is unchanged. Execution admits E1-E6 and standalone E9; E7/E8 remain
-rejected before graph generation and bundle publication. E6 uses the explicit registered
+layout is unchanged. Execution admits E1-E6, calibrated standalone E8, and standalone E9;
+E7 remains rejected before graph generation and bundle publication. E6 uses the explicit registered
 Slide/withdraw/Park recipe in `_task_program/articulation_binding.py` and
 `articulation_slide.py`. Its first supported binding is one fixed-base,
 single-prismatic, self-contained metre-authored USD with uniform scale and an
@@ -353,6 +353,20 @@ unambiguous handle mesh, in one simulation environment. Asset hashes, joint
 ownership, and declared limits are checked again at runtime. Public Slide owns
 planning; public Task Program and Gym own execution. Joint-target retention is
 checked after every recipe call; this is not in-flight contact qualification.
+
+E8 is owned by `_task_program/twist_binding.py` and `twist_runtime.py`: a source-qualified
+revolute knob lowers to prepare/bounded Twist chunks/Park through the public `Twist` skill and
+ordinary Gym runtime. Each chunk is capped at 5 degrees and the next semantic segment reads
+the measured qpos again. The target is a printed-label setting calibrated from pointer/label
+geometry and an asset hash; ordinal settings and joint-limit guesses are rejected. Coarse E8
+acceptance requires stable released qpos and more than 30 degrees of cumulative absolute qpos
+path while target contact is present; it does not require target-setting convergence or target
+direction. Parent contact is recorded as a warning, while released contact and conservative
+40 mm world mesh-AABB separation after Park remain required. E8 planning ranks geometry-scored
+dual-pad candidates, penalizing parent proximity, and may try at most three alternatives after
+an initial no-contact chunk; public `Twist` and non-E8 routes are unchanged.
+`twist_evidence.json` records measured qpos/contact evidence. `no_twist` and `centroid` are
+negative/diagnostic variants only; source assets and shared robot defaults remain unchanged.
 
 E9 is owned by `_task_program/press_binding.py` and `press_runtime.py`: an
 explicitly bound, fixed-root prismatic button lowers to prepare/Press/Park
