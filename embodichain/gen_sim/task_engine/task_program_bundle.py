@@ -61,6 +61,8 @@ __all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
 _EMBODIMENT_COMPONENTS: Final = {
     "dual_franka": "dual_franka_robotiq_arg2f_140.yaml",
     "dual_franka_robotiq_arg2f_140": "dual_franka_robotiq_arg2f_140.yaml",
+    # Experiment-only profile; the production default remains Robotiq.
+    "dual_franka_pgi": "dual_franka_robotiq_arg2f_140.yaml",
 }
 
 # The generated ``move forward`` task intent has no metric distance.  Phase one
@@ -73,6 +75,31 @@ _DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE: Final = 0.14
 _DUAL_FRANKA_HANDOVER_CLEARANCE: Final = 0.10
 _DUAL_FRANKA_TABLE_MOUNT_OFFSET: Final = 0.35
 _LATERAL_RELATION_DISTANCE: Final = 0.10
+
+
+def _apply_pgi_experiment_embodiment(payload: dict[str, Any]) -> None:
+    """Replace generated dual-Franka hands with the PGI experiment asset."""
+    simulation = payload["simulation"]
+    for component in simulation["urdf_cfg"]["components"]:
+        if component["component_type"] in {"left_hand", "right_hand"}:
+            component["urdf_path"] = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+    # PGI keeps two prismatic finger joints per hand; only the first is the
+    # commanded leader, but both positions must exist in the full qpos vector.
+    simulation["init_qpos"] = list(simulation["init_qpos"][:14]) + [0.0] * 4
+    control_parts = simulation["control_parts"]
+    drive = simulation["joint_drive_props"]
+    for side in ("left", "right"):
+        control_parts[f"{side}_eef"] = [f"{side}_gripper_finger1_joint_1"]
+        drive["stiffness"][f"{side}_eef"] = 1000.0
+        drive["damping"][f"{side}_eef"] = 100.0
+        drive["max_effort"][f"{side}_eef"] = 10000.0
+    payload["embodiment_id"] = "dual_franka_pgi_experiment"
+    payload["skill_profile"]["profile_id"] = "dual_franka_pgi_experiment"
+    for preset in payload["skill_profile"]["command_presets"]:
+        if preset["preset_id"] in {"left_parallel_gripper", "right_parallel_gripper"}:
+            preset["commands"] = {"open": [0.0], "grasp": [0.024]}
+
+
 _FRONT_RELATION_DISTANCE: Final = 0.18
 # Leave enough free space around a placed object's support reference for the
 # configured parallel-jaw fingers to close during a later semantic Pick.  A
@@ -179,10 +206,10 @@ def generate_task_program_bundle(
         raise TypeError("fit_grasp_assets must be a boolean.")
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
-        - {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}
+        - {"E1", "E2", "E3", "E4", "E5", "E6", "E8", "E9"}
     )
     if unsupported:
-        raise ValueError(f"Task Engine supports E1-E6 and E9, not {unsupported}.")
+        raise ValueError(f"Task Engine supports E1-E6 and E8-E9, not {unsupported}.")
     from ._task_program.drawer_binding import prepare_drawer_graph, drawer_routes
 
     selected_graph = prepare_drawer_graph(selected_graph, prepared_scene)
@@ -194,6 +221,9 @@ def generate_task_program_bundle(
     )
 
     source_press_routes = graph_routes(selected_graph, prepared_scene)
+    from ._task_program.twist_binding import graph_routes as twist_graph_routes
+
+    source_twist_routes = twist_graph_routes(selected_graph, prepared_scene)
     normalized_profile = str(robot_profile).strip()
     try:
         embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
@@ -220,6 +250,8 @@ def generate_task_program_bundle(
         / embodiment_filename
     )
     embodiment_payload = load_config(embodiment_source)
+    if normalized_profile == "dual_franka_pgi":
+        _apply_pgi_experiment_embodiment(embodiment_payload)
     _calibrate_task_gripper_opening(embodiment_payload)
     adaptation = None
     if fit_grasp_assets:
@@ -242,7 +274,20 @@ def generate_task_program_bundle(
         )
     scene = normalize_scene_assets(prepared_scene, root)
     scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+    scene, twist_adaptation = prepare_press_scene(
+        scene, source_twist_routes, interaction="E8"
+    )
+    if twist_adaptation:
+        _write_json(
+            root / "twist_adaptation.json",
+            {
+                "schema_version": "gen_sim.twist-adaptation/v1",
+                "policy": "unit_scale_preserve_support",
+                "records": twist_adaptation,
+            },
+        )
     press_routes = graph_routes(selected_graph, scene)
+    twist_routes = twist_graph_routes(selected_graph, scene)
     if press_adaptation:
         _write_json(
             root / "press_adaptation.json",
@@ -326,6 +371,10 @@ def generate_task_program_bundle(
         policy_payload["policy_id"] = "gen_sim_press_v1"
         policy_payload["preset_id"] = "gen_sim_press_motion"
         policy_payload["effect_assurance"] = "projected"
+    if twist_routes:
+        policy_payload["policy_id"] = "gen_sim_twist_v1"
+        policy_payload["preset_id"] = "gen_sim_twist_motion"
+        policy_payload["effect_assurance"] = "projected"
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     save_config(paths.execution_policy, policy_payload)
@@ -378,6 +427,13 @@ def generate_task_program_bundle(
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
+    for route in twist_routes:
+        art = next(
+            a
+            for a in scene_payload["simulation"]["articulation"]
+            if a["uid"] == route.binding.object_id
+        )
+        art["asset_physics_mode"] = "overlay"
     press_calibration = calibrate_scene(
         scene_payload, press_routes, source_routes=source_press_routes
     )
@@ -841,6 +897,24 @@ def _program_payload(
     by_name = {item["name"]: item for item in items}
     articulation_bindings = graph_bindings(graph, scene)
     for group in graph["task_groups"]:
+        if group.get("task_type") == "E8":
+            from ._task_program.twist_binding import graph_routes as twist_graph_routes
+
+            route = twist_graph_routes(graph, scene)[0]
+            for index, node_id in enumerate(group["node_ids"]):
+                phase = (
+                    "ready"
+                    if index == 0
+                    else "turned" if index >= len(group["node_ids"]) - 2 else "chunk"
+                )
+                by_name[node_id]["post"] = [
+                    {
+                        "kind": "wait_stable",
+                        "entity": route.binding.object_id,
+                        "preset": route.preset(phase),
+                    }
+                ]
+            continue
         if group.get("task_type") == "E9":
             from ._task_program.press_binding import graph_routes
 
@@ -1079,6 +1153,13 @@ def _integration_payload(
     from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
 
     press_routes = graph_routes(graph, scene)
+    from ._task_program.twist_binding import (
+        graph_routes as twist_graph_routes,
+        PREPARE_CALL as TWIST_PREPARE_CALL,
+        TWIST_CALL,
+    )
+
+    twist_routes = twist_graph_routes(graph, scene)
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
@@ -1431,6 +1512,12 @@ def _integration_payload(
         }:
             if node["task_type"] != "E9" or not press_routes:
                 raise ValueError("Press calls require an inspected E9 recipe.")
+        elif call["kind"] == "registered" and call["call_id"] in {
+            TWIST_PREPARE_CALL,
+            TWIST_CALL,
+        }:
+            if node["task_type"] != "E8" or not twist_routes:
+                raise ValueError("Twist calls require an inspected E8 recipe.")
         elif call["kind"] == "registered":
             raise ValueError(
                 f"Unsupported generated registered call {call['call_id']!r}."
@@ -1587,6 +1674,7 @@ def _integration_payload(
                     {b.object_id for b in articulation_bindings.values()}
                     | spatial_articulations
                     | {r.binding.object_id for r in press_routes}
+                    | {r.binding.object_id for r in twist_routes}
                 )
             ],
             "links": [
@@ -1596,7 +1684,7 @@ def _integration_payload(
                         "articulation_id": r.binding.object_id,
                         "native_link_name": r.binding.link,
                     }
-                    for r in press_routes
+                    for r in (*press_routes, *twist_routes)
                 ],
                 *[
                     {
@@ -1868,6 +1956,11 @@ def _integration_payload(
                 }
             ],
             "registered_semantic_lowerers": [
+                *[
+                    {"kind": kind, "route": route.payload()}
+                    for route in twist_routes
+                    for kind in ("twist_prepare", "twist")
+                ],
                 *[
                     {"kind": kind, "route": route.payload()}
                     for route in press_routes

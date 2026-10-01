@@ -264,7 +264,11 @@ def graph_routes(graph: dict, scene: Any) -> tuple[PressRoute, ...]:
 
 
 def prepare_press_scene(
-    scene: Any, routes: tuple[PressRoute, ...]
+    scene: Any,
+    routes: tuple[PressRoute, ...],
+    *,
+    body_scale: float = 1.0,
+    interaction: str = "E9",
 ) -> tuple[Any, list[dict]]:
     """Deploy selected E9 geometry at unit scale without editing source assets."""
     if not routes:
@@ -282,7 +286,7 @@ def prepare_press_scene(
         adapted = deepcopy(original)
         geometry = read_articulation_geometry(original["fpath"])
         before = geometry.world_vertices(original)
-        adapted["body_scale"] = [1.0, 1.0, 1.0]
+        adapted["body_scale"] = [body_scale] * 3
         after = geometry.world_vertices(adapted)
         pose = _root_pose(original).copy()
         pose[2, 3] += float(before[:, 2].min() - after[:, 2].min())
@@ -299,7 +303,7 @@ def prepare_press_scene(
             )
             if measured is None:
                 raise ValueError(
-                    f"E9 unit-scale clearance is unmeasured for {other['uid']!r}."
+                    f"{interaction} scale clearance is unmeasured for {other['uid']!r}."
                 )
             other_bounds = measured["bounds"]
             if other["uid"] == "table":
@@ -307,14 +311,16 @@ def prepare_press_scene(
                     bounds[1, :2] > other_bounds[1, :2]
                 ):
                     raise ValueError(
-                        "E9 unit-scale button exceeds the table footprint."
+                        f"{interaction} scaled control exceeds the table footprint."
                     )
                 continue
             overlap = np.minimum(bounds[1], other_bounds[1]) - np.maximum(
                 bounds[0], other_bounds[0]
             )
             if np.all(overlap > 1e-6):
-                raise ValueError(f"E9 unit-scale button overlaps {other['uid']!r}.")
+                raise ValueError(
+                    f"{interaction} scaled control overlaps {other['uid']!r}."
+                )
         articulations[index] = adapted
         for i, item in enumerate(planner):
             if item.get("runtime_uid") == uid:

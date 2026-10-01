@@ -400,6 +400,9 @@ def prepare_scene(
         )
         runtime_sections[role].append(_runtime_object(normalized, role=role))
 
+    from .._task_program.twist_binding import enrich_twist_inventory
+
+    enrich_twist_inventory(planner_objects, runtime_sections["articulation"])
     table = next(
         (obj for obj in runtime_sections["background"] if obj.get("uid") == "table"),
         None,

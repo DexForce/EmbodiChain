@@ -102,6 +102,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
         press_routes: tuple = (),
+        twist_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -113,6 +114,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
         self._press_routes = press_routes
+        self._twist_routes = twist_routes
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -153,6 +155,17 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 self._simulation,
                 self._robot,
                 press_routes[0],
+                self.step_dt,
+            )
+
+        if twist_routes:
+            from .twist_runtime import TwistAcceptancePort
+
+            self._task_post_port = TwistAcceptancePort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                twist_routes[0],
                 self.step_dt,
             )
 
@@ -215,6 +228,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             from .press_runtime import GenSimPress
 
             engine.register(GenSimPress(), replace=True)
+        if self._twist_routes:
+            from .twist_runtime import GenSimTwist
+
+            engine.register(GenSimTwist(), replace=True)
         self.task_program_registration.validate_engine(engine)
         return engine
 
@@ -240,10 +257,20 @@ class TaskAdapterFactory:
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
     press_routes: tuple = ()
+    twist_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Return the exact shared adapter; no Session or Bridge is overridden."""
         self.registration.assert_unchanged()
+        if self.twist_routes:
+            from .twist_runtime import (
+                SENSOR_UID as TWIST_SENSOR_UID,
+                ensure_sensor as ensure_twist_sensor,
+            )
+
+            environment.sensors[TWIST_SENSOR_UID] = ensure_twist_sensor(
+                environment.sim, environment.robot, self.twist_routes[0]
+            )
         if self.press_routes:
             from .press_runtime import SENSOR_UID, ensure_sensor
 
@@ -373,6 +400,7 @@ class TaskAdapterFactory:
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
             press_routes=self.press_routes,
+            twist_routes=self.twist_routes,
         )
         return factory.create_adapter()
 
@@ -458,6 +486,34 @@ def load_deployment(
         if type(f) is ArticulationWithdrawFactory
     ]
     articulation_bindings = ()
+    from .twist_runtime import TwistFactory, TwistPrepareFactory
+
+    turns = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is TwistFactory
+    ]
+    turn_preparations = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if type(f) is TwistPrepareFactory
+    ]
+    twist_routes = ()
+    if turns or turn_preparations:
+        if (
+            len(turns) != 1
+            or len(turn_preparations) != 1
+            or turns[0].route != turn_preparations[0].route
+        ):
+            raise ValueError(
+                "E8 prepare and Twist must share one exact calibrated route."
+            )
+        twist_routes = (turns[0].route,)
+        for phase in ("ready", "chunk", "turned"):
+            name = twist_routes[0].preset(phase)
+            if name in settle_presets:
+                raise ValueError("E8 policies cannot replace existing presets.")
+            settle_presets[name] = settle_presets["rigid_object"].snapshot()
     from .press_runtime import PressFactory, PressPrepareFactory
 
     presses = [
@@ -534,6 +590,10 @@ def load_deployment(
         from .press_binding import validate_program
 
         validate_program(program, press_routes[0])
+    if twist_routes:
+        from .twist_binding import validate_program as validate_twist_program
+
+        validate_twist_program(program, twist_routes[0])
     from .align_held import with_held_alignment
 
     registration = with_held_alignment(
@@ -606,6 +666,14 @@ def load_deployment(
                 else {}
             ),
             "adapter_contract": ADAPTER_CONTRACT,
+            **(
+                {
+                    "twist_runtime_revision": 1,
+                    "twist_scene_configuration": _press_scene_identity(base_dir),
+                }
+                if twist_routes
+                else {}
+            ),
             **({"press_runtime_revision": 2} if press_routes else {}),
             **(
                 {"press_scene_configuration": _press_scene_identity(base_dir)}
@@ -640,6 +708,7 @@ def load_deployment(
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
         press_routes=press_routes,
+        twist_routes=twist_routes,
     )
     integration = replace(
         base.integration,
