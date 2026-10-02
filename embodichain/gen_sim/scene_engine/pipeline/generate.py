@@ -25,7 +25,7 @@ from embodichain.gen_sim.scene_engine.llms.openai_compatible_client import (
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
-from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+from embodichain.gen_sim.simready_pipeline.clients.articulated_generation import (
     ArticulatedGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.clients.image_segmentation import (

@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any, Final
 
-from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+from embodichain.gen_sim.simready_pipeline.clients.articulated_generation import (
     ArticulatedGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (

@@ -16,4 +16,6 @@
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .articulation import generate_articulated_usdcs
+
+__all__ = ["generate_articulated_usdcs"]

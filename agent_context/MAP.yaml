@@ -306,9 +306,14 @@ topics:
   status: active
 - id: gen-sim
   title: Gen Sim
-  aliases: [gen sim, Scene Engine, SimReady, scene generation, scene editing, 场景生成, 场景编辑, 生成式仿真]
+  aliases: [gen sim, Scene Engine, SimReady, Asset Engine, scene generation, scene editing,
+    articulation generation, articulated asset, task spec, TaskSpec, task template,
+    任务规范, 任务规格, 关节资产, 场景生成, 场景编辑, 生成式仿真]
   keywords: [generate_scene_from_image, edit_scene, SceneExporter, scene-export/v1, ingest_one_asset,
-    ParserManager, SessionProcessRegistry, Gradio]
+    ParserManager, SessionProcessRegistry, Gradio, articulation, articulated, asset engine,
+    articulation asset generation, TaskTemplate, SceneInstance, ActionWitness,
+    ExpansionManifest, ValidationCertificate, task_spec, semantic_hash, predicate evaluator,
+    task spec cache, TaskSpecCache, ArticulatedGenerationClient, articulated_usdc_utils]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
   - embodichain/gen_sim/scene_engine/cli/start.py
@@ -317,9 +322,13 @@ topics:
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_exporter.py
   - embodichain/gen_sim/scene_engine/pipeline/utils/scene_importer.py
   - embodichain/gen_sim/simready_pipeline/pipeline/ingest.py
+  - embodichain/gen_sim/simready_pipeline/pipeline/articulation.py
+  - embodichain/gen_sim/simready_pipeline/clients/
+  - embodichain/gen_sim/simready_pipeline/utils/articulated_usdc_utils.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
+  - embodichain/task_spec/
   - embodichain/gen_sim/gradio_ui/app_env.py
-  watch_paths: [embodichain/gen_sim/, embodichain/cli/main.py, tests/gen_sim/]
+  watch_paths: [embodichain/gen_sim/, embodichain/task_spec/, embodichain/cli/main.py, tests/gen_sim/]
   related_topics: [simulation-system, data-assets, env-framework]
   status: active
 - id: data-assets
