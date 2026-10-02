@@ -1,9 +1,9 @@
 .. _tutorial_mcp:
 
-EmbodiChain MCP tutorial
-========================
+Use EmbodiChain through MCP
+===========================
 
-This tutorial connects an MCP Host to EmbodiChain's local, simulation-only
+This guide connects an MCP Host to EmbodiChain's local, simulation-only
 stdio server. You will inspect the server, create a simulation world, load a
 scene, generate and validate a joint trajectory, and optionally record the
 trajectory with an offscreen camera.
