@@ -136,7 +136,7 @@ _FORBIDDEN_FIELDS = frozenset(
 _MIMO_MAX_COMPLETION_TOKENS = 4096
 _GEN_SIM_DIR = Path(__file__).resolve().parents[1]
 _GEN_SIM_ENV_PATH = _GEN_SIM_DIR / ".env"
-_GEN_CONFIG_PATH = _GEN_SIM_DIR / "simready_pipeline" / "configs" / "gen_config.json"
+_GEN_CONFIG_PATH = _GEN_SIM_DIR / "asset_engine" / "configs" / "gen_config.json"
 
 
 class _MissingRequiredTargetError(ValueError):

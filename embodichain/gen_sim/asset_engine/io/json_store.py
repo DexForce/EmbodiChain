@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.asset_engine.core.asset import Asset
 
 
 class JsonStore:

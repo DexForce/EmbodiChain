@@ -19,8 +19,8 @@ import trimesh
 import pyrender
 from PIL import Image
 from pathlib import Path
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
-from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
+from embodichain.gen_sim.asset_engine.core.asset import Asset
+from embodichain.gen_sim.asset_engine.parser.base import AssetParser
 
 
 class InternalParser(AssetParser):

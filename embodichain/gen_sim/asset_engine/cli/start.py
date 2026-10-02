@@ -37,9 +37,9 @@ def cli_ingest_single(input_dir: str, output_dir: str, category: str) -> None:
     """
     os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-    from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
-    from embodichain.gen_sim.simready_pipeline.parser.base import ParserManager
-    from embodichain.gen_sim.simready_pipeline.pipeline.ingest import ingest_one_asset
+    from embodichain.gen_sim.asset_engine.io.json_store import JsonStore
+    from embodichain.gen_sim.asset_engine.parser.base import ParserManager
+    from embodichain.gen_sim.asset_engine.pipeline.ingest import ingest_one_asset
 
     input_path = Path(input_dir)
     output_path = Path(output_dir)

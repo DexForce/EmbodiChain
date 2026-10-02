@@ -16,7 +16,7 @@
 
 """Compatibility import for the Asset Engine articulation client.
 
-New code imports the client from ``simready_pipeline.clients``.  This module
+New code imports the client from ``asset_engine.clients``.  This module
 keeps the former Scene Engine path working while preserving the existing
 ``SCENE_ENGINE_ARTICULATED_GENERATION_*`` environment variable names for one
 migration cycle.
@@ -27,10 +27,10 @@ from __future__ import annotations
 from embodichain.gen_sim.scene_engine.configs.environment import (
     read_scene_engine_env_values,
 )
-from embodichain.gen_sim.simready_pipeline.clients import (
+from embodichain.gen_sim.asset_engine.clients import (
     ArticulatedGenerationClient as _AssetArticulatedGenerationClient,
 )
-from embodichain.gen_sim.simready_pipeline.clients.articulated_generation import (
+from embodichain.gen_sim.asset_engine.clients.articulated_generation import (
     _validate_articulated_usdc,  # noqa: F401
 )
 

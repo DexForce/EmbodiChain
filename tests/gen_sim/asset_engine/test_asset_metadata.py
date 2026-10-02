@@ -19,8 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
-from embodichain.gen_sim.simready_pipeline.io.json_store import JsonStore
+from embodichain.gen_sim.asset_engine.core.asset import Asset
+from embodichain.gen_sim.asset_engine.io.json_store import JsonStore
 
 
 def test_asset_json_promotes_databank_server_metadata() -> None:

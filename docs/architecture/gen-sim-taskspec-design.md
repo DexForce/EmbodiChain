@@ -56,7 +56,7 @@ flowchart TD
 
 | 层 | 所有者 | 职责 |
 |---|---|---|
-| 资产 | `gen_sim/simready_pipeline` | Asset Engine：资产 ingest、几何、articulation、物理和语义元数据 |
+| 资产 | `gen_sim/asset_engine` | Asset Engine：资产 ingest、几何、articulation、物理和语义元数据 |
 | 场景 | `gen_sim/scene_engine` | 图片理解、资产生成、布局编辑、settling、场景导出和 USD 交付 |
 | 任务语言 | `lab/task_program/language` | Task Program schema、decoder、loader 和输入边界 |
 | 任务语义 | `lab/task_program/semantics` | Semantic Call、scene/profile/effect/evidence contract |
@@ -70,7 +70,7 @@ flowchart TD
 
 Articulation asset generation follows the Asset Engine boundary: the
 articulation service client, generated-USDC structural validation, and authored
-asset normalization live under `gen_sim/simready_pipeline`. Scene Engine keeps
+asset normalization live under `gen_sim/asset_engine`. Scene Engine keeps
 scene placement, settling, scene-level USD assembly, and export. The former
 `scene_engine` client and utility paths remain compatibility imports while
 callers migrate.
