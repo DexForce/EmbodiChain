@@ -101,7 +101,7 @@ mesh + sidecar files
 主网格支持 `.glb`、`.gltf`、`.obj`、`.ply`、`.stl`；可一并上传 `.mtl`、纹理和 `.bin` 等附件。执行命令为：
 
 ```bash
-python -m embodichain.gen_sim.simready_pipeline.cli.start \
+python -m embodichain.gen_sim.asset_engine.cli.start \
   --input_dir <isolated-input-dir> \
   --output_root <isolated-output-dir> \
   --category <category>
@@ -218,7 +218,7 @@ idle → received → started → scene_intake → relations
 SimReady 需要 Blender、trimesh、LLM 配置以及可导入的：
 
 ```text
-embodichain.gen_sim.simready_pipeline.cli.start
+embodichain.gen_sim.asset_engine.cli.start
 ```
 
 SimReady 的 OpenAI-compatible 设置来自环境变量，且不应写入 Git：

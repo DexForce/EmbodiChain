@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from embodichain.gen_sim.simready_pipeline.clients import articulated_generation
+from embodichain.gen_sim.asset_engine.clients import articulated_generation
 
 
 def test_asset_engine_articulation_client_owns_canonical_environment_keys(

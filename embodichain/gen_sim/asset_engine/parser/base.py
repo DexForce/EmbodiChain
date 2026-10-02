@@ -16,7 +16,7 @@
 
 from typing import Dict, List, Optional
 from abc import ABC, abstractmethod
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.asset_engine.core.asset import Asset
 from pathlib import Path
 
 
@@ -36,11 +36,11 @@ class AssetParser(ABC):
         raise NotImplementedError
 
 
-from embodichain.gen_sim.simready_pipeline.parser.inspector import AssetInspector
-from embodichain.gen_sim.simready_pipeline.parser.geometry import GeometryParser
-from embodichain.gen_sim.simready_pipeline.parser.physics import PhysicsParser
-from embodichain.gen_sim.simready_pipeline.parser.usd import UsdParser
-from embodichain.gen_sim.simready_pipeline.parser.internal import InternalParser
+from embodichain.gen_sim.asset_engine.parser.inspector import AssetInspector
+from embodichain.gen_sim.asset_engine.parser.geometry import GeometryParser
+from embodichain.gen_sim.asset_engine.parser.physics import PhysicsParser
+from embodichain.gen_sim.asset_engine.parser.usd import UsdParser
+from embodichain.gen_sim.asset_engine.parser.internal import InternalParser
 
 
 class ParserManager:

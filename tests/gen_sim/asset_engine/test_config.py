@@ -27,7 +27,7 @@ CONFIG_PATH = (
     REPO_ROOT
     / "embodichain"
     / "gen_sim"
-    / "simready_pipeline"
+    / "asset_engine"
     / "configs"
     / "gen_config.json"
 )

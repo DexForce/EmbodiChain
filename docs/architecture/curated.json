@@ -1895,7 +1895,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 17,
@@ -1904,7 +1904,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -2677,7 +2677,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/parser/base.py",
+          "path": "embodichain/gen_sim/asset_engine/parser/base.py",
           "symbol": "ParserManager",
           "start_line": 46,
           "end_line": 46,
@@ -2686,7 +2686,7 @@
       ],
       "documentation": [
         {
-          "docname": "features/generative_sim/simready_pipeline",
+          "docname": "features/generative_sim/asset_engine",
           "label": "SimReady pipeline documentation"
         }
       ]
@@ -4112,7 +4112,7 @@
           "symbol": "<module>",
           "start_line": 48,
           "end_line": 48,
-          "excerpt": "        target=\"embodichain.gen_sim.simready_pipeline.cli.start:main\","
+          "excerpt": "        target=\"embodichain.gen_sim.asset_engine.cli.start:main\","
         }
       ]
     },
@@ -4979,7 +4979,7 @@
       "scope": "Caller supplies the ParserManager instance.",
       "evidence": [
         {
-          "path": "embodichain/gen_sim/simready_pipeline/pipeline/ingest.py",
+          "path": "embodichain/gen_sim/asset_engine/pipeline/ingest.py",
           "symbol": "ingest_one_asset",
           "start_line": 178,
           "end_line": 178,

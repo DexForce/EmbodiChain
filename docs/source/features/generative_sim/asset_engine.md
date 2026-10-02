@@ -31,7 +31,7 @@ embodichain preview-asset \
 
 The full pipeline uses Blender, trimesh, pyrender, and an OpenAI-compatible multimodal chat completions endpoint. Install EmbodiChain with the `gensim` extra first — see [Installation (gensim extra)](../../quick_start/install.md#optional-generative-simulation-gensim) for package indexes and install commands.
 
-Set the OpenAI-compatible LLM API (OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. Environment variables override the JSON config.
+Set the OpenAI-compatible LLM API (OpenAI, Gemini, Doubao, etc.) before running the pipeline, or configure them in `embodichain/gen_sim/asset_engine/configs/gen_config.json`. Environment variables override the JSON config.
 
 OpenAI-compatible API example:
 
@@ -82,7 +82,7 @@ Use `asset_simready/asset_simready.obj` or `asset_usd/` for simulation preview a
 
 ## Configuration
 
-Pipeline hyperparameters live in `embodichain/gen_sim/simready_pipeline/configs/gen_config.json`. The main hyperparameters are as follow:
+Pipeline hyperparameters live in `embodichain/gen_sim/asset_engine/configs/gen_config.json`. The main hyperparameters are as follow:
 
 ### Ingest
 

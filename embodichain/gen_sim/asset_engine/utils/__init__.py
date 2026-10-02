@@ -14,19 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility imports for articulation asset normalization.
-
-The implementation is owned by Asset Engine under
-``asset_engine.utils.articulated_usdc_utils``.  Scene Engine keeps this
-path for callers that still import the former utility location.
-"""
-
 from __future__ import annotations
-
-from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
-    _articulation_root_bottom_z,
-    _canonicalize_articulated_usdc_bottom_center,
-    _read_revolute_qpos_limits,
-)
 
 __all__: list[str] = []

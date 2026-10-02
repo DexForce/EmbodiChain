@@ -36,7 +36,7 @@ from matplotlib.patches import Rectangle
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
-from embodichain.gen_sim.simready_pipeline.clients.articulated_generation import (
+from embodichain.gen_sim.asset_engine.clients.articulated_generation import (
     ArticulatedGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
@@ -57,10 +57,10 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
-from embodichain.gen_sim.simready_pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
 )
-from embodichain.gen_sim.simready_pipeline.pipeline.articulation import (
+from embodichain.gen_sim.asset_engine.pipeline.articulation import (
     generate_articulated_usdcs,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
