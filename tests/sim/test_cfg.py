@@ -71,6 +71,19 @@ def test_cfg_package_preserves_the_public_facade() -> None:
     assert sim_cfg.RobotCfg is LeafRobotCfg
 
 
+def test_simulation_cfg_legacy_module_facades_split_domains() -> None:
+    """Rendering and physics configs have dedicated modules with old aliases."""
+    from embodichain.lab.sim.cfg import physics, rendering, simulation
+
+    assert sim_cfg.RenderCfg is rendering.RenderCfg
+    assert sim_cfg.DenoisingCfg is rendering.DenoisingCfg
+    assert sim_cfg.NRDCfg is rendering.NRDCfg
+    assert sim_cfg.NewtonPhysicsCfg is physics.NewtonPhysicsCfg
+    assert sim_cfg.GPUMemoryCfg is physics.GPUMemoryCfg
+    assert simulation.RenderCfg is rendering.RenderCfg
+    assert simulation.NewtonPhysicsCfg is physics.NewtonPhysicsCfg
+
+
 def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
     """Generic articulations do not author source drive properties."""
     articulation_cfg = ArticulationCfg()
