@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import os
+from typing import Literal
 
 import torch
 import numpy as np
@@ -33,28 +36,11 @@ from embodichain.lab.sim.motion.planners.base_planner import (
 )
 from .utils import PlanState, PlanResult
 
-try:
-    import toppra as ta
-    import toppra.constraint as constraint
-except ImportError:
-    logger.log_error(
-        "toppra not installed. Install with `pip install toppra==0.6.3`", ImportError
-    )
-
-ta.setup_logging(level="WARN")
-
-
-def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndarray]:
-    """Expand scalar limits to (dofs, 2) arrays; pass through arrays as-is."""
-    if isinstance(value, (float, int)):
-        vlims = np.array([[-value, value] for _ in range(dofs)])
-    else:
-        vlims = np.array(value)
-    if isinstance(acc, (float, int)):
-        alims = np.array([[-acc, acc] for _ in range(dofs)])
-    else:
-        alims = np.array(acc)
-    return vlims, alims
+from embodichain.compute.trajectory._toppra import (
+    _NumpyToppra,
+    _validate_grid_size,
+    _validate_sampling,
+)
 
 
 def _toppra_solve_one_env(
@@ -63,6 +49,7 @@ def _toppra_solve_one_env(
     acc_constraint,
     sample_method: "TrajectorySampleMethod",
     sample_interval: float | int,
+    grid_size: int = 100,
 ) -> dict:
     """Solve a single-env TOPPRA trajectory. Pure numpy/scipy — picklable, no torch/robot.
 
@@ -77,75 +64,33 @@ def _toppra_solve_one_env(
         ``dt`` ``(N_b,)``, ``success`` bool, and ``n`` int.
     """
     dofs = waypoints.shape[1]
-    vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
-
-    if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
-        return _empty_failure(dofs)
-    if sample_method == TrajectorySampleMethod.QUANTITY and sample_interval < 2:
-        return _empty_failure(dofs)
-
-    # Remove consecutive duplicate waypoints. Long plateaus of identical points
-    # (e.g. when start_qpos equals the first target and joint-space interpolation
-    # is enabled) can make TOPPRA's controllable-set computation numerically
-    # ill-conditioned and fail with "Instance is not controllable".
-    dup_tol = 1e-6
-    keep = [0]
-    for i in range(1, len(waypoints)):
-        if np.max(np.abs(waypoints[i] - waypoints[keep[-1]])) >= dup_tol:
-            keep.append(i)
-    if keep[-1] != len(waypoints) - 1:
-        keep.append(len(waypoints) - 1)
-    waypoints = waypoints[keep]
-
-    # Trivial same-waypoint shortcut
-    if len(waypoints) == 2 and np.sum(np.abs(waypoints[1] - waypoints[0])) < 1e-3:
-        pos = np.stack([waypoints[0], waypoints[1]])
-        return {
-            "positions": pos,
-            "velocities": np.zeros_like(pos),
-            "accelerations": np.zeros_like(pos),
-            "dt": np.array([0.0, 0.0], dtype=np.float32),
-            "success": True,
-            "n": 2,
-        }
-
-    ss = np.linspace(0.0, 1.0, len(waypoints))
     try:
-        path = ta.SplineInterpolator(ss, waypoints)
-        pc_vel = constraint.JointVelocityConstraint(vlims)
-        pc_acc = constraint.JointAccelerationConstraint(alims)
-        instance = ta.algorithm.TOPPRA(
-            [pc_vel, pc_acc],
-            path,
-            parametrizer="ParametrizeConstAccel",
-            gridpt_min_nb_points=max(100, 10 * len(waypoints)),
+        sample_dt = (
+            sample_interval if sample_method == TrajectorySampleMethod.TIME else None
         )
-        jnt_traj = instance.compute_trajectory()
-    except Exception:
+        sample_count = (
+            int(sample_interval)
+            if sample_method == TrajectorySampleMethod.QUANTITY
+            else None
+        )
+        _validate_sampling(sample_count, sample_dt)
+        trajectory = _NumpyToppra(waypoints, vel_constraint, acc_constraint, grid_size)
+        duration = trajectory.duration
+        if duration == 0:
+            count = 2
+        elif sample_dt is not None:
+            count = max(2, int(np.ceil(duration / sample_dt)) + 1)
+        else:
+            count = int(sample_count)
+        ts = np.linspace(0.0, duration, count)
+        positions, velocities, accelerations = trajectory.sample(ts)
+    except (ValueError, RuntimeError, FloatingPointError, OverflowError):
         return _empty_failure(dofs)
-
-    if jnt_traj is None:
-        return _empty_failure(dofs)
-
-    duration = float(jnt_traj.duration)
-    if duration <= 0:
-        return _empty_failure(dofs)
-
-    if sample_method == TrajectorySampleMethod.TIME:
-        n_points = max(2, int(np.ceil(duration / sample_interval)) + 1)
-        ts = np.linspace(0.0, duration, n_points)
-    else:
-        ts = np.linspace(0.0, duration, num=int(sample_interval))
-
-    positions = np.array([jnt_traj.eval(t) for t in ts])
-    velocities = np.array([jnt_traj.evald(t) for t in ts])
-    accelerations = np.array([jnt_traj.evaldd(t) for t in ts])
-    dt = np.diff(ts, prepend=0.0).astype(np.float32)
     return {
         "positions": positions,
         "velocities": velocities,
         "accelerations": accelerations,
-        "dt": dt,
+        "dt": np.diff(ts, prepend=0.0).astype(np.float32),
         "success": True,
         "n": len(ts),
     }
@@ -236,10 +181,14 @@ __all__ = ["ToppraPlanner", "ToppraPlannerCfg", "ToppraPlanOptions"]
 class ToppraPlannerCfg(BasePlannerCfg):
 
     planner_type: str = "toppra"
+    backend: Literal["auto", "numpy", "warp"] = "auto"
+    """Auto selects Warp on CUDA or for input gradients, otherwise NumPy."""
+    grid_size: int = 100
+    """Minimum timing grid size; each spline segment is subdivided uniformly."""
     max_workers: int | None = None
-    """Worker process count for the batched fan-out. None => min(cpu_count()//2, B)."""
+    """NumPy worker count. Ignored by Warp; None => min(cpu_count()//2, B)."""
     mp_context: str | None = None
-    """Multiprocessing start method for the batched fan-out.
+    """Multiprocessing start method for the NumPy batched fan-out; ignored by Warp.
 
     ``None`` (default) auto-selects based on the simulation device:
     ``'fork'`` on CPU and ``'spawn'`` on GPU. ``'fork'`` is faster — workers
@@ -256,6 +205,19 @@ class ToppraPlannerCfg(BasePlannerCfg):
     """
 
 
+class _ToppraConstraints(dict):
+    """Copy config containers while preserving runtime tensor references."""
+
+    def __deepcopy__(self, memo: dict) -> _ToppraConstraints:
+        result = _ToppraConstraints()
+        memo[id(self)] = result
+        for key, value in self.items():
+            result[deepcopy(key, memo)] = (
+                value if isinstance(value, torch.Tensor) else deepcopy(value, memo)
+            )
+        return result
+
+
 @configclass
 class ToppraPlanOptions(PlanOptions):
 
@@ -265,7 +227,11 @@ class ToppraPlanOptions(PlanOptions):
     }
     """Constraints for the planner, including velocity and acceleration limits.
 
-    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    Each value may be a symmetric scalar, per-joint magnitudes ``(DOF,)``,
+    or signed bounds ``(DOF, 2)``. Bounds must be finite and contain zero;
+    zero bounds can lock a joint or restrict its direction.
+    Tensor bounds retain their references through option construction/copying
+    so gradients reach the caller's tensors, including non-leaf expressions.
     """
 
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
@@ -279,11 +245,22 @@ class ToppraPlanOptions(PlanOptions):
 
     If sample_method is 'time', this is the time interval in seconds.
     If sample_method is 'quantity', this is the total number of samples.
+    Both modes support first-order gradients of waypoints and tensor motion limits.
     """
+
+    def __post_init__(self) -> None:
+        """Preserve tensor graphs before configclass copies mutable fields."""
+        self.constraints = _ToppraConstraints(self.constraints)
 
 
 class ToppraPlanner(BasePlanner):
-    """Time-optimal joint-space planner backed by TOPPRA."""
+    """Rest-to-rest path timing with NumPy or batched Warp TOPPRA.
+
+    Cubic path geometry uses uniform knots and not-a-knot boundaries. Timing
+    optimizes conservative interval constraints, so durations need not match
+    the former external TOPPRA package. CUDA auto mode keeps numerical work on
+    device; NumPy remains available explicitly for reference comparisons.
+    """
 
     supported_move_types = frozenset({MoveType.JOINT_MOVE})
 
@@ -296,6 +273,9 @@ class ToppraPlanner(BasePlanner):
         Args:
             cfg: Configuration object containing ToppraPlanner settings
         """
+        if cfg.backend not in {"auto", "numpy", "warp"}:
+            raise ValueError("TOPPRA backend must be auto, numpy, or warp")
+        _validate_grid_size(cfg.grid_size)
         super().__init__(cfg)
 
         self._pool = None
@@ -433,6 +413,59 @@ class ToppraPlanner(BasePlanner):
         b = _infer_batch_size(target_states) or 1
         dofs = target_states[0].qpos.shape[-1]
 
+        backend = self.cfg.backend
+        if backend not in {"auto", "numpy", "warp"}:
+            raise ValueError("TOPPRA backend must be auto, numpy, or warp")
+        needs_grad = torch.is_grad_enabled() and (
+            any(state.qpos.requires_grad for state in target_states)
+            or any(
+                isinstance(limit, torch.Tensor) and limit.requires_grad
+                for limit in options.constraints.values()
+            )
+        )
+        if needs_grad and backend == "numpy":
+            raise NotImplementedError("TOPPRA gradients require the Warp backend")
+        use_warp = backend == "warp" or (
+            backend == "auto" and (self.device.type == "cuda" or needs_grad)
+        )
+        if use_warp:
+            from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
+
+            waypoints_tensor = torch.stack([s.qpos for s in target_states], dim=1).to(
+                self.device
+            )
+            if waypoints_tensor.dtype not in (torch.float32, torch.float64):
+                waypoints_tensor = waypoints_tensor.to(torch.float64)
+            try:
+                result = _retime_toppra_warp(
+                    waypoints_tensor,
+                    options.constraints["velocity"],
+                    options.constraints["acceleration"],
+                    sample_count=(
+                        int(options.sample_interval)
+                        if options.sample_method == TrajectorySampleMethod.QUANTITY
+                        else None
+                    ),
+                    sample_dt=(
+                        options.sample_interval
+                        if options.sample_method == TrajectorySampleMethod.TIME
+                        else None
+                    ),
+                    grid_size=self.cfg.grid_size,
+                )
+            except (ValueError, FloatingPointError, OverflowError):
+                return self._assemble_batched_result(
+                    [_empty_failure(dofs) for _ in range(b)], dofs
+                )
+            # The existing planner contract returns float32 for all floating
+            # fields, independently of input precision or selected backend.
+            return PlanResult(
+                **{
+                    key: value if key == "success" else value.to(torch.float32)
+                    for key, value in result.items()
+                }
+            )
+
         # Build (B, N, DOF) numpy waypoints
         waypoints = np.stack(
             [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
@@ -440,8 +473,19 @@ class ToppraPlanner(BasePlanner):
 
         vc = options.constraints["velocity"]
         ac = options.constraints["acceleration"]
+        if isinstance(vc, torch.Tensor):
+            vc = vc.detach().cpu().numpy()
+        if isinstance(ac, torch.Tensor):
+            ac = ac.detach().cpu().numpy()
         args_per_env = [
-            (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
+            (
+                waypoints[i],
+                vc,
+                ac,
+                options.sample_method,
+                options.sample_interval,
+                self.cfg.grid_size,
+            )
             for i in range(b)
         ]
 
