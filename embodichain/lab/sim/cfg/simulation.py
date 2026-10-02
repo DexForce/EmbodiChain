@@ -108,34 +108,97 @@ class NRDCfg:
 
     Pipeline selection belongs to :class:`DenoisingCfg`. This class only owns
     NRD tuning values and intentionally does not expose RELAX/REBLUR selection.
+
+    The fields are grouped by how directly they affect the current public
+    ``nrd`` path (standalone NRD RELAX): history/disocclusion controls and the
+    post-NRD TAA controls are active-path settings. Reblur-specific blur,
+    stabilization, and anti-lag controls are retained for native parity but
+    can be deferred from a smaller public configuration surface because the
+    current EmbodiChain mode does not select NRD REBLUR. Validation is a debug
+    feature, and SH/SG mode only has an effect on RELAX with FastRT or OfflineRT.
     """
 
     max_indirect_bounces: int = 1
+    """Number of indirect continuation rays after the primary surface.
+
+    Higher values increase lighting detail and ray cost; NRD's real-time
+    default is one continuation bounce.
+    """
+
     denoising_range: float = 500000.0
+    """Maximum world-space range considered by NRD's denoising passes."""
+
     disocclusion_threshold: float = 0.01
+    """Base view-depth threshold used to reject invalid temporal history."""
+
     disocclusion_threshold_alternate: float = 0.05
+    """Alternate depth threshold for pixels selecting the mixed threshold."""
+
     disocclusion_threshold_mix_enabled: bool = True
+    """Use the per-pixel threshold-mix input for thin or transparent geometry."""
+
     history_confidence_enabled: bool = True
+    """Generate paired-history confidence from matched probe renders."""
+
     history_confidence_probe_stride: int = 5
+    """Full-resolution spacing of paired-history probe rays; native range is 1–8."""
+
     history_confidence_sigma_scale: float = 2.0
+    """Sigma scale used when converting history gradients into confidence."""
+
     history_confidence_sensitivity: float = 1.0
+    """Sensitivity used when converting history gradients into confidence."""
+
     max_accumulated_frame_num: int = 30
+    """Maximum slow temporal history length for RELAX and REBLUR."""
+
     max_fast_accumulated_frame_num: int = 6
+    """Maximum fast temporal history length used while a pixel is changing."""
+
     history_fix_frame_num: int = 3
+    """Number of frames used to repair history after a disocclusion."""
+
     diffuse_prepass_blur_radius: float = 30.0
+    """Diffuse prepass blur radius; larger values reduce noise and soften detail."""
+
     specular_prepass_blur_radius: float = 50.0
+    """Specular prepass blur radius; mainly an advanced REBLUR tuning knob."""
+
     anti_firefly_enabled: bool = False
+    """Suppress isolated bright history samples; may darken sparse highlights."""
+
     sh_mode_enabled: bool = False
+    """Enable RELAX directional SH/SG signals on FastRT and OfflineRT paths."""
+
     validation_enabled: bool = False
+    """Enable NRD validation diagnostics; intended for development builds."""
+
     max_stabilized_frame_num: int = 63
+    """Maximum stabilized history for REBLUR; inactive for standalone RELAX."""
+
     min_blur_radius: float = 1.0
+    """Minimum adaptive blur radius for REBLUR; inactive for standalone RELAX."""
+
     max_blur_radius: float = 30.0
+    """Maximum adaptive blur radius for REBLUR; inactive for standalone RELAX."""
+
     antilag_luminance_sigma_scale: float = 2.0
+    """REBLUR Anti-Lag luminance sigma scale; inactive for standalone RELAX."""
+
     antilag_luminance_sensitivity: float = 3.0
+    """REBLUR Anti-Lag luminance sensitivity; inactive for standalone RELAX."""
+
     taa_min_current_weight: float = 1.0 / 16.0
+    """Minimum current-frame weight in the post-NRD temporal resolve."""
+
     taa_sigma_scale: float = 2.0
+    """Sigma scale used by the post-NRD temporal resolve."""
+
     taa_depth_rejection_enabled: bool = True
+    """Reject post-NRD history when reprojected view depth does not match."""
+
     taa_tone_mapping_enabled: bool = False
+    """Apply NRD's optional tone mapping before the final EmbodiChain output."""
 
     def __post_init__(self) -> None:
         """Validate scalar types, numeric ranges, and radius ordering."""
