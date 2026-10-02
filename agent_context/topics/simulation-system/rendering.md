@@ -57,8 +57,9 @@ sensor behavior belongs to [sensors](../sensor-system/sensor-system.md).
 `cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering,
 `DenoisingCfg`, `DLSSCfg` and `NRDCfg` into WorldConfig after automatic renderer
 resolution. `DenoisingCfg` independently selects the window and offscreen
-pipelines from `off`, `optix`, `dlss` and `nrd`; native RR/SR variants and NRD
-method variants are not part of the EmbodiChain public contract. Retain the
+pipelines from `off`, `optix`, `dlss` and `nrd`; `dlss` maps to DLSS Ray
+Reconstruction and `nrd` maps to standalone NRD RELAX. Native SR/REBLUR
+variants are not part of the EmbodiChain public contract. Retain the
 complete configuration during headless startup for offscreen cameras or a later
 window.
 

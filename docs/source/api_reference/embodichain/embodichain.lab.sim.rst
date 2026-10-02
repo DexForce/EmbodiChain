@@ -152,9 +152,10 @@ Ray-Tracing Denoising and Reconstruction
 .. currentmodule:: embodichain.lab.sim
 
 Select independent window and offscreen image-processing paths through
-``SimulationManagerCfg.render_cfg.denoising``. DLSS and NRD tuning remain in
-their dedicated nested configs; output resolution stays owned by the window or
-camera configuration.
+``SimulationManagerCfg.render_cfg.denoising``. The public ``dlss`` path maps to
+DLSS Ray Reconstruction and ``nrd`` maps to standalone NRD RELAX. DLSS and NRD
+tuning remain in their dedicated nested configs; output resolution stays owned
+by the window or camera configuration.
 
 .. autodata:: DenoisingMode
 

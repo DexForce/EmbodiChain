@@ -2055,7 +2055,7 @@ class TestConfigToCfgFromFile:
         )
         assert (
             world_config.rt_pipeline_config.offscreen.mode
-            == dexsim.types.RTRenderMode.NRD_SR
+            == dexsim.types.RTRenderMode.NRD_RELAX
         )
         assert world_config.dlss_config.dlss_quality == 1
         assert world_config.dlss_config.tiled_enabled is False

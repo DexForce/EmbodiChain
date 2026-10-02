@@ -581,6 +581,10 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "collision_filter_parent",
         "is_visible",
         "is_site",
+        # DexSim 0.5.1rc1 native loader/ordering controls remain outside the
+        # backend-neutral EmbodiChain collision configuration.
+        "priority",
+        "use_native_mesh_loader",
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -1171,7 +1175,7 @@ def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
         ("off", RTRenderMode.RAW),
         ("optix", RTRenderMode.OPTIX_DENOISE),
         ("dlss", RTRenderMode.DLSS_RR),
-        ("nrd", RTRenderMode.NRD_SR),
+        ("nrd", RTRenderMode.NRD_RELAX),
     ],
 )
 def test_render_cfg_maps_public_denoising_modes(
@@ -1206,7 +1210,7 @@ def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
     render_cfg.apply_to_dexsim_config(world_config)
 
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.OPTIX_DENOISE
-    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_SR
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_RELAX
 
 
 def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:

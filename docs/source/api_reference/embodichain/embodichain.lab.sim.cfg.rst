@@ -122,7 +122,10 @@ window remains a consumer regardless of this automatic policy.
 
 .. autosummary::
 
+   DenoisingMode
+   DenoisingCfg
    DLSSCfg
+   NRDCfg
    RenderCfg
    GPUMemoryCfg
    PhysicsBackendCfg

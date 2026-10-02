@@ -113,7 +113,9 @@ def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
         "dlss": dexsim.types.RTRenderMode.DLSS_RR,
     }[denoising_mode]
     assert world.rt_pipeline_config.window.mode == expected_window_mode
-    assert world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_SR
+    assert (
+        world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_RELAX
+    )
     assert world.dlss_config.dlss_quality == 3
     assert world.dlss_config.render_width == world.dlss_config.render_height == 0
     assert (world.win_config.width, world.win_config.height) == (640, 480)

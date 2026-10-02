@@ -33,7 +33,10 @@ from dexsim.types import RTRenderMode, Renderer, ToneMappingType
 from embodichain.utils import configclass, logger
 
 __all__ = [
+    "DenoisingCfg",
+    "DenoisingMode",
     "DLSSCfg",
+    "NRDCfg",
     "RenderCfg",
     "GPUMemoryCfg",
     "PhysicsBackendCfg",
@@ -57,7 +60,7 @@ _DENOISING_MODES: dict[DenoisingMode, RTRenderMode] = {
     "off": RTRenderMode.RAW,
     "optix": RTRenderMode.OPTIX_DENOISE,
     "dlss": RTRenderMode.DLSS_RR,
-    "nrd": RTRenderMode.NRD_SR,
+    "nrd": RTRenderMode.NRD_RELAX,
 }
 
 
@@ -101,7 +104,7 @@ class DenoisingCfg:
 
 @configclass
 class NRDCfg:
-    """Algorithm settings shared by targets that use the NRD+SR path.
+    """Algorithm settings shared by targets that use the NRD path.
 
     Pipeline selection belongs to :class:`DenoisingCfg`. This class only owns
     NRD tuning values and intentionally does not expose RELAX/REBLUR selection.
@@ -229,10 +232,10 @@ class NRDCfg:
 
 @configclass
 class DLSSCfg:
-    """DLSS settings shared by RR and NRD+SR rendering paths.
+    """DLSS settings for the public ``dlss`` rendering path.
 
     Pipeline selection belongs to :class:`DenoisingCfg`. These controls apply
-    when either target selects ``"dlss"`` or ``"nrd"``.
+    when a target selects ``"dlss"``.
 
     .. attention::
         DLSS requires a Vulkan render device, a compatible NVIDIA GPU/driver,
@@ -388,10 +391,10 @@ class RenderCfg:
     """Window and offscreen denoising/reconstruction pipeline selection."""
 
     dlss: DLSSCfg = field(default_factory=DLSSCfg)
-    """DLSS settings shared by targets using RR or NRD+SR."""
+    """DLSS settings used when a target selects ``dlss``."""
 
     nrd: NRDCfg = field(default_factory=NRDCfg)
-    """NRD settings shared by targets using NRD+SR."""
+    """NRD settings shared by targets using standalone NRD."""
 
     tone_mapping_enabled: bool = False
     """Whether to map HDR RGB output with the modified Reinhard curve."""

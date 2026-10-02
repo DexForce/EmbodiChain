@@ -9,9 +9,9 @@ constructing a configuration object does not by itself initialize DLSS.
 
 ## Processing model
 
-DexSim manages Ray Reconstruction (RR) for denoising and reconstruction,
-and Super Resolution (SR) for upscaling. Offscreen DLSS and RR use DexSim's
-native defaults. `upscale_enabled` controls standalone SR when RR is disabled.
+DexSim manages Ray Reconstruction (RR) for the public `dlss` path. The public
+`nrd` path is configured separately through `RenderCfg.nrd` and maps to
+standalone NRD RELAX.
 
 ## EmbodiChain configuration
 
@@ -19,8 +19,6 @@ The following fields are available under `RenderCfg.dlss`:
 
 | Parameter | Default | Description |
 | :--- | :---: | :--- |
-| `dlss_enabled` | `True` | Master switch for DLSS on window and offscreen targets. |
-| `upscale_enabled` | `True` | Enables standalone SR when RR is disabled. |
 | `dlss_quality` | `2` | Quality preset: `-1` auto, `0` ultra performance, `1` performance, `2` balanced, `3` quality, `4` ultra quality, or `5` DLAA. |
 | `render_width`, `render_height` | `0` | Optional internal dimensions for FastRT/OfflineRT windows. Zero derives the dimensions from the quality preset. |
 | `target_width`, `target_height` | `0` | Compatibility fields. Set the actual output size on the window or camera instead. |
@@ -35,10 +33,8 @@ not the physics or control timestep, so it should normally remain `0.0`.
 Specify a positive value only when the application intentionally renders at a
 known fixed cadence.
 
-EmbodiChain currently mirrors the core DLSS controls only. DexSim's advanced
-multi-camera tiled controls are intentionally not duplicated in
-`DLSSCfg`; their native defaults remain in effect while the engine manages
-camera-group rendering.
+`DLSSCfg` also exposes DexSim's tiled multi-camera controls through
+`tiled_enabled`, `tiled_gutter_pixels`, and `tiled_max_dimension`.
 
 ## Quality and resolution
 
@@ -67,15 +63,15 @@ preset.
 Configure DLSS quality in a headless simulation:
 
 ```python
-from embodichain.lab.sim import DLSSCfg, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, DLSSCfg, RenderCfg
 
 sim_config = SimulationManagerCfg(
     headless=True,
     render_cfg=RenderCfg(
         renderer="hybrid",
+        denoising=DenoisingCfg(window="dlss", offscreen="dlss"),
         dlss=DLSSCfg(
-            dlss_enabled=True,
             dlss_quality=3,
         ),
     ),
@@ -105,10 +101,10 @@ sim_config = SimulationManagerCfg(
 )
 ```
 
-The same settings are available in task JSON/YAML under
-`render_cfg.dlss` (decoded into `env_cfg.sim_cfg.render_cfg.dlss`). Set
-`dlss_enabled: false` explicitly when a task must use the standard renderer
-path.
+The same settings are available in task JSON/YAML under `render_cfg.denoising`
+and `render_cfg.dlss` (decoded into the corresponding nested config objects).
+Use `denoising.window: off` or `denoising.offscreen: off` to select the raw
+ray-traced path for a scope.
 
 ## Availability and fallback
 
