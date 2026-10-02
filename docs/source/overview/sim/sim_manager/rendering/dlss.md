@@ -24,8 +24,9 @@ The following fields are available under `RenderCfg.dlss`:
 | `target_width`, `target_height` | `0` | Compatibility fields. Set the actual output size on the window or camera instead. |
 | `upsample_ratio` | `None` | Optional FastRT/OfflineRT ratio used to derive unset internal dimensions. |
 | `exposure_compensation` | `1.0` | Positive exposure multiplier used by the RR bridge. |
-`DLSSCfg` also exposes DexSim's tiled multi-camera controls through
-`tiled_enabled`, `tiled_gutter_pixels`, and `tiled_max_dimension`.
+`DLSSCfg.tiled_enabled` controls whether compatible multi-camera targets use a
+single tiled atlas. Atlas gutter and dimension limits remain owned by DexSim
+and use its native defaults.
 
 ## Quality and resolution
 

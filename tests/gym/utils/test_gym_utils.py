@@ -1862,7 +1862,6 @@ class TestConfigToCfgFromFile:
         ("field_name", "invalid_value"),
         [
             ("tiled_enabled", "false"),
-            ("tiled_gutter_pixels", -1),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
         ],

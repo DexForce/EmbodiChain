@@ -1346,8 +1346,6 @@ def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
         ("target_width", -1),
         ("target_height", -1),
         ("render_width", 1.5),
-        ("tiled_gutter_pixels", -1),
-        ("tiled_max_dimension", -1),
         ("upsample_ratio", 0.5),
         ("upsample_ratio", float("inf")),
         ("upsample_ratio", float("nan")),

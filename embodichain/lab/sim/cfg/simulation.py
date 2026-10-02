@@ -272,12 +272,6 @@ class DLSSCfg:
     tiled_enabled: bool = True
     """Evaluate compatible multi-camera targets through one tiled DLSS atlas."""
 
-    tiled_gutter_pixels: int = 16
-    """Target-resolution guard band around each tile in pixels."""
-
-    tiled_max_dimension: int = 0
-    """Maximum atlas dimension; zero uses the Vulkan device limit."""
-
     exposure_compensation: float = 1.0
     """Positive, finite exposure multiplier used by the RR bridge."""
 
@@ -292,8 +286,6 @@ class DLSSCfg:
             "render_height",
             "target_width",
             "target_height",
-            "tiled_gutter_pixels",
-            "tiled_max_dimension",
         ):
             value = getattr(self, name)
             if type(value) is not int or value < 0:
@@ -344,8 +336,6 @@ class DLSSCfg:
         dlss.target_width = self.target_width
         dlss.target_height = self.target_height
         dlss.tiled_enabled = self.tiled_enabled
-        dlss.tiled_gutter_pixels = self.tiled_gutter_pixels
-        dlss.tiled_max_dimension = self.tiled_max_dimension
         dlss.exposure_compensation = self.exposure_compensation
         return dlss
 
