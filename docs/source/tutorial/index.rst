@@ -16,6 +16,10 @@ Work through the categories in order when you are new to EmbodiChain:
    Program, and generate demonstration data.
 3. :doc:`learning/index` — train reinforcement-learning policies.
 
+The :doc:`mcp` tutorial explains how to connect an MCP Host to a local,
+simulation-only EmbodiChain server. It can be read independently of the
+simulation learning path.
+
 To add a new robot after completing the core tutorials, continue with
 :doc:`/guides/add_robot`.
 
@@ -25,3 +29,4 @@ To add a new robot after completing the core tutorials, continue with
    simulation/index
    environments/index
    learning/index
+   mcp

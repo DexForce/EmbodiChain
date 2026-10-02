@@ -1,5 +1,7 @@
 # Codex-driven Franka trajectory demo
 
+For the conceptual walkthrough, see the [EmbodiChain MCP tutorial](https://dexforce.github.io/EmbodiChain/main/tutorial/mcp.html).
+
 This demo connects Codex to the EmbodiChain MCP server. Codex creates a
 headless simulation World, loads an integrated Franka Panda configuration,
 generates a bounded joint trajectory, validates it against the robot's joint
