@@ -1653,7 +1653,7 @@ def test_oversize_drawer_payload_bundle_has_no_containment_gate(
     )
 
 
-def test_drawer_place_preparation_uses_live_target_without_fit_gate(
+def test_drawer_place_preparation_keeps_payload_for_runtime_attempt(
     drawer_container_scene: PreparedScene,
 ) -> None:
     from dataclasses import dataclass
@@ -1695,6 +1695,7 @@ def test_drawer_place_preparation_uses_live_target_without_fit_gate(
     )
     prepared = prepare_place(request, context, (obs,))
     assert prepared.goal.xpos.shape == (1, 3, 4, 4)
+    assert torch.isfinite(prepared.goal.xpos).all()
     torch.testing.assert_close(
         prepared.goal.xpos[:, 2], obs.entry_poses()[2] @ held.object_to_eef
     )
