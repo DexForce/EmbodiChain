@@ -24,15 +24,6 @@ The following fields are available under `RenderCfg.dlss`:
 | `target_width`, `target_height` | `0` | Compatibility fields. Set the actual output size on the window or camera instead. |
 | `upsample_ratio` | `None` | Optional FastRT/OfflineRT ratio used to derive unset internal dimensions. |
 | `exposure_compensation` | `1.0` | Positive exposure multiplier used by the RR bridge. |
-| `frame_time_delta_ms` | `0.0` | Render-frame interval in milliseconds. Zero selects DexSim's automatic measurement; a positive value supplies a fixed interval. |
-
-`frame_time_delta_ms` is deliberately defaulted to `0.0`, matching DexSim's
-native `DLSSConfig` default. DexSim measures the elapsed time between rendered
-frames and uses it in the temporal path. This value describes render cadence,
-not the physics or control timestep, so it should normally remain `0.0`.
-Specify a positive value only when the application intentionally renders at a
-known fixed cadence.
-
 `DLSSCfg` also exposes DexSim's tiled multi-camera controls through
 `tiled_enabled`, `tiled_gutter_pixels`, and `tiled_max_dimension`.
 
@@ -75,16 +66,6 @@ sim_config = SimulationManagerCfg(
             dlss_quality=3,
         ),
     ),
-)
-```
-
-Use a fixed 60 FPS render interval only when the rendering cadence is known
-and intentionally fixed:
-
-```python
-render_cfg = RenderCfg(
-    renderer="hybrid",
-    dlss=DLSSCfg(frame_time_delta_ms=16.667),
 )
 ```
 

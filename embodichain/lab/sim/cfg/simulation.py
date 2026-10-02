@@ -281,15 +281,6 @@ class DLSSCfg:
     exposure_compensation: float = 1.0
     """Positive, finite exposure multiplier used by the RR bridge."""
 
-    frame_time_delta_ms: float = 0.0
-    """Frame interval in milliseconds passed to DexSim's DLSS temporal path.
-
-    The default ``0.0`` intentionally matches ``dexsim.DLSSConfig``: DexSim
-    measures the actual render interval automatically. Set a positive value
-    only for a fixed render cadence; this is a render-frame interval, not a
-    physics or control timestep.
-    """
-
     def __post_init__(self) -> None:
         """Validate scalar types and the ranges of numeric settings."""
         if type(self.tiled_enabled) is not bool:
@@ -325,15 +316,6 @@ class DLSSCfg:
             raise ValueError(
                 "DLSSCfg.exposure_compensation must be a positive, finite number."
             )
-        if (
-            isinstance(self.frame_time_delta_ms, bool)
-            or not isinstance(self.frame_time_delta_ms, Real)
-            or not math.isfinite(self.frame_time_delta_ms)
-            or self.frame_time_delta_ms < 0.0
-        ):
-            raise ValueError(
-                "DLSSCfg.frame_time_delta_ms must be a non-negative, finite number."
-            )
 
     def to_dexsim_cfg(self, window_width: int, window_height: int) -> dexsim.DLSSConfig:
         """Convert settings without changing the window or camera output size.
@@ -365,7 +347,6 @@ class DLSSCfg:
         dlss.tiled_gutter_pixels = self.tiled_gutter_pixels
         dlss.tiled_max_dimension = self.tiled_max_dimension
         dlss.exposure_compensation = self.exposure_compensation
-        dlss.frame_time_delta_ms = self.frame_time_delta_ms
         return dlss
 
 

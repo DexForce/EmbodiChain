@@ -1364,7 +1364,6 @@ def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
         ("exposure_compensation", None),
         ("exposure_compensation", []),
         ("exposure_compensation", {}),
-        ("frame_time_delta_ms", -0.1),
     ],
 )
 def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
@@ -1406,7 +1405,6 @@ def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> 
         ("upsample_ratio", "2.0"),
         ("exposure_compensation", "1.0"),
         ("tiled_enabled", "false"),
-        ("frame_time_delta_ms", -1.0),
     ],
 )
 def test_dlss_conversion_revalidates_mutated_settings(

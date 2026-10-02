@@ -423,7 +423,6 @@ def _build_simulation(mode: RenderMode, cfg: BenchmarkCfg):
             dlss=DLSSCfg(
                 dlss_quality=cfg.dlss_quality,
                 tiled_enabled=False,
-                frame_time_delta_ms=1000.0 / 30.0,
             ),
             nrd=NRDCfg(taa_tone_mapping_enabled=False),
         ),
