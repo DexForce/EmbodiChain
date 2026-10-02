@@ -49,6 +49,15 @@ assert MotionGenerator.__module__ == generator_path
 assert MotionGenCfg.__module__ == generator_path
 assert MotionGenOptions().strategy == "motion_gen"
 from embodichain.lab.sim import motion
+from embodichain.lab.sim.motion import expansion
+from embodichain.lab.sim.motion.execution import (
+    EpisodeSink,
+    FixedSceneInitialStatePort,
+    InitialStatePort,
+    MeasuredExecutor,
+    SingleSlotOutcome,
+    SingleSlotRunner,
+)
 from embodichain.lab.sim.cfg import RobotCfg
 from embodichain.lab.sim.motion.solvers import SolverCfg, URSolverCfg
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
@@ -65,6 +74,21 @@ for name in motion.__all__:
     module = getattr(motion, name)
     assert module is importlib.import_module("embodichain.lab.sim.motion." + name)
 assert "solvers" in dir(motion)
+for name in (
+    "InitialStatePort",
+    "MeasuredExecutor",
+    "EpisodeSink",
+    "FixedSceneInitialStatePort",
+    "SingleSlotOutcome",
+    "SingleSlotRunner",
+):
+    assert not hasattr(expansion, name)
+assert InitialStatePort.__module__ == "embodichain.lab.sim.motion.execution"
+assert MeasuredExecutor.__module__ == "embodichain.lab.sim.motion.execution"
+assert EpisodeSink.__module__ == "embodichain.lab.sim.motion.execution"
+assert FixedSceneInitialStatePort.__module__ == "embodichain.lab.sim.motion.execution"
+assert SingleSlotOutcome.__module__ == "embodichain.lab.sim.motion.execution"
+assert SingleSlotRunner.__module__ == "embodichain.lab.sim.motion.execution"
 try:
     motion.unknown_motion_module
 except AttributeError:

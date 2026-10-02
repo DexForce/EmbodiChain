@@ -19,11 +19,12 @@ from __future__ import annotations
 import torch
 import os
 import random
+import weakref
 import copy
 import numpy as np
 from pathlib import Path
 
-from typing import TYPE_CHECKING, Literal, Union, Dict
+from typing import TYPE_CHECKING, Dict, Literal, Sequence, Union
 
 from embodichain.lab.sim.objects import (
     Light,
@@ -41,6 +42,7 @@ from embodichain.lab.sim import (
 )
 from embodichain.utils.string import resolve_matching_names
 from embodichain.utils.math import (
+    matrix_from_quat,
     sample_uniform,
     quat_from_euler_xyz,
     euler_xyz_from_quat,
@@ -142,9 +144,105 @@ def set_rigid_object_group_visual_material(
     obj.set_visual_material(mat, env_ids=env_ids)
 
 
+# Keyed by the camera object, so envs that reuse a camera uid each warn once.
+_WARNED_IGNORED_CAMERA_RANGES: weakref.WeakKeyDictionary[
+    object, set[tuple[str, ...]]
+] = weakref.WeakKeyDictionary()
+
+
+def _warn_ignored_camera_ranges(
+    camera: object, uid: str, mode: str, ranges: Dict[str, object], expected: str
+) -> None:
+    """Warn once per camera when ranges that its extrinsics mode never reads are set."""
+    ignored = tuple(name for name, value in ranges.items() if value is not None)
+    if not ignored:
+        return
+    warned = _WARNED_IGNORED_CAMERA_RANGES.setdefault(camera, set())
+    if ignored in warned:
+        return
+    warned.add(ignored)
+    logger.log_warning(
+        f"randomize_camera_extrinsics: camera '{uid}' uses {mode} extrinsics, "
+        f"so {', '.join(ignored)} {'is' if len(ignored) == 1 else 'are'} ignored. "
+        f"Use {expected} for this camera instead."
+    )
+
+
+def _normalize_camera_env_ids(
+    env: EmbodiedEnv, env_ids: Sequence[int] | torch.Tensor | None
+) -> Sequence[int] | torch.Tensor:
+    """Normalize camera event indices so global and reset events share one path."""
+    if env_ids is None or isinstance(env_ids, slice):
+        return torch.arange(env.num_envs, device=env.device)
+    if isinstance(env_ids, torch.Tensor):
+        return env_ids
+    return torch.as_tensor(env_ids, device=env.device)
+
+
+def _sample_camera_range(
+    value_range: tuple[list[float], list[float]],
+    size: tuple[int, ...],
+    device: torch.device | str,
+) -> torch.Tensor:
+    """Sample one camera randomization range on the environment device."""
+    return sample_uniform(
+        lower=torch.tensor(value_range[0], dtype=torch.float32, device=device),
+        upper=torch.tensor(value_range[1], dtype=torch.float32, device=device),
+        size=size,
+        device=device,
+    )
+
+
+def _sample_camera_pose(
+    extrinsics: object,
+    num_instances: int,
+    device: torch.device | str,
+    pos_range: tuple[list[float], list[float]] | None,
+    euler_range: tuple[list[float], list[float]] | None,
+    *,
+    parented: bool,
+) -> torch.Tensor:
+    """Sample a pose-mode camera transform in the camera configuration frame."""
+    init_pos = torch.tensor(
+        getattr(extrinsics, "pos", [0.0, 0.0, 0.0]),
+        dtype=torch.float32,
+        device=device,
+    )
+    init_quat = torch.tensor(
+        getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0]),
+        dtype=torch.float32,
+        device=device,
+    )
+    new_pose = torch.cat((init_pos, init_quat)).repeat(num_instances, 1)
+
+    if pos_range is not None:
+        new_pose[:, :3] += _sample_camera_range(pos_range, (num_instances, 3), device)
+
+    if euler_range is not None:
+        init_euler = torch.stack(
+            euler_xyz_from_quat(init_quat.repeat(num_instances, 1)), dim=1
+        )
+        random_value = _sample_camera_range(euler_range, (num_instances, 3), device)
+        roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
+        new_pose[:, 3:7] = quat_from_euler_xyz(roll, pitch, yaw)
+
+    if parented:
+        return new_pose
+
+    # Camera.reset() converts arena-frame poses to the renderer's OpenGL frame
+    # by flipping the camera's up and forward axes. Keep randomization aligned
+    # with reset for non-mounted pose cameras.
+    pose = torch.eye(4, dtype=torch.float32, device=device).repeat(num_instances, 1, 1)
+    pose[:, :3, :3] = matrix_from_quat(new_pose[:, 3:7])
+    pose[:, :3, 3] = new_pose[:, :3]
+    pose[:, :3, 1] *= -1
+    pose[:, :3, 2] *= -1
+    return pose
+
+
 def randomize_camera_extrinsics(
     env: EmbodiedEnv,
-    env_ids: Union[torch.Tensor, None],
+    env_ids: Sequence[int] | torch.Tensor | None,
     entity_cfg: SceneEntityCfg,
     pos_range: tuple[list[float], list[float]] | None = None,
     euler_range: tuple[list[float], list[float]] | None = None,
@@ -156,63 +254,51 @@ def randomize_camera_extrinsics(
     Randomize camera extrinsic properties (position and orientation).
 
     Behavior:
-    - If extrinsics config has a parent field (attach mode), pos_range/euler_range are used to perturb the initial pose (pos, quat),
-        and set_local_pose is called to attach the camera to the parent node. In this case, pose is related to parent.
-    - If extrinsics config uses eye/target/up (no parent), eye_range/target_range/up_range are used to perturb the initial eye, target, up vectors,
-        and look_at is called to set the camera orientation.
+    - Pose extrinsics use ``pos_range``/``euler_range`` whether the camera is
+      mounted to a parent or placed directly in the arena.
+    - Look-at extrinsics use ``eye_range``/``target_range``/``up_range`` and
+      recompute the camera pose with ``look_at``.
 
     Args:
         env: The environment instance.
         env_ids: The environment IDs to apply the randomization.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
-        pos_range: Position perturbation range (attach mode).
-        euler_range: Euler angle perturbation range (attach mode).
+        pos_range: Position perturbation range (pose mode).
+        euler_range: Euler angle perturbation range (pose mode).
         eye_range: Eye position perturbation range (look_at mode).
         target_range: Target position perturbation range (look_at mode).
         up_range: Up vector perturbation range (look_at mode).
+
+    Ranges that do not apply to the camera's extrinsics mode are ignored; a
+    warning is logged once per camera so that such config mistakes are visible.
     """
     camera: Union[Camera, StereoCamera] = env.sim.get_sensor(entity_cfg.uid)
+    env_ids = _normalize_camera_env_ids(env, env_ids)
     num_instance = len(env_ids)
 
     extrinsics = camera.cfg.extrinsics
 
-    if extrinsics.parent is not None:
-        # If extrinsics has a parent field, use pos/euler perturbation and attach camera to parent node
-        init_pos = getattr(extrinsics, "pos", [0.0, 0.0, 0.0])
-        init_quat = getattr(extrinsics, "quat", [0.0, 0.0, 0.0, 1.0])
-        new_pose = torch.tensor(
-            [init_pos + init_quat], dtype=torch.float32, device=env.device
-        ).repeat(num_instance, 1)
-        if pos_range:
-            random_value = sample_uniform(
-                lower=torch.tensor(pos_range[0]),
-                upper=torch.tensor(pos_range[1]),
-                size=(num_instance, 3),
-            )
-            new_pose[:, :3] += random_value
-        if euler_range:
-            # 1. quat -> euler
-            init_quat_np = (
-                torch.tensor(init_quat, dtype=torch.float32, device=env.device)
-                .unsqueeze_(0)
-                .repeat(num_instance, 1)
-            )
-            init_euler = torch.stack(euler_xyz_from_quat(init_quat_np), dim=1)
-            # 2. Sample perturbation for euler angles
-            random_value = sample_uniform(
-                lower=torch.tensor(euler_range[0]),
-                upper=torch.tensor(euler_range[1]),
-                size=(num_instance, 3),
-            )
-            # 3. Add perturbation to each environment and convert back to quaternion
-            roll, pitch, yaw = (init_euler + random_value).unbind(dim=1)
-            new_quat = quat_from_euler_xyz(roll, pitch, yaw)
-            new_pose[:, 3:7] = new_quat
+    if extrinsics.parent is not None and extrinsics.eye is not None:
+        raise ValueError(
+            f"Camera '{entity_cfg.uid}' cannot combine parent-attached and "
+            "look-at extrinsics. Configure either parent/pos/quat or "
+            "eye/target/up."
+        )
 
-        camera.set_local_pose(new_pose, env_ids=env_ids)
-
-    elif extrinsics.eye is not None:
-        # If extrinsics uses eye/target/up, use perturbation for look_at mode
+    if extrinsics.eye is not None:
+        # Look-at mode is arena-frame; parent-attached look-at configurations
+        # are rejected above because their frame semantics are ambiguous.
+        if extrinsics.target is None:
+            raise ValueError(
+                f"Camera '{entity_cfg.uid}' look-at extrinsics require target."
+            )
+        _warn_ignored_camera_ranges(
+            camera,
+            entity_cfg.uid,
+            "look_at (eye / target / up)",
+            {"pos_range": pos_range, "euler_range": euler_range},
+            "eye_range / target_range / up_range",
+        )
         init_eye = (
             torch.tensor(extrinsics.eye, dtype=torch.float32, device=env.device)
             .unsqueeze(0)
@@ -224,45 +310,60 @@ def randomize_camera_extrinsics(
             .repeat(num_instance, 1)
         )
         init_up = (
-            torch.tensor(extrinsics.up, dtype=torch.float32, device=env.device)
+            torch.tensor(
+                extrinsics.up if extrinsics.up is not None else [0.0, 0.0, 1.0],
+                dtype=torch.float32,
+                device=env.device,
+            )
             .unsqueeze(0)
             .repeat(num_instance, 1)
         )
 
-        if eye_range:
-            eye_delta = sample_uniform(
-                lower=torch.tensor(eye_range[0]),
-                upper=torch.tensor(eye_range[1]),
-                size=(num_instance, 3),
+        if eye_range is not None:
+            new_eye = init_eye + _sample_camera_range(
+                eye_range, (num_instance, 3), env.device
             )
-            new_eye = init_eye + eye_delta
         else:
             new_eye = init_eye
 
-        if target_range:
-            target_delta = sample_uniform(
-                lower=torch.tensor(target_range[0]),
-                upper=torch.tensor(target_range[1]),
-                size=(num_instance, 3),
+        if target_range is not None:
+            new_target = init_target + _sample_camera_range(
+                target_range, (num_instance, 3), env.device
             )
-            new_target = init_target + target_delta
         else:
             new_target = init_target
 
-        if up_range:
-            up_delta = sample_uniform(
-                lower=torch.tensor(up_range[0]),
-                upper=torch.tensor(up_range[1]),
-                size=(num_instance, 3),
+        if up_range is not None:
+            new_up = init_up + _sample_camera_range(
+                up_range, (num_instance, 3), env.device
             )
-            new_up = init_up + up_delta
         else:
             new_up = init_up
 
         camera.look_at(new_eye, new_target, new_up, env_ids=env_ids)
 
     else:
-        logger.log_error("Unsupported extrinsics format for camera randomization.")
+        # Pose mode works for both parent-mounted and arena-frame cameras.
+        _warn_ignored_camera_ranges(
+            camera,
+            entity_cfg.uid,
+            "pose (parent)" if extrinsics.parent is not None else "pose (arena)",
+            {
+                "eye_range": eye_range,
+                "target_range": target_range,
+                "up_range": up_range,
+            },
+            "pos_range / euler_range",
+        )
+        pose = _sample_camera_pose(
+            extrinsics,
+            num_instance,
+            env.device,
+            pos_range,
+            euler_range,
+            parented=extrinsics.parent is not None,
+        )
+        camera.set_local_pose(pose, env_ids=env_ids)
 
 
 def randomize_light(

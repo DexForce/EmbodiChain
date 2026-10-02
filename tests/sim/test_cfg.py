@@ -274,6 +274,254 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     assert merged.attrs.material_props.kd == 50.0
 
 
+def test_robot_cfg_merge_preserves_sparse_link_physics_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                        torsional_friction=0.1,
+                    ),
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "material_props": {
+                            "backend": "newton",
+                            "kd": 800.0,
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    group = merged.link_attrs["gripper_contacts"]
+    assert group.link_names_expr == ["finger_.*"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.condim == 4
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(800.0)
+    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
+
+
+def test_robot_cfg_merge_portable_link_fields_preserve_newton_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                    ),
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "collision_props": {"collision_enabled": False},
+                        "material_props": {"dynamic_friction": 0.8},
+                    }
+                }
+            }
+        },
+    )
+
+    group = merged.link_attrs["gripper_contacts"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.collision_enabled is False
+    assert group.attrs.collision_props.condim == 4
+    assert group.attrs.collision_props.contact_offset is None
+    assert group.attrs.collision_props.rest_offset is None
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.dynamic_friction == pytest.approx(0.8)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(400.0)
+
+
+def test_robot_cfg_merge_preserves_explicit_link_contact_envelope() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(
+                        contact_offset=0.009,
+                        rest_offset=0.003,
+                    )
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {"collision_props": {"collision_enabled": False}}
+                }
+            }
+        },
+    )
+
+    collision_props = merged.link_attrs["gripper_contacts"].attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.009)
+    assert collision_props.rest_offset == pytest.approx(0.003)
+
+
+def test_robot_cfg_merge_preserves_top_level_newton_contact_envelope() -> None:
+    base = RobotCfg(
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(
+                contact_offset=0.009,
+                rest_offset=0.003,
+            )
+        )
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {"attrs": {"collision_props": {"collision_enabled": False}}},
+    )
+
+    collision_props = merged.attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.009)
+    assert collision_props.rest_offset == pytest.approx(0.003)
+
+
+def test_robot_cfg_merge_applies_explicit_link_contact_envelope_override() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(
+                        contact_offset=0.009,
+                        rest_offset=0.003,
+                    )
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "collision_props": {
+                            "contact_offset": 0.006,
+                            "rest_offset": 0.002,
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    collision_props = merged.link_attrs["gripper_contacts"].attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.006)
+    assert collision_props.rest_offset == pytest.approx(0.002)
+
+
+def test_robot_cfg_merge_adds_link_physics_group_without_replacing_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "tool_contacts": {
+                    "link_names_expr": ["tool"],
+                    "attrs": {
+                        "material_props": {
+                            "backend": "newton",
+                            "ke": 1000.0,
+                        }
+                    },
+                }
+            }
+        },
+    )
+
+    assert set(merged.link_attrs) == {"gripper_contacts", "tool_contacts"}
+    assert merged.link_attrs["tool_contacts"].link_names_expr == ["tool"]
+
+
+def test_robot_cfg_merge_empty_link_physics_mapping_is_noop() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(base, {"link_attrs": {}})
+
+    assert set(merged.link_attrs) == {"gripper_contacts"}
+
+
+def test_robot_cfg_merge_empty_link_physics_mapping_preserves_none() -> None:
+    base = RobotCfg(link_attrs=None)
+
+    merged = merge_robot_cfg(base, {"link_attrs": {}})
+
+    assert merged.link_attrs is None
+
+
+def test_robot_cfg_merge_null_link_physics_group_removes_only_that_group() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"]),
+            "tool_contacts": LinkPhysicsOverrideCfg(link_names_expr=["tool"]),
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {"link_attrs": {"gripper_contacts": None}},
+    )
+
+    assert set(merged.link_attrs) == {"tool_contacts"}
+
+
+def test_robot_cfg_merge_null_link_physics_mapping_clears_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(base, {"link_attrs": None})
+
+    assert merged.link_attrs is None
+
+
 def test_rigid_physics_uses_one_slot_per_physical_concept() -> None:
     """Backend blocks and geometry cooking are not parallel physics owners."""
     assert {item.name for item in fields(RigidBodyPhysicsCfg)} == {

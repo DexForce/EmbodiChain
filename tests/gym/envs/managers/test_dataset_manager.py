@@ -131,6 +131,55 @@ def test_apply_forwards_only_functor_params() -> None:
     assert calls == [(env, env_ids, True)]
 
 
+def test_inject_robot_metadata_uses_selected_embodiment() -> None:
+    recorder_type = type("LeRobotRecorder", (), {})
+    functor_cfg = DatasetFunctorCfg(
+        func=recorder_type,
+        params={"instruction": {"lang": "pick"}},
+    )
+    manager = DatasetManager.__new__(DatasetManager)
+    manager._env = SimpleNamespace(
+        robot=SimpleNamespace(cfg=SimpleNamespace(robot_type="panda"))
+    )
+    manager._mode_functor_cfgs = {"save": [functor_cfg]}
+
+    manager._inject_robot_metadata()
+
+    assert functor_cfg.params["robot_meta"] == {"robot_type": "panda"}
+
+
+def test_inject_robot_metadata_preserves_explicit_robot_type() -> None:
+    recorder_type = type("AsyncLeRobotRecorder", (), {})
+    functor_cfg = DatasetFunctorCfg(
+        func=recorder_type,
+        params={"robot_meta": {"robot_type": "custom"}},
+    )
+    manager = DatasetManager.__new__(DatasetManager)
+    manager._env = SimpleNamespace(
+        robot=SimpleNamespace(cfg=SimpleNamespace(robot_type="panda"))
+    )
+    manager._mode_functor_cfgs = {"save": [functor_cfg]}
+
+    manager._inject_robot_metadata()
+
+    assert functor_cfg.params["robot_meta"] == {"robot_type": "custom"}
+
+
+def test_validate_policy_action_forwards_to_descriptor_recorders() -> None:
+    """Live policy validation reaches each recorder before manager processing."""
+    validator = MagicMock()
+    recorder = SimpleNamespace(validate_policy_action=validator)
+    manager = DatasetManager.__new__(DatasetManager)
+    manager._mode_functor_cfgs = {
+        "save": [SimpleNamespace(func=recorder), SimpleNamespace(func=object())]
+    }
+    action = torch.zeros(2, 3)
+
+    manager.validate_policy_action(action)
+
+    validator.assert_called_once_with(action)
+
+
 def make_manager_for_finalize(*named_functors) -> DatasetManager:
     """Create a manager lifecycle fixture without constructing a simulator."""
     manager = DatasetManager.__new__(DatasetManager)

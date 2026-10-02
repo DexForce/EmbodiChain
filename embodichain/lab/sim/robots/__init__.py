@@ -16,6 +16,10 @@
 
 """Robot-specific configuration presets (``RobotCfg`` subclasses) ready to drop into a simulation scene, plus the ``build_dual_arm_cfg`` dual-arm assembly helper."""
 
+from __future__ import annotations
+
+from .aloha_mini import AlohaMiniCfg
+from .tianji_marvin import TianjiMarvinCfg
 from .dexforce_w1 import *
 from .cobotmagic import CobotMagicCfg
 from .franka_panda import FrankaPandaCfg
@@ -23,6 +27,8 @@ from .ur_robot import URRobotCfg
 from .dual_arm import DualArmRobotCfg, build_dual_arm_cfg
 
 __all__ = [
+    "AlohaMiniCfg",
+    "TianjiMarvinCfg",
     "DexforceW1Cfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",

@@ -1,0 +1,13 @@
+task_key: go1_flat
+title: Unitree Go1 Flat Velocity
+summary: Track planar velocity and yaw-rate commands with the Unitree Go1 quadruped on flat terrain.
+tags:
+- locomotion
+- reinforcement_learning
+- quadruped
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  newton:
+    config: env.newton.yaml

@@ -24,10 +24,14 @@ import torch
 from embodichain.data import get_data_path
 from embodichain.lab.sim.cfg import (
     JointDrivePropertiesCfg,
+    LinkPhysicsOverrideCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
     RobotCfg,
     URDFCfg,
 )
-from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+from embodichain.lab.sim.motion.solvers import FEPSolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.utils import configclass
 
@@ -61,8 +65,9 @@ class FrankaPandaCfg(RobotCfg):
     """Configuration for the Franka Emika Panda robot with Panda hand.
 
     The PandaWithHand URDF includes both the 7-DOF arm and the parallel-jaw
-    gripper in a single file. The solver defaults to
-    :class:`~embodichain.lab.sim.motion.solvers.PytorchSolverCfg`.
+    gripper in a single file. The arm defaults to
+    :class:`~embodichain.lab.sim.motion.solvers.FEPSolverCfg` with redundancy
+    search enabled.
 
     Example:
 
@@ -127,7 +132,7 @@ class FrankaPandaCfg(RobotCfg):
         }
 
         self.solver_cfg = {
-            "arm": PytorchSolverCfg(
+            "arm": FEPSolverCfg(
                 end_link_name="fr3_hand_tcp",
                 root_link_name="base",
                 tcp=[
@@ -136,7 +141,7 @@ class FrankaPandaCfg(RobotCfg):
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
-                num_samples=30,
+                redundancy_search=True,
             ),
         }
 
@@ -155,6 +160,20 @@ class FrankaPandaCfg(RobotCfg):
                 "fr3_finger_joint[1-2]": 1e4,
             },
         )
+        self.link_attrs = {
+            "newton_gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["fr3_leftfinger|fr3_rightfinger"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                        torsional_friction=0.1,
+                        rolling_friction=0.01,
+                    ),
+                ),
+            )
+        }
 
         self.init_qpos = list(_FRANKA_DEFAULT_INIT_QPOS)
 

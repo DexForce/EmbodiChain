@@ -42,7 +42,16 @@ simulation:
         - [0.0, 0.0, 1.0, 0.15]
         - [0.0, 0.0, 0.0, 1.0]
 
-sensor: []
+sensor:
+  - sensor_type: Camera
+    uid: cam_overhead
+    width: 320
+    height: 240
+    intrinsics: [250.0, 250.0, 160.0, 120.0]
+    extrinsics:
+      eye: [-0.50, -0.90, 0.88]
+      target: [-0.50, 0.10, 0.20]
+      up: [0.0, 0.0, 1.0]
 
 skill_profile:
   contract_id: single_arm_parallel_gripper

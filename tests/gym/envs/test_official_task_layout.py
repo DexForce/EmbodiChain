@@ -21,7 +21,9 @@ from __future__ import annotations
 import importlib
 from importlib.util import find_spec
 from pathlib import Path
+import pytest
 
+from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import (
     REGISTERED_ENVS,
     discover_task_packages,
@@ -43,10 +45,14 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
     "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
     "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
+    "StayStillSave3Cam-v1": "embodichain_tasks.special.stay_still_save_3cam",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
 CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
-RL_SIMULATOR_ENV_IDS = {"CartPoleRL", "PushCubeRL"}
+RL_SIMULATOR_ENV_IDS = {
+    "CartPoleRL",
+    "PushCubeRL",
+}
 TABLEWARE_CONFIG_TASKS = {
     "blocks_ranking_rgb",
     "blocks_ranking_size",
@@ -77,16 +83,78 @@ def test_official_gym_configs_own_one_explicit_physics_backend() -> None:
             assert "physics_config" not in config, config_path
             owner_path = config_path.parent / environment["component"]
             owner = load_config(owner_path)
+            owners = (("component", owner_path, owner),)
+        elif type(environment) is dict and (
+            "default" in environment or "newton" in environment
+        ):
+            assert "physics" not in config, config_path
+            assert "physics_config" not in config, config_path
+            assert "default" in environment, config_path
+            owners = tuple(
+                (
+                    backend,
+                    config_path.parent / environment[backend],
+                    load_config(config_path.parent / environment[backend]),
+                )
+                for backend in ("default", "newton")
+                if backend in environment
+            )
         else:
             owner_path = config_path
             owner = config
+            owners = (("inline", owner_path, owner),)
 
-        backend = owner.get("physics")
-        assert backend in {"default", "newton"}, owner_path
-        physics_config = owner.get("physics_config", {})
-        assert type(physics_config) is dict, owner_path
-        config_type = type(physics_cfg_for_backend(backend))
-        config_type(**physics_config)
+        for variant, owner_path, owner in owners:
+            backend = owner.get("physics")
+            assert backend in {"default", "newton"}, (variant, owner_path)
+            if variant in {"default", "newton"}:
+                assert backend == variant, (variant, owner_path)
+            physics_config = owner.get("physics_config", {})
+            assert type(physics_config) is dict, owner_path
+            config_type = type(physics_cfg_for_backend(backend))
+            config_type(**physics_config)
+
+
+def test_official_action_configs_use_new_classes_only() -> None:
+    """Official action configs contain no removed class or action mode."""
+    for config_path in sorted(TASK_CONFIG_ROOT.rglob("*")):
+        if config_path.suffix.lower() not in {".json", ".yaml", ".yml"}:
+            continue
+        config = load_config(config_path)
+        if not isinstance(config, dict):
+            continue
+        for term in config.get("env", {}).get("actions", {}).values():
+            assert "func" not in term or term["func"].endswith("Action"), config_path
+            assert "mode" not in term, config_path
+            if term.get("contract") == "joint_position.default_offset@1":
+                assert "func" not in term, config_path
+            if term.get("func") == "DefaultJointPositionAction":
+                assert "part_name" not in term.get("params", {}), config_path
+
+
+def test_action_docs_and_context_use_new_public_contract() -> None:
+    """Owning docs and contexts contain only the new action API names."""
+    repository_root = Path(__file__).resolve().parents[3]
+    paths = [
+        repository_root / "docs/source/api_reference/public_api.rst",
+        repository_root
+        / "docs/source/api_reference/embodichain/embodichain.lab.gym.envs.managers.rst",
+        repository_root / "agent_context/topics/manager-functor/manager-functor.md",
+        repository_root / "agent_context/topics/env-framework/env-framework.md",
+        repository_root / "agent_context/topics/env-framework/execution.md",
+        repository_root / "agent_context/topics/data-pipeline/data-pipeline.md",
+        repository_root / "agent_context/topics/data-pipeline/persistence.md",
+    ]
+    text = "\n".join(path.read_text() for path in paths)
+
+    for public_name in (
+        "ActionDescriptor",
+        "ActionTermDescriptor",
+        "EefPoseAction",
+        "JointPositionAction",
+        "ParallelGripperAction",
+    ):
+        assert public_name in text
 
 
 def test_import_registered_gym_ids_resolve_to_flat_task_modules() -> None:

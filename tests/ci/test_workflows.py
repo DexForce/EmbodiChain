@@ -44,3 +44,18 @@ def test_automatic_pages_deployment_requires_existing_docs_artifact() -> None:
     assert deploy_condition.startswith("always() &&")
     assert "needs.inspect-docs-artifact.outputs.exists == 'true'" in deploy_condition
     assert "inputs.artifact_run_id != ''" in deploy_condition
+
+
+def test_manual_docs_build_trusts_checkout_before_architecture_generation() -> None:
+    jobs = _load_workflow("docs-pages.yml")["jobs"]
+    steps = jobs["build-and-deploy"]["steps"]
+    step_names = [step.get("name", "") for step in steps]
+
+    trust_index = step_names.index("Trust checked-out repository")
+    build_index = step_names.index("Build docs site")
+    trust_command = steps[trust_index]["run"]
+
+    assert trust_index < build_index
+    assert (
+        'git config --global --add safe.directory "$GITHUB_WORKSPACE"' in trust_command
+    )

@@ -28,17 +28,21 @@ def get_joint_descriptor(
 ) -> object:
     """Read one joint descriptor through the active backend contract.
 
-    Newton exposes backend-neutral joint descriptors directly. Default first
-    uses its legacy joint-info API and falls back to the descriptor API when
-    that legacy query is unavailable.
+    Newton exposes backend-neutral joint descriptors directly. Current DexSim
+    versions expose the same descriptor API for Default, so prefer it there as
+    well and retain the legacy joint-info call only for older backends.
     """
     if is_newton:
         return _required_descriptor(entity, joint_name)
 
+    get_joint_desc = getattr(entity, "get_joint_desc", None)
+    if callable(get_joint_desc):
+        return _required_descriptor(entity, joint_name)
     get_joint_info = getattr(entity, "get_joint_info", None)
-    native = get_joint_info(joint_name) if callable(get_joint_info) else None
-    if native is not None:
-        return native
+    if callable(get_joint_info):
+        native = get_joint_info(joint_name)
+        if native is not None:
+            return native
     return _required_descriptor(entity, joint_name)
 
 
