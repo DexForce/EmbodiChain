@@ -154,7 +154,7 @@ def reward_terms(
     pose_error = torch.square(state.joint_pos - default)
 
     gait_cfg = rewards["foot_gait"]["params"]
-    offsets = state.joint_pos.new_tensor(gait_cfg["offset"])
+    offsets = constant(tuple(gait_cfg["offset"]), state.joint_pos)
     global_phase = (
         state.episode_step * control_dt / float(gait_cfg["period"])
     ).unsqueeze(-1)
