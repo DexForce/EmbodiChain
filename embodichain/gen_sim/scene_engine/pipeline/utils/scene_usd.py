@@ -37,7 +37,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.objects import Articulation
 from embodichain.lab.visualization import VisualizationCfg
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.simready_pipeline.utils.articulated_usdc_utils import (
     _read_revolute_qpos_limits,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.usd_scene import (

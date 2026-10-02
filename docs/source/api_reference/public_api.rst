@@ -401,6 +401,21 @@ scene bindings into provider-free semantic task graphs.
    SemanticTaskPlanner
    UnsupportedSemanticCapabilityError
 
+embodichain.gen_sim.task_engine.task_spec
+------------------------------------------
+
+Task Engine adapters convert validated candidates into action-sequence
+independent TaskTemplates and optionally persist them in a content-addressed
+TaskSpec cache.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_spec
+
+.. autosummary::
+
+   TaskSpecGenerator
+   generate_task_spec
+   task_template_from_candidate
+
 embodichain.gen_sim.task_engine.task_program_bundle
 ----------------------------------------------------
 
@@ -413,6 +428,18 @@ Task Program deployment from a semantic task graph and prepared scene.
 
    TaskProgramBundlePaths
    generate_task_program_bundle
+
+embodichain.gen_sim.scene_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+Compatibility import for the Asset Engine articulation client. New code should
+use the ``simready_pipeline`` path.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
 
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
@@ -509,6 +536,70 @@ embodichain.gen_sim.simready_pipeline.cli.start
 
    cli_ingest_single
    main
+
+embodichain.gen_sim.simready_pipeline.clients
+---------------------------------------------
+
+Asset Engine clients for SimReady asset generation services.
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.simready_pipeline.clients.articulated_generation
+--------------------------------------------------------------------
+
+Generate and validate articulated SimReady assets through the Asset Engine
+articulation service.
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.simready_pipeline.configs
+---------------------------------------------
+
+Asset Engine environment configuration helpers.
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.simready_pipeline.configs.environment
+----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.simready_pipeline.pipeline
+----------------------------------------------
+
+Asset Engine articulation generation and SimReady ingestion pipeline entry
+points.
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.simready_pipeline.pipeline.articulation
+-----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.simready_pipeline.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
@@ -2323,6 +2414,141 @@ embodichain.learning.rl.utils.optimizer
    get_registered_lr_scheduler_names
    get_registered_optimizer_names
    scheduler_needs_horizon
+
+embodichain.task_spec
+---------------------
+
+Pure, simulator-independent TaskSpec contracts, predicate evaluation, and
+content-addressed template persistence.
+
+.. currentmodule:: embodichain.task_spec
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   EXPANSION_MANIFEST_SCHEMA
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   SCENE_INSTANCE_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   EvaluationReport
+   EvaluationStatus
+   ExpansionManifest
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RequirementSpec
+   RoleSpec
+   SceneInstance
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   ValidationCertificate
+   build_validation_certificate
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_task_template
+   validate_validation_certificate
+
+embodichain.task_spec.canonicalization
+---------------------------------------
+
+.. currentmodule:: embodichain.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.task_spec.contracts
+-------------------------------
+
+.. currentmodule:: embodichain.task_spec.contracts
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   EXPANSION_MANIFEST_SCHEMA
+   SCENE_INSTANCE_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   ExpansionManifest
+   RequirementSpec
+   RoleSpec
+   SceneInstance
+   TaskSpec
+   TaskTemplate
+   ValidationCertificate
+
+embodichain.task_spec.expressions
+---------------------------------
+
+.. currentmodule:: embodichain.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.task_spec.registry
+------------------------------
+
+.. currentmodule:: embodichain.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.task_spec.validation
+--------------------------------
+
+.. currentmodule:: embodichain.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   build_validation_certificate
+   evaluate_task_template
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_task_template
+   validate_validation_certificate
 
 embodichain.toolkits.acd
 ------------------------

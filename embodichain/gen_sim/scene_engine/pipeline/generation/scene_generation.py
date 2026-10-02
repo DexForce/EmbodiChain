@@ -36,7 +36,7 @@ from matplotlib.patches import Rectangle
 from embodichain.gen_sim.scene_engine.clients.geometry_generation import (
     GeometryGenerationClient,
 )
-from embodichain.gen_sim.scene_engine.clients.articulated_generation import (
+from embodichain.gen_sim.simready_pipeline.clients.articulated_generation import (
     ArticulatedGenerationClient,
 )
 from embodichain.gen_sim.scene_engine.core.scene import Scene
@@ -57,8 +57,11 @@ from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_table_aligner 
 from embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer import (
     AssetsSupportLayoutOptimizer,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.simready_pipeline.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
+)
+from embodichain.gen_sim.simready_pipeline.pipeline.articulation import (
+    generate_articulated_usdcs,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.gravity_settler import (
     GravitySettleBody,
@@ -353,91 +356,13 @@ def _generate_articulated_usdcs(
     coarse_scales_y_up_by_id: dict[str, list[float]],
     articulated_generation_client: ArticulatedGenerationClient | None,
 ) -> None:
-    """Generate and persist one articulation USDC for every articulated object."""
-    articulated_objects = []
-    for scene_object in scene.objects:
-        if _is_rubiks_cube(scene_object):
-            # The current articulation service cannot represent a Rubik cube's
-            # coupled six-layer mechanism faithfully; keep it as a rigid asset.
-            scene_object.is_articulated = False
-            scene_object.articulated_usdc_path = None
-            scene_object.articulated_usdc_scale = None
-            continue
-        if scene_object.is_articulated:
-            articulated_objects.append(scene_object)
-    if not articulated_objects:
-        return
-    if articulated_generation_client is None:
-        raise ValueError(
-            "Articulated scene objects require an articulated-generation client."
-        )
-
-    resolved_output_root = Path(output_root).expanduser().resolve()
-    resolved_output_root.mkdir(parents=True, exist_ok=True)
-    for scene_object in articulated_objects:
-        if scene_object.visible_rgba_path is None:
-            raise ValueError(
-                "Articulated scene object "
-                f"{scene_object.id!r} has no visible RGBA observation."
-            )
-        coarse_scale_y_up = coarse_scales_y_up_by_id.get(scene_object.id)
-        if (
-            not isinstance(coarse_scale_y_up, list)
-            or len(coarse_scale_y_up) != 3
-            or not np.all(np.isfinite(coarse_scale_y_up))
-            or any(scale <= 0.0 for scale in coarse_scale_y_up)
-        ):
-            raise ValueError(
-                "Articulated scene object "
-                f"{scene_object.id!r} has no valid coarse-layout scale."
-            )
-        # Run serially so the stage ends only after every required USDC is saved.
-        generated_usdc_path = articulated_generation_client.generate_articulated_usdc(
-            prompt=(
-                f"Object: {scene_object.name} ({scene_object.category}). "
-                f"{scene_object.description}\n"
-                "Reconstruct every functional movable part visible in the reference, "
-                "including switches, buttons, knobs, doors, drawers, plungers, and "
-                "handles. Use real revolute or prismatic joints with physically "
-                "meaningful axes and motion limits, connected to valid rigid-body "
-                "links. Do not fuse a movable part into the base or add an unrelated "
-                "token joint. "
-                "For every prismatic joint, pass closed_position=<endpoint> to "
-                "model.joint(...), equal to the joint-limit endpoint at which "
-                "the drawer or slider is physically closed; do not assume zero. "
-                "This requirement also applies to every push button and plunger: "
-                "use its physically fully depressed endpoint, not its released/rest "
-                "coordinate. The value must equal that joint's lower or upper limit. "
-                "The official exporter writes gen_sim:closedPosition from this "
-                "model field. Do not patch USD files or private exporter functions; "
-                "a separate output file is not the compiler's final artifact. "
-                "Repair missing model metadata rather than deleting functional joints. "
-                "Match the reference door hinge orientation and initial opening: "
-                "a side-hinged door must rotate about a vertical hinge axis, "
-                "not fold down about a horizontal axis. "
-                "Deliver a self-contained USDC with an articulation root, meshes, "
-                "and enabled non-fixed joints; a rigid GLB proxy is not enough."
-            ),
-            image_path=scene_object.visible_rgba_path,
-            output_path=resolved_output_root / f"{scene_object.id}.usdc",
-        )
-        # Normalize the authored hierarchy; export separately places the native root.
-        scene_object.articulated_usdc_path = str(
-            _canonicalize_articulated_usdc_bottom_center(generated_usdc_path)
-        )
-        # Retain deployment scale; USD's declared up-axis is handled at export.
-        scene_object.articulated_usdc_scale = list(coarse_scale_y_up)
-        log_info(f"Created articulated USDC: {scene_object.id!r}.")
-
-
-def _is_rubiks_cube(scene_object: SceneObject) -> bool:
-    """Return whether an object is a Rubik-style cube excluded from generation."""
-    text = " ".join(
-        (scene_object.category, scene_object.name, scene_object.description)
-    ).lower()
-    return any(
-        token in text
-        for token in ("rubik", "rubik's", "rubiks", "puzzle_cube", "puzzle cube")
+    """Delegate articulated asset generation to the Asset Engine."""
+    generate_articulated_usdcs(
+        asset_objects=scene.objects,
+        output_root=output_root,
+        coarse_scales_y_up_by_id=coarse_scales_y_up_by_id,
+        articulated_generation_client=articulated_generation_client,
+        canonicalize_fn=_canonicalize_articulated_usdc_bottom_center,
     )
 
 

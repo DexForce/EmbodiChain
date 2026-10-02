@@ -29,7 +29,7 @@ from embodichain.gen_sim.scene_engine.core.scene import Scene
 from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraph
 from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
 from embodichain.utils.logger import log_info
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.simready_pipeline.utils.articulated_usdc_utils import (
     _articulation_root_bottom_z,
 )
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (

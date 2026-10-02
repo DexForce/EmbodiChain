@@ -24,6 +24,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from embodichain.task_spec import TaskSpecCache, TaskTemplate
+
 from .contracts import (
     SCENE_REQUEST_SCHEMA,
     SUCCESS_SPEC_SCHEMA,
@@ -184,6 +186,44 @@ class TaskAgent:
                 "errors": errors,
             }
         )
+
+    def generate_task_spec(
+        self,
+        task_id: str,
+        instruction: str,
+        model: str | None = None,
+        candidate_count: int = 3,
+        *,
+        candidate_id: str | None = None,
+        cache: TaskSpecCache | None = None,
+    ) -> TaskTemplate:
+        """Generate a candidate set and emit its reusable TaskTemplate.
+
+        Task Engine remains the owner of interpretation and candidate
+        selection.  The returned template contains only normative semantics;
+        concrete Semantic Calls and trajectories remain in the existing
+        planner/runtime path.
+
+        Args:
+            task_id: Stable task request identifier.
+            instruction: Natural-language task instruction.
+            model: Optional interpretation model override.
+            candidate_count: Number of independently generated candidates.
+            candidate_id: Optional candidate to materialize from the set.
+            cache: Optional ``TaskSpecCache``-compatible persistence backend.
+
+        Returns:
+            A validated ``embodichain.task_spec.TaskTemplate``.
+        """
+        from .task_spec import generate_task_spec
+
+        candidate_set = self.generate(
+            task_id,
+            instruction,
+            model=model,
+            candidate_count=candidate_count,
+        )
+        return generate_task_spec(candidate_set, candidate_id=candidate_id, cache=cache)
 
 
 def derive_scene_request(draft: Mapping[str, Any]) -> dict[str, Any]:

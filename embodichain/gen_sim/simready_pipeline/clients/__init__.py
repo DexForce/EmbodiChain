@@ -14,19 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility imports for articulation asset normalization.
-
-The implementation is owned by Asset Engine under
-``simready_pipeline.utils.articulated_usdc_utils``.  Scene Engine keeps this
-path for callers that still import the former utility location.
-"""
+"""Asset Engine clients for SimReady asset generation services."""
 
 from __future__ import annotations
 
-from embodichain.gen_sim.simready_pipeline.utils.articulated_usdc_utils import (
-    _articulation_root_bottom_z,
-    _canonicalize_articulated_usdc_bottom_center,
-    _read_revolute_qpos_limits,
-)
+from .articulated_generation import ArticulatedGenerationClient
 
-__all__: list[str] = []
+__all__ = ["ArticulatedGenerationClient"]

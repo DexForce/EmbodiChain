@@ -951,6 +951,46 @@ class TaskEngineWorkflow:
                 raise ValueError(
                     "A bound preparation must select one non-empty candidate ID."
                 )
+            final_candidate = next(
+                item
+                for item in candidate_set["candidates"]
+                if item["candidate_id"] == final_candidate_id
+            )
+            # TaskTemplate is the normative, action-sequence-independent
+            # artifact.  Keep it beside the run audit after binding has chosen
+            # the final candidate; the existing bundle/runtime remains the
+            # sole execution path.
+            from .task_spec import task_template_from_candidate
+
+            if set(final_candidate) < {
+                "candidate_id",
+                "draft",
+                "scene_request",
+                "success_spec",
+                "semantic_hash",
+                "vote_count",
+                "attempts",
+                "normalizations",
+            }:
+                _write_json(
+                    staging / "task_spec_error.json",
+                    {
+                        "error_type": "legacy_candidate_shape",
+                        "message": (
+                            "TaskTemplate generation requires a complete "
+                            "TaskCandidate contract."
+                        ),
+                    },
+                )
+            else:
+                task_template = task_template_from_candidate(
+                    final_candidate,
+                    metadata={
+                        "run_id": effective_run_id,
+                        "scene_attempt": attempts[-1]["scene_attempt"],
+                    },
+                )
+                _write_json(staging / "task_spec.json", task_template.to_dict())
             selected_attempt = attempts[-1]
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (
@@ -1211,6 +1251,15 @@ class TaskEngineWorkflow:
     ) -> TaskEngineRunResult:
         state_path = staging / "workflow_state.json"
         manifest_path = staging / "run_manifest.json"
+        task_spec_path = staging / "task_spec.json"
+        task_spec_manifest = None
+        if task_spec_path.is_file():
+            task_spec = _read_json(task_spec_path)
+            if isinstance(task_spec, Mapping):
+                task_spec_manifest = {
+                    "path": task_spec_path.name,
+                    "semantic_hash": task_spec.get("semantic_hash"),
+                }
         _write_json(state_path, state.to_dict())
         _write_json(
             manifest_path,
@@ -1222,6 +1271,7 @@ class TaskEngineWorkflow:
                 "run_dir": Path(request["output_dir"]).as_posix(),
                 "status": status,
                 "failure_class": failure_class,
+                "task_spec": task_spec_manifest,
                 "request": deepcopy(dict(request)),
                 "configuration": {
                     "workflow": {
