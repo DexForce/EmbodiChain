@@ -25,13 +25,19 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from time import time
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import urlsplit
 
 from typing_extensions import TypedDict
 
-from .backend import InMemorySimulationBackend, SimulationBackend
+from .backend import (
+    MAX_SIMULATION_STEPS,
+    MAX_TRAJECTORY_SAMPLES,
+    InMemorySimulationBackend,
+    SimulationBackend,
+)
 
 __all__ = ["EmbodiChainMCPService"]
 
@@ -74,6 +80,8 @@ class HealthResult(TypedDict):
 
 
 TaskProvider = Callable[[], Sequence[Mapping[str, Any]]]
+MAX_WAYPOINTS = 256
+MAX_ACTIVE_RUNS_FACTOR = 4
 
 
 @dataclass
@@ -114,6 +122,7 @@ def _default_task_provider() -> Sequence[Mapping[str, Any]]:
                     "physics": deployment.physics,
                     "embodiments": list(deployment.embodiments),
                     "capabilities": sorted(deployment.capabilities),
+                    "_config_resource": deployment.resource,
                 }
             )
         result.append(
@@ -157,6 +166,9 @@ class EmbodiChainMCPService:
         self._runs: dict[str, _Run] = {}
         self._trajectories: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        self._world_locks: dict[str, threading.RLock] = {}
+        self._max_active_runs = max_workers * MAX_ACTIVE_RUNS_FACTOR
+        self._closed = False
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="embodichain-mcp-rollout",
@@ -165,9 +177,27 @@ class EmbodiChainMCPService:
     def close(self) -> None:
         """Cancel pending rollouts and release the rollout executor."""
         with self._lock:
+            if self._closed:
+                return
+            self._closed = True
             for run in self._runs.values():
                 run.cancel_event.set()
         self._executor.shutdown(wait=True, cancel_futures=True)
+        close_backend = getattr(self.backend, "close", None)
+        if close_backend is not None:
+            close_backend()
+
+    def _world_lock(self, world_id: str) -> threading.RLock:
+        """Return the service serialization lock for a world handle."""
+        with self._lock:
+            return self._world_locks.setdefault(world_id, threading.RLock())
+
+    @contextmanager
+    def _world_guard(self, world_id: str, expected_scene_revision: int | None = None):
+        """Serialize a complete revision-checked operation for one world."""
+        with self._world_lock(world_id):
+            state = self._check_scene_revision(world_id, expected_scene_revision)
+            yield state
 
     def server_info(self) -> ServerInfoResult:
         """Return protocol and backend metadata."""
@@ -175,8 +205,8 @@ class EmbodiChainMCPService:
             "name": "embodichain-mcp",
             "phase": self.protocol_version,
             "backend": getattr(self.backend, "name", type(self.backend).__name__),
-            "transports": ["stdio", "streamable-http"],
-            "scope": "simulation_and_read_only_analysis",
+            "transports": ["stdio"],
+            "scope": "simulation_and_stateful_analysis",
         }
 
     def health(self) -> HealthResult:
@@ -198,12 +228,13 @@ class EmbodiChainMCPService:
             "backend": getattr(self.backend, "name", type(self.backend).__name__),
             "active_rollouts": active_rollouts,
             "known_runs": known_runs,
-            "scope": "simulation_and_read_only_analysis",
+            "scope": "simulation_and_stateful_analysis",
         }
 
     def capabilities(self) -> list[str]:
         """Return the first-phase operation names exposed by the service."""
         return [
+            "server_info",
             "health",
             "list_robots",
             "get_robot_info",
@@ -258,13 +289,31 @@ class EmbodiChainMCPService:
 
     def list_tasks(self) -> list[dict[str, Any]]:
         """List task catalog records without starting a simulator."""
-        return [dict(task) for task in deepcopy(list(self._task_provider()))]
+        records = list(self._task_provider())
+        public_records = []
+        for task in records:
+            public_task = {
+                key: deepcopy(value)
+                for key, value in task.items()
+                if not key.startswith("_") and key != "deployments"
+            }
+            public_task["deployments"] = [
+                {
+                    key: deepcopy(value)
+                    for key, value in deployment.items()
+                    if not key.startswith("_")
+                }
+                for deployment in task.get("deployments", ())
+                if isinstance(deployment, Mapping)
+            ]
+            public_records.append(public_task)
+        return public_records
 
     def get_task_info(self, task_id: str) -> dict[str, Any]:
         """Return one task catalog record."""
-        for task in self.list_tasks():
+        for task in self._task_provider():
             if task.get("task_id") == task_id:
-                return task
+                return dict(task)
         raise ValueError(f"Unknown task_id: {task_id}")
 
     def list_physics_backends(self) -> list[dict[str, Any]]:
@@ -285,6 +334,8 @@ class EmbodiChainMCPService:
             getattr(self.backend, "name", "default"),
         )
         state = self.backend.create_world(backend=selected_backend, seed=seed)
+        with self._lock:
+            self._world_locks[state["world_id"]] = threading.RLock()
         return self._envelope(state, world_id=state["world_id"])
 
     def load_task_or_scene(
@@ -296,21 +347,27 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Load an existing task reference or JSON-compatible scene manifest."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        if task_id is not None:
-            task = self.get_task_info(task_id)
-            if scene is None:
-                scene = self._load_default_task_scene(task)
-        state = self.backend.load_scene(
-            world_id,
-            task_id=task_id,
-            scene=dict(scene) if scene is not None else None,
-        )
-        return self._envelope(state, world_id=world_id)
+        with self._world_guard(world_id, expected_scene_revision) as current:
+            if current.get("scene_revision", 0):
+                raise RuntimeError(
+                    "A world can load only one scene; create a new world to load another."
+                )
+            if task_id is not None:
+                task = self.get_task_info(task_id)
+                if scene is None:
+                    scene = self._load_default_task_scene(task)
+            state = self.backend.load_scene(
+                world_id,
+                task_id=task_id,
+                scene=dict(scene) if scene is not None else None,
+            )
+            return self._envelope(state, world_id=world_id)
 
     @staticmethod
-    def _load_default_task_scene(task: Mapping[str, Any]) -> dict[str, Any] | None:
-        """Load a local default deployment config when the catalog exposes one."""
+    def _load_default_task_scene(
+        task: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Load and resolve a default deployment through Gym components."""
         deployments = task.get("deployments", ())
         if not isinstance(deployments, Sequence) or isinstance(
             deployments, (str, bytes)
@@ -322,32 +379,53 @@ class EmbodiChainMCPService:
             (item for item in records if item.get("name") == selected),
             records[0] if records else None,
         )
-        config_ref = record.get("config_path") if record else None
-        if not isinstance(config_ref, str) or not os.path.isfile(config_ref):
+        if record is None:
             return None
-        with open(config_ref, encoding="utf-8") as config_file:
-            if config_ref.lower().endswith(".json"):
-                value = json.load(config_file)
-            else:
-                import yaml
+        config_ref = record.get("config_path") if record else None
+        resource = record.get("_config_resource") if record else None
 
-                value = yaml.safe_load(config_file)
-        if not isinstance(value, Mapping):
-            raise ValueError(f"Task config must contain a mapping: {config_ref}")
-        return dict(value)
+        def load_config(config_path: str) -> dict[str, Any]:
+            with open(config_path, encoding="utf-8") as config_file:
+                if config_path.lower().endswith(".json"):
+                    value = json.load(config_file)
+                else:
+                    import yaml
+
+                    value = yaml.safe_load(config_file)
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Task config must contain a mapping: {config_path}")
+            from embodichain.lab.gym.utils._component_composition import (
+                _resolve_gym_components,
+            )
+
+            resolved = _resolve_gym_components(
+                value, base_dir=os.path.dirname(config_path)
+            )
+            return dict(resolved.config)
+
+        if isinstance(config_ref, str) and os.path.isfile(config_ref):
+            return load_config(config_ref)
+        if resource is not None:
+            from importlib.resources import as_file
+
+            with as_file(resource.parent) as resource_dir:
+                return load_config(str(resource_dir / resource.name))
+        raise ValueError(
+            "The selected task deployment has no readable config resource; "
+            "pass an explicit scene or install the task package."
+        )
 
     def reset_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
     ) -> ToolEnvelope:
         """Reset dynamic world state."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(self.backend.reset_world(world_id), world_id=world_id)
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(self.backend.reset_world(world_id), world_id=world_id)
 
     def destroy_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
     ) -> ToolEnvelope:
         """Destroy a world handle."""
-        self._check_scene_revision(world_id, expected_scene_revision)
         with self._lock:
             active = [
                 run.run_id
@@ -358,22 +436,43 @@ class EmbodiChainMCPService:
             raise RuntimeError(
                 "Cannot destroy a world with active rollout jobs: " + ", ".join(active)
             )
-        self.backend.destroy_world(world_id)
-        return {"status": "succeeded", "world_id": world_id}
+        with self._world_guard(world_id, expected_scene_revision):
+            with self._lock:
+                active = [
+                    run.run_id
+                    for run in self._runs.values()
+                    if run.world_id == world_id and run.status in {"queued", "running"}
+                ]
+            if active:
+                raise RuntimeError(
+                    "Cannot destroy a world with active rollout jobs: "
+                    + ", ".join(active)
+                )
+            self.backend.destroy_world(world_id)
+            with self._lock:
+                for trajectory_id, trajectory in list(self._trajectories.items()):
+                    if trajectory["world_id"] == world_id:
+                        self._trajectories.pop(trajectory_id)
+                self._world_locks.pop(world_id, None)
+            return {"status": "succeeded", "world_id": world_id}
 
     def get_world_state(
         self, world_id: str, *, expected_scene_revision: int | None = None
     ) -> ToolEnvelope:
         """Return a detached world state with protocol metadata."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(self.backend.get_world_state(world_id), world_id=world_id)
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.get_world_state(world_id), world_id=world_id
+            )
 
     def snapshot_world(
         self, world_id: str, *, expected_scene_revision: int | None = None
     ) -> ToolEnvelope:
         """Create a snapshot handle for a world."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(self.backend.snapshot_world(world_id), world_id=world_id)
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.snapshot_world(world_id), world_id=world_id
+            )
 
     def restore_world(
         self,
@@ -383,10 +482,10 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Restore a snapshot belonging to the requested world."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.restore_world(world_id, snapshot_id), world_id=world_id
-        )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.restore_world(world_id, snapshot_id), world_id=world_id
+            )
 
     def step_simulation(
         self,
@@ -396,10 +495,14 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Advance a world by a positive number of backend steps."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.step_simulation(world_id, steps=steps), world_id=world_id
-        )
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.step_simulation(world_id, steps=steps), world_id=world_id
+            )
 
     def forward_kinematics(
         self,
@@ -410,11 +513,11 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Compute FK through the backend adapter."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.forward_kinematics(world_id, robot_id, qpos),
-            world_id=world_id,
-        )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.forward_kinematics(world_id, robot_id, qpos),
+                world_id=world_id,
+            )
 
     def solve_ik(
         self,
@@ -425,11 +528,11 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Compute IK through the backend adapter."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.solve_ik(world_id, robot_id, dict(target_pose)),
-            world_id=world_id,
-        )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.solve_ik(world_id, robot_id, dict(target_pose)),
+                world_id=world_id,
+            )
 
     def check_reachability(
         self,
@@ -440,11 +543,11 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Check reachability without implying collision-free execution."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.check_reachability(world_id, robot_id, dict(target_pose)),
-            world_id=world_id,
-        )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.check_reachability(world_id, robot_id, dict(target_pose)),
+                world_id=world_id,
+            )
 
     def check_collision(
         self,
@@ -455,10 +558,11 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Run backend collision validation for a robot configuration."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.check_collision(world_id, robot_id, qpos), world_id=world_id
-        )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.check_collision(world_id, robot_id, qpos),
+                world_id=world_id,
+            )
 
     def plan_motion(
         self,
@@ -471,13 +575,17 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Generate a backend trajectory between two joint configurations."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.plan_motion(
-                world_id, robot_id, start_qpos, goal_qpos, samples=samples
-            ),
-            world_id=world_id,
-        )
+        if type(samples) is not int or not 2 <= samples <= MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"samples must be an integer between 2 and {MAX_TRAJECTORY_SAMPLES}"
+            )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.plan_motion(
+                    world_id, robot_id, start_qpos, goal_qpos, samples=samples
+                ),
+                world_id=world_id,
+            )
 
     def generate_robot_trajectory(
         self,
@@ -504,40 +612,50 @@ class EmbodiChainMCPService:
         """
         if len(waypoints) < 2:
             raise ValueError("waypoints must contain a start and at least one goal")
+        if len(waypoints) > MAX_WAYPOINTS:
+            raise ValueError(f"waypoints cannot contain more than {MAX_WAYPOINTS}")
         if (
             type(samples_per_segment) is not int
-            or not 2 <= samples_per_segment <= 10000
+            or not 2 <= samples_per_segment <= MAX_TRAJECTORY_SAMPLES
         ):
-            raise ValueError("samples_per_segment must be between 2 and 10000")
-        world_state = self._check_scene_revision(world_id, expected_scene_revision)
-        segments: list[list[list[float]]] = []
-        for start, goal in zip(waypoints, waypoints[1:]):
-            result = self.backend.plan_motion(
-                world_id,
-                robot_id,
-                start,
-                goal,
-                samples=samples_per_segment,
+            raise ValueError(
+                "samples_per_segment must be between 2 and " f"{MAX_TRAJECTORY_SAMPLES}"
             )
-            positions = result["positions"]
-            segments.append(positions if not segments else positions[1:])
-        positions = [sample for segment in segments for sample in segment]
-        validation = self.backend.validate_trajectory(world_id, robot_id, positions)
-        trajectory_id = f"trajectory-{uuid.uuid4().hex[:12]}"
-        record = {
-            "trajectory_id": trajectory_id,
-            "world_id": world_id,
-            "scene_revision": world_state.get("scene_revision"),
-            "robot_id": robot_id,
-            "positions": positions,
-            "waypoints": [list(waypoint) for waypoint in waypoints],
-            "samples_per_segment": samples_per_segment,
-            "validation": validation,
-            "planner": "linear_interpolation",
-        }
-        with self._lock:
-            self._trajectories[trajectory_id] = deepcopy(record)
-        return self._envelope(record, world_id=world_id)
+        estimated_samples = 1 + (len(waypoints) - 1) * (samples_per_segment - 1)
+        if estimated_samples > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"expanded trajectory cannot contain more than "
+                f"{MAX_TRAJECTORY_SAMPLES} samples"
+            )
+        with self._world_guard(world_id, expected_scene_revision) as world_state:
+            segments: list[list[list[float]]] = []
+            for start, goal in zip(waypoints, waypoints[1:]):
+                result = self.backend.plan_motion(
+                    world_id,
+                    robot_id,
+                    start,
+                    goal,
+                    samples=samples_per_segment,
+                )
+                positions = result["positions"]
+                segments.append(positions if not segments else positions[1:])
+            positions = [sample for segment in segments for sample in segment]
+            validation = self.backend.validate_trajectory(world_id, robot_id, positions)
+            trajectory_id = f"trajectory-{uuid.uuid4().hex[:12]}"
+            record = {
+                "trajectory_id": trajectory_id,
+                "world_id": world_id,
+                "scene_revision": world_state.get("scene_revision"),
+                "robot_id": robot_id,
+                "positions": positions,
+                "waypoints": [list(waypoint) for waypoint in waypoints],
+                "samples_per_segment": samples_per_segment,
+                "validation": validation,
+                "planner": "linear_interpolation",
+            }
+            with self._lock:
+                self._trajectories[trajectory_id] = deepcopy(record)
+            return self._envelope(record, world_id=world_id)
 
     def execute_trajectory(self, trajectory_id: str) -> ToolEnvelope:
         """Execute a stored trajectory as one coarse-grained backend operation.
@@ -553,17 +671,14 @@ class EmbodiChainMCPService:
                 raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
         if not trajectory["validation"]["valid"]:
             raise ValueError("Cannot execute an invalid trajectory")
-        self._check_scene_revision(
-            world_id=trajectory["world_id"],
-            expected_scene_revision=trajectory["scene_revision"],
-        )
-        result = self.backend.execute_trajectory(
-            trajectory["world_id"],
-            trajectory["robot_id"],
-            trajectory["positions"],
-            cancel_event=threading.Event(),
-        )
-        return self._envelope(result, world_id=trajectory["world_id"])
+        with self._world_guard(trajectory["world_id"], trajectory["scene_revision"]):
+            result = self.backend.execute_trajectory(
+                trajectory["world_id"],
+                trajectory["robot_id"],
+                trajectory["positions"],
+                cancel_event=threading.Event(),
+            )
+            return self._envelope(result, world_id=trajectory["world_id"])
 
     def record_trajectory(
         self,
@@ -582,21 +697,18 @@ class EmbodiChainMCPService:
                 raise ValueError(f"Unknown trajectory_id: {trajectory_id}") from exc
         if not trajectory["validation"]["valid"]:
             raise ValueError("Cannot record an invalid trajectory")
-        self._check_scene_revision(
-            world_id=trajectory["world_id"],
-            expected_scene_revision=trajectory["scene_revision"],
-        )
-        result = self.backend.record_trajectory(
-            trajectory["world_id"],
-            trajectory["robot_id"],
-            trajectory["positions"],
-            camera_id=camera_id,
-            output_path=output_path,
-            fps=fps,
-            include_depth=include_depth,
-            cancel_event=threading.Event(),
-        )
-        return self._envelope(result, world_id=trajectory["world_id"])
+        with self._world_guard(trajectory["world_id"], trajectory["scene_revision"]):
+            result = self.backend.record_trajectory(
+                trajectory["world_id"],
+                trajectory["robot_id"],
+                trajectory["positions"],
+                camera_id=camera_id,
+                output_path=output_path,
+                fps=fps,
+                include_depth=include_depth,
+                cancel_event=threading.Event(),
+            )
+            return self._envelope(result, world_id=trajectory["world_id"])
 
     def validate_trajectory(
         self,
@@ -607,11 +719,15 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Validate a trajectory through the backend adapter."""
-        self._check_scene_revision(world_id, expected_scene_revision)
-        return self._envelope(
-            self.backend.validate_trajectory(world_id, robot_id, positions),
-            world_id=world_id,
-        )
+        if len(positions) > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
+        with self._world_guard(world_id, expected_scene_revision):
+            return self._envelope(
+                self.backend.validate_trajectory(world_id, robot_id, positions),
+                world_id=world_id,
+            )
 
     def start_rollout(
         self,
@@ -621,24 +737,36 @@ class EmbodiChainMCPService:
         expected_scene_revision: int | None = None,
     ) -> ToolEnvelope:
         """Start a bounded asynchronous rollout job."""
-        if type(steps) is not int or not 1 <= steps <= 1_000_000:
-            raise ValueError("steps must be an integer between 1 and 1000000")
-        self._check_scene_revision(world_id, expected_scene_revision)
-        run = _Run(
-            run_id=f"run-{uuid.uuid4().hex[:12]}", world_id=world_id, steps=steps
-        )
-        with self._lock:
-            self._runs[run.run_id] = run
-            run.future = self._executor.submit(self._execute_rollout, run)
-        return self._run_status(run)
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
+        with self._world_guard(world_id, expected_scene_revision):
+            run = _Run(
+                run_id=f"run-{uuid.uuid4().hex[:12]}", world_id=world_id, steps=steps
+            )
+            with self._lock:
+                active = sum(
+                    item.status in {"queued", "running"} for item in self._runs.values()
+                )
+                if active >= self._max_active_runs:
+                    raise RuntimeError(
+                        "rollout capacity is full; wait for an existing run to finish"
+                    )
+                self._runs[run.run_id] = run
+                run.future = self._executor.submit(self._execute_rollout, run)
+            return self._run_status(run)
 
     def _execute_rollout(self, run: _Run) -> dict[str, Any]:
         with self._lock:
+            if run.status == "cancelled":
+                return self._run_status(run)
             run.status = "running"
         try:
-            metrics = self.backend.run_rollout(
-                run.world_id, steps=run.steps, cancel_event=run.cancel_event
-            )
+            with self._world_guard(run.world_id):
+                metrics = self.backend.run_rollout(
+                    run.world_id, steps=run.steps, cancel_event=run.cancel_event
+                )
             with self._lock:
                 run.metrics = deepcopy(metrics)
                 run.status = str(metrics.get("status", "succeeded"))
@@ -770,6 +898,14 @@ class EmbodiChainMCPService:
         world_state = (
             self.backend.get_world_state(world_id) if world_id is not None else None
         )
+        artifacts: list[dict[str, Any]] = []
+        for key, media_type in (
+            ("artifact_path", "video/mp4"),
+            ("depth_artifact_path", "application/x-npz"),
+        ):
+            artifact_path = value.get(key)
+            if isinstance(artifact_path, str):
+                artifacts.append({"path": artifact_path, "media_type": media_type})
         result = {
             "status": "succeeded",
             "result": deepcopy(dict(value)),
@@ -779,7 +915,7 @@ class EmbodiChainMCPService:
             "frame": "arena",
             "units": {"length": "m", "angle": "rad", "time": "s"},
             "diagnostics": [],
-            "artifacts": [],
+            "artifacts": artifacts,
         }
         if world_id is not None:
             result["world_id"] = world_id

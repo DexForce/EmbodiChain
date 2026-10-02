@@ -17,6 +17,9 @@ adapter; future adapters remain domain-owned.
 
 ## Phase-one boundary
 
+The phase-one command serves stdio only. Streamable HTTP is deferred until an
+authenticated gateway owns authorization, approval, and resource quotas.
+
 The simulation adapter uses explicit `world_id`, `scene_revision`, `run_id`, and
 `snapshot_id`, and `trajectory_id` handles. Results carry backend, frame, units, seed, diagnostics,
 and artifact metadata. High-frequency physics and controller loops remain

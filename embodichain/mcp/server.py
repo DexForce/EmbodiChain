@@ -19,12 +19,16 @@
 The server owns protocol registration and delegates domain behavior to
 injected adapters. Simulation is the first adapter; future Task Program, RL,
 data, visualization, and device adapters can register beside it.
+The phase-one command intentionally serves stdio only. Streamable HTTP remains
+behind an authenticated gateway boundary so this process cannot expose
+stateful simulation and artifact-writing tools without authorization.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from copy import deepcopy
 from functools import wraps
 from typing import Any
 
@@ -85,18 +89,70 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
         "check_reachability",
         "check_collision",
         "validate_trajectory",
-        "generate_robot_trajectory",
+        "plan_motion",
         "get_run_status",
         "get_run_metrics",
         "compare_runs",
     }
 
     def register_tool(name: str, function: Any) -> None:
+        envelope_tools = {
+            "destroy_world",
+            "start_rollout",
+            "get_run_status",
+            "get_run_metrics",
+            "cancel_run",
+            "compare_runs",
+        }
+
+        def normalize_result(value: Any) -> Any:
+            """Give stateful status tools the same metadata envelope."""
+            if name not in envelope_tools or not isinstance(value, dict):
+                return value
+            world_id = value.get("world_id")
+            world_state = None
+            if isinstance(world_id, str):
+                try:
+                    world_state = service.backend.get_world_state(world_id)
+                except ValueError:
+                    world_state = None
+            artifacts = []
+            for key, media_type in (
+                ("artifact_path", "video/mp4"),
+                ("depth_artifact_path", "application/x-npz"),
+            ):
+                path = value.get(key)
+                if isinstance(path, str):
+                    artifacts.append({"path": path, "media_type": media_type})
+            return {
+                "status": value.get("status", "succeeded"),
+                "result": deepcopy(value),
+                "backend": getattr(
+                    service.backend, "name", type(service.backend).__name__
+                ),
+                "frame": "arena",
+                "units": {"length": "m", "angle": "rad", "time": "s"},
+                "diagnostics": [],
+                "artifacts": artifacts,
+                "world_id": world_id,
+                "scene_revision": (
+                    None if world_state is None else world_state.get("scene_revision")
+                ),
+                "seed": None if world_state is None else world_state.get("seed"),
+            }
+
         @wraps(function)
         def guarded_tool(*args: Any, **kwargs: Any) -> Any:
             try:
-                return function(*args, **kwargs)
-            except (KeyError, NotImplementedError, RuntimeError, ValueError) as error:
+                return normalize_result(function(*args, **kwargs))
+            except (
+                KeyError,
+                ModuleNotFoundError,
+                NotImplementedError,
+                OSError,
+                RuntimeError,
+                ValueError,
+            ) as error:
                 raise ToolError(str(error)) from error
 
         server.add_tool(
@@ -105,7 +161,18 @@ def create_server(service: EmbodiChainMCPService | None = None) -> Any:
             structured_output=True,
             annotations=ToolAnnotations(
                 readOnlyHint=name in read_only_tools,
-                destructiveHint=False,
+                destructiveHint=name
+                in {
+                    "load_task_or_scene",
+                    "reset_world",
+                    "destroy_world",
+                    "restore_world",
+                    "step_simulation",
+                    "execute_trajectory",
+                    "record_trajectory",
+                    "start_rollout",
+                    "cancel_run",
+                },
                 idempotentHint=name in read_only_tools
                 or name in {"reset_world", "cancel_run"},
                 openWorldHint=False,
@@ -217,11 +284,15 @@ def serve(
     """Run the MCP server using stdio or Streamable HTTP.
 
     Args:
-        transport: ``stdio`` or ``streamable-http``.
+        transport: ``stdio``. Streamable HTTP is intentionally deferred until
+            an authenticated gateway is available.
         service: Optional service instance for embedding and testing.
     """
-    if transport not in {"stdio", "streamable-http"}:
-        raise ValueError("transport must be 'stdio' or 'streamable-http'")
+    if transport != "stdio":
+        raise ValueError(
+            "streamable-http is deferred until an authenticated MCP gateway "
+            "is available; use stdio"
+        )
     owned_service = service is None
     service = service or EmbodiChainMCPService(backend=SimulationManagerBackend())
     server = create_server(service)
@@ -240,7 +311,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument(
         "--transport",
-        choices=("stdio", "streamable-http"),
+        choices=("stdio",),
         default="stdio",
         help="MCP transport to use (default: stdio).",
     )

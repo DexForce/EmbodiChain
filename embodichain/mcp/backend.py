@@ -32,6 +32,17 @@ __all__ = [
 ]
 
 
+# These limits protect the protocol boundary.  Domain callers can still use
+# the simulation APIs directly when they need a larger resource budget.
+MAX_SIMULATION_STEPS = 100_000
+MAX_TRAJECTORY_SAMPLES = 100_000
+MAX_SCENE_SENSORS = 32
+MAX_CAMERA_WIDTH = 4096
+MAX_CAMERA_HEIGHT = 4096
+MAX_CAMERA_PIXELS = 16_777_216
+MAX_RECORD_PIXELS = 64_000_000
+
+
 class SimulationBackend(Protocol):
     """Protocol implemented by a backend exposed through the MCP service.
 
@@ -215,6 +226,10 @@ class InMemorySimulationBackend:
             raise ValueError("Either task_id or scene must be provided")
         with self._lock:
             world = self._world(world_id)
+            if world["scene_revision"]:
+                raise RuntimeError(
+                    "A world can load only one scene; create a new world to load another."
+                )
             world["scene"] = {"task_id": task_id, "scene": deepcopy(scene or {})}
             world["scene_revision"] += 1
             return self.get_world_state(world_id)
@@ -244,12 +259,16 @@ class InMemorySimulationBackend:
     def snapshot_world(self, world_id: str) -> dict[str, Any]:
         """Save a world state under an explicit snapshot handle."""
         with self._lock:
-            self._world(world_id)
+            world = self._world(world_id)
             snapshot_id = f"snapshot-{uuid.uuid4().hex[:12]}"
             self._snapshots[snapshot_id] = {
                 "snapshot_id": snapshot_id,
                 "world_id": world_id,
-                "state": self.get_world_state(world_id),
+                "scene_revision": world["scene_revision"],
+                "state": {
+                    "time_s": world["time_s"],
+                    "state": deepcopy(world["state"]),
+                },
             }
             return {"snapshot_id": snapshot_id, "world_id": world_id}
 
@@ -263,14 +282,23 @@ class InMemorySimulationBackend:
                 raise ValueError(f"Unknown snapshot_id: {snapshot_id}") from exc
             if snapshot["world_id"] != world_id:
                 raise ValueError("snapshot_id belongs to another world")
+            if snapshot["scene_revision"] != world["scene_revision"]:
+                raise ValueError(
+                    "snapshot belongs to scene_revision "
+                    f"{snapshot['scene_revision']}, current "
+                    f"{world['scene_revision']}"
+                )
             restored = deepcopy(snapshot["state"])
-            world.update(restored)
+            world["time_s"] = restored["time_s"]
+            world["state"] = restored["state"]
             return self.get_world_state(world_id)
 
     def step_simulation(self, world_id: str, *, steps: int) -> dict[str, Any]:
         """Advance a world by a fixed 10 ms timestep."""
-        if type(steps) is not int or steps <= 0:
-            raise ValueError("steps must be a positive integer")
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
         with self._lock:
             world = self._world(world_id)
             world["time_s"] += steps * 0.01
@@ -406,8 +434,10 @@ class InMemorySimulationBackend:
         goal = self._finite_values(goal_qpos, "goal_qpos")
         if len(start) != 2 or len(goal) != 2:
             raise ValueError("demo_planar_arm expects two joint values")
-        if type(samples) is not int or not 2 <= samples <= 10000:
-            raise ValueError("samples must be an integer between 2 and 10000")
+        if type(samples) is not int or not 2 <= samples <= MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"samples must be an integer between 2 and {MAX_TRAJECTORY_SAMPLES}"
+            )
         positions = [
             [start[j] + (goal[j] - start[j]) * i / (samples - 1) for j in range(2)]
             for i in range(samples)
@@ -428,6 +458,10 @@ class InMemorySimulationBackend:
         self._check_robot(robot_id)
         if not positions:
             raise ValueError("positions must contain at least one sample")
+        if len(positions) > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
         violations: list[dict[str, Any]] = []
         normalized: list[list[float]] = []
         for index, position in enumerate(positions):
@@ -466,16 +500,22 @@ class InMemorySimulationBackend:
         self._check_robot(robot_id)
         if not positions:
             raise ValueError("positions must contain at least one sample")
+        if len(positions) > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
         normalized = [
             self._finite_values(row, "trajectory sample") for row in positions
         ]
         if any(len(row) != 2 for row in normalized):
             raise ValueError("demo_planar_arm expects two joint values")
+        completed = 0
         for row in normalized:
             if cancel_event.is_set():
-                return {"status": "cancelled", "steps": 0}
+                return {"status": "cancelled", "steps": completed}
             world["state"]["qpos"] = row
             world["time_s"] += 0.01
+            completed += 1
         return {
             "status": "succeeded",
             "steps": len(normalized),
@@ -509,14 +549,22 @@ class InMemorySimulationBackend:
         cancel_event: threading.Event,
     ) -> dict[str, Any]:
         """Run a deterministic no-op rollout and return aggregate metrics."""
-        if type(steps) is not int or not 1 <= steps <= 1_000_000:
-            raise ValueError("steps must be an integer between 1 and 1000000")
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
+        completed = 0
         for _ in range(steps):
             if cancel_event.is_set():
-                return {"status": "cancelled", "steps": 0}
+                return {"status": "cancelled", "steps": completed}
             self.step_simulation(world_id, steps=1)
+            completed += 1
         state = self.get_world_state(world_id)
-        return {"status": "succeeded", "steps": steps, "final_time_s": state["time_s"]}
+        return {
+            "status": "succeeded",
+            "steps": completed,
+            "final_time_s": state["time_s"],
+        }
 
 
 class SimulationManagerBackend:
@@ -546,7 +594,25 @@ class SimulationManagerBackend:
         self._world_metadata: dict[str, dict[str, Any]] = {}
         self._snapshots: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        self._world_locks: dict[str, threading.RLock] = {}
         self._prepared_worlds: set[str] = set()
+
+    def _world_lock(self, world_id: str) -> threading.RLock:
+        """Return the serialization lock owned by one world handle."""
+        with self._lock:
+            return self._world_locks.setdefault(world_id, threading.RLock())
+
+    def close(self) -> None:
+        """Destroy all manager worlds and drain deferred native cleanup."""
+        with self._lock:
+            world_ids = tuple(self._managers)
+        for world_id in world_ids:
+            try:
+                self.destroy_world(world_id)
+            except Exception:
+                # Continue closing remaining worlds so one failed native cleanup
+                # does not strand every other world owned by this backend.
+                continue
 
     @staticmethod
     def _default_manager_factory(backend: str, seed: int | None) -> Any:
@@ -595,22 +661,26 @@ class SimulationManagerBackend:
 
     def list_cameras(self, world_id: str) -> list[dict[str, Any]]:
         """List cameras registered in a SimulationManager world."""
-        manager = self._manager(world_id)
-        result = []
-        for camera_id in manager.get_sensor_uid_list():
-            sensor = manager.get_sensor(camera_id)
-            if sensor is None or getattr(sensor.cfg, "sensor_type", None) != "Camera":
-                continue
-            result.append(
-                {
-                    "camera_id": camera_id,
-                    "width": sensor.cfg.width,
-                    "height": sensor.cfg.height,
-                    "data_types": sensor.cfg.get_data_types(),
-                    "role": sensor.cfg.visualization_role,
-                }
-            )
-        return result
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
+            result = []
+            for camera_id in manager.get_sensor_uid_list():
+                sensor = manager.get_sensor(camera_id)
+                if (
+                    sensor is None
+                    or getattr(sensor.cfg, "sensor_type", None) != "Camera"
+                ):
+                    continue
+                result.append(
+                    {
+                        "camera_id": camera_id,
+                        "width": sensor.cfg.width,
+                        "height": sensor.cfg.height,
+                        "data_types": sensor.cfg.get_data_types(),
+                        "role": sensor.cfg.visualization_role,
+                    }
+                )
+            return result
 
     def create_world(self, *, backend: str, seed: int | None) -> dict[str, Any]:
         """Create a headless SimulationManager world."""
@@ -620,6 +690,7 @@ class SimulationManagerBackend:
         world_id = f"sim-{uuid.uuid4().hex[:12]}"
         with self._lock:
             self._managers[world_id] = manager
+            self._world_locks[world_id] = threading.RLock()
             self._world_metadata[world_id] = {
                 "world_id": world_id,
                 "backend": backend,
@@ -642,6 +713,92 @@ class SimulationManagerBackend:
         task_id: str | None,
         scene: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        """Load one validated scene and roll back partial native setup."""
+        if task_id is None and scene is None:
+            raise ValueError("Either task_id or scene must be provided")
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
+            scene = dict(scene or {})
+            if world_id in self._prepared_worlds:
+                raise RuntimeError(
+                    "A world can load only one scene; create a new world to load another."
+                )
+            self._validate_scene_resources(scene)
+            try:
+                return self._load_scene_locked(world_id, task_id=task_id, scene=scene)
+            except Exception:
+                self._discard_world_after_failure(world_id, manager)
+                raise
+
+    @staticmethod
+    def _validate_scene_resources(scene: dict[str, Any]) -> None:
+        """Reject unbounded sensor resource requests before native allocation."""
+        sensor_values = scene.get("sensor", [])
+        if isinstance(sensor_values, dict):
+            sensor_values = [sensor_values]
+        if sensor_values is None:
+            return
+        if isinstance(sensor_values, (str, bytes)) or not isinstance(
+            sensor_values, Sequence
+        ):
+            raise ValueError("scene.sensor must be a sequence of mappings")
+        if len(sensor_values) > MAX_SCENE_SENSORS:
+            raise ValueError(
+                f"scene.sensor cannot contain more than {MAX_SCENE_SENSORS} entries"
+            )
+        total_pixels = 0
+        for index, value in enumerate(sensor_values):
+            if not isinstance(value, dict):
+                raise ValueError(f"scene.sensor[{index}] must be a mapping")
+            if value.get("sensor_type", "") != "Camera":
+                continue
+            width = value.get("width", 640)
+            height = value.get("height", 480)
+            if (
+                type(width) is not int
+                or type(height) is not int
+                or not 1 <= width <= MAX_CAMERA_WIDTH
+                or not 1 <= height <= MAX_CAMERA_HEIGHT
+            ):
+                raise ValueError(
+                    "Camera width and height must be positive integers no larger "
+                    f"than {MAX_CAMERA_WIDTH}x{MAX_CAMERA_HEIGHT}"
+                )
+            pixels = width * height
+            if pixels > MAX_CAMERA_PIXELS:
+                raise ValueError(
+                    f"Camera resolution cannot exceed {MAX_CAMERA_PIXELS} pixels"
+                )
+            total_pixels += pixels
+        if total_pixels > MAX_CAMERA_PIXELS:
+            raise ValueError(
+                f"Total camera resolution cannot exceed {MAX_CAMERA_PIXELS} pixels"
+            )
+
+    def _discard_world_after_failure(self, world_id: str, manager: Any) -> None:
+        """Best-effort cleanup for a scene that failed during materialization."""
+        try:
+            manager.destroy(exit_process=False)
+            flush = getattr(type(manager), "flush_cleanup_queue", None)
+            if flush is not None:
+                flush()
+        finally:
+            with self._lock:
+                self._managers.pop(world_id, None)
+                self._world_metadata.pop(world_id, None)
+                self._world_locks.pop(world_id, None)
+                self._prepared_worlds.discard(world_id)
+                for snapshot_id, snapshot in list(self._snapshots.items()):
+                    if snapshot["world_id"] == world_id:
+                        self._snapshots.pop(snapshot_id)
+
+    def _load_scene_locked(
+        self,
+        world_id: str,
+        *,
+        task_id: str | None,
+        scene: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         """Load the supported JSON scene fields into a manager world.
 
         The phase-one scene schema intentionally accepts the same top-level
@@ -650,8 +807,6 @@ class SimulationManagerBackend:
         task reference without a resolved config is retained as metadata; the
         task catalog remains the owner of deployment and component resolution.
         """
-        if task_id is None and scene is None:
-            raise ValueError("Either task_id or scene must be provided")
         manager = self._manager(world_id)
         scene = dict(scene or {})
         if world_id in self._prepared_worlds:
@@ -738,79 +893,107 @@ class SimulationManagerBackend:
 
     def reset_world(self, world_id: str) -> dict[str, Any]:
         """Reset all registered manager objects."""
-        self._manager(world_id).reset_objects_state()
-        return self.get_world_state(world_id)
+        with self._world_lock(world_id):
+            self._manager(world_id).reset_objects_state()
+            return self.get_world_state(world_id)
 
     def destroy_world(self, world_id: str) -> None:
         """Destroy a manager and flush its deferred native cleanup."""
-        manager = self._manager(world_id)
-        manager.destroy(exit_process=False)
-        manager_type = type(manager)
-        flush = getattr(manager_type, "flush_cleanup_queue", None)
-        if flush is not None:
-            flush()
-        with self._lock:
-            self._managers.pop(world_id, None)
-            self._world_metadata.pop(world_id, None)
-            self._prepared_worlds.discard(world_id)
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
+            manager.destroy(exit_process=False)
+            manager_type = type(manager)
+            flush = getattr(manager_type, "flush_cleanup_queue", None)
+            if flush is not None:
+                flush()
+            with self._lock:
+                self._managers.pop(world_id, None)
+                self._world_metadata.pop(world_id, None)
+                self._world_locks.pop(world_id, None)
+                self._prepared_worlds.discard(world_id)
+                for snapshot_id, snapshot in list(self._snapshots.items()):
+                    if snapshot["world_id"] == world_id:
+                        self._snapshots.pop(snapshot_id)
 
     def get_world_state(self, world_id: str) -> dict[str, Any]:
         """Return manager metadata and detached robot states."""
-        manager = self._manager(world_id)
-        with self._lock:
-            metadata = deepcopy(self._world_metadata[world_id])
-        robots: dict[str, Any] = {}
-        for robot_id in manager.get_robot_uid_list():
-            robot = manager.get_robot(robot_id)
-            if robot is None:
-                continue
-            robots[robot_id] = {
-                "qpos": robot.get_qpos().detach().cpu().tolist(),
-                "qvel": robot.get_qvel().detach().cpu().tolist(),
-            }
-        metadata["robots"] = robots
-        metadata["backend"] = getattr(manager.physics, "name", metadata["backend"])
-        return metadata
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
+            with self._lock:
+                metadata = deepcopy(self._world_metadata[world_id])
+            robots: dict[str, Any] = {}
+            for robot_id in manager.get_robot_uid_list():
+                robot = manager.get_robot(robot_id)
+                if robot is None:
+                    continue
+                robots[robot_id] = {
+                    "qpos": robot.get_qpos().detach().cpu().tolist(),
+                    "qvel": robot.get_qvel().detach().cpu().tolist(),
+                }
+            metadata["robots"] = robots
+            metadata["backend"] = getattr(manager.physics, "name", metadata["backend"])
+            return metadata
 
     def snapshot_world(self, world_id: str) -> dict[str, Any]:
         """Capture manager robot joint state in a snapshot handle."""
-        snapshot_id = f"snapshot-{uuid.uuid4().hex[:12]}"
-        state = self.get_world_state(world_id)
-        with self._lock:
-            self._snapshots[snapshot_id] = {
-                "snapshot_id": snapshot_id,
-                "world_id": world_id,
-                "state": state,
-            }
-        return {"snapshot_id": snapshot_id, "world_id": world_id}
+        with self._world_lock(world_id):
+            snapshot_id = f"snapshot-{uuid.uuid4().hex[:12]}"
+            state = self.get_world_state(world_id)
+            with self._lock:
+                self._snapshots[snapshot_id] = {
+                    "snapshot_id": snapshot_id,
+                    "world_id": world_id,
+                    "scene_revision": state["scene_revision"],
+                    "state": state,
+                }
+            return {"snapshot_id": snapshot_id, "world_id": world_id}
 
     def restore_world(self, world_id: str, snapshot_id: str) -> dict[str, Any]:
         """Restore joint positions and velocities from a snapshot."""
-        manager = self._manager(world_id)
-        try:
-            snapshot = self._snapshots[snapshot_id]
-        except KeyError as exc:
-            raise ValueError(f"Unknown snapshot_id: {snapshot_id}") from exc
-        if snapshot["world_id"] != world_id:
-            raise ValueError("snapshot_id belongs to another world")
-        import torch
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
+            try:
+                snapshot = self._snapshots[snapshot_id]
+            except KeyError as exc:
+                raise ValueError(f"Unknown snapshot_id: {snapshot_id}") from exc
+            if snapshot["world_id"] != world_id:
+                raise ValueError("snapshot_id belongs to another world")
+            current = self.get_world_state(world_id)
+            if snapshot["scene_revision"] != current["scene_revision"]:
+                raise ValueError(
+                    "snapshot belongs to scene_revision "
+                    f"{snapshot['scene_revision']}, current "
+                    f"{current['scene_revision']}"
+                )
+            import torch
 
-        for robot_id, robot_state in snapshot["state"]["robots"].items():
-            robot = manager.get_robot(robot_id)
-            if robot is None:
-                continue
-            robot.set_qpos(torch.as_tensor(robot_state["qpos"], dtype=torch.float32))
-            robot.set_qvel(torch.as_tensor(robot_state["qvel"], dtype=torch.float32))
-        return self.get_world_state(world_id)
+            for robot_id, robot_state in snapshot["state"]["robots"].items():
+                robot = manager.get_robot(robot_id)
+                if robot is None:
+                    continue
+                qpos = torch.as_tensor(robot_state["qpos"], dtype=torch.float32)
+                qvel = torch.as_tensor(robot_state["qvel"], dtype=torch.float32)
+                robot.set_qpos(qpos, target=False)
+                robot.set_qpos(qpos, target=True)
+                robot.set_qvel(qvel, target=False)
+                clear_dynamics = getattr(robot, "clear_dynamics", None)
+                if clear_dynamics is not None:
+                    clear_dynamics()
+            sync_render_state = getattr(manager, "sync_render_state", None)
+            if sync_render_state is not None:
+                sync_render_state()
+            return self.get_world_state(world_id)
 
     def step_simulation(self, world_id: str, *, steps: int) -> dict[str, Any]:
         """Advance a manager using its explicit update boundary."""
-        if type(steps) is not int or steps <= 0:
-            raise ValueError("steps must be a positive integer")
-        manager = self._manager(world_id)
-        with self._lock:
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
+        with self._world_lock(world_id):
+            manager = self._manager(world_id)
             manager.update(step=steps, render_final_step=False)
-        return self.get_world_state(world_id)
+            return self.get_world_state(world_id)
 
     def _robot(self, world_id: str, robot_id: str) -> Any:
         manager = self._manager(world_id)
@@ -911,8 +1094,10 @@ class SimulationManagerBackend:
         goal = [float(value) for value in goal_qpos]
         if len(start) != len(goal) or not start:
             raise ValueError("start_qpos and goal_qpos must have equal non-zero width")
-        if type(samples) is not int or not 2 <= samples <= 10000:
-            raise ValueError("samples must be an integer between 2 and 10000")
+        if type(samples) is not int or not 2 <= samples <= MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"samples must be an integer between 2 and {MAX_TRAJECTORY_SAMPLES}"
+            )
         positions = [
             [
                 start[j] + (goal[j] - start[j]) * i / (samples - 1)
@@ -942,6 +1127,10 @@ class SimulationManagerBackend:
         trajectory = torch.as_tensor(positions, dtype=torch.float32)
         if trajectory.ndim != 2 or trajectory.shape[0] == 0:
             raise ValueError("positions must have shape (samples, dof)")
+        if trajectory.shape[0] > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
         if not bool(torch.isfinite(trajectory).all().item()):
             raise ValueError("positions must contain finite values")
         expected_dof = int(robot.get_qpos().shape[-1])
@@ -950,15 +1139,23 @@ class SimulationManagerBackend:
                 f"trajectory width {trajectory.shape[1]} does not match robot "
                 f"width {expected_dof}"
             )
+        frame_pixels = int(camera.cfg.width) * int(camera.cfg.height)
+        if frame_pixels * int(trajectory.shape[0]) > MAX_RECORD_PIXELS:
+            raise ValueError(
+                "recording exceeds the MCP frame budget of "
+                f"{MAX_RECORD_PIXELS} pixels"
+            )
         for position in trajectory:
             if cancel_event.is_set():
                 return {"status": "cancelled", "steps": 0}
-            robot.set_qpos(position.unsqueeze(0))
+            robot.set_qpos(position.unsqueeze(0), target=False)
+            robot.set_qpos(position.unsqueeze(0), target=True)
             manager.update(step=1, render_final_step=False)
+        measured = robot.get_qpos().detach().cpu().tolist()
         return {
             "status": "succeeded",
             "steps": int(trajectory.shape[0]),
-            "final_qpos": trajectory[-1].detach().cpu().tolist(),
+            "final_qpos": measured[0] if measured else [],
         }
 
     def record_trajectory(
@@ -994,6 +1191,10 @@ class SimulationManagerBackend:
         trajectory = torch.as_tensor(positions, dtype=torch.float32)
         if trajectory.ndim != 2 or trajectory.shape[0] == 0:
             raise ValueError("positions must have shape (samples, dof)")
+        if trajectory.shape[0] > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
         if not bool(torch.isfinite(trajectory).all().item()):
             raise ValueError("positions must contain finite values")
         expected_dof = int(robot.get_qpos().shape[-1])
@@ -1007,7 +1208,8 @@ class SimulationManagerBackend:
         for position in trajectory:
             if cancel_event.is_set():
                 return {"status": "cancelled", "frames": len(frames)}
-            robot.set_qpos(position.unsqueeze(0))
+            robot.set_qpos(position.unsqueeze(0), target=False)
+            robot.set_qpos(position.unsqueeze(0), target=True)
             manager.update(step=1, render_final_step=False)
             manager.sync_render_state()
             camera.update()
@@ -1046,6 +1248,10 @@ class SimulationManagerBackend:
         trajectory = torch.as_tensor(positions, dtype=torch.float32)
         if trajectory.ndim != 2 or trajectory.shape[0] == 0:
             raise ValueError("positions must have shape (samples, dof)")
+        if trajectory.shape[0] > MAX_TRAJECTORY_SAMPLES:
+            raise ValueError(
+                f"positions cannot contain more than {MAX_TRAJECTORY_SAMPLES} samples"
+            )
         if not bool(torch.isfinite(trajectory).all().item()):
             raise ValueError("positions must contain finite values")
         limits = robot.get_qpos_limits()[0].detach().cpu()
@@ -1077,8 +1283,14 @@ class SimulationManagerBackend:
         cancel_event: threading.Event,
     ) -> dict[str, Any]:
         """Run explicit manager updates until completion or cancellation."""
+        if type(steps) is not int or not 1 <= steps <= MAX_SIMULATION_STEPS:
+            raise ValueError(
+                f"steps must be an integer between 1 and {MAX_SIMULATION_STEPS}"
+            )
+        completed = 0
         for _ in range(steps):
             if cancel_event.is_set():
-                return {"status": "cancelled", "steps": 0}
+                return {"status": "cancelled", "steps": completed}
             self.step_simulation(world_id, steps=1)
-        return {"status": "succeeded", "steps": steps}
+            completed += 1
+        return {"status": "succeeded", "steps": completed}
