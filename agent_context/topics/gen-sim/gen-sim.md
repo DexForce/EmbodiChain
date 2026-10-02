@@ -1,8 +1,9 @@
 # Generative simulation
 
 Scene Engine turns images into editable scenes and portable exports; the
-general SimReady pipeline ingests individual assets. Neither output is by
-itself a complete runnable Gym task deployment.
+SimReady Asset Engine ingests and generates individual assets, including
+articulated assets. Neither output is by itself a complete runnable Gym task
+deployment.
 
 ## Entry points and resolution
 
@@ -17,11 +18,13 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
 | General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
+| Articulated asset generation | `simready_pipeline/clients/articulated_generation.py`, `simready_pipeline/utils/articulated_usdc_utils.py` |
+| Generated task semantics | `embodichain/task_spec/` and `task_engine/task_spec.py`: TaskTemplate generation and cache adapter |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 
-Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
+Generate: validate input → VLM understanding → Asset Engine geometry/articulation
+generation → placement refinement → export. Segmentation and Asset Engine
 clients are closed in `finally` blocks; VLM lifetime is separate.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
@@ -61,6 +64,12 @@ Keep parser capabilities idempotent so recorded stages support resume.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic
 composition belong to [env-framework](../env-framework/env-framework.md).
+TaskSpec owns the reusable normative task identity and evidence contract across
+these boundaries; its schemas, predicate rules, and cache behavior are owned by
+`embodichain/task_spec/` and detailed in the
+[GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
+Scene output is still only a SceneInstance input to that protocol, not a
+certified task witness.
 
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote

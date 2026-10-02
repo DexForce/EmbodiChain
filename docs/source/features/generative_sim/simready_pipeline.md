@@ -1,6 +1,12 @@
-# SimReady Asset Pipeline
+# SimReady Asset Engine
 
-The SimReady asset pipeline converts raw mesh archives into normalized simulation assets. It ingests a source mesh, preserves or bakes visual materials, cleans mesh topology, estimates real-world scale and semantics with multimodal LLMs, and exports assets that can be loaded directly in EmbodiChain simulations.
+The SimReady Asset Engine converts raw mesh archives into normalized simulation
+assets. It ingests a source mesh, preserves or bakes visual materials, cleans
+mesh topology, estimates real-world scale and semantics with multimodal LLMs,
+and exports assets that can be loaded directly in EmbodiChain simulations. The
+same owner provides articulated-asset generation and USDC structural
+validation; Scene Engine consumes those artifacts for placement and scene USD
+assembly.
 
 ## Quick Start
 
