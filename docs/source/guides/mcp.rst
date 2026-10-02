@@ -1,4 +1,4 @@
-.. _tutorial_mcp:
+.. _guide_mcp:
 
 Use EmbodiChain through MCP
 ===========================
@@ -29,9 +29,12 @@ ImageIO and FFmpeg support:
 
    $ python -m pip install -e '.[mcp-demo]'
 
-The recording workflow also needs the simulator dependencies and the cached
-Franka asset used by the demo. The protocol tests use the deterministic
-``InMemorySimulationBackend`` and do not start a simulator.
+The example client starts the default ``SimulationManagerBackend`` even when
+``--record`` is omitted, so both example commands need the simulator
+dependencies and the cached Franka asset used by the demo. The ``mcp-demo``
+extra adds the ImageIO and FFmpeg packages required by recording. The protocol
+tests use the deterministic ``InMemorySimulationBackend`` and do not start a
+simulator.
 
 Start the stdio server
 ----------------------
@@ -51,7 +54,7 @@ the command once:
    $ codex mcp list
 
 The phase-one server intentionally serves stdio only. A remote HTTP gateway is
-outside this tutorial because authorization, approval, and resource quotas must
+outside this guide because authorization, approval, and resource quotas must
 be owned by that gateway.
 
 The first tool calls
@@ -82,8 +85,8 @@ Run the Franka example
 ----------------------
 
 The repository example contains a complete stdio client and editable JSON
-inputs in ``examples/mcp/codex_trajectory_demo/``. Run the protocol-only part
-with:
+inputs in ``examples/mcp/codex_trajectory_demo/``. Run the trajectory workflow
+without recording with:
 
 .. code-block:: console
 
@@ -110,6 +113,12 @@ resource URI. With ``--record``, the server applies the trajectory and writes:
 The demo keeps the physics loop inside the backend. The Host chooses waypoints
 and makes one task-level recording call instead of issuing a tool call for each
 physics step.
+
+For a simulator-free protocol check, run the deterministic contract tests:
+
+.. code-block:: console
+
+   $ pytest -q -c /dev/null tests/lab/mcp/test_service.py tests/lab/mcp/test_backend_contracts.py
 
 Resources and handles
 ---------------------
