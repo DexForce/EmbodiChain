@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
     GenSimActionEngine,
@@ -31,7 +33,7 @@ from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
     bind_pour_receivers,
     pour_receiver_declarations,
 )
-from embodichain.lab.sim.atomic_actions import AtomicActionEngine
+from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PlannerDiagnostics
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 
 
@@ -153,6 +155,133 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
     assert (
         result.diagnostics.metadata["gen_sim_invocation_policy"]["cartesian_approach"]
         is False
+    )
+
+
+@dataclass(frozen=True)
+class _VelocityPlan:
+    plan_success: torch.Tensor
+    joint_trajectory: object
+    diagnostics: PlannerDiagnostics
+
+
+@pytest.mark.parametrize(
+    ("accepted_count", "expected_calls", "expected_attempts"),
+    [
+        (260, [140, 260], [260]),
+        (320, [140, 260, 320], [260, 320]),
+    ],
+)
+def test_velocity_failure_retries_only_this_gensim_invocation_with_denser_samples(
+    monkeypatch, tmp_path, accepted_count, expected_calls, expected_attempts
+):
+    """A coarse full-robot path retries at denser budgets without changing limits."""
+
+    robot_file = tmp_path / "robot.urdf"
+    robot_file.write_text(
+        '<robot><joint name="arm"><limit velocity="1"/></joint></robot>'
+    )
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(robot_file)),
+        joint_names=["arm"],
+        get_joint_ids=lambda **kwargs: [0],
+        get_qvel_limits=lambda **kwargs: torch.ones(1, 1),
+    )
+    calls = []
+
+    def plan(_self, request, context=None, *, plan_transform=None):
+        del context, plan_transform
+        sample_count = request.motion_policy.sample_count
+        calls.append(sample_count)
+        positions = torch.zeros(1, 2, 1)
+        if sample_count < accepted_count:
+            # 0.2 rad in 0.04 s is 5x the 1 rad/s limit.
+            positions[0, 1, 0] = 0.2
+        return _VelocityPlan(
+            plan_success=torch.tensor([True]),
+            joint_trajectory=SimpleNamespace(
+                positions=positions,
+                dt=torch.tensor([[0.0, 0.04]]),
+            ),
+            diagnostics=PlannerDiagnostics(backend="fixture"),
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {"task/segment:0": 140}
+    engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._planning_services = SimpleNamespace(robot=robot)
+
+    @dataclass(frozen=True)
+    class Request:
+        invocation_id: str
+        motion_policy: MotionPolicy
+
+    request = Request("task/segment:0", MotionPolicy(sample_count=140))
+    result = engine._plan_request(request)
+
+    assert calls == expected_calls
+    assert request.motion_policy.sample_count == 140
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"]["sample_count"]
+        == accepted_count
+    )
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"][
+            "velocity_retime_attempts"
+        ]
+        == expected_attempts
+    )
+    assert robot.get_qvel_limits()[0, 0] == 1
+
+
+def test_valid_gensim_plan_does_not_pay_for_velocity_retry(monkeypatch, tmp_path):
+    """A valid default path is planned once and keeps the 140-sample budget."""
+
+    robot_file = tmp_path / "robot.urdf"
+    robot_file.write_text(
+        '<robot><joint name="arm"><limit velocity="1"/></joint></robot>'
+    )
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(robot_file)),
+        joint_names=["arm"],
+        get_joint_ids=lambda **kwargs: [0],
+        get_qvel_limits=lambda **kwargs: torch.ones(1, 1),
+    )
+    calls = []
+
+    def plan(_self, request, context=None, *, plan_transform=None):
+        del context, plan_transform
+        calls.append(request.motion_policy.sample_count)
+        return _VelocityPlan(
+            plan_success=torch.tensor([True]),
+            joint_trajectory=SimpleNamespace(
+                positions=torch.zeros(1, 2, 1),
+                dt=torch.tensor([[0.0, 0.04]]),
+            ),
+            diagnostics=PlannerDiagnostics(backend="fixture"),
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {"task/segment:0": 140}
+    engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._planning_services = SimpleNamespace(robot=robot)
+
+    @dataclass(frozen=True)
+    class Request:
+        invocation_id: str
+        motion_policy: MotionPolicy
+
+    result = engine._plan_request(
+        Request("task/segment:0", MotionPolicy(sample_count=140))
+    )
+
+    assert calls == [140]
+    assert (
+        result.diagnostics.metadata["gen_sim_invocation_policy"]["sample_count"] == 140
     )
 
 

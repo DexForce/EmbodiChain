@@ -21,15 +21,18 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+import torch
+
 from embodichain.lab.sim.atomic_actions import AtomicActionEngine, PlanTransform
 from embodichain.lab.sim.atomic_actions.invocation import (
     ActionInvocation,
     ResolvedActionRequest,
 )
+from embodichain.utils import logger
 
 __all__: list[str] = []
 
-INVOCATION_POLICY_REVISION = 3
+INVOCATION_POLICY_REVISION = 4
 
 
 def motion_sample_declarations(
@@ -240,10 +243,14 @@ class GenSimActionEngine(AtomicActionEngine):
         plan_transform: PlanTransform | None = None,
     ) -> Any:
         from .motion import cartesian_approach_scope
+        from .motion import _velocity_retry_samples
         from .planning_probe import initial_plan_capture
+        from .planning_probe import _validate_final_plan_velocity
 
         capture = initial_plan_capture(request.invocation_id)
         enabled = request.invocation_id in self._cartesian_calls
+        selected_request = request
+        retime_attempts: list[int] = []
         try:
             with cartesian_approach_scope(enabled):
                 kind = self._articulation_calls.get(request.invocation_id)
@@ -269,6 +276,71 @@ class GenSimActionEngine(AtomicActionEngine):
                     plan = super()._plan_request(
                         request, context, plan_transform=plan_transform
                     )
+                # Some GenSim primitives (notably coordinated E5) assemble
+                # their complete trajectory outside the Cartesian planner's
+                # adaptive retry path.  Retry only a velocity-invalid plan
+                # with a denser time grid; never relax the robot's limits.
+                trajectory = getattr(plan, "joint_trajectory", None)
+                if (
+                    request.invocation_id in getattr(self, "_motion_samples", {})
+                    and trajectory is not None
+                    and request.motion_policy.sample_count is not None
+                    and getattr(plan, "plan_success", None) is not None
+                    and plan.plan_success.any()
+                ):
+                    velocity = _validate_final_plan_velocity(plan, self.robot)
+                    invalid = plan.plan_success & ~velocity["valid_mask"]
+                    if invalid.any():
+                        # A failed fallback must not perturb the next call's
+                        # candidate stream.  The first plan remains the source
+                        # of truth if every denser grid is rejected.
+                        devices = []
+                        device = trajectory.positions.device
+                        if device.type == "cuda" and device.index is not None:
+                            devices = [device.index]
+                        with torch.random.fork_rng(devices=devices):
+                            for sample_count in _velocity_retry_samples(
+                                request.motion_policy.sample_count
+                            ):
+                                retime_attempts.append(sample_count)
+                                retry_request = replace(
+                                    request,
+                                    motion_policy=replace(
+                                        request.motion_policy,
+                                        sample_count=sample_count,
+                                    ),
+                                )
+                                retry_plan = super()._plan_request(
+                                    retry_request,
+                                    context,
+                                    plan_transform=plan_transform,
+                                )
+                                retry_trajectory = getattr(
+                                    retry_plan, "joint_trajectory", None
+                                )
+                                if retry_trajectory is None:
+                                    continue
+                                retry_velocity = _validate_final_plan_velocity(
+                                    retry_plan, self.robot
+                                )
+                                retry_success = retry_plan.plan_success
+                                retry_invalid = (
+                                    retry_success & ~retry_velocity["valid_mask"]
+                                )
+                                retained_success = retry_success | ~plan.plan_success
+                                if (
+                                    retry_success.any()
+                                    and not retry_invalid.any()
+                                    and retained_success.all()
+                                ):
+                                    selected_request = retry_request
+                                    plan = retry_plan
+                                    logger.log_info(
+                                        "GenSim adaptive velocity retime accepted "
+                                        f"sample_count={sample_count} for "
+                                        f"{request.invocation_id}."
+                                    )
+                                    break
             plan = replace(
                 plan,
                 diagnostics=replace(
@@ -277,13 +349,16 @@ class GenSimActionEngine(AtomicActionEngine):
                         **plan.diagnostics.metadata,
                         "gen_sim_invocation_policy": {
                             "cartesian_approach": enabled,
-                            "sample_count": request.motion_policy.sample_count,
+                            "sample_count": selected_request.motion_policy.sample_count,
+                            "velocity_retime_attempts": retime_attempts,
                         },
                     },
                 ),
             )
             return (
-                plan if capture is None else capture.accept(request, plan, self.robot)
+                plan
+                if capture is None
+                else capture.accept(selected_request, plan, self.robot)
             )
         except Exception as exc:
             if capture is not None:
