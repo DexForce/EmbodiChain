@@ -128,6 +128,7 @@ def main(args: argparse.Namespace | None = None) -> None:
                 collision=MeshCollisionCfg(
                     approximation="convex_decomposition",
                     max_hulls=32,
+                    acd_method="coacd",
                 ),
             ),
             body_type="dynamic",
