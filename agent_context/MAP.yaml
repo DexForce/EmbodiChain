@@ -17,7 +17,7 @@ topics:
   - embodichain/mcp/service.py
   - embodichain/mcp/backend.py
   - embodichain/cli/main.py
-  watch_paths: [embodichain/mcp/, embodichain/lab/mcp/, tests/lab/mcp/, examples/mcp/, pyproject.toml]
+  watch_paths: [embodichain/mcp/, tests/lab/mcp/, examples/mcp/, pyproject.toml]
   related_topics: [simulation-system, env-framework, robot-system, ik-solvers, motion-planning, data-pipeline]
   status: active
 - id: simulation-system

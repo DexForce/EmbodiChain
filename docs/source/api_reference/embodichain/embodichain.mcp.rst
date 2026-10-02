@@ -51,21 +51,3 @@ embodichain.mcp.service
 
 .. automodule:: embodichain.mcp.service
    :members:
-
-Compatibility imports
-=====================
-
-The original ``embodichain.lab.mcp`` import path remains available for
-callers that adopted the initial phase-one preview.
-
-.. automodule:: embodichain.lab.mcp
-   :members:
-
-.. automodule:: embodichain.lab.mcp.backend
-   :members:
-
-.. automodule:: embodichain.lab.mcp.server
-   :members:
-
-.. automodule:: embodichain.lab.mcp.service
-   :members:

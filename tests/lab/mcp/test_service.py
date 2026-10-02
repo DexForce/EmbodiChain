@@ -32,7 +32,6 @@ from embodichain.mcp import (
     SimulationManagerBackend,
     create_server,
 )
-from embodichain.lab.mcp import EmbodiChainMCPService as LegacyMCPService
 
 DEMO_ROBOT = "demo_planar_arm"
 TARGET_POSE = {"position_m": [0.6, 0.2, 0.0]}
@@ -275,10 +274,6 @@ def test_stdio_client_can_discover_and_call_health():
     assert "health" in tools
     assert health.is_error is False
     assert health.structured_content["status"] == "ok"
-
-
-def test_legacy_lab_import_path_reexports_top_level_service():
-    assert LegacyMCPService is EmbodiChainMCPService
 
 
 def test_top_level_import_does_not_load_simulation_or_optional_sdk():
