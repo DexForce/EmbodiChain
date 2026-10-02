@@ -388,8 +388,6 @@ class URDFAssemblyAdapter:
         assembly_id = f"assembly-{_json_digest(specification)}"
         output_dir = self.output_root / assembly_id
         output_path = output_dir / f"{name}.urdf"
-        if not output_dir.exists():
-            self._prune_output_root(limit=self._max_assemblies - 1)
 
         from embodichain.toolkits.urdf_assembly import URDFAssemblyManager
 
@@ -431,6 +429,8 @@ class URDFAssemblyAdapter:
                 raise ValueError(f"Unable to attach sensor {sensor['sensor_name']!r}")
             resolved_sensors.append(deepcopy(sensor))
 
+        if not output_dir.exists():
+            self._prune_output_root(limit=self._max_assemblies - 1)
         output_dir_existed = output_dir.exists()
         output_dir.mkdir(parents=True, exist_ok=True)
         try:

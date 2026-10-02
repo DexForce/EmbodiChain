@@ -127,6 +127,10 @@ def test_eviction_removes_old_generated_artifacts(tmp_path: Path):
         assembly_name="first",
     )
     first_dir = Path(first["model"]["path"]).parent
+    with pytest.raises(ValueError, match="not registered"):
+        adapter.compose([{"component_type": "arm", "asset": "unknown.urdf"}])
+    assert first_dir.exists()
+
     adapter.compose(
         [{"component_type": "arm", "asset": "fixture/arm.urdf"}],
         assembly_name="second",
