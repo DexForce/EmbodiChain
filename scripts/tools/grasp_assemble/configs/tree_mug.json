@@ -1,0 +1,7 @@
+{
+  "assembly_result": "../../../../outputs/assemble/tree_mug/latest.json",
+  "execution": {
+    "grasp_mode": "fixed_constraint",
+    "rotation_tolerance_degrees": 20
+  }
+}
