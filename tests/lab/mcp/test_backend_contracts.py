@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 
@@ -100,6 +101,9 @@ def test_task_catalog_does_not_expose_internal_resource_handles() -> None:
     try:
         task = service.list_tasks()[0]
         assert task["deployments"] == [{"name": "default"}]
+        assert service.get_task_info("demo:task")["deployments"] == [
+            {"name": "default"}
+        ]
     finally:
         service.close()
 
@@ -186,6 +190,14 @@ def test_manager_backend_restores_current_state_and_closes_worlds() -> None:
     assert restored["robots"]["fake_robot"]["qpos"] == [[0.0, 0.0]]
     assert ("qpos", [[0.0, 0.0]]) in managers[0].robot.targets
 
+    executed = backend.execute_trajectory(
+        world_id,
+        "fake_robot",
+        [[0.0, 0.0], [0.2, 0.3]],
+        cancel_event=threading.Event(),
+    )
+    assert executed["status"] == "succeeded"
+
     backend.close()
     assert managers[0].destroyed is True
     assert backend._managers == {}
@@ -248,6 +260,24 @@ def test_manager_backend_rejects_unbounded_camera_before_manager_setup() -> None
 
     backend = SimulationManagerBackend(lambda backend, seed: FakeManager())
     world_id = backend.create_world(backend="default", seed=None)["world_id"]
+    with pytest.raises(ValueError, match="does not match world backend"):
+        backend.load_scene(
+            world_id,
+            task_id=None,
+            scene={"physics": "newton"},
+        )
+    with pytest.raises(ValueError, match="physics_config must be applied"):
+        backend.load_scene(
+            world_id,
+            task_id=None,
+            scene={"physics": "default", "physics_config": {"enable_ccd": True}},
+        )
+    with pytest.raises(ValueError, match="more than 256 object"):
+        backend.load_scene(
+            world_id,
+            task_id=None,
+            scene={"rigid_object": [{}] * 257},
+        )
     with pytest.raises(ValueError, match="Camera width and height"):
         backend.load_scene(
             world_id,

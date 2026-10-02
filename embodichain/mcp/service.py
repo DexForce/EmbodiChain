@@ -270,6 +270,32 @@ class EmbodiChainMCPService:
         """List robots available from the injected backend."""
         return deepcopy(self.backend.list_robots())
 
+    @staticmethod
+    def _public_task_record(task: Mapping[str, Any]) -> dict[str, Any]:
+        """Remove internal resource handles from one catalog record."""
+        public_task = {
+            key: deepcopy(value)
+            for key, value in task.items()
+            if not key.startswith("_") and key != "deployments"
+        }
+        public_task["deployments"] = [
+            {
+                key: deepcopy(value)
+                for key, value in deployment.items()
+                if not key.startswith("_")
+            }
+            for deployment in task.get("deployments", ())
+            if isinstance(deployment, Mapping)
+        ]
+        return public_task
+
+    def _task_record(self, task_id: str) -> Mapping[str, Any]:
+        """Return the private catalog record used for config resolution."""
+        for task in self._task_provider():
+            if task.get("task_id") == task_id:
+                return task
+        raise ValueError(f"Unknown task_id: {task_id}")
+
     def get_robot_info(self, robot_id: str) -> dict[str, Any]:
         """Return one robot record.
 
@@ -290,31 +316,11 @@ class EmbodiChainMCPService:
     def list_tasks(self) -> list[dict[str, Any]]:
         """List task catalog records without starting a simulator."""
         records = list(self._task_provider())
-        public_records = []
-        for task in records:
-            public_task = {
-                key: deepcopy(value)
-                for key, value in task.items()
-                if not key.startswith("_") and key != "deployments"
-            }
-            public_task["deployments"] = [
-                {
-                    key: deepcopy(value)
-                    for key, value in deployment.items()
-                    if not key.startswith("_")
-                }
-                for deployment in task.get("deployments", ())
-                if isinstance(deployment, Mapping)
-            ]
-            public_records.append(public_task)
-        return public_records
+        return [self._public_task_record(task) for task in records]
 
     def get_task_info(self, task_id: str) -> dict[str, Any]:
         """Return one task catalog record."""
-        for task in self._task_provider():
-            if task.get("task_id") == task_id:
-                return dict(task)
-        raise ValueError(f"Unknown task_id: {task_id}")
+        return self._public_task_record(self._task_record(task_id))
 
     def list_physics_backends(self) -> list[dict[str, Any]]:
         """List physics backends available to the injected backend."""
@@ -353,9 +359,11 @@ class EmbodiChainMCPService:
                     "A world can load only one scene; create a new world to load another."
                 )
             if task_id is not None:
-                task = self.get_task_info(task_id)
+                task = self._task_record(task_id)
                 if scene is None:
-                    scene = self._load_default_task_scene(task)
+                    scene = self._load_default_task_scene(
+                        task, selected_backend=current.get("backend")
+                    )
             state = self.backend.load_scene(
                 world_id,
                 task_id=task_id,
@@ -366,6 +374,8 @@ class EmbodiChainMCPService:
     @staticmethod
     def _load_default_task_scene(
         task: Mapping[str, Any],
+        *,
+        selected_backend: str | None = None,
     ) -> dict[str, Any] | None:
         """Load and resolve a default deployment through Gym components."""
         deployments = task.get("deployments", ())
@@ -399,7 +409,9 @@ class EmbodiChainMCPService:
             )
 
             resolved = _resolve_gym_components(
-                value, base_dir=os.path.dirname(config_path)
+                value,
+                base_dir=os.path.dirname(config_path),
+                selected_backend=selected_backend,
             )
             return dict(resolved.config)
 

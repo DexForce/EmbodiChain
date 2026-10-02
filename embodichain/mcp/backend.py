@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import threading
 import uuid
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
@@ -41,6 +42,10 @@ MAX_CAMERA_WIDTH = 4096
 MAX_CAMERA_HEIGHT = 4096
 MAX_CAMERA_PIXELS = 16_777_216
 MAX_RECORD_PIXELS = 64_000_000
+MAX_SCENE_ROBOTS = 16
+MAX_SCENE_OBJECTS = 256
+MAX_SCENE_ARTICULATIONS = 64
+MAX_SCENE_LIGHTS = 64
 
 
 class SimulationBackend(Protocol):
@@ -724,6 +729,7 @@ class SimulationManagerBackend:
                     "A world can load only one scene; create a new world to load another."
                 )
             self._validate_scene_resources(scene)
+            self._validate_scene_configuration(world_id, scene)
             try:
                 return self._load_scene_locked(world_id, task_id=task_id, scene=scene)
             except Exception:
@@ -731,8 +737,52 @@ class SimulationManagerBackend:
                 raise
 
     @staticmethod
+    def _scene_entries(scene: Mapping[str, Any], *names: str) -> list[Any]:
+        """Combine scene collections while preserving separate object fields."""
+        entries: list[Any] = []
+        for name in names:
+            value = scene.get(name, [])
+            if value is None:
+                continue
+            if isinstance(value, dict):
+                if name in {"robot", "articulation"} or (
+                    name in {"background", "rigid_object"}
+                    and any(key in value for key in ("uid", "shape", "fpath"))
+                ):
+                    value = [value]
+                elif name == "light" and "light_type" in value:
+                    value = [value]
+                elif name == "light":
+                    value = [
+                        item
+                        for group in value.values()
+                        if isinstance(group, list)
+                        for item in group
+                    ]
+                else:
+                    value = list(value.values())
+            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+                raise ValueError(f"scene.{name} must be a sequence of mappings")
+            entries.extend(value)
+        return entries
+
+    @staticmethod
     def _validate_scene_resources(scene: dict[str, Any]) -> None:
         """Reject unbounded sensor resource requests before native allocation."""
+        collection_limits = (
+            (("robot", "robots"), MAX_SCENE_ROBOTS, "robot"),
+            (
+                ("background", "rigid_object", "rigid_object_group"),
+                MAX_SCENE_OBJECTS,
+                "object",
+            ),
+            (("articulation",), MAX_SCENE_ARTICULATIONS, "articulation"),
+            (("light",), MAX_SCENE_LIGHTS, "light"),
+        )
+        for names, limit, label in collection_limits:
+            entries = SimulationManagerBackend._scene_entries(scene, *names)
+            if len(entries) > limit:
+                raise ValueError(f"scene contains more than {limit} {label} entries")
         sensor_values = scene.get("sensor", [])
         if isinstance(sensor_values, dict):
             sensor_values = [sensor_values]
@@ -775,6 +825,25 @@ class SimulationManagerBackend:
                 f"Total camera resolution cannot exceed {MAX_CAMERA_PIXELS} pixels"
             )
 
+    def _validate_scene_configuration(
+        self, world_id: str, scene: dict[str, Any]
+    ) -> None:
+        """Validate settings that can fail before native scene mutation."""
+        with self._lock:
+            world_backend = self._world_metadata[world_id]["backend"]
+        declared_backend = scene.get("physics")
+        if declared_backend is not None and declared_backend != world_backend:
+            raise ValueError(
+                f"Scene physics {declared_backend!r} does not match world backend "
+                f"{world_backend!r}"
+            )
+        physics_config = scene.get("physics_config")
+        if isinstance(physics_config, Mapping) and physics_config:
+            raise ValueError(
+                "Scene physics_config must be applied when the world is created; "
+                "create a matching world and pass the settings through its backend."
+            )
+
     def _discard_world_after_failure(self, world_id: str, manager: Any) -> None:
         """Best-effort cleanup for a scene that failed during materialization."""
         try:
@@ -811,7 +880,6 @@ class SimulationManagerBackend:
         scene = dict(scene or {})
         if world_id in self._prepared_worlds:
             raise RuntimeError("A prepared world cannot load a second scene")
-
         from embodichain.lab.sim.cfg import (
             ArticulationCfg,
             LightCfg,
@@ -819,61 +887,55 @@ class SimulationManagerBackend:
             RobotCfg,
         )
         from embodichain.lab.sim.robots import FrankaPandaCfg
+        from embodichain.utils.utility import get_class_instance
 
-        robot_values = scene.get("robots", scene.get("robot", []))
-        if isinstance(robot_values, dict):
-            robot_values = [robot_values]
-        if robot_values is not None:
-            for robot_value in robot_values:
-                if not isinstance(robot_value, dict):
-                    raise ValueError("scene.robots entries must be mappings")
-                robot_data = dict(robot_value)
-                robot_class = robot_data.pop(
-                    "robot_class", robot_data.pop("class_type", None)
+        robot_values = self._scene_entries(scene, "robot", "robots")
+        for robot_value in robot_values:
+            if not isinstance(robot_value, dict):
+                raise ValueError("scene.robots entries must be mappings")
+            robot_data = dict(robot_value)
+            robot_class = robot_data.pop(
+                "robot_class", robot_data.pop("class_type", None)
+            )
+            if robot_class in {"FrankaPanda", "FrankaPandaCfg"} or (
+                robot_class is None and robot_data.get("robot_type") == "panda"
+            ):
+                manager.add_robot(FrankaPandaCfg.from_dict(robot_data))
+            elif robot_class is not None:
+                class_name = (
+                    robot_class if robot_class.endswith("Cfg") else f"{robot_class}Cfg"
                 )
-                if robot_class in {"FrankaPanda", "FrankaPandaCfg"} or (
-                    robot_class is None and robot_data.get("robot_type") == "panda"
-                ):
-                    manager.add_robot(FrankaPandaCfg.from_dict(robot_data))
-                else:
-                    manager.add_robot(RobotCfg.from_dict(robot_data))
-
-        object_values = scene.get("rigid_object", scene.get("background", []))
-        if isinstance(object_values, dict):
-            object_values = list(object_values.values())
-        if object_values is not None:
-            for object_value in object_values:
-                if not isinstance(object_value, dict):
-                    raise ValueError("scene.rigid_object entries must be mappings")
-                manager.add_rigid_object(RigidObjectCfg.from_dict(dict(object_value)))
-
-        articulation_values = scene.get("articulation", [])
-        if isinstance(articulation_values, dict):
-            articulation_values = [articulation_values]
-        if articulation_values is not None:
-            for articulation_value in articulation_values:
-                if not isinstance(articulation_value, dict):
-                    raise ValueError("scene.articulation entries must be mappings")
-                manager.add_articulation(
-                    ArticulationCfg.from_dict(dict(articulation_value))
-                )
-
-        light_values = scene.get("light", [])
-        if isinstance(light_values, dict):
-            if "light_type" in light_values:
-                light_values = [light_values]
+                try:
+                    robot_cfg_type = get_class_instance(
+                        "embodichain.lab.sim.robots", class_name
+                    )
+                except (AttributeError, ImportError, KeyError) as error:
+                    raise ValueError(
+                        f"Unsupported robot class_type: {robot_class}"
+                    ) from error
+                manager.add_robot(robot_cfg_type.from_dict(robot_data))
             else:
-                light_values = [
-                    item
-                    for group in light_values.values()
-                    if isinstance(group, list)
-                    for item in group
-                ]
-        if light_values is not None:
-            for light_value in light_values:
-                if not isinstance(light_value, dict):
-                    raise ValueError("scene.light entries must be mappings")
-                manager.add_light(LightCfg(**dict(light_value)))
+                manager.add_robot(RobotCfg.from_dict(robot_data))
+
+        object_values = self._scene_entries(scene, "background", "rigid_object")
+        for object_value in object_values:
+            if not isinstance(object_value, dict):
+                raise ValueError("scene.rigid_object entries must be mappings")
+            manager.add_rigid_object(RigidObjectCfg.from_dict(dict(object_value)))
+
+        articulation_values = self._scene_entries(scene, "articulation")
+        for articulation_value in articulation_values:
+            if not isinstance(articulation_value, dict):
+                raise ValueError("scene.articulation entries must be mappings")
+            manager.add_articulation(
+                ArticulationCfg.from_dict(dict(articulation_value))
+            )
+
+        light_values = self._scene_entries(scene, "light")
+        for light_value in light_values:
+            if not isinstance(light_value, dict):
+                raise ValueError("scene.light entries must be mappings")
+            manager.add_light(LightCfg(**dict(light_value)))
         manager.prepare()
         sensor_values = scene.get("sensor", [])
         if isinstance(sensor_values, dict):
@@ -1002,6 +1064,41 @@ class SimulationManagerBackend:
             raise ValueError(f"Unknown robot_id in world {world_id}: {robot_id}")
         return robot
 
+    @staticmethod
+    def _kinematic_part(robot: Any) -> str | None:
+        """Select a configured control part that owns a kinematic solver."""
+        control_parts = getattr(robot, "control_parts", None)
+        if not isinstance(control_parts, Mapping):
+            return None
+        solver_names = getattr(robot, "_solvers", {})
+        if isinstance(solver_names, Mapping):
+            candidates = [
+                name
+                for name in ("arm", "manipulator", "default")
+                if name in control_parts
+            ]
+            candidates.extend(name for name in control_parts if name not in candidates)
+            for name in candidates:
+                if name in solver_names:
+                    return name
+        return next(iter(control_parts), None)
+
+    @staticmethod
+    def _part_qpos(robot: Any, qpos: Any, part: str | None) -> Any:
+        """Adapt full-articulation qpos to a selected solver's joint order."""
+        if part is None:
+            return qpos
+        joint_ids = robot.get_joint_ids(name=part)
+        full_dof = int(robot.get_qpos().shape[-1])
+        if qpos.shape[-1] == full_dof:
+            return qpos[:, joint_ids]
+        if qpos.shape[-1] != len(joint_ids):
+            raise ValueError(
+                f"qpos width {qpos.shape[-1]} does not match control part "
+                f"{part!r} width {len(joint_ids)}"
+            )
+        return qpos
+
     def forward_kinematics(
         self, world_id: str, robot_id: str, qpos: Sequence[float]
     ) -> dict[str, Any]:
@@ -1012,7 +1109,19 @@ class SimulationManagerBackend:
         qpos_tensor = torch.as_tensor(qpos, dtype=torch.float32)
         if qpos_tensor.ndim == 1:
             qpos_tensor = qpos_tensor.unsqueeze(0)
-        result = robot.compute_fk(qpos_tensor)
+        part = self._kinematic_part(robot)
+        if part is None:
+            result = robot.compute_fk(qpos_tensor)
+        else:
+            result = robot.compute_fk(
+                self._part_qpos(robot, qpos_tensor, part), name=part
+            )
+        if result.ndim == 3 and result.shape[-2:] == (4, 4):
+            from embodichain.utils.math import quat_from_matrix
+
+            result = torch.cat(
+                (result[:, :3, 3], quat_from_matrix(result[:, :3, :3])), dim=-1
+            )
         return {"robot_id": robot_id, "pose_xyz_xyzw": result.detach().cpu().tolist()}
 
     def solve_ik(
@@ -1029,7 +1138,11 @@ class SimulationManagerBackend:
             raise ValueError("target_pose.quaternion_xyzw must contain four values")
         robot = self._robot(world_id, robot_id)
         pose = torch.as_tensor([list(position) + list(quaternion)], dtype=torch.float32)
-        success, qpos = robot.compute_ik(pose)
+        part = self._kinematic_part(robot)
+        if part is None:
+            success, qpos = robot.compute_ik(pose)
+        else:
+            success, qpos = robot.compute_ik(pose, name=part)
         return {
             "robot_id": robot_id,
             "reachable": bool(success.reshape(-1)[0].item()),
@@ -1139,12 +1252,6 @@ class SimulationManagerBackend:
                 f"trajectory width {trajectory.shape[1]} does not match robot "
                 f"width {expected_dof}"
             )
-        frame_pixels = int(camera.cfg.width) * int(camera.cfg.height)
-        if frame_pixels * int(trajectory.shape[0]) > MAX_RECORD_PIXELS:
-            raise ValueError(
-                "recording exceeds the MCP frame budget of "
-                f"{MAX_RECORD_PIXELS} pixels"
-            )
         for position in trajectory:
             if cancel_event.is_set():
                 return {"status": "cancelled", "steps": 0}
@@ -1202,6 +1309,12 @@ class SimulationManagerBackend:
             raise ValueError(
                 f"trajectory width {trajectory.shape[1]} does not match robot "
                 f"width {expected_dof}"
+            )
+        frame_pixels = int(camera.cfg.width) * int(camera.cfg.height)
+        if frame_pixels * int(trajectory.shape[0]) > MAX_RECORD_PIXELS:
+            raise ValueError(
+                "recording exceeds the MCP frame budget of "
+                f"{MAX_RECORD_PIXELS} pixels"
             )
         frames: list[np.ndarray] = []
         depth_frames: list[np.ndarray] = []
