@@ -529,7 +529,7 @@ jobs:
           dist_info = f"embodichain-{version}.dist-info/"
           required = {
               "embodichain/VERSION",
-              "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
+              "embodichain/gen_sim/asset_engine/configs/gen_config.json",
               "embodichain_tasks/__init__.py",
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
           }

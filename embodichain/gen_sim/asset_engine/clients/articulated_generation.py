@@ -28,7 +28,7 @@ from urllib.parse import urljoin, urlsplit
 
 import requests
 
-from embodichain.gen_sim.simready_pipeline.configs.environment import (
+from embodichain.gen_sim.asset_engine.configs.environment import (
     read_asset_engine_env_values,
 )
 

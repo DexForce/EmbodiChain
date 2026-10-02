@@ -22,9 +22,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, List
 
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
-from embodichain.gen_sim.simready_pipeline.parser.base import AssetParser
-from embodichain.gen_sim.simready_pipeline.utils.simready_utils import (
+from embodichain.gen_sim.asset_engine.core.asset import Asset
+from embodichain.gen_sim.asset_engine.parser.base import AssetParser
+from embodichain.gen_sim.asset_engine.utils.simready_utils import (
     process_mesh,
     delete_rendered_pngs,
     client,

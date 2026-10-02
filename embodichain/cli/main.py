@@ -45,7 +45,7 @@ COMMANDS = (
     ),
     Command(
         name="simready",
-        target="embodichain.gen_sim.simready_pipeline.cli.start:main",
+        target="embodichain.gen_sim.asset_engine.cli.start:main",
         help="Convert a raw asset directory into a SimReady asset.",
     ),
     Command(

@@ -17,8 +17,8 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
-| Articulated asset generation | `simready_pipeline/clients/articulated_generation.py`, `simready_pipeline/utils/articulated_usdc_utils.py` |
+| General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Articulated asset generation | `asset_engine/clients/articulated_generation.py`, `asset_engine/utils/articulated_usdc_utils.py` |
 | Generated task semantics | `embodichain/task_spec/` and `task_engine/task_spec.py`: TaskTemplate generation and cache adapter |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
@@ -462,7 +462,7 @@ Evaluate actual placement/closing from the recorded physical outcome.
 |---|---|
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
-| Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
+| Ingest formats and metadata | `tests/gen_sim/asset_engine/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
 | Task intent and scene capability contracts | `tests/gen_sim/task_engine/test_agent.py`, `test_interpretation.py`, `orchestration/test_scene_adapter.py` |
 

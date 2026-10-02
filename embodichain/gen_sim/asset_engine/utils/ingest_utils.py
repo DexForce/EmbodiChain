@@ -21,10 +21,10 @@ import trimesh
 import json
 from pathlib import Path
 from typing import Union, Dict, Any
-from embodichain.gen_sim.simready_pipeline.utils.texture_utils import classify_visual
+from embodichain.gen_sim.asset_engine.utils.texture_utils import classify_visual
 import hashlib
 import os
-from embodichain.gen_sim.simready_pipeline.core.asset import Asset
+from embodichain.gen_sim.asset_engine.core.asset import Asset
 
 
 def new_uuid() -> str:

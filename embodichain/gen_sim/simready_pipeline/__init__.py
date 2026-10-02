@@ -14,6 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Compatibility package forwarding the former SimReady path to Asset Engine."""
+
 from __future__ import annotations
 
+from importlib import import_module
+
+_asset_engine = import_module("embodichain.gen_sim.asset_engine")
+__path__ = _asset_engine.__path__
 __all__: list[str] = []

@@ -37,7 +37,7 @@ DEFAULT_VISUAL_RESULT: dict[str, Any] = {
 
 def _import_ingest_utils():
     return importlib.import_module(
-        "embodichain.gen_sim.simready_pipeline.utils.ingest_utils"
+        "embodichain.gen_sim.asset_engine.utils.ingest_utils"
     )
 
 

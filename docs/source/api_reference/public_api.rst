@@ -433,7 +433,7 @@ embodichain.gen_sim.scene_engine.clients.articulated_generation
 ---------------------------------------------------------------
 
 Compatibility import for the Asset Engine articulation client. New code should
-use the ``simready_pipeline`` path.
+use the ``asset_engine`` path.
 
 .. currentmodule:: embodichain.gen_sim.scene_engine.clients.articulated_generation
 
@@ -527,75 +527,75 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdSceneBinding
    UsdSceneIndex
 
-embodichain.gen_sim.simready_pipeline.cli.start
+embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
 .. autosummary::
 
    cli_ingest_single
    main
 
-embodichain.gen_sim.simready_pipeline.clients
+embodichain.gen_sim.asset_engine.clients
 ---------------------------------------------
 
 Asset Engine clients for SimReady asset generation services.
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.clients
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
 
 .. autosummary::
 
    ArticulatedGenerationClient
 
-embodichain.gen_sim.simready_pipeline.clients.articulated_generation
+embodichain.gen_sim.asset_engine.clients.articulated_generation
 --------------------------------------------------------------------
 
 Generate and validate articulated SimReady assets through the Asset Engine
 articulation service.
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.clients.articulated_generation
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
 
 .. autosummary::
 
    ArticulatedGenerationClient
 
-embodichain.gen_sim.simready_pipeline.configs
+embodichain.gen_sim.asset_engine.configs
 ---------------------------------------------
 
 Asset Engine environment configuration helpers.
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.configs
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
 
 .. autosummary::
 
    read_asset_engine_env_values
 
-embodichain.gen_sim.simready_pipeline.configs.environment
+embodichain.gen_sim.asset_engine.configs.environment
 ----------------------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.configs.environment
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
 
 .. autosummary::
 
    read_asset_engine_env_values
 
-embodichain.gen_sim.simready_pipeline.pipeline
+embodichain.gen_sim.asset_engine.pipeline
 ----------------------------------------------
 
 Asset Engine articulation generation and SimReady ingestion pipeline entry
 points.
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.pipeline
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
 
 .. autosummary::
 
    generate_articulated_usdcs
 
-embodichain.gen_sim.simready_pipeline.pipeline.articulation
+embodichain.gen_sim.asset_engine.pipeline.articulation
 -----------------------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.pipeline.articulation
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
 
 .. autosummary::
 
