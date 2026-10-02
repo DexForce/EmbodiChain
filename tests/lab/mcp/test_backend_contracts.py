@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 
 import pytest
@@ -62,6 +63,24 @@ def test_in_memory_ik_normalizes_joint_limits() -> None:
     assert result["reachable"] is True
     assert result["joint_limits_checked"] is True
     assert backend.validate_trajectory(world_id, "demo_planar_arm", [result["qpos"]])[
+        "valid"
+    ]
+
+
+def test_interpolation_preserves_exact_joint_limit_waypoints() -> None:
+    """Planning at pi does not create a float32 limit violation."""
+    backend = InMemorySimulationBackend()
+    world_id = backend.create_world(backend="in-memory", seed=None)["world_id"]
+
+    plan = backend.plan_motion(
+        world_id,
+        "demo_planar_arm",
+        [math.pi, 0.0],
+        [math.pi, 0.0],
+        samples=2,
+    )
+
+    assert backend.validate_trajectory(world_id, "demo_planar_arm", plan["positions"])[
         "valid"
     ]
 

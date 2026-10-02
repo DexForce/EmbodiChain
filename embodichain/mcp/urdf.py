@@ -332,6 +332,27 @@ class URDFAssemblyAdapter:
         component_prefix: Sequence[Sequence[str | None]] | None = None,
         use_signature_check: bool = True,
     ) -> dict[str, object]:
+        """Compose one assembly while serializing artifact writes."""
+        with self._lock:
+            return self._compose(
+                components,
+                sensors=sensors,
+                assembly_name=assembly_name,
+                name_case=name_case,
+                component_prefix=component_prefix,
+                use_signature_check=use_signature_check,
+            )
+
+    def _compose(
+        self,
+        components: Sequence[Mapping[str, object]],
+        *,
+        sensors: Sequence[Mapping[str, object]] | None = None,
+        assembly_name: str = "assembly",
+        name_case: Mapping[str, str] | None = None,
+        component_prefix: Sequence[Sequence[str | None]] | None = None,
+        use_signature_check: bool = True,
+    ) -> dict[str, object]:
         """Compose registered URDF components into one generated model.
 
         Args:
@@ -367,6 +388,8 @@ class URDFAssemblyAdapter:
         assembly_id = f"assembly-{_json_digest(specification)}"
         output_dir = self.output_root / assembly_id
         output_path = output_dir / f"{name}.urdf"
+        if not output_dir.exists():
+            self._prune_output_root(limit=self._max_assemblies - 1)
 
         from embodichain.toolkits.urdf_assembly import URDFAssemblyManager
 
@@ -449,6 +472,21 @@ class URDFAssemblyAdapter:
             return deepcopy(validation | {"assembly_id": assembly_id})
 
     def verify_in_simulation(
+        self,
+        assembly_id: str,
+        *,
+        backend: str = "default",
+        seed: int | None = None,
+    ) -> dict[str, object]:
+        """Verify one generated model while pinning its assembly handle."""
+        with self._lock:
+            return self._verify_in_simulation(
+                assembly_id,
+                backend=backend,
+                seed=seed,
+            )
+
+    def _verify_in_simulation(
         self,
         assembly_id: str,
         *,
@@ -691,10 +729,11 @@ class URDFAssemblyAdapter:
             )
         return tuple(normalized)
 
-    def _prune_output_root(self) -> None:
+    def _prune_output_root(self, *, limit: int | None = None) -> None:
         """Keep only the newest bounded set of generated assembly directories."""
         if not self.output_root.is_dir():
             return
+        keep = self._max_assemblies if limit is None else max(0, limit)
         directories = sorted(
             (
                 path
@@ -704,7 +743,7 @@ class URDFAssemblyAdapter:
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
-        for path in directories[self._max_assemblies :]:
+        for path in directories[keep:]:
             shutil.rmtree(path, ignore_errors=True)
 
     @staticmethod
@@ -814,6 +853,8 @@ class URDFAssemblyAdapter:
 
         link_set = {name for name in link_names if name}
         child_links: set[str] = set()
+        parent_counts: dict[str, int] = {name: 0 for name in link_set}
+        children_by_parent: dict[str, list[str]] = {name: [] for name in link_set}
         for joint in joints:
             parent = joint.find("parent")
             child = joint.find("child")
@@ -828,6 +869,9 @@ class URDFAssemblyAdapter:
                 )
             if child_name:
                 child_links.add(child_name)
+            if parent_name in link_set and child_name in link_set:
+                parent_counts[child_name] += 1
+                children_by_parent[parent_name].append(child_name)
             mimic = joint.find("mimic")
             if mimic is not None and mimic.get("joint") not in set(joint_names):
                 errors.append(
@@ -844,6 +888,43 @@ class URDFAssemblyAdapter:
                     "message": f"expected one root link, found {len(root_links)}",
                 }
             )
+        for link_name, count in parent_counts.items():
+            if count > 1:
+                errors.append(
+                    {
+                        "code": "multiple_link_parents",
+                        "message": f"link {link_name} has {count} parent joints",
+                    }
+                )
+        if len(root_links) == 1:
+            visited: set[str] = set()
+            active: set[str] = set()
+
+            def visit(link_name: str) -> None:
+                if link_name in active:
+                    errors.append(
+                        {
+                            "code": "link_cycle",
+                            "message": f"link cycle detected at {link_name}",
+                        }
+                    )
+                    return
+                if link_name in visited:
+                    return
+                active.add(link_name)
+                for child_name in children_by_parent[link_name]:
+                    visit(child_name)
+                active.remove(link_name)
+                visited.add(link_name)
+
+            visit(root_links[0])
+            if visited != link_set:
+                errors.append(
+                    {
+                        "code": "disconnected_links",
+                        "message": "not every link is reachable from the root link",
+                    }
+                )
 
         mesh_files = sorted(
             {

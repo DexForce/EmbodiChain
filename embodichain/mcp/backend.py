@@ -56,7 +56,7 @@ def _interpolate_joint_path(
 
     from embodichain.compute.trajectory import interpolate_with_nums
 
-    keyframes = torch.as_tensor([list(start), list(goal)], dtype=torch.float32)
+    keyframes = torch.as_tensor([list(start), list(goal)], dtype=torch.float64)
     return interpolate_with_nums(keyframes.unsqueeze(0), [samples - 1], device="cpu")[
         0
     ].tolist()
@@ -735,6 +735,12 @@ class SimulationManagerBackend:
                 manager.destroy(exit_process=False)
             except Exception:
                 pass
+            flush = getattr(type(manager), "flush_cleanup_queue", None)
+            if flush is not None:
+                try:
+                    flush()
+                except Exception:
+                    pass
             with self._lock:
                 self._managers.pop(world_id, None)
                 self._world_metadata.pop(world_id, None)

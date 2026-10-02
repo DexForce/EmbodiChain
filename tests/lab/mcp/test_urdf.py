@@ -155,6 +155,30 @@ def test_compose_failure_removes_partial_artifacts(tmp_path: Path):
     assert list(output_root.glob("assembly-*/")) == []
 
 
+def test_validate_rejects_multiple_parents(tmp_path: Path):
+    """The model validator requires a single rooted URDF tree."""
+    model = tmp_path / "invalid.urdf"
+    model.write_text(
+        """<robot name="invalid">
+  <link name="root"/><link name="a"/><link name="b"/>
+  <joint name="root_a" type="fixed"><parent link="root"/><child link="a"/></joint>
+  <joint name="root_b" type="fixed"><parent link="root"/><child link="b"/></joint>
+  <joint name="a_b" type="fixed"><parent link="a"/><child link="b"/></joint>
+</robot>
+""",
+        encoding="utf-8",
+    )
+    adapter = URDFAssemblyAdapter(
+        output_root=tmp_path / "output",
+        asset_catalog=[{"asset": "fixture/invalid.urdf", "component_type": "arm"}],
+    )
+
+    validation = adapter._validate_model(model)
+
+    assert validation["valid"] is False
+    assert any(item["code"] == "multiple_link_parents" for item in validation["errors"])
+
+
 def test_verify_uses_injected_simulation_boundary(adapter: URDFAssemblyAdapter):
     """Simulation verification receives the generated model, not components."""
     captured: dict[str, object] = {}

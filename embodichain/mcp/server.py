@@ -214,9 +214,9 @@ def create_server(
 
     def list_capabilities() -> list[str]:
         """Return core and adapter-provided MCP operation names."""
-        result: list[str] = []
-        seen: set[str] = set()
-        for capability in [*service.capabilities(), *adapter_registry.capabilities()]:
+        result: list[str] = ["server_info", "health", "list_capabilities"]
+        seen: set[str] = set(result)
+        for capability in adapter_registry.capabilities():
             if capability not in seen:
                 result.append(capability)
                 seen.add(capability)

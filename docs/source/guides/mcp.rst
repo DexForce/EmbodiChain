@@ -123,8 +123,10 @@ Run the Franka trajectory example
 ---------------------------------
 
 The repository example contains a complete stdio client and editable JSON
-inputs in ``examples/mcp/codex_trajectory_demo/``. Run the trajectory workflow
-without recording with:
+inputs in ``examples/mcp/codex_trajectory_demo/``. Both commands below need
+the simulator dependencies and cached Franka asset; ``--record`` additionally
+needs the ``mcp-demo`` media dependencies. Run the trajectory workflow without
+recording with:
 
 .. code-block:: console
 

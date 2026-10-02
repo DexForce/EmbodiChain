@@ -30,6 +30,7 @@ import torch
 from embodichain.mcp import (
     EmbodiChainMCPService,
     SimulationManagerBackend,
+    URDFAssemblyAdapter,
     create_server,
 )
 
@@ -260,6 +261,20 @@ def test_health_reports_service_state(service):
     assert health["backend"] == "in-memory"
     assert health["active_rollouts"] == 0
     assert health["known_runs"] == 0
+
+
+def test_custom_adapter_registry_reports_only_installed_domains(service):
+    """A custom registry does not advertise the service's unregistered tools."""
+    pytest.importorskip("mcp")
+    server = create_server(service, adapters=[URDFAssemblyAdapter()])
+
+    async def capabilities():
+        return await server.call_tool("list_capabilities", {})
+
+    result = asyncio.run(capabilities())
+    capabilities_result = result.structured_content["result"]
+    assert "urdf_compose" in capabilities_result
+    assert "check_reachability" not in capabilities_result
 
 
 def test_stdio_client_can_discover_and_call_health():
