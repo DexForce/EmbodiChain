@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 import json
@@ -1080,6 +1080,7 @@ def _integration_payload(
     embodiment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    planned_object_rotations = _planned_object_rotations(graph)
     articulation_bindings = graph_bindings(graph, scene)
     from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
 
@@ -1129,33 +1130,19 @@ def _integration_payload(
     upright_move_objects: set[str] = set()
     horizontal_handover_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
-    upright_released: set[str] = set()
-    generic_picks_are_upright: list[bool] = []
-    for node in graph["nodes"]:
-        call = node["call"]
-        if (
-            node.get("task_type") == "E2"
-            and call.get("call_id") == _CLEAR_RELEASED_CALL_ID
-        ):
-            upright_released.add(str(call["arguments"]["object"]))
-        elif call["kind"] == "pick":
-            generic_picks_are_upright.append(str(call["object"]) in upright_released)
     default_pick_options = {
         "kind": "pick_up",
-        "pick_object_part": (
-            "top"
-            if generic_picks_are_upright and all(generic_picks_are_upright)
-            else "center"
-        ),
+        # Generic built-in Pick is intentionally neutral.  A later E2 or
+        # HandOver must not rewrite the policy of an earlier Pick by scanning
+        # the whole graph; constrained calls receive their own aliases below.
+        "pick_object_part": "center",
         "pre_grasp_distance": 0.15,
         "lift_height": _DEFAULT_PICK_LIFT_HEIGHT,
         "approach_alignment_max_angle": 0.10,
         # Robotiq travels 0.7 rad with a 2 rad/s limit at 25 Hz; include
         # enough intervals for closure, with the same budget as release.
         "hand_interp_steps": 12,
-        "grasp_settle_steps": (
-            16 if any(n["call"]["kind"] == "hand_over" for n in graph["nodes"]) else 0
-        ),
+        "grasp_settle_steps": 0,
         "grasp_commit_fraction": 1.0,
     }
     pick_options: dict[str, dict[str, Any]] = {}
@@ -1493,6 +1480,8 @@ def _integration_payload(
                 resource=resource,
                 embodiment=embodiment,
                 occupied=occupied_landings,
+                child_rotation=planned_object_rotations.get(object_id),
+                planned_rotations=planned_object_rotations,
             )
             if target is None and inside_count > 1:
                 raise ValueError(
@@ -2050,31 +2039,14 @@ def _task_settle_rigid_objects(
     graph: SemanticTaskGraph,
     scene: Any,
 ) -> tuple[dict[str, Any], ...]:
-    """Return task-referenced rigid objects for reset stabilization."""
-    rigid_objects = tuple(scene.rigid_objects)
-    scene_uids = {str(item["uid"]) for item in rigid_objects}
-    referenced_uids: set[str] = set()
+    """Return the immutable scene settling set, independent of task suffixes.
 
-    def collect(value: Any) -> None:
-        if isinstance(value, str):
-            if value in scene_uids:
-                referenced_uids.add(value)
-            return
-        if isinstance(value, dict):
-            for child in value.values():
-                collect(child)
-            return
-        if isinstance(value, (list, tuple)):
-            for child in value:
-                collect(child)
-
-    for node in graph["nodes"]:
-        collect(node["call"])
-
-    selected = tuple(
-        item for item in rigid_objects if str(item["uid"]) in referenced_uids
-    )
-    return selected or rigid_objects
+    All dynamic rigid bodies share one scene-level reset contract.  Selecting a
+    subset from the full task graph made appending an unrelated action change
+    the settled initial state of an existing prefix.
+    """
+    del graph
+    return tuple(scene.rigid_objects)
 
 
 def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskGraph:
@@ -3095,6 +3067,8 @@ def _container_target_pose(
     resource: str,
     embodiment: dict[str, Any] | None,
     occupied: Sequence[tuple[list[float], dict[str, Any]]] = (),
+    child_rotation: np.ndarray | None = None,
+    planned_rotations: Mapping[str, np.ndarray] | None = None,
 ) -> list[float] | None:
     """Ground an arm-side landing on a measured, nearly level container floor."""
     if embodiment is None:
@@ -3139,15 +3113,29 @@ def _container_target_pose(
     mesh = trimesh.load(str(container["shape"]["fpath"]), force="scene").to_geometry()
     mesh.vertices = _mesh_vertices(container)
 
-    def local_vertices(item: dict[str, Any]) -> np.ndarray:
-        return _mesh_vertices(item) @ (container_rotation.T @ pose(item)[:3, :3]).T
+    def local_vertices(
+        item: dict[str, Any], rotation_override: np.ndarray | None = None
+    ) -> np.ndarray:
+        rotation = (
+            pose(item)[:3, :3] if rotation_override is None else rotation_override
+        )
+        return _mesh_vertices(item) @ (container_rotation.T @ rotation).T
 
-    child_vertices = local_vertices(child)
+    child_vertices = local_vertices(child, child_rotation)
+    planned_rotations = planned_rotations or {}
     occupied_footprints = [
         (
             float(target[3]),
             float(target[7]),
-            float(np.linalg.norm(local_vertices(previous)[:, :2], axis=1).max()),
+            float(
+                np.linalg.norm(
+                    local_vertices(
+                        previous,
+                        planned_rotations.get(str(previous.get("runtime_uid"))),
+                    )[:, :2],
+                    axis=1,
+                ).max()
+            ),
         )
         for target, previous in occupied
     ]
@@ -3155,6 +3143,47 @@ def _container_target_pose(
         mesh, child_vertices, root_local, occupied=occupied_footprints
     )
     return None if translation is None else _translation_pose(*translation)
+
+
+def _planned_object_rotations(graph: SemanticTaskGraph) -> dict[str, np.ndarray]:
+    """Return the latest declared held-object orientation before release.
+
+    Bundle geometry must follow explicit GenSim alignment targets rather than
+    silently reverting to the source ``init_rot`` after an earlier E2/E4 call.
+    This is a planning snapshot only; runtime still observes the released pose.
+    """
+    from scipy.spatial.transform import Rotation
+
+    result: dict[str, np.ndarray] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call.get("kind") != "registered" or call.get("call_id") not in {
+            _ALIGN_HELD_CALL_ID,
+            _MOVE_HELD_OBJECT_CALL_ID,
+        }:
+            continue
+        arguments = call.get("arguments", {})
+        object_id = arguments.get("object")
+        target_id = arguments.get("target")
+        if not isinstance(object_id, str) or not isinstance(target_id, str):
+            continue
+        if target_id == "current_object_pose":
+            continue
+        target = graph["targets"].get(target_id)
+        values = target.get("values") if isinstance(target, Mapping) else None
+        pose_value = (
+            values[0] if isinstance(values, list) and len(values) == 1 else None
+        )
+        quaternion = (
+            pose_value.get("quaternion_xyzw")
+            if isinstance(pose_value, Mapping)
+            else None
+        )
+        if isinstance(quaternion, list) and len(quaternion) == 4:
+            result[object_id] = Rotation.from_quat(
+                np.asarray(quaternion, dtype=float)
+            ).as_matrix()
+    return result
 
 
 def _support_target_pose(

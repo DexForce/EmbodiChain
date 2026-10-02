@@ -21,7 +21,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.affinity import translate
+from shapely.geometry import MultiPoint, Point, Polygon
 from shapely.ops import nearest_points, unary_union
 import trimesh
 
@@ -53,18 +54,32 @@ def select_container_landing(
     triangles = mesh.triangles[mesh.facets[facet]]
     # Union the actual triangles, not their convex hull: holes remain unsupported.
     floor = unary_union([Polygon(triangle[:, :2]) for triangle in triangles])
-    radius = float(np.linalg.norm(child_vertices[:, :2], axis=1).max())
-    safe = floor.buffer(-(radius + 0.035))
-    if safe.is_empty:
+    margin = 0.035
+    safe = floor.buffer(-margin)
+    footprint = MultiPoint(child_vertices[:, :2]).convex_hull
+    footprint_radius = float(np.linalg.norm(child_vertices[:, :2], axis=1).max())
+    if safe.is_empty or footprint.is_empty:
         raise ValueError(
             "Container floor cannot contain the object footprint and margin."
         )
+    # Erode the measured floor by the actual projected footprint.  A single
+    # origin-centred circle overestimates a rectangular object's occupied area,
+    # which rejects valid placements after an upright reorientation.
+    allowed = safe
+    for x, y in footprint.exterior.coords[:-1]:
+        allowed = allowed.intersection(translate(safe, xoff=-float(x), yoff=-float(y)))
+        if allowed.is_empty:
+            raise ValueError(
+                "Container floor cannot contain the object footprint and margin."
+            )
     for x, y, previous_radius in occupied:
-        safe = safe.difference(
-            Point(float(x), float(y)).buffer(radius + float(previous_radius) + 0.02)
+        allowed = allowed.difference(
+            Point(float(x), float(y)).buffer(
+                footprint_radius + float(previous_radius) + 0.02
+            )
         )
-    if safe.is_empty or safe.area <= 1e-8:
+    if allowed.is_empty or allowed.area <= 1e-8:
         raise ValueError("Container floor has no remaining landing space.")
-    point = nearest_points(safe, Point(arm_root[:2]))[0]
+    point = nearest_points(allowed, Point(arm_root[:2]))[0]
     height = float(triangles[:, :, 2].max() - child_vertices[:, 2].min() + 0.001)
     return float(point.x), float(point.y), height

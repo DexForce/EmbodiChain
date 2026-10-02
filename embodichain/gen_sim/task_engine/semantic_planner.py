@@ -147,7 +147,16 @@ class SemanticTaskPlanner:
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
                     held_by.get(object_id)
-                    or self._nearest_resource(object_id, objects, target_id=support_id)
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        target_id=support_id,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -234,7 +243,16 @@ class SemanticTaskPlanner:
                 )
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
-                    held_by.get(object_id) or self._nearest_resource(object_id, objects)
+                    held_by.get(object_id)
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -323,6 +341,14 @@ class SemanticTaskPlanner:
                     if requested_destination == "auto"
                     else _resource(requested_destination, field="receive_arm")
                 )
+                occupied_resources = {
+                    value for value in held_by.values() if value in {"left", "right"}
+                }
+                if destination in occupied_resources:
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} HandOver receiver {destination!r} is "
+                        "already occupied by another held object."
+                    )
                 calls = []
                 if held_by.get(object_id) != source:
                     if object_id in held_by:
@@ -512,7 +538,15 @@ class SemanticTaskPlanner:
 
                 requested = str(step.get("required_arm", "auto"))
                 resource = (
-                    self._nearest_resource(object_id, objects)
+                    self._nearest_resource(
+                        object_id,
+                        objects,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -523,7 +557,16 @@ class SemanticTaskPlanner:
                 requested = str(step.get("required_arm", "auto"))
                 part_id = _bound_part(step, "object", bindings, steps_by_id)
                 resource = (
-                    self._nearest_resource(object_id, objects, part_id=part_id)
+                    self._nearest_resource(
+                        object_id,
+                        objects,
+                        part_id=part_id,
+                        occupied_resources=tuple(
+                            value
+                            for value in held_by.values()
+                            if value in {"left", "right"}
+                        ),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
@@ -744,6 +787,7 @@ class SemanticTaskPlanner:
         *,
         target_id: str | None = None,
         part_id: str | None = None,
+        occupied_resources: Sequence[str] = (),
     ) -> str:
         item = objects.get(object_id)
         if item is None:
@@ -768,7 +812,15 @@ class SemanticTaskPlanner:
         # only a preference; the runtime planning probe still checks feasibility.
         # The canonical dual-Franka embodiment faces world -X: its right arm
         # base is on +Y and its left arm base is on -Y.
-        return "right" if lateral >= 0.0 else "left"
+        preferred = "right" if lateral >= 0.0 else "left"
+        if preferred not in occupied_resources:
+            return preferred
+        alternate = "left" if preferred == "right" else "right"
+        if alternate not in occupied_resources:
+            return alternate
+        raise UnsupportedSemanticCapabilityError(
+            f"No free dual-Franka resource is available for {object_id!r}."
+        )
 
     def _relation_world_offset(
         self,

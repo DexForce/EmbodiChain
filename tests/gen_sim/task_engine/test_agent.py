@@ -70,6 +70,18 @@ def test_arm_preference_considers_both_placement_endpoints(
     )
 
 
+def test_arm_preference_skips_occupied_resources() -> None:
+    objects = {"cup": {"init_pos": [0.0, 0.2, 0.8]}}
+    planner = SemanticTaskPlanner()
+
+    assert (
+        planner._nearest_resource("cup", objects, occupied_resources=("right",))
+        == "left"
+    )
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="No free"):
+        planner._nearest_resource("cup", objects, occupied_resources=("left", "right"))
+
+
 def _selector(kind="none", *, step_id="", reference="", quantifier="one", count=0):
     return {
         "kind": kind,

@@ -233,3 +233,27 @@ def test_grasp_fit_adapts_multiple_acquired_objects_only(tmp_path: Path) -> None
 
     assert [record["object_id"] for record in report["records"]] == ["bottle", "cup"]
     assert [record["task_types"] for record in report["records"]] == [["E3"], ["E1"]]
+
+
+def test_grasp_fit_rejects_a_later_stricter_contract_for_same_object(
+    tmp_path: Path,
+) -> None:
+    scene = _scene(tmp_path, (0.14, 0.19, 0.13))
+    graph = _graph("E1")
+    graph["nodes"].append(
+        {
+            "task_type": "E2",
+            "call": {
+                "kind": "pick",
+                "object": "cup",
+                "resources": {"primary": "right"},
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="stricter"):
+        fit_grasp_assets(
+            scene,
+            graph,
+            openings={"left": 0.128, "right": 0.100},
+        )

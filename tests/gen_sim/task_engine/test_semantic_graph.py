@@ -46,6 +46,7 @@ from embodichain.gen_sim.task_engine.task_program_bundle import (
     generate_task_program_bundle,
     _integration_payload,
     _program_payload,
+    _planned_object_rotations,
     _refine_upright_targets,
     _scene_payload,
     _support_target_pose,
@@ -424,7 +425,7 @@ def test_collision_world_declares_unreferenced_obstacles_without_changing_defaul
     }
 
 
-def test_generic_repick_uses_end_grasp_only_after_all_objects_were_uprighted() -> None:
+def test_generic_repick_uses_neutral_policy_without_graph_wide_upright_scan() -> None:
     scene = SimpleNamespace(
         table_top_z=0.7,
         planner_objects=[
@@ -449,7 +450,7 @@ def test_generic_repick_uses_end_grasp_only_after_all_objects_were_uprighted() -
     options = _integration_payload(
         graph, scene, program_id="probe", scene_contract="scene"
     )["profile"]["action_options"]
-    assert options["pick"]["pick_object_part"] == "top"
+    assert options["pick"]["pick_object_part"] == "center"
 
     graph["nodes"].append(
         {"task_type": "E1", "call": {"kind": "pick", "object": "box"}}
@@ -816,7 +817,7 @@ def test_dual_franka_mount_is_bound_to_the_scene_table() -> None:
     assert embodiment["simulation"]["init_pos"] == pytest.approx([-0.7, 0.0, 0.704499])
 
 
-def test_reset_settles_only_task_referenced_rigid_objects() -> None:
+def test_reset_settles_the_scene_owned_rigid_object_set() -> None:
     scene = SimpleNamespace(
         rigid_objects=(
             {"uid": "cube"},
@@ -824,16 +825,66 @@ def test_reset_settles_only_task_referenced_rigid_objects() -> None:
             {"uid": "smiley_ball"},
         )
     )
-    graph = _graph()
-    graph["nodes"][1]["call"] = {
-        "kind": "place",
-        "object": "cube",
-        "reference": "wood_cube",
+    selected = _task_settle_rigid_objects(_graph(), scene)
+
+    assert [item["uid"] for item in selected] == [
+        "cube",
+        "wood_cube",
+        "smiley_ball",
+    ]
+
+
+def test_container_planning_uses_latest_declared_held_orientation() -> None:
+    graph = {
+        "targets": {
+            "first": {
+                "values": [
+                    {
+                        "position": [0.0, 0.0, 0.8],
+                        "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                    }
+                ]
+            },
+            "second": {
+                "values": [
+                    {
+                        "position": [0.0, 0.0, 0.8],
+                        "quaternion_xyzw": [0.70710678, 0.0, 0.0, 0.70710678],
+                    }
+                ]
+            },
+        },
+        "nodes": [
+            {
+                "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                        "object": "can",
+                        "target": "first",
+                    },
+                }
+            },
+            {
+                "call": {
+                    "kind": "registered",
+                    "call_id": "gen_sim.align_held",
+                    "arguments": {
+                        "object": "can",
+                        "target": "second",
+                    },
+                }
+            },
+        ],
     }
 
-    selected = _task_settle_rigid_objects(graph, scene)
+    rotations = _planned_object_rotations(graph)
 
-    assert [item["uid"] for item in selected] == ["cube", "wood_cube"]
+    np.testing.assert_allclose(
+        rotations["can"],
+        np.asarray([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]),
+        atol=1e-6,
+    )
 
 
 def test_horizontal_relation_distance_keeps_gripper_clearance(
