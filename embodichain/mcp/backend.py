@@ -48,6 +48,20 @@ MAX_SCENE_ARTICULATIONS = 64
 MAX_SCENE_LIGHTS = 64
 
 
+def _interpolate_joint_path(
+    start: Sequence[float], goal: Sequence[float], samples: int
+) -> list[list[float]]:
+    """Interpolate a joint path through the shared trajectory API."""
+    import torch
+
+    from embodichain.compute.trajectory import interpolate_with_nums
+
+    keyframes = torch.as_tensor([list(start), list(goal)], dtype=torch.float32)
+    return interpolate_with_nums(keyframes.unsqueeze(0), [samples - 1], device="cpu")[
+        0
+    ].tolist()
+
+
 class SimulationBackend(Protocol):
     """Protocol implemented by a backend exposed through the MCP service.
 
@@ -375,13 +389,18 @@ class InMemorySimulationBackend:
             self._LINK_LENGTHS[1] * math.sin(elbow),
             self._LINK_LENGTHS[0] + self._LINK_LENGTHS[1] * math.cos(elbow),
         )
+        shoulder = (shoulder + math.pi) % (2.0 * math.pi) - math.pi
         qpos = [shoulder, elbow]
+        joint_limits_valid = all(
+            lower <= value <= upper
+            for value, (lower, upper) in zip(qpos, self._JOINT_LIMITS)
+        )
         return {
-            "reachable": True,
+            "reachable": joint_limits_valid,
             "qpos": qpos,
             "target_pose": deepcopy(target_pose),
             "position_only": True,
-            "joint_limits_checked": True,
+            "joint_limits_checked": joint_limits_valid,
             "collision_checked": False,
         }
 
@@ -443,10 +462,7 @@ class InMemorySimulationBackend:
             raise ValueError(
                 f"samples must be an integer between 2 and {MAX_TRAJECTORY_SAMPLES}"
             )
-        positions = [
-            [start[j] + (goal[j] - start[j]) * i / (samples - 1) for j in range(2)]
-            for i in range(samples)
-        ]
+        positions = _interpolate_joint_path(start, goal, samples)
         return {
             "robot_id": robot_id,
             "positions": positions,
@@ -745,7 +761,7 @@ class SimulationManagerBackend:
             if value is None:
                 continue
             if isinstance(value, dict):
-                if name in {"robot", "articulation"} or (
+                if name in {"robot", "robots", "articulation"} or (
                     name in {"background", "rigid_object"}
                     and any(key in value for key in ("uid", "shape", "fpath"))
                 ):
@@ -1143,6 +1159,11 @@ class SimulationManagerBackend:
             success, qpos = robot.compute_ik(pose)
         else:
             success, qpos = robot.compute_ik(pose, name=part)
+            joint_ids = robot.get_joint_ids(name=part)
+            qpos = qpos.reshape(qpos.shape[0], -1)
+            full_qpos = robot.get_qpos().detach().clone().to(qpos)
+            full_qpos[:, joint_ids] = qpos
+            qpos = full_qpos
         return {
             "robot_id": robot_id,
             "reachable": bool(success.reshape(-1)[0].item()),
@@ -1211,13 +1232,7 @@ class SimulationManagerBackend:
             raise ValueError(
                 f"samples must be an integer between 2 and {MAX_TRAJECTORY_SAMPLES}"
             )
-        positions = [
-            [
-                start[j] + (goal[j] - start[j]) * i / (samples - 1)
-                for j in range(len(start))
-            ]
-            for i in range(samples)
-        ]
+        positions = _interpolate_joint_path(start, goal, samples)
         return {
             "robot_id": robot_id,
             "positions": positions,

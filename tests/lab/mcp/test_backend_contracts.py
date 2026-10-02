@@ -50,6 +50,31 @@ def test_in_memory_restore_keeps_scene_revision_and_rejects_stale_snapshot() -> 
         backend.restore_world(world_id, snapshot_id)
 
 
+def test_in_memory_ik_normalizes_joint_limits() -> None:
+    backend = InMemorySimulationBackend()
+    world_id = backend.create_world(backend="in-memory", seed=None)["world_id"]
+    result = backend.solve_ik(
+        world_id,
+        "demo_planar_arm",
+        {"position_m": [-0.6, -0.2, 0.0]},
+    )
+
+    assert result["reachable"] is True
+    assert result["joint_limits_checked"] is True
+    assert backend.validate_trajectory(world_id, "demo_planar_arm", [result["qpos"]])[
+        "valid"
+    ]
+
+
+def test_scene_entries_accept_single_robot_mapping() -> None:
+    entries = SimulationManagerBackend._scene_entries(
+        {"robots": {"class_type": "FrankaPandaCfg", "robot_type": "panda"}},
+        "robots",
+    )
+
+    assert entries == [{"class_type": "FrankaPandaCfg", "robot_type": "panda"}]
+
+
 def test_service_limits_step_and_trajectory_expansion() -> None:
     service = EmbodiChainMCPService()
     try:
