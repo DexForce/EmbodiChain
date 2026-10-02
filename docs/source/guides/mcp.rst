@@ -3,15 +3,16 @@
 Use EmbodiChain through MCP
 ===========================
 
-This guide connects an MCP Host to EmbodiChain's local, simulation-only
-stdio server. You will inspect the server, create a simulation world, load a
-scene, generate and validate a joint trajectory, and optionally record the
-trajectory with an offscreen camera.
+This guide connects an MCP Host to EmbodiChain's local, project-level stdio
+server. You will compose a modular URDF without starting a simulator, validate
+the generated asset, optionally verify it in a temporary simulation world, and
+then inspect the existing simulation and motion tools.
 
-The protocol boundary lives in the top-level ``embodichain.mcp`` package. The
-simulation backend owns physics, rendering, kinematics, and high-frequency
-loops; the MCP client sends task-level tool calls and receives structured
-results.
+The protocol boundary lives in the top-level ``embodichain.mcp`` package.
+Domain adapters own their existing implementations: the URDF adapter calls
+the standalone assembly toolkit, while the simulation adapter owns physics,
+rendering, kinematics, and high-frequency loops. The MCP client sends
+coarse-grained tool calls and receives structured results.
 
 Prerequisites
 -------------
@@ -29,12 +30,11 @@ ImageIO and FFmpeg support:
 
    $ python -m pip install -e '.[mcp-demo]'
 
-The example client starts the default ``SimulationManagerBackend`` even when
-``--record`` is omitted, so both example commands need the simulator
-dependencies and the cached Franka asset used by the demo. The ``mcp-demo``
-extra adds the ImageIO and FFmpeg packages required by recording. The protocol
-tests use the deterministic ``InMemorySimulationBackend`` and do not start a
-simulator.
+The URDF assembly example can run without creating a simulator world. The
+optional simulation verification and Franka recording workflows use the
+headless simulator. The ``mcp-demo`` extra adds the ImageIO and FFmpeg
+packages required by recording. The protocol tests use the deterministic
+``InMemorySimulationBackend`` and the URDF tests use local XML fixtures.
 
 Start the stdio server
 ----------------------
@@ -61,8 +61,19 @@ The first tool calls
 --------------------
 
 Ask the Host to call ``server_info``, ``health``, and ``list_capabilities``. A
-healthy response identifies the protocol phase and backend scope without
-starting a simulation. The normal world workflow is:
+healthy response identifies the installed domain adapters without starting a
+simulation. The normal URDF workflow is:
+
+.. code-block:: text
+
+   urdf_list_assets()
+     -> registered asset identifiers
+   urdf_compose(components=[arm, hand])
+     -> assembly_id, model resource, manifest resource
+   urdf_validate(assembly_id)
+   urdf_verify_in_simulation(assembly_id)  # optional
+
+The simulation workflow remains available when a world is needed:
 
 .. code-block:: text
 
@@ -81,8 +92,35 @@ changing calls can include ``expected_scene_revision``. The server rejects a
 stale revision before touching the world, so a Host should read the latest
 world state after a revision conflict and retry with the new value.
 
-Run the Franka example
-----------------------
+Run the URDF assembly showcase
+------------------------------
+
+The repository example composes a UR5 arm and a DH PGC gripper through the
+pure URDF adapter. It validates XML topology and copied mesh references before
+optionally loading the generated model in a temporary headless world:
+
+.. code-block:: console
+
+   $ python examples/mcp/urdf_assembly_demo/run_demo.py
+
+Use ``--no-verify`` to stop after the simulator-independent checks:
+
+.. code-block:: console
+
+   $ python examples/mcp/urdf_assembly_demo/run_demo.py --no-verify
+
+Generated files are written under ``outputs/mcp/urdf/``. The MCP input uses
+registered asset identifiers rather than arbitrary filesystem paths. The
+generated model and manifest are available as:
+
+.. code-block:: text
+
+   embodichain://urdf/assemblies/{assembly_id}/model
+   embodichain://urdf/assemblies/{assembly_id}/manifest
+   embodichain://urdf/assemblies/{assembly_id}/validation
+
+Run the Franka trajectory example
+---------------------------------
 
 The repository example contains a complete stdio client and editable JSON
 inputs in ``examples/mcp/codex_trajectory_demo/``. Run the trajectory workflow
@@ -139,6 +177,12 @@ The Host can read these resources after the corresponding handle exists:
      - Read the current world state and scene revision.
    * - ``embodichain://trajectories/{trajectory_id}``
      - Inspect generated waypoints, samples, and validation.
+   * - ``embodichain://urdf/assemblies/{assembly_id}/model``
+     - Read a generated modular URDF model.
+   * - ``embodichain://urdf/assemblies/{assembly_id}/manifest``
+     - Read component references, artifact digest, and validation metadata.
+   * - ``embodichain://urdf/assemblies/{assembly_id}/validation``
+     - Read pure XML, topology, mimic, and mesh-reference checks.
    * - ``embodichain://runs/{run_id}/status``
      - Follow a bounded asynchronous rollout.
    * - ``embodichain://runs/{run_id}/metrics``
@@ -152,10 +196,13 @@ finishes.
 Safety and scope
 ----------------
 
-Phase one exposes simulation and read-only analysis. It does not provide
-real-device control, arbitrary Python execution, or an interactive per-step
-agent control loop. Collision results state their exact scope; a joint-limit
-check or geometric reachability result does not certify collision-free motion.
+Phase one exposes project adapters for asset composition, simulation, and
+read-only analysis. It does not provide real-device control, arbitrary Python
+execution, or an interactive per-step agent control loop. URDF composition
+writes generated files under the adapter output root; simulation verification
+uses a temporary world and removes it before returning. Collision results state
+their exact scope; a joint-limit check or geometric reachability result does
+not certify collision-free motion.
 
 Treat ``execute_trajectory`` and ``record_trajectory`` as state-changing
 operations. Validate the trajectory immediately before execution and ask for
@@ -187,4 +234,6 @@ Further reference
 * :doc:`/api_reference/embodichain/embodichain.mcp` — public Python API.
 * ``examples/mcp/codex_trajectory_demo/README.md`` — complete Host prompt and
   local demo notes.
+* ``examples/mcp/urdf_assembly_demo/README.md`` — modular arm and gripper
+  composition workflow.
 * :doc:`/tutorial/simulation/index` — simulation setup and scene fundamentals.

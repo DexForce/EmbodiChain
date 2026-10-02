@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from .adapters import MCPAdapter, MCPAdapterRegistry
 from .backend import (
     InMemorySimulationBackend,
     SimulationBackend,
@@ -25,12 +26,18 @@ from .backend import (
 )
 from .server import cli, create_server, serve
 from .service import EmbodiChainMCPService
+from .simulation import SimulationMCPAdapter
+from .urdf import URDFAssemblyAdapter
 
 __all__ = [
+    "MCPAdapter",
+    "MCPAdapterRegistry",
     "EmbodiChainMCPService",
     "InMemorySimulationBackend",
     "SimulationBackend",
     "SimulationManagerBackend",
+    "SimulationMCPAdapter",
+    "URDFAssemblyAdapter",
     "cli",
     "create_server",
     "serve",

@@ -222,13 +222,23 @@ def test_mcp_server_registers_phase_one_tools_resources_and_prompts(service):
     assert "record_trajectory" in tool_names
     assert "status" in tool_by_name["solve_ik"].output_schema["properties"]
     assert "embodichain://worlds/{world_id}/manifest" in template_uris
+    assert "embodichain://urdf/assemblies/{assembly_id}/manifest" in template_uris
     assert prompt_names == {
         "inspect_robot",
         "validate_motion",
         "generate_robot_trajectory",
+        "compose_urdf",
     }
     assert result.is_error is False
     assert result.structured_content["result"]["reachable"] is True
+
+    server_info = asyncio.run(server.call_tool("server_info", {}))
+    health = asyncio.run(server.call_tool("health", {}))
+    assert server_info.structured_content["scope"] == "project_capabilities"
+    assert server_info.structured_content["adapters"] == ["simulation", "urdf"]
+    assert health.structured_content["scope"] == "project_capabilities"
+    with pytest.raises(ValueError, match="authenticated MCP gateway"):
+        server.run(transport="streamable-http")
 
     with pytest.raises(ToolError, match="Unknown world_id"):
         asyncio.run(

@@ -190,7 +190,10 @@ class EmbodiChainMCPService:
     def _world_lock(self, world_id: str) -> threading.RLock:
         """Return the service serialization lock for a world handle."""
         with self._lock:
-            return self._world_locks.setdefault(world_id, threading.RLock())
+            try:
+                return self._world_locks[world_id]
+            except KeyError as error:
+                raise ValueError(f"Unknown world_id: {world_id}") from error
 
     @contextmanager
     def _world_guard(self, world_id: str, expected_scene_revision: int | None = None):

@@ -621,19 +621,28 @@ class SimulationManagerBackend:
     def _world_lock(self, world_id: str) -> threading.RLock:
         """Return the serialization lock owned by one world handle."""
         with self._lock:
-            return self._world_locks.setdefault(world_id, threading.RLock())
+            try:
+                return self._world_locks[world_id]
+            except KeyError as error:
+                raise ValueError(f"Unknown world_id: {world_id}") from error
 
     def close(self) -> None:
         """Destroy all manager worlds and drain deferred native cleanup."""
         with self._lock:
             world_ids = tuple(self._managers)
+        errors: list[Exception] = []
         for world_id in world_ids:
             try:
                 self.destroy_world(world_id)
-            except Exception:
+            except Exception as error:
                 # Continue closing remaining worlds so one failed native cleanup
                 # does not strand every other world owned by this backend.
-                continue
+                errors.append(error)
+        if errors:
+            raise RuntimeError(
+                "Failed to close one or more simulation worlds: "
+                + "; ".join(f"{type(error).__name__}: {error}" for error in errors)
+            ) from errors[0]
 
     @staticmethod
     def _default_manager_factory(backend: str, seed: int | None) -> Any:
@@ -719,7 +728,19 @@ class SimulationManagerBackend:
                 "scene_revision": 0,
                 "scene": {},
             }
-        return self.get_world_state(world_id)
+        try:
+            return self.get_world_state(world_id)
+        except Exception:
+            try:
+                manager.destroy(exit_process=False)
+            except Exception:
+                pass
+            with self._lock:
+                self._managers.pop(world_id, None)
+                self._world_metadata.pop(world_id, None)
+                self._world_locks.pop(world_id, None)
+                self._prepared_worlds.discard(world_id)
+            raise
 
     def _manager(self, world_id: str) -> Any:
         try:
@@ -863,10 +884,16 @@ class SimulationManagerBackend:
     def _discard_world_after_failure(self, world_id: str, manager: Any) -> None:
         """Best-effort cleanup for a scene that failed during materialization."""
         try:
-            manager.destroy(exit_process=False)
+            try:
+                manager.destroy(exit_process=False)
+            except Exception:
+                pass
             flush = getattr(type(manager), "flush_cleanup_queue", None)
             if flush is not None:
-                flush()
+                try:
+                    flush()
+                except Exception:
+                    pass
         finally:
             with self._lock:
                 self._managers.pop(world_id, None)

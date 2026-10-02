@@ -111,6 +111,25 @@ def test_service_destroy_purges_trajectory_handles() -> None:
         service.close()
 
 
+def test_unknown_world_requests_do_not_allocate_locks() -> None:
+    """Invalid handles cannot grow service or backend lock maps."""
+    service = EmbodiChainMCPService(backend=InMemorySimulationBackend())
+    try:
+        for index in range(8):
+            with pytest.raises(ValueError, match="Unknown world_id"):
+                service.get_world_state(f"missing-{index}")
+        assert service._world_locks == {}
+    finally:
+        service.close()
+
+    backend = SimulationManagerBackend(lambda backend, seed: object())
+    for index in range(8):
+        with pytest.raises(ValueError, match="Unknown world_id"):
+            backend.get_world_state(f"missing-{index}")
+    assert backend._world_locks == {}
+    backend.close()
+
+
 def test_task_catalog_does_not_expose_internal_resource_handles() -> None:
     internal_resource = object()
     service = EmbodiChainMCPService(
