@@ -2,7 +2,7 @@
 
 状态日期：2026-10-02（北京时间）
 
-当前 `main`：`c38d9f3a`
+代码架构基线：`c38d9f3a`（本文档为架构说明提交）
 
 参考 PR：[DexForce/EmbodiChain #729](https://github.com/DexForce/EmbodiChain/pull/729)
 
