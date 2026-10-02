@@ -3215,8 +3215,8 @@
           "path": "embodichain/mcp/server.py",
           "symbol": "<module>",
           "start_line": 17,
-          "end_line": 22,
-          "excerpt": "\"\"\"MCP protocol adapter and command-line entry point.\n\nThe server owns protocol registration and delegates domain behavior to\ninjected adapters. Simulation is the first adapter; future Task Program, RL,\ndata, visualization, and device adapters can register beside it.\nThe phase-one command intentionally serves stdio only. Streamable HTTP remains\nbehind an authenticated gateway boundary so this process cannot expose\nstateful simulation and artifact-writing tools without authorization.\n\"\"\""
+          "end_line": 26,
+          "excerpt": "\"\"\"MCP protocol adapter and command-line entry point.\n\nThe server owns protocol registration and delegates domain behavior to\ninjected adapters. Simulation and URDF assembly are the first registered\nproviders; future Task Program, RL, data, visualization, and device adapters\ncan register beside them.\nThe phase-one command intentionally serves stdio only. Streamable HTTP remains\nbehind an authenticated gateway boundary so this process cannot expose\nstateful simulation and artifact-writing tools without authorization.\n\"\"\""
         }
       ],
       "documentation": [
