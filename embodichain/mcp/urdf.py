@@ -429,8 +429,6 @@ class URDFAssemblyAdapter:
                 raise ValueError(f"Unable to attach sensor {sensor['sensor_name']!r}")
             resolved_sensors.append(deepcopy(sensor))
 
-        if not output_dir.exists():
-            self._prune_output_root(limit=self._max_assemblies - 1)
         output_dir_existed = output_dir.exists()
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -449,6 +447,7 @@ class URDFAssemblyAdapter:
             if not output_dir_existed:
                 shutil.rmtree(output_dir, ignore_errors=True)
             raise
+        self._prune_output_root(limit=self._max_assemblies, preserve={assembly_id})
         with self._lock:
             if assembly_id not in self._assemblies:
                 while len(self._assemblies) >= self._max_assemblies:
@@ -729,11 +728,14 @@ class URDFAssemblyAdapter:
             )
         return tuple(normalized)
 
-    def _prune_output_root(self, *, limit: int | None = None) -> None:
+    def _prune_output_root(
+        self, *, limit: int | None = None, preserve: set[str] | None = None
+    ) -> None:
         """Keep only the newest bounded set of generated assembly directories."""
         if not self.output_root.is_dir():
             return
         keep = self._max_assemblies if limit is None else max(0, limit)
+        preserve = preserve or set()
         directories = sorted(
             (
                 path
@@ -743,7 +745,9 @@ class URDFAssemblyAdapter:
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
-        for path in directories[keep:]:
+        candidates = [path for path in directories if path.name not in preserve]
+        remove_count = max(0, len(directories) - keep)
+        for path in candidates[:remove_count]:
             shutil.rmtree(path, ignore_errors=True)
 
     @staticmethod
@@ -900,7 +904,13 @@ class URDFAssemblyAdapter:
             visited: set[str] = set()
             active: set[str] = set()
 
-            def visit(link_name: str) -> None:
+            stack: list[tuple[str, bool]] = [(root_links[0], False)]
+            while stack:
+                link_name, exiting = stack.pop()
+                if exiting:
+                    active.discard(link_name)
+                    visited.add(link_name)
+                    continue
                 if link_name in active:
                     errors.append(
                         {
@@ -908,16 +918,15 @@ class URDFAssemblyAdapter:
                             "message": f"link cycle detected at {link_name}",
                         }
                     )
-                    return
+                    continue
                 if link_name in visited:
-                    return
+                    continue
                 active.add(link_name)
-                for child_name in children_by_parent[link_name]:
-                    visit(child_name)
-                active.remove(link_name)
-                visited.add(link_name)
-
-            visit(root_links[0])
+                stack.append((link_name, True))
+                stack.extend(
+                    (child_name, False)
+                    for child_name in reversed(children_by_parent[link_name])
+                )
             if visited != link_set:
                 errors.append(
                     {
