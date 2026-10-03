@@ -61,3 +61,28 @@ sim_config = SimulationManagerCfg(
 ```
 
 For DLSS-specific settings, see {doc}`dlss`.
+
+## Native window capture
+
+When a native window opens, `SimulationManager` registers the **C** hotkey by
+default. It saves one PNG under `outputs/images` using the current viewer
+pose. Configure the control next to the recording and camera-pose settings:
+
+```python
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import WindowCaptureCfg
+
+sim_config = SimulationManagerCfg(
+    window_capture=WindowCaptureCfg(
+        enable_hotkey=True,
+        hotkey="c",
+        save_path="outputs/images/debug_view.png",
+    )
+)
+```
+
+The programmatic `sim.capture_window(save_path=...)` method returns an owned
+`uint8` image array. DexSim's native frame is used when available; Hybrid and
+Fast-RT builds without native CPU readback use an offscreen camera at the
+current window pose. Closed windows and empty readbacks return `None` and do
+not create a file.

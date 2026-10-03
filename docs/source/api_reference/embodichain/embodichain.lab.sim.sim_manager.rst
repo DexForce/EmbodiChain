@@ -19,6 +19,13 @@ Set ``SimulationManagerCfg(enable_entity_gizmo=False)`` to opt out, or call
 custom DexSim controller settings survive window close/reopen. Pure headless
 and Viser runs do not automatically create native gizmos.
 
+Native single-frame capture is enabled by default with the **C** hotkey. It
+uses DexSim's current window frame when available and falls back to an
+offscreen camera at the current viewer pose for renderers without native CPU
+readback. Configure ``SimulationManagerCfg(window_capture=WindowCaptureCfg(...))``
+to disable the hotkey or choose the output path, or call
+``sim.capture_window(save_path=...)`` to capture programmatically.
+
 ``SimulationManagerCfg.robot_ik_gizmo`` defaults to ``GizmoCfg()`` and registers
 robot control parts with configured IK-chain/TCP metadata during normal updates.
 Native IK activates on the first **I** press by default; Viser constructs its solver on
