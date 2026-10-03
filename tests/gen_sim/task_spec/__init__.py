@@ -14,13 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility imports for the GenSim-owned TaskSpec protocol.
-
-New code should import from :mod:`embodichain.gen_sim.task_spec`.  This module
-remains a thin forwarding surface for callers that used the earlier path.
-"""
+"""Tests for the GenSim-owned TaskSpec protocol."""
 
 from __future__ import annotations
-
-from embodichain.gen_sim.task_spec import *  # noqa: F401,F403
-from embodichain.gen_sim.task_spec import __all__

@@ -326,9 +326,9 @@ topics:
   - embodichain/gen_sim/asset_engine/clients/
   - embodichain/gen_sim/asset_engine/utils/articulated_usdc_utils.py
   - embodichain/gen_sim/gradio_ui/app_processes.py
-  - embodichain/task_spec/
+  - embodichain/gen_sim/task_spec/
   - embodichain/gen_sim/gradio_ui/app_env.py
-  watch_paths: [embodichain/gen_sim/, embodichain/task_spec/, embodichain/cli/main.py, tests/gen_sim/]
+  watch_paths: [embodichain/gen_sim/, embodichain/gen_sim/task_spec/, embodichain/cli/main.py, tests/gen_sim/]
   related_topics: [simulation-system, data-assets, env-framework]
   status: active
 - id: task-spec
@@ -338,10 +338,10 @@ topics:
     predicate evaluator, task spec cache]
   paths: [topics/gen-sim/gen-sim.md]
   source_of_truth:
-  - embodichain/task_spec/
+  - embodichain/gen_sim/task_spec/
   - embodichain/gen_sim/task_engine/task_spec.py
-  watch_paths: [embodichain/task_spec/, embodichain/gen_sim/task_engine/task_spec.py,
-    tests/task_spec/, tests/gen_sim/task_engine/test_agent.py]
+  watch_paths: [embodichain/gen_sim/task_spec/, embodichain/gen_sim/task_engine/task_spec.py,
+    tests/gen_sim/task_spec/, tests/gen_sim/task_engine/test_agent.py]
   related_topics: [gen-sim, task-programs, motion-planning]
   status: active
 - id: data-assets

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from embodichain.task_spec import (
+from embodichain.gen_sim.task_spec import (
     EvaluationStatus,
     Predicate,
     PredicateEvaluation,
