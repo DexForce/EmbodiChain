@@ -2114,6 +2114,7 @@ def _decode_registered_lowerer(
                 "object_id",
                 "object_ids",
                 "routes",
+                "stage_id",
             }
         ),
     )
@@ -2292,6 +2293,7 @@ def _decode_registered_lowerer(
                         "world_displacement",
                     }
                 ),
+                optional=frozenset({"stage_id"}),
             )
             routes.append(
                 _RelativePlaceRoute(
@@ -2311,6 +2313,11 @@ def _decode_registered_lowerer(
                         route["world_displacement"],
                         path=f"{route_path}.world_displacement",
                         expected_length=3,
+                    ),
+                    stage_id=(
+                        _identifier(route["stage_id"], path=f"{route_path}.stage_id")
+                        if str(route.get("stage_id", "")).strip()
+                        else ""
                     ),
                 )
             )

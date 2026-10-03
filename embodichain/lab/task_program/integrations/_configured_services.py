@@ -729,6 +729,7 @@ class _RelativePlaceRoute:
     reference_entity_id: str
     relation: str
     world_displacement: tuple[float, float, float]
+    stage_id: str = ""
 
     def __post_init__(self) -> None:
         for field_name in ("object_id", "reference_entity_id", "relation"):
@@ -737,6 +738,8 @@ class _RelativePlaceRoute:
                 field_name,
                 _identifier(getattr(self, field_name), field_name=field_name),
             )
+        if type(self.stage_id) is not str or self.stage_id != self.stage_id.strip():
+            raise ValueError("stage_id must be a string without outer whitespace.")
         if self.relation not in {
             "above",
             "behind",
@@ -756,9 +759,9 @@ class _RelativePlaceRoute:
         )
 
     @property
-    def selector(self) -> tuple[str, str, str]:
+    def selector(self) -> tuple[str, str, str, str]:
         """Return the semantic arguments selecting this immutable route."""
-        return self.object_id, self.reference_entity_id, self.relation
+        return self.stage_id, self.object_id, self.reference_entity_id, self.relation
 
 
 class _RelativePlaceLowerer(RegisteredSemanticLowerer):
@@ -890,17 +893,35 @@ class _RelativePlaceLowerer(RegisteredSemanticLowerer):
     def _resolve_route(self, call: RegisteredSemanticCall) -> _RelativePlaceRoute:
         """Validate one call and return its exact configured route."""
         arguments = dict(call.arguments)
-        if set(arguments) != {"object", "reference", "relation"}:
+        allowed = {"object", "reference", "relation", "stage_id"}
+        if set(arguments) - allowed or set(arguments) < {
+            "object",
+            "reference",
+            "relation",
+        }:
             raise ValueError(
                 f"{self.call_id} arguments must contain only 'object', "
-                "'reference', and 'relation'."
+                "'reference', 'relation', and optional 'stage_id'."
             )
         selector = (
+            str(arguments.get("stage_id", "")),
             arguments["object"],
             arguments["reference"],
             arguments["relation"],
         )
         route = self._routes.get(selector)
+        if route is None and not selector[0]:
+            # A single occurrence keeps the legacy call shape without a
+            # stage_id.  Resolve that shape to its only stage-qualified route;
+            # repeated occurrences remain intentionally ambiguous and must
+            # carry their explicit stage selector.
+            candidates = [
+                candidate
+                for key, candidate in self._routes.items()
+                if key[1:] == selector[1:]
+            ]
+            if len(candidates) == 1:
+                route = candidates[0]
         if route is None:
             raise ValueError(
                 f"{self.call_id} does not declare relation route {selector!r}."
@@ -982,6 +1003,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     reference_entity_id=reference_ref.entity_id,
                     relation=route.relation,
                     world_displacement=route.world_displacement,
+                    stage_id=route.stage_id,
                 )
             )
         return _RelativePlaceLowerer(tuple(routes))

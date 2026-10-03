@@ -414,6 +414,7 @@ TaskSpec cache.
 
    TaskSpecGenerator
    generate_task_spec
+   task_spec_from_candidate
    task_template_from_candidate
 
 embodichain.gen_sim.task_engine.task_program_bundle
@@ -2430,20 +2431,24 @@ content-addressed template persistence.
    EVALUATION_STATUSES
    EXPANSION_MANIFEST_SCHEMA
    KNOWN_PREDICATES
+   MILESTONE_SCHEMA
    PREDICATE_OPERATORS
    SCENE_INSTANCE_SCHEMA
+   TASK_SPEC_SCHEMA
    TASK_TEMPLATE_SCHEMA
    VALIDATION_CERTIFICATE_SCHEMA
    ActionWitness
    EvaluationReport
    EvaluationStatus
    ExpansionManifest
+   MilestoneSpec
    Predicate
    PredicateEvaluation
    PredicateSpec
    RequirementSpec
    RoleSpec
    SceneInstance
+   TaskRequirement
    TaskSpec
    TaskSpecCache
    TaskSpecCacheError
@@ -2458,6 +2463,7 @@ content-addressed template persistence.
    canonical_json
    canonicalize
    evaluate_predicate
+   evaluate_task_spec
    evaluate_task_template
    evaluate_temporal_condition
    json_snapshot
@@ -2465,6 +2471,7 @@ content-addressed template persistence.
    validate_action_witness
    validate_expansion_manifest
    validate_scene_instance
+   validate_task_spec
    validate_task_template
    validate_validation_certificate
 
@@ -2533,6 +2540,24 @@ embodichain.task_spec.registry
    TaskSpecCacheError
    TaskSpecRegistry
 
+embodichain.task_spec.spec
+--------------------------
+
+The compact normative TaskSpec model.  It owns roles, conditions, long-horizon
+milestones, downstream requirements, and the semantic hash; runtime artifacts
+remain with their existing owners.
+
+.. currentmodule:: embodichain.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
 embodichain.task_spec.validation
 --------------------------------
 
@@ -2543,10 +2568,12 @@ embodichain.task_spec.validation
    EvaluationReport
    TaskSpecValidationError
    build_validation_certificate
+   evaluate_task_spec
    evaluate_task_template
    validate_action_witness
    validate_expansion_manifest
    validate_scene_instance
+   validate_task_spec
    validate_task_template
    validate_validation_certificate
 

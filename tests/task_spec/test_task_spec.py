@@ -167,6 +167,8 @@ def test_task_engine_generation_is_content_addressed(tmp_path: Path) -> None:
     first = generate_task_spec(_candidate_set(), cache=cache)
     second = generate_task_spec(_candidate_set(), cache=cache)
     assert first.semantic_hash == second.semantic_hash
+    assert [milestone.id for milestone in first.milestones] == ["step_01"]
+    assert [predicate.name for predicate in first.goal] == ["object_upright"]
     assert cache.get(first.semantic_hash) == first
     assert cache.hashes() == (first.semantic_hash,)
     assert validate_task_template(first)["semantic_hash"] == first.semantic_hash
@@ -178,6 +180,7 @@ def test_task_engine_generation_is_content_addressed(tmp_path: Path) -> None:
         goal=first.goal,
         invariants=first.invariants,
         temporal=first.temporal,
+        milestones=first.milestones,
         requirements=first.requirements,
         metadata={"candidate_id": "another-run"},
     )
@@ -193,6 +196,89 @@ def test_require_observations_is_an_explicit_validation_mode() -> None:
     )
     with pytest.raises(TaskSpecValidationError, match="observation keys"):
         validate_task_template(template, require_observations=True)
+
+
+def test_compact_task_spec_schema_round_trips_without_runtime_artifacts() -> None:
+    value = {
+        "schema_version": "task_spec/v0.1",
+        "task_id": "upright_can",
+        "instruction": "make the can upright",
+        "roles": [
+            {
+                "id": "role_001",
+                "kind": "object",
+                "cardinality": "one",
+                "affordances": ["graspable", "orientable"],
+                "properties": {},
+            }
+        ],
+        "init": [
+            {
+                "predicate": "state",
+                "subject": "role_001",
+                "key": "orientation",
+                "expected": "fallen",
+            }
+        ],
+        "goal": [
+            {
+                "predicate": "object_upright",
+                "subject": "role_001",
+                "expected": True,
+            }
+        ],
+        "invariants": [],
+        "temporal": [],
+        "milestones": [
+            {
+                "id": "upright_once",
+                "achieve": [
+                    {
+                        "predicate": "object_upright",
+                        "subject": "role_001",
+                        "expected": True,
+                    }
+                ],
+            }
+        ],
+        "requirements": [
+            {
+                "consumer": "asset",
+                "key": "affordances",
+                "value": ["graspable", "orientable"],
+            }
+        ],
+    }
+    spec = TaskTemplate.from_dict(value)
+    encoded = spec.to_dict()
+    assert encoded["schema_version"] == "task_spec/v0.1"
+    assert encoded["roles"][0]["id"] == "role_001"
+    assert encoded["init"][0]["subject"] == "role_001"
+    assert encoded["milestones"][0]["id"] == "upright_once"
+    assert TaskTemplate.from_dict(encoded) == spec
+
+
+def test_task_spec_hash_ignores_logical_id_and_instruction() -> None:
+    common = {
+        "roles": (RoleSpec("role_001"),),
+        "goal": (Predicate("exists", arguments={"subject": "role_001"}),),
+    }
+    first = TaskTemplate(task_id="a", instruction="first wording", **common)
+    second = TaskTemplate(task_id="b", instruction="different wording", **common)
+    assert first.semantic_hash == second.semantic_hash
+
+
+def test_task_spec_rejects_cyclic_milestones() -> None:
+    predicate = {"predicate": "exists", "expected": True}
+    with pytest.raises(ValueError, match="acyclic"):
+        TaskTemplate(
+            roles=(RoleSpec("role_001"),),
+            goal=(Predicate("exists"),),
+            milestones=(
+                {"id": "a", "achieve": (predicate,), "after": ("b",)},
+                {"id": "b", "achieve": (predicate,), "after": ("a",)},
+            ),
+        )
 
 
 def test_certificate_status_cannot_hide_failed_predicate() -> None:

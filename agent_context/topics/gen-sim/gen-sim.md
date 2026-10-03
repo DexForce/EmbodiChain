@@ -19,7 +19,7 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
 | General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
 | Articulated asset generation | `asset_engine/clients/articulated_generation.py`, `asset_engine/utils/articulated_usdc_utils.py` |
-| Generated task semantics | `embodichain/task_spec/` and `task_engine/task_spec.py`: TaskTemplate generation and cache adapter |
+| Generated task semantics | `embodichain/task_spec/` and `task_engine/task_spec.py`: compact TaskSpec generation and cache adapter |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 
@@ -68,8 +68,10 @@ TaskSpec owns the reusable normative task identity and evidence contract across
 these boundaries; its schemas, predicate rules, and cache behavior are owned by
 `embodichain/task_spec/` and detailed in the
 [GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
-Scene output is still only a SceneInstance input to that protocol, not a
-certified task witness.
+Long-horizon specifications keep the terminal state in `goal` and represent
+ordered intermediate achievements as acyclic `milestones`.
+Scene output is a scene-binding and measured-state input to that protocol; it
+does not by itself certify a task witness.
 
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote

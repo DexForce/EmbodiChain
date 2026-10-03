@@ -24,7 +24,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from embodichain.task_spec import TaskSpecCache, TaskTemplate
+from embodichain.task_spec import TaskSpec, TaskSpecCache
 
 from .contracts import (
     SCENE_REQUEST_SCHEMA,
@@ -196,7 +196,7 @@ class TaskAgent:
         *,
         candidate_id: str | None = None,
         cache: TaskSpecCache | None = None,
-    ) -> TaskTemplate:
+    ) -> TaskSpec:
         """Generate a candidate set and emit its reusable TaskTemplate.
 
         Task Engine remains the owner of interpretation and candidate
@@ -213,7 +213,7 @@ class TaskAgent:
             cache: Optional ``TaskSpecCache``-compatible persistence backend.
 
         Returns:
-            A validated ``embodichain.task_spec.TaskTemplate``.
+            A validated ``embodichain.task_spec.TaskSpec``.
         """
         from .task_spec import generate_task_spec
 

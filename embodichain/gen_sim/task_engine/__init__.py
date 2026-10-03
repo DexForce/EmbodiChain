@@ -46,6 +46,7 @@ from .contracts import (
 from .task_spec import (
     TaskSpecGenerator,
     generate_task_spec,
+    task_spec_from_candidate,
     task_template_from_candidate,
 )
 from .interpretation import (
@@ -136,6 +137,7 @@ __all__ = [
     "derive_scene_request",
     "derive_success_spec",
     "generate_task_spec",
+    "task_spec_from_candidate",
     "complete_stage",
     "fail_stage",
     "initial_state",

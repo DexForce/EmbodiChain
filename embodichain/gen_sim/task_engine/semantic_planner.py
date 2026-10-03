@@ -384,29 +384,13 @@ class SemanticTaskPlanner:
                 relation = str(step.get("relation", "none"))
                 target_part = _bound_part(step, "target", bindings, steps_by_id)
                 calls = []
-                if (
-                    held_by.get(object_id) == resource
-                    and relation in {"on", "above"}
-                    and object_id in upright_objects
-                    and target_id in upright_objects
-                ):
-                    # A low receiving grasp can intersect the support during
-                    # stacking. Expose the regrasp as ordinary semantic calls.
-                    calls.append(
-                        self._placement_call(
-                            step_id=step_id,
-                            object_id=object_id,
-                            target_id="table",
-                            relation="on",
-                            resource=resource,
-                        )
-                    )
-                    held_by.pop(object_id)
-                    other_resource = "left" if resource == "right" else "right"
-                    if other_resource not in held_by.values():
-                        # Clear the former source hand only after the receiver
-                        # has safely staged its object, not during a live hold.
-                        calls.append(_park_call(other_resource))
+                # Keep a receiver's handover grasp live for a subsequent
+                # stack placement.  Releasing onto the table and regrasping
+                # here sweeps the support object during long programs (and
+                # turns an otherwise upright support over).  A direct
+                # ``stack_place`` lowerer already performs the controlled
+                # alignment and descent; an explicit stack pick is still
+                # emitted below when the object is not currently held.
                 if held_by.get(object_id) != resource:
                     if object_id in held_by:
                         raise UnsupportedSemanticCapabilityError(
@@ -434,7 +418,8 @@ class SemanticTaskPlanner:
                     and object_id in upright_objects
                     and target_id in upright_objects
                 ):
-                    if calls and calls[-1]["kind"] == "pick":
+                    needs_regrasp = bool(calls and calls[-1]["kind"] == "pick")
+                    if needs_regrasp:
                         calls[-1] = {
                             "kind": "registered",
                             "call_id": _STACK_PICK_CALL_ID,
@@ -442,18 +427,19 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     place_call["call_id"] = _STACK_PLACE_CALL_ID
-                    calls.append(
-                        {
-                            "kind": "registered",
-                            "call_id": _ALIGN_HELD_CALL_ID,
-                            "arguments": {
-                                "object": object_id,
-                                "target": upright_staging_targets[object_id],
-                                "preserve_yaw": True,
-                            },
-                            "resources": {"primary": resource},
-                        }
-                    )
+                    if needs_regrasp:
+                        calls.append(
+                            {
+                                "kind": "registered",
+                                "call_id": _ALIGN_HELD_CALL_ID,
+                                "arguments": {
+                                    "object": object_id,
+                                    "target": upright_staging_targets[object_id],
+                                    "preserve_yaw": True,
+                                },
+                                "resources": {"primary": resource},
+                            }
+                        )
                 calls.append(place_call)
                 held_by.pop(object_id, None)
                 cleanup_resources = (resource,)
@@ -621,11 +607,7 @@ class SemanticTaskPlanner:
                 )
                 for index, call in enumerate(calls)
             ]
-            if cleanup_resources and (
-                task_type == "E2"
-                or requested_upright
-                or calls[-1].get("call_id") == _STACK_PLACE_CALL_ID
-            ):
+            if cleanup_resources and (task_type == "E2" or requested_upright):
                 call_roles.append(
                     (
                         {

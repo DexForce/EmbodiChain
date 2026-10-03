@@ -720,14 +720,21 @@ class _RelativePlaceRoute:
     relation: str
     world_displacement: tuple[float, float, float]
     world_yaw_offset: float = 0.0
+    stage_id: str = ""
 
     def __post_init__(self) -> None:
-        for field_name in ("object_id", "reference_entity_id", "relation"):
+        for field_name in (
+            "object_id",
+            "reference_entity_id",
+            "relation",
+        ):
             object.__setattr__(
                 self,
                 field_name,
                 _identifier(getattr(self, field_name), field_name=field_name),
             )
+        if type(self.stage_id) is not str or self.stage_id != self.stage_id.strip():
+            raise ValueError("stage_id must be a string without outer whitespace.")
         if self.relation not in {
             "front_left_of",
             "front_right_of",
@@ -758,9 +765,9 @@ class _RelativePlaceRoute:
         object.__setattr__(self, "world_yaw_offset", float(self.world_yaw_offset))
 
     @property
-    def selector(self) -> tuple[str, str, str]:
+    def selector(self) -> tuple[str, str, str, str]:
         """Return the semantic arguments selecting this immutable route."""
-        return self.object_id, self.reference_entity_id, self.relation
+        return self.stage_id, self.object_id, self.reference_entity_id, self.relation
 
 
 class _ObservedRelativePlaceLowerer(_RelativePlaceLowerer):
@@ -879,6 +886,7 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     relation=route.relation,
                     world_displacement=route.world_displacement,
                     world_yaw_offset=route.world_yaw_offset,
+                    stage_id=route.stage_id,
                 )
             )
         return self.lowerer_type(tuple(routes), robot)

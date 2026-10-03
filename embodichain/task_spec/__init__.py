@@ -14,12 +14,11 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pure protocol objects for generated, cacheable Task Specifications.
+"""Pure, simulator-independent TaskSpec protocol and cache.
 
-``embodichain.task_spec`` intentionally has no simulator dependency.  Task
-Engine produces :class:`TaskTemplate`; scene/runtime integrations append
-``SceneInstance``, ``ActionWitness``, and ``ValidationCertificate`` evidence;
-trajectory expansion records lineage in ``ExpansionManifest``.
+The core object is :class:`TaskSpec`.  Scene bindings, execution attempts,
+certificates, and expansion receipts remain compatibility artifacts owned by
+their existing integrations and reference the TaskSpec semantic hash.
 """
 
 from __future__ import annotations
@@ -42,8 +41,6 @@ from .contracts import (
     RequirementSpec,
     RoleSpec,
     SceneInstance,
-    TaskSpec,
-    TaskTemplate,
     ValidationCertificate,
 )
 from .expressions import (
@@ -61,14 +58,24 @@ from .expressions import (
     lookup_observation,
 )
 from .registry import TaskSpecCache, TaskSpecCacheError, TaskSpecRegistry
+from .spec import (
+    MILESTONE_SCHEMA,
+    TASK_SPEC_SCHEMA,
+    MilestoneSpec,
+    TaskRequirement,
+    TaskSpec,
+    TaskTemplate,
+)
 from .validation import (
     EvaluationReport,
     TaskSpecValidationError,
     build_validation_certificate,
+    evaluate_task_spec,
     evaluate_task_template,
     validate_action_witness,
     validate_expansion_manifest,
     validate_scene_instance,
+    validate_task_spec,
     validate_task_template,
     validate_validation_certificate,
 )
@@ -79,20 +86,24 @@ __all__ = [
     "EVALUATION_STATUSES",
     "EXPANSION_MANIFEST_SCHEMA",
     "KNOWN_PREDICATES",
+    "MILESTONE_SCHEMA",
     "PREDICATE_OPERATORS",
     "SCENE_INSTANCE_SCHEMA",
+    "TASK_SPEC_SCHEMA",
     "TASK_TEMPLATE_SCHEMA",
     "VALIDATION_CERTIFICATE_SCHEMA",
     "ActionWitness",
     "EvaluationReport",
     "EvaluationStatus",
     "ExpansionManifest",
+    "MilestoneSpec",
     "Predicate",
     "PredicateEvaluation",
     "PredicateSpec",
     "RequirementSpec",
     "RoleSpec",
     "SceneInstance",
+    "TaskRequirement",
     "TaskSpec",
     "TaskSpecCache",
     "TaskSpecCacheError",
@@ -107,6 +118,7 @@ __all__ = [
     "canonical_json",
     "canonicalize",
     "evaluate_predicate",
+    "evaluate_task_spec",
     "evaluate_task_template",
     "evaluate_temporal_condition",
     "json_snapshot",
@@ -114,6 +126,7 @@ __all__ = [
     "validate_action_witness",
     "validate_expansion_manifest",
     "validate_scene_instance",
+    "validate_task_spec",
     "validate_task_template",
     "validate_validation_certificate",
 ]

@@ -14,11 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task Engine adapter that emits reusable normative TaskTemplates."""
+"""Task Engine adapter that emits reusable normative TaskSpecs."""
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -29,8 +28,9 @@ from embodichain.task_spec import (
     Predicate,
     RequirementSpec,
     RoleSpec,
+    MilestoneSpec,
+    TaskSpec,
     TaskSpecCache,
-    TaskTemplate,
     validate_task_template,
 )
 
@@ -39,21 +39,17 @@ from .contracts import TaskCandidate, validate_task_candidate
 __all__ = [
     "TaskSpecGenerator",
     "generate_task_spec",
+    "task_spec_from_candidate",
     "task_template_from_candidate",
 ]
 
-# Role names are also used in dotted observation keys.  Keep dots out of the
-# generated component so ``lookup_observation`` cannot mistake part of a role
-# name for another mapping level.
-_ROLE_NAME_RE = re.compile(r"[^a-zA-Z0-9_:-]+")
 
-
-def task_template_from_candidate(
+def task_spec_from_candidate(
     candidate: Mapping[str, Any] | TaskCandidate,
     *,
     metadata: Mapping[str, Any] | None = None,
-) -> TaskTemplate:
-    """Convert one validated TaskCandidate into a normative TaskTemplate.
+) -> TaskSpec:
+    """Convert one validated TaskCandidate into a normative TaskSpec.
 
     The adapter consumes scene references and success semantics, while leaving
     concrete calls, robot poses, trajectories, and planner choices in the
@@ -76,11 +72,10 @@ def task_template_from_candidate(
                     name="state",
                     arguments={"subject": role.name, "key": key},
                     expected=expected,
-                    observation=f"initial_state.{role.name}.{key}",
                 )
             )
 
-    goals: list[Predicate] = []
+    step_goals: dict[str, list[Predicate]] = defaultdict(list)
     for term in selected["success_spec"]["terms"]:
         step_id = str(term["step_id"])
         name = str(term["type"])
@@ -95,16 +90,36 @@ def task_template_from_candidate(
         arguments.update(_semantic_step_arguments(steps_by_id[step_id]))
         # When grounding has no target role, retain the semantic step type but
         # do not invent a physical pose or coordinate.
-        goals.append(
+        step_goals[step_id].append(
             Predicate(
                 name=name,
                 arguments=arguments,
                 expected=True,
-                observation=_goal_observation(name, arguments),
             )
         )
 
+    # Candidate success terms describe every intermediate achievement.  The
+    # normative ``goal`` is the final authored step; earlier achievements stay
+    # available as ordered milestones instead of being treated as simultaneous
+    # terminal state.
+    terminal_steps = [str(steps[-1]["id"])] if steps else []
+    goals = [
+        predicate
+        for step_id in terminal_steps
+        for predicate in step_goals.get(step_id, ())
+    ]
+    if not goals:
+        goals = [predicate for values in step_goals.values() for predicate in values]
     requirements = _requirements(role_specs, steps, goals)
+    milestones = tuple(
+        MilestoneSpec(
+            milestone_id=str(step["id"]),
+            achieve=tuple(step_goals.get(str(step["id"]), ())),
+            after=tuple(str(value) for value in step.get("depends_on", ())),
+        )
+        for step in steps
+        if step_goals.get(str(step["id"]))
+    )
     source_metadata: dict[str, Any] = {
         "generator": "embodichain.gen_sim.task_engine",
         "candidate_id": selected["candidate_id"],
@@ -113,7 +128,7 @@ def task_template_from_candidate(
     }
     if metadata is not None:
         source_metadata["caller"] = dict(metadata)
-    template = TaskTemplate(
+    template = TaskSpec(
         task_id=draft["task_id"],
         instruction=draft["instruction"],
         roles=role_specs,
@@ -121,11 +136,21 @@ def task_template_from_candidate(
         goal=tuple(goals),
         invariants=(),
         temporal=(),
+        milestones=milestones,
         requirements=requirements,
         metadata=source_metadata,
     )
     validate_task_template(template)
     return template
+
+
+def task_template_from_candidate(
+    candidate: Mapping[str, Any] | TaskCandidate,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> TaskSpec:
+    """Compatibility alias for :func:`task_spec_from_candidate`."""
+    return task_spec_from_candidate(candidate, metadata=metadata)
 
 
 def generate_task_spec(
@@ -134,8 +159,8 @@ def generate_task_spec(
     candidate_id: str | None = None,
     cache: TaskSpecCache | None = None,
     metadata: Mapping[str, Any] | None = None,
-) -> TaskTemplate:
-    """Generate or reuse a TaskTemplate from a candidate or candidate set.
+) -> TaskSpec:
+    """Generate or reuse a TaskSpec from a candidate or candidate set.
 
     Args:
         candidate_or_set: A validated ``TaskCandidate`` or a candidate set
@@ -146,10 +171,10 @@ def generate_task_spec(
         metadata: Non-semantic generation metadata retained on the template.
 
     Returns:
-        A validated, reusable :class:`~embodichain.task_spec.TaskTemplate`.
+        A validated, reusable :class:`~embodichain.task_spec.TaskSpec`.
     """
     candidate = _select_candidate(candidate_or_set, candidate_id=candidate_id)
-    template = task_template_from_candidate(candidate, metadata=metadata)
+    template = task_spec_from_candidate(candidate, metadata=metadata)
     if cache is None:
         return template
     cached = cache.get(template.semantic_hash)
@@ -171,7 +196,7 @@ class TaskSpecGenerator:
         *,
         candidate_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> TaskTemplate:
+    ) -> TaskSpec:
         """Generate one template using this generator's cache."""
         return generate_task_spec(
             candidate_or_set,
@@ -217,14 +242,12 @@ def _roles(
     roles: list[RoleSpec] = []
     role_by_key: dict[tuple[str, str, str], str] = {}
     used: set[str] = set()
-    for key in sorted(grouped):
+    for index, key in enumerate(sorted(grouped), start=1):
         role, reference, source_structure = key
-        base = _ROLE_NAME_RE.sub("_", f"{role}:{reference}").strip("_") or role
-        name = base
-        suffix = 2
-        while name in used:
-            name = f"{base}:{suffix}"
-            suffix += 1
+        # Role IDs are canonical protocol references.  The grounded natural
+        # language reference remains an implementation detail of SceneAdapter
+        # and must not leak into the TaskSpec semantic identity.
+        name = f"role_{index:03d}"
         used.add(name)
         items = grouped[key]
         affordances = tuple(
@@ -294,12 +317,6 @@ def _role_kind(role: str, source_structure: str) -> str:
     if source_structure == "button":
         return "button"
     return "object"
-
-
-def _goal_observation(name: str, arguments: Mapping[str, Any]) -> str:
-    subject = str(arguments.get("subject", arguments.get("reference", "task")))
-    safe = _ROLE_NAME_RE.sub("_", subject).strip("_") or "task"
-    return f"goal.{name}.{safe}"
 
 
 def _semantic_step_arguments(step: Mapping[str, Any]) -> dict[str, Any]:
@@ -376,7 +393,7 @@ def _requirements(
         RequirementSpec(
             kind="expansion",
             name="lineage_key",
-            value="task_template.semantic_hash",
+            value="task_spec.semantic_hash",
         )
     )
     return tuple(requirements)
