@@ -146,7 +146,7 @@ def test_newton_contact_sensor_capability_depends_on_runtime(
         ("pure_mujoco", True, False),
         ("pure_vbd", False, True),
         ("coupled", False, True),
-        ("mjvbd_kinematic_soft", False, True),
+        ("dexuni_kinematic_soft", False, True),
     ],
 )
 def test_dexuni_contact_sensor_capability_follows_resolved_path(

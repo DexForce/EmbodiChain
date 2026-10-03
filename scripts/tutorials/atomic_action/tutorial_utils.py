@@ -115,7 +115,7 @@ TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
 )
 DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
 # Calibrated for the UR5's DH-PGI gripper holding the tutorial's 5 cm cube.
-# V2's one-way contacts cannot stop the fingers at an oversized close target.
+# DexUni's one-way contacts cannot stop the fingers at an oversized close target.
 DEXUNI_CUBE_CLOSE_QPOS = 0.013
 NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
 NEWTON_GRASP_CONTACT_DAMPING = 4.0e2

@@ -112,7 +112,7 @@ opening. The wait uses segment metadata, not a fixed waypoint index, and is
 scoped to that same profile. This scene-specific calibration does not promise
 identical final poses or stability across initial-state changes. Horizontal
 objects and other robot families retain their prior configuration.
-The UR5 V2 `place.py` profile uses a 0.013 m close target, gripper friction 4,
+The UR5 DexUni `place.py` profile uses a 0.013 m close target, gripper friction 4,
 contact history with `latest` matching, contact alpha 0.5, and arm damping 1000.
 The lower arm damping reduces tracking lag when the fingers open; finger
 drives and authored release waypoints remain unchanged. Complete cached
