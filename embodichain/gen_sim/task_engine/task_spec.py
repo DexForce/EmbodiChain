@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from embodichain.task_spec import (
+from embodichain.gen_sim.task_spec import (
     KNOWN_PREDICATES,
     Predicate,
     RequirementSpec,
@@ -171,7 +171,7 @@ def generate_task_spec(
         metadata: Non-semantic generation metadata retained on the template.
 
     Returns:
-        A validated, reusable :class:`~embodichain.task_spec.TaskSpec`.
+        A validated, reusable :class:`~embodichain.gen_sim.task_spec.TaskSpec`.
     """
     candidate = _select_candidate(candidate_or_set, candidate_id=candidate_id)
     template = task_spec_from_candidate(candidate, metadata=metadata)
