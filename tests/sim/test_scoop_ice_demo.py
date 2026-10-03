@@ -196,4 +196,11 @@ def test_newton_uses_cg_for_the_large_free_body_pile(monkeypatch) -> None:
 
     monkeypatch.setattr(demo, "SimulationManager", manager)
     demo.initialize_simulation(demo.build_parser().parse_args(["--physics", "newton"]))
-    assert configs[0].physics_cfg.solver_cfg["solver"] == "cg"
+    assert configs[0].physics_cfg.solver_cfg["solver_type"] == "dexuni"
+    assert configs[0].physics_cfg.solver_cfg["mujoco_options"]["solver"] == "cg"
+    assert (
+        configs[0].physics_cfg.solver_cfg["vbd_options"][
+            "rigid_body_contact_buffer_size"
+        ]
+        == 256
+    )

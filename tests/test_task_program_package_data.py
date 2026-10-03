@@ -109,6 +109,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/stack_cups/README.md"),
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_slow.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
         Path("components/expansion_policies/task_program_episode.yaml"),
         Path("components/randomization_profiles/cube_initial_pose.yaml"),
