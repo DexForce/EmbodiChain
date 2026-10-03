@@ -40,6 +40,8 @@ import psutil
 
 RenderMode = Literal["optix", "dlss", "nrd"]
 BENCHMARK_MODES: tuple[RenderMode, ...] = ("optix", "dlss", "nrd")
+_SSIM_WINDOW_SIZE = 11
+_SSIM_WINDOW_SIGMA = 1.5
 
 
 @dataclass(frozen=True)
@@ -59,7 +61,11 @@ class BenchmarkCfg:
 def compute_quality_metrics(
     reference: np.ndarray, candidate: np.ndarray
 ) -> dict[str, float]:
-    """Return image similarity metrics for one RGB frame pair."""
+    """Return image similarity metrics for one RGB frame pair.
+
+    SSIM is computed from local Gaussian windows so small edge and texture
+    defects remain visible even when most of the frame is unchanged.
+    """
     reference_rgb = np.asarray(reference)[..., :3].astype(np.float64) / 255.0
     candidate_rgb = np.asarray(candidate)[..., :3].astype(np.float64) / 255.0
     if reference_rgb.shape != candidate_rgb.shape:
@@ -72,26 +78,50 @@ def compute_quality_metrics(
     mae = float(np.mean(np.abs(delta)))
     psnr_db = math.inf if mse == 0.0 else float(10.0 * math.log10(1.0 / mse))
 
-    c1 = 0.01**2
-    c2 = 0.03**2
     channel_ssim: list[float] = []
     for channel in range(3):
         ref_channel = reference_rgb[..., channel]
         candidate_channel = candidate_rgb[..., channel]
-        ref_mean = float(np.mean(ref_channel))
-        candidate_mean = float(np.mean(candidate_channel))
-        ref_variance = float(np.mean(np.square(ref_channel - ref_mean)))
-        candidate_variance = float(
-            np.mean(np.square(candidate_channel - candidate_mean))
+        ref_mean = cv2.GaussianBlur(
+            ref_channel,
+            (_SSIM_WINDOW_SIZE, _SSIM_WINDOW_SIZE),
+            _SSIM_WINDOW_SIGMA,
+            borderType=cv2.BORDER_REFLECT,
         )
-        covariance = float(
-            np.mean((ref_channel - ref_mean) * (candidate_channel - candidate_mean))
+        candidate_mean = cv2.GaussianBlur(
+            candidate_channel,
+            (_SSIM_WINDOW_SIZE, _SSIM_WINDOW_SIZE),
+            _SSIM_WINDOW_SIGMA,
+            borderType=cv2.BORDER_REFLECT,
         )
+        ref_variance = cv2.GaussianBlur(
+            np.square(ref_channel),
+            (_SSIM_WINDOW_SIZE, _SSIM_WINDOW_SIZE),
+            _SSIM_WINDOW_SIGMA,
+            borderType=cv2.BORDER_REFLECT,
+        ) - np.square(ref_mean)
+        candidate_variance = cv2.GaussianBlur(
+            np.square(candidate_channel),
+            (_SSIM_WINDOW_SIZE, _SSIM_WINDOW_SIZE),
+            _SSIM_WINDOW_SIGMA,
+            borderType=cv2.BORDER_REFLECT,
+        ) - np.square(candidate_mean)
+        covariance = (
+            cv2.GaussianBlur(
+                ref_channel * candidate_channel,
+                (_SSIM_WINDOW_SIZE, _SSIM_WINDOW_SIZE),
+                _SSIM_WINDOW_SIGMA,
+                borderType=cv2.BORDER_REFLECT,
+            )
+            - ref_mean * candidate_mean
+        )
+        c1 = 0.01**2
+        c2 = 0.03**2
         numerator = (2.0 * ref_mean * candidate_mean + c1) * (2.0 * covariance + c2)
-        denominator = (ref_mean**2 + candidate_mean**2 + c1) * (
+        denominator = (np.square(ref_mean) + np.square(candidate_mean) + c1) * (
             ref_variance + candidate_variance + c2
         )
-        channel_ssim.append(numerator / denominator)
+        channel_ssim.append(float(np.mean(numerator / denominator)))
 
     reference_gray = np.mean(reference_rgb, axis=-1)
     candidate_gray = np.mean(candidate_rgb, axis=-1)

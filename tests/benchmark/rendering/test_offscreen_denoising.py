@@ -54,6 +54,21 @@ def test_quality_metrics_detect_local_image_error() -> None:
     assert metrics["edge_mae"] > 0.0
 
 
+def test_quality_metrics_weight_local_defects() -> None:
+    """Local-window SSIM distinguishes concentrated defects from background error."""
+    reference = np.zeros((64, 64, 3), dtype=np.uint8)
+    concentrated = reference.copy()
+    concentrated[31:33, 31:33] = 255
+    distributed = reference.copy()
+    distributed[:2, :2] = 255
+
+    concentrated_metrics = compute_quality_metrics(reference, concentrated)
+    distributed_metrics = compute_quality_metrics(reference, distributed)
+
+    assert concentrated_metrics["mae"] == distributed_metrics["mae"]
+    assert concentrated_metrics["ssim"] < distributed_metrics["ssim"]
+
+
 def test_leaderboard_sorts_valid_frame_rate_then_similarity() -> None:
     """Leaderboard prioritizes successful captures before reference similarity."""
     rows = build_leaderboard_rows(
