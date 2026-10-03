@@ -15,7 +15,8 @@ The pages are organized from high-level package namespaces to concrete submodule
 Core Framework
 --------------
 
-The core ``embodichain`` framework is split into six top-level packages:
+The core ``embodichain`` framework groups domain APIs and integrations in
+top-level packages:
 
 ``compute``
     Shared numerical computations: analytical kinematics, trajectory
@@ -45,6 +46,11 @@ The core ``embodichain`` framework is split into six top-level packages:
     (PPO/GRPO), rollout buffers, collectors, policy/model builders, and the
     training entry point.
 
+``mcp``
+    Agent-facing tools, resources, prompts, and transport entry points. The
+    first adapter exposes simulation and motion APIs; other domains can supply
+    adapters without placing the MCP entry point under ``lab``.
+
 ``utils``
     Shared utilities: the ``@configclass`` decorator, logging, math/tensor
     helpers, file/string/device helpers, and legacy computation import aliases.
@@ -60,6 +66,7 @@ The core ``embodichain`` framework is split into six top-level packages:
    lab
    toolkits
    learning
+   mcp
    utils
 
 Public API Coverage
@@ -84,4 +91,5 @@ documentation. CI runs this same checker after style checks and before tests.
    :maxdepth: 1
 
    public_api
+   embodichain/embodichain.mcp
    locomotion_tasks

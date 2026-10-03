@@ -39,6 +39,7 @@ EXPECTED_COMMANDS = {
     "decompose-urdf",
     "eval-policy",
     "list-task",
+    "mcp",
     "show-task",
     "preview-asset",
     "preview_lerobot_data",

@@ -407,6 +407,7 @@ def _resolve_gym_components(
     config: Mapping[str, object],
     *,
     base_dir: str | Path,
+    selected_backend: str | None = None,
 ) -> _ResolvedGymComponents:
     """Expand optional environment, embodiment, and scene selectors."""
     resolved = _owned_mapping(config, path="Gym config")
@@ -422,6 +423,7 @@ def _resolve_gym_components(
         resolved = _resolve_environment_component(
             resolved,
             base_dir=selected_base_dir,
+            selected_backend=selected_backend,
         )
 
     embodiment_selected = "embodiment" in resolved
