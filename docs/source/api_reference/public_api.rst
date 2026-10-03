@@ -2416,13 +2416,13 @@ embodichain.learning.rl.utils.optimizer
    get_registered_optimizer_names
    scheduler_needs_horizon
 
-embodichain.task_spec
+embodichain.gen_sim.task_spec
 ---------------------
 
 Pure, simulator-independent TaskSpec contracts, predicate evaluation, and
 content-addressed template persistence.
 
-.. currentmodule:: embodichain.task_spec
+.. currentmodule:: embodichain.gen_sim.task_spec
 
 .. autosummary::
 
@@ -2475,10 +2475,10 @@ content-addressed template persistence.
    validate_task_template
    validate_validation_certificate
 
-embodichain.task_spec.canonicalization
+embodichain.gen_sim.task_spec.canonicalization
 ---------------------------------------
 
-.. currentmodule:: embodichain.task_spec.canonicalization
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
 
 .. autosummary::
 
@@ -2488,10 +2488,10 @@ embodichain.task_spec.canonicalization
    canonicalize
    json_snapshot
 
-embodichain.task_spec.contracts
+embodichain.gen_sim.task_spec.contracts
 -------------------------------
 
-.. currentmodule:: embodichain.task_spec.contracts
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
 
 .. autosummary::
 
@@ -2509,10 +2509,10 @@ embodichain.task_spec.contracts
    TaskTemplate
    ValidationCertificate
 
-embodichain.task_spec.expressions
+embodichain.gen_sim.task_spec.expressions
 ---------------------------------
 
-.. currentmodule:: embodichain.task_spec.expressions
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
 
 .. autosummary::
 
@@ -2529,10 +2529,10 @@ embodichain.task_spec.expressions
    evaluate_temporal_condition
    lookup_observation
 
-embodichain.task_spec.registry
+embodichain.gen_sim.task_spec.registry
 ------------------------------
 
-.. currentmodule:: embodichain.task_spec.registry
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
 
 .. autosummary::
 
@@ -2540,14 +2540,14 @@ embodichain.task_spec.registry
    TaskSpecCacheError
    TaskSpecRegistry
 
-embodichain.task_spec.spec
+embodichain.gen_sim.task_spec.spec
 --------------------------
 
 The compact normative TaskSpec model.  It owns roles, conditions, long-horizon
 milestones, downstream requirements, and the semantic hash; runtime artifacts
 remain with their existing owners.
 
-.. currentmodule:: embodichain.task_spec.spec
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
 
 .. autosummary::
 
@@ -2558,10 +2558,10 @@ remain with their existing owners.
    TaskSpec
    TaskTemplate
 
-embodichain.task_spec.validation
+embodichain.gen_sim.task_spec.validation
 --------------------------------
 
-.. currentmodule:: embodichain.task_spec.validation
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
 
 .. autosummary::
 

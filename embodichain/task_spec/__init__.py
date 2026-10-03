@@ -14,119 +14,13 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pure, simulator-independent TaskSpec protocol and cache.
+"""Compatibility imports for the GenSim-owned TaskSpec protocol.
 
-The core object is :class:`TaskSpec`.  Scene bindings, execution attempts,
-certificates, and expansion receipts remain compatibility artifacts owned by
-their existing integrations and reference the TaskSpec semantic hash.
+New code should import from :mod:`embodichain.gen_sim.task_spec`.  This module
+remains a thin forwarding surface for callers that used the earlier path.
 """
 
 from __future__ import annotations
 
-from .canonicalization import (
-    CANONICALIZATION_VERSION,
-    canonical_hash,
-    canonical_json,
-    canonicalize,
-    json_snapshot,
-)
-from .contracts import (
-    ACTION_WITNESS_SCHEMA,
-    EXPANSION_MANIFEST_SCHEMA,
-    SCENE_INSTANCE_SCHEMA,
-    TASK_TEMPLATE_SCHEMA,
-    VALIDATION_CERTIFICATE_SCHEMA,
-    ActionWitness,
-    ExpansionManifest,
-    RequirementSpec,
-    RoleSpec,
-    SceneInstance,
-    ValidationCertificate,
-)
-from .expressions import (
-    EVALUATION_STATUSES,
-    KNOWN_PREDICATES,
-    PREDICATE_OPERATORS,
-    EvaluationStatus,
-    Predicate,
-    PredicateEvaluation,
-    PredicateSpec,
-    TemporalCondition,
-    TemporalSpec,
-    evaluate_predicate,
-    evaluate_temporal_condition,
-    lookup_observation,
-)
-from .registry import TaskSpecCache, TaskSpecCacheError, TaskSpecRegistry
-from .spec import (
-    MILESTONE_SCHEMA,
-    TASK_SPEC_SCHEMA,
-    MilestoneSpec,
-    TaskRequirement,
-    TaskSpec,
-    TaskTemplate,
-)
-from .validation import (
-    EvaluationReport,
-    TaskSpecValidationError,
-    build_validation_certificate,
-    evaluate_task_spec,
-    evaluate_task_template,
-    validate_action_witness,
-    validate_expansion_manifest,
-    validate_scene_instance,
-    validate_task_spec,
-    validate_task_template,
-    validate_validation_certificate,
-)
-
-__all__ = [
-    "ACTION_WITNESS_SCHEMA",
-    "CANONICALIZATION_VERSION",
-    "EVALUATION_STATUSES",
-    "EXPANSION_MANIFEST_SCHEMA",
-    "KNOWN_PREDICATES",
-    "MILESTONE_SCHEMA",
-    "PREDICATE_OPERATORS",
-    "SCENE_INSTANCE_SCHEMA",
-    "TASK_SPEC_SCHEMA",
-    "TASK_TEMPLATE_SCHEMA",
-    "VALIDATION_CERTIFICATE_SCHEMA",
-    "ActionWitness",
-    "EvaluationReport",
-    "EvaluationStatus",
-    "ExpansionManifest",
-    "MilestoneSpec",
-    "Predicate",
-    "PredicateEvaluation",
-    "PredicateSpec",
-    "RequirementSpec",
-    "RoleSpec",
-    "SceneInstance",
-    "TaskRequirement",
-    "TaskSpec",
-    "TaskSpecCache",
-    "TaskSpecCacheError",
-    "TaskSpecRegistry",
-    "TaskSpecValidationError",
-    "TaskTemplate",
-    "TemporalCondition",
-    "TemporalSpec",
-    "ValidationCertificate",
-    "build_validation_certificate",
-    "canonical_hash",
-    "canonical_json",
-    "canonicalize",
-    "evaluate_predicate",
-    "evaluate_task_spec",
-    "evaluate_task_template",
-    "evaluate_temporal_condition",
-    "json_snapshot",
-    "lookup_observation",
-    "validate_action_witness",
-    "validate_expansion_manifest",
-    "validate_scene_instance",
-    "validate_task_spec",
-    "validate_task_template",
-    "validate_validation_certificate",
-]
+from embodichain.gen_sim.task_spec import *  # noqa: F401,F403
+from embodichain.gen_sim.task_spec import __all__

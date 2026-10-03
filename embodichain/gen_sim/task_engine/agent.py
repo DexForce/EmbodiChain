@@ -24,7 +24,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from embodichain.task_spec import TaskSpec, TaskSpecCache
+from embodichain.gen_sim.task_spec import TaskSpec, TaskSpecCache
 
 from .contracts import (
     SCENE_REQUEST_SCHEMA,
@@ -213,7 +213,7 @@ class TaskAgent:
             cache: Optional ``TaskSpecCache``-compatible persistence backend.
 
         Returns:
-            A validated ``embodichain.task_spec.TaskSpec``.
+            A validated ``embodichain.gen_sim.task_spec.TaskSpec``.
         """
         from .task_spec import generate_task_spec
 

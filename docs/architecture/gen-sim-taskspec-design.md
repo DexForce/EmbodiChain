@@ -144,7 +144,7 @@ flowchart TD
 
 ## TaskSpec 的目标位置
 
-本分支已提供 `embodichain/task_spec/` 的纯标准库 TaskSpec 实现。它不导入仿真、Gym 或 Task Program，因此生成的 TaskSpec 可以独立缓存并被多个下游复用。场景实例、执行尝试、验证报告和扩增 receipt 不属于 TaskSpec 核心；它们只引用 TaskSpec 的 semantic hash。
+本分支已提供 `embodichain/gen_sim/task_spec/` 的纯标准库 TaskSpec 实现。它不导入仿真、Gym 或 Task Program，因此生成的 TaskSpec 可以独立缓存并被多个下游复用。场景实例、执行尝试、验证报告和扩增 receipt 不属于 TaskSpec 核心；它们只引用 TaskSpec 的 semantic hash。
 
 目标数据流如下：
 
@@ -179,7 +179,7 @@ flowchart TD
 
 | 对象 | 规范职责 | 当前最接近的实现 |
 |---|---|---|
-| `TaskSpec` | roles、init、goal、invariants、temporal、milestones、requirements 和规范 semantic hash | `embodichain.task_spec.TaskSpec`；由 Task Engine 从 `TaskCandidate` 生成 |
+| `TaskSpec` | roles、init、goal、invariants、temporal、milestones、requirements 和规范 semantic hash | `embodichain.gen_sim.task_spec.TaskSpec`；由 Task Engine 从 `TaskCandidate` 生成 |
 | Scene binding | 将 role ID 绑定到场景 UID、资产和真实初态 | 现有 SceneAdapter / Scene Engine；不写入 TaskSpec |
 | Execution evidence | program、integration、trajectory、运行状态和证据 | 现有 Task Program / Gym / data pipeline；引用 TaskSpec hash |
 | Expansion lineage | parent、operator、seed、children、失效检查 | 现有 Motion Expansion / host；引用 TaskSpec hash |
@@ -189,7 +189,7 @@ flowchart TD
 协议实现位于：
 
 ```text
-embodichain/task_spec/
+embodichain/gen_sim/task_spec/
   spec.py               # 紧凑 TaskSpec、milestones、requirements
   expressions.py        # 有限 predicate、bounded temporal AST 和状态
   canonicalization.py   # JSON canonicalization 与 SHA-256 semantic hash
@@ -365,7 +365,7 @@ candidate trajectory
 新增标准库依赖的纯协议包：
 
 ```text
-embodichain/task_spec/
+embodichain/gen_sim/task_spec/
   contracts.py
   expressions.py
   canonicalization.py
