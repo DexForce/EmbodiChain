@@ -22,8 +22,14 @@ import numpy as np
 import pytest
 
 from scripts.benchmark.rendering.offscreen_denoising import (
+    BenchmarkCfg,
     build_leaderboard_rows,
+    build_parser,
     compute_quality_metrics,
+    _aggregate_quality,
+    _build_sweep_leaderboard_rows,
+    _write_comparison_image,
+    run_environment_sweep,
     write_markdown_report,
 )
 
@@ -122,3 +128,91 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path) -> None:
     assert "## Time & Memory" in report
     assert "## Success & Other Metrics" in report
     assert "## Leaderboard" in report
+
+
+def test_benchmark_cfg_carries_rendering_dimensions_and_modes() -> None:
+    """External settings configure camera, environment, and denoising scope."""
+    cfg = BenchmarkCfg.from_mapping(
+        {
+            "resolution": "320x200",
+            "camera_count": 3,
+            "num_envs": 4,
+            "denoising": ["off", "nrd"],
+            "measure_frames": 4,
+            "quality_frames": 2,
+        }
+    )
+
+    assert cfg.resolution == (320, 200)
+    assert cfg.camera_count == 3
+    assert cfg.num_envs == 4
+    assert cfg.denoising_modes == ("off", "nrd")
+    assert cfg.resolved_reference_mode == "off"
+    assert cfg.to_dict()["resolution"] == "320x200"
+
+
+def test_benchmark_cfg_keeps_legacy_positional_order() -> None:
+    """The original worker settings remain valid for callers using keywords or positions."""
+    cfg = BenchmarkCfg(320, 200, 1, 2, 1, 3, 0, "cpu")
+
+    assert cfg.resolution == (320, 200)
+    assert cfg.measure_frames == 2
+    assert cfg.device == "cpu"
+
+
+def test_benchmark_cfg_rejects_invalid_parallel_settings() -> None:
+    """Invalid dimensions and duplicate denoising modes fail before startup."""
+    with pytest.raises(ValueError, match="camera_count"):
+        BenchmarkCfg(camera_count=0)
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        BenchmarkCfg(denoising_modes=("optix", "optix"))
+
+
+def test_aggregate_quality_counts_parallel_images() -> None:
+    """Quality aggregation traverses every configured environment and camera."""
+    frames = np.zeros((2, 2, 3, 8, 8, 4), dtype=np.uint8)
+    metrics = _aggregate_quality(
+        "optix", frames, frames.copy(), fps=10.0, expected_frames=2
+    )
+
+    assert metrics["success_rate"] == 100.0
+    assert metrics["rendered_images"] == 12
+    assert metrics["camera_count"] == 3
+    assert metrics["num_envs"] == 2
+
+
+def test_comparison_image_supports_multiple_cameras(tmp_path) -> None:
+    """The comparison artifact keeps one row for each first-environment camera."""
+    import cv2
+
+    frames = np.zeros((2, 1, 2, 8, 8, 4), dtype=np.uint8)
+    frames[:, :, 1, :, :, 0] = 255
+    for mode in ("optix", "nrd"):
+        np.savez_compressed(tmp_path / f"{mode}_frames.npz", frames=frames)
+
+    path = _write_comparison_image(tmp_path, frame_index=0)
+    image = cv2.imread(str(path))
+    assert image is not None
+    assert image.shape[0] == 2 * 2 * 8
+
+
+def test_environment_sweep_parser_and_leaderboard() -> None:
+    """A sweep keeps all environment counts while ranking modes by averages."""
+    args = build_parser().parse_args(["--env-sweep", "1", "4", "8"])
+    assert args.env_sweep == [1, 4, 8]
+
+    rows = _build_sweep_leaderboard_rows(
+        [
+            {"mode": "optix", "success_rate": 100.0, "ssim": 1.0, "fps": 50.0},
+            {"mode": "optix", "success_rate": 100.0, "ssim": 1.0, "fps": 30.0},
+            {"mode": "nrd", "success_rate": 100.0, "ssim": 0.8, "fps": 70.0},
+            {"mode": "nrd", "success_rate": 100.0, "ssim": 0.8, "fps": 60.0},
+        ]
+    )
+    assert [row["algorithm"] for row in rows] == ["optix", "nrd"]
+
+
+def test_environment_sweep_rejects_non_positive_counts(tmp_path) -> None:
+    """Sweep validation happens before any simulation worker is started."""
+    with pytest.raises(ValueError, match="positive integers"):
+        run_environment_sweep(BenchmarkCfg(), [1, 0], tmp_path)
