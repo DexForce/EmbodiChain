@@ -21,8 +21,12 @@ from __future__ import annotations
 import pytest
 
 from embodichain.lab.scripts.run_env import (
+    CollectionPlan,
+    CollectionSelection,
     _create_parser,
+    _pad_expansion_recipe_indices,
     _resolve_expansion_request,
+    resolve_collection_plan,
 )
 from embodichain.lab.gym.utils.gym_utils import _apply_expansion_runtime_overlay
 from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
@@ -44,13 +48,23 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
         "task.ur5.yaml"
     )
     assert request is not None
-    profile, candidate_indices, _ = request
+    profile, candidate_indices, _, collection = request
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "repeated_cube_pick_place"
     assert profile.source.call_count == 6
     assert profile.scene_randomization.reference_family_count == 4
     assert profile.trajectory.spatial.joint_offset_scale == 0.005
-    assert candidate_indices == (0, 16, 32, 48)
+    assert candidate_indices == ()
+    assert collection["target_episodes"] == 64
+    plan = resolve_collection_plan(
+        args=_create_parser().parse_args(
+            ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+        ),
+        gym_config={},
+        expansion_collection={"target_episodes": 64},
+    )
+    assert plan.target_episodes == 64
+    assert plan.selection.take(0, 4) == (0, 1, 2, 3)
 
 
 def test_open_drawer_policy_component_merges_phase_binding() -> None:
@@ -58,13 +72,14 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
         "embodichain_tasks/configs/tasks/manipulation/open_drawer/" "task.ur5.yaml"
     )
     assert request is not None
-    profile, candidate_indices, _ = request
+    profile, candidate_indices, _, collection = request
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "slide_open_drawer"
     assert profile.source.call_count == 1
     assert profile.source.phase_permissions["pull"] == ("joint_residual",)
     assert profile.visual.enabled is False
-    assert candidate_indices == (0, 1, 2)
+    assert candidate_indices == ()
+    assert collection["target_episodes"] == 3
 
 
 def test_task_expansion_config_accepts_local_candidate_override() -> None:
@@ -73,7 +88,10 @@ def test_task_expansion_config_accepts_local_candidate_override() -> None:
         "task.ur5.yaml"
     )
     config = load_config(task_path)
-    config["expansion"]["candidate_indices"] = [32]
+    config["expansion"]["collection"] = {
+        "target_episodes": 1,
+        "selection": {"mode": "explicit", "recipe_indices": [32]},
+    }
     args = _create_parser().parse_args(
         ["--gym-config", str(task_path), "--headless", "--device", "cpu"]
     )
@@ -81,8 +99,142 @@ def test_task_expansion_config_accepts_local_candidate_override() -> None:
     request = _resolve_expansion_request(args, config)
 
     assert request is not None
-    assert request[1] == (32,)
+    assert request[1] == ()
     assert request[2].name == "repeated_pick_place.yaml"
+    assert request[3]["target_episodes"] == 1
+    assert request[3]["selection"]["recipe_indices"] == [32]
+
+
+def test_collection_plan_cli_recipe_override_uses_explicit_mode() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--max_episodes",
+            "4",
+            "--expansion-recipe-indices",
+            "0",
+            "16",
+            "32",
+            "48",
+            "--headless",
+            "--device",
+            "cpu",
+        ]
+    )
+    plan = resolve_collection_plan(
+        args,
+        {},
+        expansion_collection={
+            "target_episodes": 64,
+            "selection": {"mode": "sequential", "start_recipe_index": 0},
+        },
+        legacy_recipe_indices=(0, 16, 32, 48),
+    )
+
+    assert plan.target_episodes == 4
+    assert plan.selection.mode == "explicit"
+    assert plan.selection.recipe_indices == (0, 16, 32, 48)
+
+
+def test_collection_plan_rejects_non_integer_numeric_values() -> None:
+    args = _create_parser().parse_args(
+        ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+    )
+    with pytest.raises(ValueError, match="target_episodes"):
+        resolve_collection_plan(
+            args,
+            {"collection": {"target_episodes": 4.5}},
+        )
+
+
+def test_expansion_recipe_padding_preserves_selected_rows() -> None:
+    assert _pad_expansion_recipe_indices((4, 16), num_envs=4) == (4, 16, 16, 16)
+
+
+def test_collection_plan_separates_target_from_parallel_capacity() -> None:
+    plan = CollectionPlan(64, 3, CollectionSelection("sequential"))
+    assert plan.batch_count(16) == 4
+    assert plan.selection.take(16, 4) == (16, 17, 18, 19)
+
+
+def test_collection_plan_rejects_explicit_target_mismatch() -> None:
+    with pytest.raises(ValueError, match="equal target_episodes"):
+        CollectionPlan(
+            3,
+            selection=CollectionSelection("explicit", recipe_indices=(0, 1)),
+        )
+
+
+def test_collection_plan_prefers_task_target_over_legacy_environment_default() -> None:
+    args = _create_parser().parse_args(
+        ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+    )
+    plan = resolve_collection_plan(
+        args,
+        {"max_episodes": 1, "collection": {"target_episodes": 4}},
+    )
+    assert plan.target_episodes == 4
+
+
+def test_collection_plan_cli_target_overrides_task_target() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--headless",
+            "--device",
+            "cpu",
+            "--max_episodes",
+            "5",
+        ]
+    )
+    plan = resolve_collection_plan(args, {"collection": {"target_episodes": 4}})
+
+    assert plan.target_episodes == 5
+
+
+def test_collection_plan_rejects_conflicting_task_and_expansion_targets() -> None:
+    args = _create_parser().parse_args(
+        ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+    )
+    with pytest.raises(ValueError, match="declared more than once"):
+        resolve_collection_plan(
+            args,
+            {"collection": {"target_episodes": 4}},
+            expansion_collection={"target_episodes": 8},
+        )
+
+
+def test_cli_collection_target_overrides_task_target() -> None:
+    args = _create_parser().parse_args(
+        [
+            "--gym-config",
+            "task.yaml",
+            "--max_episodes",
+            "5",
+            "--headless",
+            "--device",
+            "cpu",
+        ]
+    )
+
+    plan = resolve_collection_plan(
+        args,
+        {"collection": {"target_episodes": 64}},
+    )
+
+    assert plan.target_episodes == 5
+
+
+def test_collection_plan_maps_legacy_max_episodes_as_fallback() -> None:
+    args = _create_parser().parse_args(
+        ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
+    )
+    plan = resolve_collection_plan(args, {"max_episodes": 5})
+
+    assert plan.target_episodes == 5
+    assert plan.selection.mode == "sequential"
 
 
 def test_task_expansion_config_applies_runtime_overlay() -> None:

@@ -976,8 +976,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1210,
-          "end_line": 1210,
+          "start_line": 1457,
+          "end_line": 1457,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -3819,8 +3819,8 @@
         {
           "path": "embodichain/lab/scripts/run_env.py",
           "symbol": "cli",
-          "start_line": 1023,
-          "end_line": 1023,
+          "start_line": 1628,
+          "end_line": 1628,
           "excerpt": "    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)"
         }
       ]
@@ -3862,15 +3862,15 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1244,
-          "end_line": 1249,
-          "excerpt": "    cfg: EmbodiedEnvCfg = config_to_cfg(\n        gym_config,\n        manager_modules=get_manager_modules(),\n        source_path=gym_config_source_path,\n        task_program_path_override=getattr(args, \"task_program\", None),\n    )"
+          "start_line": 1497,
+          "end_line": 1502,
+          "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
           "path": "embodichain/lab/scripts/run_env.py",
           "symbol": "cli",
-          "start_line": 1028,
-          "end_line": 1028,
+          "start_line": 1680,
+          "end_line": 1680,
           "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]

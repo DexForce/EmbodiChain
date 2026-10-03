@@ -109,6 +109,25 @@ except ImportError:
     __all__ = []
 
 
+if LEROBOT_AVAILABLE:
+
+    class _ImageCompressionLeRobotDataset(LeRobotDataset):
+        """LeRobot dataset that overrides image PNG compression on request."""
+
+        def _save_image(self, image: Any, fpath: Path, compress_level: int = 1) -> None:
+            # LeRobot passes level 6 for image features and level 1 for the
+            # temporary PNGs used by video features.  Keep the latter at its
+            # upstream default so ``image_compress_level`` only tunes image
+            # feature writes.
+            image_compress_level = getattr(self, "image_compress_level", None)
+            if image_compress_level is not None and compress_level == 6:
+                compress_level = image_compress_level
+            super()._save_image(image, fpath, compress_level)
+
+else:
+    _ImageCompressionLeRobotDataset = None
+
+
 class LeRobotRecorder(Functor):
     """Functor for recording episodes in LeRobot format.
 
@@ -135,6 +154,9 @@ class LeRobotRecorder(Functor):
                 - use_videos: Whether to save videos
                 - image_writer_threads: Number of threads for image writing
                 - image_writer_processes: Number of processes for image writing
+                - image_compress_level: Optional PNG compression level (0-9)
+                  for image features; video temporary PNGs keep LeRobot's
+                  default level 1
             env: The environment instance
         """
         if not LEROBOT_AVAILABLE:
@@ -184,6 +206,9 @@ class LeRobotRecorder(Functor):
 
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
+        self.image_compress_level = self._parse_image_compress_level(
+            params.get("image_compress_level")
+        )
 
         # Async image writing (lerobot official AsyncImageWriter).
         # When > 0, per-frame PNG writes are offloaded to a thread/process pool
@@ -226,6 +251,31 @@ class LeRobotRecorder(Functor):
 
         # Initialize dataset
         self._initialize_dataset()
+
+    @staticmethod
+    def _parse_image_compress_level(value: Any) -> int | None:
+        """Validate an optional lossless PNG compression level.
+
+        Args:
+            value: ``None`` to preserve LeRobot defaults, or an integer from
+                0 through 9.
+
+        Returns:
+            The validated compression level, or ``None``.
+
+        Raises:
+            TypeError: If ``value`` is not ``None`` or an integer.
+            ValueError: If the integer is outside the PNG level range.
+        """
+        if value is None:
+            return None
+        if type(value) is not int:
+            raise TypeError(
+                "image_compress_level must be None or an integer from 0 to 9."
+            )
+        if not 0 <= value <= 9:
+            raise ValueError("image_compress_level must be between 0 and 9.")
+        return value
 
     @staticmethod
     def _parse_action_contract(value: Any) -> dict[str, Any] | None:
@@ -1464,7 +1514,12 @@ class LeRobotRecorder(Functor):
 
         features = self._build_features()
 
-        self.dataset = LeRobotDataset.create(
+        dataset_cls = (
+            _ImageCompressionLeRobotDataset
+            if self.image_compress_level is not None
+            else LeRobotDataset
+        )
+        self.dataset = dataset_cls.create(
             repo_id=dataset_name,
             fps=self.dataset_fps,
             root=str(self.dataset_full_path),
@@ -1475,6 +1530,11 @@ class LeRobotRecorder(Functor):
             image_writer_processes=self.image_writer_processes,
             image_writer_threads=self.image_writer_threads,
         )
+        if self.image_compress_level is not None:
+            # ``LeRobotDataset.create`` constructs the object with
+            # ``cls.__new__(cls)``. Set the override after create, before the
+            # first frame reaches ``_save_image``.
+            self.dataset.image_compress_level = self.image_compress_level
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
         # Set up the depth sidecar manager now that the dataset root and fps are

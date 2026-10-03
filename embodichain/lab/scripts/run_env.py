@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 import select
@@ -60,6 +61,147 @@ if TYPE_CHECKING:
 
 _REPLAY_CONTROL_POLL_INTERVAL = 0.05
 _ACTIVITY_BAR_WIDTH = 10
+
+
+@dataclass(frozen=True)
+class CollectionSelection:
+    """Select logical recipes without encoding batch boundaries."""
+
+    mode: str = "sequential"
+    start_recipe_index: int = 0
+    recipe_indices: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"sequential", "explicit"}:
+            raise ValueError("collection.selection.mode must be sequential or explicit")
+        if type(self.start_recipe_index) is not int or self.start_recipe_index < 0:
+            raise ValueError("start_recipe_index must be a non-negative integer")
+        indices = tuple(self.recipe_indices)
+        if any(type(index) is not int or index < 0 for index in indices):
+            raise ValueError("recipe_indices must contain non-negative integers")
+        if len(set(indices)) != len(indices):
+            raise ValueError("recipe_indices must be unique")
+        if self.mode == "explicit" and not indices:
+            raise ValueError("explicit selection requires recipe_indices")
+        if self.mode == "sequential" and indices:
+            raise ValueError("sequential selection cannot declare recipe_indices")
+        object.__setattr__(self, "recipe_indices", indices)
+
+    def take(self, cursor: int, count: int) -> tuple[int, ...]:
+        """Return the next logical recipe IDs for one batch."""
+        if type(cursor) is not int or cursor < 0:
+            raise ValueError("selection cursor must be a non-negative integer")
+        if type(count) is not int or count < 0:
+            raise ValueError("selection count must be a non-negative integer")
+        if self.mode == "explicit":
+            selected = self.recipe_indices[cursor : cursor + count]
+            if len(selected) != count:
+                raise ValueError(
+                    "explicit recipe selection is shorter than target_episodes"
+                )
+            return selected
+        return tuple(
+            self.start_recipe_index + cursor + offset for offset in range(count)
+        )
+
+
+@dataclass(frozen=True)
+class CollectionPlan:
+    """Unified target, retry, and logical recipe selection policy."""
+
+    target_episodes: int
+    max_attempts: int = 3
+    selection: CollectionSelection = CollectionSelection()
+
+    def __post_init__(self) -> None:
+        if type(self.target_episodes) is not int or self.target_episodes < 0:
+            raise ValueError("collection.target_episodes must be non-negative")
+        if type(self.max_attempts) is not int or self.max_attempts < 1:
+            raise ValueError("collection.max_attempts must be at least 1")
+        if not isinstance(self.selection, CollectionSelection):
+            raise TypeError("collection.selection must be a CollectionSelection")
+        if (
+            self.selection.mode == "explicit"
+            and len(self.selection.recipe_indices) != self.target_episodes
+        ):
+            raise ValueError("explicit recipe count must equal target_episodes")
+
+    def batch_count(self, num_envs: int) -> int:
+        """Return the number of batches needed at a given parallel width."""
+        if type(num_envs) is not int or num_envs < 1:
+            raise ValueError("num_envs must be at least 1")
+        return (self.target_episodes + num_envs - 1) // num_envs
+
+
+def _mapping_or_empty(value: object, name: str) -> Mapping[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a mapping")
+    return value
+
+
+def resolve_collection_plan(
+    args: Any,
+    gym_config: Mapping[str, Any],
+    *,
+    expansion_collection: Mapping[str, Any] | None = None,
+    legacy_recipe_indices: Sequence[int] = (),
+) -> CollectionPlan:
+    """Resolve the common collection policy for ordinary and Expansion runs."""
+    task_collection = _mapping_or_empty(gym_config.get("collection"), "collection")
+    expansion = _mapping_or_empty(expansion_collection, "expansion.collection")
+    cli_target = getattr(args, "max_episodes", None)
+    target_values = [
+        value
+        for value in (
+            task_collection.get("target_episodes"),
+            expansion.get("target_episodes"),
+        )
+        if value is not None
+    ]
+    legacy_target = gym_config.get("max_episodes")
+    if cli_target is not None:
+        target = cli_target
+    elif target_values:
+        if len(set(target_values)) != 1:
+            raise ValueError("collection.target_episodes is declared more than once")
+        target = target_values[0]
+    else:
+        target = 1 if legacy_target is None else legacy_target
+    attempts = expansion.get(
+        "max_attempts",
+        task_collection.get("max_attempts", gym_config.get("demo_max_attempts", 3)),
+    )
+    selection_data = _mapping_or_empty(
+        expansion.get("selection", task_collection.get("selection", {})),
+        "collection.selection",
+    )
+    legacy_indices = tuple(legacy_recipe_indices)
+    declared_indices = selection_data.get("recipe_indices")
+    if declared_indices is not None and legacy_indices:
+        if tuple(declared_indices) != legacy_indices:
+            raise ValueError(
+                "collection.selection.recipe_indices conflicts with legacy candidate_indices"
+            )
+    if selection_data or legacy_indices:
+        selection_mode = selection_data.get("mode")
+        declared_recipe_indices = selection_data.get("recipe_indices")
+        if legacy_indices:
+            # CLI and legacy candidate-index overrides select logical recipes
+            # explicitly, even when the referenced profile defaults to the
+            # sequential schedule.
+            selection_mode = "explicit"
+            if declared_recipe_indices is None:
+                declared_recipe_indices = legacy_indices
+        selection = CollectionSelection(
+            mode=selection_mode or "sequential",
+            start_recipe_index=selection_data.get("start_recipe_index", 0),
+            recipe_indices=tuple(declared_recipe_indices or ()),
+        )
+    else:
+        selection = CollectionSelection()
+    return CollectionPlan(target, attempts, selection)
 
 
 def _indeterminate_progress(actions: Iterable[Any], description: str) -> Iterator[Any]:
@@ -187,8 +329,13 @@ def _reset_episode_rows(
 def _abort_pending_episode(
     env: Any,
     env_ids: Sequence[int] | torch.Tensor | None = None,
+    *,
+    count_discard: bool = True,
 ) -> None:
     """Discard buffered data before retrying or closing an environment."""
+    stats = getattr(_env_target(env), "_collection_stats", None)
+    if count_discard and isinstance(stats, dict):
+        stats["discard_reset_count"] = stats.get("discard_reset_count", 0) + 1
     _reset_episode_rows(env, env_ids, save_data=False)
 
 
@@ -197,6 +344,9 @@ def _commit_pending_episode(
     save_env_ids: Sequence[int] | torch.Tensor | None,
 ) -> None:
     """Commit selected dataset rows through one reset of the full vector batch."""
+    stats = getattr(_env_target(env), "_collection_stats", None)
+    if isinstance(stats, dict):
+        stats["commit_reset_count"] = stats.get("commit_reset_count", 0) + 1
     selected = _normalize_save_env_ids(env, save_env_ids)
     target = _env_target(env)
     all_env_ids = tuple(range(int(getattr(target, "num_envs", 1))))
@@ -375,6 +525,9 @@ def generate_function(
         _abort_pending_episode(env)
 
     for attempt in range(1, max_attempts + 1):
+        stats = getattr(_env_target(env), "_collection_stats", None)
+        if isinstance(stats, dict):
+            stats["attempts"] = stats.get("attempts", 0) + 1
         commit_succeeded = False
         try:
             result: DemoEpisodeResult = execute_demo_episode(
@@ -495,10 +648,35 @@ def _resolve_expansion_resource(anchor: Path, value: str) -> Path:
     return (anchor.parent / path).resolve()
 
 
+def _load_expansion_collection(path: Path) -> Mapping[str, Any]:
+    """Load the optional collection section from an expansion declaration."""
+    from embodichain.utils.utility import load_config
+
+    data = load_config(path)
+    return data.get("collection", {}) if isinstance(data, Mapping) else {}
+
+
+def _pad_expansion_recipe_indices(
+    selected: Sequence[int], *, num_envs: int
+) -> tuple[int, ...]:
+    """Fill an undersized physical batch without changing committed recipes.
+
+    Expansion planning remains vectorized across the constructed environment.
+    Rows beyond the collection target therefore receive a repeat of the last
+    selected recipe and are discarded at the commit boundary.
+    """
+    selected = tuple(selected)
+    if not selected:
+        raise ValueError("an expansion batch must select at least one recipe")
+    if type(num_envs) is not int or num_envs < len(selected):
+        raise ValueError("num_envs must cover the selected expansion recipes")
+    return selected + (selected[-1],) * (num_envs - len(selected))
+
+
 def _resolve_expansion_request(
     args: Any,
     gym_config: Mapping[str, Any],
-) -> tuple[Any, tuple[int, ...], Path] | None:
+) -> tuple[Any, tuple[int, ...], Path, Mapping[str, Any]] | None:
     """Resolve a task-bound or CLI-selected Expansion Profile."""
     from embodichain.utils.config_paths import resolve_config_path
     from embodichain.utils.utility import load_config
@@ -521,6 +699,8 @@ def _resolve_expansion_request(
             "policy",
             "overrides",
             "runtime",
+            "collection",
+            "selection",
             "candidate_indices",
         }
         if unknown:
@@ -535,7 +715,7 @@ def _resolve_expansion_request(
     profile_value = cli_profile if cli_profile is not None else binding_profile
     use_binding_policy = binding_policy is not None and cli_profile is None
     if profile_value is None and not use_binding_policy:
-        if getattr(args, "expansion_candidate_indices", None) is not None:
+        if getattr(args, "expansion_recipe_indices", None) is not None:
             raise ValueError("expansion candidate indices require a profile")
         return None
     if use_binding_policy:
@@ -578,8 +758,14 @@ def _resolve_expansion_request(
 
         if not isinstance(policy_data, Mapping):
             raise ValueError("expansion policy component must be a mapping")
-        profile = CombinedExpansionProfile.from_mapping(merge(policy_data, overrides))
+        policy_collection = policy_data.get("collection", {})
+        if not isinstance(policy_collection, Mapping):
+            raise ValueError("expansion.collection must be a mapping")
+        profile_data = dict(policy_data)
+        profile_data.pop("collection", None)
+        profile = CombinedExpansionProfile.from_mapping(merge(profile_data, overrides))
         profile_path = expansion_config_path or task_path
+        expansion_collection = binding.get("collection", policy_collection)
     else:
         if (
             not isinstance(profile_value, str)
@@ -601,14 +787,26 @@ def _resolve_expansion_request(
             )
         profile_path = profile_path.resolve()
         profile = load_expansion_profile(profile_path)
-    candidate_values = getattr(args, "expansion_candidate_indices", None)
+        profile_collection = _load_expansion_collection(profile_path)
+        expansion_collection = (
+            binding.get("collection", profile_collection)
+            if binding is not None
+            else profile_collection
+        )
+    candidate_values = getattr(args, "expansion_recipe_indices", None)
+    if candidate_values is None:
+        candidate_values = getattr(args, "expansion_candidate_indices", None)
     if candidate_values is None and binding is not None:
         candidate_values = binding.get("candidate_indices")
+        if candidate_values is None:
+            selection = binding.get("selection")
+            if isinstance(selection, Mapping):
+                candidate_values = selection.get("recipe_indices")
     if candidate_values is None:
         candidate_indices: tuple[int, ...] = ()
     else:
         if not isinstance(candidate_values, (list, tuple)):
-            raise ValueError("expansion.candidate_indices must be a sequence")
+            raise ValueError("expansion.selection.recipe_indices must be a sequence")
         candidate_indices = tuple(candidate_values)
         if not candidate_indices or len(set(candidate_indices)) != len(
             candidate_indices
@@ -618,37 +816,38 @@ def _resolve_expansion_request(
             raise ValueError(
                 "expansion candidate indices must be non-negative integers"
             )
-    return profile, candidate_indices, profile_path
+    if not isinstance(expansion_collection, Mapping):
+        raise ValueError("expansion.collection must be a mapping")
+    return profile, candidate_indices, profile_path, expansion_collection
 
 
-def _expansion_candidate_indices(
+def _validate_expansion_collection_plan(
     profile: Any,
-    configured: tuple[int, ...],
+    plan: CollectionPlan,
     *,
     num_envs: int,
-) -> tuple[int, ...]:
-    """Resolve and validate candidate batch starts for one profile."""
+) -> None:
+    """Validate collection capacity and logical recipe selection before launch."""
     from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 
+    if not isinstance(profile, CombinedExpansionProfile):
+        raise ValueError(
+            "run-task expansion requires a CombinedExpansionProfile; "
+            "direct source profiles need a source-specific provider host"
+        )
     if num_envs < 1:
         raise ValueError("expansion requires at least one environment")
-    if isinstance(profile, CombinedExpansionProfile):
-        profile.validate_for_num_envs(num_envs)
-        total = (
-            profile.scene_randomization.reference_family_count
-            * profile.affordance.branches_per_family
-            * profile.trajectory.variants_per_family
-        )
-        indices = configured or tuple(range(0, total, num_envs))
-        if any(index >= total for index in indices):
-            raise ValueError(
-                "combined expansion candidate index exceeds the recipe budget"
-            )
-        return indices
-    raise ValueError(
-        "run-task expansion requires a CombinedExpansionProfile; "
-        "direct source profiles need a source-specific provider host"
+    profile.validate_for_num_envs(num_envs)
+    total = (
+        profile.scene_randomization.reference_family_count
+        * profile.affordance.branches_per_family
+        * profile.trajectory.variants_per_family
     )
+    if plan.selection.mode == "sequential":
+        if plan.selection.start_recipe_index + plan.target_episodes > total:
+            raise ValueError("collection selection exceeds the expansion recipe budget")
+    elif any(index >= total for index in plan.selection.recipe_indices):
+        raise ValueError("collection selection contains an out-of-range recipe")
 
 
 def _run_expansion(
@@ -656,7 +855,7 @@ def _run_expansion(
     args: Any,
     gym_config: Mapping[str, Any],
 ) -> None:
-    """Run task-bound trajectory expansion batches through the Gym lifecycle."""
+    """Run expansion candidates through the shared episode collection plan."""
     from embodichain.lab.sim.motion.expansion import (
         CombinedExpansionProfile,
         CubeInitialPoseProvider,
@@ -667,16 +866,19 @@ def _run_expansion(
     request = _resolve_expansion_request(args, gym_config)
     if request is None:
         raise ValueError("run_expansion requires an expansion profile")
-    profile, configured_indices, profile_path = request
+    profile, configured_indices, profile_path, expansion_collection = request
     if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError("run-task expansion requires a CombinedExpansionProfile")
     target = _env_target(env)
     num_envs = int(getattr(target, "num_envs", 1))
-    indices = _expansion_candidate_indices(
-        profile,
-        configured_indices,
-        num_envs=num_envs,
+    profile.validate_for_num_envs(num_envs)
+    plan = resolve_collection_plan(
+        args,
+        gym_config,
+        expansion_collection=expansion_collection,
+        legacy_recipe_indices=configured_indices,
     )
+    _validate_expansion_collection_plan(profile, plan, num_envs=num_envs)
     if getattr(args, "disable_sensor", False) and profile.visual.enabled:
         raise ValueError(
             "--disable-sensor cannot be used with a combined profile that "
@@ -685,18 +887,14 @@ def _run_expansion(
 
     visual_registry = (
         VisualProfileRegistry.from_yaml(
-            _resolve_expansion_resource(
-                profile_path,
-                profile.visual.profile_file,
-            )
+            _resolve_expansion_resource(profile_path, profile.visual.profile_file)
         )
         if profile.visual.enabled
         else None
     )
     if profile.scene_randomization.enabled:
         family_path = _resolve_expansion_resource(
-            profile_path,
-            profile.scene_randomization.profile_file,
+            profile_path, profile.scene_randomization.profile_file
         )
         families = CubeInitialPoseProvider.from_yaml(family_path).enumerate(
             profile.scene_randomization.reference_family_count
@@ -706,102 +904,123 @@ def _run_expansion(
             profile.scene_randomization.reference_family_count
         )
     recipes = enumerate_candidate_recipes(profile, families=families)
+    if plan.selection.mode == "sequential":
+        if plan.selection.start_recipe_index + plan.target_episodes > len(recipes):
+            raise ValueError("collection selection exceeds the expansion recipe budget")
+    elif any(index >= len(recipes) for index in plan.selection.recipe_indices):
+        raise ValueError("collection selection contains an out-of-range recipe")
 
     output_dir = getattr(args, "expansion_output_dir", None)
     if output_dir is None:
-        output_dir = (
-            profile.persistence.output_dir
-            if isinstance(profile, CombinedExpansionProfile)
-            else str(profile_path.parent / "expansion-output")
-        )
+        output_dir = profile.persistence.output_dir
     output_path = Path(output_dir).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
+    stats: dict[str, Any] = {
+        "target_episodes": plan.target_episodes,
+        "planned_episodes": plan.target_episodes,
+        "committed_episodes": 0,
+        "rejected_episodes": 0,
+        "attempts": 0,
+        "batch_count": 0,
+        "prepare_reset_count": 0,
+        "commit_reset_count": 0,
+        "discard_reset_count": 0,
+    }
+    setattr(target, "_collection_stats", stats)
     manifest: dict[str, Any] = {
         "profile": str(profile_path),
-        "candidate_indices": list(indices),
+        "target_episodes": plan.target_episodes,
+        "planned_episodes": plan.target_episodes,
+        "selection": {
+            "mode": plan.selection.mode,
+            "start_recipe_index": plan.selection.start_recipe_index,
+            "recipe_indices": list(plan.selection.recipe_indices),
+        },
         "num_envs": num_envs,
         "batches": [],
     }
-    successful_batches = 0
-
-    for candidate_index in indices:
-        if profile.scene_randomization.enabled or profile.visual.enabled:
-            family_by_id = {family.reference_family_id: family for family in families}
-            batch_recipes = tuple(
-                recipes[(candidate_index + row) % len(recipes)]
-                for row in range(num_envs)
-            )
-            reset_payload: dict[str, Any] = {}
-            if profile.scene_randomization.enabled:
-                pose = torch.tensor(
+    committed = 0
+    cursor = 0
+    while committed < plan.target_episodes:
+        batch_size = min(num_envs, plan.target_episodes - committed)
+        selected = plan.selection.take(cursor, batch_size)
+        if any(index >= len(recipes) for index in selected):
+            raise ValueError("collection selection contains an out-of-range recipe")
+        full_recipe_indices = _pad_expansion_recipe_indices(selected, num_envs=num_envs)
+        batch_recipes = tuple(recipes[index] for index in full_recipe_indices)
+        reset_payload: dict[str, Any] = {}
+        family_by_id = {family.reference_family_id: family for family in families}
+        if profile.scene_randomization.enabled:
+            reset_payload["cube_pose"] = torch.tensor(
+                [
                     [
-                        [
-                            *family_by_id[recipe.reference_family_id].cube_position,
-                            *family_by_id[
-                                recipe.reference_family_id
-                            ].cube_quaternion_xyzw,
-                        ]
-                        for recipe in batch_recipes
-                    ],
-                    dtype=torch.float32,
-                    device=target.device,
-                )
-                reset_payload["cube_pose"] = pose
-            assignments = {
-                row: recipes[(candidate_index + row) % len(recipes)].visual_profile_id
-                for row in range(num_envs)
-            }
-            if profile.visual.enabled:
-                reset_payload.update(
-                    {
-                        "visual_registry": visual_registry,
-                        "visual_assignments": assignments,
-                        "visual_seed": (args.seed if args.seed is not None else 7)
-                        + candidate_index,
-                    }
-                )
+                        *family_by_id[recipe.reference_family_id].cube_position,
+                        *family_by_id[recipe.reference_family_id].cube_quaternion_xyzw,
+                    ]
+                    for recipe in batch_recipes
+                ],
+                dtype=torch.float32,
+                device=target.device,
+            )
+        if profile.visual.enabled:
+            reset_payload.update(
+                {
+                    "visual_registry": visual_registry,
+                    "visual_assignments": {
+                        row: recipe.visual_profile_id
+                        for row, recipe in enumerate(batch_recipes)
+                    },
+                    "visual_seed": (args.seed if args.seed is not None else 7) + cursor,
+                }
+            )
+        if reset_payload:
             _configure_expansion_reset_event(env, reset_payload)
-
+        stats["prepare_reset_count"] += 1
         env.reset(seed=args.seed, options={"save_data": False})
         batch_records: list[Any] = []
         generated = generate_function(
             env,
-            time_id=candidate_index,
+            time_id=cursor,
             save_path=str(output_path),
             save_video=getattr(args, "expansion_save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
-            save_env_ids=tuple(range(num_envs)),
-            max_attempts=int(gym_config.get("demo_max_attempts", 3)),
+            save_env_ids=tuple(range(batch_size)),
+            max_attempts=plan.max_attempts,
             reset_before=False,
             expansion_profile=profile,
-            expansion_candidate_index=candidate_index,
-            _expansion_record_sink=batch_records.extend,
+            expansion_candidate_index=selected[0] if selected else 0,
+            expansion_recipe_indices=full_recipe_indices,
+            _expansion_record_sink=lambda records: batch_records.extend(
+                record
+                for record in records
+                if getattr(record, "env_id", None) is None
+                or int(record.env_id) < batch_size
+            ),
         )
+        stats["batch_count"] += 1
+        batch_record = {
+            "recipe_indices": list(selected),
+            "status": "accepted" if generated else "rejected",
+            "records": [record.to_metadata() for record in batch_records],
+        }
+        manifest["batches"].append(batch_record)
         if not generated:
-            manifest["batches"].append(
-                {
-                    "candidate_index": candidate_index,
-                    "status": "rejected",
-                    "records": [record.to_metadata() for record in batch_records],
-                }
+            stats["rejected_episodes"] += batch_size
+            manifest.update(stats)
+            (output_path / "expansion_manifest.json").write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
             )
-            continue
-        successful_batches += 1
-        manifest["batches"].append(
-            {
-                "candidate_index": candidate_index,
-                "status": "accepted",
-                "records": [record.to_metadata() for record in batch_records],
-            }
-        )
-    manifest["accepted_batches"] = successful_batches
-    manifest["rejected_batches"] = len(indices) - successful_batches
+            raise RuntimeError(
+                f"Failed to collect expansion batch at recipe cursor {cursor} "
+                f"after {plan.max_attempts} attempts"
+            )
+        committed += batch_size
+        cursor += batch_size
+        stats["committed_episodes"] = committed
+    manifest.update(stats)
     (output_path / "expansion_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True),
-        encoding="utf-8",
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
-    if successful_batches == 0:
-        raise RuntimeError("all expansion candidate batches were rejected")
 
 
 def replay(env, trajectory_path: str, mode: str = "kinematic") -> None:
@@ -1143,17 +1362,23 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
         _run_expansion(env, args, gym_config)
         return
 
-    # Prepare one clean scene. max_episodes counts persisted per-environment
-    # episodes, not vector batches. Every successful generate_function call
-    # commits exactly the selected rows and leaves the next batch ready to plan.
-    _abort_pending_episode(env)
-    max_episodes = int(gym_config.get("max_episodes", 1))
-    if max_episodes < 0:
-        raise ValueError(f"max_episodes must be non-negative, got {max_episodes}.")
+    plan = resolve_collection_plan(args, gym_config)
+    _abort_pending_episode(env, count_discard=False)
     num_envs = int(getattr(_env_target(env), "num_envs", 1))
     if num_envs < 1:
         raise ValueError(f"env.num_envs must be at least 1, got {num_envs}.")
-    max_attempts = int(gym_config.get("demo_max_attempts", 3))
+    stats = {
+        "target_episodes": plan.target_episodes,
+        "planned_episodes": plan.target_episodes,
+        "committed_episodes": 0,
+        "rejected_episodes": 0,
+        "attempts": 0,
+        "batch_count": 0,
+        "prepare_reset_count": 0,
+        "commit_reset_count": 0,
+        "discard_reset_count": 0,
+    }
+    setattr(_env_target(env), "_collection_stats", stats)
 
     environment_label = "environment" if num_envs == 1 else "environments"
     tqdm.tqdm.write(
@@ -1161,19 +1386,19 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             (
                 "╭─ EmbodiChain · Run Task",
                 f"│ Task        {gym_config.get('id', 'unknown')}",
-                f"│ Episodes    {max_episodes}",
+                f"│ Episodes    {plan.target_episodes}",
                 f"│ Parallel    {num_envs} {environment_label}",
-                f"│ Attempts    {max_attempts} per batch",
+                f"│ Attempts    {plan.max_attempts} per episode",
                 "╰─",
             )
         ),
         file=sys.stdout,
     )
 
-    saved_episodes = 0
-    generated_batches = 0
+    committed = 0
+    cursor = 0
     with tqdm.tqdm(
-        total=max_episodes,
+        total=plan.target_episodes,
         desc="Collecting episodes",
         unit="episode",
         file=sys.stdout,
@@ -1184,34 +1409,38 @@ def main(args: Any, env: Any, gym_config: dict[str, Any]) -> None:
             "[{elapsed}<{remaining}, {rate_fmt}]"
         ),
     ) as episode_progress:
-        while saved_episodes < max_episodes:
-            batch_episode_count = min(num_envs, max_episodes - saved_episodes)
-            save_env_ids = tuple(range(batch_episode_count))
+        while committed < plan.target_episodes:
+            batch_size = min(num_envs, plan.target_episodes - committed)
+            stats["prepare_reset_count"] += 1
+            env.reset()
             generated = generate_function(
                 env,
-                time_id=saved_episodes,
+                time_id=cursor,
                 save_path=getattr(args, "save_path", ""),
                 save_video=getattr(args, "save_video", False),
                 debug_mode=getattr(args, "debug_mode", False),
-                save_env_ids=save_env_ids,
+                save_env_ids=tuple(range(batch_size)),
                 regenerate=getattr(args, "regenerate", False),
-                max_attempts=max_attempts,
+                max_attempts=plan.max_attempts,
                 reset_before=False,
             )
+            stats["batch_count"] += 1
             if not generated:
+                stats["rejected_episodes"] += batch_size
                 raise RuntimeError(
-                    f"Failed to generate episode batch starting at {saved_episodes} "
-                    f"after {max_attempts} attempts."
+                    f"Failed to collect batch starting at {cursor} after "
+                    f"{plan.max_attempts} attempts."
                 )
-            saved_episodes += batch_episode_count
-            generated_batches += 1
-            episode_progress.update(batch_episode_count)
+            committed += batch_size
+            cursor += batch_size
+            stats["committed_episodes"] = committed
+            episode_progress.update(batch_size)
 
-    episode_label = "episode" if saved_episodes == 1 else "episodes"
-    batch_label = "batch" if generated_batches == 1 else "batches"
+    episode_label = "episode" if committed == 1 else "episodes"
+    batch_label = "batch" if stats["batch_count"] == 1 else "batches"
     tqdm.tqdm.write(
-        f"✓ Collection complete · {saved_episodes} {episode_label} saved in "
-        f"{generated_batches} {batch_label}",
+        f"✓ Collection complete · {committed} {episode_label} saved in "
+        f"{stats['batch_count']} {batch_label}",
         file=sys.stdout,
     )
 
@@ -1313,12 +1542,15 @@ def _create_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--expansion-recipe-indices",
+        "--expansion_recipe_indices",
         "--expansion-candidate-indices",
         "--expansion_candidate_indices",
+        dest="expansion_recipe_indices",
         nargs="+",
         type=int,
         default=None,
-        help="Logical expansion recipe batch starts.",
+        help="Explicit logical expansion recipe indices (legacy candidate name is accepted).",
     )
     parser.add_argument(
         "--output-dir",
@@ -1378,7 +1610,7 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
     abort_error: BaseException | None = None
     close_error: BaseException | None = None
     try:
-        _abort_pending_episode(env)
+        _abort_pending_episode(env, count_discard=False)
     except BaseException as error:
         abort_error = error
     try:
@@ -1457,10 +1689,16 @@ def cli(argv: Sequence[str] | None = None) -> None:
             raise ValueError(
                 "expansion profile source must match the configured Task Program"
             )
+        expansion_plan = resolve_collection_plan(
+            args,
+            gym_config,
+            expansion_collection=expansion_request[3],
+            legacy_recipe_indices=expansion_request[1],
+        )
         if isinstance(profile, CombinedExpansionProfile):
-            _expansion_candidate_indices(
+            _validate_expansion_collection_plan(
                 profile,
-                expansion_request[1],
+                expansion_plan,
                 num_envs=env_cfg.num_envs,
             )
             if getattr(args, "disable_sensor", False) and profile.visual.enabled:
@@ -1476,11 +1714,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
                         "requires the expansion_profile_reset event"
                     )
         else:
-            _expansion_candidate_indices(
-                profile,
-                expansion_request[1],
-                num_envs=env_cfg.num_envs,
-            )
+            raise ValueError("expansion requires a CombinedExpansionProfile")
 
     if args.replay and args.replay_mode == "control":
         log_info("Dataset saving disabled for control replay mode.", color="green")

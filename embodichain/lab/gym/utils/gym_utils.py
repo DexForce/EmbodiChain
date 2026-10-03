@@ -464,12 +464,14 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
+        DenoisingCfg,
         RobotCfg,
         RigidObjectCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
         DLSSCfg,
+        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -655,8 +657,12 @@ def config_to_cfg(
     env_cfg.enable_sensor = config.get("enable_sensor", True)
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("denoising"), dict):
+        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):
         render_config["dlss"] = DLSSCfg(**render_config["dlss"])
+    if isinstance(render_config.get("nrd"), dict):
+        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -1492,12 +1498,17 @@ def build_env_cfg_from_args(
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config,
-        manager_modules=get_manager_modules(),
-        source_path=gym_config_source_path,
-        task_program_path_override=getattr(args, "task_program", None),
-    )
+    collection_config = gym_config.pop("collection", None)
+    try:
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            gym_config,
+            manager_modules=get_manager_modules(),
+            source_path=gym_config_source_path,
+            task_program_path_override=getattr(args, "task_program", None),
+        )
+    finally:
+        if collection_config is not None:
+            gym_config["collection"] = collection_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if getattr(args, "disable_sensor", False):

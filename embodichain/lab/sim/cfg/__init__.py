@@ -64,18 +64,17 @@ from .rigid import (
 )
 from .rigid_object import RigidObjectCfg, RigidObjectGroupCfg
 from .scene import LightCfg, RigidConstraintCfg
-from .simulation import (
+from .physics import (
     DefaultPhysicsCfg,
-    DLSSCfg,
     GPUMemoryCfg,
     NewtonCollisionPipelineCfg,
     NewtonPhysicsCfg,
     PhysicsBackendCfg,
-    RenderCfg,
     physics_backend_from_cfg,
     physics_cfg_for_backend,
     validate_physics_cfg,
 )
+from .rendering import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg, RenderCfg
 from .urdf import URDFCfg
 from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
 
@@ -89,7 +88,10 @@ from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 __all__ = [
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
+    "DenoisingCfg",
+    "DenoisingMode",
     "DLSSCfg",
+    "NRDCfg",
     "RenderCfg",
     "GPUMemoryCfg",
     "PhysicsBackendCfg",

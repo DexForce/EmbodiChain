@@ -831,6 +831,7 @@ class TaskProgramEnvironmentAdapter:
         *,
         expansion_profile: CombinedExpansionProfile | None = None,
         candidate_index: int = 0,
+        recipe_indices: tuple[int, ...] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create a fresh Gym bridge for one provider-free compiled program.
 
@@ -856,10 +857,13 @@ class TaskProgramEnvironmentAdapter:
             raise ValueError("candidate_index must be a non-negative integer.")
         if expansion_profile is None and candidate_index != 0:
             raise ValueError("candidate_index requires an expansion_profile.")
+        if expansion_profile is None and recipe_indices is not None:
+            raise ValueError("recipe_indices requires an expansion_profile.")
         if isinstance(expansion_profile, CombinedExpansionProfile):
             expansion = CombinedTaskProgramExpansionFactory(
                 expansion_profile,
                 candidate_index=candidate_index,
+                recipe_indices=recipe_indices,
                 program_id=program.program_id,
                 integration_id=self._scene_registry_id,
                 robot_profile_id=self._robot_profile_id,

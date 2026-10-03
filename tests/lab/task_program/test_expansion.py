@@ -245,6 +245,44 @@ def test_combined_factory_expands_multi_environment_batch() -> None:
     assert len(factory.records) == 2
 
 
+def test_combined_factory_uses_explicit_recipe_indices_per_row() -> None:
+    engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=2)
+    factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile(),
+        candidate_index=7,
+        recipe_indices=(7, 9),
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    transform = factory.create_plan_transform(request, engine=engine)
+    assert transform is not None
+
+    transform(resolved, context, plan)
+
+    assert [record.recipe_index for record in factory.records] == [7, 9]
+
+
+def test_combined_factory_allows_padded_recipe_indices_for_discarded_rows() -> None:
+    engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=3)
+    factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile(),
+        candidate_index=7,
+        recipe_indices=(7, 9, 9),
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    transform = factory.create_plan_transform(request, engine=engine)
+    assert transform is not None
+
+    transform(resolved, context, plan)
+
+    assert [record.recipe_index for record in factory.records] == [7, 9, 9]
+
+
 def _planned_place_batch(*, batch_size: int) -> tuple[
     AtomicActionEngine,
     ActionInvocation,
