@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Content-addressed persistence for independently reusable TaskTemplates."""
+"""Content-addressed persistence for independently reusable TaskSpecs."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from .contracts import TaskTemplate
-from .validation import validate_task_template
+from .spec import TaskSpec
+from .validation import validate_task_spec
 
 __all__ = [
     "TaskSpecCache",
@@ -42,7 +42,7 @@ class TaskSpecCacheError(RuntimeError):
 
 
 class TaskSpecCache:
-    """Store and retrieve validated TaskTemplates by semantic hash.
+    """Store and retrieve validated TaskSpecs by semantic hash.
 
     The cache contains one pretty-printed JSON document per semantic hash.  A
     temporary file plus ``os.replace`` makes writes atomic, so a process that
@@ -74,9 +74,9 @@ class TaskSpecCache:
         """Return whether a cache entry exists."""
         return self.path_for(semantic_hash).is_file()
 
-    def put(self, template: TaskTemplate, *, overwrite: bool = False) -> Path:
-        """Atomically cache one validated template and return its path."""
-        normalized = TaskTemplate.from_dict(validate_task_template(template))
+    def put(self, template: TaskSpec, *, overwrite: bool = False) -> Path:
+        """Atomically cache one validated TaskSpec and return its path."""
+        normalized = TaskSpec.from_dict(validate_task_spec(template))
         destination = self.path_for(normalized.semantic_hash)
         if destination.exists() and not overwrite:
             existing = self.get(normalized.semantic_hash)
@@ -122,14 +122,14 @@ class TaskSpecCache:
                 temporary.unlink(missing_ok=True)
         return destination
 
-    def get(self, semantic_hash: str) -> TaskTemplate | None:
-        """Load one template, returning ``None`` for a cache miss."""
+    def get(self, semantic_hash: str) -> TaskSpec | None:
+        """Load one TaskSpec, returning ``None`` for a cache miss."""
         path = self.path_for(semantic_hash)
         if not path.is_file():
             return None
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            template = TaskTemplate.from_dict(value)
+            template = TaskSpec.from_dict(value)
             if template.semantic_hash != semantic_hash:
                 raise ValueError("document hash does not match requested cache key")
             return template
@@ -138,18 +138,18 @@ class TaskSpecCache:
                 f"Invalid TaskSpec cache entry {path}: {exc}"
             ) from exc
 
-    def require(self, semantic_hash: str) -> TaskTemplate:
-        """Load a template or raise ``KeyError`` on a cache miss."""
+    def require(self, semantic_hash: str) -> TaskSpec:
+        """Load a TaskSpec or raise ``KeyError`` on a cache miss."""
         result = self.get(semantic_hash)
         if result is None:
             raise KeyError(f"TaskSpec semantic hash is not cached: {semantic_hash}")
         return result
 
-    def save(self, template: TaskTemplate, *, overwrite: bool = False) -> Path:
+    def save(self, template: TaskSpec, *, overwrite: bool = False) -> Path:
         """Alias for :meth:`put` used by persistence adapters."""
         return self.put(template, overwrite=overwrite)
 
-    def load(self, semantic_hash: str) -> TaskTemplate | None:
+    def load(self, semantic_hash: str) -> TaskSpec | None:
         """Alias for :meth:`get` used by persistence adapters."""
         return self.get(semantic_hash)
 
@@ -172,8 +172,8 @@ class TaskSpecCache:
                 values.append(path.stem)
         return tuple(sorted(values))
 
-    def templates(self) -> Iterator[TaskTemplate]:
-        """Yield validated templates in semantic-hash order."""
+    def templates(self) -> Iterator[TaskSpec]:
+        """Yield validated TaskSpecs in semantic-hash order."""
         for semantic_hash in self.hashes():
             template = self.get(semantic_hash)
             if template is not None:
@@ -181,8 +181,8 @@ class TaskSpecCache:
 
     def find(
         self, task_id: str, *, instruction: str | None = None
-    ) -> tuple[TaskTemplate, ...]:
-        """Return cached templates matching a logical task ID.
+    ) -> tuple[TaskSpec, ...]:
+        """Return cached TaskSpecs matching a logical task ID.
 
         A task ID may intentionally have several semantic versions.  The
         result is therefore a tuple ordered by semantic hash rather than an

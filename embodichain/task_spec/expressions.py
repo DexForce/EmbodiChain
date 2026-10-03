@@ -383,16 +383,8 @@ def evaluate_predicate(
     """
     expression = Predicate.from_dict(predicate)
     local_id = predicate_id or expression.predicate_id or expression.name
-    if expression.observation is None:
-        return PredicateEvaluation(
-            predicate_id=local_id,
-            predicate=expression.name,
-            status=EvaluationStatus.UNAVAILABLE,
-            observed=None,
-            expected=expression.expected,
-            reason="predicate does not declare an observation key",
-        )
-    found, observed = lookup_observation(observations, expression.observation)
+    observation_key = expression.observation or local_id
+    found, observed = lookup_observation(observations, observation_key)
     if not found:
         return PredicateEvaluation(
             predicate_id=local_id,
@@ -400,7 +392,7 @@ def evaluate_predicate(
             status=EvaluationStatus.UNAVAILABLE,
             observed=None,
             expected=expression.expected,
-            reason=f"observation {expression.observation!r} was not provided",
+            reason=f"observation {observation_key!r} was not provided",
         )
     if isinstance(observed, Mapping) and "status" in observed:
         marker = observed.get("status")

@@ -27,7 +27,6 @@ from .contracts import (
     ActionWitness,
     ExpansionManifest,
     SceneInstance,
-    TaskTemplate,
     ValidationCertificate,
 )
 from .expressions import (
@@ -36,15 +35,18 @@ from .expressions import (
     evaluate_predicate,
     evaluate_temporal_condition,
 )
+from .spec import TaskSpec
 
 __all__ = [
     "EvaluationReport",
     "TaskSpecValidationError",
     "build_validation_certificate",
+    "evaluate_task_spec",
     "evaluate_task_template",
     "validate_action_witness",
     "validate_expansion_manifest",
     "validate_scene_instance",
+    "validate_task_spec",
     "validate_task_template",
     "validate_validation_certificate",
 ]
@@ -81,12 +83,12 @@ class EvaluationReport:
         }
 
 
-def validate_task_template(
-    value: TaskTemplate | Mapping[str, Any],
+def validate_task_spec(
+    value: TaskSpec | Mapping[str, Any],
     *,
     require_observations: bool = False,
 ) -> dict[str, Any]:
-    """Validate and normalize one TaskTemplate.
+    """Validate and normalize one compact TaskSpec.
 
     Args:
         value: Dataclass or JSON mapping to validate.
@@ -101,11 +103,11 @@ def validate_task_template(
             declaration is invalid.
     """
     try:
-        template = TaskTemplate.from_dict(value)
+        template = TaskSpec.from_dict(value)
         if not template.roles:
-            raise ValueError("TaskTemplate.roles must contain at least one role.")
+            raise ValueError("TaskSpec.roles must contain at least one role.")
         if not template.goal:
-            raise ValueError("TaskTemplate.goal must contain at least one predicate.")
+            raise ValueError("TaskSpec.goal must contain at least one predicate.")
         if require_observations:
             missing = [
                 item.predicate_id or item.name
@@ -118,7 +120,7 @@ def validate_task_template(
             ]
             if missing:
                 raise ValueError(
-                    "TaskTemplate predicates require observation keys: "
+                    "TaskSpec predicates require observation keys: "
                     + ", ".join(missing)
                 )
         return template.to_dict()
@@ -165,7 +167,7 @@ def validate_validation_certificate(
 
 
 def evaluate_task_template(
-    template: TaskTemplate | Mapping[str, Any],
+    template: TaskSpec | Mapping[str, Any],
     observations: Mapping[str, Any],
     *,
     trajectory: Sequence[Mapping[str, Any]] | None = None,
@@ -178,8 +180,8 @@ def evaluate_task_template(
     explicit ``observations['trajectory']`` sequence.  Missing measurements are
     reported as ``unavailable`` and never treated as success.
     """
-    normalized = TaskTemplate.from_dict(template)
-    validate_task_template(normalized)
+    normalized = TaskSpec.from_dict(template)
+    validate_task_spec(normalized)
     if not isinstance(observations, Mapping):
         raise TypeError("observations must be a mapping.")
     root = json_snapshot(dict(observations))
@@ -228,6 +230,25 @@ def evaluate_task_template(
         invariants=invariants,
         temporal=temporal,
     )
+
+
+def validate_task_template(
+    value: TaskSpec | Mapping[str, Any],
+    *,
+    require_observations: bool = False,
+) -> dict[str, Any]:
+    """Compatibility alias for :func:`validate_task_spec`."""
+    return validate_task_spec(value, require_observations=require_observations)
+
+
+def evaluate_task_spec(
+    template: TaskSpec | Mapping[str, Any],
+    observations: Mapping[str, Any],
+    *,
+    trajectory: Sequence[Mapping[str, Any]] | None = None,
+) -> EvaluationReport:
+    """Evaluate one TaskSpec; kept separate as the primary public spelling."""
+    return evaluate_task_template(template, observations, trajectory=trajectory)
 
 
 def build_validation_certificate(

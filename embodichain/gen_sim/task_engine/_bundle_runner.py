@@ -635,10 +635,22 @@ def _verify_program_projection(
                 f"{node['id']!r}."
             )
         steps = item.get("steps")
+        projected_call = steps.get("call") if type(steps) is dict else None
+        # Long-horizon relative-placement routes carry a runtime-only stage
+        # selector.  It is deliberately absent from the semantic graph so
+        # graph identity and old callers remain stable; strip it before
+        # checking the immutable graph-to-program projection.
+        if type(projected_call) is dict:
+            projected_call = deepcopy(projected_call)
+            arguments = projected_call.get("arguments")
+            if type(arguments) is dict and "stage_id" in arguments:
+                arguments = dict(arguments)
+                arguments.pop("stage_id", None)
+                projected_call["arguments"] = arguments
         if (
             type(steps) is not dict
             or steps.get("kind") != "invoke"
-            or steps.get("call") != node["call"]
+            or projected_call != node["call"]
         ):
             raise ValueError(
                 f"Task Program segment {node['id']!r} is not an exact "
