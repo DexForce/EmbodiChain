@@ -367,6 +367,12 @@ class EmbodiChainMCPService:
                     scene = self._load_default_task_scene(
                         task, selected_backend=current.get("backend")
                     )
+            if isinstance(scene, Mapping) and scene.get("physics_config"):
+                raise ValueError(
+                    "This world was created without the task's physics_config. "
+                    "Create a new world with matching physics settings before "
+                    "loading this task."
+                )
             state = self.backend.load_scene(
                 world_id,
                 task_id=task_id,

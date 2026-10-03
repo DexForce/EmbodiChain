@@ -92,6 +92,10 @@ changing calls can include ``expected_scene_revision``. The server rejects a
 stale revision before touching the world, so a Host should read the latest
 world state after a revision conflict and retry with the new value.
 
+Task deployments that declare ``physics_config`` must be created with matching
+physics settings before loading. The server rejects such a config on an
+already-created world instead of silently ignoring its values.
+
 Run the URDF assembly showcase
 ------------------------------
 

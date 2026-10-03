@@ -277,6 +277,20 @@ def test_custom_adapter_registry_reports_only_installed_domains(service):
     assert "check_reachability" not in capabilities_result
 
 
+def test_task_physics_config_is_rejected_before_scene_mutation(service):
+    """Task physics settings cannot be silently ignored by an existing world."""
+    world_id = service.create_world()["world_id"]
+    with pytest.raises(ValueError, match="created without the task's physics_config"):
+        service.load_task_or_scene(
+            world_id,
+            scene={
+                "physics": "default",
+                "physics_config": {"enable_ccd": True},
+                "robot": {"robot_type": "panda"},
+            },
+        )
+
+
 def test_stdio_client_can_discover_and_call_health():
     mcp = pytest.importorskip("mcp")
     del mcp
