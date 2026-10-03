@@ -88,6 +88,26 @@ the planner can choose the final orientation.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
+Yaw-free non-drawer GenSim held alignment also screens robot self/other-arm
+proxies before accepting a heading. If the existing heading search exhausts,
+one bounded local IK recovery may preserve the last heading's Cartesian path
+and timing. Extra searches restore the first rejected legacy-stop random state;
+safe original paths retain their normal random stream. Emitted joints are
+checked again after plan transforms. This is not a held-object scene-contact
+certificate; attachment monitors and existing collision policies remain active.
+Generated released-hand cleanup uses `task_engine/_task_program/clearance_recovery.py`.
+An adjacent same-object, same-resource verified Place/clearance followed by one
+or two distinct sequential Parks including the owning arm enables its bounded
+route search. Both registered releases and curated Place use their actual
+effect-monitor binding. Canonical shared-compiler policy grounds each configured
+Park from the previous full-robot endpoint. Qualification checks every segment
+and boundary in execution order: emitted commands, timing, joint limits, passive
+holds, and fresh scene/self/other-arm collision meshes. An observed clearance
+start collision stops route search immediately. The shared executor receives
+only the accepted cleanup plan; each Park replans and revalidates observed state.
+This gate currently supports one environment at index zero and fails closed
+outside that scope or when collision evidence is unavailable. Sampled mesh
+clearance is not continuous collision or physical-success certification.
 E5 Robotiq grasp clearance is isolated in
 `task_engine/_task_program/coordinated_grasp.py`: only the dual-grasp service
 uses URDF collision surfaces and deployment open/grasp commands in TCP space.

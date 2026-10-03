@@ -101,6 +101,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        clearance_routes: tuple = (),
+        runtime_preset: str | None = None,
         press_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
@@ -112,6 +114,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
+        self._clearance_routes = clearance_routes
+        self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
@@ -216,7 +220,49 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
             engine.register(GenSimPress(), replace=True)
         self.task_program_registration.validate_engine(engine)
+        if self._clearance_routes:
+            engine._clearance_profile = profile
         return engine
+
+    def create_registered_semantic_lowerers(
+        self, *, scene_registry: Any, engine: Any
+    ) -> tuple[Any, ...]:
+        """Bind preview calls through canonical assembly, without another executor."""
+        profile = None
+        if self._clearance_routes:
+            profile = engine._clearance_profile
+            del engine._clearance_profile
+        lowerers = super().create_registered_semantic_lowerers(
+            scene_registry=scene_registry, engine=engine
+        )
+        if self._clearance_routes:
+            from embodichain.lab.task_program.language import TaskProgramIntegrationCfg
+            from embodichain.lab.task_program.runtime.assembly import (
+                assemble_semantic_executor_components,
+            )
+            from .clearance_recovery import bind_park_requests
+
+            registration = self.task_program_registration
+            semantic = assemble_semantic_executor_components(
+                scene_registry,
+                profile,
+                engine,
+                TaskProgramIntegrationCfg(
+                    robot_profile=self.robot_profile_id,
+                    scene_registry=self.scene_registry_id,
+                    runtime_preset=self._runtime_preset,
+                ),
+                call_catalog=registration.call_catalog,
+                endpoint_adapters=registration.endpoint_adapter_map,
+                registered_lowerers=lowerers,
+                relation_grounders=registration.relation_grounders,
+                handover_pose_providers=registration.handover_pose_providers,
+            )
+            engine.bind_release_clearance(
+                bind_park_requests(semantic.compiler, self._clearance_routes),
+                simulation=self._simulation,
+            )
+        return lowerers
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
         return self._task_post_port, self.segment_policy_port
@@ -239,10 +285,12 @@ class TaskAdapterFactory:
     motion_samples: tuple[tuple[str, int], ...] = ()
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
+    clearance_routes: tuple = ()
+    runtime_preset: str | None = None
     press_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
-        """Return the exact shared adapter; no Session or Bridge is overridden."""
+        """Bind task-owned planning scopes without overriding Session or Bridge."""
         self.registration.assert_unchanged()
         if self.press_routes:
             from .press_runtime import SENSOR_UID, ensure_sensor
@@ -372,6 +420,8 @@ class TaskAdapterFactory:
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
+            clearance_routes=self.clearance_routes,
+            runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
         )
         return factory.create_adapter()
@@ -567,6 +617,9 @@ def load_deployment(
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     articulation_calls = bind_articulation_calls(compiled)
+    from .clearance_recovery import CLEARANCE_RECOVERY_REVISION, bind_clearance_calls
+
+    clearance_routes = bind_clearance_calls(compiled)
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
@@ -580,6 +633,11 @@ def load_deployment(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {"clearance_recovery_revision": CLEARANCE_RECOVERY_REVISION}
+                if clearance_routes
+                else {}
+            ),
             **(
                 {"articulation_recovery_revision": ARTICULATION_RECOVERY_REVISION}
                 if articulation_calls
@@ -639,6 +697,8 @@ def load_deployment(
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
+        clearance_routes=clearance_routes,
+        runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
     )
     integration = replace(

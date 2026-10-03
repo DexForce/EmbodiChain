@@ -18,6 +18,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import numpy as np
@@ -26,6 +29,20 @@ import torch
 from .drawer_geometry import collision_meshes
 
 __all__: list[str] = []
+
+_ROBOT_CHECKERS: ContextVar[dict[tuple[int, str], Callable] | None] = ContextVar(
+    "gen_sim_robot_collision_checkers", default=None
+)
+
+
+@contextmanager
+def robot_collision_scope() -> Iterator[None]:
+    """Reuse only invocation-owned robot proxies; scene checks stay fresh."""
+    token = _ROBOT_CHECKERS.set({})
+    try:
+        yield
+    finally:
+        _ROBOT_CHECKERS.reset(token)
 
 
 def _descendants(children: dict[str, set[str]], root: str) -> set[str]:
@@ -48,11 +65,47 @@ def check_free_motion(
     URDF neighbors within two joints and intra-gripper mechanism pairs are
     excluded from self tests, never from scene or other-arm tests.
     """
+    return _check_motion(robot, simulation, positions, control_part, include_scene=True)
+
+
+def check_robot_motion(
+    robot: Any, positions: torch.Tensor, control_part: str
+) -> dict[str, Any]:
+    """Screen robot proxies only; do not certify held-object or scene clearance."""
+    return _check_motion(robot, None, positions, control_part, include_scene=False)
+
+
+def _check_motion(
+    robot: Any,
+    simulation: Any,
+    positions: torch.Tensor,
+    control_part: str,
+    *,
+    include_scene: bool,
+) -> dict[str, Any]:
+    """Keep both certificates on the same URDF/FK and pair-exclusion rules."""
+    if positions.ndim != 2 or not torch.isfinite(positions).all():
+        raise ValueError("Recovery collision samples must be finite (T, robot.dof).")
+    cache = None if include_scene else _ROBOT_CHECKERS.get()
+    key = (id(robot), control_part)
+    if cache is not None and key in cache:
+        checker = cache[key]
+    else:
+        checker = _make_checker(
+            robot, simulation, control_part, include_scene=include_scene
+        )
+        if cache is not None:
+            cache[key] = checker
+    return checker(positions)
+
+
+def _make_checker(
+    robot: Any, simulation: Any, control_part: str, *, include_scene: bool
+) -> Callable[[torch.Tensor], dict[str, Any]]:
+    """Own one read-only FK-calibrated geometry snapshot."""
     import trimesh
     import yourdfpy
 
-    if positions.ndim != 2 or not torch.isfinite(positions).all():
-        raise ValueError("Recovery collision samples must be finite (T, robot.dof).")
     model = yourdfpy.URDF.load(
         robot.cfg.fpath,
         load_meshes=False,
@@ -61,7 +114,7 @@ def check_free_motion(
         load_collision_meshes=True,
     )
     world = trimesh.collision.CollisionManager()
-    for uid in simulation.get_rigid_object_uid_list():
+    for uid in simulation.get_rigid_object_uid_list() if include_scene else ():
         obj = simulation.get_rigid_object(uid)
         pose = obj.get_local_pose(to_matrix=True)[0].detach().cpu().numpy()
         for index, shape in enumerate(obj.get_collision_shapes()):
@@ -84,7 +137,7 @@ def check_free_motion(
                 mesh,
                 transform=pose @ shape.local_pose.cpu().numpy(),
             )
-    for uid in simulation.get_articulation_uid_list():
+    for uid in simulation.get_articulation_uid_list() if include_scene else ():
         art = simulation.get_articulation(uid)
         meshes = collision_meshes(
             {"fpath": art.cfg.fpath, "body_scale": art.cfg.body_scale}
@@ -104,7 +157,7 @@ def check_free_motion(
     active_links = _descendants(children, solver.root_link_name)
     hand_links = _descendants(children, solver.end_link_name)
     near = {name: set.union(*(neighbors[n] for n in neighbors[name])) for name in links}
-    world_root = robot.get_local_pose(to_matrix=True)[0].cpu().numpy()
+    world_root = robot.get_local_pose(to_matrix=True)[0].cpu().numpy().copy()
 
     def configure(q: torch.Tensor) -> None:
         model.update_cfg(
@@ -115,7 +168,10 @@ def check_free_motion(
             }
         )
 
-    configure(robot.get_qpos()[0])
+    observed_qpos = robot.get_qpos()[0].clone()
+    model_path, joint_names = str(robot.cfg.fpath), tuple(robot.joint_names)
+    solver_links = (solver.root_link_name, solver.end_link_name)
+    configure(observed_qpos)
     observed = (
         robot.get_link_pose(solver.end_link_name, to_matrix=True)[0].cpu().numpy()
     )
@@ -139,39 +195,68 @@ def check_free_motion(
     if not any(owner in active_links for _, owner, _ in geometry):
         raise ValueError("The operated arm has no collision geometry.")
     owners = {node: owner for node, owner, _ in geometry}
-    for frame, q in enumerate(positions):
-        configure(q)
-        active = trimesh.collision.CollisionManager()
-        passive = trimesh.collision.CollisionManager()
-        for node, owner, mesh in geometry:
-            pose, _ = graph[node]
-            manager = active if owner in active_links else passive
-            manager.add_object(node, mesh, transform=world_root @ pose)
-        for kind, other in (("scene", world), ("other_arm", passive)):
-            hit, pairs = active.in_collision_other(other, return_names=True)
-            if hit:
+
+    def check(positions: torch.Tensor) -> dict[str, Any]:
+        if not include_scene and (
+            str(robot.cfg.fpath) != model_path
+            or tuple(robot.joint_names) != joint_names
+            or (
+                robot.get_solver(control_part).root_link_name,
+                robot.get_solver(control_part).end_link_name,
+            )
+            != solver_links
+            or not torch.equal(robot.get_qpos()[0], observed_qpos)
+            or not np.array_equal(
+                robot.get_local_pose(to_matrix=True)[0].cpu().numpy(), world_root
+            )
+        ):
+            raise ValueError(
+                "Observed robot changed during the scoped collision check."
+            )
+        for frame, q in enumerate(positions):
+            configure(q)
+            active = trimesh.collision.CollisionManager()
+            passive = trimesh.collision.CollisionManager()
+            for node, owner, mesh in geometry:
+                pose, _ = graph[node]
+                manager = active if owner in active_links else passive
+                manager.add_object(node, mesh, transform=world_root @ pose)
+            obstacles = (
+                (("scene", world), ("other_arm", passive))
+                if include_scene
+                else (("other_arm", passive),)
+            )
+            for kind, other in obstacles:
+                hit, pairs = active.in_collision_other(other, return_names=True)
+                if hit:
+                    return {
+                        "valid": False,
+                        "frame": frame,
+                        "kind": kind,
+                        "pairs": sorted(map(list, pairs)),
+                    }
+            _, pairs = active.in_collision_internal(return_names=True)
+            invalid = [
+                [a, b]
+                for a, b in pairs
+                if owners[b] not in near[owners[a]]
+                and not ({owners[a], owners[b]} <= hand_links)
+            ]
+            if invalid:
                 return {
                     "valid": False,
                     "frame": frame,
-                    "kind": kind,
-                    "pairs": sorted(map(list, pairs)),
+                    "kind": "self",
+                    "pairs": sorted(invalid),
                 }
-        _, pairs = active.in_collision_internal(return_names=True)
-        invalid = [
-            [a, b]
-            for a, b in pairs
-            if owners[b] not in near[owners[a]]
-            and not ({owners[a], owners[b]} <= hand_links)
-        ]
-        if invalid:
-            return {
-                "valid": False,
-                "frame": frame,
-                "kind": "self",
-                "pairs": sorted(invalid),
-            }
-    return {
-        "valid": True,
-        "frames": len(positions),
-        "scope": "discrete_free_motion_meshes",
-    }
+        return {
+            "valid": True,
+            "frames": len(positions),
+            "scope": (
+                "discrete_free_motion_meshes"
+                if include_scene
+                else "discrete_robot_meshes"
+            ),
+        }
+
+    return check

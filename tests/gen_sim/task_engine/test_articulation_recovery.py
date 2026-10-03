@@ -131,6 +131,8 @@ def test_engine_gates_recovery_before_touching_other_planning(
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", original)
     request = NS(
         invocation_id=call,
+        skill_id="move_end_effector",
+        goal=None,
         motion_policy=NS(
             strategy=strategy, dynamic_collision_mode=collision, sample_count=260
         ),

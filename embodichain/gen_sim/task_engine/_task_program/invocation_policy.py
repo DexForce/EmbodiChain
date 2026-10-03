@@ -32,7 +32,7 @@ from embodichain.utils import logger
 
 __all__: list[str] = []
 
-INVOCATION_POLICY_REVISION = 4
+INVOCATION_POLICY_REVISION = 5
 
 
 def motion_sample_declarations(
@@ -202,6 +202,9 @@ class GenSimActionEngine(AtomicActionEngine):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
         self._articulation_calls = dict(articulation_calls)
+        self._clearance_requests: dict[str, Any] = {}
+        self._clearance_parks: frozenset[str] = frozenset()
+        self._clearance_simulation: Any = None
         if len(self._articulation_calls) != len(articulation_calls) or any(
             not isinstance(key, str) or not key or value not in {"slide", "withdraw"}
             for key, value in articulation_calls
@@ -217,6 +220,32 @@ class GenSimActionEngine(AtomicActionEngine):
                 "Invocation motion budgets require unique IDs and integer sample counts."
             )
         super().__init__(*args, **kwargs)
+
+    def bind_release_clearance(
+        self, park_requests: dict[str, tuple[Any, ...]], *, simulation: Any
+    ) -> None:
+        """Install exact generated cleanup/park scopes after compiler analysis."""
+        if self._clearance_requests:
+            raise ValueError("Released-hand planning scopes are already bound.")
+        if any(
+            type(chain) is not tuple or not 1 <= len(chain) <= 2
+            for chain in park_requests.values()
+        ):
+            raise ValueError("Released-hand recovery requires bounded park tuples.")
+        parks = [request for chain in park_requests.values() for request in chain]
+        park_ids = [request.invocation_id for request in parks]
+        if (
+            len(set(park_ids)) != len(park_ids)
+            or any(type(key) is not str or not key for key in park_requests)
+            or any(type(key) is not str or not key for key in park_ids)
+            or any(request.skill_id != "move_joints" for request in parks)
+        ):
+            raise ValueError(
+                "Released-hand recovery requires unique configured park requests."
+            )
+        self._clearance_requests = dict(park_requests)
+        self._clearance_parks = frozenset(park_ids)
+        self._clearance_simulation = simulation
 
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
         if self._motion_samples:
@@ -249,6 +278,17 @@ class GenSimActionEngine(AtomicActionEngine):
 
         capture = initial_plan_capture(request.invocation_id)
         enabled = request.invocation_id in self._cartesian_calls
+        alignment = (
+            request.skill_id == "move_held_object"
+            and getattr(request.goal, "world_yaw_free", False) is True
+            and not getattr(self.motion_generator, "direct_transport_planning", False)
+        )
+        if context is None and (
+            alignment
+            or request.invocation_id in getattr(self, "_clearance_requests", {})
+            or request.invocation_id in getattr(self, "_clearance_parks", ())
+        ):
+            context = self.initial_context()
         selected_request = request
         retime_attempts: list[int] = []
         try:
@@ -341,6 +381,79 @@ class GenSimActionEngine(AtomicActionEngine):
                                         f"{request.invocation_id}."
                                     )
                                     break
+                if alignment:
+                    from .held_alignment_recovery import qualify_alignment_plan
+
+                    plan = qualify_alignment_plan(request, context, plan, self.robot)
+                park_request = getattr(self, "_clearance_requests", {}).get(
+                    request.invocation_id
+                )
+                if park_request is not None:
+                    from .clearance_recovery import recover
+
+                    def build_clearance(selected: Any, current: Any) -> Any:
+                        return super(GenSimActionEngine, self)._plan_request(
+                            selected,
+                            current,
+                            plan_transform=(
+                                plan_transform
+                                if selected.invocation_id == request.invocation_id
+                                else None
+                            ),
+                        )
+
+                    plan = recover(
+                        request,
+                        context,
+                        plan,
+                        build=build_clearance,
+                        park_request=park_request,
+                        robot=self.robot,
+                        simulation=self._clearance_simulation,
+                    )
+                elif request.invocation_id in getattr(self, "_clearance_parks", ()):
+                    from .clearance_recovery import validate_motion
+                    from embodichain.lab.sim.atomic_actions import JointPositionTarget
+                    from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
+
+                    endpoint = request.binding.endpoint("primary", "motion")
+                    motion = endpoint.require_target(JointPositionTarget)
+                    held = context.task.get_held_object(endpoint.task_state_key)
+                    acceptance = (
+                        {"valid": False, "reason": "park_requires_released_hand"}
+                        if held is not None and held.active_mask.any()
+                        else validate_motion(
+                            plan,
+                            context,
+                            self.robot,
+                            self._clearance_simulation,
+                            motion.control_part,
+                        )
+                    )
+                    plan = replace(
+                        plan,
+                        plan_success=(
+                            plan.plan_success
+                            if acceptance["valid"]
+                            else torch.zeros_like(plan.plan_success)
+                        ),
+                        diagnostics=replace(
+                            plan.diagnostics,
+                            metadata={
+                                **plan.diagnostics.metadata,
+                                "gen_sim_clearance_park": acceptance,
+                            },
+                            **(
+                                {
+                                    "failure": PlanningFailure(
+                                        "cleanup_park_failed", retryable=False
+                                    )
+                                }
+                                if not acceptance["valid"]
+                                else {}
+                            ),
+                        ),
+                    )
             plan = replace(
                 plan,
                 diagnostics=replace(

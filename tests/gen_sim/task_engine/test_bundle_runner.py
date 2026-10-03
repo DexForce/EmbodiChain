@@ -291,6 +291,8 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         invocation_id="test/segment-0:0",
         motion_policy=MotionPolicy(),
         skill_options=SimpleNamespace(),
+        skill_id="move_joints",
+        goal=None,
     )
     positions = torch.zeros(1, 2, 1)
     if outcome == "velocity_failure":

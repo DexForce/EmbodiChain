@@ -140,7 +140,10 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
 
     def request(name):
         return SimpleNamespace(
-            invocation_id=name, motion_policy=MotionPolicy(sample_count=140)
+            invocation_id=name,
+            motion_policy=MotionPolicy(sample_count=140),
+            skill_id="move_end_effector",
+            goal=None,
         )
 
     with motion.cartesian_approach_scope(True):
@@ -217,6 +220,8 @@ def test_velocity_failure_retries_only_this_gensim_invocation_with_denser_sample
     class Request:
         invocation_id: str
         motion_policy: MotionPolicy
+        skill_id: str = "move_joints"
+        goal: object | None = None
 
     request = Request("task/segment:0", MotionPolicy(sample_count=140))
     result = engine._plan_request(request)
@@ -274,6 +279,8 @@ def test_valid_gensim_plan_does_not_pay_for_velocity_retry(monkeypatch, tmp_path
     class Request:
         invocation_id: str
         motion_policy: MotionPolicy
+        skill_id: str = "move_joints"
+        goal: object | None = None
 
     result = engine._plan_request(
         Request("task/segment:0", MotionPolicy(sample_count=140))

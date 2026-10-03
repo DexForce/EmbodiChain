@@ -678,7 +678,36 @@ class GenSimMoveHeldObject(MoveHeldObject):
                     ),
                 )
                 request = replace(request, goal=goal)
-        plan = super()._plan(request, context)
+        from .held_alignment_recovery import (
+            AlignmentCollisionUnavailable,
+            recover,
+            world_yaw_free_collision_scope,
+        )
+        from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
+
+        try:
+            with world_yaw_free_collision_scope(self.robot, request, context) as scope:
+                plan = super()._plan(request, context)
+                plan = recover(
+                    scope,
+                    request,
+                    context,
+                    plan,
+                    lambda selected: super(GenSimMoveHeldObject, self)._plan(
+                        selected, context
+                    ),
+                )
+        except AlignmentCollisionUnavailable as error:
+            plan = self.failed_plan(request, context, message=str(error))
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    failure=PlanningFailure(
+                        "held_alignment_collision_unavailable", retryable=False
+                    ),
+                ),
+            )
         motion = request.binding.endpoint("primary", "motion")
         grasp = request.binding.endpoint("primary", "grasp")
         task_key = require_shared_task_state_key(

@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 import json
 import math
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 import xml.etree.ElementTree as ET
 
 import torch
@@ -84,7 +84,11 @@ def place_ik_recovery() -> Iterator[_PlaceIKRecovery]:
 
 
 def _local_place_ik(
-    generator: MotionGenerator, targets: list[PlanState], options: MotionGenOptions
+    generator: MotionGenerator,
+    targets: list[PlanState],
+    options: MotionGenOptions,
+    *,
+    candidate_predicate: Callable[[torch.Tensor], bool] | None = None,
 ) -> PlanResult | None:
     """Recover a single-environment path without changing targets or timing."""
     robot = generator.robot
@@ -119,6 +123,7 @@ def _local_place_ik(
             and (qpos >= lower).all()
             and (qpos <= upper).all()
             and ((qpos - seed).abs() <= allowed).all()
+            and (candidate_predicate is None or candidate_predicate(qpos))
         )
 
     # Failed searches must not perturb the later grasp-candidate random stream.
@@ -208,6 +213,14 @@ class CheckedMotionGenerator(MotionGenerator):
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
     ) -> PlanResult:
         from .articulation_recovery import motion_scope
+        from .held_alignment_recovery import (
+            motion_scope as held_alignment_scope,
+            screen_alignment_result,
+        )
+
+        held = held_alignment_scope(self)
+        if held is not None and held.replay_result is not None:
+            return held.replay(target_states, options)
 
         scope = motion_scope(self)
         if scope is not None and scope.tracks is not None:
@@ -218,7 +231,7 @@ class CheckedMotionGenerator(MotionGenerator):
             result = self._generate_checked(target_states, options)
         if scope is not None:
             scope.record(target_states, options)
-        return result
+        return screen_alignment_result(self, result, options, targets=target_states)
 
     def _generate_checked(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None
