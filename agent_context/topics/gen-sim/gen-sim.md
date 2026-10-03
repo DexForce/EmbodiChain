@@ -357,16 +357,45 @@ checked after every recipe call; this is not in-flight contact qualification.
 E8 is owned by `_task_program/twist_binding.py` and `twist_runtime.py`: a source-qualified
 revolute knob lowers to prepare/bounded Twist chunks/Park through the public `Twist` skill and
 ordinary Gym runtime. Each chunk is capped at 5 degrees and the next semantic segment reads
-the measured qpos again. The target is a printed-label setting calibrated from pointer/label
-geometry and an asset hash; ordinal settings and joint-limit guesses are rejected. Coarse E8
-acceptance requires stable released qpos and more than 30 degrees of cumulative absolute qpos
-path while target contact is present; it does not require target-setting convergence or target
-direction. Parent contact is recorded as a warning, while released contact and conservative
-40 mm world mesh-AABB separation after Park remain required. E8 planning ranks geometry-scored
-dual-pad candidates, penalizing parent proximity, and may try at most three alternatives after
-an initial no-contact chunk; public `Twist` and non-E8 routes are unchanged.
+the measured qpos again. Nonzero targets reserve 32 feedback calls; nominal 5-degree coverage
+plus three contact retries must fit that bound. Only full physical acceptance and a fresh
+qpos within tolerance permit unused calls to become one-frame holds. The printed setting uses
+pointer/label geometry and an asset hash; ordinal settings and joint-limit guesses are rejected.
+`twist_adaptation.py` screens source-qualified geometry against the active gripper: compatible
+dimensions remain unchanged; mismatches propose a uniform assembly scale with preferred 10 mm
+grip depth. The canonical minimum depth is empirically qualified, not inferred from opening-axis
+finger thickness. Dimensional candidates still require actual physics acceptance. Audited XY
+relayout moves only unreferenced rigid `on(table)` children,
+excluding supports/parents. Four axis-separation candidates reuse Scene Engine's 20 mm target
+margin and check table bounds and other AABBs; this is not its full layout optimizer.
+The formal generator proposes 1 mm total extra lift after preserving the resized support bottom.
+`twist_support.py` checks full swept geometry; `twist_attempts.py` rebuilds from the original
+PreparedScene at 2/3/4 mm only after support-related startup rejection. Geometric penetration also
+gets bounded preflight alternatives. Source USD/physics remain unchanged; the adaptation audit
+separates actual gap from conservative contact-envelope reference. Direct helper calls retain
+their conservative default. Startup evidence covers reset-to-ready substeps; invalid/overflowed
+observations, motion or table/robot contact fail closed. Final E8 acceptance requires target-setting qpos
+convergence within 5 degrees, contact-backed directional travel, release and stability; Park
+rechecks all conditions. Directional travel must cover the smaller of 15 degrees and the
+initial-to-target angle.
+Directional travel accumulates signed increments across separate contact chunks;
+uncontacted forward motion earns no credit and uncontacted reversals subtract credit.
+Parent contact is recorded as a warning, while released contact and conservative
+40 mm world mesh-AABB separation after Park remain required. Candidates rank closed-hand,
+arena-frame dual-pad geometry and penalize parent proximity; at most three alternatives follow
+an initial no-contact chunk. Axial offsets scale with grip depth and include the calibrated
+center. The lowerer measures matching jaw aperture and uses invocation-owned typed grasp
+overrides; public `Twist` and non-E8 routes remain unchanged.
+The debounced absolute qpos path is diagnostic only, never an early-stop condition.
+Regenerate E8 bundles for revision 4; non-E8 routes retain their behavior.
+E8 remains standalone; mixed E1 transport plus E8 twist graphs fail closed before bundle
+generation and must be qualified as separate stages.
 `twist_evidence.json` records measured qpos/contact evidence. `no_twist` and `centroid` are
 negative/diagnostic variants only; source assets and shared robot defaults remain unchanged.
+E8 alone has a bounded episode-step cap. `orchestration/execution_resources.py` serializes ordinary
+E8 subprocesses and monitors available RAM; resource stops retain receipts and cannot be accepted
+as task success. `twist_recording.py` streams the original camera frames with unchanged encoding
+parameters, committing only verified complete movies. Other task defaults/recorders remain unchanged.
 
 E9 is owned by `_task_program/press_binding.py` and `press_runtime.py`: an
 explicitly bound, fixed-root prismatic button lowers to prepare/Press/Park

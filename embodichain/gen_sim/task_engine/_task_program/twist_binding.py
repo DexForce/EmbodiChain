@@ -30,10 +30,28 @@ from .articulation_binding import PARK_CALL, _fixed_base
 __all__: list[str] = []
 PREPARE_CALL = "gen_sim.twist_prepare"
 TWIST_CALL = "gen_sim.twist"
-TWIST_REVISION = "1"
+TWIST_REVISION = "4"
 TWIST_CHUNK_COUNT = 8
 TWIST_CHUNK_ANGLE = math.radians(5.0)
 TWIST_SETTLE_STEPS = 5
+TWIST_FALLBACK_CHUNKS = 3
+TWIST_MAX_CHUNK_COUNT = 32
+
+
+def required_chunk_count(target_qpos: float) -> int:
+    """Cover the calibrated zero-to-setting angle plus bounded contact retries."""
+    if type(target_qpos) not in (int, float) or not math.isfinite(target_qpos):
+        raise ValueError("E8 chunk coverage requires a finite calibrated angle.")
+    count = max(
+        TWIST_CHUNK_COUNT,
+        math.ceil(abs(target_qpos) / TWIST_CHUNK_ANGLE - 1e-12) + TWIST_FALLBACK_CHUNKS,
+    )
+    if count > TWIST_MAX_CHUNK_COUNT:
+        raise ValueError("E8 calibrated turn exceeds the bounded chunk budget.")
+    # A finite feedback budget covers contact slip; only verified convergence
+    # may turn the unused semantic calls into stationary holds.
+    return TWIST_CHUNK_COUNT if target_qpos == 0.0 else TWIST_MAX_CHUNK_COUNT
+
 
 # Audited mesh identities, not task IDs or inferred ordinal-to-angle mappings.
 # Each label angle is measured anew from its geometry and the source pointer.
@@ -112,7 +130,10 @@ class TwistRoute:
             raise ValueError("E8 grasp_depth must be finite and within (0, 0.01] m.")
         if type(self.settle_steps) is not int or not 0 <= self.settle_steps <= 100:
             raise ValueError("E8 settle_steps must be an integer within [0, 100].")
-        if type(self.chunk_count) is not int or not 1 <= self.chunk_count <= 32:
+        if (
+            type(self.chunk_count) is not int
+            or not 1 <= self.chunk_count <= TWIST_MAX_CHUNK_COUNT
+        ):
             raise ValueError("E8 chunk_count must be an integer within [1, 32].")
         if (
             type(self.chunk_angle) not in (int, float)
@@ -334,7 +355,11 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
         setting,
         min(limits[1], max(limits[0], targets[0])),
     )
-    return TwistRoute.decode(TwistRoute(binding).payload())
+    return TwistRoute.decode(
+        TwistRoute(
+            binding, chunk_count=required_chunk_count(binding.target_qpos)
+        ).payload()
+    )
 
 
 def enrich_twist_inventory(objects: list[dict], articulations: list[dict]) -> None:
@@ -361,7 +386,9 @@ def enrich_twist_inventory(objects: list[dict], articulations: list[dict]) -> No
         attributes["twist_control_joint"] = joint
 
 
-def recipe(object_id: str, arm: str, setting: int) -> list[dict]:
+def recipe(
+    object_id: str, arm: str, setting: int, *, chunk_count: int = TWIST_CHUNK_COUNT
+) -> list[dict]:
     return (
         [
             {
@@ -379,7 +406,7 @@ def recipe(object_id: str, arm: str, setting: int) -> list[dict]:
                 "arguments": {"object": object_id, "setting": setting},
                 "resources": {"primary": arm},
             }
-            for _ in range(TWIST_CHUNK_COUNT)
+            for _ in range(chunk_count)
         ]
         + [
             {
@@ -397,7 +424,10 @@ def graph_routes(graph: dict, scene: Any) -> tuple[TwistRoute, ...]:
     if not groups:
         return ()
     if len(groups) != 1 or len(graph["task_groups"]) != 1:
-        raise ValueError("E8 MVP requires one standalone calibrated knob operation.")
+        raise ValueError(
+            "E8 MVP requires one standalone calibrated knob operation; "
+            "split E1 transport and E8 twist into separate qualified deployments."
+        )
     nodes = {n["id"]: n for n in graph["nodes"]}
     sequence = [nodes[key] for key in groups[0]["node_ids"]]
     call = sequence[0]["call"]
@@ -408,23 +438,28 @@ def graph_routes(graph: dict, scene: Any) -> tuple[TwistRoute, ...]:
         call["arguments"]["setting"],
         call["resources"]["primary"],
     )
-    if (
-        [n["call"] for n in sequence] != recipe(uid, arm, setting)
-        or [n["role"] for n in sequence]
-        != ["primary"] * (TWIST_CHUNK_COUNT + 1) + ["cleanup"]
-        or any(b["depends_on"] != [a["id"]] for a, b in zip(sequence, sequence[1:]))
-    ):
-        raise ValueError("E8 requires prepare/bounded-Twist/Park in order.")
     configs = {a["uid"]: a for a in scene.articulations}
     if uid not in configs:
         raise ValueError("E8 must bind an articulation.")
-    return (replace(discover_twist(configs[uid], setting), arm=arm),)
+    route = replace(discover_twist(configs[uid], setting), arm=arm)
+    if (
+        [n["call"] for n in sequence]
+        != recipe(uid, arm, setting, chunk_count=route.chunk_count)
+        or [n["role"] for n in sequence]
+        != ["primary"] * (route.chunk_count + 1) + ["cleanup"]
+        or any(b["depends_on"] != [a["id"]] for a, b in zip(sequence, sequence[1:]))
+    ):
+        raise ValueError("E8 requires prepare/bounded-Twist/Park in order.")
+    return (route,)
 
 
 def validate_program(program: dict, route: TwistRoute) -> None:
     items = program["program"]["items"]
     expected_recipe = recipe(
-        route.binding.object_id, route.arm, route.binding.target_setting
+        route.binding.object_id,
+        route.arm,
+        route.binding.target_setting,
+        chunk_count=route.chunk_count,
     )
     if len(items) != len(expected_recipe):
         raise ValueError("E8 requires the complete bounded-twist program.")

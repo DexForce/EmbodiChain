@@ -161,6 +161,10 @@ def execute_bundle(
             args,
             gym_config_modifier=configure_environment,
         )
+        _configure_twist_recorders(
+            env_cfg,
+            bool(getattr(deployment.integration.adapter_factory, "twist_routes", ())),
+        )
         env_cfg.task_program = load_task_program(
             program_path,
             integration=deployment.selection,
@@ -299,6 +303,14 @@ def execute_bundle(
                                     )
                                 ],
                                 "trace": sensor.trace,
+                                **(
+                                    {
+                                        "table_actor_id": sensor.table_actor,
+                                        "startup_evidence": sensor.startup_evidence(),
+                                    }
+                                    if twist_routes
+                                    else {}
+                                ),
                             },
                             indent=2,
                         ),
@@ -740,6 +752,21 @@ def _configure_recording(config: dict[str, Any], output: Path) -> None:
             "save_path": (output / "videos").as_posix(),
         },
     }
+
+
+def _configure_twist_recorders(env_cfg: Any, enabled: bool) -> None:
+    """Select the private E8 recorder after the legacy short-name parser.
+
+    The Gym YAML parser resolves only names in manager modules. Keep its normal
+    recorder declaration and replace the already decoded callable locally,
+    without modifying the shared manager registry or other task recorders.
+    """
+    if not enabled:
+        return
+    from ._task_program.twist_recording import E8CameraRecorder
+
+    for name in ("record_camera", "record_press_camera"):
+        getattr(env_cfg.events, name).func = E8CameraRecorder
 
 
 def _verify_source(bundle: Path) -> None:

@@ -26,6 +26,7 @@ from contextvars import ContextVar
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
+    ActionControlOverrides,
     Twist,
     TwistGoal,
     TwistOptions,
@@ -35,6 +36,7 @@ from embodichain.lab.sim.atomic_actions import (
     MoveJoints,
     MoveJointsOptions,
     JointPositionGoal,
+    JointPositionCommand,
     JointPositionTarget,
     RecoveryPolicy,
     GRASP_COMMAND,
@@ -42,6 +44,7 @@ from embodichain.lab.sim.atomic_actions import (
     TimedTrajectory,
 )
 from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.trajectory_ops import resolve_pose_target
 from embodichain.lab.sim.sensors import ContactSensorCfg, ArticulationContactFilterCfg
 from embodichain.lab.task_program.compiler.lowering import (
@@ -76,8 +79,13 @@ __all__: list[str] = []
 SENSOR_UID = "gen_sim_twist_evidence"
 ANGLE_TOLERANCE = math.radians(5.0)
 INITIAL_TOLERANCE = math.radians(2.0)
+INITIAL_VELOCITY_TOLERANCE = math.radians(2.0)
+STARTUP_MAX_DURATION = 32.0
+STARTUP_MAX_SAMPLES = 8192
 PARENT_CONTACT_FRACTION_LIMIT = 0.25
-COARSE_TURN_THRESHOLD = math.radians(30.0)
+PARENT_CONTACT_SCORE_LIMIT = 0.05
+COARSE_TURN_THRESHOLD = math.radians(15.0)
+QPOS_PATH_DEADBAND = math.radians(0.5)
 _ROLL_CANDIDATES = (
     0.0,
     math.pi / 2,
@@ -88,7 +96,7 @@ _ROLL_CANDIDATES = (
     math.pi / 4,
     -math.pi / 4,
 )
-_AXIAL_CANDIDATES = (-0.025, -0.015, -0.005, 0.005)
+_AXIAL_CANDIDATES = (-0.25, 0.0, 0.25, 0.5)
 TWIST_CANDIDATE_FALLBACKS = 3
 
 
@@ -101,6 +109,9 @@ class _TwistCandidateState:
     selected_index: int | None = None
     fallback_count: int = 0
     locked: bool = False
+    contact_path: float = 0.0
+    last_contact_qpos: float | None = None
+    goal_complete: bool = False
 
 
 _CANDIDATE_STATE: ContextVar[_TwistCandidateState | None] = ContextVar(
@@ -116,9 +127,13 @@ def _candidate_state() -> _TwistCandidateState:
     return state
 
 
-def _candidate_table() -> tuple[tuple[int, float, float], ...]:
+def _candidate_table(grip_depth: float = 0.01) -> tuple[tuple[int, float, float], ...]:
+    if not math.isfinite(grip_depth) or grip_depth <= 0.0:
+        raise ValueError("E8 axial candidates require a positive grip depth.")
     values = [
-        (roll, shift) for roll in _ROLL_CANDIDATES[:4] for shift in _AXIAL_CANDIDATES
+        (roll, fraction * grip_depth)
+        for roll in _ROLL_CANDIDATES[:4]
+        for fraction in _AXIAL_CANDIDATES
     ]
     return tuple((index, roll, shift) for index, (roll, shift) in enumerate(values))
 
@@ -156,6 +171,11 @@ class GenSimTwist(Twist):
     @staticmethod
     def _current_qpos(request: Any, context: Any) -> float | None:
         geometry = request.goal.semantics.geometry
+        measured = geometry.get("gen_sim_twist_measured_qpos")
+        if measured is not None:
+            if type(measured) is not float or not math.isfinite(measured):
+                raise ValueError("E8 requires a finite freshly measured joint angle.")
+            return measured
         articulation_id = geometry.get("gen_sim_twist_articulation_id")
         joint = geometry.get("gen_sim_twist_joint")
         if not isinstance(articulation_id, str) or not isinstance(joint, str):
@@ -178,7 +198,10 @@ class GenSimTwist(Twist):
         point = tuple(
             p + shift * axis
             for p, axis in zip(
-                geometry["gen_sim_twist_outer_point"],
+                geometry.get(
+                    "gen_sim_twist_grasp_point",
+                    geometry["gen_sim_twist_outer_point"],
+                ),
                 geometry["gen_sim_twist_axis"],
             )
         )
@@ -198,18 +221,18 @@ class GenSimTwist(Twist):
 
     def _candidate_geometry_score(
         self, plan: Any, request: Any, context: Any
-    ) -> tuple[float, float, float]:
-        """Rank successful IK by dual-pad proximity, parent clearance, then motion."""
+    ) -> tuple[float, float, float, float]:
+        """Rank successful IK by parent clearance, pad contact, then motion."""
         geometry = request.goal.semantics.geometry
         target_points = geometry.get("gen_sim_twist_target_points")
         parent_points = geometry.get("gen_sim_twist_parent_points")
         target_to_parent = geometry.get("gen_sim_twist_target_to_parent")
         if not target_points or not parent_points or target_to_parent is None:
-            return (1.0, 1.0, float("inf"))
-        reach = next((s for s in plan.segments if s.name == "reach"), None)
-        if reach is None or plan.joint_trajectory is None:
-            return (1.0, 1.0, float("inf"))
-        qpos = plan.joint_trajectory.positions[:, reach.stop - 1]
+            return (1.0, 1.0, 1.0, float("inf"))
+        close = next((s for s in plan.segments if s.name == "close"), None)
+        if close is None or plan.joint_trajectory is None:
+            return (1.0, 1.0, 1.0, float("inf"))
+        qpos = plan.joint_trajectory.positions[:, close.stop - 1]
         target_pose = resolve_pose_target(
             resolve_pose_goal(request.goal.target_pose, context, name="target_pose"),
             num_envs=1,
@@ -227,12 +250,14 @@ class GenSimTwist(Twist):
             if "finger_pad" in name
         ]
         if not names:
-            return (1.0, 1.0, float("inf"))
+            return (1.0, 1.0, 1.0, float("inf"))
         pads = self.robot.compute_fk(
             qpos=qpos,
             link_names=names,
             qpos_joint_names=self.robot.joint_names,
         )
+        # Full-articulation FK is root-local; the target snapshot is arena-local.
+        pads = self.robot.get_local_pose(to_matrix=True).to(pads)[:, None] @ pads
         distances = []
         parent_close = []
         for index, name in enumerate(names):
@@ -240,13 +265,12 @@ class GenSimTwist(Twist):
             pose = pads[0, index]
             world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
             distances.append(torch.cdist(world, target_world).amin())
-            parent_close.append(
-                (torch.cdist(world, parent_world).amin() <= 0.003).float()
-            )
+            parent_close.append(torch.cdist(world, parent_world).amin(-1))
         dual_pad_distance = float(torch.stack(distances).amax())
-        parent_fraction = float(torch.stack(parent_close).mean())
+        parent_fraction = float(torch.cat(parent_close).le(0.003).float().mean())
         motion = float(torch.linalg.vector_norm(qpos - context.robot.qpos).item())
-        return parent_fraction, dual_pad_distance, motion
+        parent_violation = float(parent_fraction > PARENT_CONTACT_SCORE_LIMIT)
+        return parent_violation, parent_fraction, dual_pad_distance, motion
 
     @staticmethod
     def _annotate_plan(plan: Any, *, roll: float, candidate_index: int) -> Any:
@@ -286,13 +310,35 @@ class GenSimTwist(Twist):
             request, skill_options=replace(request.skill_options, twist_angle=angle)
         )
         state = _candidate_state()
-        table = _candidate_table()
+        if state.goal_complete:
+            if (
+                current_qpos is not None
+                and abs(current_qpos - geometry["gen_sim_twist_target_qpos"])
+                <= ANGLE_TOLERANCE
+            ):
+                return self.build_plan(
+                    request,
+                    context,
+                    success=torch.ones(
+                        context.batch_size, dtype=torch.bool, device=self.device
+                    ),
+                    trajectory=TimedTrajectory.from_uniform_step(
+                        context.robot.qpos.unsqueeze(1).clone(),
+                        env_ids=context.env_ids,
+                        step_dt=context.require_control_dt(),
+                    ),
+                    expected_effects=StateDelta(),
+                    diagnostics=None,
+                    segment_lengths={"approach": 1},
+                )
+            state.goal_complete = False
+        table = _candidate_table(geometry["gen_sim_twist_grip_depth"])
         candidates = (
             [item for item in table if item[0] == state.forced_index]
             if state.forced_index is not None
             else list(table)
         )
-        ranked: list[tuple[tuple[float, float, float], int, Any, Any]] = []
+        ranked: list[tuple[tuple[float, float, float, float], int, Any, Any]] = []
         for candidate_index, roll, shift in candidates:
             candidate_request = self._candidate_request(base_request, roll, shift)
             candidate_plan = super()._plan(candidate_request, context)
@@ -327,6 +373,7 @@ class GenSimTwist(Twist):
                         "gen_sim_twist_candidate_order": list(state.order),
                         "gen_sim_twist_candidate_score": list(selected_score),
                         "gen_sim_twist_candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
+                        "gen_sim_twist_parent_contact_score_limit": PARENT_CONTACT_SCORE_LIMIT,
                     },
                 ),
             )
@@ -358,7 +405,11 @@ class GenSimTwist(Twist):
                     trajectory=TimedTrajectory.from_uniform_step(
                         torch.cat(pieces, dim=1),
                         env_ids=trajectory.env_ids,
-                        step_dt=trajectory.dt,
+                        step_dt=(
+                            float(trajectory.dt[0, 1].item())
+                            if trajectory.dt.shape[1] > 1
+                            else context.require_control_dt()
+                        ),
                     ),
                     expected_effects=plan.expected_effects,
                     diagnostics=plan.diagnostics,
@@ -377,17 +428,19 @@ class GenSimTwist(Twist):
                     context,
                     message="E8 Twist exceeds resampled joint velocity limits.",
                 )
-            # As with public Slide, grasping intentionally moves the live link.
-            # GenSim chunks the turn and recompiles from the measured qpos for
-            # the next semantic call; dependency monitoring remains bounded to
-            # the non-contact approach of each public Twist invocation.
+            # Keep free-space invalidation, then permit the intended contact
+            # rotation. The next chunk lowers from a fresh physical observation.
             if plan.scene_dependencies:
                 plan = replace(plan, scene_dependency_end_segment="reach")
         return plan
 
 
-def _grasp_tip_offset(robot: Any, context: Any, bound: Any, width: float) -> float:
-    """Measure the finger tip at the knob's aperture, not at an empty closed hand."""
+def _grasp_tip_offset(
+    robot: Any, context: Any, bound: Any, width: float
+) -> tuple[float, JointPositionCommand]:
+    """Match the measured aperture and return its tip offset and grasp command."""
+    if not math.isfinite(width) or width <= 0.0:
+        raise ValueError("E8 knob width must be finite and positive.")
     motion = bound.binding.action_binding.endpoint("primary", "motion").require_target(
         JointPositionTarget
     )
@@ -439,7 +492,17 @@ def _grasp_tip_offset(robot: Any, context: Any, bound: Any, width: float) -> flo
             float(p[:, 2].max()) for p in clouds
         )
 
-    if width > measure(0.0)[0] or width < measure(1.0)[0]:
+    open_gap, closed_gap = measure(0.0)[0], measure(1.0)[0]
+    if math.isclose(width, open_gap):
+        width = open_gap
+    elif math.isclose(width, closed_gap):
+        width = closed_gap
+    if (
+        not math.isfinite(open_gap)
+        or not math.isfinite(closed_gap)
+        or open_gap <= closed_gap
+        or not closed_gap <= width <= open_gap
+    ):
         raise ValueError("E8 knob width is outside the measured gripper opening.")
     low, high = 0.0, 1.0
     for _ in range(12):
@@ -448,7 +511,10 @@ def _grasp_tip_offset(robot: Any, context: Any, bound: Any, width: float) -> flo
             low = mid
         else:
             high = mid
-    return measure((low + high) / 2)[1]
+    # The closed-side bound adds only the bisection's numerical contact margin.
+    offset = measure(high)[1]
+    command = JointPositionCommand(commands[0] + high * (commands[1] - commands[0]))
+    return offset, command
 
 
 def with_twist_options(profile: Any, routes: tuple[TwistRoute, ...]) -> Any:
@@ -487,6 +553,20 @@ def with_twist_options(profile: Any, routes: tuple[TwistRoute, ...]) -> Any:
             for p in profile.presets
         ),
     )
+
+
+def _bounded_twist_qpos(
+    observed: torch.Tensor, limits: tuple[float, float]
+) -> float | None:
+    """Accept native-dtype boundary roundoff without accepting physical overtravel."""
+    value = float(observed)
+    epsilon = torch.finfo(observed.dtype).eps * max(1.0, *(abs(v) for v in limits))
+    if (
+        not math.isfinite(value)
+        or not limits[0] - epsilon <= value <= limits[1] + epsilon
+    ):
+        return None
+    return min(limits[1], max(limits[0], value))
 
 
 class _TwistLowerer(RegisteredSemanticLowerer):
@@ -546,8 +626,9 @@ class _TwistLowerer(RegisteredSemanticLowerer):
             )
         if type(option_template) is not TwistOptions:
             raise TypeError("E8 requires public TwistOptions.")
-        qpos = float(self.art.get_qpos()[0, self.joint_index])
-        if not math.isfinite(qpos) or not b.limits[0] <= qpos <= b.limits[1]:
+        observed = self.art.get_qpos()[0, self.joint_index]
+        qpos = _bounded_twist_qpos(observed, b.limits)
+        if qpos is None:
             raise ValueError("E8 calibrated joint qpos is not finite or within limits.")
         rest = float(self.art.get_link_physical_attr(b.link)[0].rest_offset)
         pad_names = [
@@ -563,13 +644,11 @@ class _TwistLowerer(RegisteredSemanticLowerer):
             if pad_names
             else 0.0
         )
-        offset = (
-            _closed_finger_tip_offset(self.robot, context, bound)
-            if self.route.variant == "closed_tip"
-            else _grasp_tip_offset(
-                self.robot, context, bound, b.grip_width + 2 * (rest + pad_rest)
-            )
+        offset, grasp_command = _grasp_tip_offset(
+            self.robot, context, bound, b.grip_width + 2 * (rest + pad_rest)
         )
+        if self.route.variant == "closed_tip":
+            offset = _closed_finger_tip_offset(self.robot, context, bound)
         bite = min(self.route.grasp_depth, b.grip_depth / 2)
         shift = b.grip_depth / 2 if self.route.variant == "centroid" else bite - offset
         point = tuple(p + shift * a for p, a in zip(b.outer_point, b.axis))
@@ -605,6 +684,7 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                     entity_id=self.route.link_id,
                     geometry={
                         "gen_sim_twist_angle": angle,
+                        "gen_sim_twist_measured_qpos": qpos,
                         "gen_sim_twist_target_qpos": b.target_qpos,
                         "gen_sim_twist_axis_sign": b.axis_sign,
                         "gen_sim_twist_articulation_id": b.object_id,
@@ -612,6 +692,8 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                         "gen_sim_twist_chunk_angle": self.route.chunk_angle,
                         "gen_sim_twist_settle_steps": self.route.settle_steps,
                         "gen_sim_twist_outer_point": list(b.outer_point),
+                        "gen_sim_twist_grip_depth": b.grip_depth,
+                        "gen_sim_twist_grasp_point": list(point),
                         "gen_sim_twist_axis": list(b.axis),
                         "gen_sim_twist_arm": self.route.arm,
                         "gen_sim_twist_target_points": sample(target_vertices),
@@ -629,7 +711,10 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                     ),
                 ),
                 SceneEntityPose(self.route.link_id),
-            )
+            ),
+            control_overrides=ActionControlOverrides(
+                endpoints={"primary": {"grasp": {GRASP_COMMAND: grasp_command}}}
+            ),
         )
 
 
@@ -665,9 +750,117 @@ class TwistFactory(TwistPrepareFactory):
 class TwistContactSensor(PressContactSensor):
     """Reuse the read-only substep collector; qpos values here are radians."""
 
+    def configure(self, route: TwistRoute, robot: Any) -> None:
+        super().configure(route, robot)
+        self.table_actor = int(self.get_actor_ids("table")[0, 0])
+        self.robot_actors = set(
+            self.get_actor_ids(robot.uid, robot.link_names)[0].tolist()
+        )
+        dt = float(self._sim.sim_config.physics_dt)
+        if not math.isfinite(dt) or dt <= 0:
+            raise ValueError("E8 startup observation requires a positive physics dt.")
+        self._startup_sample_limit = min(
+            STARTUP_MAX_SAMPLES, math.ceil(STARTUP_MAX_DURATION / dt) + 1
+        )
+        self._startup_epoch = -1
+        self._finalized_startup: dict[str, Any] | None = None
+        self.update()
+        self._begin_startup()
+
+    def _begin_startup(self) -> None:
+        self.clock = 0.0
+        self._startup_epoch += 1
+        self._startup_recording = True
+        self._startup_overflow = False
+        self.startup_trace: list[dict[str, Any]] = []
+        self._capture_startup()
+
+    def _capture_startup(self) -> None:
+        if (
+            len(self.startup_trace) >= self._startup_sample_limit
+            or self.clock > STARTUP_MAX_DURATION + 1e-8
+        ):
+            self._startup_overflow = True
+            return
+        data = self.get_data()
+        mask = data["is_valid"][0]
+        pairs = data["user_ids"][0, mask].tolist()
+        impulses = data["impulse"][0, mask].tolist()
+        qpos = float(self.art.get_qpos()[0, self.joint_index])
+        qvel = float(self.art.get_qvel()[0, self.joint_index])
+        valid = (
+            self.dropped_contacts == 0
+            and all(math.isfinite(value) for value in (self.clock, qpos, qvel))
+            and all(
+                bool(torch.isfinite(data[key][0, mask]).all())
+                for key in ("impulse", "position", "normal", "distance")
+            )
+        )
+        self.startup_trace.append(
+            {
+                "timestamp": self.clock,
+                "qpos": qpos,
+                "qvel": qvel,
+                "contact_pairs": pairs,
+                "impulses": impulses,
+                "table_target_contact": any(
+                    self.target_actor in pair
+                    and self.table_actor in pair
+                    and impulse > 0
+                    for pair, impulse in zip(pairs, impulses)
+                ),
+                "robot_target_contact": any(
+                    self.target_actor in pair
+                    and any(actor in self.robot_actors for actor in pair)
+                    and impulse > 0
+                    for pair, impulse in zip(pairs, impulses)
+                ),
+                "valid": valid,
+                "dropped_contacts": self.dropped_contacts,
+            }
+        )
+
+    def update_physics_step(self, dt: float) -> None:
+        super().update_physics_step(dt)
+        if self._startup_recording and not self._startup_overflow:
+            self._capture_startup()
+
+    def _startup_record(self, *, complete: bool) -> dict[str, Any]:
+        record = {
+            "scope": "reset_to_ready_physics_substeps",
+            "epoch": self._startup_epoch,
+            "complete": complete,
+            "overflow": self._startup_overflow,
+            "sample_limit": self._startup_sample_limit,
+            "duration_limit": STARTUP_MAX_DURATION,
+            "table_actor_id": self.table_actor,
+            "robot_actor_ids": sorted(self.robot_actors),
+            "trace": deepcopy(self.startup_trace),
+        }
+        record["summary"] = _evaluate_twist_startup(record)
+        return record
+
+    def startup_evidence(self) -> dict[str, Any]:
+        """Retain the completed attempt even if error cleanup resets the scene."""
+        if self._finalized_startup is not None:
+            return deepcopy(self._finalized_startup)
+        return self._startup_record(complete=False)
+
+    def startup_check(self) -> dict[str, Any]:
+        return self.startup_evidence()["summary"]
+
     def arm(self) -> None:
+        self._startup_recording = False
+        self._finalized_startup = self._startup_record(complete=True)
         super().arm()
         self.phase = "twist"
+
+    def reset(self, env_ids: Any = None) -> None:
+        super().reset(env_ids)
+        if hasattr(self, "route"):
+            if self._startup_recording and len(self.startup_trace) > 1:
+                self._finalized_startup = self._startup_record(complete=False)
+            self._begin_startup()
 
     def capture(self, phase: str) -> Any:
         sample = super().capture(phase)
@@ -678,6 +871,57 @@ class TwistContactSensor(PressContactSensor):
                 part, target=True
             ).tolist()
         return sample
+
+
+def _evaluate_twist_startup(evidence: dict[str, Any]) -> dict[str, Any]:
+    trace = evidence["trace"]
+    valid = bool(
+        evidence["complete"]
+        and not evidence["overflow"]
+        and len(trace) >= 2
+        and all(frame["valid"] and frame["dropped_contacts"] == 0 for frame in trace)
+        and all(
+            math.isfinite(frame[key])
+            for frame in trace
+            for key in ("timestamp", "qpos", "qvel")
+        )
+        and all(
+            current["timestamp"] > previous["timestamp"]
+            for previous, current in zip(trace, trace[1:])
+        )
+    )
+    table_contacts = sum(frame["table_target_contact"] for frame in trace)
+    robot_contacts = sum(frame["robot_target_contact"] for frame in trace)
+    motion_stable = _initial_twist_state_stable(
+        [frame["qpos"] for frame in trace], [frame["qvel"] for frame in trace]
+    )
+    reason = (
+        "invalid_startup_evidence"
+        if not valid
+        else (
+            "startup_table_contact"
+            if table_contacts
+            else (
+                "startup_robot_contact"
+                if robot_contacts
+                else ("startup_stable" if motion_stable else "startup_motion")
+            )
+        )
+    )
+    return {
+        "accepted": valid
+        and not table_contacts
+        and not robot_contacts
+        and motion_stable,
+        "reason": reason,
+        "sample_count": len(trace),
+        "table_contact_samples": table_contacts,
+        "robot_contact_samples": robot_contacts,
+        "max_abs_qpos": max((abs(frame["qpos"]) for frame in trace), default=None),
+        "max_abs_qvel": max((abs(frame["qvel"]) for frame in trace), default=None),
+        "initial_angle_tolerance": INITIAL_TOLERANCE,
+        "initial_velocity_tolerance": INITIAL_VELOCITY_TOLERANCE,
+    }
 
 
 def ensure_sensor(simulation: Any, robot: Any, route: TwistRoute) -> TwistContactSensor:
@@ -697,6 +941,7 @@ def ensure_sensor(simulation: Any, robot: Any, route: TwistRoute) -> TwistContac
                 uid=SENSOR_UID,
                 sensor_type="GenSimTwistContact",
                 max_contacts_per_env=512,
+                filter_need_both_actor=False,
                 articulation_cfg_list=[
                     ArticulationContactFilterCfg(articulation_uid=robot.uid),
                     ArticulationContactFilterCfg(
@@ -715,11 +960,13 @@ def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> di
     b = route.binding
     result = {
         "accepted": False,
-        "criterion": "contact_backed_coarse_turn",
+        "criterion": "qpos_converged_with_contact",
         "target_qpos": b.target_qpos,
         "observed_qpos": final_qpos,
         "angle_tolerance": ANGLE_TOLERANCE,
         "coarse_turn_threshold": COARSE_TURN_THRESHOLD,
+        "coarse_turn_reached": False,
+        "target_contact_seen": False,
         "reason": "invalid_observation",
     }
     if (
@@ -740,31 +987,67 @@ def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> di
     if any(not b.limits[0] - 0.02 <= s.qpos <= b.limits[1] + 0.02 for s in samples):
         return {**result, "reason": "joint_out_of_bounds"}
     sign = math.copysign(1.0, b.target_qpos - samples[0].qpos)
-    anchor, directional_travel, contact_path = None, 0.0, 0.0
-    previous = None
-    for s in samples:
-        if not s.target_contact:
-            anchor = None
-            previous = None
-            continue
-        if anchor is None:
-            anchor = s.qpos
-        if previous is not None:
-            contact_path += abs(s.qpos - previous)
-        previous = s.qpos
-        directional_travel = max(directional_travel, sign * (s.qpos - anchor))
+    signed_contact_travel, uncontacted_reverse_travel, contact_path = 0.0, 0.0, 0.0
+    for previous, current in zip(samples, samples[1:]):
+        delta = sign * (current.qpos - previous.qpos)
+        if previous.target_contact and current.target_contact:
+            signed_contact_travel += delta
+            contact_path += abs(delta)
+        elif delta < 0.0:
+            # Release/regrasp reversals must not let repeated excursions earn credit.
+            uncontacted_reverse_travel -= delta
+    directional_travel = max(0.0, signed_contact_travel - uncontacted_reverse_travel)
     error = abs(final_qpos - b.target_qpos)
-    accepted = math.isfinite(final_qpos) and contact_path >= COARSE_TURN_THRESHOLD
+    target_contact_seen = any(s.target_contact for s in samples)
+    required_directional_travel = min(
+        COARSE_TURN_THRESHOLD, abs(b.target_qpos - samples[0].qpos)
+    )
+    accepted = (
+        math.isfinite(final_qpos)
+        and target_contact_seen
+        and directional_travel >= required_directional_travel
+        and error <= ANGLE_TOLERANCE
+    )
     return {
         **result,
         "accepted": accepted,
         "contact_travel": directional_travel,
+        "signed_contact_travel": signed_contact_travel,
+        "uncontacted_reverse_travel": uncontacted_reverse_travel,
         "contact_path": contact_path,
+        "target_contact_seen": target_contact_seen,
+        "directional_travel_required": required_directional_travel,
         "target_error": error,
+        "coarse_turn_reached": contact_path >= COARSE_TURN_THRESHOLD,
         "reason": (
-            "coarse_turn_reached" if accepted else "coarse_contact_travel_insufficient"
+            "qpos_converged"
+            if accepted
+            else (
+                "target_contact_missing"
+                if not target_contact_seen
+                else (
+                    "target_qpos_not_reached"
+                    if error > ANGLE_TOLERANCE
+                    else "direction_not_confirmed"
+                )
+            )
         ),
     }
+
+
+def _initial_twist_state_stable(
+    positions: list[float], velocities: list[float]
+) -> bool:
+    """Reject a stationary-looking joint with unresolved angular velocity."""
+    return bool(
+        positions
+        and len(positions) == len(velocities)
+        and all(math.isfinite(q) and abs(q) <= INITIAL_TOLERANCE for q in positions)
+        and all(
+            math.isfinite(v) and abs(v) <= INITIAL_VELOCITY_TOLERANCE
+            for v in velocities
+        )
+    )
 
 
 class TwistAcceptancePort:
@@ -798,6 +1081,30 @@ class TwistAcceptancePort:
         ):
             raise ValueError("E8 physical policy identity differs from its knob.")
 
+    def _accumulate_contact_path(self, samples: list) -> None:
+        """Accumulate debounced target-contact qpos travel across chunks."""
+        state = self._candidate_state
+        for sample in samples:
+            if sample.target_contact is not True:
+                state.last_contact_qpos = None
+                continue
+            if state.last_contact_qpos is not None:
+                delta = abs(sample.qpos - state.last_contact_qpos)
+                if delta >= QPOS_PATH_DEADBAND:
+                    state.contact_path += delta
+                    state.last_contact_qpos = sample.qpos
+            else:
+                state.last_contact_qpos = sample.qpos
+
+    def _clearance(self) -> float:
+        bounds = []
+        for name in self.sensor.finger_names:
+            pose = self.robot.get_link_pose(name, to_matrix=True)[0]
+            vertices, _ = self.robot.get_link_vert_face(name)
+            world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
+            bounds.append(torch.stack((world.amin(0), world.amax(0))))
+        return _park_clearance(self.sensor.art, bounds)
+
     def actions(self, policy: Any, *, segment: Any, active_mask: torch.Tensor) -> Any:
         self.validate_policy(policy, segment=segment)
         ready = policy.cfg.preset == self.route.preset("ready")
@@ -809,34 +1116,60 @@ class TwistAcceptancePort:
             return
         s, b = self.sensor, self.route.binding
         hold = self.robot.get_qpos().clone()
-        values = []
+        values, velocities = [], []
         for _ in range(math.ceil(0.5 / self.dt)):
             yield hold.clone()
             values.append(float(s.art.get_qpos()[0, s.joint_index]))
+            velocities.append(float(s.art.get_qvel()[0, s.joint_index]))
+        stable = bool(
+            max(values) - min(values) <= math.radians(1.0)
+            and all(
+                math.isfinite(v) and abs(v) <= INITIAL_VELOCITY_TOLERANCE
+                for v in velocities
+            )
+        )
+        recent = s.samples[-max(1, math.ceil(0.15 / s._sim.sim_config.physics_dt)) :]
+        released = bool(recent) and all(
+            sample.valid and sample.target_contact is False for sample in recent
+        )
         if ready:
             self._candidate_state.forced_index = None
             self._candidate_state.order = ()
             self._candidate_state.selected_index = None
             self._candidate_state.fallback_count = 0
             self._candidate_state.locked = False
+            self._candidate_state.contact_path = 0.0
+            self._candidate_state.last_contact_qpos = None
+            self._candidate_state.goal_complete = False
             s.update()
             s.arm()
             s.other_qpos = s.art.get_qpos().clone()
             self._chunk_cursor = len(s.samples)
+            startup = s.startup_check()
             good = (
-                all(math.isfinite(v) and abs(v) <= INITIAL_TOLERANCE for v in values)
+                startup["accepted"]
+                and _initial_twist_state_stable(values, velocities)
                 and s.samples[0].valid
                 and s.samples[0].target_contact is False
             )
             result = {
                 "accepted": good,
                 "phase": "initial_stable",
+                "reason": (
+                    startup["reason"]
+                    if not startup["accepted"]
+                    else ("initial_stable" if good else "unstable_initial_state")
+                ),
                 "joint_positions": values,
+                "joint_velocities": velocities,
+                "initial_velocity_tolerance": INITIAL_VELOCITY_TOLERANCE,
+                "startup_check": startup,
             }
         elif chunk:
             start = self._chunk_cursor
             samples = s.samples[start:]
             trace = s.trace[start:]
+            self._accumulate_contact_path(samples)
             qpos = float(s.art.get_qpos()[0, s.joint_index])
             target_contacts = [sample.target_contact for sample in samples]
             parent_contacts = [bool(item.get("parent_contact")) for item in trace]
@@ -845,20 +1178,28 @@ class TwistAcceptancePort:
             )
             target_error = abs(qpos - b.target_qpos)
             already_reached = target_error <= ANGLE_TOLERANCE
-            good = bool(
+            coarse_reached = self._candidate_state.contact_path >= COARSE_TURN_THRESHOLD
+            valid_chunk = bool(
                 samples
                 and all(sample.valid for sample in samples)
                 and all(sample.target_contact is not None for sample in samples)
-                and (already_reached or any(target_contacts))
                 and math.isfinite(qpos)
                 and b.limits[0] - 0.02 <= qpos <= b.limits[1] + 0.02
             )
-            fallback_good, fallback = _candidate_contact_decision(
-                self._candidate_state,
-                target_contact=any(target_contacts),
-                already_reached=already_reached,
+            good, fallback = False, False
+            if valid_chunk:
+                good, fallback = _candidate_contact_decision(
+                    self._candidate_state,
+                    target_contact=any(target_contacts),
+                    already_reached=already_reached,
+                )
+            goal_check = evaluate_twist(self.route, s.samples, final_qpos=qpos)
+            self._candidate_state.goal_complete = bool(
+                goal_check["accepted"]
+                and stable
+                and released
+                and self._clearance() >= 0.04
             )
-            good = good or fallback_good
             result = {
                 "accepted": good,
                 "phase": "bounded_chunk",
@@ -875,24 +1216,16 @@ class TwistAcceptancePort:
                 "candidate_fallback": fallback,
                 "candidate_fallback_count": self._candidate_state.fallback_count,
                 "candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
+                "coarse_turn_threshold": COARSE_TURN_THRESHOLD,
+                "cumulative_contact_path": self._candidate_state.contact_path,
+                "coarse_turn_reached": coarse_reached,
+                "early_stop": False,
+                "goal_complete": self._candidate_state.goal_complete,
             }
             self._chunk_cursor = len(s.samples)
         else:
             result = evaluate_twist(self.route, s.samples, final_qpos=values[-1])
-            stable = max(values) - min(values) <= math.radians(1.0)
-            recent = s.samples[
-                -max(1, math.ceil(0.15 / s._sim.sim_config.physics_dt)) :
-            ]
-            released = bool(recent) and all(
-                v.valid and v.target_contact is False for v in recent
-            )
-            bounds = []
-            for name in s.finger_names:
-                pose = self.robot.get_link_pose(name, to_matrix=True)[0]
-                vertices, _ = self.robot.get_link_vert_face(name)
-                world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
-                bounds.append(torch.stack((world.amin(0), world.amax(0))))
-            clearance = _park_clearance(s.art, bounds)
+            clearance = self._clearance()
             qpos = s.art.get_qpos().clone()
             qpos[:, s.joint_index] = s.other_qpos[:, s.joint_index]
             others_unchanged = bool(
@@ -914,12 +1247,19 @@ class TwistAcceptancePort:
                 accepted=good,
                 contact_released=released,
                 stable=stable,
+                joint_velocities=velocities,
                 clearance=clearance,
                 others_unchanged=others_unchanged,
                 parent_contact_fraction=parent_fraction,
                 parent_contact_fraction_limit=PARENT_CONTACT_FRACTION_LIMIT,
                 parent_contact_warning=parent_fraction > PARENT_CONTACT_FRACTION_LIMIT,
                 terminal=any(c.call.semantic_id == PARK_CALL for c in segment.calls),
+                coarse_turn_threshold=COARSE_TURN_THRESHOLD,
+                cumulative_contact_path=self._candidate_state.contact_path,
+                coarse_turn_reached=(
+                    self._candidate_state.contact_path >= COARSE_TURN_THRESHOLD
+                ),
+                early_stop=False,
             )
             s.phase = "cleanup"
         s.acceptance = deepcopy(result)

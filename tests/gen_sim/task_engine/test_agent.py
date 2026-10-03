@@ -1787,10 +1787,18 @@ def test_semantic_planner_emits_task_owned_calibrated_twist_call(
             "reference_bindings": {"step_01.object": ["control"]},
             "role_bindings": {},
         },
-        [{"runtime_uid": "control", "role": "articulation", "init_pos": [0, 0, 0]}],
+        [
+            {
+                "runtime_uid": "control",
+                "role": "articulation",
+                "init_pos": [0, 0, 0],
+                "attributes": {"twist_setting_labels": {"2": 1.5707963267948966}},
+            }
+        ],
     )
     assert graph["nodes"][1]["call"]["call_id"] == call_id
     assert graph["nodes"][1]["call"]["arguments"] == {
         "object": "control",
         "setting": argument_value,
     }
+    assert len(graph["nodes"]) == 34

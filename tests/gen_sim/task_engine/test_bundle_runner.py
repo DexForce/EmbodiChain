@@ -752,4 +752,36 @@ def test_module_entrypoint_flushes_protocol_before_fast_exit(
     assert exit_codes == [7]
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_twist_recorder_selection_follows_real_short_name_event_decode(enabled):
+    from embodichain.lab.gym.envs import managers
+    from embodichain.lab.gym.envs.managers import record
+    from embodichain.gen_sim.task_engine._task_program.twist_recording import (
+        E8CameraRecorder,
+    )
+    from embodichain.utils.module_utils import find_function_from_modules
+
+    resolved = find_function_from_modules(
+        "record_camera_data", [record], raise_if_not_found=True
+    )
+    first = managers.EventCfg(
+        func=resolved,
+        mode="interval",
+        params={"name": "task_program_audience_view"},
+        interval_step=5,
+    )
+    second = managers.EventCfg(
+        func=resolved, mode="interval", params={"name": "e8_knob_view"}, interval_step=5
+    )
+    env_cfg = SimpleNamespace(
+        events=SimpleNamespace(record_camera=first, record_press_camera=second)
+    )
+    _bundle_runner._configure_twist_recorders(env_cfg, enabled)
+    expected = E8CameraRecorder if enabled else record.record_camera_data
+    assert first.func is expected and second.func is expected
+    assert first.interval_step == second.interval_step == 5
+    assert first.params == {"name": "task_program_audience_view"}
+    assert second.params == {"name": "e8_knob_view"}
+
+
 __all__: list[str] = []

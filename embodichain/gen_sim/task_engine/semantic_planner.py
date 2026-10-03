@@ -508,7 +508,10 @@ class SemanticTaskPlanner:
                 else:
                     held_by[object_id] = "coordinated"
             elif task_type == "E8":
-                from ._task_program.twist_binding import recipe as twist_recipe
+                from ._task_program.twist_binding import (
+                    recipe as twist_recipe,
+                    required_chunk_count,
+                )
 
                 joint = (
                     objects[object_id]
@@ -528,7 +531,23 @@ class SemanticTaskPlanner:
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
-                calls = twist_recipe(object_id, resource, step["target_setting"])
+                setting = step["target_setting"]
+                calibrated_angle = (
+                    objects[object_id]
+                    .get("attributes", {})
+                    .get("twist_setting_labels", {})
+                    .get(str(setting))
+                )
+                if calibrated_angle is None:
+                    raise UnsupportedSemanticCapabilityError(
+                        "E8 chunk coverage requires the source-calibrated setting angle."
+                    )
+                calls = twist_recipe(
+                    object_id,
+                    resource,
+                    setting,
+                    chunk_count=required_chunk_count(calibrated_angle),
+                )
             elif task_type == "E9":
                 from ._task_program.press_binding import recipe as press_recipe
 
