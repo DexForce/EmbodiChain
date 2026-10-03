@@ -331,6 +331,19 @@ topics:
   watch_paths: [embodichain/gen_sim/, embodichain/task_spec/, embodichain/cli/main.py, tests/gen_sim/]
   related_topics: [simulation-system, data-assets, env-framework]
   status: active
+- id: task-spec
+  title: TaskSpec Protocol
+  aliases: [TaskSpec, task spec, task specification, 任务规范, 任务规格]
+  keywords: [TaskSpec, TaskSpecCache, task_spec/v0.1, milestones, semantic_hash,
+    predicate evaluator, task spec cache]
+  paths: [topics/gen-sim/gen-sim.md]
+  source_of_truth:
+  - embodichain/task_spec/
+  - embodichain/gen_sim/task_engine/task_spec.py
+  watch_paths: [embodichain/task_spec/, embodichain/gen_sim/task_engine/task_spec.py,
+    tests/task_spec/, tests/gen_sim/task_engine/test_agent.py]
+  related_topics: [gen-sim, task-programs, motion-planning]
+  status: active
 - id: data-assets
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
