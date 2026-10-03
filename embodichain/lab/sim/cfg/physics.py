@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 
 from collections.abc import Mapping
@@ -525,6 +526,46 @@ def _newton_solver_cfg_to_dexsim(
     )
     normalized_solver_type = _normalize_newton_solver_type(str(configured_solver_type))
     solver_cfg_type = solver_cfg_map[normalized_solver_type]
+    if normalized_solver_type == "dexuni":
+        try:
+            uses_grouped_options = (
+                "vbd_options" in inspect.signature(solver_cfg_type).parameters
+            )
+        except (TypeError, ValueError):
+            uses_grouped_options = True
+        if not uses_grouped_options:
+            # DexSim 0.5.0 still owns the legacy flat DexUni dataclass.
+            return solver_cfg_type(**solver_cfg_data)
+
+        # DexSim 0.5.0 exposed these options directly on DexUniSolverCfg.  The
+        # 0.5.1rc1 facade groups them by owned solver path, so keep existing
+        # EmbodiChain mappings source-compatible while forwarding the values to
+        # the native option contract.
+        legacy_values: dict[str, Any] = {}
+        vbd_options = dict(solver_cfg_data.get("vbd_options", {}))
+        if "iterations" in solver_cfg_data:
+            legacy_values["iterations"] = solver_cfg_data.pop("iterations")
+            vbd_options.setdefault("iterations", legacy_values["iterations"])
+        if "step_rigid_bodies" in solver_cfg_data:
+            legacy_values["step_rigid_bodies"] = solver_cfg_data.pop(
+                "step_rigid_bodies"
+            )
+            # The new option describes the inverse operation: when true, VBD
+            # integrates rigid state supplied by an external rigid solver.
+            vbd_options.setdefault(
+                "integrate_with_external_rigid_solver",
+                not legacy_values["step_rigid_bodies"],
+            )
+        if vbd_options:
+            solver_cfg_data["vbd_options"] = vbd_options
+
+        native_cfg = solver_cfg_type(**solver_cfg_data)
+        # Preserve read-only compatibility for callers that still inspect the
+        # legacy attributes after conversion.  Native DexSim dataclasses are
+        # not slotted, so these aliases do not affect its option validation.
+        for name, value in legacy_values.items():
+            setattr(native_cfg, name, value)
+        return native_cfg
     return solver_cfg_type(**solver_cfg_data)
 
 

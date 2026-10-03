@@ -458,10 +458,17 @@ class RenderCfg:
         """
         world_config.renderer = self.to_dexsim_flags()
         window_mode, offscreen_mode = self.denoising.to_dexsim_modes()
-        world_config.set_rt_render_modes(
-            window=window_mode,
-            offscreen=offscreen_mode,
-        )
+        set_rt_render_modes = getattr(world_config, "set_rt_render_modes", None)
+        if callable(set_rt_render_modes):
+            set_rt_render_modes(window=window_mode, offscreen=offscreen_mode)
+        else:
+            # DexSim 0.5.0 exposed the pipeline modes as nested fields.  Keep
+            # that fallback for older native configs and lightweight test
+            # doubles that only model the fields used by a specific test.
+            pipeline = getattr(world_config, "rt_pipeline_config", None)
+            if pipeline is not None:
+                pipeline.window.mode = window_mode
+                pipeline.offscreen.mode = offscreen_mode
         world_config.dlss_config = self.dlss.to_dexsim_cfg(
             window_width=world_config.win_config.width,
             window_height=world_config.win_config.height,
