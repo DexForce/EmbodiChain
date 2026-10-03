@@ -181,6 +181,7 @@ def generate_task_program_bundle(
     max_episodes: int | None = None,
     max_episode_steps: int | None = None,
     fit_grasp_assets: bool = False,
+    twist_support_lift_m: float = 0.001,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -192,7 +193,10 @@ def generate_task_program_bundle(
         robot_profile: Task Engine robot-profile selector. Phase one supports
             only the canonical dual-Franka embodiment.
         max_episodes: Optional Gym episode limit.
-        max_episode_steps: Optional Gym step limit.
+        max_episode_steps: Optional Gym step limit. E8 caps this limit at 15000
+            without increasing a smaller requested limit.
+        twist_support_lift_m: E8 total extra support lift, selected from 1--4 mm.
+            Live startup checks must qualify this dimensional candidate.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -274,15 +278,75 @@ def generate_task_program_bundle(
         )
     scene = normalize_scene_assets(prepared_scene, root)
     scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+    scene_uids = {
+        str(item.get("runtime_uid"))
+        for item in scene.planner_objects
+        if item.get("runtime_uid")
+    }
+    referenced_uids: set[str] = set()
+
+    def _collect_scene_refs(value: Any) -> None:
+        if isinstance(value, dict):
+            for nested in value.values():
+                _collect_scene_refs(nested)
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                _collect_scene_refs(nested)
+        elif isinstance(value, str) and value in scene_uids:
+            referenced_uids.add(value)
+
+    _collect_scene_refs(selected_graph)
+    eligible_table_children: set[str] = set()
+    if source_twist_routes:
+        graph_path = scene.source_config_path.with_name("scene_graph.json")
+        if graph_path.is_file():
+            source_graph = load_config(graph_path)
+            nodes = source_graph.get("nodes", ())
+            uid_map = scene.uid_map
+            support_uids = {
+                uid_map.get(node.get("parent_id"), node.get("parent_id"))
+                for node in nodes
+                if isinstance(node, dict)
+            }
+            # Missing support relationships do not authorize moving an object.
+            eligible_table_children = {
+                uid_map.get(node.get("object_id"), node.get("object_id"))
+                for node in nodes
+                if isinstance(node, dict)
+                and uid_map.get(node.get("parent_id"), node.get("parent_id")) == "table"
+                and node.get("parent_relation") == "on"
+            } - support_uids
+    movable_e8_uids = {
+        str(item["uid"])
+        for item in scene.rigid_objects
+        if str(item["uid"]) in eligible_table_children
+        and str(item["uid"]) not in referenced_uids
+        and str(item["uid"]) != "table"
+    }
+    twist_scale = None
+    twist_scale_audit = None
+    if source_twist_routes:
+        from ._task_program.twist_adaptation import select_twist_scale
+
+        twist_scale, twist_scale_audit = select_twist_scale(
+            source_twist_routes[0], embodiment_payload
+        )
     scene, twist_adaptation = prepare_press_scene(
-        scene, source_twist_routes, interaction="E8"
+        scene,
+        source_twist_routes,
+        interaction="E8",
+        relayout_uids=movable_e8_uids,
+        interaction_scale=twist_scale,
+        interaction_scale_qualified=twist_scale is not None,
+        support_lift_m=twist_support_lift_m,
     )
     if twist_adaptation:
         _write_json(
             root / "twist_adaptation.json",
             {
                 "schema_version": "gen_sim.twist-adaptation/v1",
-                "policy": "unit_scale_preserve_support",
+                "policy": "gripper_measured_scale_bounded_height_constrained_relayout",
+                "scale_candidate": twist_scale_audit,
                 "records": twist_adaptation,
             },
         )
@@ -459,14 +523,17 @@ def generate_task_program_bundle(
             if "friction" not in drive:
                 drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
     save_config(paths.scene, scene_payload)
+    episode_steps = int(max_episode_steps or TaskEnginePlanningCfg().max_episode_steps)
+    if twist_routes:
+        from ._task_program.twist_adaptation import MAX_E8_EPISODE_STEPS
+
+        episode_steps = min(episode_steps, MAX_E8_EPISODE_STEPS)
     save_config(
         paths.deployment,
         {
             "id": f"GenSimTaskProgram-{program_id}-v1",
             "max_episodes": int(max_episodes or 1),
-            "max_episode_steps": int(
-                max_episode_steps or TaskEnginePlanningCfg().max_episode_steps
-            ),
+            "max_episode_steps": episode_steps,
             "num_envs": 1,
             "arena_space": 2.5,
             # Gym configs own the physics backend explicitly.  Generated
@@ -2369,6 +2436,8 @@ def _calibrate_task_gripper_effort(
 
 def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
     """Bound this deployment's grasp proposals by the mounted pad clearance."""
+    from ._task_program.twist_adaptation import GRIPPER_COLLISION_CALIBRATIONS
+
     generators = embodiment["skill_profile"]["runtime_services"][
         "grasp_pose_generators"
     ]
@@ -2378,7 +2447,12 @@ def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
             # At the profile's zero-angle open command, the assembled URDF pad
             # centers are 0.1360346 m apart, with 0.0075 m total pad thickness.
             # Round the resulting 0.1285346 m free gap down, never up.
-            model["max_opening_width"] = min(float(model["max_opening_width"]), 0.128)
+            model["max_opening_width"] = min(
+                float(model["max_opening_width"]),
+                GRIPPER_COLLISION_CALIBRATIONS[model["model_id"]][
+                    "maximum_opening_width"
+                ],
+            )
 
 
 def _bind_embodiment_to_scene(

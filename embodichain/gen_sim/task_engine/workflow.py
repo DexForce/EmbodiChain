@@ -36,6 +36,7 @@ from embodichain.gen_sim.task_engine.reporting import (
     validate_execution_report,
 )
 from embodichain.gen_sim.scene_engine.errors import SceneServiceError
+from embodichain.utils.utility import load_config
 
 from .agent import TaskAgent
 from .config import (
@@ -113,6 +114,114 @@ class SubprocessActionExecutor:
         failure_policy: str = "stop",
         open_window: bool = False,
     ) -> Mapping[str, Any]:
+        """Execute one task, isolating E8 resource retries from physical results.
+
+        Args:
+            bundle: Prepared Task Program bundle.
+            output_root: Fresh logical execution directory.
+            seed: Simulator random seed, unchanged on resource retries.
+            num_envs: Number of vectorized scene replicas.
+            dataset_saving: Whether to enable the Gym dataset recorder.
+            failure_policy: Whether failed dependencies stop downstream execution.
+            open_window: Whether to open the native execution window.
+
+        Returns:
+            Validated physical report from a non-interrupted execution.
+        """
+        if failure_policy not in {"stop", "continue"}:
+            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if not isinstance(open_window, bool):
+            raise TypeError("open_window must be a boolean.")
+        from ._task_program.twist_attempts import is_twist_bundle
+
+        bundle_root = Path(bundle).expanduser().resolve()
+        if not is_twist_bundle(bundle_root):
+            return self._execute(
+                bundle,
+                output_root,
+                seed=seed,
+                num_envs=num_envs,
+                dataset_saving=dataset_saving,
+                failure_policy=failure_policy,
+                open_window=open_window,
+            )
+        from .orchestration.execution_resources import (
+            ResourceAdmissionError,
+            ResourceInterruptionError,
+            wait_for_competitors,
+        )
+
+        output = Path(output_root).expanduser().resolve()
+        output.mkdir(parents=True, exist_ok=False)
+        attempts = []
+        for index in range(1, 4):
+            execution = output / "resource_attempts" / f"attempt_{index:04d}"
+            try:
+                report = self._execute(
+                    bundle_root,
+                    execution,
+                    seed=seed,
+                    num_envs=num_envs,
+                    dataset_saving=dataset_saving,
+                    failure_policy=failure_policy,
+                    open_window=open_window,
+                )
+            except ResourceAdmissionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_not_admitted",
+                        "receipt": str(error.receipt_path),
+                        "reason": error.reason,
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                raise
+            except ResourceInterruptionError as error:
+                attempts.append(
+                    {
+                        "attempt": index,
+                        "status": "resource_interrupted",
+                        "receipt": str(error.receipt_path),
+                    }
+                )
+                _write_json(output / "resource_attempts.json", attempts)
+                if index == 3:
+                    raise
+                wait_for_competitors(error)
+                continue
+            attempts.append(
+                {
+                    "attempt": index,
+                    "status": "completed",
+                    "report_status": report["status"],
+                    "execution_root": str(execution),
+                }
+            )
+            _write_json(output / "resource_attempts.json", attempts)
+            _write_json(
+                output / "execution_selection.json",
+                {"selected_execution_root": str(execution), "resource_attempt": index},
+            )
+            for path in execution.iterdir():
+                if path.is_file():
+                    shutil.copy2(path, output / path.name)
+            if (execution / "videos").is_dir():
+                shutil.copytree(execution / "videos", output / "videos")
+            return report
+        raise RuntimeError("E8 resource attempt loop ended without a report.")
+
+    def _execute(
+        self,
+        bundle: str | Path,
+        output_root: str | Path,
+        *,
+        seed: int,
+        num_envs: int,
+        dataset_saving: bool = False,
+        failure_policy: str = "stop",
+        open_window: bool = False,
+    ) -> Mapping[str, Any]:
         """Run one simulator attempt and preserve its report and trajectory.
 
         Args:
@@ -150,7 +259,13 @@ class SubprocessActionExecutor:
             str(seed),
         ]
         if not open_window:
-            command.extend(["--headless", "--renderer", "fast-rt"])
+            command.extend(
+                [
+                    "--headless",
+                    "--renderer",
+                    _headless_renderer_for_bundle(bundle_root),
+                ]
+            )
         if not dataset_saving:
             command.append("--filter_dataset_saving")
         command.extend(["--failure-policy", failure_policy])
@@ -162,7 +277,14 @@ class SubprocessActionExecutor:
             f"failure_policy={failure_policy}",
             flush=True,
         )
-        completed = _run_streaming_process(command, log_path)
+        from ._task_program.twist_attempts import is_twist_bundle
+
+        if is_twist_bundle(bundle_root):
+            from .orchestration.execution_resources import run_e8_process
+
+            completed = run_e8_process(command, log_path, emit=_write_terminal_chunk)
+        else:
+            completed = _run_streaming_process(command, log_path)
         print(
             f"[Task Engine] Completed {attempt_root.name}: "
             f"returncode={completed.returncode}",
@@ -267,6 +389,26 @@ def _run_streaming_process(
         stdout=output,
         stderr="",
     )
+
+
+def _headless_renderer_for_bundle(bundle: Path) -> str:
+    """Select the stable headless renderer for the bundle's interaction family.
+
+    Fast-RT currently hits a native ``OptiXMaterialMgr`` assertion while
+    importing some articulated E8 scenes.  Hybrid preserves the same physics
+    and recording contract while avoiding that renderer-only material path.
+    Other task families retain the historical fast-rt default.
+    """
+    program_path = bundle / "task_program/program.yaml"
+    if not program_path.is_file():
+        return "fast-rt"
+    program = load_config(program_path)
+    items = program.get("program", {}).get("items", ())
+    for item in items:
+        call = item.get("steps", {}).get("call", {})
+        if call.get("call_id") == "gen_sim.twist":
+            return "hybrid"
+    return "fast-rt"
 
 
 def _write_terminal_chunk(chunk: bytes) -> None:
@@ -1030,14 +1172,17 @@ class TaskEngineWorkflow:
                     final_bundle=final_bundle,
                 )
             state = start_stage(state, WorkflowStage.EXECUTION)
+            scene_attempt_root = preparation.output_dir.parent
 
             successful_report: Mapping[str, Any] | None = None
             successful_action_root: Path | None = None
+            successful_action_index: int | None = None
+            execution_failure_class = "action_execution"
             success_terms = _bundle_success_terms(preparation.output_dir)
             for action_index in range(1, workflow_cfg.max_action_attempts + 1):
                 action_seed = int(base_seed) + action_index - 1
                 action_root = (
-                    preparation.output_dir.parent
+                    scene_attempt_root
                     / "action_attempts"
                     / f"action_{action_index:04d}"
                 )
@@ -1058,11 +1203,19 @@ class TaskEngineWorkflow:
                     }
                     if open_window:
                         execution_options["open_window"] = True
-                    report = self.action_executor(
-                        preparation.output_dir,
-                        action_root,
-                        **execution_options,
+                    from ._task_program.twist_attempts import execute_support_candidates
+
+                    report, executed_preparation, executed_root, support_attempts = (
+                        execute_support_candidates(
+                            preparation,
+                            action_root,
+                            self.action_executor,
+                            execution_options,
+                            planning_cfg,
+                        )
                     )
+                    if support_attempts:
+                        action_record["support_attempts"] = support_attempts
                     successes = _environment_successes(
                         report,
                         required_semantic_steps=success_terms,
@@ -1081,28 +1234,47 @@ class TaskEngineWorkflow:
                     _write_json(action_root / "task_engine_attempt.json", action_record)
                     selected_attempt["action_attempts"].append(deepcopy(action_record))
                     if accepted:
+                        preparation = executed_preparation
                         successful_report = deepcopy(dict(report))
-                        successful_action_root = action_root
+                        successful_action_root = executed_root
+                        successful_action_index = action_index
                         break
                 except Exception as exc:
                     action_record["status"] = "failed"
                     action_record["error"] = _error_record(exc)
+                    from .orchestration.execution_resources import (
+                        ResourceAdmissionError,
+                        ResourceInterruptionError,
+                    )
+
+                    resource_interrupted = isinstance(
+                        exc, (ResourceInterruptionError, ResourceAdmissionError)
+                    )
+                    if resource_interrupted:
+                        action_record["status"] = (
+                            "resource_not_admitted"
+                            if isinstance(exc, ResourceAdmissionError)
+                            else "resource_interrupted"
+                        )
+                        execution_failure_class = "execution_resources"
                     action_root.mkdir(parents=True, exist_ok=True)
                     _write_json(action_root / "task_engine_attempt.json", action_record)
                     selected_attempt["action_attempts"].append(deepcopy(action_record))
-                _write_json(
-                    preparation.output_dir.parent / "attempt.json", selected_attempt
-                )
+                    if resource_interrupted:
+                        break
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
 
             if successful_report is None:
                 selected_attempt["status"] = "execution_failed"
-                _write_json(
-                    preparation.output_dir.parent / "attempt.json", selected_attempt
-                )
+                _write_json(scene_attempt_root / "attempt.json", selected_attempt)
                 state = fail_stage(
                     state,
                     WorkflowStage.EXECUTION,
-                    reason="All bounded Task Program execution attempts failed.",
+                    reason=(
+                        "E8 execution could not satisfy the available-memory policy."
+                        if execution_failure_class == "execution_resources"
+                        else "All bounded Task Program execution attempts failed."
+                    ),
                 )
                 return self._publish(
                     transaction,
@@ -1115,13 +1287,11 @@ class TaskEngineWorkflow:
                     state,
                     attempts,
                     status="failed",
-                    failure_class="action_execution",
+                    failure_class=execution_failure_class,
                 )
 
             selected_attempt["status"] = "succeeded"
-            _write_json(
-                preparation.output_dir.parent / "attempt.json", selected_attempt
-            )
+            _write_json(scene_attempt_root / "attempt.json", selected_attempt)
             state = complete_stage(state, WorkflowStage.EXECUTION)
             final_root = staging / "final"
             final_bundle = final_root / "bundle"
@@ -1132,7 +1302,7 @@ class TaskEngineWorkflow:
                 {
                     "scene_attempt": selected_attempt["scene_attempt"],
                     "candidate_id": final_candidate_id,
-                    "action_attempt": int(successful_action_root.name.split("_")[-1]),
+                    "action_attempt": successful_action_index,
                     "execution_report": successful_report,
                     "success_spec_steps": list(success_terms),
                 },

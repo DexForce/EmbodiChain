@@ -20,6 +20,7 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,7 +31,9 @@ from embodichain.gen_sim.task_engine._task_program.twist_binding import (
     TwistRoute,
 )
 from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+    COARSE_TURN_THRESHOLD,
     GenSimTwist,
+    QPOS_PATH_DEADBAND,
     TWIST_CANDIDATE_FALLBACKS,
     _TwistCandidateState,
     _candidate_contact_decision,
@@ -125,6 +128,9 @@ def knob_scene(tmp_path, monkeypatch):
 
 
 def graph(scene):
+    twist_binding.enrich_twist_inventory(
+        list(scene.planner_objects), list(scene.articulations)
+    )
     empty = {
         "kind": "none",
         "reference": "",
@@ -162,12 +168,44 @@ def test_twist_wrapper_preserves_public_skill_descriptor():
     assert GenSimTwist.descriptor() == Twist.descriptor()
 
 
+@pytest.mark.parametrize(
+    "angle,count",
+    [(0.0, 8), (-math.pi / 2, 32), (math.pi / 4, 32), (1.3613568296, 32)],
+)
+def test_twist_chunk_budget_covers_target_and_fallbacks(angle, count):
+    actual = twist_binding.required_chunk_count(angle)
+    assert actual == count
+    assert (
+        actual - twist_binding.TWIST_FALLBACK_CHUNKS
+    ) * twist_binding.TWIST_CHUNK_ANGLE >= abs(angle) - 1e-10
+
+
+def test_twist_chunk_budget_rejects_unbounded_turn():
+    with pytest.raises(ValueError, match="bounded chunk budget"):
+        twist_binding.required_chunk_count(math.pi)
+    with pytest.raises(ValueError, match="finite calibrated"):
+        twist_binding.required_chunk_count(float("nan"))
+
+
 def test_twist_candidate_table_is_bounded_and_distinct():
     table = _candidate_table()
     assert len(table) == 16
     assert [item[0] for item in table] == list(range(len(table)))
     assert len({(item[1], item[2]) for item in table}) == len(table)
     assert TWIST_CANDIDATE_FALLBACKS == 3
+    assert twist_binding.TWIST_CHUNK_ANGLE == pytest.approx(math.radians(5.0))
+    assert COARSE_TURN_THRESHOLD == pytest.approx(math.radians(15.0))
+    assert QPOS_PATH_DEADBAND == pytest.approx(math.radians(0.5))
+
+
+def test_twist_axial_candidates_scale_with_grip_depth_and_include_center():
+    table = _candidate_table(0.0075)
+    assert table[0][2] == pytest.approx(-0.001875)
+    assert table[1][2] == 0.0
+    assert table[3][2] == pytest.approx(0.00375)
+    assert max(abs(item[2]) for item in table) <= 0.0075 / 2
+    with pytest.raises(ValueError, match="positive grip depth"):
+        _candidate_table(0.0)
 
 
 def test_twist_candidate_fallback_is_bounded_until_contact_locks_pose():
@@ -299,7 +337,7 @@ def test_twist_bundle_preflight_and_nested_publication(knob_scene, tmp_path):
     calls = [n["call"]["call_id"] for n in g["nodes"]]
     assert calls[0] == "gen_sim.twist_prepare"
     assert calls[-1] == "gen_sim.articulation_park"
-    assert calls[1:-1] == ["gen_sim.twist"] * 8
+    assert calls[1:-1] == ["gen_sim.twist"] * 32
     scene = load_config(root / "components/scene.yaml")
     assert scene["simulation"]["articulation"][0]["asset_physics_mode"] == "overlay"
     program = load_config(root / "task_program/program.yaml")
@@ -309,6 +347,241 @@ def test_twist_bundle_preflight_and_nested_publication(knob_scene, tmp_path):
         _verify_integration_fingerprint(
             root, root / "task_program_deployment.yaml", g, fp
         )
+
+
+def _scaled_knob_with_distractor(knob_scene, scale=0.159):
+    """Return a source-scale E8 scene with one movable overlapping distractor."""
+    art = {**deepcopy(knob_scene.articulations[0]), "body_scale": [scale] * 3}
+    distractor = {
+        "uid": "distractor",
+        "shape": {"shape_type": "Cube", "size": [0.02, 0.02, 0.02]},
+        "init_pos": [0.01, 0.0, 0.8],
+        "init_rot": [0.0, 0.0, 0.0],
+        "body_scale": [1.0, 1.0, 1.0],
+    }
+    planner_distractor = {
+        **distractor,
+        "runtime_uid": "distractor",
+        "role": "rigid_object",
+    }
+    return replace(
+        knob_scene,
+        articulations=(art,),
+        rigid_objects=(distractor,),
+        planner_objects=(
+            {**art, "runtime_uid": "control", "role": "articulation"},
+            knob_scene.planner_objects[1],
+            planner_distractor,
+        ),
+    )
+
+
+def test_e8_prepare_preserves_source_scale(knob_scene):
+    from embodichain.gen_sim.task_engine._task_program.press_binding import (
+        prepare_press_scene,
+    )
+
+    scene = replace(
+        knob_scene,
+        articulations=(
+            {**deepcopy(knob_scene.articulations[0]), "body_scale": [0.159] * 3},
+        ),
+    )
+    route = discover_twist(scene.articulations[0], 90)
+    adapted, audit = prepare_press_scene(scene, (route,), interaction="E8")
+    assert adapted.articulations[0]["body_scale"] == pytest.approx([0.159] * 3)
+    assert audit[0]["scale_policy"] == "preserve_source"
+
+
+def test_e8_interaction_scale_requires_qualification(knob_scene):
+    from embodichain.gen_sim.task_engine._task_program.press_binding import (
+        prepare_press_scene,
+    )
+
+    scene = _scaled_knob_with_distractor(knob_scene)
+    route = discover_twist(scene.articulations[0], 90)
+    with pytest.raises(ValueError, match="independent asset/gripper qualification"):
+        prepare_press_scene(
+            scene,
+            (route,),
+            interaction="E8",
+            interaction_scale=1.0,
+        )
+
+
+def test_e8_qualified_scale_relayouts_only_declared_distractor(knob_scene):
+    from embodichain.gen_sim.task_engine._task_program.press_binding import (
+        prepare_press_scene,
+    )
+
+    scene = _scaled_knob_with_distractor(knob_scene)
+    route = discover_twist(scene.articulations[0], 90)
+    adapted, audit = prepare_press_scene(
+        scene,
+        (route,),
+        interaction="E8",
+        interaction_scale=1.0,
+        interaction_scale_qualified=True,
+        relayout_uids={"distractor"},
+    )
+    assert adapted.articulations[0]["body_scale"] == [1.0] * 3
+    assert adapted.rigid_objects[0]["init_pos"][2] == pytest.approx(0.8)
+    assert adapted.rigid_objects[0]["init_pos"][:2] != pytest.approx([0.01, 0.0])
+    assert (
+        adapted.planner_objects[-1]["init_pos"] == adapted.rigid_objects[0]["init_pos"]
+    )
+    assert audit[0]["relayout"][0]["support_policy"] == "preserve_z_and_orientation"
+    assert audit[0]["scale_policy"] == "qualified_interaction_scale"
+
+
+def test_e8_overlap_without_declared_relayout_fails_closed(knob_scene):
+    from embodichain.gen_sim.task_engine._task_program.press_binding import (
+        prepare_press_scene,
+    )
+
+    scene = _scaled_knob_with_distractor(knob_scene)
+    route = discover_twist(scene.articulations[0], 90)
+    with pytest.raises(ValueError, match="overlaps 'distractor'"):
+        prepare_press_scene(scene, (route,), interaction="E8")
+
+
+def test_e8_bundle_passes_unreferenced_rigid_ids_to_relayout(knob_scene, tmp_path):
+    from unittest.mock import patch
+
+    from embodichain.gen_sim.task_engine._task_program import press_binding
+
+    with patch.object(
+        press_binding,
+        "prepare_press_scene",
+        wraps=press_binding.prepare_press_scene,
+    ) as prepare:
+        generate_task_program_bundle(
+            graph(knob_scene),
+            knob_scene,
+            output_dir=tmp_path / "bundle",
+            robot_profile="dual_franka",
+        )
+    e8_calls = [
+        call
+        for call in prepare.call_args_list
+        if call.kwargs.get("interaction") == "E8"
+    ]
+    assert len(e8_calls) == 1
+    assert e8_calls[0].kwargs["relayout_uids"] == set()
+
+
+def test_official_e8_bundle_adapts_only_small_knob_and_bounds_episode_steps(
+    knob_scene, tmp_path
+):
+    scene = replace(
+        knob_scene,
+        articulations=(
+            {**deepcopy(knob_scene.articulations[0]), "body_scale": [0.159] * 3},
+        ),
+    )
+    _, paths = generate_task_program_bundle(
+        graph(scene),
+        scene,
+        tmp_path / "small",
+        robot_profile="dual_franka",
+        max_episode_steps=1000000,
+    )
+    physical = load_config(paths.scene)["simulation"]["articulation"][0]
+    assert physical["body_scale"] == pytest.approx([0.5] * 3, abs=1e-7)
+    audit = json.loads((paths.root / "twist_adaptation.json").read_text())
+    assert audit["scale_candidate"]["candidate_grip_depth"] == pytest.approx(0.010)
+    assert audit["records"][0]["support_clearance"]["translation_z"] == 0.001
+    assert audit["records"][0]["source_edited"] is False
+    assert load_config(paths.deployment)["max_episode_steps"] == 15000
+    assert scene.articulations[0]["body_scale"] == [0.159] * 3
+    _, smaller = generate_task_program_bundle(
+        graph(knob_scene),
+        knob_scene,
+        tmp_path / "normal",
+        robot_profile="dual_franka",
+        max_episode_steps=5000,
+        twist_support_lift_m=0.004,
+    )
+    assert load_config(smaller.deployment)["max_episode_steps"] == 5000
+    assert (
+        load_config(smaller.scene)["simulation"]["articulation"][0]["body_scale"]
+        == [1.0] * 3
+    )
+    normal_audit = json.loads((smaller.root / "twist_adaptation.json").read_text())
+    assert normal_audit["scale_candidate"]["reasons"] == []
+    assert normal_audit["records"][0]["support_clearance"]["translation_z"] == 0.004
+
+
+def test_e8_bundle_relayout_keeps_supports_and_supported_children_fixed(
+    knob_scene, tmp_path
+):
+    from unittest.mock import patch
+    from embodichain.gen_sim.task_engine._task_program import press_binding
+
+    objects = tuple(
+        {
+            "uid": uid,
+            "shape": {"shape_type": "Cube", "size": [0.04, 0.04, 0.04]},
+            "init_pos": [x, 0.0, 0.75],
+        }
+        for uid, x in (("support", -0.4), ("cargo", -0.3), ("distractor", 0.4))
+    )
+    scene = replace(
+        knob_scene,
+        rigid_objects=objects,
+        planner_objects=(
+            *knob_scene.planner_objects,
+            *(
+                {**obj, "runtime_uid": obj["uid"], "role": "rigid_object"}
+                for obj in objects
+            ),
+        ),
+    )
+    source_graph = {
+        "nodes": [
+            {"object_id": "support", "parent_id": "table", "parent_relation": "on"},
+            {"object_id": "cargo", "parent_id": "support", "parent_relation": "on"},
+            {"object_id": "distractor", "parent_id": "table", "parent_relation": "on"},
+        ]
+    }
+    scene.source_config_path.with_name("scene_graph.json").write_text(
+        json.dumps(source_graph), encoding="utf-8"
+    )
+    with patch.object(
+        press_binding, "prepare_press_scene", wraps=press_binding.prepare_press_scene
+    ) as prepare:
+        generate_task_program_bundle(
+            graph(scene), scene, tmp_path / "protected", robot_profile="dual_franka"
+        )
+    e8_call = next(
+        c for c in prepare.call_args_list if c.kwargs.get("interaction") == "E8"
+    )
+    assert e8_call.kwargs["relayout_uids"] == {"distractor"}
+
+
+def test_e8_rejects_mixed_recipe_without_changing_shared_policy(knob_scene):
+    value = graph(knob_scene)
+    value["task_groups"].append({"task_type": "E1"})
+    with pytest.raises(ValueError, match="standalone"):
+        twist_binding.graph_routes(value, knob_scene)
+
+
+def test_twist_coarse_contact_does_not_accept_wrong_direction():
+    route = SimpleNamespace(
+        binding=SimpleNamespace(target_qpos=1.0, limits=(-2.0, 2.0))
+    )
+    samples = [
+        PressSample(0.0, 0.0, "prepare", False),
+        PressSample(0.1, -0.3, "twist", True),
+        PressSample(0.2, -0.7, "twist", True),
+        PressSample(0.3, 1.0, "cleanup", False),
+    ]
+    result = evaluate_twist(route, samples, final_qpos=1.0)
+    assert not result["accepted"]
+    assert result["coarse_turn_reached"]
+    assert result["reason"] == "direction_not_confirmed"
+    assert result["contact_travel"] == pytest.approx(0.0)
+    assert result["directional_travel_required"] == pytest.approx(0.2617993878)
 
 
 @pytest.mark.parametrize(
@@ -347,5 +620,10 @@ def test_twist_evidence_ablation(knob_scene, variant):
         samples[2] = replace(samples[2], target_contact=None)
     elif variant == "small":
         samples = [replace(s, qpos=s.qpos * 0.1) for s in samples]
+        final = target * 0.1
     result = evaluate_twist(route, samples, final_qpos=final)
-    assert result["accepted"] is (variant in {"positive", "rebound"})
+    assert result["accepted"] is (variant == "positive")
+    assert result["criterion"] == "qpos_converged_with_contact"
+    assert result["coarse_turn_reached"] is (variant in {"positive", "rebound"})
+    if variant == "wrong_direction":
+        assert result["reason"] == "joint_out_of_bounds"
