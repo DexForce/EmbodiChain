@@ -47,7 +47,7 @@ from embodichain.utils.math import get_pc_center_box
 GRASP_ANNOTATOR_CACHE_DIR = (
     Path.home() / ".cache" / "embodichain" / "grasp_annotator_cache"
 )
-VERSION_TAG = "v0.0.3"
+_CACHE_VERSIONS = {"bounds": "v0.0.3", "centroid": "v0.0.2"}
 
 
 __all__: list[str] = []
@@ -108,6 +108,7 @@ class _AntipodalMeshBackend:
             cfg=collision_cfg,
         )
         self._sampler_cfg = sampler_cfg
+        self._center_mode = sampler_cfg.center_mode
         self._max_deviation_angle = max_deviation_angle
         self._approach_direction_samples = approach_direction_samples
         self._max_candidates = max_candidates
@@ -325,8 +326,9 @@ class _AntipodalMeshBackend:
             f"largest={self._use_largest_connected_component}"
         ).encode("utf-8")
         md5_hash = hashlib.md5(vert_bytes + face_bytes + sampler_signature).hexdigest()
+        version = _CACHE_VERSIONS[self._center_mode]
         cache_path = os.path.join(
-            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{VERSION_TAG}_{md5_hash}.npy"
+            GRASP_ANNOTATOR_CACHE_DIR, f"antipodal_cache_{version}_{md5_hash}.npy"
         )
         return cache_path
 
@@ -527,7 +529,11 @@ class _AntipodalMeshBackend:
         if obj_longest_axis is None:
             origin_points_masked = origin_points_
             hit_points_masked = hit_points_
-            mesh_part_center = get_pc_center_box(mesh_vert_transformed)
+            mesh_part_center = (
+                get_pc_center_box(mesh_vert_transformed)
+                if self._center_mode == "bounds"
+                else mesh_vert_transformed.mean(dim=0)
+            )
         else:
             axis = torch.as_tensor(
                 obj_longest_axis,
@@ -543,22 +549,40 @@ class _AntipodalMeshBackend:
                 raise TypeError("is_positive_part must be a bool.")
             axis = axis / axis_norm
             mesh_projection = torch.matmul(mesh_vert_transformed, axis)
-            mesh_center = get_pc_center_box(mesh_vert_transformed)
+            mesh_center = (
+                get_pc_center_box(mesh_vert_transformed)
+                if self._center_mode == "bounds"
+                else mesh_vert_transformed.mean(dim=0)
+            )
             mesh_projection_range = mesh_projection.max() - mesh_projection.min()
+            positive_fraction = 0.5 if self._center_mode == "bounds" else 0.65
+            negative_fraction = 0.5 if self._center_mode == "bounds" else 0.35
             projection_posi_threshold = (
-                mesh_projection.min() + 0.5 * mesh_projection_range
+                mesh_projection.min() + positive_fraction * mesh_projection_range
             )
             projection_nega_threshold = (
-                mesh_projection.min() + 0.5 * mesh_projection_range
+                mesh_projection.min() + negative_fraction * mesh_projection_range
             )
             pair_centers = 0.5 * (origin_points_ + hit_points_)
             pair_projection = torch.matmul(pair_centers, axis)
             if is_positive_part:
-                mesh_part_center = mesh_center + 0.25 * mesh_projection_range * axis
                 part_mask = pair_projection > projection_posi_threshold
+                mesh_part_center = (
+                    mesh_center + 0.25 * mesh_projection_range * axis
+                    if self._center_mode == "bounds"
+                    else mesh_vert_transformed[
+                        mesh_projection > projection_posi_threshold
+                    ].mean(dim=0)
+                )
             else:
-                mesh_part_center = mesh_center - 0.25 * mesh_projection_range * axis
                 part_mask = pair_projection < projection_nega_threshold
+                mesh_part_center = (
+                    mesh_center - 0.25 * mesh_projection_range * axis
+                    if self._center_mode == "bounds"
+                    else mesh_vert_transformed[
+                        mesh_projection < projection_nega_threshold
+                    ].mean(dim=0)
+                )
             origin_points_masked = origin_points_[part_mask]
             hit_points_masked = hit_points_[part_mask]
         return self._filter_valid_grasp_poses(
@@ -591,7 +615,6 @@ class _AntipodalMeshBackend:
 
         mesh_vert_transformed = self._apply_transform(self.vertices, object_pose)
 
-        mesh_center = get_pc_center_box(mesh_vert_transformed)
         mesh_projection = torch.matmul(
             mesh_vert_transformed, left_to_right_arm_direction
         )
@@ -604,13 +627,35 @@ class _AntipodalMeshBackend:
             mesh_projection.max()
             - (0.5 - middle_empty_ratio / 2) * mesh_projection_range
         )
-        pair_centers = 0.5 * (origin_points_ + hit_points_)
-        pair_projection = torch.matmul(pair_centers, left_to_right_arm_direction)
-
-        left_center = (
-            mesh_center - 0.25 * mesh_projection_range * left_to_right_arm_direction
-        )
-        left_mask = pair_projection < left_threshold
+        if self._center_mode == "bounds":
+            mesh_center = get_pc_center_box(mesh_vert_transformed)
+            pair_centers = 0.5 * (origin_points_ + hit_points_)
+            pair_projection = torch.matmul(pair_centers, left_to_right_arm_direction)
+            left_mask = pair_projection < left_threshold
+            right_mask = pair_projection > right_threshold
+            left_center = (
+                mesh_center - 0.25 * mesh_projection_range * left_to_right_arm_direction
+            )
+            right_center = (
+                mesh_center + 0.25 * mesh_projection_range * left_to_right_arm_direction
+            )
+        else:
+            origin_projection = torch.matmul(
+                origin_points_, left_to_right_arm_direction
+            )
+            hit_projection = torch.matmul(hit_points_, left_to_right_arm_direction)
+            left_mask = (origin_projection < left_threshold) | (
+                hit_projection < left_threshold
+            )
+            right_mask = (origin_projection > right_threshold) | (
+                hit_projection > right_threshold
+            )
+            left_center = mesh_vert_transformed[mesh_projection < left_threshold].mean(
+                dim=0
+            )
+            right_center = mesh_vert_transformed[
+                mesh_projection > right_threshold
+            ].mean(dim=0)
         is_succes_left, grasp_poses_left, open_lengths_left, total_cost_left = (
             self._filter_valid_grasp_poses(
                 hit_points_=hit_points_[left_mask],
@@ -621,10 +666,6 @@ class _AntipodalMeshBackend:
                 visualize_collision=visualize_collision,
             )
         )
-        right_center = (
-            mesh_center + 0.25 * mesh_projection_range * left_to_right_arm_direction
-        )
-        right_mask = pair_projection > right_threshold
         is_succes_right, grasp_poses_right, open_lengths_right, total_cost_right = (
             self._filter_valid_grasp_poses(
                 hit_points_=hit_points_[right_mask],

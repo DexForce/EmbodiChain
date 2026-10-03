@@ -1,5 +1,5 @@
 Sensors
-=======
+-------
 
 Sensors provide batched observations of the simulation. Choose a camera for
 image data, a stereo camera for paired views and disparity, or a contact sensor

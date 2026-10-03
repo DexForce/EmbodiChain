@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
-import torch
-import torch.nn.functional as F
+from typing import Literal
+
 import numpy as np
 import open3d as o3d
 import open3d.core as o3c
+import torch
+import torch.nn.functional as F
+
 from embodichain.utils import configclass
 from embodichain.utils import logger
 
@@ -47,6 +50,13 @@ class AntipodalSamplerCfg:
 
     min_length: float = 0.001
     """minimum gripper open width, used to filter out antipodal points that are too close to be grasped"""
+
+    center_mode: Literal["bounds", "centroid"] = "bounds"
+    """Mesh center used to place the enclosing ray sphere."""
+
+    def __post_init__(self) -> None:
+        if self.center_mode not in {"bounds", "centroid"}:
+            raise ValueError("center_mode must be 'bounds' or 'centroid'.")
 
 
 class AntipodalSampler:
@@ -78,8 +88,8 @@ class AntipodalSampler:
             faces.to("cpu").numpy(), dtype=o3c.int32
         )
         # Sample surface points and normals by raycasting Fibonacci-distributed
-        # rays from outside the mesh toward its bounding-box center. Each contact
-        # replaces the previous uniform surface sample and keeps its face normal.
+        # rays toward the configured mesh center. Each contact replaces the
+        # previous uniform surface sample and keeps its face normal.
         sample_points, sample_normals = self._sample_surface_by_fibonacci_raycast(
             vertices, self.cfg.n_sample
         )
@@ -112,7 +122,7 @@ class AntipodalSampler:
 
         Instead of sampling points directly on the mesh surface, rays are
         distributed uniformly over the unit sphere using the Fibonacci spiral
-        and cast from a sphere enclosing the mesh toward its bounding-box center.
+        and cast from a sphere enclosing the mesh toward the configured center.
         The first contact point of each ray with the mesh is the sample, and the
         face normal at the contact (oriented against the ray) is its normal.
 
@@ -147,9 +157,12 @@ class AntipodalSampler:
             [rho * torch.cos(theta), rho * torch.sin(theta), z], dim=-1
         )
 
-        # Use the bounding-box center so local mesh refinement cannot bias the rays.
         vertices_np = vertices.detach().to("cpu").numpy()
-        center = (vertices_np.min(axis=0) + vertices_np.max(axis=0)) / 2
+        center = (
+            (vertices_np.min(axis=0) + vertices_np.max(axis=0)) / 2
+            if self.cfg.center_mode == "bounds"
+            else vertices_np.mean(axis=0)
+        )
         extent = np.linalg.norm(vertices_np - center, axis=1)
         max_radius = float(extent.max()) if vertices_np.shape[0] > 0 else 0.0
         ray_distance = 2.0 * max_radius + 1.0  # safely outside the mesh

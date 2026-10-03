@@ -352,6 +352,7 @@ class SceneExportImporter:
         # Scene edit still measures and optimizes the canonical GLB proxy.
         proxy_entry = {
             **entry,
+            "init_pos": entry.get("proxy_init_pos", entry.get("init_pos")),
             "shape": {"shape_type": "Mesh", "fpath": proxy_glb_fpath},
             "body_scale": proxy_body_scale,
         }

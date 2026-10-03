@@ -260,6 +260,188 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.task_engine.orchestration.grounding
+--------------------------------------------------------
+
+Task-conditioned grounding selects canonical scene UIDs from a redacted
+semantic inventory. It does not construct physical goals or action
+invocations.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.grounding
+
+.. autosummary::
+
+   GroundingCaller
+   GroundingResult
+   ground_articulation_parts
+   ground_scene_references
+
+embodichain.gen_sim.task_engine.orchestration.scene_assets
+-----------------------------------------------------------
+
+Generated GLB assets are normalized into renderer-safe runtime geometry while
+the source files and their provenance remain unchanged.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_assets
+
+.. autosummary::
+
+   normalize_scene_assets
+
+embodichain.gen_sim.task_engine.orchestration.scene_inventory
+--------------------------------------------------------------
+
+The structural inventory preserves source semantics and validates only
+explicit task/scene compatibility. It deliberately avoids language matching
+and physical goal grounding.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.scene_inventory
+
+.. autosummary::
+
+   SceneEntity
+   SceneInventory
+   validate_source_compatibility
+   validate_target_compatibility
+
+embodichain.gen_sim.task_engine.orchestration.source_scene
+-----------------------------------------------------------
+
+Source-scene utilities resolve supported exports and normalize their stable
+identities, paths, transforms, and conservative physics metadata for Task
+Engine planning and simulator loading.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.source_scene
+
+.. autosummary::
+
+   PreparedScene
+   ResolvedSceneSource
+   is_prompt2scene_export
+   prepare_scene
+   resolve_gym_config_path
+   resolve_source_scene
+
+embodichain.gen_sim.task_engine.orchestration.visual_evidence
+--------------------------------------------------------------
+
+Visual evidence rendering runs in an isolated EGL process and records UID-labeled
+views, object crops, masks, and source hashes. Articulation proxies are visual
+identity evidence, not observations of live joint state or physical capability.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.visual_evidence
+
+.. autosummary::
+
+   render_scene_visual_evidence
+
+.. autofunction:: render_scene_visual_evidence
+
+embodichain.gen_sim.task_engine.orchestration.visual_grounding
+---------------------------------------------------------------
+
+Visual grounding reuses Task Engine model configuration, verifies evidence
+hashes before each call, and records the model response for audit. Responses
+remain subject to UID visibility and semantic compatibility checks; configuration
+availability alone does not establish service health or physical task success.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.orchestration.visual_grounding
+
+.. autosummary::
+
+   make_visual_grounding_caller
+   visual_grounding_available
+
+.. autofunction:: make_visual_grounding_caller
+
+.. autofunction:: visual_grounding_available
+
+embodichain.gen_sim.task_engine.reporting
+------------------------------------------
+
+Tensor-free Task Engine reports retain the canonical Task Program runtime
+result and its per-environment semantic outcomes without reconstructing
+physical execution state.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.reporting
+
+.. autosummary::
+
+   EXECUTION_REPORT_FILENAME
+   TASK_PROGRAM_EXECUTION_REPORT_SCHEMA
+   TaskProgramExecutionReport
+   validate_execution_report
+   write_execution_report
+
+embodichain.gen_sim.task_engine.semantic_graph
+-----------------------------------------------
+
+Semantic task graphs are immutable, JSON-safe planning artifacts whose nodes
+contain canonical Semantic Calls and exclude grounded action data.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph
+
+.. autosummary::
+
+   SEMANTIC_TASK_GRAPH_SCHEMA
+   SemanticTaskGraph
+   semantic_task_graph_hash
+   validate_semantic_task_graph
+
+embodichain.gen_sim.task_engine.semantic_planner
+-------------------------------------------------
+
+The semantic planner lowers validated Task Engine candidates and canonical
+scene bindings into provider-free semantic task graphs.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_planner
+
+.. autosummary::
+
+   SemanticTaskPlanner
+   UnsupportedSemanticCapabilityError
+
+embodichain.gen_sim.task_engine.task_spec
+------------------------------------------
+
+Task Engine adapters convert validated candidates into action-sequence
+independent TaskTemplates and optionally persist them in a content-addressed
+TaskSpec cache.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_spec
+
+.. autosummary::
+
+   TaskSpecGenerator
+   generate_task_spec
+   task_spec_from_candidate
+   task_template_from_candidate
+
+embodichain.gen_sim.task_engine.task_program_bundle
+----------------------------------------------------
+
+Bundle generation materializes and preflights a fingerprint-bound configured
+Task Program deployment from a semantic task graph and prepared scene.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_program_bundle
+
+.. autosummary::
+
+   TaskProgramBundlePaths
+   generate_task_program_bundle
+
+embodichain.gen_sim.scene_engine.clients.articulated_generation
+---------------------------------------------------------------
+
+Compatibility import for the Asset Engine articulation client. New code should
+use the ``asset_engine`` path.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -269,6 +451,58 @@ embodichain.gen_sim.scene_engine.core.scene_edit_plan
 
    SceneEditOperation
    SceneEditPlan
+
+embodichain.gen_sim.scene_engine.errors
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.errors
+
+Scene service failures preserve typed preparation and materialization errors
+across the Task Engine boundary.
+
+.. autosummary::
+
+   SceneServiceError
+
+embodichain.gen_sim.scene_engine.pipeline
+-----------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline
+
+The public authoring boundary separates deterministic scene analysis from
+side-effecting materialization for generated and edited scenes.
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
+
+embodichain.gen_sim.scene_engine.pipeline.api
+---------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.api
+
+Versioned blueprint artifacts and analyze/materialize operations provide the
+implementation-level Scene Engine authoring contract.
+
+.. autosummary::
+
+   SCENE_BLUEPRINT_SCHEMA
+   SCENE_EDIT_BLUEPRINT_SCHEMA
+   SceneBlueprintPackage
+   SceneEditBlueprintPackage
+   SceneMaterialization
+   analyze_edit
+   analyze_image
+   materialize_blueprint
+   materialize_edit
 
 embodichain.gen_sim.scene_engine.pipeline.editing.scene_edit_asset_preparation
 -------------------------------------------------------------------------------
@@ -294,15 +528,79 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdSceneBinding
    UsdSceneIndex
 
-embodichain.gen_sim.simready_pipeline.cli.start
+embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
 .. autosummary::
 
    cli_ingest_single
    main
+
+embodichain.gen_sim.asset_engine.clients
+---------------------------------------------
+
+Asset Engine clients for SimReady asset generation services.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+--------------------------------------------------------------------
+
+Generate and validate articulated SimReady assets through the Asset Engine
+articulation service.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+---------------------------------------------
+
+Asset Engine environment configuration helpers.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+----------------------------------------------
+
+Asset Engine articulation generation and SimReady ingestion pipeline entry
+points.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+-----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
@@ -389,7 +687,7 @@ embodichain.lab.gym.envs.managers.action_types
    ActionTrace
 
 embodichain.lab.gym.envs.objectives
-----------------------------------
+---------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.objectives
 
@@ -406,7 +704,7 @@ per environment. Stable region occupancy does not establish gripper detachment.
    OrderedPlacementObjective
 
 embodichain.lab.gym.envs.objectives.config
------------------------------------------
+---------------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.objectives.config
 
@@ -421,7 +719,7 @@ to its owning configuration and rejects unknown fields and invalid thresholds.
    load_objective_component
 
 embodichain.lab.gym.envs.objectives.ordered_placement
----------------------------------------------------
+-------------------------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.objectives.ordered_placement
 
@@ -690,6 +988,7 @@ embodichain.lab.sim.atomic_actions.control
    GRASP_COMMAND
    JointPositionCommand
    OPEN_COMMAND
+   PARK_COMMAND
 
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
@@ -1531,6 +1830,16 @@ embodichain.lab.sim.motion.solvers.pink_solver
    PinkSolver
    PinkSolverCfg
 
+embodichain.lab.sim.motion.solvers.pytorch_solver
+-------------------------------------------------
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers.pytorch_solver
+
+.. autosummary::
+
+   PytorchSolverCfg
+   PytorchSolver
+
 embodichain.lab.sim.motion.solvers.srs_solver
 ---------------------------------------------
 
@@ -2107,6 +2416,167 @@ embodichain.learning.rl.utils.optimizer
    get_registered_optimizer_names
    scheduler_needs_horizon
 
+embodichain.gen_sim.task_spec
+---------------------
+
+Pure, simulator-independent TaskSpec contracts, predicate evaluation, and
+content-addressed template persistence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   EXPANSION_MANIFEST_SCHEMA
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   SCENE_INSTANCE_SCHEMA
+   TASK_SPEC_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   EvaluationReport
+   EvaluationStatus
+   ExpansionManifest
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RequirementSpec
+   RoleSpec
+   SceneInstance
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   ValidationCertificate
+   build_validation_certificate
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_task_spec
+   validate_task_template
+   validate_validation_certificate
+
+embodichain.gen_sim.task_spec.canonicalization
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.contracts
+-------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   EXPANSION_MANIFEST_SCHEMA
+   SCENE_INSTANCE_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   ExpansionManifest
+   RequirementSpec
+   RoleSpec
+   SceneInstance
+   TaskSpec
+   TaskTemplate
+   ValidationCertificate
+
+embodichain.gen_sim.task_spec.expressions
+---------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.registry
+------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+--------------------------
+
+The compact normative TaskSpec model.  It owns roles, conditions, long-horizon
+milestones, downstream requirements, and the semantic hash; runtime artifacts
+remain with their existing owners.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+--------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   build_validation_certificate
+   evaluate_task_spec
+   evaluate_task_template
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_task_spec
+   validate_task_template
+   validate_validation_certificate
+
 embodichain.toolkits.acd
 ------------------------
 
@@ -2413,7 +2883,7 @@ embodichain_tasks.utils.importer
    import_packages
 
 Standalone simulation command-line options
------------------------------------------
+---------------------------------------------
 
 ``embodichain.cli.sim`` builds simulation arguments without importing the
 simulation runtime. Gym launchers compose these options with configuration
