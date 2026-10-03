@@ -48,6 +48,34 @@
       "details": "Start here when describing an embodied task declaratively. The configuration records the program structure and targets that the compiler validates before execution; the same language can be supplied through JSON, YAML, or Python."
     },
     {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Simulator-independent normative task contract with milestones, requirements, semantic identity, and cache support.",
+      "boundaries": [
+        "TaskSpec defines task semantics; scene bindings, execution evidence, and trajectory expansion remain owned by their existing integrations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"Pure, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`.  Scene bindings, execution attempts,\ncertificates, and expansion receipts remain compatibility artifacts owned by\ntheir existing integrations and reference the TaskSpec semantic hash.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec API"
+        }
+      ],
+      "details": "Task Engine emits one reusable TaskSpec for Asset Engine, Scene Engine, Task Program, runtime evaluation, and expansion lineage. Its semantic hash is content addressed and excludes execution-specific identities."
+    },
+    {
       "id": "program-compiler",
       "label": "TaskProgramCompiler",
       "kind": "class",
@@ -2513,7 +2541,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -5435,7 +5463,8 @@
         "device-controller",
         "grasp-tools",
         "urdf-assembly",
-        "convex-decomposition"
+        "convex-decomposition",
+        "task-spec"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5685,7 +5714,8 @@
         "step-clock",
         "embodied-env",
         "base-env",
-        "simulation-manager"
+        "simulation-manager",
+        "task-spec"
       ],
       "edge_ids": [
         "compiler-reads-config",
@@ -6084,7 +6114,8 @@
         "convex-decomposition",
         "simulation-manager",
         "robot",
-        "workspace-analyzer"
+        "workspace-analyzer",
+        "task-spec"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
