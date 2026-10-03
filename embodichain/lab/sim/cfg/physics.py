@@ -349,6 +349,10 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     parameters accepted by that DexSim solver config. If omitted, EmbodiChain
     preserves DexSim's scene-aware ``AutoSolverCfg`` default. A DexSim build
     exporting ``AutoSolverCfg`` is required; no concrete-solver fallback is used.
+    For ``solver_type='dexuni'``, the current DexSim contract keeps expert
+    options under ``vbd_options``, ``mujoco_options`` and
+    ``collision_options``; use ``joint_mode`` and ``contact_mode`` for the
+    coupled dispatch policy.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(

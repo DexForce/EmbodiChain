@@ -40,6 +40,13 @@ support. Do not infer force support from sensor construction alone. Inspect
 backend/solver/device matrix: Newton AutoSolver may change the answer during
 preparation, so the manager checks again afterwards.
 
+DexUni's `pure_mujoco` path reports rigid-contact geometry, normal impulse and
+tangential impulse through the MuJoCo contact buffer, except when MuJoCo uses
+its CPU implementation. Other DexUni paths expose available rigid-contact
+geometry with `impulse=False` and `friction=False`; zero-valued output columns
+there are placeholders, not measured zero forces. Particle-shape contacts do
+not enter this rigid ContactQuery.
+
 The sensor retains backend-emitted rows rather than reducing an actor pair to
 one contact. Force-reporting paths apply the query's positive-impulse filtering;
 geometry-only paths may provide valid rows with zero impulse. Solver settings

@@ -174,7 +174,7 @@ def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
 
 @pytest.mark.no_sim
 def test_newton_gradient_mode_rejects_auto_solver() -> None:
-    cfg = NewtonPhysicsCfg(requires_grad=True)
+    cfg = NewtonPhysicsCfg(solver_cfg=None, requires_grad=True)
 
     with pytest.raises(RuntimeError, match="explicit.*semi_implicit"):
         cfg.to_dexsim_cfg(gpu_id=0)
@@ -193,7 +193,9 @@ def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
 def test_newton_physics_cfg_forwards_collision_pipeline_update_interval(
     update_interval: int | None,
 ) -> None:
-    cfg = NewtonPhysicsCfg(collision_cfg={"update_interval": update_interval})
+    cfg = NewtonPhysicsCfg(
+        solver_cfg=None, collision_cfg={"update_interval": update_interval}
+    )
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
@@ -300,7 +302,7 @@ def test_newton_backend_reports_scene_resolved_auto_solver(
     manager = SimpleNamespace(_world=world)
     backend = NewtonPhysicsBackend(manager)
     world_config = SimpleNamespace(newton_cfg=None)
-    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
+    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg(solver_cfg=None))
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
         lambda candidate: native_backend if candidate is world else None,
@@ -461,8 +463,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
     cfg = NewtonPhysicsCfg(
         solver_cfg={
             config_key: solver_name,
-            "iterations": 12,
-            "step_rigid_bodies": False,
+            "joint_mode": "kinematic",
+            "vbd_options": {"iterations": 12},
         }
     )
 
@@ -470,8 +472,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
-    assert dexsim_cfg.solver_cfg.iterations == 12
-    assert dexsim_cfg.solver_cfg.step_rigid_bodies is False
+    assert dexsim_cfg.solver_cfg.joint_mode == "kinematic"
+    assert dexsim_cfg.solver_cfg.vbd_options["iterations"] == 12
 
 
 @pytest.mark.no_sim

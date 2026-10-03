@@ -1080,6 +1080,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",

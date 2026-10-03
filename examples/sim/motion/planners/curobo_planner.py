@@ -502,9 +502,9 @@ def _build_scene(
                 init_rot=(0.0, 0.0, 0.0),
             )
         )
+        sim.prepare()
     finally:
         demo_block_mesh_path.unlink(missing_ok=True)
-    sim.prepare()
 
     if robot_type == "w1":
         # Keep the W1-specific IK diagnostic batched so it remains useful when
@@ -861,7 +861,10 @@ def main(args: argparse.Namespace | None = None) -> None:
                     binding,
                     motion_policy,
                 ),
-            )
+            ),
+            context=engine.initial_context(
+                control_dt=sim.sim_config.physics_dt * args.step_repeat,
+            ),
         )
         success = compiled.plan_success
         trajectory = compiled.trajectory.positions
@@ -899,7 +902,10 @@ def main(args: argparse.Namespace | None = None) -> None:
                     binding,
                     motion_policy,
                 ),
-            )
+            ),
+            context=engine.initial_context(
+                control_dt=sim.sim_config.physics_dt * args.step_repeat,
+            ),
         )
         success = compiled.plan_success
         trajectory = compiled.trajectory.positions
