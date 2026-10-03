@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "5b70a51f053c26c6d266450ec9e06b5636e2f994",
+  "revision": "d161cf4b9fb080c0c7d750ea147d1fba66e9a242",
   "source_ref": "HEAD",
   "package_version": "0.3.0",
   "topic_index": "agent_context/MAP.yaml",
@@ -2991,6 +2991,35 @@
         }
       ],
       "details": "Start here when describing an embodied task declaratively. The configuration records the program structure and targets that the compiler validates before execution; the same language can be supplied through JSON, YAML, or Python."
+    },
+    {
+      "id": "task-spec",
+      "label": "TaskSpec",
+      "kind": "module",
+      "topic_ids": [
+        "task-spec"
+      ],
+      "summary": "Simulator-independent normative task contract with milestones, requirements, semantic identity, and cache support.",
+      "boundaries": [
+        "TaskSpec defines task semantics; scene bindings, execution evidence, and trajectory expansion remain owned by their existing integrations."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"Pure, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`.  Scene bindings, execution attempts,\ncertificates, and expansion receipts remain compatibility artifacts owned by\ntheir existing integrations and reference the TaskSpec semantic hash.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/public_api",
+          "label": "TaskSpec API",
+          "source_extension": ".rst"
+        }
+      ],
+      "details": "Task Engine emits one reusable TaskSpec for Asset Engine, Scene Engine, Task Program, runtime evaluation, and expansion lineage. Its semantic hash is content addressed and excludes execution-specific identities."
     },
     {
       "id": "tasks",
@@ -7614,7 +7643,8 @@
         "device-controller",
         "grasp-tools",
         "urdf-assembly",
-        "convex-decomposition"
+        "convex-decomposition",
+        "task-spec"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -7857,7 +7887,8 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec"
           ]
         },
         {
@@ -7928,7 +7959,8 @@
         "step-clock",
         "embodied-env",
         "base-env",
-        "simulation-manager"
+        "simulation-manager",
+        "task-spec"
       ],
       "edge_ids": [
         "compiler-reads-config",
@@ -8008,7 +8040,8 @@
             "program-input",
             "scene-registry",
             "skill-profile",
-            "integration-catalog"
+            "integration-catalog",
+            "task-spec"
           ]
         },
         {
@@ -8404,7 +8437,8 @@
         "convex-decomposition",
         "simulation-manager",
         "robot",
-        "workspace-analyzer"
+        "workspace-analyzer",
+        "task-spec"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -8488,7 +8522,8 @@
           "node_ids": [
             "simulation-manager",
             "robot",
-            "workspace-analyzer"
+            "workspace-analyzer",
+            "task-spec"
           ]
         }
       ]

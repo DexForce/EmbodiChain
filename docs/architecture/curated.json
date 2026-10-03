@@ -5643,7 +5643,8 @@
             "scene-export",
             "simready",
             "asset-parsers",
-            "gen-sim-sessions"
+            "gen-sim-sessions",
+            "task-spec"
           ]
         },
         {
@@ -5756,7 +5757,8 @@
             "program-input",
             "scene-registry",
             "skill-profile",
-            "integration-catalog"
+            "integration-catalog",
+            "task-spec"
           ]
         },
         {
@@ -6189,7 +6191,8 @@
           "node_ids": [
             "simulation-manager",
             "robot",
-            "workspace-analyzer"
+            "workspace-analyzer",
+            "task-spec"
           ]
         }
       ]
