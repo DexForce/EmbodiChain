@@ -111,7 +111,7 @@ def _candidate_set() -> dict:
                     "count": 0,
                     "source_structure": "rigid_object",
                     "affordances": ["graspable", "orientable"],
-                    "initial_state": {"orientation": "fallen"},
+                    "initial_state": {},
                     "attributes": {},
                 }
             ],

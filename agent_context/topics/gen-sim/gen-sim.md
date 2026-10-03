@@ -82,6 +82,9 @@ objects back to configured X/Y after settling.
 Invocation-scoped Cartesian policy also covers single-EEF-target transports;
 joint targets retain their joint-space behavior. E2 alignment preserves the
 acquired orientation during the staging lift, then turns the object aloft.
+E2's upright goal does not impose an initially fallen source pose: prior steps
+may change the object's orientation. Grounding preserves the full object reference;
+the existing runtime alignment and upright checks still execute without goal-based skipping.
 E2 checks its final yaw-free alignment at release height before Place preserves
 that heading. Alignment staging never descends below the current height before
 the planner can choose the final orientation.

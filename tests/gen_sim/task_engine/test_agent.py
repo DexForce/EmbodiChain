@@ -235,11 +235,31 @@ def test_scene_request_and_success_are_deterministic_contract_derivations():
             "count": 0,
             "source_structure": "rigid_object",
             "affordances": ["graspable", "orientable"],
-            "initial_state": {"orientation": "fallen"},
+            "initial_state": {},
             "attributes": {},
         }
     ]
     assert success["terms"] == [{"step_id": "orient", "type": "object_upright"}]
+
+
+@pytest.mark.parametrize("reference", ["red cup", "the fallen red cup"])
+def test_upright_goal_does_not_invent_initial_orientation(reference: str) -> None:
+    draft = {
+        "schema_version": TASK_DRAFT_SCHEMA,
+        "task_id": "upright",
+        "instruction": _TEST_INSTRUCTION,
+        "steps": [_step(reference=reference)],
+    }
+    original = deepcopy(draft)
+
+    request = derive_scene_request(draft)
+
+    assert request["references"][0]["initial_state"] == {}
+    assert request["references"][0]["reference"] == reference
+    assert derive_success_spec(draft)["terms"] == [
+        {"step_id": "orient", "type": "object_upright"}
+    ]
+    assert draft == original
 
 
 @pytest.mark.parametrize(
