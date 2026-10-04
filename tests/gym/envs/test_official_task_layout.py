@@ -45,6 +45,7 @@ EXPECTED_IMPORT_REGISTERED_TASK_MODULES = {
     "StackBlocksTwo-v1": "embodichain_tasks.manipulation.tableware.stack_blocks_two",
     "StackCups-v1": "embodichain_tasks.manipulation.tableware.stack_cups",
     "StayStillSave-v1": "embodichain_tasks.special.stay_still_save",
+    "StayStillSave3Cam-v1": "embodichain_tasks.special.stay_still_save_3cam",
 }
 REMOVED_AGENT_ENV_IDS = {"PourWaterAgent-v3", "RearrangementAgent-v3"}
 CONFIG_DEFINED_TASK_PROGRAM_TASKS = {"pour_water"}
