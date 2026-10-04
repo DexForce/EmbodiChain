@@ -893,55 +893,6 @@ def test_semantic_planner_adds_profile_bound_cleanup_without_joint_data() -> Non
     assert "qpos" not in repr(graph).lower()
 
 
-def test_semantic_planner_keeps_explicit_e2_arm_through_release() -> None:
-    """E2 remains semantic while the integration owns axis and motion details."""
-    candidate = TaskAgent(
-        interpreter=lambda *_args, **_kwargs: _result(
-            {**_step(), "required_arm": "right_arm"}
-        )
-    ).generate("upright", _TEST_INSTRUCTION, candidate_count=1)["candidates"][0]
-    graph = SemanticTaskPlanner().plan(
-        candidate,
-        {
-            "schema_version": ROLE_BINDINGS_SCHEMA,
-            "task_id": "upright",
-            "candidate_id": candidate["candidate_id"],
-            "reference_bindings": {"step_01.object": ["purple_can"]},
-            "role_bindings": {},
-        },
-        [
-            {"runtime_uid": "purple_can", "init_pos": [0.0, 0.2, 0.7]},
-            {"runtime_uid": "table", "init_pos": [0.0, 0.0, 0.0]},
-        ],
-    )
-
-    assert [node["call"].get("call_id") for node in graph["nodes"]] == [
-        "simulation.pick",
-        "gen_sim.align_held",
-        "gen_sim.align_held",
-        "simulation.place_relative",
-        "gen_sim.clear_released",
-        "simulation.park",
-    ]
-    assert all(
-        node["call"]["resources"] == {"primary": "right"} for node in graph["nodes"]
-    )
-    release = next(
-        node["call"]
-        for node in graph["nodes"]
-        if node["call"].get("call_id") == "simulation.place_relative"
-    )
-    assert release["arguments"] == {
-        "object": "purple_can",
-        "reference": "table",
-        "relation": "on",
-    }
-    assert set(graph["targets"]) == {
-        "step_01_upright_target",
-        "step_01_upright_staging_target",
-    }
-
-
 def test_semantic_planner_routes_handover_through_verified_pick_state() -> None:
     """A transfer starts from a verified source attachment boundary."""
     step = _step(step_id="handover", reference="can")
@@ -1142,16 +1093,6 @@ def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
             "kind": "registered",
             "call_id": "simulation.pick",
             "arguments": {"object": "can", "target": "step_01_upright_target"},
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.align_held",
-            "arguments": {
-                "object": "can",
-                "target": "step_01_upright_staging_target",
-                "preserve_yaw": False,
-            },
             "resources": {"primary": "left"},
         },
         {

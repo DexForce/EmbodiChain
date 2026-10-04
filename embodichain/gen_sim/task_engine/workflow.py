@@ -956,11 +956,11 @@ class TaskEngineWorkflow:
                 for item in candidate_set["candidates"]
                 if item["candidate_id"] == final_candidate_id
             )
-            # TaskTemplate is the normative, action-sequence-independent
+            # TaskSpec is the normative, action-sequence-independent
             # artifact.  Keep it beside the run audit after binding has chosen
             # the final candidate; the existing bundle/runtime remains the
             # sole execution path.
-            from .task_spec import task_template_from_candidate
+            from .task_spec import task_spec_from_candidate
 
             if set(final_candidate) < {
                 "candidate_id",
@@ -977,20 +977,20 @@ class TaskEngineWorkflow:
                     {
                         "error_type": "legacy_candidate_shape",
                         "message": (
-                            "TaskTemplate generation requires a complete "
+                            "TaskSpec generation requires a complete "
                             "TaskCandidate contract."
                         ),
                     },
                 )
             else:
-                task_template = task_template_from_candidate(
+                task_spec = task_spec_from_candidate(
                     final_candidate,
                     metadata={
                         "run_id": effective_run_id,
                         "scene_attempt": attempts[-1]["scene_attempt"],
                     },
                 )
-                _write_json(staging / "task_spec.json", task_template.to_dict())
+                _write_json(staging / "task_spec.json", task_spec.to_dict())
             selected_attempt = attempts[-1]
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (

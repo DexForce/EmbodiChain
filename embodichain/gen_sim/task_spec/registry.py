@@ -145,13 +145,9 @@ class TaskSpecCache:
             raise KeyError(f"TaskSpec semantic hash is not cached: {semantic_hash}")
         return result
 
-    def save(self, template: TaskSpec, *, overwrite: bool = False) -> Path:
-        """Alias for :meth:`put` used by persistence adapters."""
-        return self.put(template, overwrite=overwrite)
-
-    def load(self, semantic_hash: str) -> TaskSpec | None:
-        """Alias for :meth:`get` used by persistence adapters."""
-        return self.get(semantic_hash)
+    # Deprecated persistence spellings; keep the canonical methods' signatures.
+    save = put
+    load = get
 
     def delete(self, semantic_hash: str) -> bool:
         """Delete one cache entry and report whether it existed."""
@@ -209,8 +205,8 @@ class TaskSpecCache:
         return isinstance(semantic_hash, str) and self.contains(semantic_hash)
 
 
-class TaskSpecRegistry(TaskSpecCache):
-    """Named registry alias for integrations that manage reusable specs."""
+# Compatibility spelling for integrations that used a registry-shaped name.
+TaskSpecRegistry = TaskSpecCache
 
 
 def _validate_hash(value: str) -> None:

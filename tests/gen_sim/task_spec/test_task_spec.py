@@ -23,16 +23,14 @@ import pytest
 from embodichain.gen_sim.task_spec import (
     EvaluationStatus,
     Predicate,
-    PredicateEvaluation,
     RoleSpec,
     TaskSpecCache,
     TaskSpecValidationError,
-    TaskTemplate,
+    TaskSpec,
     TemporalCondition,
-    ValidationCertificate,
     canonicalize,
-    evaluate_task_template,
-    validate_task_template,
+    evaluate_task_spec,
+    validate_task_spec,
 )
 
 
@@ -86,14 +84,14 @@ def _candidate_set() -> dict[str, object]:
 
 
 def test_task_template_hash_excludes_generation_metadata() -> None:
-    base = TaskTemplate(
+    base = TaskSpec(
         task_id="demo",
         instruction="place the object",
         roles=(RoleSpec("object:cup"),),
         goal=(Predicate("semantic_goal", observation="goal.done"),),
         metadata={"candidate_id": "one"},
     )
-    rerun = TaskTemplate(
+    rerun = TaskSpec(
         task_id="demo",
         instruction="place the object",
         roles=(RoleSpec("object:cup"),),
@@ -101,11 +99,11 @@ def test_task_template_hash_excludes_generation_metadata() -> None:
         metadata={"candidate_id": "two", "model": "other"},
     )
     assert base.semantic_hash == rerun.semantic_hash
-    assert TaskTemplate.from_dict(base.to_dict()) == base
+    assert TaskSpec.from_dict(base.to_dict()) == base
 
 
 def test_task_template_predicate_order_is_canonical_but_explicit_ids_survive() -> None:
-    first = TaskTemplate(
+    first = TaskSpec(
         task_id="demo",
         instruction="check",
         roles=(RoleSpec("object"),),
@@ -114,7 +112,7 @@ def test_task_template_predicate_order_is_canonical_but_explicit_ids_survive() -
             Predicate("exists", observation="exists"),
         ),
     )
-    second = TaskTemplate(
+    second = TaskSpec(
         task_id="demo",
         instruction="check",
         roles=(RoleSpec("object"),),
@@ -135,7 +133,7 @@ def test_unknown_values_and_callable_are_rejected() -> None:
 
 
 def test_missing_observation_is_unavailable_and_success_is_certifiable() -> None:
-    template = TaskTemplate(
+    template = TaskSpec(
         task_id="demo",
         instruction="press the button",
         roles=(RoleSpec("button", kind="button"),),
@@ -146,9 +144,9 @@ def test_missing_observation_is_unavailable_and_success_is_certifiable() -> None
             ),
         ),
     )
-    unavailable = evaluate_task_template(template, {})
+    unavailable = evaluate_task_spec(template, {})
     assert unavailable.status is EvaluationStatus.UNAVAILABLE
-    report = evaluate_task_template(
+    report = evaluate_task_spec(
         template,
         {
             "goal": {"goal.pressed": True},
@@ -171,8 +169,8 @@ def test_task_engine_generation_is_content_addressed(tmp_path: Path) -> None:
     assert [predicate.name for predicate in first.goal] == ["object_upright"]
     assert cache.get(first.semantic_hash) == first
     assert cache.hashes() == (first.semantic_hash,)
-    assert validate_task_template(first)["semantic_hash"] == first.semantic_hash
-    alternate = TaskTemplate(
+    assert validate_task_spec(first)["semantic_hash"] == first.semantic_hash
+    alternate = TaskSpec(
         task_id=first.task_id,
         instruction=first.instruction,
         roles=first.roles,
@@ -188,14 +186,14 @@ def test_task_engine_generation_is_content_addressed(tmp_path: Path) -> None:
 
 
 def test_require_observations_is_an_explicit_validation_mode() -> None:
-    template = TaskTemplate(
+    template = TaskSpec(
         task_id="demo",
         instruction="do it",
         roles=(RoleSpec("object"),),
         goal=(Predicate("exists"),),
     )
     with pytest.raises(TaskSpecValidationError, match="observation keys"):
-        validate_task_template(template, require_observations=True)
+        validate_task_spec(template, require_observations=True)
 
 
 def test_compact_task_spec_schema_round_trips_without_runtime_artifacts() -> None:
@@ -249,13 +247,13 @@ def test_compact_task_spec_schema_round_trips_without_runtime_artifacts() -> Non
             }
         ],
     }
-    spec = TaskTemplate.from_dict(value)
+    spec = TaskSpec.from_dict(value)
     encoded = spec.to_dict()
     assert encoded["schema_version"] == "task_spec/v0.1"
     assert encoded["roles"][0]["id"] == "role_001"
     assert encoded["init"][0]["subject"] == "role_001"
     assert encoded["milestones"][0]["id"] == "upright_once"
-    assert TaskTemplate.from_dict(encoded) == spec
+    assert TaskSpec.from_dict(encoded) == spec
 
 
 def test_task_spec_hash_ignores_logical_id_and_instruction() -> None:
@@ -263,42 +261,19 @@ def test_task_spec_hash_ignores_logical_id_and_instruction() -> None:
         "roles": (RoleSpec("role_001"),),
         "goal": (Predicate("exists", arguments={"subject": "role_001"}),),
     }
-    first = TaskTemplate(task_id="a", instruction="first wording", **common)
-    second = TaskTemplate(task_id="b", instruction="different wording", **common)
+    first = TaskSpec(task_id="a", instruction="first wording", **common)
+    second = TaskSpec(task_id="b", instruction="different wording", **common)
     assert first.semantic_hash == second.semantic_hash
 
 
 def test_task_spec_rejects_cyclic_milestones() -> None:
     predicate = {"predicate": "exists", "expected": True}
     with pytest.raises(ValueError, match="acyclic"):
-        TaskTemplate(
+        TaskSpec(
             roles=(RoleSpec("role_001"),),
             goal=(Predicate("exists"),),
             milestones=(
                 {"id": "a", "achieve": (predicate,), "after": ("b",)},
                 {"id": "b", "achieve": (predicate,), "after": ("a",)},
-            ),
-        )
-
-
-def test_certificate_status_cannot_hide_failed_predicate() -> None:
-    digest = "0" * 64
-    with pytest.raises(ValueError, match="aggregate predicate status"):
-        ValidationCertificate(
-            certificate_id="certificate",
-            task_template_hash=digest,
-            scene_instance_hash=digest,
-            witness_id=None,
-            checker="test",
-            status="satisfied",
-            predicate_results=(
-                PredicateEvaluation(
-                    predicate_id="goal_001",
-                    predicate="exists",
-                    status=EvaluationStatus.FAILED,
-                    observed=False,
-                    expected=True,
-                    reason="missing",
-                ),
             ),
         )

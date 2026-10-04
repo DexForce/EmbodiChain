@@ -130,7 +130,7 @@ class Predicate:
         operator: Comparison to apply to the observed measurement.
         expected: JSON value used by ``operator``.
         observation: Direct or dotted key supplied by a runtime observer.
-        predicate_id: Stable local evidence identifier.  TaskTemplate assigns
+        predicate_id: Stable local evidence identifier.  TaskSpec assigns
             one when omitted.
 
     A missing observation key is reported as ``unavailable`` by the evaluator;

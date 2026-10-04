@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from .canonicalization import (
     CANONICALIZATION_VERSION,
@@ -35,7 +35,7 @@ from .canonicalization import (
     canonical_json,
     json_snapshot,
 )
-from .contracts import RequirementSpec, RoleSpec
+from .contracts import RoleSpec
 from .expressions import Predicate, TemporalCondition
 
 __all__ = [
@@ -46,6 +46,9 @@ __all__ = [
     "TaskSpec",
     "TaskTemplate",
 ]
+
+if TYPE_CHECKING:
+    from .compat import RequirementSpec
 
 TASK_SPEC_SCHEMA: Final = "task_spec/v0.1"
 # Kept for readers of the pre-simplification schema.
@@ -228,14 +231,11 @@ class TaskRequirement:
     ) -> TaskRequirement:
         if isinstance(value, cls):
             return value
-        if isinstance(value, RequirementSpec):
-            return cls(
-                consumer=value.kind,
-                key=value.name,
-                value=value.value,
-                required=value.required,
-            )
         if not isinstance(value, Mapping):
+            from .compat import RequirementSpec
+
+            if isinstance(value, RequirementSpec):
+                return cls.from_value(value.to_dict())
             raise TypeError("TaskSpec requirements must be mappings.")
         raw = dict(value)
         if "consumer" not in raw:

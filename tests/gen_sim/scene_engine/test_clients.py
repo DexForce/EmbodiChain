@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from embodichain.gen_sim.scene_engine.clients import articulated_generation
+from embodichain.gen_sim.asset_engine.clients import articulated_generation
 from embodichain.gen_sim.scene_engine.clients import geometry_generation
 from embodichain.gen_sim.scene_engine.clients import image_generation
 from embodichain.gen_sim.scene_engine.clients import image_segmentation
@@ -99,11 +99,11 @@ def test_clients_load_their_required_dotenv_values(
         "SCENE_ENGINE_IMAGE_GENERATION_BY_PROMPT_PATH": "/generate_image_by_prompt",
     }
     articulated_generation_values = {
-        "SCENE_ENGINE_ARTICULATED_GENERATION_BASE_URL": "http://articulation/",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S": "7200",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS": "2",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH": "/health",
-        "SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH": "/generate_articulation",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_BASE_URL": "http://articulation/",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S": "7200",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS": "2",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH": "/health",
+        "ASSET_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH": "/generate_articulation",
     }
     llm_values = {
         "OPENAI_API_KEY": "test-key",
@@ -127,7 +127,7 @@ def test_clients_load_their_required_dotenv_values(
     )
     monkeypatch.setattr(
         articulated_generation,
-        "read_scene_engine_env_values",
+        "read_asset_engine_env_values",
         lambda *_: articulated_generation_values,
     )
     monkeypatch.setattr(

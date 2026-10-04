@@ -195,7 +195,8 @@ embodichain/gen_sim/task_spec/
   canonicalization.py   # JSON canonicalization 与 SHA-256 semantic hash
   validation.py         # TaskSpec 校验和 provider-free 求值
   registry.py           # <semantic_hash>.json 内容寻址缓存
-  contracts.py          # 旧 Scene/Witness/Certificate 数据的兼容读取
+  contracts.py          # 角色绑定的核心 RoleSpec contract
+  compat.py             # 旧 TaskTemplate/Scene/Witness/Certificate 兼容读取
 ```
 
 Task Engine 的入口是 `generate_task_spec()`、`task_spec_from_candidate()`
@@ -367,6 +368,7 @@ candidate trajectory
 ```text
 embodichain/gen_sim/task_spec/
   contracts.py
+  compat.py
   expressions.py
   canonicalization.py
   validation.py

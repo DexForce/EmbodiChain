@@ -28,7 +28,12 @@ from typing import Any, Literal, Sequence, TYPE_CHECKING
 import dexsim
 import numpy as np
 import torch
-from dexsim.types import DenoiserType, Renderer, ToneMappingType
+from dexsim.types import Renderer, ToneMappingType
+
+try:
+    from dexsim.types import DenoiserType
+except ImportError:  # DexSim 0.5 exposes denoising through RTRenderMode.
+    DenoiserType = None  # type: ignore[assignment,misc]
 
 from embodichain.utils import configclass, logger
 
@@ -157,20 +162,24 @@ class DLSSCfg:
         """
         self.__post_init__()
         dlss = dexsim.DLSSConfig()
-        dlss.dlss_enabled = self.dlss_enabled
-        dlss.upscale_enabled = self.upscale_enabled
-        dlss.dlss_quality = self.dlss_quality
-        dlss.render_width = self.render_width
-        dlss.render_height = self.render_height
+        for name, value in (
+            ("dlss_enabled", self.dlss_enabled),
+            ("upscale_enabled", self.upscale_enabled),
+            ("dlss_quality", self.dlss_quality),
+            ("render_width", self.render_width),
+            ("render_height", self.render_height),
+            ("target_width", self.target_width),
+            ("target_height", self.target_height),
+            ("exposure_compensation", self.exposure_compensation),
+            ("frame_time_delta_ms", self.frame_time_delta_ms),
+        ):
+            if hasattr(dlss, name):
+                setattr(dlss, name, value)
         if self.upsample_ratio is not None:
-            if self.render_width == 0:
+            if self.render_width == 0 and hasattr(dlss, "render_width"):
                 dlss.render_width = max(1, int(window_width / self.upsample_ratio))
-            if self.render_height == 0:
+            if self.render_height == 0 and hasattr(dlss, "render_height"):
                 dlss.render_height = max(1, int(window_height / self.upsample_ratio))
-        dlss.target_width = self.target_width
-        dlss.target_height = self.target_height
-        dlss.exposure_compensation = self.exposure_compensation
-        dlss.frame_time_delta_ms = self.frame_time_delta_ms
         return dlss
 
 
@@ -243,8 +252,11 @@ class RenderCfg:
             window_height=world_config.win_config.height,
         )
         world_config.raytrace_config.render_iterations_per_frame = self.spp
-        world_config.raytrace_config.open_denoise = True
-        world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
+        if DenoiserType is not None and hasattr(
+            world_config.raytrace_config, "open_denoise"
+        ):
+            world_config.raytrace_config.open_denoise = True
+            world_config.raytrace_config.denoiser_type = DenoiserType.OPTIX
         world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
         world_config.postprocess_config.tone_mapping_type = (
             ToneMappingType.MODIFIED_REINHARD
