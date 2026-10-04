@@ -399,6 +399,7 @@ statuses from a Task Program execution report.
 
 .. autosummary::
 
+   ATOMIC_SKILL_MAP
    SemanticGraphView
    render_semantic_task_graph_png
    write_semantic_task_graph_png
