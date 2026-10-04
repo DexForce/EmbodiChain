@@ -27,7 +27,18 @@ _SCENE_ENGINE_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 
 def read_scene_engine_env_values(*keys: str) -> dict[str, str]:
-    """Read only the requested Scene Engine settings from ``gen_sim/.env``."""
+    """Read only the requested Scene Engine settings from ``gen_sim/.env``.
+
+    Args:
+        keys: Environment keys to load.
+
+    Returns:
+        Mapping of requested keys to their configured values.
+
+    Raises:
+        FileNotFoundError: If the shared settings file is absent.
+        ValueError: If a requested key is missing.
+    """
     return _read_gen_sim_env_values(
         *keys,
         env_path=_SCENE_ENGINE_ENV_PATH,
