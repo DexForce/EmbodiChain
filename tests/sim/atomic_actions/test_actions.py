@@ -949,7 +949,6 @@ def test_move_end_effector_returns_full_robot_timed_plan() -> None:
     generator = _motion_generator()
     action = _bind_action(generator, MoveEndEffector())
     context = _context()
-
     plan = _plan_action(
         action,
         _invocation(
@@ -3308,6 +3307,37 @@ def test_slide_joint_target_rejects_incompatible_binding_before_ik(case: str) ->
     generator.robot.compute_ik.assert_not_called()
 
 
+def test_slide_satisfied_joint_target_still_resolves_scene_pose() -> None:
+    affordance = SlideAffordance(
+        mesh_vertices=torch.zeros(3, 3),
+        mesh_triangles=torch.tensor([[0, 1, 2]]),
+        joint_name="joint",
+        joint_limits=(0.0, 0.3),
+    )
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    invocation = ActionInvocation(
+        skill_id="slide",
+        goal=SlideGoal(
+            ObjectSemantics(affordance=affordance, geometry={}, entity_id="target"),
+            SceneEntityPose("missing"),
+            joint_target=SlideJointTarget("drawer", "joint", 0.2, axis_sign=1),
+        ),
+        binding=_binding(action),
+    )
+    scene = replace(
+        SceneSnapshot.empty(),
+        articulation_joints={
+            ("drawer", "joint"): ObservedArticulationJointState(
+                torch.full((NUM_ENVS, 1), 0.2)
+            )
+        },
+    )
+    with pytest.raises(KeyError, match="missing"):
+        _plan_action(action, invocation, _context(scene=scene))
+    generator.robot.compute_ik.assert_not_called()
+
+
 @pytest.mark.parametrize("case", ["invalid_observation", "sampler_failure"])
 def test_slide_joint_target_preserves_reached_rows_when_other_rows_fail(
     case: str,
@@ -5119,6 +5149,7 @@ def test_handover_can_end_with_receiving_resource_holding_object(
         "receive_approach",
         "receive_close",
         "handover_release",
+        "source_retreat",
     ]
     projected = plan.expected_effects.apply(
         context.task,
@@ -5187,11 +5218,30 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     exchange[1, 3] = 0.4
     exchange[2, 3] = 0.05
 
+    context = _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1), task)
+    source_hand_qpos = torch.tensor([[0.35, 0.45], [0.55, 0.65]])
+    qpos = context.robot.qpos.clone()
+    qpos[:, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF] = source_hand_qpos
+    context = replace(
+        context,
+        robot=replace(context.robot, qpos=qpos),
+        scene=replace(
+            context.scene,
+            entities={
+                **context.scene.entities,
+                "handover_target": EntityState(exchange),
+            },
+        ),
+    )
+
     plan = _plan_action(
         action,
         ActionInvocation(
             skill_id="hand_over",
-            goal=HandOverGoal(semantics, target_pose=exchange),
+            goal=HandOverGoal(
+                semantics,
+                target_pose=SceneEntityPose("handover_target"),
+            ),
             binding=_dual_binding(action, "source", "destination"),
             motion_policy=MotionPolicy(sample_count=60),
             skill_options=HandOverOptions(
@@ -5199,7 +5249,7 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
                 receive_pick_object_part="center",
             ),
         ),
-        _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1), task),
+        context,
     )
 
     assert plan.plan_success.tolist() == [True, True]
@@ -5231,6 +5281,21 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         "handover_release",
         "source_retreat",
     ]
+    assert plan.scene_dependencies == ("handover_object", "handover_target")
+    assert plan.scene_dependency_monitor_until == {"handover_object": 0}
+    trajectory = _joint_trajectory(plan).positions
+    transfer = plan.segment("transfer")
+    release = plan.segment("handover_release")
+    torch.testing.assert_close(
+        trajectory[
+            :, transfer.start : release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF
+        ],
+        source_hand_qpos[:, None].expand(-1, release.start - transfer.start, -1),
+    )
+    torch.testing.assert_close(
+        trajectory[:, release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF],
+        source_hand_qpos,
+    )
 
 
 @pytest.mark.parametrize("sampling_enabled", [False, True])
@@ -5771,6 +5836,23 @@ def test_handover_rejects_link_scoped_grasp_mesh() -> None:
             invocation,
             _handover_context(torch.eye(4).repeat(NUM_ENVS, 1, 1)),
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"retreat_distance": float("nan")},
+        {"retreat_distance": True},
+        {"retreat_steps": 2.5},
+        {"release_steps": float("nan")},
+        {"middle_empty_ratio": 1.0},
+    ],
+)
+def test_coordinated_pick_rejects_nonfinite_or_nonintegral_options(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        CoordinatedPickmentOptions(**kwargs)
 
 
 @pytest.mark.parametrize(

@@ -228,6 +228,14 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
         interpolation_dt = context.require_control_dt()
+        # Resolve late-bound scene targets before any already-satisfied fast
+        # path so invalid or low-confidence references fail at the goal
+        # boundary instead of being reported as a successful hold.
+        resolved_link_pose = resolve_pose_goal(
+            target.target_pose,
+            context,
+            name="target_pose",
+        )
         direction = options.direction
         displacement = None
         joint_valid = torch.ones(
@@ -294,7 +302,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
 
         link_pose = resolve_pose_target(
-            resolve_pose_goal(target.target_pose, context, name="target_pose"),
+            resolved_link_pose,
             num_envs=self.num_envs,
             device=self.device,
         )
