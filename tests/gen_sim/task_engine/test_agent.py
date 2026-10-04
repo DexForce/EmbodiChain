@@ -1044,11 +1044,17 @@ def test_task_agent_isolates_invalid_interpreter_results():
     assert len(result["candidates"]) == 1
 
 
-def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
-    """E2 separates verified pickup, upright transport, opening, and retreat."""
+@pytest.mark.parametrize(
+    ("requested_arm", "resource"),
+    [("auto", "left"), ("left_arm", "left"), ("right_arm", "right")],
+)
+def test_semantic_planner_composes_e2_with_one_alignment(
+    requested_arm: str, resource: str
+) -> None:
+    """One E2 alignment retains the selected arm through release and retreat."""
 
     def interpreter(_instruction, **_kwargs):
-        return _result(_step(reference="purple can"))
+        return _result({**_step(reference="purple can"), "required_arm": requested_arm})
 
     candidate = TaskAgent(interpreter=interpreter).generate(
         "upright_can", _TEST_INSTRUCTION, candidate_count=1
@@ -1088,49 +1094,33 @@ def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
         ],
     )
 
-    assert [node["call"] for node in graph["nodes"]] == [
-        {
-            "kind": "registered",
-            "call_id": "simulation.pick",
-            "arguments": {"object": "can", "target": "step_01_upright_target"},
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.align_held",
-            "arguments": {
+    calls = [node["call"] for node in graph["nodes"]]
+    assert all(call["kind"] == "registered" for call in calls)
+    assert all(call["resources"] == {"primary": resource} for call in calls)
+    assert [(call["call_id"], call["arguments"]) for call in calls] == [
+        ("simulation.pick", {"object": "can", "target": "step_01_upright_target"}),
+        (
+            "gen_sim.align_held",
+            {
                 "object": "can",
                 "target": "step_01_upright_target",
                 "preserve_yaw": False,
             },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "simulation.place_relative",
-            "arguments": {
-                "object": "can",
-                "reference": "table",
-                "relation": "on",
-            },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.clear_released",
-            "arguments": {
-                "object": "can",
-                "target": "step_01_upright_staging_target",
-            },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "simulation.park",
-            "arguments": {},
-            "resources": {"primary": "left"},
-        },
+        ),
+        (
+            "simulation.place_relative",
+            {"object": "can", "reference": "table", "relation": "on"},
+        ),
+        (
+            "gen_sim.clear_released",
+            {"object": "can", "target": "step_01_upright_staging_target"},
+        ),
+        ("simulation.park", {}),
     ]
+    assert set(graph["targets"]) == {
+        "step_01_upright_target",
+        "step_01_upright_staging_target",
+    }
     assert graph["targets"]["step_01_upright_target"]["values"][0][
         "position"
     ] == pytest.approx([0.1, -0.2, 0.79])
