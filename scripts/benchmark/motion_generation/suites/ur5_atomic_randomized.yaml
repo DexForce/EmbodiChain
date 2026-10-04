@@ -14,6 +14,7 @@ planners:
     role: candidate
     enabled: true
     config:
+      # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
       onnx_model_path: null
       num_waypoints: 5
       steps_per_waypoint: 30

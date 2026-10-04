@@ -340,6 +340,36 @@ def test_randomized_atomic_suite_covers_six_skills_with_fixed_seed_sweep():
     assert press["articulation_position_jitter_m"] == [0.03, 0.03, 0.015]
 
 
+def test_ur5_atomic_suite_loads_nmg_and_six_skills():
+    suite = load_suite("ur5_atomic_randomized")
+    track = suite.enabled_tracks()[0]
+
+    assert suite.robot.id == "ur5_pgi"
+    assert suite.robot.provider == "ur5_pgi"
+    assert [spec.id for spec in suite.planners if spec.enabled] == ["nmg"]
+    assert track.scenario == "atomic_task"
+    assert [item["id"] for item in track.config["skills"]] == [
+        "move_end_effector",
+        "move_joints",
+        "pick_up",
+        "move_held_object",
+        "place",
+        "press",
+    ]
+
+
+def test_ur5_pgi_robot_provider_exposes_six_joint_arm_and_hand():
+    suite = load_suite("ur5_atomic_randomized")
+    cfg = create_robot_provider(suite.robot).build_cfg()
+
+    assert cfg.uid == "benchmark_ur5_pgi"
+    assert cfg.control_parts["arm"] == [f"joint{index}" for index in range(1, 7)]
+    assert cfg.control_parts["hand"] == ["gripper_finger1_joint_1"]
+    assert cfg.solver_cfg["arm"].end_link_name == "ee_link"
+    assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.17)
+    assert len(cfg.init_qpos) == 8
+
+
 def test_seeded_jitter_is_reproducible_bounded_and_stream_separated():
     kwargs = {
         "amplitude": (0.1, 0.2, 0.0),
@@ -1204,6 +1234,33 @@ def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:
     full.fill_(9.0)
     assert torch.equal(raw, before)
     assert torch.equal(start, _canonical_case_qpos(before)[:, [2, 0]])
+
+
+def test_ur5_atomic_move_joints_case_uses_six_controlled_joints() -> None:
+    suite = load_suite("ur5_atomic_randomized")
+    track = suite.enabled_tracks()[0]
+    skill = next(item for item in track.config["skills"] if item["id"] == "move_joints")
+    config = {
+        **{key: value for key, value in skill.items() if key not in {"id", "cases"}},
+        **skill["cases"][0],
+    }
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qpos.return_value = torch.zeros(1, 8)  # Six arm and two hand joints.
+    robot.get_joint_ids.return_value = list(range(6))
+    robot.get_qpos_limits.return_value = torch.tensor([[[-6.28, 6.28]] * 6])
+    robot.compute_fk.return_value = torch.eye(4).unsqueeze(0)
+    scenario = Mock(robot=robot, control_part="arm")
+
+    case = create_atomic_skill_provider("move_joints").generate_case(
+        scenario, suite, track, config, seed=101, batch_size=1
+    )
+
+    robot.get_qpos.assert_called_once_with()
+    robot.get_joint_ids.assert_called_once_with(name="arm")
+    assert case.robot_id == "ur5_pgi"
+    assert case.start_qpos.shape == (1, 6)
+    assert case.full_start_qpos.shape == (1, 8)
+    assert case.reference_qpos.shape == (1, 1, 6)
 
 
 def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) -> None:
