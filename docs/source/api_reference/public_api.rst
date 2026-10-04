@@ -388,6 +388,21 @@ contain canonical Semantic Calls and exclude grounded action data.
    semantic_task_graph_hash
    validate_semantic_task_graph
 
+embodichain.gen_sim.task_engine.semantic_graph_visualization
+-------------------------------------------------------------
+
+Headless PNG rendering for the current semantic graph contract. The renderer
+can show task-group overviews or individual Semantic Call cards and can overlay
+statuses from a Task Program execution report.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph_visualization
+
+.. autosummary::
+
+   SemanticGraphView
+   render_semantic_task_graph_png
+   write_semantic_task_graph_png
+
 embodichain.gen_sim.task_engine.semantic_planner
 -------------------------------------------------
 

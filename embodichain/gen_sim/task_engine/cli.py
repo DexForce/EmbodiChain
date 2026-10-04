@@ -89,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
     annotate_parser.add_argument("--report", required=True)
     annotate_parser.add_argument("--apply", action="store_true")
     annotate_parser.add_argument("--backup-root", default=None)
+    visualize_parser = subparsers.add_parser(
+        "visualize", help="Render a semantic task graph as a PNG."
+    )
+    visualize_parser.add_argument("--graph", required=True)
+    visualize_parser.add_argument("--report", default=None)
+    visualize_parser.add_argument("--output", required=True)
+    visualize_parser.add_argument(
+        "--view", choices=("groups", "calls"), default="groups"
+    )
     return parser
 
 
@@ -150,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "run",
         "run-all",
         "annotate-endpoints",
+        "visualize",
         "-h",
         "--help",
     }:
@@ -157,6 +167,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
     if args.command == "annotate-endpoints":
         return _run_endpoint_annotations(args)
+    if args.command == "visualize":
+        return _run_visualize(args, parser)
     if args.command == "run":
         return _run_prepared_bundle(args)
     return _run_workflow(
@@ -164,6 +176,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         execute=args.command == "run-all",
         parser=parser,
     )
+
+
+def _run_visualize(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Render one semantic graph without constructing a simulator."""
+    try:
+        graph = json.loads(Path(args.graph).expanduser().read_text(encoding="utf-8"))
+        report = (
+            None
+            if args.report is None
+            else json.loads(Path(args.report).expanduser().read_text(encoding="utf-8"))
+        )
+        from .semantic_graph_visualization import write_semantic_task_graph_png
+
+        output = write_semantic_task_graph_png(
+            graph,
+            args.output,
+            report,
+            view=args.view,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        parser.error(str(exc))
+    print(json.dumps({"output": output.as_posix(), "view": args.view}))
+    return 0
 
 
 def _run_workflow(
