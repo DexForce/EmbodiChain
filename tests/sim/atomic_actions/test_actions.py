@@ -1114,7 +1114,7 @@ def test_place_holds_fully_open_before_retracting_when_configured() -> None:
 
     release = plan.segment("release")
     assert plan.scene_dependencies == ("destination",)
-    assert plan.scene_dependency_monitor_until == {"destination": release.start}
+    assert plan.scene_dependency_monitor_until == {}
     assert plan.commands.frame_count == sample_count + settle_steps
     assert release.stop - release.start == 5 + settle_steps
     hand_positions = _joint_command_positions(plan, "hand")
@@ -2088,14 +2088,26 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         label="axis-object",
         entity_id="target",
     )
-    context = _context(scene=_target_scene(object_pose, timestamp=0.0, version=0))
+    scene = _target_scene(object_pose, timestamp=0.0, version=0)
+    context = _context(
+        scene=replace(
+            scene,
+            entities={
+                **scene.entities,
+                "grasp_target": EntityState(torch.eye(4).repeat(NUM_ENVS, 1, 1)),
+            },
+        )
+    )
     original_task = context.task
 
     plan = _plan_action(
         action,
         ActionInvocation(
             skill_id="axis_align",
-            goal=AxisAlignGoal(semantics=semantics, grasp_xpos=torch.eye(4)),
+            goal=AxisAlignGoal(
+                semantics=semantics,
+                grasp_xpos=SceneEntityPose("grasp_target"),
+            ),
             binding=_binding(action),
             motion_policy=MotionPolicy(sample_count=20),
             skill_options=AxisAlignOptions(
@@ -2125,7 +2137,7 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     torch.testing.assert_close(held.object_to_eef, object_pose)
     torch.testing.assert_close(held.grasp_xpos, solved_poses[-1])
     assert context.task is original_task
-    assert plan.scene_dependencies == ("target",)
+    assert plan.scene_dependencies == ("grasp_target", "target")
     assert plan.scene_dependency_monitor_until == {"target": plan.segments[0].stop}
     final_object_rotation = solved_poses[-1][:, :3, :3]
     final_world_axis = torch.matmul(

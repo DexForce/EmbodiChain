@@ -425,9 +425,8 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
             ),
             segment_lengths=segment_lengths,
             # Contact during close/manipulate intentionally moves the aligned
-            # object.  Continue monitoring only through the pre-contact part of
-            # approach so that external target motion can still invalidate the
-            # plan without treating the action's own effect as goal drift.
+            # semantic object.  Independent scene-referenced grasp targets
+            # remain monitored for the full action.
             scene_dependency_monitor_until={
                 entity_id: max(
                     1,
@@ -436,6 +435,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                     ),
                 )
                 for entity_id in self._scene_dependencies(request)
+                if entity_id == request.goal.semantics.entity_id
             },
         )
 
