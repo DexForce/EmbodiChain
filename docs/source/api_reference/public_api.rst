@@ -590,6 +590,18 @@ embodichain.gen_sim.asset_engine.pipeline.articulation
 
    generate_articulated_usdcs
 
+embodichain.gen_sim.scene_engine.configs.environment
+--------------------------------------------------
+
+Read selected Scene Engine settings from the shared ``gen_sim/.env`` file;
+missing files or requested keys raise an error.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
+
 embodichain.lab.gym.envs.base_env
 ---------------------------------
 
