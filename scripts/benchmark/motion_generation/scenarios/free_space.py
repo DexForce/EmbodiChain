@@ -33,10 +33,22 @@ if TYPE_CHECKING:
 
 __all__ = ["FreeSpaceScenario"]
 
-_NOMINAL_QPOS = torch.tensor(
-    [0.0, -math.pi / 4, 0.0, -3.0 * math.pi / 4, 0.0, math.pi / 2, math.pi / 4],
-    dtype=torch.float32,
-)
+_NOMINAL_QPOS = {
+    "franka_panda": torch.tensor(
+        [0.0, -math.pi / 4, 0.0, -3.0 * math.pi / 4, 0.0, math.pi / 2, math.pi / 4],
+        dtype=torch.float32,
+    ),
+    "ur5": torch.tensor(
+        [0.0, -math.pi / 2, math.pi / 2, -math.pi / 2, -math.pi / 2, 0.0],
+        dtype=torch.float32,
+    ),
+}
+_NEAR_SINGULARITY_QPOS = {
+    "franka_panda": torch.tensor(
+        [0.0, 0.0, 0.0, -0.15, 0.0, 0.20, 0.0], dtype=torch.float32
+    ),
+    "ur5": torch.tensor([0.0, -math.pi / 2, 0.0, 0.0, 0.0, 0.0], dtype=torch.float32),
+}
 
 
 def _clamp_with_margin(qpos: torch.Tensor, limits: torch.Tensor) -> torch.Tensor:
@@ -50,17 +62,29 @@ def _start_qpos_for_bin(
     name: str,
     limits: torch.Tensor,
     generator: torch.Generator,
+    robot_id: str = "franka_panda",
 ) -> torch.Tensor:
-    """Create one deterministic start posture for a named condition bin.
+    """Create a deterministic start posture for the selected robot and bin.
 
-    ``near_singularity`` uses a fixed elbow-extended Franka posture. It is a
-    reproducible low-manipulability seed for free-space-common v1, not a
-    runtime singularity search.
+    ``near_singularity`` uses a fixed elbow-extended posture, not a runtime
+    singularity search.
     """
     lower, upper = limits[:, 0], limits[:, 1]
     midpoint = (lower + upper) * 0.5
     span = upper - lower
-    nominal = _clamp_with_margin(_NOMINAL_QPOS.to(limits), limits)
+    try:
+        nominal_qpos = _NOMINAL_QPOS[robot_id]
+        near_singularity_qpos = _NEAR_SINGULARITY_QPOS[robot_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"No free-space start postures for robot {robot_id!r}"
+        ) from exc
+    if limits.shape[0] != nominal_qpos.shape[0]:
+        raise ValueError(
+            f"Free-space robot {robot_id!r} expects {nominal_qpos.shape[0]} "
+            f"joints, got {limits.shape[0]}."
+        )
+    nominal = _clamp_with_margin(nominal_qpos.to(limits), limits)
 
     if name == "nominal":
         return nominal
@@ -75,11 +99,7 @@ def _start_qpos_for_bin(
         ).to(limits)
         return _clamp_with_margin(midpoint + signs * span * 0.42, limits)
     if name == "near_singularity":
-        # Elbow nearly extended (q3≈0): a fixed Franka near-singularity seed.
-        candidate = torch.tensor(
-            [0.0, 0.0, 0.0, -0.15, 0.0, 0.20, 0.0], dtype=limits.dtype
-        ).to(limits)
-        return _clamp_with_margin(candidate, limits)
+        return _clamp_with_margin(near_singularity_qpos.to(limits), limits)
     raise ValueError(f"Unknown free-space start_state_bin {name!r}.")
 
 
@@ -141,18 +161,15 @@ def _build_case(
     Path shape and waypoint count affect targets only.
     """
     limits = robot.get_qpos_limits(name=control_part)[0].detach().cpu()
-    if limits.shape[0] != _NOMINAL_QPOS.shape[0]:
-        raise ValueError(
-            "free-space-common v1 expects a 7-DoF Franka arm, got "
-            f"{limits.shape[0]} DoF."
-        )
 
     starts: list[torch.Tensor] = []
     for env_index in range(batch_size):
         generator = torch.Generator(device="cpu")
         # Keep starts aligned across path_shape / num_waypoints comparisons.
         generator.manual_seed(seed * 100_003 + bin_index * 131 + env_index)
-        starts.append(_start_qpos_for_bin(start_state_bin, limits, generator))
+        starts.append(
+            _start_qpos_for_bin(start_state_bin, limits, generator, suite.robot.id)
+        )
 
     start_qpos_cpu = torch.stack(starts)
     references: list[torch.Tensor] = []

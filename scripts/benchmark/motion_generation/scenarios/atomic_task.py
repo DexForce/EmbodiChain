@@ -1377,7 +1377,11 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
         ):
             raise TypeError("target_offsets_rad must be a non-empty list.")
         base_offsets = [
-            _float_vector(value, name="target_offsets_rad", length=7)
+            _float_vector(
+                value,
+                name="target_offsets_rad",
+                length=scenario.robot.get_qpos(name=scenario.control_part).shape[-1],
+            )
             for value in raw_offsets
         ]
         if not base_offsets:

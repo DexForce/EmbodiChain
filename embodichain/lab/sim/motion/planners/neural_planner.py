@@ -68,6 +68,7 @@ class _WaypointObservationLayout:
     num_controlled_joints: int
     use_relative_obs: bool
     canonicalize_quat_obs: bool = True
+    joint_periodic_features: bool = False
 
     def __post_init__(self) -> None:
         if self.num_waypoints < 1 or self.num_controlled_joints < 1:
@@ -99,6 +100,8 @@ class _WaypointObservationLayout:
                     ("waypoint_joint_err", j * n),
                 ]
             )
+        if self.joint_periodic_features:
+            widths.extend((("joint_sin", j), ("joint_cos", j)))
         return tuple(widths)
 
     @property
@@ -131,13 +134,15 @@ class _WaypointObservationLayout:
             "quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
             "use_relative_obs": bool(self.use_relative_obs),
         }
+        if self.joint_periodic_features:
+            payload["joint_periodic_encoding"] = "sin_cos_radians"
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
     @property
     def onnx_metadata(self) -> dict[str, str]:
         """Return metadata expected from an NMG ONNX export."""
-        return {
+        metadata = {
             "nmg.observation_layout": _WAYPOINT_OBSERVATION_LAYOUT,
             "nmg.observation_fingerprint": self.fingerprint,
             "nmg.num_waypoints": str(int(self.num_waypoints)),
@@ -146,6 +151,9 @@ class _WaypointObservationLayout:
             "nmg.canonicalize_quat_obs": str(bool(self.canonicalize_quat_obs)).lower(),
             "nmg.quaternion_order": _WAYPOINT_OBSERVATION_QUATERNION_ORDER,
         }
+        if self.joint_periodic_features:
+            metadata["nmg.joint_periodic_encoding"] = "sin_cos_radians"
+        return metadata
 
     def concatenate(self, blocks: Mapping[str, torch.Tensor]) -> torch.Tensor:
         """Validate and concatenate named observation blocks in contract order."""
@@ -208,11 +216,16 @@ class _OnnxPolicy:
             raise ValueError(
                 f"Expected ONNX input shape [batch, obs], got {input_shape}."
             )
-        if len(output_shape) != 2 or output_shape[1] != 7:
+        if (
+            len(output_shape) != 2
+            or not isinstance(output_shape[1], int)
+            or output_shape[1] < 1
+        ):
             raise ValueError(
-                f"Expected ONNX output shape [batch, 7], got {output_shape}."
+                f"Expected ONNX output shape [batch, joints], got {output_shape}."
             )
         self.obs_dim = int(input_shape[1])
+        self.output_dim = int(output_shape[1])
         self.observation_metadata = dict(
             self.session.get_modelmeta().custom_metadata_map
         )
@@ -231,9 +244,19 @@ class _OnnxPolicy:
         return torch.as_tensor(action, dtype=torch.float32, device=obs.device)
 
 
-def _waypoint_obs_dim(num_waypoints: int, use_relative_obs: bool) -> int:
+def _waypoint_obs_dim(
+    num_waypoints: int,
+    use_relative_obs: bool,
+    num_arm_joints: int = 7,
+    joint_periodic_features: bool = False,
+) -> int:
     """Return the unified NMG constraint-observation width."""
-    return _WaypointObservationLayout(int(num_waypoints), 7, bool(use_relative_obs)).dim
+    return _WaypointObservationLayout(
+        int(num_waypoints),
+        int(num_arm_joints),
+        bool(use_relative_obs),
+        joint_periodic_features=bool(joint_periodic_features),
+    ).dim
 
 
 def _quat_inverse_xyzw(q: torch.Tensor) -> torch.Tensor:
@@ -288,6 +311,9 @@ class NeuralPlannerCfg(BasePlannerCfg):
 
     canonicalize_quat_obs: bool = True
     """Whether quaternion observations use the training-time ``w >= 0`` convention."""
+
+    joint_periodic_features: bool = False
+    """Append sin/cos of raw joints after the relative observation blocks."""
 
     intermediate_orientation: bool = True
     """Whether every Cartesian waypoint requires its orientation constraint."""
@@ -390,11 +416,10 @@ class NeuralPlanner(BasePlanner):
         self._num_waypoints = int(self.cfg.num_waypoints)
         self._use_relative_obs = bool(self.cfg.use_relative_obs)
         self._canonicalize_quat_obs = bool(self.cfg.canonicalize_quat_obs)
+        self._joint_periodic_features = bool(self.cfg.joint_periodic_features)
         self._action_dim = int(self.cfg.num_arm_joints)
-        if self._action_dim != 7:
-            raise ValueError(
-                f"NMG ONNX policy controls 7 arm joints, got {self._action_dim}."
-            )
+        if self._action_dim < 1:
+            raise ValueError("num_arm_joints must be positive.")
         self._max_steps = int(self.cfg.max_steps)
         self._pos_eps = float(self.cfg.pos_eps)
         self._rot_eps = float(self.cfg.rot_eps)
@@ -402,11 +427,17 @@ class NeuralPlanner(BasePlanner):
         self._intermediate_orientation = bool(self.cfg.intermediate_orientation)
         self._policy = _OnnxPolicy(model_path, self.cfg.onnx_providers)
         self._obs_dim = self._policy.obs_dim
+        output_dim = getattr(self._policy, "output_dim", self._action_dim)
+        if output_dim != self._action_dim:
+            raise ValueError(
+                f"ONNX output has {output_dim} joints, expected {self._action_dim}."
+            )
         self._observation_layout = _WaypointObservationLayout(
             self._num_waypoints,
             self._action_dim,
             self._use_relative_obs,
             self._canonicalize_quat_obs,
+            self._joint_periodic_features,
         )
         self._policy_frame_from_world = self._as_transform(
             self.cfg.policy_frame_from_world, "policy_frame_from_world"
@@ -467,7 +498,7 @@ class NeuralPlanner(BasePlanner):
         Args:
             target_states: List of :class:`PlanState` waypoints. Each entry uses
                 :attr:`MoveType.EEF_MOVE` with ``xpos`` shape ``(B, 4, 4)`` or
-                :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, 7)``.
+                :attr:`MoveType.JOINT_MOVE` with ``qpos`` shape ``(B, num_arm_joints)``.
             options: :class:`NeuralPlanOptions` with ``control_part``,
                 ``start_qpos``, and ``max_steps`` overrides.
 
@@ -780,6 +811,8 @@ class NeuralPlanner(BasePlanner):
                     ),
                 }
             )
+        if getattr(self, "_joint_periodic_features", False):
+            obs_blocks.update(joint_sin=joint_pos.sin(), joint_cos=joint_pos.cos())
         layout = getattr(
             self,
             "_observation_layout",
@@ -788,6 +821,7 @@ class NeuralPlanner(BasePlanner):
                 self._action_dim,
                 self._use_relative_obs,
                 getattr(self, "_canonicalize_quat_obs", False),
+                getattr(self, "_joint_periodic_features", False),
             ),
         )
         obs = layout.concatenate(obs_blocks)
