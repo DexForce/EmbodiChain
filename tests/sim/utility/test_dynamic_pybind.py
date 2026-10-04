@@ -69,5 +69,7 @@ def test_projective_uv_offsets_faces_for_multiple_meshes(
 
     set_projective_uv(render_body, project_direction)
 
-    np.testing.assert_array_equal(render_body.uv_mappings[0], generated_uv[:3])
-    np.testing.assert_array_equal(render_body.uv_mappings[1], generated_uv[3:])
+    expected_first = generated_uv[:3].ravel(order="C").reshape((3, 2), order="F")
+    expected_second = generated_uv[3:].ravel(order="C").reshape((3, 2), order="F")
+    np.testing.assert_array_equal(render_body.uv_mappings[0], expected_first)
+    np.testing.assert_array_equal(render_body.uv_mappings[1], expected_second)

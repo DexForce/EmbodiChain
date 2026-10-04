@@ -61,7 +61,15 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -
     start_idx = 0
     for i in range(n_mesh):
         mesh_vert_uvs = vert_uvs[start_idx : start_idx + n_vert_list[i], :]
-        self.set_uv_mapping(uvs=mesh_vert_uvs, mesh_id=i)
+        # DexSim's binding accepts a column-major Eigen matrix while the
+        # generated UV array is indexed as row-major ``(vertex, coord)``.
+        # Repack the same values so the native binding receives each ``(u, v)``
+        # pair in the intended order without requiring a native rebuild.
+        native_uvs = np.asarray(
+            mesh_vert_uvs.ravel(order="C").reshape(mesh_vert_uvs.shape, order="F"),
+            dtype=np.float32,
+        )
+        self.set_uv_mapping(uvs=native_uvs, mesh_id=i)
         start_idx += n_vert_list[i]
 
 
