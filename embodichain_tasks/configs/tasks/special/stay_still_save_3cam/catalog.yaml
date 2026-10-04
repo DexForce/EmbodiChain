@@ -1,0 +1,11 @@
+task_key: stay_still_save_3cam
+title: Stay Still Save Three Cameras
+summary: Collect 300-step stationary UR10 episodes from three RGB cameras.
+tags:
+- special
+- data_collection
+- benchmark
+default_deployment: default
+deployments:
+  default:
+    config: env_ur10_3cam.json
