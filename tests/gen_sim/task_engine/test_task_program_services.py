@@ -1040,8 +1040,15 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
 
 @pytest.mark.parametrize("verify_retention", [False, True])
 @pytest.mark.parametrize("height", [1.3, 0.8])
+@pytest.mark.parametrize(
+    ("target_name", "staging_clearance"),
+    [("staging", 0.0), ("step_upright_target", 0.20)],
+)
 def test_upright_alignment_lifts_before_rotating(
-    verify_retention: bool, height: float
+    verify_retention: bool,
+    height: float,
+    target_name: str,
+    staging_clearance: float,
 ) -> None:
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
@@ -1052,7 +1059,15 @@ def test_upright_alignment_lifts_before_rotating(
         get_link_pose=lambda **kw: torch.eye(4).unsqueeze(0),
     )
     lowerer = _AlignHeldFactory(
-        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, height)),),
+        (
+            (
+                "can",
+                target_name,
+                False,
+                (0.0, 0.0, 1.0),
+                (0.1, 0.2, height),
+            ),
+        ),
         verify_retention=verify_retention,
     ).create(
         simulation=None,
@@ -1091,7 +1106,7 @@ def test_upright_alignment_lifts_before_rotating(
             call_id="gen_sim.align_held",
             arguments={
                 "object": "can",
-                "target": "staging",
+                "target": target_name,
                 "preserve_yaw": False,
             },
         ),
@@ -1100,13 +1115,25 @@ def test_upright_alignment_lifts_before_rotating(
         option_template=MoveHeldObjectOptions(),
     )
     waypoints = result.goal.object_target_pose
-    assert waypoints.shape == (1, 2, 4, 4)
+    expected_count = 3 if staging_clearance else 2
+    assert waypoints.shape == (1, expected_count, 4, 4)
     torch.testing.assert_close(waypoints[:, 0, :3, :3], original[:, :3, :3])
+    stage_height = max(1.0, height + staging_clearance)
+    expected_positions = (
+        [
+            [0.1, 0.2, stage_height],
+            [0.1, 0.2, stage_height],
+            [0.1, 0.2, height],
+        ]
+        if staging_clearance
+        else [[0.1, 0.2, stage_height], [0.1, 0.2, height]]
+    )
     torch.testing.assert_close(
         waypoints[:, :, :3, 3],
-        torch.tensor([[[0.1, 0.2, max(1.0, height)], [0.1, 0.2, height]]]),
+        torch.tensor([expected_positions]),
     )
     assert result.goal.world_yaw_free
+    assert result.goal.world_yaw_free_path is bool(staging_clearance)
     torch.testing.assert_close(
         waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
     )

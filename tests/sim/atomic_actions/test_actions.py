@@ -1423,6 +1423,69 @@ def test_move_held_object_yaw_freedom_retains_successful_rows() -> None:
     torch.testing.assert_close(held.object_to_eef, grasp_before)
 
 
+def test_move_held_object_staged_yaw_reuses_clearance_heading() -> None:
+    generator = _motion_generator()
+    dt_first = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1)
+    dt_second = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT, CONTROL_DT]]).repeat(
+        NUM_ENVS, 1
+    )
+    second_positions = torch.full((NUM_ENVS, 4, ARM_DOF), 0.3)
+    second_positions[:, 0] = 0.1
+    second_positions[1, 0] = 0.2
+    generator.generate = Mock(
+        side_effect=[
+            PlanResult(
+                success=torch.zeros(NUM_ENVS, dtype=torch.bool),
+                positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.tensor([True, False]),
+                positions=torch.full((NUM_ENVS, 3, ARM_DOF), 0.1),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.tensor([False, True]),
+                positions=torch.full((NUM_ENVS, 3, ARM_DOF), 0.2),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.ones(NUM_ENVS, dtype=torch.bool),
+                positions=second_positions,
+                dt=dt_second,
+            ),
+        ]
+    )
+    action = _bind_action(generator, MoveHeldObject())
+    held = _held()
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    target = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    target[:, :, 2, 3] = torch.tensor([0.8, 0.8, 0.6])
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            action,
+            HeldObjectPoseGoal(
+                target,
+                world_yaw_free=True,
+                world_yaw_free_path=True,
+            ),
+        ),
+        _context(task),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert generator.generate.call_count == 4
+    final_states = generator.generate.call_args_list[-1].args[0]
+    final_pose = final_states[0].xpos
+    assert final_pose.shape == (NUM_ENVS, 4, 4)
+    assert plan.diagnostics is not None
+    assert plan.diagnostics.metadata["world_yaw_offsets_rad"] == pytest.approx(
+        [math.pi / 4, -math.pi / 4]
+    )
+
+
 @pytest.mark.parametrize("free_yaw, attempts", [(False, 1), (True, 8)])
 def test_move_held_object_yaw_search_fails_closed(
     free_yaw: bool, attempts: int

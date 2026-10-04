@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 import torch
 
@@ -50,6 +50,7 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix
 __all__: list[str] = []
 
 ALIGN_HELD_CALL = "gen_sim.align_held"
+_UPRIGHT_STAGING_CLEARANCE: Final = 0.20
 
 
 class _AlignHeldLowerer(RegisteredSemanticLowerer):
@@ -140,7 +141,20 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
             staging_pose[:, :2, 3] = pose[:, :2, 3]
             # A lower destination must not force the old heading down before
             # the yaw-free planner can select a reachable final orientation.
-            staging_pose[:, 2, 3] = torch.maximum(staging_pose[:, 2, 3], pose[:, 2, 3])
+            is_upright_final_target = args["target"].endswith(
+                "_upright_target"
+            ) and not args["target"].endswith("_upright_staging_target")
+            staging_clearance = (
+                _UPRIGHT_STAGING_CLEARANCE
+                if not args["preserve_yaw"] and is_upright_final_target
+                else 0.0
+            )
+            staging_pose[:, 2, 3] = torch.maximum(
+                staging_pose[:, 2, 3],
+                pose[:, 2, 3] + pose.new_tensor(staging_clearance),
+            )
+        else:
+            is_upright_final_target = False
         if args["preserve_yaw"]:
             return SemanticLowering(
                 goal=HeldObjectPoseGoal(pose), registered_effect=effect
@@ -169,11 +183,26 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         )
         # Lift with the acquired orientation before turning the object. A
         # coupled rotation/translation can hit joint limits or sweep the table.
-        target_poses = (
-            torch.stack((staging_pose, pose), dim=1) if position is not None else pose
-        )
+        if position is not None:
+            if is_upright_final_target:
+                # Keep the old two-call motion boundary inside one semantic
+                # call: translate with the observed heading, rotate at the
+                # clearance height, and then descend with that same heading.
+                aligned_staging_pose = staging_pose.clone()
+                aligned_staging_pose[:, :3, :3] = pose[:, :3, :3]
+                target_poses = torch.stack(
+                    (staging_pose, aligned_staging_pose, pose), dim=1
+                )
+            else:
+                target_poses = torch.stack((staging_pose, pose), dim=1)
+        else:
+            target_poses = pose
         return SemanticLowering(
-            goal=HeldObjectPoseGoal(target_poses, world_yaw_free=True),
+            goal=HeldObjectPoseGoal(
+                target_poses,
+                world_yaw_free=True,
+                world_yaw_free_path=is_upright_final_target,
+            ),
             registered_effect=effect,
         )
 
@@ -188,7 +217,7 @@ class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "7"
+    revision: ClassVar[str] = "8"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...

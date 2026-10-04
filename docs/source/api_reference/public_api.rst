@@ -405,8 +405,8 @@ embodichain.gen_sim.task_engine.task_spec
 ------------------------------------------
 
 Task Engine adapters convert validated candidates into action-sequence
-independent TaskTemplates and optionally persist them in a content-addressed
-TaskSpec cache.
+independent TaskSpecs and optionally persist them in a content-addressed
+TaskSpec cache. The TaskTemplate spelling remains a compatibility alias.
 
 .. currentmodule:: embodichain.gen_sim.task_engine.task_spec
 
@@ -429,18 +429,6 @@ Task Program deployment from a semantic task graph and prepared scene.
 
    TaskProgramBundlePaths
    generate_task_program_bundle
-
-embodichain.gen_sim.scene_engine.clients.articulated_generation
----------------------------------------------------------------
-
-Compatibility import for the Asset Engine articulation client. New code should
-use the ``asset_engine`` path.
-
-.. currentmodule:: embodichain.gen_sim.scene_engine.clients.articulated_generation
-
-.. autosummary::
-
-   ArticulatedGenerationClient
 
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
@@ -2419,8 +2407,8 @@ embodichain.learning.rl.utils.optimizer
 embodichain.gen_sim.task_spec
 ---------------------
 
-Pure, simulator-independent TaskSpec contracts, predicate evaluation, and
-content-addressed template persistence.
+GenSim-owned, simulator-independent TaskSpec contracts, predicate evaluation,
+and content-addressed TaskSpec persistence.
 
 .. currentmodule:: embodichain.gen_sim.task_spec
 
@@ -2495,6 +2483,17 @@ embodichain.gen_sim.task_spec.contracts
 
 .. autosummary::
 
+   RoleSpec
+
+embodichain.gen_sim.task_spec.compat
+-------------------------------
+
+Legacy runtime artifact contracts and one-release compatibility validators.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.compat
+
+.. autosummary::
+
    ACTION_WITNESS_SCHEMA
    EXPANSION_MANIFEST_SCHEMA
    SCENE_INSTANCE_SCHEMA
@@ -2503,11 +2502,14 @@ embodichain.gen_sim.task_spec.contracts
    ActionWitness
    ExpansionManifest
    RequirementSpec
-   RoleSpec
    SceneInstance
-   TaskSpec
    TaskTemplate
    ValidationCertificate
+   build_validation_certificate
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_validation_certificate
 
 embodichain.gen_sim.task_spec.expressions
 ---------------------------------
@@ -2567,15 +2569,10 @@ embodichain.gen_sim.task_spec.validation
 
    EvaluationReport
    TaskSpecValidationError
-   build_validation_certificate
    evaluate_task_spec
    evaluate_task_template
-   validate_action_witness
-   validate_expansion_manifest
-   validate_scene_instance
    validate_task_spec
    validate_task_template
-   validate_validation_certificate
 
 embodichain.toolkits.acd
 ------------------------

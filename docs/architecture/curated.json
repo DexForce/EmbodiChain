@@ -64,7 +64,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 22,
-          "excerpt": "\"\"\"Pure, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`.  Scene bindings, execution attempts,\ncertificates, and expansion receipts remain compatibility artifacts owned by\ntheir existing integrations and reference the TaskSpec semantic hash.\n\"\"\""
+          "excerpt": "\"\"\"GenSim-owned, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`. Legacy artifact exports are resolved\nfrom :mod:`.compat` only when requested; normal generation and cache access\ndo not load them. Runtime evidence belongs to the execution integrations.\n\"\"\""
         }
       ],
       "documentation": [

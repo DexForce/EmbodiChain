@@ -93,9 +93,10 @@ objects back to configured X/Y after settling.
 Invocation-scoped Cartesian policy also covers single-EEF-target transports;
 joint targets retain their joint-space behavior. E2 alignment preserves the
 acquired orientation during the staging lift, then turns the object aloft.
-E2 checks its final yaw-free alignment at release height before Place preserves
-that heading. Alignment staging never descends below the current height before
-the planner can choose the final orientation.
+The semantic planner emits one E2 alignment call; its lowerer retains the
+clearance rotation boundary and Place owns the final descent and release.
+Alignment staging never descends below the current height before the planner
+can choose the final orientation.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
@@ -211,7 +212,8 @@ collision envelope; a reference also actuated by Slide in the same program is
 rejected rather than reusing stale extents. Articulated `on/above/inside` support still requires qualified
 link geometry; spatial-reference support does not authorize joint manipulation.
 Explicit upright, oriented hold and stack constraints retain their axis checks;
-legacy presets are unchanged, so regenerate bundles to select the new policy.
+stack acceptance uses the merged E2 route's 12-degree alignment tolerance, so
+regenerate bundles to select the policy.
 Source pose matrices take precedence over Euler fields.
 After UID grounding, independent E1 placement, E2 upright, and E5
 lift-and-return `count`/`all` sets lower to ordered single-object steps;
