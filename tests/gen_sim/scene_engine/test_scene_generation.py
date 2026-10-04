@@ -42,7 +42,7 @@ from embodichain.gen_sim.scene_engine.pipeline.generation.scene_generation impor
 from embodichain.gen_sim.scene_engine.pipeline.utils.visual_yaw_optimizer import (
     VisualYawOptimizer,
 )
-from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
     _canonicalize_articulated_usdc_bottom_center,
     _articulation_root_bottom_z,
 )
@@ -348,7 +348,7 @@ def test_runtime_revolute_limits_convert_degrees_without_mutating_usd(
     tmp_path: Path,
 ) -> None:
     from pxr import Usd, UsdPhysics
-    from embodichain.gen_sim.scene_engine.pipeline.utils.articulated_usdc_utils import (
+    from embodichain.gen_sim.asset_engine.utils.articulated_usdc_utils import (
         _read_revolute_qpos_limits,
     )
 

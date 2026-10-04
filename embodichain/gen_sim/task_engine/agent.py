@@ -197,7 +197,7 @@ class TaskAgent:
         candidate_id: str | None = None,
         cache: TaskSpecCache | None = None,
     ) -> TaskSpec:
-        """Generate a candidate set and emit its reusable TaskTemplate.
+        """Generate a candidate set and emit its reusable TaskSpec.
 
         Task Engine remains the owner of interpretation and candidate
         selection.  The returned template contains only normative semantics;

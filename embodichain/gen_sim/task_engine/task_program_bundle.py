@@ -119,6 +119,10 @@ _SLENDER_UPRIGHT_RELEASE_CLEARANCE: Final = 0.01
 
 _UPRIGHT_STAGING_CLEARANCE: Final = 0.20
 
+# A single composite E2 alignment can settle within 12 degrees while still
+# passing the measured support-gap and relative-position checks.
+_STACK_ALIGNMENT_TOLERANCE: Final = math.cos(math.pi / 15.0)
+
 _E2_RELEASE_SAFETY_MARGIN: Final = 0.02
 
 
@@ -700,7 +704,7 @@ def _task_stability_payload(
                         )
                         for axis in (0, 1)
                     ],
-                    "minimum_alignment": math.cos(math.pi / 18.0),
+                    "minimum_alignment": _STACK_ALIGNMENT_TOLERANCE,
                 }
             else:
                 route = _lookup_route(

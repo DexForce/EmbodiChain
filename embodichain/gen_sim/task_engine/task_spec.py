@@ -25,13 +25,13 @@ from typing import Any
 
 from embodichain.gen_sim.task_spec import (
     KNOWN_PREDICATES,
+    TaskRequirement,
     Predicate,
-    RequirementSpec,
     RoleSpec,
     MilestoneSpec,
     TaskSpec,
     TaskSpecCache,
-    validate_task_template,
+    validate_task_spec,
 )
 
 from .contracts import TaskCandidate, validate_task_candidate
@@ -140,7 +140,7 @@ def task_spec_from_candidate(
         requirements=requirements,
         metadata=source_metadata,
     )
-    validate_task_template(template)
+    validate_task_spec(template)
     return template
 
 
@@ -348,13 +348,13 @@ def _requirements(
     roles: tuple[RoleSpec, ...],
     steps: list[Mapping[str, Any]],
     goals: list[Predicate],
-) -> tuple[RequirementSpec, ...]:
-    requirements: list[RequirementSpec] = []
+) -> tuple[TaskRequirement, ...]:
+    requirements: list[TaskRequirement] = []
     for role in roles:
         requirements.append(
-            RequirementSpec(
-                kind="asset",
-                name=role.name,
+            TaskRequirement(
+                consumer="asset",
+                key=role.name,
                 value={
                     "source_structure": role.source_structure,
                     "affordances": list(role.affordances),
@@ -363,9 +363,9 @@ def _requirements(
             )
         )
         requirements.append(
-            RequirementSpec(
-                kind="scene",
-                name=role.name,
+            TaskRequirement(
+                consumer="scene",
+                key=role.name,
                 value={"kind": role.kind, "initial_state": dict(role.initial_state)},
             )
         )
@@ -378,21 +378,21 @@ def _requirements(
     )
     if required_arms:
         requirements.append(
-            RequirementSpec(
-                kind="embodiment", name="required_arms", value=required_arms
+            TaskRequirement(
+                consumer="embodiment", key="required_arms", value=required_arms
             )
         )
     requirements.append(
-        RequirementSpec(
-            kind="task_program",
-            name="goal_predicates",
+        TaskRequirement(
+            consumer="task_program",
+            key="goal_predicates",
             value=sorted({item.name for item in goals}),
         )
     )
     requirements.append(
-        RequirementSpec(
-            kind="expansion",
-            name="lineage_key",
+        TaskRequirement(
+            consumer="expansion",
+            key="lineage_key",
             value="task_spec.semantic_hash",
         )
     )

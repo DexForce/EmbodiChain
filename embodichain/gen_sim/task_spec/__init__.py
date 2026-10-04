@@ -16,12 +16,14 @@
 
 """GenSim-owned, simulator-independent TaskSpec protocol and cache.
 
-The core object is :class:`TaskSpec`.  Scene bindings, execution attempts,
-certificates, and expansion receipts remain compatibility artifacts owned by
-their existing integrations and reference the TaskSpec semantic hash.
+The core object is :class:`TaskSpec`. Legacy artifact exports are resolved
+from :mod:`.compat` only when requested; normal generation and cache access
+do not load them. Runtime evidence belongs to the execution integrations.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from .canonicalization import (
     CANONICALIZATION_VERSION,
@@ -30,19 +32,7 @@ from .canonicalization import (
     canonicalize,
     json_snapshot,
 )
-from .contracts import (
-    ACTION_WITNESS_SCHEMA,
-    EXPANSION_MANIFEST_SCHEMA,
-    SCENE_INSTANCE_SCHEMA,
-    TASK_TEMPLATE_SCHEMA,
-    VALIDATION_CERTIFICATE_SCHEMA,
-    ActionWitness,
-    ExpansionManifest,
-    RequirementSpec,
-    RoleSpec,
-    SceneInstance,
-    ValidationCertificate,
-)
+from .contracts import RoleSpec
 from .expressions import (
     EVALUATION_STATUSES,
     KNOWN_PREDICATES,
@@ -69,15 +59,10 @@ from .spec import (
 from .validation import (
     EvaluationReport,
     TaskSpecValidationError,
-    build_validation_certificate,
     evaluate_task_spec,
     evaluate_task_template,
-    validate_action_witness,
-    validate_expansion_manifest,
-    validate_scene_instance,
     validate_task_spec,
     validate_task_template,
-    validate_validation_certificate,
 )
 
 __all__ = [
@@ -130,3 +115,30 @@ __all__ = [
     "validate_task_template",
     "validate_validation_certificate",
 ]
+
+_COMPAT_EXPORTS = {
+    "ACTION_WITNESS_SCHEMA",
+    "EXPANSION_MANIFEST_SCHEMA",
+    "SCENE_INSTANCE_SCHEMA",
+    "TASK_TEMPLATE_SCHEMA",
+    "VALIDATION_CERTIFICATE_SCHEMA",
+    "ActionWitness",
+    "ExpansionManifest",
+    "RequirementSpec",
+    "SceneInstance",
+    "ValidationCertificate",
+    "build_validation_certificate",
+    "validate_action_witness",
+    "validate_expansion_manifest",
+    "validate_scene_instance",
+    "validate_validation_certificate",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve deprecated artifact exports without loading them in core code."""
+    if name in _COMPAT_EXPORTS:
+        from . import compat
+
+        return getattr(compat, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

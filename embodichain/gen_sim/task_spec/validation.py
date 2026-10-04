@@ -23,12 +23,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .canonicalization import json_snapshot
-from .contracts import (
-    ActionWitness,
-    ExpansionManifest,
-    SceneInstance,
-    ValidationCertificate,
-)
 from .expressions import (
     EvaluationStatus,
     PredicateEvaluation,
@@ -40,16 +34,28 @@ from .spec import TaskSpec
 __all__ = [
     "EvaluationReport",
     "TaskSpecValidationError",
-    "build_validation_certificate",
     "evaluate_task_spec",
     "evaluate_task_template",
+    "validate_task_spec",
+    "validate_task_template",
+]
+
+_LEGACY_EXPORTS = {
+    "build_validation_certificate",
     "validate_action_witness",
     "validate_expansion_manifest",
     "validate_scene_instance",
-    "validate_task_spec",
-    "validate_task_template",
     "validate_validation_certificate",
-]
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve moved evidence validators only for explicit legacy imports."""
+    if name in _LEGACY_EXPORTS:
+        from . import compat
+
+        return getattr(compat, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class TaskSpecValidationError(ValueError):
@@ -130,49 +136,13 @@ def validate_task_spec(
         raise TaskSpecValidationError(str(exc)) from exc
 
 
-def validate_scene_instance(value: SceneInstance | Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize one grounded SceneInstance."""
-    try:
-        return SceneInstance.from_dict(value).to_dict()
-    except (TypeError, ValueError) as exc:
-        raise TaskSpecValidationError(str(exc)) from exc
-
-
-def validate_action_witness(value: ActionWitness | Mapping[str, Any]) -> dict[str, Any]:
-    """Validate and normalize one ActionWitness."""
-    try:
-        return ActionWitness.from_dict(value).to_dict()
-    except (TypeError, ValueError) as exc:
-        raise TaskSpecValidationError(str(exc)) from exc
-
-
-def validate_expansion_manifest(
-    value: ExpansionManifest | Mapping[str, Any],
-) -> dict[str, Any]:
-    """Validate and normalize one ExpansionManifest."""
-    try:
-        return ExpansionManifest.from_dict(value).to_dict()
-    except (TypeError, ValueError) as exc:
-        raise TaskSpecValidationError(str(exc)) from exc
-
-
-def validate_validation_certificate(
-    value: ValidationCertificate | Mapping[str, Any],
-) -> dict[str, Any]:
-    """Validate and normalize one ValidationCertificate."""
-    try:
-        return ValidationCertificate.from_dict(value).to_dict()
-    except (TypeError, ValueError) as exc:
-        raise TaskSpecValidationError(str(exc)) from exc
-
-
-def evaluate_task_template(
+def evaluate_task_spec(
     template: TaskSpec | Mapping[str, Any],
     observations: Mapping[str, Any],
     *,
     trajectory: Sequence[Mapping[str, Any]] | None = None,
 ) -> EvaluationReport:
-    """Evaluate a template against explicit runtime observations.
+    """Evaluate a TaskSpec against explicit runtime observations.
 
     An adapter may provide section-specific mappings under ``init``, ``goal``,
     and ``invariants``.  When absent, the supplied mapping is used for all
@@ -232,53 +202,9 @@ def evaluate_task_template(
     )
 
 
-def validate_task_template(
-    value: TaskSpec | Mapping[str, Any],
-    *,
-    require_observations: bool = False,
-) -> dict[str, Any]:
-    """Compatibility alias for :func:`validate_task_spec`."""
-    return validate_task_spec(value, require_observations=require_observations)
-
-
-def evaluate_task_spec(
-    template: TaskSpec | Mapping[str, Any],
-    observations: Mapping[str, Any],
-    *,
-    trajectory: Sequence[Mapping[str, Any]] | None = None,
-) -> EvaluationReport:
-    """Evaluate one TaskSpec; kept separate as the primary public spelling."""
-    return evaluate_task_template(template, observations, trajectory=trajectory)
-
-
-def build_validation_certificate(
-    report: EvaluationReport,
-    *,
-    certificate_id: str,
-    task_template_hash: str,
-    scene_instance_hash: str,
-    witness_id: str | None = None,
-    checker: str = "task_spec.evaluator",
-    checker_version: str = "task_spec/v0.1",
-    metrics: Mapping[str, Any] | None = None,
-    evidence_refs: Sequence[str] = (),
-    metadata: Mapping[str, Any] | None = None,
-) -> ValidationCertificate:
-    """Build a certificate while preserving each section's evidence records."""
-    results = (*report.init, *report.goal, *report.invariants, *report.temporal)
-    return ValidationCertificate(
-        certificate_id=certificate_id,
-        task_template_hash=task_template_hash,
-        scene_instance_hash=scene_instance_hash,
-        witness_id=witness_id,
-        checker=checker,
-        status=report.status.value,
-        predicate_results=results,
-        metrics={} if metrics is None else metrics,
-        evidence_refs=tuple(evidence_refs),
-        checker_version=checker_version,
-        metadata={} if metadata is None else metadata,
-    )
+# Deprecated spellings kept for one transition release.
+validate_task_template = validate_task_spec
+evaluate_task_template = evaluate_task_spec
 
 
 def _section(root: Mapping[str, Any], name: str) -> Mapping[str, Any]:

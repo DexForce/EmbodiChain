@@ -177,6 +177,7 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         }
                     )
+                # Align aloft once; Place owns the final descent and release.
                 calls.extend(
                     (
                         {
@@ -184,7 +185,7 @@ class SemanticTaskPlanner:
                             "call_id": _ALIGN_HELD_CALL_ID,
                             "arguments": {
                                 "object": object_id,
-                                "target": staging_target_name,
+                                "target": target_name,
                                 "preserve_yaw": False,
                             },
                             "resources": {"primary": resource},
@@ -204,20 +205,6 @@ class SemanticTaskPlanner:
                             "resources": {"primary": resource},
                         },
                     )
-                )
-                # Check the free heading at release height before Place pins it.
-                calls.insert(
-                    -1,
-                    {
-                        "kind": "registered",
-                        "call_id": _ALIGN_HELD_CALL_ID,
-                        "arguments": {
-                            "object": object_id,
-                            "target": target_name,
-                            "preserve_yaw": False,
-                        },
-                        "resources": {"primary": resource},
-                    },
                 )
                 held_by.pop(object_id, None)
                 objects[object_id]["init_pos"] = upright_position
