@@ -2888,6 +2888,15 @@ embodichain_tasks.special.stay_still_save
 
    StayStillSaveEnv
 
+embodichain_tasks.special.stay_still_save_3cam
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
+
+.. autosummary::
+
+   StayStillSave3CamEnv
+
 embodichain_tasks.utils.importer
 --------------------------------
 
