@@ -1025,6 +1025,7 @@ Both bound grasp endpoints must provide `open` and `grasp`. Important
 
 - `pre_grasp_distance` and `lift_height`;
 - `object_motion_keyframes`, `hand_interp_steps`, and `hold_steps`;
+- `release`, `release_steps`, `retreat_distance`, and `retreat_steps`;
 - `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
   for affordance-based left/right grasp sampling.
 
@@ -1117,7 +1118,9 @@ through middle transfer, and from the receiving grasp through final lowering,
 EEF waypoint rotations remain fixed; only translations change. The final
 object translation comes from `HandOverGoal.target_pose`, while its execution
 orientation stays consistent with the handover grasp. `HandOverOptions` owns
-only the approach/lift distances and gripper interpolation count. The first
+the approach/lift distances, gripper interpolation, hold, and retreat phases.
+With `release_at_target=False`, the source hand opens and retreats while the
+destination remains the verified holder for a later placement action. The first
 placement waypoint changes only horizontal coordinates and preserves the
 handover height exactly; the second waypoint lowers to the final target.
 
