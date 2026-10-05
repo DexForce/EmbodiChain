@@ -3,7 +3,7 @@
   "kind": "static-architecture",
   "coverage": "curated-sample",
   "repository": "DexForce/EmbodiChain",
-  "revision": "72e64b6b96e5f851ccf0dd2869626b598e5c3ff9",
+  "revision": "58dacd6dbead63128f6df6a06d8c31eebcc1ae65",
   "source_ref": "HEAD",
   "package_version": "0.3.0",
   "topic_index": "agent_context/MAP.yaml",
@@ -203,8 +203,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/async_datasets.py",
           "symbol": "AsyncLeRobotRecorder",
-          "start_line": 55,
-          "end_line": 55,
+          "start_line": 57,
+          "end_line": 57,
           "excerpt": "class AsyncLeRobotRecorder(LeRobotRecorder):"
         }
       ],
@@ -679,8 +679,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1457,
-          "end_line": 1457,
+          "start_line": 1463,
+          "end_line": 1463,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -2108,8 +2108,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/datasets.py",
           "symbol": "LeRobotRecorder",
-          "start_line": 112,
-          "end_line": 112,
+          "start_line": 131,
+          "end_line": 131,
           "excerpt": "class LeRobotRecorder(Functor):"
         }
       ],
@@ -3009,7 +3009,14 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 22,
-        "excerpt": "\"\"\"GenSim-owned, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`. Legacy artifact exports are resolved\nfrom :mod:`.compat` only when requested; normal generation and cache access\ndo not load them. Runtime evidence belongs to the execution integrations.\n\"\"\""
+          "excerpt": "\"\"\"GenSim-owned, simulator-independent TaskSpec protocol and cache.\n\nThe core object is :class:`TaskSpec`. Legacy artifact exports are resolved\nfrom :mod:`.compat` only when requested; normal generation and cache access\ndo not load them. Runtime evidence belongs to the execution integrations.\n\"\"\""
+        },
+        {
+          "path": "embodichain/task_spec/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 21,
+          "excerpt": "\"\"\"Compatibility imports for the GenSim-owned TaskSpec protocol.\n\nNew code should import from :mod:`embodichain.gen_sim.task_spec`.  This module\nremains a thin forwarding surface for callers that used the earlier path.\n\"\"\""
         }
       ],
       "documentation": [
@@ -3567,8 +3574,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/async_datasets.py",
           "symbol": "AsyncLeRobotRecorder",
-          "start_line": 55,
-          "end_line": 55,
+          "start_line": 57,
+          "end_line": 57,
           "excerpt": "class AsyncLeRobotRecorder(LeRobotRecorder):"
         }
       ]
@@ -3958,8 +3965,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 525,
-          "end_line": 526,
+          "start_line": 527,
+          "end_line": 528,
           "excerpt": "    component_resolution = _resolve_gym_components(config, base_dir=base_dir)\n    config = component_resolution.config"
         }
       ]
@@ -3976,15 +3983,15 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "config_to_cfg",
-          "start_line": 500,
-          "end_line": 500,
+          "start_line": 502,
+          "end_line": 502,
           "excerpt": "    env_cfg = EmbodiedEnvCfg()"
         },
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1497,
-          "end_line": 1502,
+          "start_line": 1503,
+          "end_line": 1508,
           "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
@@ -4691,8 +4698,8 @@
         {
           "path": "embodichain/lab/gym/envs/managers/datasets.py",
           "symbol": "LeRobotRecorder._initialize_dataset",
-          "start_line": 1484,
-          "end_line": 1484,
+          "start_line": 1544,
+          "end_line": 1544,
           "excerpt": "            self._depth_manager = DepthSidecarManager("
         }
       ]
