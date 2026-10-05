@@ -109,7 +109,7 @@ def test_project_requires_spawn_capable_dexsim() -> None:
     ]
     dexsim = next(value for value in requirements if value.name == "dexsim_engine")
 
-    assert str(dexsim.specifier) == "==0.5.0"
+    assert str(dexsim.specifier) == "==0.5.1rc1"
 
 
 def test_wheel_metadata_accepts_index_dependencies(tmp_path: Path) -> None:
