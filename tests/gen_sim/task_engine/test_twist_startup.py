@@ -18,9 +18,11 @@ from __future__ import annotations
 import math
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
+from embodichain.gen_sim.task_engine._task_program import twist_runtime
 from embodichain.gen_sim.task_engine._task_program.press_runtime import (
     PressContactSensor,
 )
@@ -28,6 +30,10 @@ from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
     TwistAcceptancePort,
     TwistContactSensor,
     _TwistCandidateState,
+)
+from embodichain.gen_sim.task_engine._task_program.twist_geometry import (
+    LinkMesh,
+    TwistGeometry,
 )
 
 
@@ -62,6 +68,7 @@ def sensor(monkeypatch):
     value.art_object = SimpleNamespace(
         joint_names=["rotation"],
         uid="control",
+        cfg=SimpleNamespace(fpath="startup-unit.usda"),
         get_qpos=lambda: torch.tensor([[value.qpos]], dtype=torch.float64),
         get_qvel=lambda: torch.tensor([[value.qvel]], dtype=torch.float64),
         get_link_physical_attr=lambda name: [physical],
@@ -79,9 +86,46 @@ def sensor(monkeypatch):
     )
     robot = SimpleNamespace(
         uid="robot",
+        cfg=SimpleNamespace(fpath="startup-unit.urdf", body_scale=(1.0, 1.0, 1.0)),
         link_names=list(value.robot_ids),
         get_link_physical_attr=lambda name: [physical],
         get_qpos=lambda *args, **kwargs: torch.zeros(1, 2),
+    )
+    vertices = np.frombuffer(
+        np.asarray(
+            [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]], dtype=np.float64
+        ).tobytes(),
+        dtype=np.float64,
+    ).reshape(-1, 3)
+    faces = np.frombuffer(
+        np.asarray(
+            [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], dtype=np.int64
+        ).tobytes(),
+        dtype=np.int64,
+    ).reshape(-1, 3)
+    grip = LinkMesh("/Control/knob/grip", "/Control/knob", vertices, faces, "none")
+    panel = LinkMesh("/Control/panel/mesh", "/Control/panel", vertices, faces, "none")
+    geometry = TwistGeometry(
+        grip,
+        (grip,),
+        (panel,),
+        "a" * 64,
+        1.0,
+        "/Control/knob",
+        "/Control/panel",
+        (grip, panel),
+    )
+    # Startup tests keep source parsing separate from qpos/contact acceptance.
+    monkeypatch.setattr(
+        twist_runtime, "load_twist_geometry", lambda path, binding: geometry
+    )
+    monkeypatch.setattr(
+        twist_runtime,
+        "load_robot_link_meshes",
+        lambda path, names, scale: {
+            name: (LinkMesh(name + "/mesh", name, vertices, faces, "urdfMeshInput"),)
+            for name in names
+        },
     )
     monkeypatch.setattr(
         PressContactSensor,

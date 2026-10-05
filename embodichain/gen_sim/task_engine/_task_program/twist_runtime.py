@@ -63,9 +63,8 @@ from embodichain.utils import logger
 
 from .press_runtime import (
     PressContactSensor,
-    _closed_finger_tip_offset,
-    _park_clearance,
 )
+from .twist_geometry import load_robot_link_meshes, load_twist_geometry
 from .twist_binding import (
     TwistRoute,
     PREPARE_CALL,
@@ -96,8 +95,59 @@ _ROLL_CANDIDATES = (
     math.pi / 4,
     -math.pi / 4,
 )
-_AXIAL_CANDIDATES = (-0.25, 0.0, 0.25, 0.5)
+_BITE_FRACTIONS = (1.0 / 3.0, 2.0 / 3.0, 1.0)
 TWIST_CANDIDATE_FALLBACKS = 3
+
+
+def _robot_collision_points(
+    robot: Any, names: tuple[str, ...]
+) -> dict[str, list[list[float]]]:
+    """Read finger collision inputs in scaled robot-link coordinates."""
+    meshes = load_robot_link_meshes(
+        robot.cfg.fpath, names, tuple(float(v) for v in robot.cfg.body_scale)
+    )
+    return {
+        name: [point for mesh in meshes[name] for point in mesh.vertices.tolist()]
+        for name in names
+    }
+
+
+def _closed_collision_tip_offset(robot: Any, context: Any, bound: Any) -> float:
+    motion = bound.binding.action_binding.endpoint("primary", "motion").require_target(
+        JointPositionTarget
+    )
+    hand = bound.binding.action_binding.endpoint("primary", "grasp")
+    hand_target = hand.require_target(JointPositionTarget)
+    names = tuple(
+        n
+        for n in robot.link_names
+        if n.startswith(motion.control_part.removesuffix("_arm") + "_")
+        and "finger" in n
+    )
+    clouds = _robot_collision_points(robot, names)
+    closed = context.robot.qpos.clone()
+    closed[:, list(hand_target.joint_ids)] = hand.joint_positions(
+        GRASP_COMMAND,
+        num_envs=context.batch_size,
+        device=closed.device,
+        dtype=closed.dtype,
+    )
+    solver = robot.cfg.solver_cfg[motion.control_part]
+    poses = robot.compute_fk(
+        qpos=closed,
+        link_names=[solver.end_link_name, *names],
+        qpos_joint_names=robot.joint_names,
+    )
+    inverse = torch.linalg.inv(poses[0, 0] @ poses.new_tensor(solver.tcp))
+    values = []
+    for i, name in enumerate(names, start=1):
+        transform = inverse @ poses[0, i]
+        points = poses.new_tensor(clouds[name]) @ transform[:3, :3].T + transform[:3, 3]
+        values.append(float(points[:, 2].max()))
+    offset = max(values)
+    if not math.isfinite(offset) or not 0 <= offset <= 0.15:
+        raise ValueError("E8 closed-finger collision tip calibration is unavailable.")
+    return offset
 
 
 @dataclass
@@ -107,10 +157,11 @@ class _TwistCandidateState:
     forced_index: int | None = None
     order: tuple[int, ...] = ()
     selected_index: int | None = None
+    selected_bite_depth: float | None = None
+    selected_roll: float | None = None
     fallback_count: int = 0
     locked: bool = False
     contact_path: float = 0.0
-    last_contact_qpos: float | None = None
     goal_complete: bool = False
 
 
@@ -127,15 +178,36 @@ def _candidate_state() -> _TwistCandidateState:
     return state
 
 
-def _candidate_table(grip_depth: float = 0.01) -> tuple[tuple[int, float, float], ...]:
-    if not math.isfinite(grip_depth) or grip_depth <= 0.0:
-        raise ValueError("E8 axial candidates require a positive grip depth.")
+def _candidate_table(
+    bite: float = 0.005, *, fixed_roll: float | None = None
+) -> tuple[tuple[int, float, float], ...]:
+    if not math.isfinite(bite) or bite <= 0.0:
+        raise ValueError("E8 depth candidates require a positive finite bite.")
+    if fixed_roll is not None and (
+        type(fixed_roll) not in (int, float)
+        or not math.isfinite(fixed_roll)
+        or abs(fixed_roll) > math.pi
+    ):
+        raise ValueError("E8 fixed_roll must be finite and within [-pi, pi].")
+    rolls = (float(fixed_roll),) if fixed_roll is not None else _ROLL_CANDIDATES[:4]
     values = [
-        (roll, fraction * grip_depth)
-        for roll in _ROLL_CANDIDATES[:4]
-        for fraction in _AXIAL_CANDIDATES
+        (roll, (fraction - 1.0) * bite)
+        for fraction in _BITE_FRACTIONS
+        for roll in rolls
     ]
     return tuple((index, roll, shift) for index, (roll, shift) in enumerate(values))
+
+
+def _candidate_order(
+    table: tuple[tuple[int, float, float], ...],
+    scores: dict[int, tuple[float, float, float, float]],
+) -> tuple[int, ...]:
+    feasible = [item for item in table if item[0] in scores]
+    feasible.sort(key=lambda item: (item[2], scores[item[0]], item[0]))
+    if not feasible:
+        return ()
+    selected_roll = feasible[0][1]
+    return tuple(index for index, roll, _ in feasible if roll == selected_roll)
 
 
 def _candidate_contact_decision(
@@ -224,11 +296,19 @@ class GenSimTwist(Twist):
     ) -> tuple[float, float, float, float]:
         """Rank successful IK by parent clearance, pad contact, then motion."""
         geometry = request.goal.semantics.geometry
-        target_points = geometry.get("gen_sim_twist_target_points")
-        parent_points = geometry.get("gen_sim_twist_parent_points")
+        target_points = geometry.get("gen_sim_twist_grip_points")
+        parent_points = geometry.get("gen_sim_twist_parent_collision_points")
+        pad_points = geometry.get("gen_sim_twist_pad_collision_points")
         target_to_parent = geometry.get("gen_sim_twist_target_to_parent")
-        if not target_points or not parent_points or target_to_parent is None:
-            return (1.0, 1.0, 1.0, float("inf"))
+        if (
+            not target_points
+            or not parent_points
+            or not pad_points
+            or target_to_parent is None
+        ):
+            raise ValueError(
+                "E8 candidate scoring requires source-bound collision geometry."
+            )
         close = next((s for s in plan.segments if s.name == "close"), None)
         if close is None or plan.joint_trajectory is None:
             return (1.0, 1.0, 1.0, float("inf"))
@@ -261,7 +341,9 @@ class GenSimTwist(Twist):
         distances = []
         parent_close = []
         for index, name in enumerate(names):
-            vertices, _ = self.robot.get_link_vert_face(name)
+            if name not in pad_points or not pad_points[name]:
+                raise ValueError("E8 candidate pad collision geometry is missing.")
+            vertices = qpos.new_tensor(pad_points[name])
             pose = pads[0, index]
             world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
             distances.append(torch.cdist(world, target_world).amin())
@@ -311,11 +393,7 @@ class GenSimTwist(Twist):
         )
         state = _candidate_state()
         if state.goal_complete:
-            if (
-                current_qpos is not None
-                and abs(current_qpos - geometry["gen_sim_twist_target_qpos"])
-                <= ANGLE_TOLERANCE
-            ):
+            if current_qpos is not None and math.isfinite(current_qpos):
                 return self.build_plan(
                     request,
                     context,
@@ -323,7 +401,7 @@ class GenSimTwist(Twist):
                         context.batch_size, dtype=torch.bool, device=self.device
                     ),
                     trajectory=TimedTrajectory.from_uniform_step(
-                        context.robot.qpos.unsqueeze(1).clone(),
+                        self.robot.get_qpos(target=True).unsqueeze(1).clone(),
                         env_ids=context.env_ids,
                         step_dt=context.require_control_dt(),
                     ),
@@ -332,19 +410,30 @@ class GenSimTwist(Twist):
                     segment_lengths={"approach": 1},
                 )
             state.goal_complete = False
-        table = _candidate_table(geometry["gen_sim_twist_grip_depth"])
+        bite = geometry["gen_sim_twist_bite_depth"]
+        table = _candidate_table(
+            bite, fixed_roll=geometry.get("gen_sim_twist_fixed_roll")
+        )
+        table_by_index = {index: (roll, shift) for index, roll, shift in table}
         candidates = (
             [item for item in table if item[0] == state.forced_index]
             if state.forced_index is not None
             else list(table)
         )
+        if not candidates:
+            raise ValueError(
+                "E8 candidate index is absent from its declared depth table."
+            )
         ranked: list[tuple[tuple[float, float, float, float], int, Any, Any]] = []
+        first_failed = None
         for candidate_index, roll, shift in candidates:
             candidate_request = self._candidate_request(base_request, roll, shift)
             candidate_plan = super()._plan(candidate_request, context)
             candidate_plan = self._annotate_plan(
                 candidate_plan, roll=roll, candidate_index=candidate_index
             )
+            if first_failed is None:
+                first_failed = (candidate_index, candidate_plan, candidate_request)
             if candidate_plan.plan_success.any():
                 ranked.append(
                     (
@@ -356,14 +445,13 @@ class GenSimTwist(Twist):
                         candidate_request,
                     )
                 )
-        plan = None
-        planned_request = base_request
         if ranked:
-            ranked.sort(key=lambda item: (item[0], item[1]))
-            selected_score, selected, plan, planned_request = ranked[0]
-            state.selected_index = selected
+            order = _candidate_order(table, {item[1]: item[0] for item in ranked})
+            by_index = {item[1]: item for item in ranked}
+            selected_score, selected, plan, planned_request = by_index[order[0]]
             if state.forced_index is None:
-                state.order = tuple(item[1] for item in ranked)
+                state.order = order
+            selected_roll, selected_shift = table_by_index[selected]
             plan = replace(
                 plan,
                 diagnostics=replace(
@@ -372,16 +460,20 @@ class GenSimTwist(Twist):
                         **plan.diagnostics.metadata,
                         "gen_sim_twist_candidate_order": list(state.order),
                         "gen_sim_twist_candidate_score": list(selected_score),
+                        "gen_sim_twist_reference_bite": bite,
+                        "gen_sim_twist_candidate_bite": bite + selected_shift,
+                        "gen_sim_twist_fixed_roll": selected_roll,
                         "gen_sim_twist_candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
                         "gen_sim_twist_parent_contact_score_limit": PARENT_CONTACT_SCORE_LIMIT,
                     },
                 ),
             )
         else:
-            if candidates:
-                selected, _, _ = candidates[0]
-                state.selected_index = selected
-            plan = super()._plan(base_request, context)
+            assert first_failed is not None
+            selected, plan, planned_request = first_failed
+        state.selected_index = selected
+        state.selected_roll, selected_shift = table_by_index[selected]
+        state.selected_bite_depth = bite + selected_shift
         request = planned_request
         if not plan.plan_success.any():
             logger.log_warning(f"E8 public Twist planning rejected: {plan.diagnostics}")
@@ -471,7 +563,8 @@ def _grasp_tip_offset(
         )
         for c in (OPEN_COMMAND, GRASP_COMMAND)
     ]
-    vertices = [robot.get_link_vert_face(n)[0] for n in names]
+    clouds = _robot_collision_points(robot, tuple(names))
+    vertices = [qpos.new_tensor(clouds[n]) for n in names]
 
     def measure(fraction: float) -> tuple[float, float]:
         qpos[:, list(hand.joint_ids)] = commands[0] + fraction * (
@@ -604,6 +697,12 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                 "E8 requires one environment and unchanged source-qualified geometry."
             )
         self.joint_index = self.art.joint_names.index(b.joint)
+        sensor = simulation.get_sensor(SENSOR_UID)
+        self.geometry = (
+            sensor.geometry
+            if isinstance(sensor, TwistContactSensor)
+            else load_twist_geometry(self.art.cfg.fpath, b)
+        )
 
     def lower(
         self, call: Any, *, context: Any, bound: Any, option_template: Any
@@ -648,7 +747,7 @@ class _TwistLowerer(RegisteredSemanticLowerer):
             self.robot, context, bound, b.grip_width + 2 * (rest + pad_rest)
         )
         if self.route.variant == "closed_tip":
-            offset = _closed_finger_tip_offset(self.robot, context, bound)
+            offset = _closed_collision_tip_offset(self.robot, context, bound)
         bite = min(self.route.grasp_depth, b.grip_depth / 2)
         shift = b.grip_depth / 2 if self.route.variant == "centroid" else bite - offset
         point = tuple(p + shift * a for p, a in zip(b.outer_point, b.axis))
@@ -664,8 +763,17 @@ class _TwistLowerer(RegisteredSemanticLowerer):
         )
         target_pose = self.art.get_link_pose(b.link, to_matrix=True)[0]
         parent_pose = self.art.get_link_pose(b.parent, to_matrix=True)[0]
-        target_vertices, _ = self.art.get_link_vert_face(b.link)
-        parent_vertices, _ = self.art.get_link_vert_face(b.parent)
+        target_vertices = context.robot.qpos.new_tensor(
+            self.geometry.grip.vertices.copy()
+        )
+        parent_vertices = context.robot.qpos.new_tensor(
+            [
+                point
+                for mesh in self.geometry.parent_collisions
+                for point in mesh.vertices.tolist()
+            ]
+        )
+        pad_points = _robot_collision_points(self.robot, tuple(pad_names))
 
         def sample(vertices: torch.Tensor, limit: int = 128) -> list[list[float]]:
             if vertices.shape[0] <= limit:
@@ -693,11 +801,17 @@ class _TwistLowerer(RegisteredSemanticLowerer):
                         "gen_sim_twist_settle_steps": self.route.settle_steps,
                         "gen_sim_twist_outer_point": list(b.outer_point),
                         "gen_sim_twist_grip_depth": b.grip_depth,
+                        "gen_sim_twist_bite_depth": bite,
+                        "gen_sim_twist_fixed_roll": self.route.fixed_roll,
                         "gen_sim_twist_grasp_point": list(point),
                         "gen_sim_twist_axis": list(b.axis),
                         "gen_sim_twist_arm": self.route.arm,
-                        "gen_sim_twist_target_points": sample(target_vertices),
-                        "gen_sim_twist_parent_points": sample(parent_vertices),
+                        "gen_sim_twist_grip_points": sample(target_vertices),
+                        "gen_sim_twist_parent_collision_points": sample(
+                            parent_vertices
+                        ),
+                        "gen_sim_twist_pad_collision_points": pad_points,
+                        "gen_sim_twist_geometry_contract": "scaled_owning_link_collision_inputs/v1",
                         "gen_sim_twist_target_to_parent": target_to_parent.detach()
                         .cpu()
                         .tolist(),
@@ -752,6 +866,20 @@ class TwistContactSensor(PressContactSensor):
 
     def configure(self, route: TwistRoute, robot: Any) -> None:
         super().configure(route, robot)
+        self.geometry = load_twist_geometry(self.art.cfg.fpath, route.binding)
+        self.finger_collisions = load_robot_link_meshes(
+            robot.cfg.fpath,
+            self.finger_names,
+            tuple(float(v) for v in robot.cfg.body_scale),
+        )
+        self.finger_collision_points = {
+            n: [
+                point
+                for mesh in self.finger_collisions[n]
+                for point in mesh.vertices.tolist()
+            ]
+            for n in self.finger_names
+        }
         self.table_actor = int(self.get_actor_ids("table")[0, 0])
         self.robot_actors = set(
             self.get_actor_ids(robot.uid, robot.link_names)[0].tolist()
@@ -766,6 +894,43 @@ class TwistContactSensor(PressContactSensor):
         self._finalized_startup: dict[str, Any] | None = None
         self.update()
         self._begin_startup()
+
+    def geometry_evidence(self) -> dict[str, Any]:
+        """Describe the exact source inputs without certifying native cooking."""
+
+        def record(mesh: Any) -> dict[str, Any]:
+            return {
+                "path": mesh.path,
+                "owner": mesh.owner_path,
+                "approximation": mesh.approximation,
+                "bounds": [
+                    mesh.vertices.min(0).tolist(),
+                    mesh.vertices.max(0).tolist(),
+                ],
+                "vertices": len(mesh.vertices),
+                "triangles": len(mesh.faces),
+            }
+
+        return {
+            "schema": "scaled_owning_link_collision_inputs/v1",
+            "frame": "scaled owning rigid-link local",
+            "units": "m",
+            "asset_scale_applied": self.geometry.scale,
+            "native_pose_scaled_again": False,
+            "source_sha256": self.geometry.source_sha256,
+            "grip": record(self.geometry.grip),
+            "target_collisions": [record(m) for m in self.geometry.target_collisions],
+            "parent_collisions": [record(m) for m in self.geometry.parent_collisions],
+            "articulation_collisions": [
+                record(m) for m in self.geometry.articulation_collisions
+            ],
+            "fingers": {
+                n: [record(m) for m in meshes]
+                for n, meshes in self.finger_collisions.items()
+            },
+            "backend_cooked_shapes_verified": False,
+            "continuous_collision_certificate": False,
+        }
 
     def _begin_startup(self) -> None:
         self.clock = 0.0
@@ -956,11 +1121,24 @@ def ensure_sensor(simulation: Any, robot: Any, route: TwistRoute) -> TwistContac
     return sensor
 
 
+def _debounced_contact_path(samples: list) -> float:
+    path, anchor = 0.0, None
+    for sample in samples:
+        if sample.target_contact is not True:
+            anchor = None
+        elif anchor is None:
+            anchor = sample.qpos
+        elif abs(sample.qpos - anchor) >= QPOS_PATH_DEADBAND:
+            path += abs(sample.qpos - anchor)
+            anchor = sample.qpos
+    return path
+
+
 def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> dict:
     b = route.binding
     result = {
         "accepted": False,
-        "criterion": "qpos_converged_with_contact",
+        "criterion": "contact_backed_coarse_turn",
         "target_qpos": b.target_qpos,
         "observed_qpos": final_qpos,
         "angle_tolerance": ANGLE_TOLERANCE,
@@ -987,16 +1165,17 @@ def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> di
     if any(not b.limits[0] - 0.02 <= s.qpos <= b.limits[1] + 0.02 for s in samples):
         return {**result, "reason": "joint_out_of_bounds"}
     sign = math.copysign(1.0, b.target_qpos - samples[0].qpos)
-    signed_contact_travel, uncontacted_reverse_travel, contact_path = 0.0, 0.0, 0.0
+    signed_contact_travel, uncontacted_reverse_travel, raw_contact_path = 0.0, 0.0, 0.0
     for previous, current in zip(samples, samples[1:]):
         delta = sign * (current.qpos - previous.qpos)
         if previous.target_contact and current.target_contact:
             signed_contact_travel += delta
-            contact_path += abs(delta)
+            raw_contact_path += abs(delta)
         elif delta < 0.0:
             # Release/regrasp reversals must not let repeated excursions earn credit.
             uncontacted_reverse_travel -= delta
     directional_travel = max(0.0, signed_contact_travel - uncontacted_reverse_travel)
+    contact_path = _debounced_contact_path(samples)
     error = abs(final_qpos - b.target_qpos)
     target_contact_seen = any(s.target_contact for s in samples)
     required_directional_travel = min(
@@ -1005,8 +1184,7 @@ def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> di
     accepted = (
         math.isfinite(final_qpos)
         and target_contact_seen
-        and directional_travel >= required_directional_travel
-        and error <= ANGLE_TOLERANCE
+        and contact_path >= COARSE_TURN_THRESHOLD
     )
     return {
         **result,
@@ -1015,21 +1193,19 @@ def evaluate_twist(route: TwistRoute, samples: list, *, final_qpos: float) -> di
         "signed_contact_travel": signed_contact_travel,
         "uncontacted_reverse_travel": uncontacted_reverse_travel,
         "contact_path": contact_path,
+        "raw_contact_path": raw_contact_path,
         "target_contact_seen": target_contact_seen,
         "directional_travel_required": required_directional_travel,
         "target_error": error,
+        "target_qpos_reached": error <= ANGLE_TOLERANCE,
         "coarse_turn_reached": contact_path >= COARSE_TURN_THRESHOLD,
         "reason": (
-            "qpos_converged"
+            "coarse_turn_reached"
             if accepted
             else (
                 "target_contact_missing"
                 if not target_contact_seen
-                else (
-                    "target_qpos_not_reached"
-                    if error > ANGLE_TOLERANCE
-                    else "direction_not_confirmed"
-                )
+                else "coarse_contact_travel_insufficient"
             )
         ),
     }
@@ -1081,29 +1257,36 @@ class TwistAcceptancePort:
         ):
             raise ValueError("E8 physical policy identity differs from its knob.")
 
-    def _accumulate_contact_path(self, samples: list) -> None:
-        """Accumulate debounced target-contact qpos travel across chunks."""
-        state = self._candidate_state
-        for sample in samples:
-            if sample.target_contact is not True:
-                state.last_contact_qpos = None
-                continue
-            if state.last_contact_qpos is not None:
-                delta = abs(sample.qpos - state.last_contact_qpos)
-                if delta >= QPOS_PATH_DEADBAND:
-                    state.contact_path += delta
-                    state.last_contact_qpos = sample.qpos
-            else:
-                state.last_contact_qpos = sample.qpos
-
     def _clearance(self) -> float:
         bounds = []
         for name in self.sensor.finger_names:
             pose = self.robot.get_link_pose(name, to_matrix=True)[0]
-            vertices, _ = self.robot.get_link_vert_face(name)
+            vertices = pose.new_tensor(self.sensor.finger_collision_points[name])
             world = vertices.to(pose) @ pose[:3, :3].T + pose[:3, 3]
             bounds.append(torch.stack((world.amin(0), world.amax(0))))
-        return _park_clearance(self.sensor.art, bounds)
+        if not bounds or any(not bool(torch.isfinite(v).all()) for v in bounds):
+            raise ValueError("E8 Park requires finite finger collision inputs.")
+        distances = []
+        for mesh in self.sensor.geometry.articulation_collisions:
+            name = mesh.owner_path.rsplit("/", 1)[-1]
+            if name not in self.sensor.art.link_names:
+                raise ValueError(
+                    "E8 Park collision ownership differs from its native links."
+                )
+            pose = self.sensor.art.get_link_pose(name, to_matrix=True)[0]
+            vertices = pose.new_tensor(mesh.vertices.copy())
+            world = vertices @ pose[:3, :3].T + pose[:3, 3]
+            if not bool(torch.isfinite(world).all()):
+                raise ValueError("E8 Park requires finite collision input geometry.")
+            low, high = world.amin(0), world.amax(0)
+            for finger in bounds:
+                gap = torch.maximum(low - finger[1], finger[0] - high).clamp_min(0)
+                distances.append(float(torch.linalg.vector_norm(gap)))
+        if not distances:
+            raise ValueError(
+                "E8 Park requires complete finger and articulation collision inputs."
+            )
+        return min(distances)
 
     def actions(self, policy: Any, *, segment: Any, active_mask: torch.Tensor) -> Any:
         self.validate_policy(policy, segment=segment)
@@ -1115,7 +1298,12 @@ class TwistAcceptancePort:
             )
             return
         s, b = self.sensor, self.route.binding
-        hold = self.robot.get_qpos().clone()
+        # Re-anchoring completed holds to measured sag accumulates pose drift.
+        hold = (
+            self.robot.get_qpos(target=True)
+            if self._candidate_state.goal_complete and not ready
+            else self.robot.get_qpos()
+        ).clone()
         values, velocities = [], []
         for _ in range(math.ceil(0.5 / self.dt)):
             yield hold.clone()
@@ -1136,10 +1324,11 @@ class TwistAcceptancePort:
             self._candidate_state.forced_index = None
             self._candidate_state.order = ()
             self._candidate_state.selected_index = None
+            self._candidate_state.selected_bite_depth = None
+            self._candidate_state.selected_roll = None
             self._candidate_state.fallback_count = 0
             self._candidate_state.locked = False
             self._candidate_state.contact_path = 0.0
-            self._candidate_state.last_contact_qpos = None
             self._candidate_state.goal_complete = False
             s.update()
             s.arm()
@@ -1169,7 +1358,6 @@ class TwistAcceptancePort:
             start = self._chunk_cursor
             samples = s.samples[start:]
             trace = s.trace[start:]
-            self._accumulate_contact_path(samples)
             qpos = float(s.art.get_qpos()[0, s.joint_index])
             target_contacts = [sample.target_contact for sample in samples]
             parent_contacts = [bool(item.get("parent_contact")) for item in trace]
@@ -1178,7 +1366,6 @@ class TwistAcceptancePort:
             )
             target_error = abs(qpos - b.target_qpos)
             already_reached = target_error <= ANGLE_TOLERANCE
-            coarse_reached = self._candidate_state.contact_path >= COARSE_TURN_THRESHOLD
             valid_chunk = bool(
                 samples
                 and all(sample.valid for sample in samples)
@@ -1191,15 +1378,12 @@ class TwistAcceptancePort:
                 good, fallback = _candidate_contact_decision(
                     self._candidate_state,
                     target_contact=any(target_contacts),
-                    already_reached=already_reached,
+                    already_reached=already_reached
+                    or self._candidate_state.goal_complete,
                 )
             goal_check = evaluate_twist(self.route, s.samples, final_qpos=qpos)
-            self._candidate_state.goal_complete = bool(
-                goal_check["accepted"]
-                and stable
-                and released
-                and self._clearance() >= 0.04
-            )
+            self._candidate_state.contact_path = goal_check.get("contact_path", 0.0)
+            self._candidate_state.goal_complete = goal_check["accepted"]
             result = {
                 "accepted": good,
                 "phase": "bounded_chunk",
@@ -1213,18 +1397,21 @@ class TwistAcceptancePort:
                 "parent_contact_warning": parent_fraction
                 > PARENT_CONTACT_FRACTION_LIMIT,
                 "candidate_selected": self._candidate_state.selected_index,
+                "candidate_bite_depth": self._candidate_state.selected_bite_depth,
+                "candidate_roll": self._candidate_state.selected_roll,
                 "candidate_fallback": fallback,
                 "candidate_fallback_count": self._candidate_state.fallback_count,
                 "candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
                 "coarse_turn_threshold": COARSE_TURN_THRESHOLD,
                 "cumulative_contact_path": self._candidate_state.contact_path,
-                "coarse_turn_reached": coarse_reached,
-                "early_stop": False,
+                "coarse_turn_reached": self._candidate_state.goal_complete,
+                "early_stop": self._candidate_state.goal_complete,
                 "goal_complete": self._candidate_state.goal_complete,
             }
             self._chunk_cursor = len(s.samples)
         else:
             result = evaluate_twist(self.route, s.samples, final_qpos=values[-1])
+            self._candidate_state.contact_path = result.get("contact_path", 0.0)
             clearance = self._clearance()
             qpos = s.art.get_qpos().clone()
             qpos[:, s.joint_index] = s.other_qpos[:, s.joint_index]
@@ -1232,11 +1419,12 @@ class TwistAcceptancePort:
                 torch.isfinite(qpos).all()
                 and torch.allclose(qpos, s.other_qpos, atol=INITIAL_TOLERANCE, rtol=0)
             )
+            terminal = any(c.call.semantic_id == PARK_CALL for c in segment.calls)
             good = bool(
                 result["accepted"]
                 and stable
                 and released
-                and clearance >= 0.04
+                and (not terminal or clearance >= 0.04)
                 and others_unchanged
             )
             parent_contacts = [bool(item.get("parent_contact")) for item in s.trace]
@@ -1249,17 +1437,18 @@ class TwistAcceptancePort:
                 stable=stable,
                 joint_velocities=velocities,
                 clearance=clearance,
+                clearance_required=0.04 if terminal else None,
                 others_unchanged=others_unchanged,
                 parent_contact_fraction=parent_fraction,
                 parent_contact_fraction_limit=PARENT_CONTACT_FRACTION_LIMIT,
                 parent_contact_warning=parent_fraction > PARENT_CONTACT_FRACTION_LIMIT,
-                terminal=any(c.call.semantic_id == PARK_CALL for c in segment.calls),
+                terminal=terminal,
                 coarse_turn_threshold=COARSE_TURN_THRESHOLD,
                 cumulative_contact_path=self._candidate_state.contact_path,
                 coarse_turn_reached=(
                     self._candidate_state.contact_path >= COARSE_TURN_THRESHOLD
                 ),
-                early_stop=False,
+                early_stop=self._candidate_state.goal_complete,
             )
             s.phase = "cleanup"
         s.acceptance = deepcopy(result)

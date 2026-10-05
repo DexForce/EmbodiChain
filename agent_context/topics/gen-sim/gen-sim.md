@@ -358,8 +358,8 @@ E8 is owned by `_task_program/twist_binding.py` and `twist_runtime.py`: a source
 revolute knob lowers to prepare/bounded Twist chunks/Park through the public `Twist` skill and
 ordinary Gym runtime. Each chunk is capped at 5 degrees and the next semantic segment reads
 the measured qpos again. Nonzero targets reserve 32 feedback calls; nominal 5-degree coverage
-plus three contact retries must fit that bound. Only full physical acceptance and a fresh
-qpos within tolerance permit unused calls to become one-frame holds. The printed setting uses
+plus three contact retries must fit that bound. Verified coarse contact travel permits
+unused calls to become one-frame holds; Park still checks release and clearance. The printed setting uses
 pointer/label geometry and an asset hash; ordinal settings and joint-limit guesses are rejected.
 `twist_adaptation.py` screens source-qualified geometry against the active gripper: compatible
 dimensions remain unchanged; mismatches propose a uniform assembly scale with preferred 10 mm
@@ -374,20 +374,33 @@ PreparedScene at 2/3/4 mm only after support-related startup rejection. Geometri
 gets bounded preflight alternatives. Source USD/physics remain unchanged; the adaptation audit
 separates actual gap from conservative contact-envelope reference. Direct helper calls retain
 their conservative default. Startup evidence covers reset-to-ready substeps; invalid/overflowed
-observations, motion or table/robot contact fail closed. Final E8 acceptance requires target-setting qpos
-convergence within 5 degrees, contact-backed directional travel, release and stability; Park
-rechecks all conditions. Directional travel must cover the smaller of 15 degrees and the
-initial-to-target angle.
-Directional travel accumulates signed increments across separate contact chunks;
-uncontacted forward motion earns no credit and uncontacted reversals subtract credit.
+observations, motion or table/robot contact fail closed. Final E8 coarse acceptance requires at
+least 15 degrees of debounced absolute travel during target contact, release and stability;
+Park rechecks all conditions. The 0.5-degree anchor deadband excludes small oscillations,
+and contact loss resets the anchor so uncontacted motion cannot earn credit.
+Target-setting error and signed directional travel remain diagnostics, not success gates.
 Parent contact is recorded as a warning, while released contact and conservative
-40 mm world mesh-AABB separation after Park remain required. Candidates rank closed-hand,
-arena-frame dual-pad geometry and penalize parent proximity; at most three alternatives follow
-an initial no-contact chunk. Axial offsets scale with grip depth and include the calibrated
-center. The lowerer measures matching jaw aperture and uses invocation-owned typed grasp
+40 mm world collision-input AABB separation after Park remain required. `twist_geometry.py`
+owns source-hash-bound USD collider inputs and URDF finger colliders. Mesh transforms are
+baked into each owning link frame before deployment scale is applied exactly once;
+observed native rigid poses are not scaled again. Candidate contact proximity uses only
+the calibrated grip collider, not the full render-link union. Parent screening and Park
+use owned collider inputs, including non-selected articulation bodies. Default render
+vertices are not collision inputs. Authored convex-cooking policies remain diagnostic;
+these proxies do not certify backend cooked shapes or continuous collision clearance.
+Candidates use final tip bites
+B/3, 2B/3 and B, where B=min(grasp_depth, grip_depth/2). Their TCP shifts are outward-only,
+so no extra inward offset can exceed the requested bite. Depth takes precedence over closed-hand,
+arena-frame geometry scores. The shallowest feasible layer selects a roll, which stays fixed
+for the ordered depth fallbacks; contact locks that candidate, not final success. Failed IK cannot
+silently fall back to an undeclared base pose. The lowerer measures matching jaw aperture and uses invocation-owned typed grasp
 overrides; public `Twist` and non-E8 routes remain unchanged.
-The debounced absolute qpos path is diagnostic only, never an early-stop condition.
-Regenerate E8 bundles for revision 4; non-E8 routes retain their behavior.
+Reaching the coarse contact threshold makes remaining Twist calls stationary holds; it does
+not skip final release/clearance checks or imply precise arrival at the printed setting.
+Completed holds and waits retain the issued joint target instead of re-anchoring to measured
+gravity sag; dynamic-goal and velocity checks remain active.
+Regenerate E8 bundles for revision 8; non-E8 routes retain their behavior. The experimental
+local-continuation and adaptive-grip loops are not enabled by this geometry revision.
 E8 remains standalone; mixed E1 transport plus E8 twist graphs fail closed before bundle
 generation and must be qualified as separate stages.
 `twist_evidence.json` records measured qpos/contact evidence. `no_twist` and `centroid` are

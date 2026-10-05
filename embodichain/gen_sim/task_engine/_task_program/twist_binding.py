@@ -30,7 +30,7 @@ from .articulation_binding import PARK_CALL, _fixed_base
 __all__: list[str] = []
 PREPARE_CALL = "gen_sim.twist_prepare"
 TWIST_CALL = "gen_sim.twist"
-TWIST_REVISION = "4"
+TWIST_REVISION = "8"
 TWIST_CHUNK_COUNT = 8
 TWIST_CHUNK_ANGLE = math.radians(5.0)
 TWIST_SETTLE_STEPS = 5
@@ -48,8 +48,8 @@ def required_chunk_count(target_qpos: float) -> int:
     )
     if count > TWIST_MAX_CHUNK_COUNT:
         raise ValueError("E8 calibrated turn exceeds the bounded chunk budget.")
-    # A finite feedback budget covers contact slip; only verified convergence
-    # may turn the unused semantic calls into stationary holds.
+    # A finite feedback budget covers contact slip; verified coarse contact travel
+    # turns the unused semantic calls into stationary holds.
     return TWIST_CHUNK_COUNT if target_qpos == 0.0 else TWIST_MAX_CHUNK_COUNT
 
 
@@ -111,6 +111,7 @@ class TwistRoute:
     settle_steps: int = TWIST_SETTLE_STEPS
     chunk_count: int = TWIST_CHUNK_COUNT
     chunk_angle: float = TWIST_CHUNK_ANGLE
+    fixed_roll: float | None = None
 
     def __post_init__(self) -> None:
         if self.arm not in {"left", "right"}:
@@ -141,6 +142,12 @@ class TwistRoute:
             or not 0 < self.chunk_angle <= math.pi / 2
         ):
             raise ValueError("E8 chunk_angle must be finite and within (0, pi/2].")
+        if self.fixed_roll is not None and (
+            type(self.fixed_roll) not in (int, float)
+            or not math.isfinite(self.fixed_roll)
+            or abs(self.fixed_roll) > math.pi
+        ):
+            raise ValueError("E8 fixed_roll must be finite and within [-pi, pi].")
 
     @property
     def link_id(self) -> str:
@@ -164,6 +171,7 @@ class TwistRoute:
             "settle_steps",
             "chunk_count",
             "chunk_angle",
+            "fixed_roll",
         }:
             raise ValueError("E8 route has missing or unexpected fields.")
         data = dict(value["binding"])
@@ -216,6 +224,7 @@ class TwistRoute:
             value["settle_steps"],
             value["chunk_count"],
             value["chunk_angle"],
+            value["fixed_roll"],
         )
 
 
