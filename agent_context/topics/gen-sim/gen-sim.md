@@ -288,7 +288,13 @@ snapshot; upright and stack constraints take precedence over ordinary policy.
 `GenSimPickUp` screens each
 candidate strategy through the shared full pickup planner and retains the exact
 successful trajectory per row; endpoint IK alone is not acceptance. Explicit
-grasp poses, fixed calibrations and constrained picks retain their contracts.
+grasp poses and fixed grasps retain their contracts. A failed constrained,
+single-environment Cartesian Pick without downstream look-ahead may try one
+symmetric roll in the calibrated grasp frame. The original opening, region and
+release-clearance filters gate that alternative; the shared Pick planner rebuilds
+its trajectory and proposed attachment together. Full-robot velocity and arm
+joint limits gate the final resampled path. Successful original plans and later
+calls' random streams remain unchanged; exhaustion retains the original failure.
 Its direction prefilter removes only candidate columns whose two roll variants
 are rejected in every environment, then delegates to shared `PickUp` and restores
 the original candidate indices. Upright adjustment and unconstrained approaches

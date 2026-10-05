@@ -173,6 +173,52 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         scoped._active_rules = matches[:1]
         return scoped
 
+    def accepts_grasp_poses(
+        self,
+        poses: torch.Tensor,
+        object_poses: torch.Tensor,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+    ) -> torch.Tensor:
+        """Recheck explicit alternatives against this Pick's immutable filters.
+
+        Args:
+            poses: One world-frame gripper pose per environment, shape (B, 4, 4).
+            object_poses: Matching observed object poses.
+            mesh_vertices: Target-local vertices used to bind the filter.
+            mesh_triangles: Matching target-local triangle indices.
+
+        Returns:
+            Opening, region and release-clearance acceptance per environment.
+        """
+        if (
+            poses.ndim != 3
+            or poses.shape[1:] != (4, 4)
+            or object_poses.shape != poses.shape
+        ):
+            raise ValueError("Explicit grasp filter requires matching (B, 4, 4) poses.")
+        if not self._active_rules or any(
+            rule.geometry != geometry_key(mesh_vertices, mesh_triangles)
+            for rule in self._active_rules
+        ):
+            raise ValueError("Explicit grasp filter requires matching scoped geometry.")
+        accepted = torch.isfinite(poses).all(-1).all(-1)
+        for row in range(len(poses)):
+            accepted[row] &= opening_envelope_mask(
+                mesh_vertices,
+                poses[row : row + 1],
+                object_poses[row].to(poses),
+                self.gripper_model.max_opening_width,
+            )[0]
+            for rule in self._active_rules:
+                accepted[row] &= accepted_candidates(
+                    poses[row : row + 1],
+                    object_poses[row].to(poses),
+                    rule,
+                    self.gripper_model,
+                )[0]
+        return accepted
+
     def get_valid_grasp_poses(
         self,
         *,

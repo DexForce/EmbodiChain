@@ -402,6 +402,32 @@ def test_symmetric_roll_variants_have_identical_release_clearance() -> None:
     )
 
 
+def test_explicit_roll_rechecks_opening_region_and_release_clearance() -> None:
+    provider = TaskGraspPoseGenerator(
+        CandidateGenerator(((0.15,),)), (rule(),)
+    ).for_pick("can", "release", VERTICES, TRIANGLES)
+    poses = torch.eye(4).repeat(3, 1, 1)
+    poses[:, 2, 3] = torch.tensor([0.06, 0.15, 0.15])
+    poses[2, 0, 3] = 1.0
+    poses[:, :3, :2] *= -1
+    accepted = provider.accepts_grasp_poses(
+        poses, torch.eye(4).repeat(3, 1, 1), VERTICES, TRIANGLES
+    )
+    assert accepted.tolist() == [False, True, False]
+
+
+def test_explicit_roll_requires_scoped_matching_geometry() -> None:
+    provider = TaskGraspPoseGenerator(CandidateGenerator(((0.15,),)), (rule(),))
+    poses = torch.eye(4)[None]
+    with pytest.raises(ValueError, match="scoped geometry"):
+        provider.accepts_grasp_poses(poses, poses, VERTICES, TRIANGLES)
+    scoped = provider.for_pick("can", "release", VERTICES, TRIANGLES)
+    with pytest.raises(ValueError, match="scoped geometry"):
+        scoped.accepts_grasp_poses(poses, poses, VERTICES * 2, TRIANGLES)
+    with pytest.raises(ValueError, match="matching"):
+        scoped.accepts_grasp_poses(poses[0], poses, VERTICES, TRIANGLES)
+
+
 def test_no_candidate_is_encoded_as_ineligible_not_as_a_fake_success() -> None:
     provider = TaskGraspPoseGenerator(
         CandidateGenerator(((), (0.05,))), (rule(),)

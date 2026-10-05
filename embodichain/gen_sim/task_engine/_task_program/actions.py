@@ -79,6 +79,7 @@ class _PickSelection:
     direction: torch.Tensor | None = None
     request: object = None
     trajectory: tuple | None = None
+    constrained: bool = False
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -190,11 +191,120 @@ class GenSimPickUp(PickUp):
                     )
                 semantics.affordance.set_custom_config(ADAPTIVE_GRASP, purpose)
                 request = replace(request, goal=replace(goal, semantics=semantics))
-        token = _PICK_SELECTION.set(_PickSelection(request=request))
+        selection = _PickSelection(request=request)
+        token = _PICK_SELECTION.set(selection)
         try:
-            return super()._plan(request, context)
+            first = super()._plan(request, context)
+            return (
+                self._recover_constrained_pick_roll(request, context, first)
+                if selection.constrained
+                else first
+            )
         finally:
             _PICK_SELECTION.reset(token)
+
+    def _recover_constrained_pick_roll(self, request, context, first):
+        """Try one symmetric grasp only after the original constrained path fails."""
+        goal, options = request.goal, request.skill_options
+        affordance = goal.semantics.affordance
+        if (
+            first.plan_success.any()
+            or context.batch_size != 1
+            or goal.grasp_xpos is not None
+            or options.fixed_object_to_eef is not None
+            or options.rotate_upright is not None
+            or options.pick_object_part != "center"
+            or options.downstream_object_target_poses
+            or not isinstance(affordance, AntipodalAffordance)
+            or affordance.get_custom_config(_PICK_GRASP_RULE) is None
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or getattr(self.motion_generator, "direct_transport_planning", False)
+        ):
+            return first
+        endpoint = request.binding.endpoint("primary", "motion")
+        held = first.expected_effects.held_object_updates.get(endpoint.task_state_key)
+        if held is None or held.semantics.entity_id != goal.semantics.entity_id:
+            return first
+        from .grasp_filter import TaskGraspPoseGenerator
+        from .motion import _joint_velocity_limits, _velocity_validity
+
+        calibration = options.grasp_frame_to_eef.to(held.grasp_xpos)
+        grasp_pose = held.grasp_xpos @ pose_inv(calibration)
+        grasp_pose = grasp_pose.clone()
+        grasp_pose[..., :3, :2] *= -1
+        alternate = grasp_pose @ calibration
+        object_pose = held.grasp_xpos @ pose_inv(held.object_to_eef)
+        hand = request.binding.endpoint("primary", "grasp").require_target(
+            JointPositionTarget
+        )
+        generator = self.planning_services.grasp_pose_generator(hand.target_id)
+        if not isinstance(generator, TaskGraspPoseGenerator):
+            raise ValueError(
+                "Constrained Pick roll recovery requires its grasp filter."
+            )
+        generator = generator.for_pick(
+            *affordance.get_custom_config(_PICK_GRASP_RULE),
+            affordance.mesh_vertices,
+            affordance.mesh_triangles,
+        )
+
+        def finish(plan, reason):
+            accepted = reason == "accepted"
+            metadata = dict(plan.diagnostics.metadata)
+            if accepted:
+                samples = dict(first.diagnostics.metadata.get("affordance_sample", {}))
+                samples["grasp"] = {
+                    **samples.get("grasp", {}),
+                    "selected_poses": alternate.detach().cpu().tolist(),
+                }
+                metadata["affordance_sample"] = samples
+            metadata["gen_sim_pick_roll_recovery"] = {
+                "accepted": accepted,
+                "reason": reason,
+                "variant": "grasp_z_roll_180",
+                "original_plan_success": first.plan_success.tolist(),
+            }
+            return replace(
+                plan, diagnostics=replace(plan.diagnostics, metadata=metadata)
+            )
+
+        if not generator.accepts_grasp_poses(
+            grasp_pose,
+            object_pose,
+            affordance.mesh_vertices,
+            affordance.mesh_triangles,
+        ).all():
+            return finish(first, "grasp_filter_rejected")
+        direction = options.approach_direction.to(alternate)
+        direction = direction / torch.linalg.vector_norm(direction)
+        if not self._approach_alignment_mask(
+            alternate[:, None, None], options, direction
+        ).all():
+            return finish(first, "approach_alignment_rejected")
+        # Rebuild the whole plan so trajectory and proposed attachment use the
+        # same pose. Extra IK draws must not change later calls' random stream.
+        devices = [alternate.device.index] if alternate.is_cuda else []
+        with torch.random.fork_rng(devices=devices):
+            second = super()._plan(
+                replace(request, goal=replace(goal, grasp_xpos=alternate)), context
+            )
+        if not second.plan_success.all():
+            return finish(first, "planning_failed")
+        trajectory = second.joint_trajectory
+        limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)
+        if not _velocity_validity(trajectory.positions, trajectory.dt, limits).all():
+            return finish(first, "final_velocity_rejected")
+        arm = endpoint.require_target(JointPositionTarget)
+        bounds = self.robot.get_qpos_limits(name=arm.control_part).to(
+            trajectory.positions
+        )
+        positions = trajectory.positions[..., list(arm.joint_ids)]
+        if not (
+            (positions >= bounds[:, None, :, 0]) & (positions <= bounds[:, None, :, 1])
+        ).all():
+            return finish(first, "joint_limits_rejected")
+        return finish(second, "accepted")
 
     def _get_full_pickup_trajectory(
         self,
@@ -308,6 +418,8 @@ class GenSimPickUp(PickUp):
             generator = generator.for_pick(
                 *rule_selector, affordance.mesh_vertices, affordance.mesh_triangles
             )
+            if selection is not None:
+                selection.constrained = True
         candidates = affordance.get_grasp_candidates(
             generator,
             object_pose,
