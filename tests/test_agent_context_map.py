@@ -70,6 +70,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "data-pipeline",
         "robot-workspace",
         "differentiable-env",
+        "mesh-affordance",
     }
 
     assert set(topics) == expected_topic_ids
