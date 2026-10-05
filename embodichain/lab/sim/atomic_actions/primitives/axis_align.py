@@ -436,6 +436,7 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                     ),
                 )
                 for entity_id in self._scene_dependencies(request)
+                if entity_id == request.goal.semantics.entity_id
             },
         )
 

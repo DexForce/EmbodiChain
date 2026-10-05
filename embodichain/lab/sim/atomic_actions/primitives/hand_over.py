@@ -112,7 +112,7 @@ class HandOverOptions(ActionOptions):
     hold_steps: int = 4
     """Closed-hand waypoints used to settle a receiving grasp."""
 
-    retreat_steps: int = 24
+    retreat_steps: int = 20
     """Waypoints used while the source hand retreats after release."""
 
     retreat_distance: float = 0.10
@@ -879,6 +879,12 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             name="HandOver existing-hold source retreat success",
         )
 
+        # An existing hold is already physically established.  Preserve the
+        # observed source-hand closure until the release phase instead of
+        # commanding a configured grasp setpoint that may be tighter than the
+        # contact-supported pose.
+        source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+
         segment_values: list[tuple[str, torch.Tensor]] = [
             (
                 "transfer",
@@ -886,7 +892,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     context,
                     source_transfer,
                     repeat_qpos(destination_start_qpos, lengths["transfer"]),
-                    repeat_qpos(resources.first.hand_grasp_qpos, lengths["transfer"]),
+                    repeat_qpos(source_hand_qpos, lengths["transfer"]),
                     repeat_qpos(resources.second.hand_open_qpos, lengths["transfer"]),
                     resources.first,
                     resources.second,
@@ -898,7 +904,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     context,
                     repeat_qpos(source_hold_qpos, lengths["approach"]),
                     destination_approach,
-                    repeat_qpos(resources.first.hand_grasp_qpos, lengths["approach"]),
+                    repeat_qpos(source_hand_qpos, lengths["approach"]),
                     repeat_qpos(resources.second.hand_open_qpos, lengths["approach"]),
                     resources.first,
                     resources.second,
@@ -910,7 +916,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     context,
                     repeat_qpos(source_hold_qpos, lengths["close"]),
                     repeat_qpos(destination_hold_qpos, lengths["close"]),
-                    repeat_qpos(resources.first.hand_grasp_qpos, lengths["close"]),
+                    repeat_qpos(source_hand_qpos, lengths["close"]),
                     interpolate_hand_qpos(
                         resources.second.hand_open_qpos,
                         resources.second.hand_grasp_qpos,
@@ -929,7 +935,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                         context,
                         repeat_qpos(source_hold_qpos, lengths["hold"]),
                         repeat_qpos(destination_hold_qpos, lengths["hold"]),
-                        repeat_qpos(resources.first.hand_grasp_qpos, lengths["hold"]),
+                        repeat_qpos(source_hand_qpos, lengths["hold"]),
                         repeat_qpos(resources.second.hand_grasp_qpos, lengths["hold"]),
                         resources.first,
                         resources.second,
@@ -945,7 +951,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                         repeat_qpos(source_hold_qpos, lengths["release"]),
                         repeat_qpos(destination_hold_qpos, lengths["release"]),
                         interpolate_hand_qpos(
-                            resources.first.hand_grasp_qpos,
+                            source_hand_qpos,
                             resources.first.hand_open_qpos,
                             n_waypoints=lengths["release"],
                         ),
@@ -1014,7 +1020,9 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             ),
             segment_lengths={name: value.shape[1] for name, value in segment_values},
             scene_dependency_monitor_until={
-                entity_id: 0 for entity_id in self._scene_dependencies(request)
+                entity_id: 0
+                for entity_id in self._scene_dependencies(request)
+                if entity_id == goal.semantics.entity_id
             },
         )
 
@@ -1447,6 +1455,48 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         success &= receive_approach_success
         receive_grasp_qpos = receive_approach[:, -1]
 
+        source_retreat: torch.Tensor | None = None
+        if not options.release_at_target:
+            source_retreat_waypoints = self._source_retreat_waypoints(
+                handover_middle_eef,
+                receive_grasp,
+                source_fallback=handover_middle_eef,
+                destination_fallback=receive_grasp,
+                retreat_distance=options.retreat_distance,
+                lift_height=options.lift_height,
+            )
+            phase_success, source_retreat = plan_named_arm_trajectory(
+                self.motion_generator,
+                handover.arm.control_part,
+                handover_middle_qpos,
+                source_retreat_waypoints,
+                segment_lengths["source_retreat"],
+                request.motion_policy,
+                context.control_dt,
+            )
+            source_retreat_success = normalize_success_mask(
+                phase_success,
+                num_envs=self.num_envs,
+                device=self.device,
+                name="HandOver source-retreat success",
+            )
+            self._report_phase_failure(
+                context,
+                phase_name="source_retreat",
+                waypoint_names=(
+                    "source_withdraw_1",
+                    "source_withdraw_2",
+                    "source_withdraw_3",
+                    "source_lift_1",
+                    "source_lift_2",
+                ),
+                target_poses=source_retreat_waypoints,
+                start_qpos=handover_middle_qpos,
+                arm=handover.arm,
+                failed_mask=active_mask & ~source_retreat_success,
+            )
+            success &= source_retreat_success
+
         receive_place: torch.Tensor | None = None
         receive_final_qpos: torch.Tensor | None = None
         if options.release_at_target:
@@ -1599,6 +1649,22 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                         handover,
                         receive,
                     ),
+                )
+            )
+        elif source_retreat is not None:
+            segments.append(
+                self._assemble_segment(
+                    state,
+                    source_retreat,
+                    repeat_qpos(receive_grasp_qpos, segment_lengths["source_retreat"]),
+                    repeat_qpos(
+                        handover.hand_open_qpos, segment_lengths["source_retreat"]
+                    ),
+                    repeat_qpos(
+                        receive.hand_grasp_qpos, segment_lengths["source_retreat"]
+                    ),
+                    handover,
+                    receive,
                 )
             )
         trajectory = torch.cat(segments, dim=1)
@@ -1908,7 +1974,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         """Split the sample budget across enabled arm and hand phases."""
         hand_count = options.hand_interp_steps
         hand_phase_count = 4 if options.release_at_target else 3
-        motion_phase_count = 4 if options.release_at_target else 3
+        motion_phase_count = 4
         motion_budget = sample_count - hand_phase_count * hand_count
         if motion_budget < 2 * motion_phase_count:
             raise ValueError(
@@ -1933,6 +1999,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     "receive_release": hand_count,
                 }
             )
+        else:
+            result["source_retreat"] = motion_counts[3]
         return result
 
     @staticmethod

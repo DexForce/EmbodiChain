@@ -627,12 +627,15 @@ class _AntipodalMeshBackend:
             mesh_projection.max()
             - (0.5 - middle_empty_ratio / 2) * mesh_projection_range
         )
+        pair_centers = 0.5 * (origin_points_ + hit_points_)
+        pair_projection = torch.matmul(pair_centers, left_to_right_arm_direction)
+        # Assign each antipodal pair exactly once using its center.  Classifying
+        # a pair when either contact lies on a side duplicates pairs that span
+        # the middle gap and can send the same grasp to both arms.
+        left_mask = pair_projection < left_threshold
+        right_mask = pair_projection > right_threshold
         if self._center_mode == "bounds":
             mesh_center = get_pc_center_box(mesh_vert_transformed)
-            pair_centers = 0.5 * (origin_points_ + hit_points_)
-            pair_projection = torch.matmul(pair_centers, left_to_right_arm_direction)
-            left_mask = pair_projection < left_threshold
-            right_mask = pair_projection > right_threshold
             left_center = (
                 mesh_center - 0.25 * mesh_projection_range * left_to_right_arm_direction
             )
@@ -640,16 +643,6 @@ class _AntipodalMeshBackend:
                 mesh_center + 0.25 * mesh_projection_range * left_to_right_arm_direction
             )
         else:
-            origin_projection = torch.matmul(
-                origin_points_, left_to_right_arm_direction
-            )
-            hit_projection = torch.matmul(hit_points_, left_to_right_arm_direction)
-            left_mask = (origin_projection < left_threshold) | (
-                hit_projection < left_threshold
-            )
-            right_mask = (origin_projection > right_threshold) | (
-                hit_projection > right_threshold
-            )
             left_center = mesh_vert_transformed[mesh_projection < left_threshold].mean(
                 dim=0
             )
