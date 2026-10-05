@@ -220,6 +220,7 @@ class _PayloadPlanner(CuroboPlanner):
     ) -> None:
         self._observation, self._motion, self._qpos = observation, motion, qpos.clone()
         self._attachments: dict[int, tuple[Any, ...]] = {}
+        self._closed = False
         super().__init__(cfg)
 
     def _load_runtime_robot_config(self, path: str) -> dict[str, Any]:
@@ -293,6 +294,9 @@ class _PayloadPlanner(CuroboPlanner):
         return backend
 
     def close(self) -> None:
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         first_error: Exception | None = None
         try:
             for managers in self._attachments.values():
