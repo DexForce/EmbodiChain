@@ -189,7 +189,7 @@ def test_twist_chunk_budget_rejects_unbounded_turn():
 
 def test_twist_candidate_table_is_bounded_and_distinct():
     table = _candidate_table()
-    assert len(table) == 16
+    assert len(table) == 12
     assert [item[0] for item in table] == list(range(len(table)))
     assert len({(item[1], item[2]) for item in table}) == len(table)
     assert TWIST_CANDIDATE_FALLBACKS == 3
@@ -198,14 +198,68 @@ def test_twist_candidate_table_is_bounded_and_distinct():
     assert QPOS_PATH_DEADBAND == pytest.approx(math.radians(0.5))
 
 
-def test_twist_axial_candidates_scale_with_grip_depth_and_include_center():
-    table = _candidate_table(0.0075)
-    assert table[0][2] == pytest.approx(-0.001875)
-    assert table[1][2] == 0.0
-    assert table[3][2] == pytest.approx(0.00375)
-    assert max(abs(item[2]) for item in table) <= 0.0075 / 2
-    with pytest.raises(ValueError, match="positive grip depth"):
+def test_twist_depth_candidates_are_final_bites_without_deep_offsets():
+    bite = 0.00625
+    table = _candidate_table(bite)
+    for roll in (0.0, math.pi / 2, -math.pi / 2, math.pi):
+        depths = [bite + shift for _, angle, shift in table if angle == roll]
+        assert depths == pytest.approx([bite / 3, 2 * bite / 3, bite])
+    assert all(shift <= 0 for _, _, shift in table)
+    with pytest.raises(ValueError, match="positive.*bite"):
         _candidate_table(0.0)
+
+
+def test_twist_candidate_order_prefers_shallow_depth_and_keeps_roll():
+    from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+        _candidate_order,
+    )
+
+    table = _candidate_table(0.00625)
+    scores = {
+        2: (1.0, 0.4, 0.02, 2.0),
+        6: (0.0, 0.0, 0.0, 0.0),
+        10: (0.0, 0.0, 0.0, 0.0),
+        8: (0.0, 0.0, 0.0, 0.0),
+    }
+    assert _candidate_order(table, scores) == (2, 6, 10)
+
+
+def test_twist_candidate_order_skips_unreachable_depths_without_changing_roll():
+    from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+        _candidate_order,
+    )
+
+    table = _candidate_table(0.00625)
+    assert _candidate_order(
+        table, {6: (0.0, 0.0, 0.0, 0.0), 10: (0.0, 0.0, 0.0, 0.0)}
+    ) == (6, 10)
+    assert _candidate_order(table, {}) == ()
+
+
+def test_twist_fixed_roll_keeps_exactly_three_final_depths():
+    bite, roll = 0.00625, -math.pi / 2
+    table = _candidate_table(bite, fixed_roll=roll)
+    assert len(table) == 3
+    assert all(angle == roll for _, angle, _ in table)
+    assert [bite + shift for _, _, shift in table] == pytest.approx(
+        [bite / 3, 2 * bite / 3, bite]
+    )
+
+
+def test_twist_fixed_roll_is_a_fingerprinted_route_value(knob_scene):
+    payload = discover_twist(knob_scene.articulations[0], 90).payload()
+    payload["fixed_roll"] = -math.pi / 2
+    route = TwistRoute.decode(payload)
+    assert route.fixed_roll == -math.pi / 2
+    assert TwistRoute.decode(json.loads(json.dumps(route.payload()))) == route
+
+
+@pytest.mark.parametrize("roll", [True, float("nan"), math.pi + 0.01])
+def test_twist_fixed_roll_rejects_invalid_values(knob_scene, roll):
+    payload = discover_twist(knob_scene.articulations[0], 90).payload()
+    payload["fixed_roll"] = roll
+    with pytest.raises(ValueError):
+        TwistRoute.decode(payload)
 
 
 def test_twist_candidate_fallback_is_bounded_until_contact_locks_pose():
@@ -251,7 +305,9 @@ def test_twist_live_lowerer_types_match_their_factory_contracts(knob_scene):
             root_props=SimpleNamespace(fixed_base=True),
         ),
     )
-    sim = SimpleNamespace(num_envs=1, get_articulation=lambda uid: art)
+    sim = SimpleNamespace(
+        num_envs=1, get_articulation=lambda uid: art, get_sensor=lambda uid: None
+    )
     registry = SimpleNamespace(
         lookup=lambda *a, **kw: SimpleNamespace(
             parent=SceneArticulationRef(config["uid"]), native_name=route.binding.link
@@ -566,7 +622,7 @@ def test_e8_rejects_mixed_recipe_without_changing_shared_policy(knob_scene):
         twist_binding.graph_routes(value, knob_scene)
 
 
-def test_twist_coarse_contact_does_not_accept_wrong_direction():
+def test_twist_coarse_contact_reports_wrong_direction_without_rejecting():
     route = SimpleNamespace(
         binding=SimpleNamespace(target_qpos=1.0, limits=(-2.0, 2.0))
     )
@@ -577,9 +633,9 @@ def test_twist_coarse_contact_does_not_accept_wrong_direction():
         PressSample(0.3, 1.0, "cleanup", False),
     ]
     result = evaluate_twist(route, samples, final_qpos=1.0)
-    assert not result["accepted"]
+    assert result["accepted"]
     assert result["coarse_turn_reached"]
-    assert result["reason"] == "direction_not_confirmed"
+    assert result["reason"] == "coarse_turn_reached"
     assert result["contact_travel"] == pytest.approx(0.0)
     assert result["directional_travel_required"] == pytest.approx(0.2617993878)
 
@@ -622,8 +678,8 @@ def test_twist_evidence_ablation(knob_scene, variant):
         samples = [replace(s, qpos=s.qpos * 0.1) for s in samples]
         final = target * 0.1
     result = evaluate_twist(route, samples, final_qpos=final)
-    assert result["accepted"] is (variant == "positive")
-    assert result["criterion"] == "qpos_converged_with_contact"
+    assert result["accepted"] is (variant in {"positive", "rebound"})
+    assert result["criterion"] == "contact_backed_coarse_turn"
     assert result["coarse_turn_reached"] is (variant in {"positive", "rebound"})
     if variant == "wrong_direction":
         assert result["reason"] == "joint_out_of_bounds"

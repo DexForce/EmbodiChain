@@ -307,6 +307,7 @@ def execute_bundle(
                                     {
                                         "table_actor_id": sensor.table_actor,
                                         "startup_evidence": sensor.startup_evidence(),
+                                        "geometry_evidence": sensor.geometry_evidence(),
                                     }
                                     if twist_routes
                                     else {}

@@ -20,9 +20,11 @@ from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 
+from embodichain.gen_sim.task_engine._task_program import twist_runtime
 from embodichain.gen_sim.task_engine._task_program.twist_binding import (
     KnobBinding,
     TwistRoute,
@@ -66,13 +68,10 @@ class _Robot:
             }
         )
 
-    def get_link_vert_face(self, name: str) -> tuple[torch.Tensor, torch.Tensor]:
-        return (
-            torch.tensor(
-                [(-PAD_HALF_WIDTH, 0.0, 0.0), (PAD_HALF_WIDTH, 0.0, PAD_HEIGHT)],
-                dtype=torch.float64,
-            ),
-            torch.empty((0, 3), dtype=torch.long),
+    def collision_points(self, name: str) -> torch.Tensor:
+        return torch.tensor(
+            [(-PAD_HALF_WIDTH, 0.0, 0.0), (PAD_HALF_WIDTH, 0.0, PAD_HEIGHT)],
+            dtype=torch.float64,
         )
 
     def compute_fk(
@@ -89,6 +88,18 @@ class _Robot:
 
     def get_link_physical_attr(self, names: list[str]) -> list[SimpleNamespace]:
         return [SimpleNamespace(rest_offset=REST_OFFSET) for _ in names]
+
+
+@pytest.fixture(autouse=True)
+def collision_inputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Aperture tests isolate the jaw/FK calculation from source-file loading.
+    monkeypatch.setattr(
+        twist_runtime,
+        "_robot_collision_points",
+        lambda robot, names: {
+            name: robot.collision_points(name).tolist() for name in names
+        },
+    )
 
 
 def _fixture() -> tuple[_Robot, SimpleNamespace, SimpleNamespace]:
@@ -206,11 +217,24 @@ def test_lowerer_overrides_only_invocation_grasp_without_mutating_defaults() -> 
     )
     lowerer = object.__new__(_TwistLowerer)
     lowerer.route, lowerer.robot, lowerer.joint_index = route, robot, 0
+    grip_vertices = np.frombuffer(
+        np.asarray(
+            [[-width / 2, 0, 0], [width / 2, 0, 0.0075]], dtype=np.float64
+        ).tobytes(),
+        dtype=np.float64,
+    ).reshape(-1, 3)
+    parent_vertices = np.frombuffer(
+        np.asarray([[-0.1, -0.1, -0.01], [0.1, 0.1, 0]], dtype=np.float64).tobytes(),
+        dtype=np.float64,
+    ).reshape(-1, 3)
+    lowerer.geometry = SimpleNamespace(
+        grip=SimpleNamespace(vertices=grip_vertices),
+        parent_collisions=(SimpleNamespace(vertices=parent_vertices),),
+    )
     lowerer.art = SimpleNamespace(
         get_qpos=lambda: torch.zeros((1, 1)),
         get_link_physical_attr=lambda name: [SimpleNamespace(rest_offset=REST_OFFSET)],
         get_link_pose=lambda name, to_matrix: torch.eye(4).unsqueeze(0),
-        get_link_vert_face=robot.get_link_vert_face,
     )
     options = TwistOptions()
     original_options = asdict(options)

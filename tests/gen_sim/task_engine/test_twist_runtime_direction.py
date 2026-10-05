@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import math
-from dataclasses import make_dataclass
+from dataclasses import make_dataclass, replace
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -36,6 +37,113 @@ from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
 TARGET_ANGLE = math.pi / 2.0
 CHUNK_TRAVEL = math.radians(6.0)
 CHUNK_COUNT = 5
+
+
+def test_twist_port_delegates_non_e8_policy_without_reading_robot():
+    command = torch.tensor([[0.3]])
+    delegate = SimpleNamespace(
+        validate_policy=Mock(), actions=Mock(return_value=iter([command]))
+    )
+    port = object.__new__(TwistAcceptancePort)
+    port.delegate = delegate
+    port.route = SimpleNamespace(preset=lambda phase: f"e8_{phase}")
+    port.robot = SimpleNamespace(get_qpos=Mock(side_effect=AssertionError))
+    policy = SimpleNamespace(cfg=SimpleNamespace(preset="unrelated_policy"))
+    segment, mask = object(), torch.tensor([True])
+    result = list(port.actions(policy, segment=segment, active_mask=mask))
+    assert result[0] is command
+    delegate.validate_policy.assert_called_once_with(policy, segment=segment)
+    delegate.actions.assert_called_once_with(policy, segment=segment, active_mask=mask)
+    port.robot.get_qpos.assert_not_called()
+
+
+def test_failed_depth_plans_do_not_fall_back_to_unrequested_base_bite(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import twist_runtime
+    from embodichain.lab.sim.atomic_actions import Twist
+
+    request_type = make_dataclass(
+        "DepthRequest", [("goal", object), ("skill_options", object)]
+    )
+    geometry = {
+        "gen_sim_twist_angle": 0.1,
+        "gen_sim_twist_measured_qpos": 0.0,
+        "gen_sim_twist_target_qpos": 1.0,
+        "gen_sim_twist_axis_sign": 1.0,
+        "gen_sim_twist_chunk_angle": 0.1,
+        "gen_sim_twist_grip_depth": 0.0125,
+        "gen_sim_twist_bite_depth": 0.00625,
+    }
+    request = request_type(
+        SimpleNamespace(semantics=SimpleNamespace(geometry=geometry), marker=0.0),
+        TwistOptions(),
+    )
+    calls = []
+
+    def candidate(request, roll, shift):
+        return replace(
+            request,
+            goal=SimpleNamespace(semantics=request.goal.semantics, marker=shift),
+        )
+
+    def plan(self, request, context):
+        calls.append(request.goal.marker)
+        return SimpleNamespace(
+            plan_success=torch.tensor([False]),
+            diagnostics=None,
+            marker=request.goal.marker,
+        )
+
+    monkeypatch.setattr(GenSimTwist, "_candidate_request", staticmethod(candidate))
+    monkeypatch.setattr(Twist, "_plan", plan)
+    action = object.__new__(GenSimTwist)
+    token = twist_runtime._CANDIDATE_STATE.set(_TwistCandidateState())
+    try:
+        result = action._plan(request, SimpleNamespace())
+    finally:
+        twist_runtime._CANDIDATE_STATE.reset(token)
+    assert len(calls) == 12
+    assert result.marker == pytest.approx(-2 * 0.00625 / 3)
+
+
+def test_depth_candidate_tcp_compensation_produces_the_requested_tip_depth():
+    from embodichain.lab.sim.atomic_actions import (
+        ObjectSemantics,
+        SceneEntityPose,
+        TwistAffordance,
+        TwistGoal,
+    )
+    from embodichain.gen_sim.task_engine._task_program.twist_runtime import (
+        _candidate_table,
+    )
+
+    outer, bite, tip_offset = 0.0125, 0.00625, 0.017
+    point = (0.0, 0.0, outer - bite + tip_offset)
+    goal = TwistGoal(
+        ObjectSemantics(
+            entity_id="control::knob",
+            geometry={
+                "gen_sim_twist_grasp_point": point,
+                "gen_sim_twist_outer_point": (0.0, 0.0, outer),
+                "gen_sim_twist_axis": (0.0, 0.0, -1.0),
+            },
+            affordance=TwistAffordance(
+                grasp_position=point,
+                axis_origin=(0.0, 0.0, 0.0),
+                twist_axis=torch.tensor([0.0, 0.0, -1.0]),
+                joint_name="axis",
+                joint_limits=(-1.0, 1.0),
+            ),
+        ),
+        SceneEntityPose("control::knob"),
+    )
+    request_type = make_dataclass("TipRequest", [("goal", object)])
+    request = request_type(goal)
+    for index, roll, shift in _candidate_table(bite):
+        candidate = GenSimTwist._candidate_request(request, roll, shift)
+        tcp_z = candidate.goal.semantics.affordance.grasp_position[2]
+        final_tip_depth = outer - (tcp_z - tip_offset)
+        assert final_tip_depth == pytest.approx(bite * (index // 4 + 1) / 3)
+        assert 0 < final_tip_depth <= bite + 1e-12
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
@@ -64,14 +172,15 @@ def test_twist_reads_latest_lowerer_measurement_before_symbolic_state():
     "final,velocity,clearance,released,valid,complete",
     [
         (-TARGET_ANGLE, 0.0, 0.1, True, True, True),
-        (-0.5, 0.0, 0.1, True, True, False),
-        (-TARGET_ANGLE, 1.0, 0.1, True, True, False),
-        (-TARGET_ANGLE, 0.0, 0.01, True, True, False),
-        (-TARGET_ANGLE, 0.0, 0.1, False, True, False),
+        (-0.5, 0.0, 0.1, True, True, True),
+        (-0.5, 0.0, 0.0, True, True, True),
+        (-TARGET_ANGLE, 1.0, 0.1, True, True, True),
+        (-TARGET_ANGLE, 0.0, 0.01, True, True, True),
+        (-TARGET_ANGLE, 0.0, 0.1, False, True, True),
         (-TARGET_ANGLE, 0.0, 0.1, True, False, False),
     ],
 )
-def test_goal_hold_requires_full_contact_release_acceptance(
+def test_coarse_goal_stops_turning_before_park_checks_release(
     final, velocity, clearance, released, valid, complete
 ):
     route = _route(-1.0)
@@ -89,13 +198,17 @@ def test_goal_hold_requires_full_contact_release_acceptance(
             get_qvel=lambda: torch.tensor([[velocity]]),
         ),
         joint_index=0,
+        other_qpos=torch.zeros(1, 1),
         samples=samples,
         trace=[{"parent_contact": False} for _ in samples],
         _sim=SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01)),
     )
     port = object.__new__(TwistAcceptancePort)
     port.route, port.sensor, port.dt = route, sensor, 0.04
-    port.robot = SimpleNamespace(get_qpos=lambda: torch.zeros(1, 2))
+    commanded = torch.full((1, 2), 0.2)
+    port.robot = SimpleNamespace(
+        get_qpos=lambda target=False: commanded.clone() if target else torch.zeros(1, 2)
+    )
     port._chunk_cursor = 0
     port._candidate_state = _TwistCandidateState()
     port._clearance = lambda: clearance
@@ -112,6 +225,52 @@ def test_goal_hold_requires_full_contact_release_acceptance(
         )
     )
     assert port._candidate_state.goal_complete is complete
+    if complete and released:
+        samples.extend(
+            PressSample(3.2 + index * 0.01, final, "cleanup", False, True)
+            for index in range(20)
+        )
+        sensor.trace.extend({"parent_contact": False} for _ in range(20))
+        hold_actions = list(
+            port.actions(
+                policy,
+                segment=SimpleNamespace(calls=[]),
+                active_mask=torch.tensor([True]),
+            )
+        )
+        assert sensor.acceptance["accepted"] is True
+        assert sensor.acceptance["early_stop"] is True
+        assert all(torch.equal(action, commanded) for action in hold_actions)
+    park_policy = SimpleNamespace(
+        cfg=SimpleNamespace(preset="turned", kind="wait_stable"),
+        entity=SimpleNamespace(entity_id="control"),
+    )
+    list(
+        port.actions(
+            park_policy,
+            segment=SimpleNamespace(calls=[]),
+            active_mask=torch.tensor([True]),
+        )
+    )
+    assert sensor.acceptance["accepted"] is bool(
+        complete and velocity == 0.0 and released
+    )
+    list(
+        port.actions(
+            park_policy,
+            segment=SimpleNamespace(
+                calls=[
+                    SimpleNamespace(
+                        call=SimpleNamespace(semantic_id="gen_sim.articulation_park")
+                    )
+                ]
+            ),
+            active_mask=torch.tensor([True]),
+        )
+    )
+    assert sensor.acceptance["accepted"] is bool(
+        complete and velocity == 0.0 and clearance >= 0.04 and released
+    )
     if complete:
         from embodichain.gen_sim.task_engine._task_program import twist_runtime
 
@@ -123,7 +282,7 @@ def test_goal_hold_requires_full_contact_release_acceptance(
                 semantics=SimpleNamespace(
                     geometry={
                         "gen_sim_twist_angle": 0.0,
-                        "gen_sim_twist_measured_qpos": -TARGET_ANGLE,
+                        "gen_sim_twist_measured_qpos": final,
                         "gen_sim_twist_target_qpos": -TARGET_ANGLE,
                         "gen_sim_twist_axis_sign": -1.0,
                     }
@@ -139,6 +298,7 @@ def test_goal_hold_requires_full_contact_release_acceptance(
         )
         action = SimpleNamespace(
             device=torch.device("cpu"),
+            robot=port.robot,
             _current_qpos=GenSimTwist._current_qpos,
             build_plan=lambda request, context, **kwargs: kwargs,
         )
@@ -149,6 +309,7 @@ def test_goal_hold_requires_full_contact_release_acceptance(
             twist_runtime._CANDIDATE_STATE.reset(token)
         assert plan["segment_lengths"] == {"approach": 1}
         assert plan["trajectory"].positions.shape == (1, 1, 2)
+        assert torch.equal(plan["trajectory"].positions[:, 0], commanded)
         assert not plan["expected_effects"].articulation_joint_updates
         assert not plan["expected_effects"].held_object_updates
     if not valid:
@@ -175,8 +336,9 @@ def test_twist_candidate_score_compares_arena_frames(monkeypatch) -> None:
     monkeypatch.setattr(twist_runtime, "resolve_pose_target", lambda *a, **kw: root)
     geometry = {
         "gen_sim_twist_arm": "left",
-        "gen_sim_twist_target_points": [[-0.02, 0, 0], [0.02, 0, 0]],
-        "gen_sim_twist_parent_points": [[1.0, 0, 0]],
+        "gen_sim_twist_grip_points": [[-0.02, 0, 0], [0.02, 0, 0]],
+        "gen_sim_twist_parent_collision_points": [[1.0, 0, 0]],
+        "gen_sim_twist_pad_collision_points": {name: [[0, 0, 0]] for name in names},
         "gen_sim_twist_target_to_parent": torch.eye(4).tolist(),
     }
     request = SimpleNamespace(
@@ -249,20 +411,20 @@ def test_disjoint_contact_chunks_accumulate_net_direction(direction: float) -> N
     assert result["uncontacted_reverse_travel"] == pytest.approx(0.0)
 
 
-def test_contact_oscillation_does_not_accumulate_direction() -> None:
+def test_coarse_contact_oscillation_counts_path_not_net_direction() -> None:
     states = [(0.0, False), (0.0, True)]
     states.extend([(CHUNK_TRAVEL, True), (0.0, True)] * CHUNK_COUNT)
     states.append((TARGET_ANGLE, False))
 
     result = evaluate_twist(_route(), _samples(states), final_qpos=TARGET_ANGLE)
 
-    assert not result["accepted"]
-    assert result["reason"] == "direction_not_confirmed"
+    assert result["accepted"]
+    assert result["reason"] == "coarse_turn_reached"
     assert result["contact_travel"] == pytest.approx(0.0)
     assert result["coarse_turn_reached"]
 
 
-def test_reverse_contact_chunks_cancel_forward_chunks() -> None:
+def test_coarse_reverse_contact_chunks_count_absolute_path() -> None:
     states = [(0.0, False)]
     for _ in range(CHUNK_COUNT):
         states.extend(
@@ -279,12 +441,12 @@ def test_reverse_contact_chunks_cancel_forward_chunks() -> None:
 
     result = evaluate_twist(_route(), _samples(states), final_qpos=TARGET_ANGLE)
 
-    assert not result["accepted"]
-    assert result["reason"] == "direction_not_confirmed"
+    assert result["accepted"]
+    assert result["reason"] == "coarse_turn_reached"
     assert result["signed_contact_travel"] == pytest.approx(0.0)
 
 
-def test_uncontacted_reversal_cancels_repeated_contact_excursions() -> None:
+def test_coarse_uncontacted_reversal_is_diagnostic_not_a_gate() -> None:
     states = [(0.0, False)]
     for _ in range(CHUNK_COUNT):
         states.extend(
@@ -294,8 +456,8 @@ def test_uncontacted_reversal_cancels_repeated_contact_excursions() -> None:
 
     result = evaluate_twist(_route(), _samples(states), final_qpos=TARGET_ANGLE)
 
-    assert not result["accepted"]
-    assert result["reason"] == "direction_not_confirmed"
+    assert result["accepted"]
+    assert result["reason"] == "coarse_turn_reached"
     assert result["signed_contact_travel"] == pytest.approx(CHUNK_COUNT * CHUNK_TRAVEL)
     assert result["uncontacted_reverse_travel"] == pytest.approx(
         CHUNK_COUNT * CHUNK_TRAVEL
@@ -317,7 +479,7 @@ def test_movement_between_isolated_contact_samples_earns_no_direction() -> None:
     result = evaluate_twist(_route(), _samples(states), final_qpos=TARGET_ANGLE)
 
     assert not result["accepted"]
-    assert result["reason"] == "direction_not_confirmed"
+    assert result["reason"] == "coarse_contact_travel_insufficient"
     assert result["contact_path"] == pytest.approx(0.0)
     assert result["contact_travel"] == pytest.approx(0.0)
 
@@ -331,7 +493,7 @@ def test_no_contact_target_motion_is_rejected() -> None:
     assert result["reason"] == "target_contact_missing"
 
 
-def test_contact_direction_does_not_replace_final_target_convergence() -> None:
+def test_coarse_contact_does_not_require_final_target_convergence() -> None:
     partial_angle = CHUNK_COUNT * CHUNK_TRAVEL
     samples = _samples(
         [(0.0, False), (0.0, True), (partial_angle, True), (partial_angle, False)]
@@ -339,6 +501,31 @@ def test_contact_direction_does_not_replace_final_target_convergence() -> None:
 
     result = evaluate_twist(_route(), samples, final_qpos=partial_angle)
 
-    assert not result["accepted"]
-    assert result["reason"] == "target_qpos_not_reached"
+    assert result["accepted"]
+    assert result["reason"] == "coarse_turn_reached"
     assert result["contact_travel"] > result["directional_travel_required"]
+    assert result["target_qpos_reached"] is False
+
+
+def test_coarse_contact_noise_cannot_accumulate_fifteen_degrees() -> None:
+    states = [(0.0, False), (0.0, True)]
+    states.extend([(math.radians(0.1), True), (0.0, True)] * 1000)
+    result = evaluate_twist(_route(), _samples(states), final_qpos=0.0)
+    assert not result["accepted"]
+    assert result["contact_path"] == 0.0
+    assert result["raw_contact_path"] > math.radians(15.0)
+
+
+def test_coarse_contact_small_substeps_accumulate_real_travel() -> None:
+    states = [(0.0, False)] + [
+        (math.radians(index * 0.1), True) for index in range(161)
+    ]
+    result = evaluate_twist(_route(), _samples(states), final_qpos=states[-1][0])
+    assert result["accepted"]
+    assert result["contact_path"] >= math.radians(15.0)
+
+
+def test_coarse_contact_exact_fifteen_degree_boundary() -> None:
+    states = [(0.0, False), (0.0, True), (math.radians(15.0), True)]
+    result = evaluate_twist(_route(), _samples(states), final_qpos=states[-1][0])
+    assert result["accepted"]
