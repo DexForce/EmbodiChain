@@ -1098,6 +1098,29 @@ def test_configured_handover_decodes_source_retreat_clearance() -> None:
     assert options.retreat_steps == 28
 
 
+@pytest.mark.parametrize("source_hold_mode", ["observed", "grasp_command"])
+def test_configured_handover_decodes_source_hold_mode(source_hold_mode: str) -> None:
+    """Configured profiles choose how an established source grasp is driven."""
+    options = _decode_action_options(
+        {"kind": "hand_over", "source_hold_mode": source_hold_mode},
+        path="policy.action_options.hand_over",
+    )
+
+    assert type(options) is HandOverOptions
+    assert options.source_hold_mode == source_hold_mode
+
+
+@pytest.mark.parametrize("source_hold_mode", [None, False, "unsupported"])
+def test_configured_handover_rejects_invalid_source_hold_mode(
+    source_hold_mode: object,
+) -> None:
+    with pytest.raises((TypeError, ValueError), match="source_hold_mode"):
+        _decode_action_options(
+            {"kind": "hand_over", "source_hold_mode": source_hold_mode},
+            path="policy.action_options.hand_over",
+        )
+
+
 def test_coordinated_transport_world_displacement_uses_fresh_object_pose() -> None:
     """A relative task motion keeps live orientation and robot-frame direction."""
     semantics = ObjectSemantics(
