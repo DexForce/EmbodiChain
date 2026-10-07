@@ -172,3 +172,38 @@ def test_complete_process_transport_overrides_dotenv(
     assert settings["api_key"] == "process-key"
     assert settings["base_url"] == "https://process.example/v1"
     assert settings["model"] == "process-model"
+
+
+@pytest.mark.parametrize("source", ["json", "LLM_MODEL"])
+def test_default_interpreter_uses_the_transport_model_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    import json
+
+    for name in (
+        "TASK_ENGINE_LLM_MODEL",
+        "ACTION_ENGINE_LLM_MODEL",
+        "OPENAI_MODEL",
+        "LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    config = tmp_path / "gen_config.json"
+    config.write_text(
+        json.dumps({"llm": {"openai_compatible": {"model": "configured-model"}}})
+    )
+    monkeypatch.setattr(interpretation_module, "_GEN_CONFIG_PATH", config)
+    monkeypatch.setattr(interpretation_module, "_load_local_env", lambda: {})
+    if source == "LLM_MODEL":
+        monkeypatch.setenv("LLM_MODEL", "configured-model")
+    selected = []
+
+    def caller(**kwargs):
+        selected.append(kwargs["model"])
+        return interpretation_module._instruction_shape_example()
+
+    monkeypatch.setattr(interpretation_module, "_default_instruction_caller", caller)
+    result = interpretation_module.interpret_instruction_draft("Move the cup.")
+    assert result.model == "configured-model"
+    assert selected == ["configured-model"]

@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 import trimesh
+import pytest
 
 from embodichain.gen_sim.task_engine.orchestration.source_scene import prepare_scene
 from embodichain.gen_sim.task_engine.orchestration.legacy_scene import (
@@ -107,7 +108,8 @@ def test_legacy_conversion_is_read_only_and_restores_locked_articulation(
     assert converted["format"] == "embodichain.scene-export/v1"
     assert converted["background"][0]["uid"] == "table"
     assert converted["rigid_object"][0]["uid"] == "can"
-    assert converted["articulation"][0]["uid"] == "cabinet"
+    assert converted["articulation"] == []
+    assert manifest["locked_articulations"][0]["uid"] == "cabinet"
     assert manifest["audit_hierarchy"] == "unknown"
     assert manifest["operational_hierarchy"] == "assumed_on_table"
     assert set(revision.locked_entity_uids) == {"table", "cabinet"}
@@ -162,3 +164,159 @@ def test_scene_identity_covers_transitive_urdf_meshes(tmp_path: Path) -> None:
     changed_fingerprint = fingerprint_scene_source(project)
     assert changed_fingerprint.asset_sha256 != original_fingerprint.asset_sha256
     assert scene_revision_id(project) != original_revision
+
+
+def test_converted_legacy_scene_round_trips_through_formal_edit_importer(
+    tmp_path: Path,
+) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+        SceneExportImporter,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+        SceneExporter,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+        resolve_source_scene,
+    )
+
+    project = _legacy_project(tmp_path)
+    original = fingerprint_scene_source(project)
+    before = prepare_scene(project)
+    revision = convert_legacy_gym_project(project, tmp_path / "revision")
+    imported, graph = SceneExportImporter(
+        output_root=revision.output_root
+    ).import_scene_and_graph()
+    assert {item.id for item in imported.objects} == {"table", "can"}
+    assert all(item.is_articulated is False for item in imported.objects)
+    SceneExporter(
+        scene=imported, scene_graph=graph, output_root=revision.output_root
+    ).export()
+    restored = restore_locked_scene_entities(revision.output_root)
+    resolve_source_scene(restored)  # Checks companion/runtime ID and label agreement.
+    after = prepare_scene(restored)
+    assert after.rigid_objects[0]["init_pos"] == pytest.approx(
+        before.rigid_objects[0]["init_pos"]
+    )
+    assert after.rigid_objects[0]["init_rot"] == pytest.approx(
+        before.rigid_objects[0]["init_rot"]
+    )
+    assert {item["uid"] for item in after.articulations} == {"cabinet"}
+    assert fingerprint_scene_source(project) == original
+
+
+def test_legacy_primitive_geometry_keeps_native_z_up_height(tmp_path: Path) -> None:
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+        SceneExportImporter,
+    )
+
+    source = tmp_path / "source.json"
+    source.write_text(
+        json.dumps(
+            {
+                "background": [
+                    {
+                        "uid": "table",
+                        "shape": {"shape_type": "Cube", "size": [1, 1, 0.1]},
+                        "init_pos": [0, 0, 0.5],
+                    }
+                ],
+                "rigid_object": [
+                    {
+                        "uid": "cube",
+                        "shape": {"shape_type": "Cube", "size": [0.05] * 3},
+                        "init_pos": [0.3, 0.4, 0.575],
+                    }
+                ],
+            }
+        )
+    )
+    revision = convert_legacy_gym_project(source, tmp_path / "revision")
+    SceneExportImporter(output_root=revision.output_root).import_scene_and_graph()
+    result = prepare_scene(revision.scene_config_path)
+    assert result.table_top_z == pytest.approx(0.55, abs=1e-6)
+    assert result.rigid_objects[0]["init_pos"] == pytest.approx([0.3, 0.4, 0.575])
+
+
+@pytest.mark.parametrize("scale", [[1.0, 1.0, 1.0], [1.0, 2.0, 3.0]])
+def test_legacy_edit_geometry_and_new_articulation_share_native_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scale: list[float],
+) -> None:
+    import numpy as np
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+        SceneExportImporter,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+        SceneExporter,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+        measure_scene_object_z_up_world_aabb,
+    )
+    from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+    from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraphNode
+    from embodichain.gen_sim.scene_engine.pipeline.utils import scene_exporter
+
+    source = tmp_path / "source.json"
+    source.write_text(
+        json.dumps(
+            {
+                "background": [
+                    {
+                        "uid": "table",
+                        "shape": {"shape_type": "Cube", "size": [1.0, 1.0, 0.1]},
+                        "init_pos": [0.0, 0.0, 0.5],
+                        "body_scale": scale,
+                    }
+                ],
+                "rigid_object": [
+                    {
+                        "uid": "cube",
+                        "shape": {"shape_type": "Cube", "size": [0.05] * 3},
+                        "init_pos": [0.3, 0.2, 0.7],
+                    }
+                ],
+            }
+        )
+    )
+    revision = convert_legacy_gym_project(source, tmp_path / "revision")
+    scene, graph = SceneExportImporter(
+        output_root=revision.output_root
+    ).import_scene_and_graph()
+    expected = np.array(
+        [
+            [-0.5 * scale[0], -0.5 * scale[1], 0.5 - 0.05 * scale[2]],
+            [0.5 * scale[0], 0.5 * scale[1], 0.5 + 0.05 * scale[2]],
+        ]
+    )
+    np.testing.assert_allclose(
+        measure_scene_object_z_up_world_aabb(scene_object=scene.table),
+        expected,
+        atol=1e-6,
+    )
+    assert scene.table.scale == [1.0, 1.0, 1.0]
+    addition = SceneObject(
+        "new_drawer",
+        "asset",
+        "drawer",
+        "drawer",
+        "A drawer.",
+        is_articulated=True,
+        articulated_usdc_path=str(tmp_path / "new.usdc"),
+        articulated_usdc_scale=[1.0] * 3,
+        pos=[0.0, 0.55, 0.0],
+        rot=[0.0] * 3,
+        scale=[1.0] * 3,
+    )
+    scene.objects.append(addition)
+    graph.nodes.append(SceneGraphNode("new_drawer", "table", "on"))
+    # Asset-root height is a separate tested contract; isolate support placement.
+    monkeypatch.setattr(scene_exporter, "_articulation_root_bottom_z", lambda *a: 0.0)
+    entry = SceneExporter(
+        scene=scene, scene_graph=graph, output_root=revision.output_root
+    )._articulation_config(
+        scene_object=addition,
+        articulated_relative_path="new.usdc",
+        proxy_glb_relative_path="proxy.glb",
+    )
+    assert entry["init_pos"][2] == pytest.approx(expected[1, 2] + 0.001, abs=1e-6)

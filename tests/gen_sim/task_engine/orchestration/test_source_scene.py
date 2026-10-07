@@ -518,3 +518,49 @@ def test_articulation_planner_view_keeps_native_geometry_and_pose():
     assert result["init_local_pose"] == pose
     result["init_local_pose"][0][3] = 99.0
     assert pose[0][3] == 0.2
+
+
+@pytest.mark.parametrize("rotation_degrees", [0.0, 90.0])
+def test_source_matrix_survives_normalization_and_world_rotation(
+    tmp_path: Path,
+    rotation_degrees: float,
+) -> None:
+    import numpy as np
+    from scipy.spatial.transform import Rotation
+    from embodichain.gen_sim.task_engine.task_program_bundle import _scene_payload
+
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_euler("xyz", [20, 30, 40], degrees=True).as_matrix()
+    pose[:3, 3] = [0.3, 0.4, 0.8]
+    path = tmp_path / "source.json"
+    path.write_text(
+        json.dumps(
+            {
+                "background": [
+                    {
+                        "uid": "table",
+                        "shape": {"shape_type": "Cube", "size": [1, 1, 0.1]},
+                    }
+                ],
+                "rigid_object": [
+                    {
+                        "uid": "cube",
+                        "shape": {"shape_type": "Cube", "size": [0.05] * 3},
+                        "init_local_pose": pose.tolist(),
+                        "init_pos": [9, 9, 9],
+                        "init_rot": [0, 0, 0],
+                    }
+                ],
+            }
+        )
+    )
+    scene = prepare_scene(path, z_rotation_degrees=rotation_degrees)
+    world = np.eye(4)
+    world[:3, :3] = Rotation.from_euler("z", rotation_degrees, degrees=True).as_matrix()
+    expected = world @ pose
+    np.testing.assert_allclose(scene.rigid_objects[0]["init_local_pose"], expected)
+    np.testing.assert_allclose(scene.planner_objects[1]["init_local_pose"], expected)
+    payload = _scene_payload(scene, program_id="probe")["simulation"]["rigid_object"][0]
+    np.testing.assert_allclose(payload["init_local_pose"], expected)
+    cfg = RigidObjectCfg.from_dict(payload)
+    np.testing.assert_allclose(cfg.init_local_pose, expected)

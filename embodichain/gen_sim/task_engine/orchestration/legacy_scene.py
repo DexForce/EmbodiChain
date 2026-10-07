@@ -30,7 +30,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import trimesh
 
-from .source_scene import prepare_scene, resolve_source_scene
+from embodichain.gen_sim.scene_engine.core.scene_object import SceneObject
+
+from .source_scene import _normalize_pose_fields, prepare_scene, resolve_source_scene
 
 from .scene_source import (
     SceneSourceFingerprint,
@@ -47,6 +49,14 @@ __all__ = [
 
 LEGACY_SCENE_CONVERSION_SCHEMA: Final = "embodichain.legacy-scene-conversion/v1"
 _CONVERSION_MANIFEST = "legacy_conversion.json"
+_Y_UP_TO_Z_UP = np.array(
+    [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -118,9 +128,12 @@ def convert_legacy_gym_project(
     scene_config = {
         "format": "embodichain.scene-export/v1",
         "scene_id": f"legacy-revision-{source_fingerprint.config_sha256[:16]}",
-        "background": background,
+        "world_alignment_applied": True,
+        "background": [table],
         "rigid_object": rigid_objects,
-        "articulation": articulations,
+        # Opaque native assets cannot enter the editable GLB/proxy importer.
+        # Restore them from the conversion manifest after scene editing.
+        "articulation": [],
     }
     scene_config_path = export_root / "scene_config.json"
     _write_json(scene_config_path, scene_config)
@@ -131,7 +144,7 @@ def convert_legacy_gym_project(
                 "parent_id": None,
                 "parent_relation": None,
                 "table_region": None,
-                "orientation_state": None,
+                "pose_description": None,
             },
             *[
                 {
@@ -139,7 +152,7 @@ def convert_legacy_gym_project(
                     "parent_id": "table",
                     "parent_relation": "on",
                     "table_region": None,
-                    "orientation_state": None,
+                    "pose_description": None,
                 }
                 for item in rigid_objects
             ],
@@ -155,6 +168,7 @@ def convert_legacy_gym_project(
         "schema_version": LEGACY_SCENE_CONVERSION_SCHEMA,
         "source": source_fingerprint.to_dict(),
         "scene_config": scene_config_path.as_posix(),
+        "world_alignment_applied": True,
         "audit_hierarchy": "unknown",
         "operational_hierarchy": "assumed_on_table",
         "assumptions": [
@@ -172,6 +186,14 @@ def convert_legacy_gym_project(
         "locked_background": deepcopy(
             [item for item in background if item.get("uid") != "table"]
         ),
+        "locked_scene_objects": [
+            _locked_scene_object(item, semantics=semantics, articulated=articulated)
+            for items, articulated in (
+                ([item for item in background if item.get("uid") != "table"], False),
+                (articulations, True),
+            )
+            for item in items
+        ],
     }
     manifest_path = destination / _CONVERSION_MANIFEST
     _write_json(manifest_path, manifest)
@@ -210,6 +232,13 @@ def restore_locked_scene_entities(revision_root: str | Path) -> Path:
         raise ValueError("Legacy conversion manifest schema is invalid.")
     config_path = root / "scene_export" / "scene_config.json"
     config = _read_mapping(config_path)
+    scene_json_path = config_path.with_name("scene.json")
+    if not scene_json_path.is_file():
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+            SceneExportImporter,
+        )
+
+        SceneExportImporter(output_root=root).import_scene()
     existing = {
         str(item.get("uid"))
         for section in ("background", "rigid_object", "articulation")
@@ -232,7 +261,42 @@ def restore_locked_scene_entities(revision_root: str | Path) -> Path:
             existing.add(uid)
             target.append(item)
         config[section] = target
+    config["world_alignment_applied"] = True
     _write_json(config_path, config)
+    scene_json = _read_mapping(scene_json_path)
+    scene_json["objects"].extend(deepcopy(manifest.get("locked_scene_objects", ())))
+    _write_json(scene_json_path, scene_json)
+    graph_path = config_path.with_name("scene_graph.json")
+    graph = _read_mapping(graph_path)
+    known = {item["object_id"] for item in graph["nodes"]}
+    for section, key in (
+        ("background", "locked_background"),
+        ("articulation", "locked_articulations"),
+    ):
+        for item in manifest.get(key, ()):
+            uid = str(item["uid"])
+            if uid not in known:
+                graph["nodes"].append(
+                    {
+                        "object_id": uid,
+                        "parent_id": "table",
+                        "parent_relation": "on",
+                        "table_region": None,
+                        "pose_description": None,
+                    }
+                )
+                known.add(uid)
+            manifest["assumptions"].append(
+                {
+                    "uid": uid,
+                    "relation": "on",
+                    "parent_uid": "table",
+                    "confidence": None,
+                    "source": "operational_assumption",
+                }
+            )
+    _write_json(graph_path, graph)
+    _write_json(manifest_path, manifest)
     verify_scene_source_fingerprint(manifest["source"])
     return config_path
 
@@ -255,36 +319,89 @@ def _editable_entry(
         raise ValueError(f"Legacy scene entity {uid!r} has no supported shape.")
     destination = assets_root / uid / f"{uid}.glb"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    _shape_to_glb(shape, destination)
+    _shape_to_glb(
+        shape, destination, _vector(item.get("body_scale", [1.0] * 3), length=3)
+    )
     item["shape"] = {
         "shape_type": "Mesh",
         "fpath": destination.relative_to(assets_root.parent).as_posix(),
         "compute_uv": False,
     }
-    item.setdefault("body_scale", [1.0, 1.0, 1.0])
+    item["body_scale"] = [1.0, 1.0, 1.0]
     item.setdefault("init_pos", [0.0, 0.0, 0.0])
     item.setdefault("init_rot", [0.0, 0.0, 0.0])
     item.setdefault("attrs", {"mass": 1.0})
     item.setdefault("body_type", "kinematic" if uid == "table" else "dynamic")
     item.setdefault("max_convex_hull_num", 1 if uid == "table" else 16)
+    item["is_articulated"] = False
     return item
 
 
-def _shape_to_glb(shape: Mapping[str, Any], destination: Path) -> None:
+def _locked_scene_object(
+    item: Mapping[str, Any],
+    *,
+    semantics: Mapping[str, Mapping[str, Any]],
+    articulated: bool,
+) -> dict[str, Any]:
+    item = deepcopy(dict(item))
+    _normalize_pose_fields(item)
+    uid = str(item["uid"])
+    semantic = semantics.get(uid, {})
+    basis = _Y_UP_TO_Z_UP[:3, :3]
+    rotation = Rotation.from_euler(
+        "XYZ", item.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+    ).as_matrix()
+    value = SceneObject(
+        id=uid,
+        kind="asset",
+        category=str(semantic.get("category") or uid),
+        name=str(semantic.get("name") or uid),
+        description=str(semantic.get("description") or uid),
+        is_articulated=articulated,
+        articulated_usdc_path=str(item["fpath"]) if articulated else None,
+        pos=(basis.T @ np.asarray(item.get("init_pos", [0.0, 0.0, 0.0]))).tolist(),
+        rot=Rotation.from_matrix(basis.T @ rotation @ basis)
+        .as_euler("xyz", degrees=True)
+        .tolist(),
+        scale=list(item.get("body_scale", [1.0, 1.0, 1.0])),
+        physics=None,
+    ).to_dict()
+    for key in ("name", "category", "description"):
+        if key in item:
+            value[key] = deepcopy(item[key])
+    return value
+
+
+def _shape_to_glb(
+    shape: Mapping[str, Any],
+    destination: Path,
+    body_scale: Sequence[float],
+) -> None:
     shape_type = str(shape.get("shape_type", ""))
     if shape_type == "Mesh":
         source = Path(str(shape.get("fpath", ""))).expanduser().resolve()
         if not source.is_file():
             raise FileNotFoundError(f"Legacy mesh asset not found: {source}")
+        if source.suffix.lower() in {".glb", ".gltf"}:
+            from .scene_assets import _bake_glb
+
+            _bake_glb(source, destination, list(body_scale))
+            return
         mesh = trimesh.load(source, force="scene")
+        mesh.apply_scale(body_scale)
+        mesh.apply_transform(_Y_UP_TO_Z_UP.T)
     elif shape_type == "Cube":
         size = _vector(shape.get("size", [1.0, 1.0, 1.0]), length=3)
         mesh = trimesh.Scene(trimesh.creation.box(extents=size))
+        mesh.apply_scale(body_scale)
+        mesh.apply_transform(_Y_UP_TO_Z_UP.T)
     elif shape_type == "Sphere":
         radius = float(shape.get("radius", 1.0))
         if not np.isfinite(radius) or radius <= 0.0:
             raise ValueError("Legacy sphere radius must be positive and finite.")
         mesh = trimesh.Scene(trimesh.creation.icosphere(radius=radius))
+        mesh.apply_scale(body_scale)
+        mesh.apply_transform(_Y_UP_TO_Z_UP.T)
     else:
         raise ValueError(f"Unsupported legacy shape_type {shape_type!r}.")
     mesh.export(destination, file_type="glb")
@@ -311,7 +428,8 @@ def _locked_articulation(
 
 def _measure_support_metadata(entry: dict[str, Any], *, export_root: Path) -> None:
     bounds = _world_bounds(entry, export_root=export_root)
-    entry["support_surface_z"] = float(bounds[1, 2])
+    # Copied geometry is at unit scale; metadata is local to its root.
+    entry["support_surface_z"] = float(bounds[1, 2] - entry["init_pos"][2])
     rectangle = [
         [float(bounds[0, 0]), float(bounds[0, 1])],
         [float(bounds[1, 0]), float(bounds[0, 1])],
@@ -339,6 +457,7 @@ def _world_bounds(entry: Mapping[str, Any], *, export_root: Path) -> np.ndarray:
     mesh_path = (export_root / str(shape["fpath"])).resolve()
     loaded = trimesh.load(mesh_path, force="scene")
     mesh = loaded.to_geometry()
+    mesh.apply_transform(_Y_UP_TO_Z_UP)
     scale = np.asarray(_vector(entry.get("body_scale", [1.0] * 3), length=3))
     mesh.apply_scale(scale)
     transform = np.eye(4)

@@ -106,7 +106,9 @@ def render_semantic_task_graph_png(
         if execution_report is None
         else validate_execution_report(execution_report)
     )
-    statuses = _runtime_statuses(selected, report)
+    statuses = _runtime_statuses(
+        selected, report, use_semantic_acceptance=view == "groups"
+    )
     if view == "groups":
         return _render_groups(selected, statuses)
     return _render_calls(selected, statuses)
@@ -144,6 +146,8 @@ def write_semantic_task_graph_png(
 def _runtime_statuses(
     graph: SemanticTaskGraph,
     report: Mapping[str, Any] | None,
+    *,
+    use_semantic_acceptance: bool = True,
 ) -> dict[str, str]:
     statuses = {str(node["id"]): "unknown" for node in graph["nodes"]}
     if report is None:
@@ -171,6 +175,26 @@ def _runtime_statuses(
             statuses[segment_id] = (
                 "success" if segment.get("success") is True else "failed"
             )
+    if use_semantic_acceptance:
+        environments = report.get("environments", ())
+        for group in graph["task_groups"]:
+            accepted = [
+                item.get("semantic_success", {}).get(str(group["id"]))
+                for item in environments
+                if isinstance(item, Mapping)
+                and isinstance(item.get("semantic_success"), Mapping)
+            ]
+            if not accepted:
+                continue
+            outcome = (
+                "failed"
+                if any(value is False for value in accepted)
+                else (
+                    "success" if all(value is True for value in accepted) else "unknown"
+                )
+            )
+            for node_id in group["node_ids"]:
+                statuses[str(node_id)] = outcome
     return statuses
 
 

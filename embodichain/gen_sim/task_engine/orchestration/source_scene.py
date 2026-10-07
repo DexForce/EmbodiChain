@@ -358,7 +358,9 @@ def prepare_scene(
             float(value) for value in source_scene_xy_translation
         )
     elif source_has_robot and source_table is not None:
-        table_anchor = _vector3(source_table.get("init_pos", (0.0, 0.0, 0.0)))
+        normalized_table = deepcopy(source_table)
+        _normalize_pose_fields(normalized_table)
+        table_anchor = normalized_table["init_pos"]
         resolved_xy_translation = (-table_anchor[0], -table_anchor[1])
     else:
         resolved_xy_translation = (0.0, 0.0)
@@ -381,6 +383,9 @@ def prepare_scene(
         _normalize_pose_fields(normalized)
         normalized["init_pos"][0] += resolved_xy_translation[0]
         normalized["init_pos"][1] += resolved_xy_translation[1]
+        if normalized.get("init_local_pose") is not None:
+            for axis in (0, 1):
+                normalized["init_local_pose"][axis][3] = normalized["init_pos"][axis]
         _apply_body_scale_policy(
             normalized,
             policy=scale_policy,
@@ -502,10 +507,13 @@ def _classify_source_config(path: Path) -> ResolvedSceneSource:
                 f"expected {_SCENE_EXPORT_FORMAT!r}."
             )
         _validate_export_companion_ids(path, source)
+        alignment_applied = source.get("world_alignment_applied", False)
+        if not isinstance(alignment_applied, bool):
+            raise ValueError("Scene export world_alignment_applied must be a boolean.")
         return ResolvedSceneSource(
             path=path,
             source_format=_SCENE_EXPORT_FORMAT,
-            is_prompt2scene=True,
+            is_prompt2scene=not alignment_applied,
         )
     return ResolvedSceneSource(
         path=path,
@@ -654,8 +662,31 @@ def _resolve_asset_path(scene_dir: Path, fpath: str) -> Path:
 
 
 def _normalize_pose_fields(config: dict[str, Any]) -> None:
-    config["init_pos"] = _vector3(config.get("init_pos", [0.0, 0.0, 0.0]))
-    config["init_rot"] = _vector3(config.get("init_rot", [0.0, 0.0, 0.0]))
+    if config.get("init_local_pose") is not None:
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+
+        pose = np.asarray(config["init_local_pose"], dtype=float)
+        if (
+            pose.shape != (4, 4)
+            or not np.isfinite(pose).all()
+            or not np.allclose(pose[3], [0.0, 0.0, 0.0, 1.0], atol=1e-6)
+            or not np.allclose(pose[:3, :3].T @ pose[:3, :3], np.eye(3), atol=1e-6)
+            or not np.isclose(np.linalg.det(pose[:3, :3]), 1.0, atol=1e-6)
+        ):
+            raise ValueError("init_local_pose must be a finite rigid 4x4 pose.")
+        config["init_local_pose"] = pose.tolist()
+        config["init_pos"] = pose[:3, 3].tolist()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Gimbal lock detected")
+            config["init_rot"] = (
+                Rotation.from_matrix(pose[:3, :3])
+                .as_euler("XYZ", degrees=True)
+                .tolist()
+            )
+    else:
+        config["init_pos"] = _vector3(config.get("init_pos", [0.0, 0.0, 0.0]))
+        config["init_rot"] = _vector3(config.get("init_rot", [0.0, 0.0, 0.0]))
     if "body_scale" in config:
         scale = _vector3(config["body_scale"])
         if any(value <= 0.0 for value in scale):
@@ -710,10 +741,13 @@ def _apply_world_z_rotation(config: dict[str, Any], degrees: float) -> None:
         warnings.filterwarnings("ignore", message="Gimbal lock detected")
         rotated = (world_z * original).as_euler("XYZ", degrees=True)
     config["init_rot"] = [_clean_float(value) for value in rotated]
-    if "init_local_pose" in config:
-        # Keeping two pose representations risks the stale local matrix
-        # overriding the rotated Euler pose in ObjectBaseCfg.from_dict.
-        del config["init_local_pose"]
+    if config.get("init_local_pose") is not None:
+        import numpy as np
+
+        pose = np.asarray(config["init_local_pose"], dtype=float).copy()
+        pose[:3, :3] = world_z.as_matrix() @ pose[:3, :3]
+        pose[:3, 3] = config["init_pos"]
+        config["init_local_pose"] = pose.tolist()
 
 
 def _planner_object(
@@ -748,7 +782,7 @@ def _planner_object(
         **({"fpath": config["fpath"]} if role == "articulation" else {}),
         **(
             {"init_local_pose": deepcopy(config["init_local_pose"])}
-            if role == "articulation" and config.get("init_local_pose") is not None
+            if config.get("init_local_pose") is not None
             else {}
         ),
         "init_pos": list(config["init_pos"]),
@@ -868,6 +902,7 @@ def _runtime_object(config: Mapping[str, Any], *, role: str) -> dict[str, Any]:
             "shape",
             "init_pos",
             "init_rot",
+            "init_local_pose",
             "body_scale",
         )
         if key in config

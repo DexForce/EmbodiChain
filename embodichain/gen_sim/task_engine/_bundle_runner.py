@@ -706,9 +706,7 @@ def _runner_parser() -> argparse.ArgumentParser:
     add_env_launcher_args_to_parser(parser, require_gym_config=False)
     parser.set_defaults(seed=0)
     parser.add_argument("--plan-probe-only", action="store_true")
-    parser.add_argument(
-        "--failure-policy", choices=("stop", "continue"), default="stop"
-    )
+    parser.add_argument("--failure-policy", choices=("stop",), default="stop")
     return parser
 
 

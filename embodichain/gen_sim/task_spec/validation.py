@@ -29,7 +29,7 @@ from .expressions import (
     evaluate_predicate,
     evaluate_temporal_condition,
 )
-from .spec import TaskSpec
+from .spec import MilestoneSpec, TaskSpec
 
 __all__ = [
     "EvaluationReport",
@@ -64,13 +64,14 @@ class TaskSpecValidationError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class EvaluationReport:
-    """Complete evaluation of init, goal, invariants, and temporal checks."""
+    """Evaluation of snapshot checks, temporal windows, and ordered milestones."""
 
     status: EvaluationStatus
     init: tuple[PredicateEvaluation, ...]
     goal: tuple[PredicateEvaluation, ...]
     invariants: tuple[PredicateEvaluation, ...]
     temporal: tuple[PredicateEvaluation, ...]
+    milestones: tuple[PredicateEvaluation, ...] = ()
 
     @property
     def certificate_ready(self) -> bool:
@@ -86,6 +87,7 @@ class EvaluationReport:
             "goal": [item.to_dict() for item in self.goal],
             "invariants": [item.to_dict() for item in self.invariants],
             "temporal": [item.to_dict() for item in self.temporal],
+            "milestones": [item.to_dict() for item in self.milestones],
         }
 
 
@@ -98,7 +100,7 @@ def validate_task_spec(
 
     Args:
         value: Dataclass or JSON mapping to validate.
-        require_observations: Require every goal, invariant, and temporal
+        require_observations: Require every goal, invariant, temporal, and milestone
             predicate to declare a runtime observation key.
 
     Returns:
@@ -115,15 +117,24 @@ def validate_task_spec(
         if not template.goal:
             raise ValueError("TaskSpec.goal must contain at least one predicate.")
         if require_observations:
-            missing = [
-                item.predicate_id or item.name
-                for item in (*template.goal, *template.invariants)
-                if item.observation is None
-            ] + [
-                item.condition_id or item.predicate.name
-                for item in template.temporal
-                if item.predicate.observation is None
-            ]
+            missing = (
+                [
+                    item.predicate_id or item.name
+                    for item in (*template.goal, *template.invariants)
+                    if item.observation is None
+                ]
+                + [
+                    item.condition_id or item.predicate.name
+                    for item in template.temporal
+                    if item.predicate.observation is None
+                ]
+                + [
+                    f"milestone.{milestone.id}.{item.predicate_id or item.name}"
+                    for milestone in template.milestones
+                    for item in milestone.achieve
+                    if item.observation is None
+                ]
+            )
             if missing:
                 raise ValueError(
                     "TaskSpec predicates require observation keys: "
@@ -147,8 +158,9 @@ def evaluate_task_spec(
     An adapter may provide section-specific mappings under ``init``, ``goal``,
     and ``invariants``.  When absent, the supplied mapping is used for all
     snapshot predicates.  Temporal conditions use ``trajectory`` or an
-    explicit ``observations['trajectory']`` sequence.  Missing measurements are
-    reported as ``unavailable`` and never treated as success.
+    explicit ``observations['trajectory']`` sequence. Milestones require all
+    achievement predicates at one snapshot strictly after their predecessors.
+    Missing measurements are reported as ``unavailable`` and never treated as success.
     """
     normalized = TaskSpec.from_dict(template)
     validate_task_spec(normalized)
@@ -192,14 +204,99 @@ def evaluate_task_spec(
             evaluate_temporal_condition(item, temporal_source)
             for item in normalized.temporal
         )
-    status = _aggregate_status((*init, *goal, *invariants, *temporal))
+    milestones = _evaluate_milestones(normalized.milestones, temporal_source)
+    status = _aggregate_status((*init, *goal, *invariants, *temporal, *milestones))
     return EvaluationReport(
         status=status,
         init=init,
         goal=goal,
         invariants=invariants,
         temporal=temporal,
+        milestones=milestones,
     )
+
+
+def _evaluate_milestones(
+    milestones: Sequence[MilestoneSpec],
+    trajectory: Sequence[Mapping[str, Any]] | None,
+) -> tuple[PredicateEvaluation, ...]:
+    if not milestones:
+        return ()
+    if trajectory is not None and (
+        not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes))
+    ):
+        raise TypeError("trajectory must be a sequence of observation mappings.")
+    snapshots = () if trajectory is None else trajectory
+    by_id = {item.id: item for item in milestones}
+    results: dict[str, PredicateEvaluation] = {}
+    achieved_at: dict[str, int] = {}
+
+    def evaluate(milestone_id: str) -> PredicateEvaluation:
+        if milestone_id in results:
+            return results[milestone_id]
+        milestone = by_id[milestone_id]
+        predecessors = [evaluate(item) for item in milestone.after]
+        status = EvaluationStatus.UNAVAILABLE
+        reason = "no trajectory evidence was supplied for milestone"
+        observed: dict[str, Any] | None = None
+        evidence_refs: tuple[str, ...] = ()
+        if any(item.status is not EvaluationStatus.SATISFIED for item in predecessors):
+            reason = "milestone predecessors have not been verified"
+        else:
+            start = max((achieved_at[item] + 1 for item in milestone.after), default=0)
+            statuses = []
+            for step in range(start, len(snapshots)):
+                checks = tuple(
+                    evaluate_predicate(
+                        predicate,
+                        snapshots[step],
+                        predicate_id=predicate.predicate_id
+                        or f"{milestone_id}.{index}",
+                    )
+                    for index, predicate in enumerate(milestone.achieve)
+                )
+                frame_status = _aggregate_status(checks)
+                statuses.append(frame_status)
+                observed = {
+                    "step": step,
+                    "predicates": [item.to_dict() for item in checks],
+                }
+                evidence_refs = tuple(
+                    ref for item in checks for ref in item.evidence_refs
+                )
+                if frame_status is EvaluationStatus.SATISFIED:
+                    achieved_at[milestone_id] = step
+                    status = EvaluationStatus.SATISFIED
+                    reason = f"milestone achieved at step {step}"
+                    break
+            else:
+                if statuses:
+                    status = next(
+                        (
+                            item
+                            for item in (
+                                EvaluationStatus.UNAVAILABLE,
+                                EvaluationStatus.UNKNOWN,
+                                EvaluationStatus.NOT_RUN,
+                            )
+                            if item in statuses
+                        ),
+                        EvaluationStatus.FAILED,
+                    )
+                    reason = "milestone was not verified after its predecessors"
+        result = PredicateEvaluation(
+            predicate_id=f"milestone:{milestone_id}",
+            predicate="semantic_goal",
+            status=status,
+            observed=observed,
+            expected=True,
+            reason=reason,
+            evidence_refs=evidence_refs,
+        )
+        results[milestone_id] = result
+        return result
+
+    return tuple(evaluate(item.id) for item in milestones)
 
 
 # Deprecated spellings kept for one transition release.

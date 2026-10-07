@@ -295,3 +295,160 @@ def test_final_inspection_rejects_scene_changed_after_revision(tmp_path: Path) -
 
     with pytest.raises(RuntimeError, match="changed before geometry inspection"):
         backend.inspect(revision, tmp_path / "inspection.json")
+
+
+def test_image_blueprint_preserves_articulation_role(tmp_path: Path) -> None:
+    scene = Scene(
+        objects=[
+            SceneObject("table", "table", "table", "table", "A table."),
+            SceneObject(
+                "drawer", "asset", "drawer", "drawer", "A drawer.", is_articulated=True
+            ),
+        ]
+    )
+    package = SceneBlueprintPackage(
+        schema_version=SCENE_BLUEPRINT_SCHEMA,
+        blueprint_id="test",
+        image_path=tmp_path / "input.png",
+        output_root=tmp_path,
+        manifest_path=tmp_path / "blueprint.json",
+        scene=scene,
+        scene_graph=SceneGraph(
+            nodes=[
+                SceneGraphNode("table", None),
+                SceneGraphNode("drawer", "table", "on"),
+            ]
+        ),
+    )
+    objects = scene_blueprint_objects(package)
+    from embodichain.gen_sim.task_engine.orchestration.scene_inventory import (
+        SceneInventory,
+        validate_source_compatibility,
+    )
+
+    inventory = SceneInventory(objects, robot_profile="dual_franka")
+    validate_source_compatibility("E6", [inventory.by_uid["drawer"]])
+    assert inventory.by_uid["drawer"].role == "articulation"
+
+
+@pytest.mark.parametrize("has_companion", [False, True])
+@pytest.mark.parametrize("edit", ["delete", "reparent"])
+def test_scene_edit_restores_locked_ids_and_discards_deleted_planar_edges(
+    tmp_path: Path,
+    has_companion: bool,
+    edit: str,
+) -> None:
+    import trimesh
+    from embodichain.gen_sim.scene_engine.core.scene_graph import SceneGraphRelation
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+        SceneExportImporter,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_exporter import (
+        SceneExporter,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.source_scene import (
+        resolve_source_scene,
+    )
+    from embodichain.gen_sim.task_engine.orchestration.scene_source import (
+        fingerprint_scene_source,
+    )
+
+    source = tmp_path / "source" / "scene_export"
+    assets = source / "mesh_assets"
+    assets.mkdir(parents=True)
+    for uid in ("table", "cup", "bowl"):
+        (assets / uid).mkdir()
+        trimesh.creation.box(extents=[0.2, 0.1, 0.2]).export(
+            assets / uid / f"{uid}.glb"
+        )
+    # Restoration treats this native file as opaque; qualification is later.
+    (source / "cabinet.usdc").write_bytes(b"opaque-native-asset")
+
+    def entry(uid):
+        return {
+            "uid": uid,
+            "name": uid,
+            "category": uid,
+            "description": uid,
+            "is_articulated": False,
+            "shape": {"shape_type": "Mesh", "fpath": f"mesh_assets/{uid}/{uid}.glb"},
+            "init_pos": [0.0, 0.0, 0.0],
+            "init_rot": [0.0, 0.0, 0.0],
+            "body_scale": [1.0] * 3,
+        }
+
+    config = {
+        "format": "embodichain.scene-export/v1",
+        "world_alignment_applied": True,
+        "background": [entry("table")],
+        "rigid_object": [entry("cup"), entry("bowl")],
+        "articulation": [
+            {
+                "uid": "cabinet",
+                "name": "cabinet",
+                "category": "cabinet",
+                "description": "cabinet",
+                "is_articulated": True,
+                "fpath": "cabinet.usdc",
+                "init_pos": [0.3, 0.2, 0.5],
+                "init_rot": [0.0] * 3,
+                "body_scale": [1.0] * 3,
+            }
+        ],
+    }
+    path = source / "scene_config.json"
+    path.write_text(json.dumps(config))
+    graph = SceneGraph(
+        nodes=[
+            SceneGraphNode("table", None),
+            SceneGraphNode("cup", "table", "on"),
+            SceneGraphNode("bowl", "table", "on"),
+            SceneGraphNode("cabinet", "table", "on"),
+        ],
+        relations=[SceneGraphRelation("cup", "left_of", "cabinet")],
+    )
+    (source / "scene_graph.json").write_text(json.dumps(graph.to_dict()))
+    if has_companion:
+        companion = Scene(
+            objects=[
+                SceneObject(
+                    uid,
+                    "table" if uid == "table" else "asset",
+                    uid,
+                    uid,
+                    uid,
+                    is_articulated=uid == "cabinet",
+                )
+                for uid in ("table", "cup", "bowl", "cabinet")
+            ]
+        )
+        (source / "scene.json").write_text(json.dumps(companion.to_dict()))
+    original = fingerprint_scene_source(path)
+    revision = tmp_path / "revision"
+    scene_backend_module._copy_scene_export_revision(path, revision)
+    scene, editable_graph = SceneExportImporter(
+        output_root=revision
+    ).import_scene_and_graph()
+    if edit == "delete":
+        scene.objects = [item for item in scene.objects if item.id != "cup"]
+        editable_graph.nodes = [
+            item for item in editable_graph.nodes if item.object_id != "cup"
+        ]
+    else:
+        editable_graph.node_by_id()["cup"].parent_id = "bowl"
+    SceneExporter(
+        scene=scene, scene_graph=editable_graph, output_root=revision
+    ).export()
+    scene_backend_module._restore_scene_export_locked_entities(revision)
+    restored = revision / "scene_export" / "scene_config.json"
+    resolve_source_scene(restored)
+    restored_graph = SceneExportImporter._scene_graph_from_data(
+        json.loads(restored.with_name("scene_graph.json").read_text())
+    )
+    expected = {"table", "bowl", "cabinet"}
+    if edit == "reparent":
+        expected.add("cup")
+    assert set(restored_graph.node_by_id()) == expected
+    assert restored_graph.relations == []
+    assert json.loads(restored.read_text())["world_alignment_applied"] is True
+    assert fingerprint_scene_source(path) == original

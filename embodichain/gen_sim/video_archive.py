@@ -133,6 +133,8 @@ def _archive_task_video(
     source = candidates[0]
     extension = source.name[len(source_stem) :]
     destination = directory / f"{task_id}{extension}"
+    if destination == source:
+        return destination
     if destination.exists() or destination.is_symlink():
         destination.unlink()
     shutil.copy2(source, destination)

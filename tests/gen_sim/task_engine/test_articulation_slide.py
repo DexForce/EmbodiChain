@@ -1896,3 +1896,99 @@ def test_spatial_root_reference_rejects_joint_motion_in_the_same_program(scene):
     }
     with pytest.raises(ValueError, match="changes joints"):
         _relative_place_route_payloads(graph, scene)
+
+
+@pytest.mark.parametrize(
+    ("observed", "opened", "accepted"),
+    [
+        ([0.2, -0.2, 0.2, -0.2, -0.2, 0.2], [0.0] * 6, False),
+        ([0.7, -0.7, 0.7, -0.7, -0.7, 0.7], [0.0] * 6, False),
+        (
+            [0.15, -0.15, 0.15, -0.15, -0.15, 0.15],
+            [0.15, -0.15, 0.15, -0.15, -0.15, 0.15],
+            True,
+        ),
+        ([0.0] * 6, [0.15, -0.15, 0.15, -0.15, -0.15, 0.15], False),
+    ],
+)
+def test_withdrawal_compares_mixed_sign_joints_to_declared_open_command(
+    observed, opened, accepted
+) -> None:
+    from types import SimpleNamespace
+    from embodichain.gen_sim.task_engine._task_program.articulation_slide import (
+        _WithdrawLowerer,
+    )
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        PrismaticBinding,
+        WITHDRAW_CALL,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        JointPositionCommand,
+        JointPositionTarget,
+        MoveEndEffectorOptions,
+    )
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    identity = torch.eye(4)[None]
+    binding = PrismaticBinding(
+        "drawer",
+        "slide",
+        "drawer",
+        "base",
+        "/fixture/handle",
+        "a" * 64,
+        1.0,
+        (0.0, 1.0, 0.0),
+        (-0.2, 0.0),
+    )
+    art = SimpleNamespace(
+        joint_names=["slide"],
+        get_qpos=lambda: torch.tensor([[-0.2]]),
+        get_link_pose=lambda *args, **kwargs: identity.clone(),
+    )
+    robot = SimpleNamespace(compute_fk=lambda **kwargs: identity.clone())
+    lowerer = _WithdrawLowerer({"drawer": (binding, None, art)}, robot)
+    motion = SimpleNamespace(
+        task_state_key="right",
+        require_target=lambda cls: JointPositionTarget("right_arm", (0, 1)),
+    )
+    hand = SimpleNamespace(
+        runtime_target=SimpleNamespace(joint_ids=tuple(range(2, 8))),
+        commands={"open": JointPositionCommand(torch.tensor(opened))},
+    )
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            action_binding=SimpleNamespace(endpoint=lambda *args: motion),
+            resources={"primary": SimpleNamespace(endpoints={"grasp": hand})},
+        )
+    )
+    qpos = torch.zeros(1, 8)
+    qpos[:, 2:] = torch.tensor(observed)
+    context = SimpleNamespace(
+        task=SimpleNamespace(
+            get_held_object=lambda key: None, coordinated_held_objects={}
+        ),
+        robot=SimpleNamespace(qpos=qpos),
+        env_ids=torch.tensor([0]),
+    )
+    call = RegisteredSemanticCall(
+        call_id=WITHDRAW_CALL, arguments={"object": "drawer", "state": "open"}
+    )
+    if accepted:
+        assert (
+            lowerer.lower(
+                call,
+                context=context,
+                bound=bound,
+                option_template=MoveEndEffectorOptions(),
+            ).goal.xpos.shape[1]
+            == 3
+        )
+    else:
+        with pytest.raises(ValueError, match="open posture"):
+            lowerer.lower(
+                call,
+                context=context,
+                bound=bound,
+                option_template=MoveEndEffectorOptions(),
+            )

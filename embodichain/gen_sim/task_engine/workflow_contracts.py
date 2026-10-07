@@ -117,6 +117,8 @@ def validate_scene_output_separation(
     """
     source = Path(gym_project).expanduser().resolve()
     output = Path(output_dir).expanduser().resolve()
+    if source.is_file():
+        source = source.parent
     if source == output or source in output.parents or output in source.parents:
         raise ValueError(
             "Task Engine output_dir and source Gym project must not overlap."

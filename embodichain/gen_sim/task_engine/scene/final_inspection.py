@@ -339,26 +339,32 @@ def _measure_geometry(
             return None
         loaded = trimesh.load(path, force="scene")
         mesh = loaded.to_geometry()
+        convert_y_up = convert_y_up or path.suffix.lower() in {".glb", ".gltf"}
     elif shape_type == "Cube":
+        convert_y_up = False
         mesh = trimesh.creation.box(
             extents=_vector(shape.get("size"), default=(1, 1, 1))
         )
     elif shape_type == "Sphere":
+        convert_y_up = False
         radius = float(shape.get("radius", 1.0))
         mesh = trimesh.creation.icosphere(radius=radius)
     else:
         return None
     scale = np.asarray(_vector(entry.get("body_scale"), default=(1, 1, 1)))
+    conversion = _Y_UP_TO_Z_UP if convert_y_up else np.eye(3)
+    basis = np.eye(4)
+    basis[:3, :3] = conversion
+    mesh.apply_transform(basis)
     mesh.apply_scale(scale)
     local_extents = np.asarray(mesh.extents, dtype=float)
-    conversion = _Y_UP_TO_Z_UP if convert_y_up else np.eye(3)
     rotation = Rotation.from_euler(
         "XYZ",
         _vector(entry.get("init_rot"), default=(0, 0, 0)),
         degrees=True,
     ).as_matrix()
     transform = np.eye(4)
-    transform[:3, :3] = rotation @ conversion
+    transform[:3, :3] = rotation
     transform[:3, 3] = _vector(entry.get("init_pos"), default=(0, 0, 0))
     mesh.apply_transform(transform)
     return {
