@@ -940,6 +940,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "source_hold_mode",
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
@@ -1439,6 +1440,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "retreat_distance",
                     "retreat_steps",
                     "receive_pick_object_part",
+                    "source_hold_mode",
                     "release_at_target",
                     "arm_selection",
                 }
@@ -1478,6 +1480,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             kwargs["release_at_target"] = _boolean(
                 config["release_at_target"],
                 path=f"{path}.release_at_target",
+            )
+        if "source_hold_mode" in config:
+            kwargs["source_hold_mode"] = _identifier(
+                config["source_hold_mode"],
+                path=f"{path}.source_hold_mode",
             )
         if "arm_selection" in config:
             kwargs["arm_selection"] = _identifier(
