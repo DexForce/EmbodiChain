@@ -129,3 +129,23 @@ def test_task_engine_cli_exposes_visualize_command() -> None:
     )
     assert args.command == "visualize"
     assert args.view == "groups"
+
+
+def test_group_overlay_honors_final_semantic_rejection_and_keeps_call_status() -> None:
+    from embodichain.gen_sim.task_engine.semantic_graph_visualization import (
+        _group_status,
+        _runtime_statuses,
+    )
+
+    graph = _graph()
+    report = _report()
+    report["status"] = "failed"
+    report["environments"][0]["success"] = False
+    report["environments"][0]["semantic_success"]["place_group"] = False
+    statuses = _runtime_statuses(graph, report)
+    assert _group_status([graph["nodes"][1]], statuses) != "OK"
+    assert statuses["place_cube"] == "failed"
+    assert (
+        _runtime_statuses(graph, report, use_semantic_acceptance=False)["place_cube"]
+        == "success"
+    )

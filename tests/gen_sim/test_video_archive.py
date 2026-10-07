@@ -147,3 +147,12 @@ def test_task_recording_uses_runtime_recorder_path(tmp_path: Path) -> None:
 
 def test_task_recording_is_noop_when_recording_is_disabled() -> None:
     assert _archive_task_recording(_env(), "task_alpha") is None
+
+
+def test_archive_preserves_recording_when_task_id_is_source_stem(
+    tmp_path: Path,
+) -> None:
+    source = _write_source(tmp_path, ".mp4", b"unique-recording")
+    result = _archive_task_video(tmp_path, source_stem=SOURCE_STEM, task_id=SOURCE_STEM)
+    assert result == source
+    assert source.read_bytes() == b"unique-recording"

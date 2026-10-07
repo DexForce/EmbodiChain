@@ -1060,7 +1060,13 @@ def build_validation_certificate(
     metadata: Mapping[str, Any] | None = None,
 ) -> ValidationCertificate:
     """Build one legacy certificate from a core evaluation report."""
-    results = (*report.init, *report.goal, *report.invariants, *report.temporal)
+    results = (
+        *report.init,
+        *report.goal,
+        *report.invariants,
+        *report.temporal,
+        *getattr(report, "milestones", ()),
+    )
     return ValidationCertificate(
         certificate_id=certificate_id,
         task_template_hash=task_template_hash,

@@ -70,6 +70,8 @@ these boundaries; its schemas, predicate rules, and cache behavior are owned by
 [GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
 Long-horizon specifications keep the terminal state in `goal` and represent
 ordered intermediate achievements as acyclic `milestones`.
+Completion evaluation requires trajectory evidence for those achievements and
+their predecessor order; incomplete `always` windows cannot certify success.
 Scene output is a scene-binding and measured-state input to that protocol; it
 does not by itself certify a task witness.
 
@@ -88,6 +90,9 @@ from the Task Program's `quaternion_xyzw` serialization. E6 runtime binding,
 geometry bounds, rail direction and handle clearance use that same matrix;
 never reinterpret a decoder's derived extrinsic angles as source `XYZ` angles.
 Explicit proxy fitting updates an existing matrix together with its pose fields.
+Legacy editable revisions bake runtime scale into copied GLBs and use unit
+editable scale. Their scene config carries `world_alignment_applied`; preserve
+it through edits so already-normalized poses are not rotated again.
 Generated deployments retain the measured settled layout instead of teleporting
 objects back to configured X/Y after settling.
 Invocation-scoped Cartesian policy also covers single-EEF-target transports;

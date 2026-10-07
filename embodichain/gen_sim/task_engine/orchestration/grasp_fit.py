@@ -256,6 +256,11 @@ def _fit_object(
     obj["init_pos"][2] = new_z
     planner_obj["body_scale"] = new_scale.copy()
     planner_obj["init_pos"][2] = new_z
+    for item in (obj, planner_obj):
+        if item.get("init_local_pose") is not None:
+            pose = np.asarray(item["init_local_pose"], dtype=float).copy()
+            pose[2, 3] = new_z
+            item["init_local_pose"] = pose.tolist()
     record.update(
         original_body_scale=old_scale.tolist(),
         adapted_body_scale=new_scale,

@@ -270,3 +270,198 @@ def test_compat_certificate_cannot_hide_failed_predicate() -> None:
             status="satisfied",
             predicate_results=(failed,),
         )
+
+
+@pytest.mark.parametrize("observation", [False, None])
+def test_required_milestone_never_certifies_failed_or_missing_evidence(
+    observation,
+) -> None:
+    from embodichain.gen_sim.task_spec.compat import build_validation_certificate
+
+    spec = TaskSpec(
+        roles=(RoleSpec("object"),),
+        goal=(Predicate("exists", observation="final"),),
+        milestones=(
+            {
+                "id": "press",
+                "achieve": ({"predicate": "pressed", "observation": "pressed"},),
+            },
+        ),
+    )
+    trajectory = None if observation is None else [{"pressed": observation}]
+    report = evaluate_task_spec(spec, {"final": True}, trajectory=trajectory)
+    assert not report.certificate_ready
+    certificate = build_validation_certificate(
+        report,
+        certificate_id="test",
+        task_template_hash=spec.semantic_hash,
+        scene_instance_hash="0" * 64,
+    )
+    assert certificate.status != "satisfied"
+    assert any(
+        item.predicate_id == "milestone:press" for item in certificate.predicate_results
+    )
+
+
+@pytest.mark.parametrize(
+    ("trajectory", "accepted"),
+    [
+        ([{"opened": True, "placed": False}, {"opened": False, "placed": True}], True),
+        ([{"opened": False, "placed": True}, {"opened": True, "placed": False}], False),
+        ([{"opened": True, "placed": True}], False),
+    ],
+)
+def test_milestones_require_achievement_strictly_after_predecessors(
+    trajectory, accepted
+) -> None:
+    # IDs deliberately sort opposite to dependency order.
+    spec = TaskSpec(
+        roles=(RoleSpec("object"),),
+        goal=(Predicate("exists", observation="final"),),
+        milestones=(
+            {
+                "id": "z_open",
+                "achieve": ({"predicate": "state", "observation": "opened"},),
+            },
+            {
+                "id": "a_place",
+                "after": ("z_open",),
+                "achieve": ({"predicate": "semantic_goal", "observation": "placed"},),
+            },
+        ),
+    )
+    report = evaluate_task_spec(spec, {"final": True}, trajectory=trajectory)
+    assert report.certificate_ready is accepted
+    assert len(report.milestones) == 2
+
+
+def test_milestone_requires_joint_achievement_and_declared_observations() -> None:
+    spec = TaskSpec(
+        roles=(RoleSpec("object"),),
+        goal=(Predicate("exists", observation="final"),),
+        milestones=(
+            {
+                "id": "hold",
+                "achieve": (
+                    {"predicate": "contact", "observation": "contact"},
+                    {"predicate": "state", "observation": "stable"},
+                ),
+            },
+        ),
+    )
+    report = evaluate_task_spec(
+        spec,
+        {"final": True},
+        trajectory=[
+            {"contact": True, "stable": False},
+            {"contact": False, "stable": True},
+        ],
+    )
+    assert not report.certificate_ready
+    missing = replace(
+        spec, milestones=({"id": "hold", "achieve": (Predicate("contact"),)},)
+    )
+    with pytest.raises(TaskSpecValidationError, match="milestone.hold.contact"):
+        validate_task_spec(missing, require_observations=True)
+
+
+@pytest.mark.parametrize(
+    ("mode", "value", "accepted"),
+    [
+        ("always", True, False),
+        ("always", False, False),
+        ("eventually", False, False),
+        ("eventually", True, True),
+    ],
+)
+def test_partial_temporal_window_requires_conclusive_evidence(
+    mode, value, accepted
+) -> None:
+    spec = TaskSpec(
+        roles=(RoleSpec("object"),),
+        goal=(Predicate("exists", observation="final"),),
+        temporal=(
+            TemporalCondition(
+                Predicate("contact", observation="contact"), within_steps=10, mode=mode
+            ),
+        ),
+    )
+    report = evaluate_task_spec(spec, {"final": True}, trajectory=[{"contact": value}])
+    assert report.certificate_ready is accepted
+    if mode == "always" and not value:
+        assert report.temporal[0].status is EvaluationStatus.FAILED
+    elif not accepted:
+        assert report.temporal[0].status is EvaluationStatus.UNAVAILABLE
+
+
+def test_spec_identity_ignores_evidence_ids_and_observation_keys() -> None:
+    arguments = {"subject": "object"}
+    first = TaskSpec(
+        roles=(RoleSpec("object"),),
+        goal=(
+            Predicate("exists", arguments, predicate_id="a", observation="first"),
+            Predicate(
+                "object_upright", arguments, predicate_id="b", observation="second"
+            ),
+        ),
+    )
+    second = replace(
+        first,
+        goal=(
+            Predicate("exists", arguments, predicate_id="b", observation="renamed_two"),
+            Predicate(
+                "object_upright", arguments, predicate_id="a", observation="renamed_one"
+            ),
+        ),
+    )
+    assert first.semantic_hash == second.semantic_hash
+
+
+def test_step_result_keeps_the_selected_subject_in_spec_identity() -> None:
+    from copy import deepcopy
+    from embodichain.gen_sim.task_engine.agent import TaskAgent
+    from embodichain.gen_sim.task_engine.interpretation import InstructionDraftResult
+    from embodichain.gen_sim.task_engine.task_spec import task_spec_from_candidate
+
+    template = _candidate_set()["candidates"][0]["draft"]["steps"][0]
+    first = deepcopy(template)
+    first.update(id="first", object=_selector("scene_ref", reference="red can"))
+    second = deepcopy(template)
+    second.update(id="second", object=_selector("scene_ref", reference="blue can"))
+    specs = []
+    for reference in ("first", "second"):
+        final = deepcopy(template)
+        result_selector = _selector("step_result")
+        result_selector["step_id"] = reference
+        final.update(
+            id="final",
+            task_type="E1",
+            object=result_selector,
+            target=_selector("scene_ref", reference="table"),
+            relation="on",
+            orientation_goal="preserve",
+            depends_on=["first", "second"],
+        )
+        draft = InstructionDraftResult(
+            intent={"steps": [first, second, final]},
+            model="test",
+            attempts=1,
+            latency_seconds=0.0,
+            normalizations=(),
+        )
+        candidate = TaskAgent(
+            interpreter=lambda *a, _draft=draft, **k: _draft
+        ).generate(
+            "task",
+            "Stand both cans upright and place the selected one on the table.",
+            candidate_count=1,
+        )[
+            "candidates"
+        ][
+            0
+        ]
+        specs.append(task_spec_from_candidate(candidate))
+    assert all(
+        "subject" in predicate.arguments for spec in specs for predicate in spec.goal
+    )
+    assert specs[0].semantic_hash != specs[1].semantic_hash

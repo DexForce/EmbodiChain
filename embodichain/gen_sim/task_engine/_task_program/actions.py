@@ -849,7 +849,7 @@ class GenSimPour(Pour):
                 torch.linspace(0.0, 1.0, first + 1, device=self.device)[1:],
                 torch.linspace(1.0, 0.0, count - first + 1, device=self.device)[1:],
             )
-        ) * abs(float(request.skill_options.rotate_angle))
+        ) * float(request.skill_options.rotate_angle)
         try:
             rotations = axis_angle_to_rotation_matrix(
                 axis[:, None] * angles[None, :, None]

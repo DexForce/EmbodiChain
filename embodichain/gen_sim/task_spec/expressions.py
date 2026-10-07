@@ -505,6 +505,14 @@ def evaluate_temporal_condition(
         else:
             status = EvaluationStatus.SATISFIED
             reason = "predicate held throughout the bounded window"
+    if len(window) < expression.within_steps + 1 and not (
+        expression.mode == "eventually"
+        and status is EvaluationStatus.SATISFIED
+        or expression.mode == "always"
+        and status is EvaluationStatus.FAILED
+    ):
+        status = EvaluationStatus.UNAVAILABLE
+        reason = "bounded temporal window is incomplete"
     return PredicateEvaluation(
         predicate_id=local_id,
         predicate=expression.predicate.name,

@@ -284,6 +284,7 @@ class TaskAdapterFactory:
                 MotionGenCfg(
                     planner_cfg=CuroboPlannerCfg(
                         robot_uid=environment.robot.uid,
+                        sim_instance_id=environment.sim.instance_id,
                         use_cuda_graph=False,
                         world=CuroboWorldCfg(
                             rigid_objects=obstacles,
@@ -299,7 +300,10 @@ class TaskAdapterFactory:
 
             motion_factory = lambda: CheckedMotionGenerator(
                 MotionGenCfg(
-                    planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
+                    planner_cfg=ToppraPlannerCfg(
+                        robot_uid=environment.robot.uid,
+                        sim_instance_id=environment.sim.instance_id,
+                    )
                 )
             )
             if self.drawer_routes:

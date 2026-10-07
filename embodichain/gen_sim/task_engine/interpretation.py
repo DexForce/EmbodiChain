@@ -969,20 +969,37 @@ def _default_instruction_caller(
 
 
 def _instruction_model(explicit: str | None) -> str | None:
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-    # Keep model selection separate from credential loading.  Reading the local
-    # dotenv file is side-effect free and gives generation the documented
-    # priority without leaking credentials into TaskSpec metadata.
-    for name in ("TASK_ENGINE_LLM_MODEL", "ACTION_ENGINE_LLM_MODEL", "OPENAI_MODEL"):
-        for source in (
-            os.environ,
-            _load_local_env(),
-        ):
-            value = source.get(name)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
+    # Resolve the same model as the transport without requiring credentials here.
+    return _model_name(explicit, _load_local_env(), _load_llm_config())
+
+
+def _load_llm_config() -> dict[str, Any]:
+    if _GEN_CONFIG_PATH.is_file():
+        raw = json.loads(_GEN_CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(raw, Mapping):
+            llm = raw.get("llm", {})
+            if isinstance(llm, Mapping):
+                configured = llm.get("openai_compatible", {})
+                if isinstance(configured, Mapping):
+                    return dict(configured)
+    return {}
+
+
+def _model_name(
+    explicit: str | None, local_env: Mapping[str, str], config: Mapping[str, Any]
+) -> str | None:
+    return (
+        (explicit.strip() if isinstance(explicit, str) else "")
+        or _first_env_value(
+            local_env,
+            "TASK_ENGINE_LLM_MODEL",
+            "ACTION_ENGINE_LLM_MODEL",
+            "OPENAI_MODEL",
+            "LLM_MODEL",
+        )
+        or str(config.get("model", "")).strip()
+        or None
+    )
 
 
 def _load_local_env() -> dict[str, str]:
@@ -1020,27 +1037,9 @@ def _structured_output_runnable(
 
 def _load_llm_settings(*, model: str | None) -> dict[str, Any]:
     local_env = _load_local_env()
-    config: dict[str, Any] = {}
-    if _GEN_CONFIG_PATH.is_file():
-        raw = json.loads(_GEN_CONFIG_PATH.read_text(encoding="utf-8"))
-        if isinstance(raw, Mapping):
-            llm = raw.get("llm", {})
-            if isinstance(llm, Mapping):
-                configured = llm.get("openai_compatible", {})
-                if isinstance(configured, Mapping):
-                    config = dict(configured)
+    config = _load_llm_config()
     api_key, base_url = _resolve_transport_settings(local_env, config)
-    selected_model = (
-        (model.strip() if isinstance(model, str) else "")
-        or _first_env_value(
-            local_env,
-            "TASK_ENGINE_LLM_MODEL",
-            "ACTION_ENGINE_LLM_MODEL",
-            "OPENAI_MODEL",
-            "LLM_MODEL",
-        )
-        or str(config.get("model", "")).strip()
-    )
+    selected_model = _model_name(model, local_env, config)
     default_query = config.get("default_query", {}) or {}
     if not api_key:
         raise ValueError(

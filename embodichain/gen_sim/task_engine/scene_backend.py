@@ -40,6 +40,7 @@ from embodichain.gen_sim.scene_engine.pipeline import (
 )
 
 from .orchestration.legacy_scene import (
+    _locked_scene_object,
     convert_legacy_gym_project,
     restore_locked_scene_entities,
 )
@@ -319,7 +320,11 @@ def scene_blueprint_objects(blueprint: SceneBlueprintPackage) -> list[dict[str, 
             {
                 "uid": item.id,
                 "source_uid": item.id,
-                "role": "table" if item.kind == "table" else "rigid_object",
+                "role": (
+                    "table"
+                    if item.kind == "table"
+                    else "articulation" if item.is_articulated else "rigid_object"
+                ),
                 "name": item.name,
                 "description": item.description,
                 "category": item.category,
@@ -362,10 +367,49 @@ def _copy_scene_export_revision(source_config: Path, output_root: Path) -> Path:
         raise ValueError("Scene export revision requires exactly one table.")
     locked = {
         "schema_version": "embodichain.locked-scene-entities/v1",
+        "world_alignment_applied": config.get("world_alignment_applied", False),
         "background": [item for item in background if item not in table],
         "rigid_object": locked_rigid,
         "articulation": articulations,
     }
+    locked_uids = {
+        str(item["uid"])
+        for section in ("background", "rigid_object", "articulation")
+        for item in locked[section]
+    }
+    companion_path = destination / "scene.json"
+    companion = _read_json_mapping(companion_path) if companion_path.is_file() else {}
+    locked["scene_objects"] = [
+        item
+        for item in companion.get("objects", ())
+        if str(item.get("id")) in locked_uids
+    ]
+    recorded_uids = {str(item["id"]) for item in locked["scene_objects"]}
+    for section in ("background", "rigid_object", "articulation"):
+        for item in locked[section]:
+            if str(item["uid"]) not in recorded_uids:
+                locked["scene_objects"].append(
+                    _locked_scene_object(
+                        item,
+                        semantics={str(item["uid"]): item},
+                        articulated=section == "articulation",
+                    )
+                )
+    source_graph_path = destination / "scene_graph.json"
+    source_graph = (
+        _read_json_mapping(source_graph_path) if source_graph_path.is_file() else {}
+    )
+    locked["graph_nodes"] = [
+        item
+        for item in source_graph.get("nodes", ())
+        if str(item.get("object_id")) in locked_uids
+    ]
+    locked["graph_relations"] = [
+        item
+        for item in source_graph.get("relations", ())
+        if str(item.get("source_id")) in locked_uids
+        or str(item.get("target_id")) in locked_uids
+    ]
     config["background"] = table
     config["rigid_object"] = editable_rigid
     config["articulation"] = []
@@ -413,7 +457,46 @@ def _restore_scene_export_locked_entities(output_root: Path) -> None:
             target.append(item)
             existing.add(uid)
         config[section] = target
+    if manifest.get("world_alignment_applied") is True:
+        config["world_alignment_applied"] = True
+    companion_path = config_path.with_name("scene.json")
+    companion = None
+    if companion_path.is_file():
+        companion = _read_json_mapping(companion_path)
+        companion["objects"].extend(deepcopy(manifest.get("scene_objects", ())))
+    graph_path = config_path.with_name("scene_graph.json")
+    graph = None
+    if graph_path.is_file():
+        graph = _read_json_mapping(graph_path)
+        for node in manifest.get("graph_nodes", ()):
+            parent = node.get("parent_id")
+            if parent is not None and str(parent) not in existing:
+                raise ValueError(
+                    f"Scene edit deleted parent {parent!r} of locked entity "
+                    f"{node['object_id']!r}."
+                )
+        graph["nodes"].extend(deepcopy(manifest.get("graph_nodes", ())))
+        parents = {
+            str(node["object_id"]): node.get("parent_id") for node in graph["nodes"]
+        }
+        graph["relations"] = [
+            relation
+            for relation in (*graph["relations"], *manifest.get("graph_relations", ()))
+            if str(relation["source_id"]) in existing
+            and str(relation["target_id"]) in existing
+            and parents[str(relation["source_id"])]
+            == parents[str(relation["target_id"])]
+        ]
+        from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+            SceneExportImporter,
+        )
+
+        SceneExportImporter._scene_graph_from_data(graph)
     _write_json_mapping(config_path, config)
+    if companion is not None:
+        _write_json_mapping(companion_path, companion)
+    if graph is not None:
+        _write_json_mapping(graph_path, graph)
 
 
 def _scene_editable_rigid(value: Mapping[str, Any]) -> bool:

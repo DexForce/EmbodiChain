@@ -1029,7 +1029,7 @@ def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
         seed=7,
         num_envs=4,
         dataset_saving=dataset_saving,
-        failure_policy="continue",
+        failure_policy="stop",
         open_window=open_window,
     )
 
@@ -1053,7 +1053,7 @@ def test_subprocess_executor_controls_launch_options_and_copies_trajectory(
     else:
         assert "--renderer" not in captured["command"]
     assert "--show-grasp-poses" not in captured["command"]
-    assert captured["command"][-2:] == ["--failure-policy", "continue"]
+    assert captured["command"][-2:] == ["--failure-policy", "stop"]
     assert captured["log_path"] == attempt / "action.log"
     assert (attempt / "action.log").read_text(encoding="utf-8") == "child output\n"
     assert (attempt / "trajectory" / "episode.json").is_file()
@@ -1401,3 +1401,74 @@ def test_image_binding_conflict_does_not_regenerate_scene(tmp_path: Path) -> Non
     assert result.status == "input_conflict"
     assert result.failure_class == "input_conflict"
     assert scene.seeds == [0]
+
+
+def test_public_execution_entries_reject_continue_before_side_effects(
+    tmp_path: Path,
+) -> None:
+    executor = SubprocessActionExecutor()
+    with pytest.raises(ValueError, match="diagnostic continuation is unavailable"):
+        executor(
+            tmp_path / "bundle",
+            tmp_path / "attempt",
+            seed=0,
+            num_envs=1,
+            dataset_saving=False,
+            failure_policy="continue",
+        )
+    workflow = TaskEngineWorkflow()
+    with pytest.raises(ValueError, match="diagnostic continuation is unavailable"):
+        workflow.run(_request(tmp_path), failure_policy="continue")
+    assert not (tmp_path / "attempt").exists()
+    assert not (tmp_path / "run").exists()
+
+
+def test_candidate_failure_waits_for_analysis_before_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    started, release, finished, cancelled, published = (Event() for _ in range(5))
+    observations = []
+
+    class Agent:
+        def generate(self, *args, **kwargs):
+            assert started.wait(3)
+            cancelled.set()
+            raise ValueError("candidate failure")
+
+    class Backend:
+        def analyze(self, _request, root):
+            started.set()
+            assert release.wait(5)
+            root = Path(root)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "late_analysis.json").write_text("{}")
+            finished.set()
+            return None
+
+    workflow = TaskEngineWorkflow(task_agent=Agent(), scene_backend=Backend())
+    original = workflow._publish
+
+    def publish(*args, **kwargs):
+        observations.append(finished.is_set())
+        published.set()
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(workflow, "_publish", publish)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(workflow.run, _request(tmp_path), execute=False)
+        try:
+            assert cancelled.wait(3)
+            # A blocked analysis branch must keep the transaction unpublished.
+            early_publication = published.wait(0.2)
+        finally:
+            release.set()
+        result = future.result(timeout=5)
+    assert not early_publication
+    assert observations == [True]
+    assert result.failure_class == "task_generation"
+    assert (result.output_dir / "scene_analysis" / "late_analysis.json").is_file()
+    assert not list(tmp_path.glob(".run.staging-*"))
