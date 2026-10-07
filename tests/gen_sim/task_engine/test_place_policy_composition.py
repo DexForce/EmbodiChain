@@ -25,6 +25,7 @@ import torch
 from embodichain.gen_sim.task_engine._task_program import assembly, motion
 from embodichain.gen_sim.task_engine._task_program.actions import GenSimPlace
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
 
 
 @pytest.mark.parametrize("kind", ["place", "transport"])
@@ -66,14 +67,19 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
     target = start.clone()
     target[:, 2, 3] = 0.1
     robot = SimpleNamespace(uid="robot", compute_fk=lambda **kw: start.clone())
+    captured = {}
+
+    def initialize_generator(self: motion.MotionGenerator, cfg: MotionGenCfg) -> None:
+        self.robot = robot
+        captured["planner_cfg"] = cfg.planner_cfg
+
     monkeypatch.setattr(
         motion.MotionGenerator,
         "__init__",
-        lambda self, cfg: setattr(self, "robot", robot),
+        initialize_generator,
     )
     monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
     monkeypatch.setattr(assembly, "install_grasp_filters", lambda *a: {})
-    captured = {}
 
     def factory(*args, **kwargs):
         captured["generator"] = kwargs["motion_generator_factory"]()
@@ -95,9 +101,13 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
         (),
         cartesian_calls=("other",) if cartesian_approaches else (),
     )
-    adapter.create_adapter(SimpleNamespace(robot=robot, sim=object(), step_dt=step_dt))
+    simulation = SimpleNamespace(instance_id="place-policy-composition-sim")
+    adapter.create_adapter(
+        SimpleNamespace(robot=robot, sim=simulation, step_dt=step_dt)
+    )
     generator = captured["generator"]
     assert type(generator) is motion.CheckedMotionGenerator
+    assert captured["planner_cfg"].sim_instance_id == simulation.instance_id
 
     failed = motion.PlanResult(
         success=torch.tensor([False]),
