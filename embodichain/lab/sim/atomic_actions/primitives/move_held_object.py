@@ -370,16 +370,50 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             and second.positions is not None
             and second.dt is not None
         ):
-            fallback, _, fallback_attempts = self._plan_single_yaw_free_path(
-                final_poses,
-                second_object_to_eef,
-                second_options,
-                missing_second,
-                True,
-            )
-            attempts += fallback_attempts
-            if fallback.positions is not None:
-                second = _merge_yaw_paths(second, fallback, missing_second)
+            # A new heading needs a fresh clearance path as well as its descent.
+            for fraction in (0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+                if not missing_second.any():
+                    break
+                angle = math.pi * fraction
+                rows = missing_second & ~torch.isclose(
+                    selected_yaws, selected_yaws.new_full(selected_yaws.shape, angle)
+                )
+                if not rows.any():
+                    continue
+                cosine, sine = math.cos(angle), math.sin(angle)
+                candidate_yaw = first_poses.new_tensor(
+                    [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+                )
+                candidate_poses = first_poses.clone()
+                candidate_poses[:, 1, :3, :3] = (
+                    candidate_yaw @ candidate_poses[:, 1, :3, :3]
+                )
+                candidate_first = plan_first(candidate_poses, motion_options)
+                attempts += 1
+                if (
+                    candidate_first.positions is None
+                    or candidate_first.dt is None
+                    or not (rows & candidate_first.success).any()
+                ):
+                    continue
+                candidate_final = object_target_poses[:, 2].clone()
+                candidate_final[:, :3, :3] = candidate_yaw @ candidate_final[:, :3, :3]
+                candidate_options = deepcopy(motion_options)
+                candidate_options.start_qpos = candidate_first.positions[:, -1].clone()
+                candidate_second = self.motion_generator.generate(
+                    build_pose_plan_states(candidate_final @ second_object_to_eef),
+                    options=candidate_options,
+                )
+                accepted = rows & candidate_first.success & candidate_second.success
+                if (
+                    accepted.any()
+                    and candidate_second.positions is not None
+                    and candidate_second.dt is not None
+                ):
+                    first = _merge_yaw_paths(first, candidate_first, accepted)
+                    second = _merge_yaw_paths(second, candidate_second, accepted)
+                    selected_yaws[accepted] = angle
+                    missing_second &= ~accepted
         success = first.success & second.success
         if second.positions is None or second.dt is None:
             return (

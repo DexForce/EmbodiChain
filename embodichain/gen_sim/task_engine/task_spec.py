@@ -289,6 +289,9 @@ def _step_roles(
         result[step_id] = {}
         for role in ("object", "target"):
             selector = step[role]
+            if selector["kind"] == "step_result":
+                result[step_id][role] = result[str(selector["step_id"])]["object"]
+                continue
             if selector["kind"] != "scene_ref":
                 continue
             reference = next(

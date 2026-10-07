@@ -126,7 +126,9 @@ class ArticulatedGenerationClient:
         evidence = {
             "request_id": request_id,
             "base_url": self._base_url,
-            "image_sha256": hashlib.sha256(Path(image_path).read_bytes()).hexdigest(),
+            "image_sha256": hashlib.sha256(
+                Path(image_path).expanduser().resolve().read_bytes()
+            ).hexdigest(),
             "prompt": prompt,
             "submitted_at": time.time(),
             "response": response_data,

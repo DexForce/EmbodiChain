@@ -7194,3 +7194,35 @@ def test_assemble_place_reports_sampled_symmetry() -> None:
     assert plan.diagnostics.metadata["affordance_sample"]["assembly"][
         "candidate_ids"
     ] == [0, 1]
+
+
+def test_staged_yaw_fallback_replans_clearance_and_descent_together() -> None:
+    generator = _motion_generator()
+    dt = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1)
+    replies = iter([True, False, True, True])
+    calls = []
+
+    def generate(states, options=None):
+        calls.append([state.xpos.clone() for state in states])
+        return PlanResult(
+            success=torch.full((NUM_ENVS,), next(replies)),
+            positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+            dt=dt.clone(),
+        )
+
+    generator.generate = generate
+    action = _bind_action(generator, MoveHeldObject())
+    targets = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    before = targets.clone()
+    options = SimpleNamespace(start_qpos=torch.zeros(NUM_ENVS, ARM_DOF))
+    result, yaws, _ = action._plan_staged_yaw_free_path(
+        targets,
+        torch.eye(4).repeat(NUM_ENVS, 1, 1, 1),
+        options,
+        torch.ones(NUM_ENVS, dtype=torch.bool),
+    )
+    assert result.success.all()
+    assert len(calls) == 4
+    torch.testing.assert_close(calls[2][1][:, :3, :3], calls[3][0][:, :3, :3])
+    torch.testing.assert_close(yaws, torch.full((NUM_ENVS,), math.pi / 4))
+    torch.testing.assert_close(targets, before)

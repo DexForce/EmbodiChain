@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -133,11 +134,11 @@ def _add_workflow_arguments(parser: argparse.ArgumentParser) -> None:
 def _add_failure_policy_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--failure-policy",
-        choices=("stop", "continue"),
+        choices=("stop",),
         default="stop",
         help=(
-            "Whether dependency failures stop affected downstream execution or "
-            "allow diagnostic continuation."
+            "Stop affected execution after a dependency failure. "
+            "Diagnostic continuation is currently unsupported."
         ),
     )
 
@@ -314,6 +315,15 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
     num_envs = execution_cfg.num_envs if args.num_envs is None else int(args.num_envs)
     if num_envs < 1:
         raise ValueError("num_envs must be positive.")
+    execution_cfg = replace(
+        execution_cfg,
+        num_envs=num_envs,
+        min_successful_envs=(
+            num_envs
+            if execution_cfg.success_policy == "all"
+            else execution_cfg.min_successful_envs
+        ),
+    )
     with reserve_run_directory(args.output_root) as allocation:
         report = SubprocessActionExecutor()(
             args.bundle,

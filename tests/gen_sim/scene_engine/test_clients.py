@@ -525,3 +525,74 @@ def test_geometry_client_posts_masks_and_downloads_glbs(tmp_path: Path) -> None:
     assert session.post_call is not None
     assert session.post_call["url"] == "http://geometry/objects"
     assert (tmp_path / "output/cup.glb").read_bytes() == b"glTF-mesh"
+
+
+def test_articulated_upload_hashes_the_same_expanded_image_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import hashlib
+    import os
+
+    pytest.importorskip("pxr")
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    image = tmp_path / "reference.png"
+    image.write_bytes(b"reference-image")
+    asset = tmp_path / "fixture.usdc"
+    stage = Usd.Stage.CreateNew(str(asset))
+    root = UsdGeom.Xform.Define(stage, "/asset").GetPrim()
+    stage.SetDefaultPrim(root)
+    UsdPhysics.ArticulationRootAPI.Apply(root)
+    for name in ("base", "drawer"):
+        UsdPhysics.RigidBodyAPI.Apply(
+            UsdGeom.Cube.Define(stage, f"/asset/{name}").GetPrim()
+        )
+    joint = UsdPhysics.PrismaticJoint.Define(stage, "/asset/slide")
+    joint.CreateBody0Rel().SetTargets(["/asset/base"])
+    joint.CreateBody1Rel().SetTargets(["/asset/drawer"])
+    joint.CreateLowerLimitAttr(0.0)
+    joint.CreateUpperLimitAttr(0.1)
+    joint.GetPrim().CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
+    stage.GetRootLayer().Save()
+    content = asset.read_bytes()
+
+    class Session(_Session):
+        def __init__(self):
+            super().__init__(get_payload={})
+
+        def post(self, url, **kwargs):
+            self.post_call = kwargs
+            return _Response({"request_id": "test"})
+
+        def get(self, url, **kwargs):
+            self.get_calls.append((url, kwargs.get("timeout")))
+            if url.endswith("/tasks/test"):
+                return _Response(
+                    {
+                        "status": "succeeded",
+                        "result": {"artifacts": {"usdc": "fixture.usdc"}},
+                    }
+                )
+            return _Response({}, content=content)
+
+    session = Session()
+    client = articulated_generation.ArticulatedGenerationClient(
+        base_url="http://mock",
+        timeout_s=30,
+        max_attempts=1,
+        health_path="/health",
+        generate_path="/generate",
+        session=session,
+    )
+    output = client.generate_articulated_usdc(
+        prompt="drawer",
+        image_path="~/" + os.path.relpath(image, Path.home()),
+        output_path=tmp_path / "output.usdc",
+    )
+    assert output.read_bytes() == content
+    evidence = json.loads(output.with_suffix(".request.json").read_text())
+    assert evidence["image_sha256"] == hashlib.sha256(image.read_bytes()).hexdigest()
+    assert len(session.get_calls) == 2

@@ -121,8 +121,7 @@ class SubprocessActionExecutor:
             seed: Simulator random seed.
             num_envs: Number of vectorized scene replicas.
             dataset_saving: Whether to enable the Gym project's dataset recorder.
-            failure_policy: Whether failed dependencies stop or permit downstream
-                diagnostic execution.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
             open_window: Whether to open the native DexSim execution window.
 
         Returns:
@@ -130,8 +129,10 @@ class SubprocessActionExecutor:
         """
         bundle_root = Path(bundle).expanduser().resolve()
         attempt_root = Path(output_root).expanduser().resolve()
-        if failure_policy not in {"stop", "continue"}:
-            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
         attempt_root.mkdir(parents=True, exist_ok=False)
@@ -334,8 +335,7 @@ class TaskEngineWorkflow:
             model: Optional Task and grounding model override.
             base_seed: First audited scene and action attempt seed.
             dataset_saving: Whether Action attempts may initialize dataset recording.
-            failure_policy: Whether failed dependencies stop or permit downstream
-                diagnostic execution.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
             open_window: Whether simulator attempts open the native DexSim window.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
@@ -350,8 +350,10 @@ class TaskEngineWorkflow:
             raise TypeError("dataset_saving must be a boolean.")
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
-        if failure_policy not in {"stop", "continue"}:
-            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
         if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
             loaded_workflow, loaded_planning, loaded_execution = (
                 load_task_engine_config(config_path)
@@ -413,6 +415,12 @@ class TaskEngineWorkflow:
                     _write_json(staging / "task_candidate_set.json", candidate_set)
                 except Exception as exc:
                     analysis_future.cancel()
+                    # A running worker can still write to staging after cancellation.
+                    # Finish its writes before publishing or cleaning that directory.
+                    try:
+                        analysis_future.result()
+                    except Exception:
+                        pass
                     state = fail_stage(
                         state,
                         WorkflowStage.TASK_CANDIDATES,

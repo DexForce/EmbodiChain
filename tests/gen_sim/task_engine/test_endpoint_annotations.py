@@ -224,3 +224,46 @@ def test_endpoint_annotation_cli_writes_dry_run_report(
     )
     assert json.loads(report_path.read_text())["mode"] == "dry_run"
     assert '"mode": "dry_run"' in capsys.readouterr().out
+
+
+def test_endpoint_backup_normalizes_parent_components_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    root, path = _asset(tmp_path)
+    manifest = _manifest(path, root)
+    manifest["assets"][0]["path"] = "../assets/cabinet/drawer.usda"
+    backup = tmp_path / "audit" / "backup"
+    victim = tmp_path / "audit" / "assets" / "cabinet" / "drawer.usda"
+    victim.parent.mkdir(parents=True)
+    victim.write_bytes(b"unrelated-data")
+    original = path.read_bytes()
+    report = migrate_endpoint_manifest(
+        asset_root=root, manifest=manifest, apply=True, backup_root=backup
+    )
+    assert victim.read_bytes() == b"unrelated-data"
+    assert Path(report["assets"][0]["backup"]).resolve().is_relative_to(backup)
+    assert (backup / "cabinet" / "drawer.usda").read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "alias", ["./cabinet/drawer.usda", "../assets/cabinet/drawer.usda"]
+)
+def test_endpoint_duplicate_source_aliases_fail_before_mutation(
+    tmp_path: Path, alias: str
+) -> None:
+    from copy import deepcopy
+
+    root, path = _asset(tmp_path)
+    manifest = _manifest(path, root)
+    duplicate = deepcopy(manifest["assets"][0])
+    duplicate["path"] = alias
+    duplicate["joints"][0]["closed_position"] = 0.0
+    manifest["assets"].append(duplicate)
+    original = path.read_bytes()
+    backup = tmp_path / "backup"
+    with pytest.raises(ValueError, match="duplicated"):
+        migrate_endpoint_manifest(
+            asset_root=root, manifest=manifest, apply=True, backup_root=backup
+        )
+    assert path.read_bytes() == original
+    assert not backup.exists()

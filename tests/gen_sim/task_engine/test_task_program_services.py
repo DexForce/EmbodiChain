@@ -831,12 +831,13 @@ def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
     objects = {b.simulation_uid: Mock() for b in bindings}
     env = SimpleNamespace(
         robot=SimpleNamespace(uid="robot"),
-        sim=SimpleNamespace(get_rigid_object=objects.get),
+        sim=SimpleNamespace(get_rigid_object=objects.get, instance_id=1),
         step_dt=0.04,
     )
     adapter = assembly.TaskAdapterFactory(registration, "test", (), ())
     assert adapter.create_adapter(env) == "adapter"
     captured["motion_generator_factory"]()
+    assert cfgs[0].planner_cfg.sim_instance_id == env.sim.instance_id
     world = cfgs[0].planner_cfg.world
     assert world.representation == "auto"
     assert set(world.rigid_objects) == {b.entity_id for b in bindings}
@@ -1622,3 +1623,40 @@ def test_relative_place_observes_either_native_reference_root(articulated):
                 scene_registry=registry,
                 engine=SimpleNamespace(robot=robot),
             )
+
+
+def test_ordinary_adapter_planner_uses_its_environment_instance(monkeypatch) -> None:
+    from embodichain.gen_sim.task_engine._task_program import assembly
+    from embodichain.lab.sim import sim_manager as manager_module
+
+    correct = SimpleNamespace(uid="robot", device=torch.device("cpu"))
+    other = SimpleNamespace(uid="robot", device=torch.device("cpu"))
+    sim = SimpleNamespace(instance_id=1, get_robot=lambda uid: correct)
+    zero = SimpleNamespace(instance_id=0, get_robot=lambda uid: other)
+    registration = SimpleNamespace(
+        assert_unchanged=lambda: None,
+        robot_profile_binding=SimpleNamespace(
+            presets=[
+                SimpleNamespace(motion_policy=SimpleNamespace(strategy="ik_interp"))
+            ]
+        ),
+        scene_binding=SimpleNamespace(rigid_objects=[]),
+    )
+    captured = {}
+
+    def factory(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(create_adapter=lambda: "adapter")
+
+    monkeypatch.setattr(assembly, "_TaskFactory", factory)
+    monkeypatch.setattr(assembly, "install_grasp_filters", lambda *args: {})
+    environment = SimpleNamespace(robot=correct, sim=sim, step_dt=0.04)
+    assembly.TaskAdapterFactory(registration, "test", (), ()).create_adapter(
+        environment
+    )
+    monkeypatch.setattr(
+        manager_module.SimulationManager, "_instances", {0: zero, 1: sim}
+    )
+    generator = captured["motion_generator_factory"]()
+    assert generator.robot is correct
+    assert generator.planner.cfg.sim_instance_id == sim.instance_id

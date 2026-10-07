@@ -40,6 +40,7 @@ from embodichain.gen_sim.task_engine.workflow_contracts import (
     TASK_RUN_REQUEST_SCHEMA,
     scene_input_kind,
     validate_scene_history_root,
+    validate_scene_output_separation,
     validate_task_run_request,
 )
 
@@ -347,3 +348,14 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(ik_solver="unsupported")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(planner={"mode": "toppra", "dynamic_collision": True})
+
+
+def test_output_separation_protects_an_explicit_config_parent(tmp_path: Path) -> None:
+    source = tmp_path / "scene_export"
+    source.mkdir()
+    config = source / "scene_config.json"
+    config.write_text("{}")
+    for output in (source, source / "result"):
+        with pytest.raises(ValueError, match="must not overlap"):
+            validate_scene_output_separation(config, output)
+    validate_scene_output_separation(config, tmp_path / "separate")

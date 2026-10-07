@@ -508,7 +508,9 @@ class TaskSpec:
 
 
 def _sort_predicates(values: Sequence[Predicate], prefix: str) -> tuple[Predicate, ...]:
-    ordered = sorted(values, key=lambda item: canonical_json(item.to_dict()))
+    ordered = sorted(
+        values, key=lambda item: canonical_json(_semantic_predicate_dict(item))
+    )
     used = {item.predicate_id for item in ordered if item.predicate_id is not None}
     result: list[Predicate] = []
     index = 1

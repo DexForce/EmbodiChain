@@ -60,7 +60,14 @@ def migrate_endpoint_manifest(
         if backup.exists():
             raise FileExistsError(f"Endpoint backup root already exists: {backup}")
 
-    plans = [_plan_asset(root, entry) for entry in entries]
+    plans = []
+    sources: set[Path] = set()
+    for entry in entries:
+        plan = _plan_asset(root, entry)
+        if plan["source"] in sources:
+            raise ValueError(f"Endpoint asset path is duplicated: {plan['relative']}")
+        sources.add(plan["source"])
+        plans.append(plan)
     report_assets = [plan["report"] for plan in plans]
     if not apply:
         return {
@@ -241,6 +248,7 @@ def _plan_asset(root: Path, entry: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Endpoint asset escapes asset_root: {relative.as_posix()}")
     if source.suffix.lower() not in _USD_SUFFIXES or not source.is_file():
         raise ValueError(f"Endpoint asset must be an existing USD file: {relative}")
+    relative = source.relative_to(root)
     before_sha256 = _sha256(source)
     if before_sha256 != entry["expected_sha256"]:
         raise ValueError(

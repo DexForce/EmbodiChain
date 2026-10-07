@@ -281,10 +281,16 @@ class _WithdrawLowerer(_SlideLowerer):
             )
         ids = list(hand.runtime_target.joint_ids)
         observed = context.robot.qpos[:, ids]
-        stuck_closed = (
-            observed.abs().amax() > 0.08 and observed.std(dim=-1).amax() < 1.0e-6
+        expected = command.resolve(
+            num_envs=observed.shape[0],
+            control_dof=len(ids),
+            device=observed.device,
+            dtype=observed.dtype,
         )
-        if not torch.isfinite(observed).all() or stuck_closed:
+        if (
+            not torch.isfinite(observed).all()
+            or (observed - expected).abs().amax() > 0.08
+        ):
             raise ValueError(
                 "The hand has not reached its open posture before withdrawal."
             )
