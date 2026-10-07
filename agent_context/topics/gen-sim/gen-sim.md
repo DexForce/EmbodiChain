@@ -295,9 +295,12 @@ that order. Candidate, IK or path failure triggers one alternate-direction
 attempt through the complete shared HandOver planner before execution. Successful
 rows retain their first trajectories and attachment candidates. Exhaustion
 fails normally; no source regrasp or cross-call recovery is added. Transfer,
-release, retreat and state effects remain owned by shared HandOver. E5 paired
-grasping and E6 handle policies remain separate. These are GenSim-local skill replacements,
-not another executor or changes to shared goal/options types. Unmarked calls
+release, retreat and state effects remain owned by shared HandOver. Generated
+Robotiq profiles select `source_hold_mode=grasp_command` to retain the bound
+closing drive during existing-hold transfers; the mode's contract belongs to
+[Atomic Action execution](../atomic-actions/execution.md).
+E5 paired grasping and E6 handle policies remain separate. These GenSim-local
+skill replacements use the shared goals and options. Unmarked calls
 delegate unchanged; drawer deployments install the same ordinary wrappers.
 Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
@@ -324,8 +327,8 @@ instead of assigning overlapping destinations. These are planning contracts,
 not physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
 GenSim installs PickUp, HandOver, MoveHeldObject, Place and Pour wrappers for all
-deployments after shared engine validation; shared Lab action classes and
-options remain unchanged. The transport wrapper stages above the target and
+deployments after shared engine validation and configure shared Lab action
+options through the skill profile. The transport wrapper stages above the target and
 returns the input attachment as its expected effect, so the existing composite
 monitor verifies retention before observed-transform reconciliation. This is
 terminal verification, not in-flight slip prevention. Regenerate older bundles

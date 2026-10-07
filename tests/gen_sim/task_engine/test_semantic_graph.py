@@ -2061,6 +2061,10 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         not in integration["profile"]["action_options"]["hand_over"]
     )
     assert (
+        integration["profile"]["action_options"]["hand_over"]["source_hold_mode"]
+        == "grasp_command"
+    )
+    assert (
         load_config(paths.integration_fingerprint)["schema_version"]
         == "semantic_integration_fingerprint/v2"
     )

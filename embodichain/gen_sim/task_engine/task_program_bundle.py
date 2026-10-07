@@ -1723,6 +1723,7 @@ def _integration_payload(
                     "retreat_steps": 36,
                     "retreat_distance": 0.10,
                     "receive_pick_object_part": "center",
+                    "source_hold_mode": "grasp_command",
                     "release_at_target": False,
                     "arm_selection": "bound",
                 },

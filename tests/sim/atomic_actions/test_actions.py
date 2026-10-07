@@ -5248,8 +5248,10 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert torch.all(trajectory.positions[:, -1, DUAL_ARM_DOF + 2 :] == 1)
 
 
+@pytest.mark.parametrize("source_hold_mode", ["observed", "grasp_command"])
 def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
+    source_hold_mode: str,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
     action = _bind_action(_dual_motion_generator(), HandOver())
@@ -5309,6 +5311,20 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         ),
     )
 
+    binding = _dual_binding(action, "source", "destination")
+    expected_source_hold = (
+        source_hand_qpos
+        if source_hold_mode == "observed"
+        else binding.endpoint("source", "grasp").joint_positions(
+            "grasp", num_envs=NUM_ENVS, device="cpu", dtype=torch.float32
+        )
+    )
+    options = HandOverOptions(
+        release_at_target=False,
+        receive_pick_object_part="center",
+    )
+    if source_hold_mode == "grasp_command":
+        options = replace(options, source_hold_mode=source_hold_mode)
     plan = _plan_action(
         action,
         ActionInvocation(
@@ -5317,12 +5333,9 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
                 semantics,
                 target_pose=SceneEntityPose("handover_target"),
             ),
-            binding=_dual_binding(action, "source", "destination"),
+            binding=binding,
             motion_policy=MotionPolicy(sample_count=60),
-            skill_options=HandOverOptions(
-                release_at_target=False,
-                receive_pick_object_part="center",
-            ),
+            skill_options=options,
         ),
         context,
     )
@@ -5365,11 +5378,11 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         trajectory[
             :, transfer.start : release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF
         ],
-        source_hand_qpos[:, None].expand(-1, release.start - transfer.start, -1),
+        expected_source_hold[:, None].expand(-1, release.start - transfer.start, -1),
     )
     torch.testing.assert_close(
         trajectory[:, release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF],
-        source_hand_qpos,
+        expected_source_hold,
     )
 
 
@@ -5829,6 +5842,15 @@ def test_handover_requires_antipodal_affordance_and_valid_options() -> None:
         HandOverOptions(hand_interp_steps=0)
     with pytest.raises(ValueError, match="retreat_distance"):
         HandOverOptions(retreat_distance=float("nan"))
+
+
+def test_handover_source_hold_option_preserves_positional_constructor() -> None:
+    """Existing callers keep their release and resource-selection arguments."""
+    options = HandOverOptions(0.1, 0.1, 10, 4, 20, 0.1, "bottom", False, "bound")
+
+    assert options.release_at_target is False
+    assert options.arm_selection == "bound"
+    assert options.source_hold_mode == "observed"
 
 
 def test_handover_source_retreat_retraces_grasp_before_lifting() -> None:

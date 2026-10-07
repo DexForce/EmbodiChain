@@ -137,6 +137,14 @@ class HandOverOptions(ActionOptions):
     explicit ``source`` and ``destination`` resource slots are authoritative.
     """
 
+    source_hold_mode: Literal["observed", "grasp_command"] = "observed"
+    """Source-hand target during a transfer from an existing hold.
+
+    ``"observed"`` retains the measured posture without tightening the grip.
+    ``"grasp_command"`` continues the bound grasp command, retaining closing
+    drive when contact prevents a position-controlled hand reaching its target.
+    """
+
     def __post_init__(self) -> None:
         for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
             value = getattr(self, name)
@@ -157,6 +165,10 @@ class HandOverOptions(ActionOptions):
             )
         if type(self.release_at_target) is not bool:
             raise TypeError("release_at_target must be a bool.")
+        if self.source_hold_mode not in ("observed", "grasp_command"):
+            raise ValueError(
+                "source_hold_mode must be exactly 'observed' or 'grasp_command'."
+            )
         if self.arm_selection not in ("nearest", "bound"):
             raise ValueError("arm_selection must be exactly 'nearest' or 'bound'.")
 
@@ -879,11 +891,14 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             name="HandOver existing-hold source retreat success",
         )
 
-        # An existing hold is already physically established.  Preserve the
-        # observed source-hand closure until the release phase instead of
-        # commanding a configured grasp setpoint that may be tighter than the
-        # contact-supported pose.
-        source_hand_qpos = context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        # Measured posture limits further squeezing; a declared grasp command
+        # retains closing drive in hands whose contact-limited posture differs
+        # from the actuator target. Keep this choice through the release start.
+        source_hand_qpos = (
+            resources.first.hand_grasp_qpos
+            if options.source_hold_mode == "grasp_command"
+            else context.last_qpos[:, list(resources.first.hand.joint_ids)]
+        )
 
         segment_values: list[tuple[str, torch.Tensor]] = [
             (
