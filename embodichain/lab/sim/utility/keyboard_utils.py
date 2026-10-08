@@ -232,6 +232,7 @@ def run_keyboard_control_for_camera(
 
                 if vis_pose:
                     sim.sync_render_state()
+                    sim.capture_visualization(force=True)
 
     except KeyboardInterrupt:
         if vis_pose:
@@ -484,6 +485,7 @@ def run_keyboard_control_for_light(
             # Update simulation if any property changed
             if property_changed and vis_pose:
                 sim.sync_render_state()
+                sim.capture_visualization(force=True)
 
     except KeyboardInterrupt:
         if vis_pose:

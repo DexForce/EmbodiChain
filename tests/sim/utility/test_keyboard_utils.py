@@ -36,6 +36,7 @@ def _simulation() -> SimpleNamespace:
         draw_marker=Mock(return_value=[marker]),
         remove_marker=Mock(),
         sync_render_state=Mock(),
+        capture_visualization=Mock(),
         update=Mock(side_effect=AssertionError("UI edit stepped physics")),
     )
 
@@ -62,6 +63,7 @@ def test_camera_keyboard_edit_only_publishes(monkeypatch: pytest.MonkeyPatch) ->
 
     assert sensor.set_local_pose.call_args.args[0][0, 2, 3] == pytest.approx(0.01)
     sim.sync_render_state.assert_called_once()
+    sim.capture_visualization.assert_called_once_with(force=True)
     sim.update.assert_not_called()
 
 
@@ -90,4 +92,5 @@ def test_light_keyboard_edit_only_publishes(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert light.set_local_pose.call_args.args[0][0, 2] == pytest.approx(0.01)
     sim.sync_render_state.assert_called_once()
+    sim.capture_visualization.assert_called_once_with(force=True)
     sim.update.assert_not_called()

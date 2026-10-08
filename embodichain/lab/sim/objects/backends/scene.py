@@ -637,6 +637,9 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             rows,
             (7,),
         )
+        if not self.is_newton_backend:
+            # Default root writes do not propagate descendant poses on CUDA.
+            self.compute_kinematics(rows)
 
     def apply_root_velocity(
         self, velocity: torch.Tensor, env_ids: Sequence[int] | torch.Tensor

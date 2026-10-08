@@ -683,7 +683,9 @@ def main(args: argparse.Namespace) -> None:
                     f"'{control_part}' has {len(joint_ids)} joints; skipping."
                 )
             else:
-                robot.set_qpos(qpos=qpos, joint_ids=joint_ids)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=False)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=True)
+                sim.sync_render_state()
 
         analyzer_cfg = build_analyzer_config(args, control_part)
         analyzer = WorkspaceAnalyzer(robot=robot, config=analyzer_cfg, sim_manager=sim)

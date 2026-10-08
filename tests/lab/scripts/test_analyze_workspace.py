@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import torch
 
 from embodichain.lab.scripts import analyze_workspace
 from embodichain.lab.sim import sim_manager
@@ -31,13 +32,37 @@ from embodichain.lab.sim.motion.workspace import analyzer
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize(
+    "initial",
+    [None, [0.7], [0.7, 0.8]],
+    ids=["configured", "requested", "invalid-width"],
+)
 def test_workspace_display_publishes_without_physics(
     monkeypatch: pytest.MonkeyPatch,
+    preview: bool,
+    initial: list[float] | None,
 ) -> None:
     events: list[str] = []
+    current = torch.zeros((1, 1))
+    target = torch.zeros_like(current)
+    expected = torch.tensor([[0.7]]) if initial == [0.7] else torch.zeros_like(current)
+
+    def set_qpos(qpos, joint_ids, target=True):
+        output = targets if target else current
+        output[:, joint_ids] = qpos
+
+    targets = target
     robot = SimpleNamespace(
-        cfg=SimpleNamespace(uid="mock"), control_parts={"arm": ["joint"]}
+        cfg=SimpleNamespace(uid="mock"),
+        control_parts={"arm": ["joint"]},
+        get_joint_ids=lambda _: [0],
+        set_qpos=set_qpos,
     )
+
+    def check_state():
+        torch.testing.assert_close(current, expected)
+        torch.testing.assert_close(targets, expected)
 
     class FakeSimulation:
         def __init__(self, cfg):
@@ -51,9 +76,13 @@ def test_workspace_display_publishes_without_physics(
         def prepare(self):
             pass
 
+        def sync_render_state(self):
+            check_state()
+
         @contextmanager
         def render_frame(self, **kwargs):
             assert not kwargs.get("force_visualization", False)
+            check_state()
             events.append("publish")
             yield
             raise KeyboardInterrupt
@@ -78,19 +107,25 @@ def test_workspace_display_publishes_without_physics(
     monkeypatch.setattr(analyze_workspace, "_visualization_enabled", lambda _: True)
     monkeypatch.setattr(analyze_workspace, "_viser_enabled", lambda _: False)
     monkeypatch.setattr(analyze_workspace, "_print_summary", lambda *_: None)
-    monkeypatch.setattr(
-        analyzer,
-        "WorkspaceAnalyzer",
-        lambda **_: SimpleNamespace(analyze=lambda **_: object()),
-    )
+    analyze = Mock(side_effect=lambda **_: check_state())
+
+    def construct_analyzer(**kwargs):
+        check_state()
+        return SimpleNamespace(analyze=analyze)
+
+    monkeypatch.setattr(analyzer, "WorkspaceAnalyzer", construct_analyzer)
+    cache_preview = Mock(side_effect=lambda *_: check_state())
+    monkeypatch.setattr(analyze_workspace, "preview_cache", cache_preview)
     args = SimpleNamespace(
         robot="mock",
         asset=None,
-        init_qpos=None,
-        preview_cache=None,
+        init_qpos=initial,
+        preview_cache="cache.npz" if preview else None,
         num_samples=1,
         force_recompute=False,
         output=None,
     )
     analyze_workspace.main(args)
     assert events == ["publish", "destroy", "flush"]
+    assert cache_preview.call_count == int(preview)
+    assert analyze.call_count == int(not preview)

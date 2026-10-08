@@ -153,9 +153,13 @@ def test_reset_and_root_pose_write_preserve_physics_state(
         quaternion = torch.zeros((2, 4), device=sim.device)
         quaternion[:, 1] = torch.sin(angle / 2)
         quaternion[:, 3] = torch.cos(angle / 2)
+        expected_link_pose = torch.eye(4, device=sim.device).repeat(2, 1, 1)
+        expected_link_pose[:, :3, :3] = matrix_from_quat(quaternion)
+        # The hinge has no origin offset, so arm and root frame origins coincide.
+        expected_link_pose[:, :3, 3] = root_pose[:, :3]
         torch.testing.assert_close(
-            art.get_link_pose("arm", to_matrix=True)[:, :3, :3],
-            matrix_from_quat(quaternion),
+            art.get_link_pose("arm", to_matrix=True),
+            expected_link_pose,
             rtol=0,
             atol=1e-6,
         )
