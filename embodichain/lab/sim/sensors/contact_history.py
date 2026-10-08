@@ -77,13 +77,21 @@ class ContactHistory:
         self.include_unknown_counterpart = include_unknown_counterpart
         self.force_threshold = float(force_threshold)
         shape = actor_ids.shape
-        self.contact = torch.zeros(shape, device=actor_ids.device, dtype=torch.bool)
-        self.found = torch.zeros_like(self.contact)
-        self.first_contact = torch.zeros_like(self.contact)
-        self.force = torch.zeros((*shape, 3), device=actor_ids.device)
-        self.peak_force = torch.zeros_like(self.force)
-        self.current_air_time = torch.zeros(shape, device=actor_ids.device)
-        self.last_air_time = torch.zeros_like(self.current_air_time)
+        # Pooled allocations: one storage per dtype/shape family so a reset
+        # fuses into a handful of launches instead of one CUDA write per
+        # field. The public attributes remain per-field contiguous views.
+        self._bool_pool = torch.zeros(
+            (3, *shape), device=actor_ids.device, dtype=torch.bool
+        )
+        self.contact = self._bool_pool[0]
+        self.found = self._bool_pool[1]
+        self.first_contact = self._bool_pool[2]
+        self._force_pool = torch.zeros((2, *shape, 3), device=actor_ids.device)
+        self.force = self._force_pool[0]
+        self.peak_force = self._force_pool[1]
+        self._air_pool = torch.zeros((2, *shape), device=actor_ids.device)
+        self.current_air_time = self._air_pool[0]
+        self.last_air_time = self._air_pool[1]
         self.contact_count = torch.zeros(shape[0], device=actor_ids.device)
         self._hits = torch.zeros(shape, device=actor_ids.device, dtype=torch.int32)
         self._env_hits = torch.zeros(
@@ -214,17 +222,24 @@ class ContactHistory:
         Args:
             env_ids: Rows to clear. None selects every environment.
         """
-        ids = slice(None) if env_ids is None else env_ids
-        for value in (
-            self.contact,
-            self.found,
-            self.first_contact,
-            self.force,
-            self.peak_force,
-            self.current_air_time,
-            self.last_air_time,
-            self.contact_count,
-            self._hits,
-            self._env_hits,
-        ):
-            value[ids] = 0
+        if env_ids is None:
+            # One fused multi-tensor zero for the full-reset case.
+            torch._foreach_zero_(
+                [
+                    self._bool_pool,
+                    self._force_pool,
+                    self._air_pool,
+                    self.contact_count,
+                    self._hits,
+                    self._env_hits,
+                ]
+            )
+            return
+        ids = env_ids
+        # Pooled rows: one advanced-indexing write per dtype/shape family.
+        self._bool_pool[:, ids] = False
+        self._force_pool[:, ids] = 0
+        self._air_pool[:, ids] = 0
+        self.contact_count[ids] = 0
+        self._hits[ids] = 0
+        self._env_hits[ids] = 0
