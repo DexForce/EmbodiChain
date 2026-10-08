@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import json
+import os
 import subprocess
 import sys
 
@@ -29,7 +30,6 @@ import numpy as np
 import pytest
 import torch
 
-import embodichain
 from embodichain.learning.rl.evaluation import (
     convert_policy_action_for_env,
     infer_policy_action,
@@ -41,8 +41,18 @@ from scripts.benchmark.rl.locomotion_ppo import (
     _check_backend,
 )
 
-ROOT = Path(embodichain.__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[4]
 TASK_DIR = ROOT / "embodichain_tasks/configs/tasks/locomotion/velocity"
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Make repository benchmark modules available to fresh workers."""
+    env = os.environ.copy()
+    paths = [str(ROOT)]
+    if env.get("PYTHONPATH"):
+        paths.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    return env
 
 
 def _finite(value: object) -> bool:
@@ -71,6 +81,8 @@ def test_locomotion_cuda_reset_step_and_partial_reset(robot: str, backend: str) 
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=ROOT,
+        env=_subprocess_env(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -157,7 +169,14 @@ def test_g1_ppo_checkpoint_resume(tmp_path: Path, backend: str) -> None:
         [sys.executable, str(Path(__file__).resolve()), "resume", backend, str(output)],
     ]
     for command in commands:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=ROOT,
+            env=_subprocess_env(),
+        )
         assert result.returncode == 0, result.stdout + result.stderr
     result = json.loads((output / "result.json").read_text())
     assert result["status"] == "passed"
