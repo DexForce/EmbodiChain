@@ -30,6 +30,10 @@ import numpy as np
 import pytest
 import torch
 
+from embodichain.lab.gym.utils.registration import (
+    discover_task_packages,
+    execute_init_hooks,
+)
 from embodichain.learning.rl.evaluation import (
     convert_policy_action_for_env,
     infer_policy_action,
@@ -89,7 +93,8 @@ def test_locomotion_cuda_reset_step_and_partial_reset(robot: str, backend: str) 
 
 def _run_locomotion_smoke(robot: str, backend: str) -> None:
     """Check inference and selected-row reset with the official task config."""
-    import embodichain_tasks  # noqa: F401 — register task manager functors
+    discover_task_packages()
+    execute_init_hooks()
 
     config_dir = TASK_DIR / f"{robot}_flat"
     config = _load_config(config_dir, backend, 8, 24)
@@ -185,7 +190,8 @@ def test_g1_ppo_checkpoint_resume(tmp_path: Path, backend: str) -> None:
 
 
 def _resume_checkpoint(backend: str, output: Path) -> None:
-    import embodichain_tasks  # noqa: F401
+    discover_task_packages()
+    execute_init_hooks()
 
     device = torch.device("cuda:0")
     config_dir = TASK_DIR / "g1_flat"
