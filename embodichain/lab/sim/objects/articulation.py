@@ -1472,6 +1472,8 @@ class Articulation(BatchEntity):
     ) -> None:
         """Set local pose of the articulation.
 
+        The pose write does not advance physics or move other scene objects.
+
         Args:
             pose (torch.Tensor): The local pose of the articulation with shape (N, 7) or (N, 4, 4).
             env_ids (Sequence[int] | None, optional): Environment indices. If None, then all indices are used.
@@ -1499,7 +1501,9 @@ class Articulation(BatchEntity):
 
         self._data.articulation_view.apply_root_pose(target_pose, local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
-            self._world.update(0.001)
+            # Native CPU link-pose reads consume published render transforms.
+            # A zero-duration update publishes them without stepping physics.
+            self._world.update(0.0)
 
     def get_local_pose(self, to_matrix=False) -> torch.Tensor:
         """Get local pose (root link pose) of the articulation.
@@ -2736,6 +2740,10 @@ class Articulation(BatchEntity):
     ) -> None:
         """Restore configured state for selected articulation instances.
 
+        State writes and Scene kinematics publish the restored state without
+        advancing physics, preserving motion in unselected instances and
+        other scene objects.
+
         Args:
             env_ids: Environment indices to reset. Defaults to all instances.
             clear_dynamics: Whether to clear native dynamics immediately. The
@@ -2802,7 +2810,7 @@ class Articulation(BatchEntity):
 
         self._data.articulation_view.compute_kinematics(local_env_ids)
         if self.device.type == "cpu" and not self._data.is_newton_backend:
-            self._world.update(0.001)
+            self._world.update(0.0)
 
     def _set_default_joint_drive(
         self,

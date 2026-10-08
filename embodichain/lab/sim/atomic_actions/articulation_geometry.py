@@ -18,11 +18,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+import math
+import numbers
+from typing import TYPE_CHECKING, Protocol
 
 import torch
+from dexsim.types import DriveType
+
+from .affordance import AntipodalAffordance
 
 from ._articulation_geometry_keys import (
     _ARTICULATION_POINT_CLOUD_KEY,
@@ -32,6 +37,326 @@ from ._articulation_geometry_keys import (
     _TARGET_LINK_REVOLUTE_AXIS_ORIGIN_KEY,
     _TARGET_LINK_REVOLUTE_JOINT_AXIS_KEY,
 )
+
+if TYPE_CHECKING:
+    from embodichain.lab.sim.objects import Articulation
+
+
+_MAX_RIGIDIZED_JOINT_POSITION_TOLERANCE = 1.0e-3
+_MAX_RIGIDIZED_LINK_TRANSFORM_TOLERANCE = 1.0e-5
+
+
+def _rigidized_articulation_tolerance(
+    value: object,
+    *,
+    field_name: str,
+) -> float:
+    """Return one bounded positive tolerance for rigidized geometry."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{field_name} must be a real number.")
+    tolerance = float(value)
+    if not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError(f"{field_name} must be finite and greater than zero.")
+    maximum = {
+        "joint_position_tolerance": _MAX_RIGIDIZED_JOINT_POSITION_TOLERANCE,
+        "link_transform_tolerance": _MAX_RIGIDIZED_LINK_TRANSFORM_TOLERANCE,
+    }[field_name]
+    if tolerance > maximum:
+        raise ValueError(f"{field_name} must be at most {maximum:.1e}.")
+    return tolerance
+
+
+def _validated_locked_qpos(
+    articulation: Articulation,
+    locked_qpos: Mapping[str, float],
+) -> dict[str, float]:
+    """Validate and own the declared joint configuration."""
+    if not isinstance(locked_qpos, Mapping):
+        raise TypeError("locked_qpos must be a mapping from joint names to values.")
+    normalized: dict[str, float] = {}
+    for name, value in locked_qpos.items():
+        if type(name) is not str or not name or name != name.strip():
+            raise ValueError("locked_qpos keys must be non-empty joint names.")
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
+            raise TypeError(f"locked_qpos[{name!r}] must be a real number.")
+        position = float(value)
+        if not math.isfinite(position):
+            raise ValueError(f"locked_qpos[{name!r}] must be finite.")
+        normalized[name] = position
+    return normalized
+
+
+def _joint_readings(
+    values: torch.Tensor,
+    joint_count: int,
+    *,
+    field_name: str,
+) -> torch.Tensor:
+    """Normalize one batched per-joint reading to finite CPU float64 rows."""
+    readings = torch.as_tensor(values).detach().cpu().to(torch.float64)
+    if joint_count <= 0 or readings.numel() == 0 or readings.numel() % joint_count:
+        raise ValueError(
+            f"{field_name} must contain complete readings for {joint_count} joints."
+        )
+    readings = readings.reshape(-1, joint_count)
+    if not bool(torch.isfinite(readings).all().item()):
+        raise ValueError(f"{field_name} must contain only finite values.")
+    return readings
+
+
+def _first_flagged(flags: torch.Tensor) -> tuple[int, int]:
+    """Return the ``(arena, joint)`` index of the first flagged entry."""
+    index = int(torch.argmax(flags.flatten().to(torch.uint8)))
+    return divmod(index, flags.shape[1])
+
+
+def _root_to_link_transforms(
+    articulation: Articulation,
+    grasp_link: str,
+    locked_qpos: Mapping[str, float],
+) -> torch.Tensor:
+    """Read or compute batched articulation-root-to-link transforms."""
+    joint_names = tuple(articulation.joint_names)
+    if getattr(articulation, "pk_chain", None) is not None:
+        qpos = torch.tensor(
+            [[locked_qpos[name] for name in joint_names]],
+            dtype=torch.float32,
+        )
+        poses = torch.as_tensor(
+            articulation.compute_fk(
+                qpos,
+                link_names=(grasp_link,),
+                qpos_joint_names=joint_names,
+            )
+        )
+        if poses.dim() == 4 and poses.shape[1:] == (1, 4, 4):
+            poses = poses[:, 0]
+        if poses.dim() != 3 or poses.shape[1:] != (4, 4):
+            raise ValueError(
+                "Articulation named FK must return shape (N, 4, 4) or "
+                "(N, 1, 4, 4) for one selected link."
+            )
+        transforms = poses.detach().cpu().to(torch.float64)
+    else:
+        root = (
+            torch.as_tensor(articulation.get_local_pose(to_matrix=True))
+            .detach()
+            .cpu()
+            .to(torch.float64)
+            .reshape(-1, 4, 4)
+        )
+        link = (
+            torch.as_tensor(articulation.get_link_pose(grasp_link, to_matrix=True))
+            .detach()
+            .cpu()
+            .to(torch.float64)
+            .reshape(-1, 4, 4)
+        )
+        if root.shape[0] != link.shape[0]:
+            raise ValueError(
+                f"{articulation.uid!r} reports {root.shape[0]} root poses but "
+                f"{link.shape[0]} poses for link {grasp_link!r}; the two readings "
+                "must share one arena batch."
+            )
+        transforms = torch.linalg.inv(root) @ link
+    if transforms.shape[0] == 0 or not bool(torch.isfinite(transforms).all().item()):
+        raise ValueError("Articulation root-to-link transforms must be finite.")
+    return transforms
+
+
+def _articulation_root_to_link(
+    articulation: Articulation,
+    grasp_link: str,
+    locked_qpos: Mapping[str, float],
+    *,
+    transform_tolerance: float,
+) -> torch.Tensor:
+    """Return the common root-to-link transform for every arena."""
+    per_arena = _root_to_link_transforms(articulation, grasp_link, locked_qpos)
+    if per_arena.shape[0] > 1:
+        spread = (per_arena - per_arena[0]).abs().amax(dim=(1, 2))
+        worst = int(torch.argmax(spread))
+        if float(spread[worst]) > transform_tolerance:
+            raise ValueError(
+                f"Arena {worst} of {articulation.uid!r} places {grasp_link!r} "
+                f"{float(spread[worst]):.6f} away from the arena-0 root-to-link "
+                "transform, so one grasp mesh cannot describe every arena."
+            )
+    return per_arena[0]
+
+
+def _assert_link_is_rigid_to_root(
+    articulation: Articulation,
+    locked_qpos: Mapping[str, float],
+    *,
+    position_tolerance: float,
+) -> None:
+    """Reject a configuration that is not held as one compound rigid body."""
+    joint_names = tuple(articulation.joint_names)
+    declared = set(locked_qpos)
+    missing = sorted(set(joint_names) - declared)
+    if missing:
+        raise ValueError(
+            f"locked_qpos must declare every joint of {articulation.uid!r} so the "
+            f"articulation is a compound rigid body; missing {missing}."
+        )
+    unknown = sorted(declared - set(joint_names))
+    if unknown:
+        raise ValueError(
+            f"locked_qpos declares joints {unknown} that {articulation.uid!r} "
+            f"does not have; available joints are {list(joint_names)}."
+        )
+
+    joint_count = len(joint_names)
+    expected = torch.tensor(
+        [locked_qpos[name] for name in joint_names],
+        dtype=torch.float64,
+    )
+    measured = _joint_readings(
+        articulation.get_qpos(), joint_count, field_name="articulation qpos"
+    )
+    displaced = (measured - expected).abs() > position_tolerance
+    if bool(displaced.any()):
+        arena, joint = _first_flagged(displaced)
+        raise ValueError(
+            f"Joint {joint_names[joint]!r} of {articulation.uid!r} reads "
+            f"{float(measured[arena, joint]):.6f} in arena {arena} but was declared "
+            f"locked at {float(expected[joint]):.6f}."
+        )
+
+    target = _joint_readings(
+        articulation.get_qpos(target=True),
+        joint_count,
+        field_name="articulation target qpos",
+    )
+    stiffness = _joint_readings(
+        articulation.get_joint_drive()[0],
+        joint_count,
+        field_name="articulation drive stiffness",
+    )
+    drive_types = articulation.get_joint_drive_type()
+    if len(drive_types) != measured.shape[0] or any(
+        len(row) != joint_count for row in drive_types
+    ):
+        raise ValueError(
+            "articulation drive types must contain one reading per arena and joint."
+        )
+    active_drive = torch.tensor(
+        [
+            [mode in (DriveType.FORCE, DriveType.ACCELERATION) for mode in row]
+            for row in drive_types
+        ],
+        dtype=torch.bool,
+    )
+    driven = (
+        active_drive
+        & (stiffness > 0.0)
+        & ((target - expected).abs() <= position_tolerance)
+    )
+
+    limits = torch.as_tensor(articulation.get_qpos_limits()).detach().cpu()
+    if limits.numel() != measured.shape[0] * joint_count * 2:
+        raise ValueError(
+            "articulation qpos limits must contain lower and upper values for "
+            "every arena and joint."
+        )
+    limits = limits.to(torch.float64).reshape(-1, joint_count, 2)
+    if not bool(torch.isfinite(limits).all().item()):
+        raise ValueError("articulation qpos limits must contain only finite values.")
+    lower, upper = limits[..., 0], limits[..., 1]
+    pinned = (
+        ((upper - lower).abs() <= position_tolerance)
+        & (expected >= lower - position_tolerance)
+        & (expected <= upper + position_tolerance)
+    )
+    unheld = ~(driven | pinned)
+    if bool(unheld.any()):
+        arena, joint = _first_flagged(unheld)
+        raise ValueError(
+            f"Joint {joint_names[joint]!r} of {articulation.uid!r} rests at its "
+            f"declared position in arena {arena} but nothing holds it there: drive "
+            f"type is {drive_types[arena][joint]!s}, stiffness is "
+            f"{float(stiffness[arena, joint]):.6f} with position target "
+            f"{float(target[arena, joint]):.6f}, and the position limits span "
+            f"[{float(lower[arena, joint]):.6f}, {float(upper[arena, joint]):.6f}]."
+        )
+
+
+def create_rigidized_articulation_antipodal_affordance(
+    articulation: Articulation,
+    *,
+    grasp_link: str,
+    locked_qpos: Mapping[str, float],
+    joint_position_tolerance: float = 1.0e-3,
+    link_transform_tolerance: float = 1.0e-5,
+) -> AntipodalAffordance:
+    """Build root-frame, link-scoped grasp geometry for a rigidized articulation.
+
+    Args:
+        articulation: Native articulation providing named joint, link, pose,
+            drive, limit, FK, and link-mesh queries.
+        grasp_link: Native link whose mesh supplies the grasp geometry.
+        locked_qpos: Exact position required for every native joint.
+        joint_position_tolerance: Positive tolerance, no greater than ``1e-3``,
+            for measured positions, targets, and direct-Python lock checks.
+        link_transform_tolerance: Positive tolerance, no greater than ``1e-5``,
+            for root-to-link transform agreement across arenas.
+
+    Returns:
+        Owned link-scoped antipodal mesh in the articulation-root frame.
+
+    Raises:
+        TypeError: If a declared value or native reading has an invalid type.
+        ValueError: If the articulation is not consistently rigidized, the
+            selected link is absent, or its transformed mesh is invalid.
+    """
+    joint_tolerance = _rigidized_articulation_tolerance(
+        joint_position_tolerance, field_name="joint_position_tolerance"
+    )
+    transform_tolerance = _rigidized_articulation_tolerance(
+        link_transform_tolerance, field_name="link_transform_tolerance"
+    )
+    locked = _validated_locked_qpos(articulation, locked_qpos)
+    link_names = tuple(articulation.link_names)
+    if grasp_link not in link_names:
+        raise ValueError(
+            f"Link {grasp_link!r} is not part of {articulation.uid!r}; "
+            f"available links are {list(link_names)}."
+        )
+    _assert_link_is_rigid_to_root(
+        articulation, locked, position_tolerance=joint_tolerance
+    )
+    root_to_link = _articulation_root_to_link(
+        articulation,
+        grasp_link,
+        locked,
+        transform_tolerance=transform_tolerance,
+    )
+    vertices, triangles = articulation.get_link_vert_face(grasp_link)
+    vertices = torch.as_tensor(vertices)
+    triangles = torch.as_tensor(triangles)
+    if (
+        not vertices.is_floating_point()
+        or vertices.dim() != 2
+        or vertices.shape[1:] != (3,)
+        or vertices.shape[0] == 0
+        or not bool(torch.isfinite(vertices).all().item())
+    ):
+        raise ValueError(
+            f"Link {grasp_link!r} of {articulation.uid!r} has no usable mesh "
+            "vertices; expected non-empty finite floating mesh vertices with "
+            f"shape (N, 3), got {tuple(vertices.shape)}."
+        )
+    transform = root_to_link.to(dtype=torch.float64, device=vertices.device)
+    local = vertices.to(torch.float64)
+    root_frame = (local @ transform[:3, :3].transpose(0, 1) + transform[:3, 3]).to(
+        vertices.dtype
+    )
+    return AntipodalAffordance(
+        mesh_vertices=root_frame,
+        mesh_triangles=triangles,
+        mesh_scope="link",
+    )
 
 
 class ArticulationJointGeometry(Protocol):
@@ -822,5 +1147,6 @@ __all__ = [
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
+    "create_rigidized_articulation_antipodal_affordance",
     "sample_initial_articulation_geometry",
 ]

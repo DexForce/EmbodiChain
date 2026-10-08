@@ -3,12 +3,12 @@ embodichain.lab.sim.motion.expansion
 
 The :mod:`embodichain.lab.sim.motion.expansion` package provides
 qpos contracts, constrained trajectory operators, measured coverage, and a
-generation session for simulation expert trajectories. The core algorithms do
+expansion session for simulation expert trajectories. The core algorithms do
 not directly import Gym or own simulation stepping. Public imports pass through
 ``embodichain.lab`` and ``embodichain.lab.sim`` initialization and therefore
 require the normal simulation dependencies.
 
-This is the motion core for fixed-scene expert generation. Physical
+This is the motion core for fixed-scene expert expansion. Physical
 initial-state restoration, planning, rollout execution, task validation, and
 episode persistence must be supplied by separate host integrations. Those
 integrations provide actual observations and commands, validation evidence,
@@ -20,13 +20,31 @@ and persistence confirmations; this package does not instantiate them.
    :nosignatures:
 
    CandidateIdentity
+   CandidateRecipe
+   CallRecipe
+   CombinedAssignment
+   CombinedEpisodeCoordinator
+   ProposalRequest
+   CandidateSpec
+   CandidateCoordinator
+   CandidateWorkItem
    CandidateTrajectoryBatch
    CommitReceipt
    ExpertEpisode
    MotionSnapshot
    SceneCase
    TrajectoryAugmentationCfg
-   TrajectoryGenerationJobCfg
+   TrajectoryExpansionCfg
+   TrajectoryExpansionJobCfg
+   CombinedExpansionProfile
+   ReferenceFamilySpec
+   CubeInitialPoseProvider
+   CycleRecipe
+   MeasuredValidator
+   PhysicalSlotPool
+   SlotReservation
+   VisualProfileApplication
+   VisualProfileRegistry
    SPATIAL_METHODS
    TrajectoryPhase
    TrajectoryTemplate
@@ -57,7 +75,16 @@ and persistence confirmations; this package does not instantiate them.
    apply_trajectory_variant
    expand_trajectory_variants
    sample_approach_cone
-   GenerationSession
+   ExpansionSession
+   load_expansion_profile
+   SourceContext
+   SourceAdapter
+   TemplateSourceAdapter
+   PlanResultSourceAdapter
+   enumerate_candidate_recipes
+   load_visual_profile_registry
+   schedule_digest
+   round_robin_recipes
 
 Values and Evidence
 ~~~~~~~~~~~~~~~~~~~
@@ -68,6 +95,15 @@ pose, entity poses, and dependency revisions. Pose validation checks finite
 proper SE(3) transforms, including rotation orthogonality and handedness.
 Tensor inputs are detached and cloned at construction; consumers must still
 treat the resulting owned tensors as read-only.
+
+``CandidateSpec`` combines one Affordance selection and one trajectory variant
+under a single slot-independent candidate identity. Observation profiles are
+post-rollout fan-out metadata and do not create additional physical candidates.
+
+``SourceAdapter`` is the provider-neutral boundary for handwritten,
+MotionGenerator, Atomic Action, and Task Program sources. It exports a complete
+qpos template but does not own slots, simulator stepping, candidate identity, or
+persistence.
 
 Templates declare the complete joint order and use explicit qpos values.
 ``dt[0]`` is zero and each subsequent ``dt`` is the positive arrival interval
@@ -109,6 +145,30 @@ the package itself does not write or verify storage.
 .. autoclass:: CandidateIdentity
    :members:
 
+.. autoclass:: ProposalRequest
+   :members:
+
+.. autoclass:: CandidateSpec
+   :members:
+
+.. autoclass:: CandidateCoordinator
+   :members:
+
+.. autoclass:: CandidateWorkItem
+   :members:
+
+.. autoclass:: SourceContext
+   :members:
+
+.. autoclass:: SourceAdapter
+   :members:
+
+.. autoclass:: TemplateSourceAdapter
+   :members:
+
+.. autoclass:: PlanResultSourceAdapter
+   :members:
+
 .. autoclass:: CandidateTrajectoryBatch
    :members:
 
@@ -124,6 +184,46 @@ the package itself does not write or verify storage.
 .. autoclass:: CommitReceipt
    :members:
 
+.. autoclass:: CombinedExpansionProfile
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: ReferenceFamilySpec
+   :members:
+
+.. autoclass:: CubeInitialPoseProvider
+   :members:
+
+.. autoclass:: CycleRecipe
+   :members:
+
+.. autoclass:: CallRecipe
+   :members:
+
+.. autoclass:: CandidateRecipe
+   :members:
+
+.. autoclass:: SlotReservation
+   :members:
+
+.. autoclass:: PhysicalSlotPool
+   :members:
+
+.. autoclass:: VisualProfileApplication
+   :members:
+
+.. autoclass:: VisualProfileRegistry
+   :members:
+
+.. autoclass:: CombinedAssignment
+   :members:
+
+.. autoclass:: CombinedEpisodeCoordinator
+   :members:
+
+.. autoclass:: MeasuredValidator
+   :members:
+
 Configuration and Preflight
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -132,19 +232,21 @@ the spatial, redundancy (``ik``), approach, timing and manipulability factors,
 and the joint-geometry coverage limits. ``spatial.method`` names one or more of
 ``SPATIAL_METHODS``; each requested method becomes its own variant, and a
 single name is still accepted where a sequence is expected.
-``TrajectoryGenerationJobCfg`` adds the nested ``source``, ``planning``,
-``execution``, ``reset``, ``validation``, ``collection``, and ``persistence``
-sections used by a standalone generation job. Both ``from_mapping`` methods
-reject unknown fields and invalid types or ranges. ``validate_semantics``
-rechecks mutable configuration objects.
+``TrajectoryExpansionCfg`` is the single source-neutral configuration contract
+for candidate expansion, validation, collection budgets, and persistence
+bookkeeping. Its ``from_mapping`` method rejects unknown fields and invalid
+types or ranges, while nested values are rechecked after construction.
+``TrajectoryExpansionJobCfg`` remains a legacy standalone-job adapter for
+existing callers; new source integrations should consume
+``TrajectoryExpansionCfg`` directly.
 
-The initial schema requires ``planning.batch_mode: env_rows``,
-``execution.pool_mode: per_env_case``, ``execution.scheduler: full_batch``,
-provided initial states, and synchronous persistence. It limits each candidate
-to one rollout attempt. Write retries reuse the same episode and commit ID.
-Other scheduling modes, overlapping planning and physics, and the still
-unimplemented ``contact``, ``contact_timing`` and ``recovery`` factors are
-rejected. Control periods remain owned by the host.
+The expansion contract accepts FIFO candidate scheduling, bounded collection,
+and synchronous persistence. It keeps control periods, source identity, initial
+state restoration, and physical execution owned by the host integration.
+Coverage-per-cost scheduling and the still-unimplemented ``contact``,
+``contact_timing`` and ``recovery`` factors remain rejected. The legacy job
+adapter retains its standalone preflight fields for existing callers but is not
+used by the new source integration path.
 
 Configuration IDs, including the default ``lerobot`` sink name, do not create
 services. ``validate_capabilities`` requires explicit trusted source, validator,
@@ -159,9 +261,15 @@ capability does not implement the EEF replanning its poses require. Deployment p
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
 
-.. autoclass:: TrajectoryGenerationJobCfg
+.. autoclass:: TrajectoryExpansionCfg
    :members:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: TrajectoryExpansionJobCfg
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autofunction:: load_expansion_profile
 
 Operators, Coverage, and Session
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -222,7 +330,7 @@ retain capacity. Bands classify measured evidence: the session reads the
 score. Manipulability describes posture conditioning only; every banded
 candidate still requires the same independent path, dynamic, and task checks.
 
-``GenerationSession`` owns scene-case registration, stable candidate identity,
+``ExpansionSession`` owns scene-case registration, stable candidate identity,
 local random streams, bounded candidate and pending-episode payloads, collection
 budgets, coverage reservations, and commit accounting. Its lifecycle accepts
 planning results and measured episode evidence without stepping or resetting a
@@ -269,7 +377,7 @@ release collection and coverage reservations before an explicit write retry.
 
 .. autofunction:: manipulability_guided_residual
 
-.. autoclass:: GenerationSession
+.. autoclass:: ExpansionSession
    :members:
 
 Trajectory Variants
@@ -364,11 +472,40 @@ The package import path above is convenient for callers combining them.
    TrajectoryPhase
    TrajectoryTemplate
    CandidateIdentity
+   ProposalRequest
+   CandidateSpec
    CandidateTrajectoryBatch
    ValidationCheck
    ValidationResult
    ExpertEpisode
    CommitReceipt
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.source
+
+.. autosummary::
+   :nosignatures:
+
+   SourceContext
+   SourceAdapter
+   TemplateSourceAdapter
+   PlanResultSourceAdapter
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.coordinator
+
+.. autosummary::
+   :nosignatures:
+
+   CandidateCoordinator
+   CandidateWorkItem
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.profile
+
+.. autosummary::
+   :nosignatures:
+
+   load_expansion_profile
+
+.. autofunction:: load_expansion_profile
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.cfg
 
@@ -377,7 +514,8 @@ The package import path above is convenient for callers combining them.
 
    SPATIAL_METHODS
    TrajectoryAugmentationCfg
-   TrajectoryGenerationJobCfg
+   TrajectoryExpansionCfg
+   TrajectoryExpansionJobCfg
 
 .. currentmodule:: embodichain.lab.sim.motion.expansion.coverage
 
@@ -434,4 +572,90 @@ The package import path above is convenient for callers combining them.
 .. autosummary::
    :nosignatures:
 
-   GenerationSession
+   ExpansionSession
+
+Combined Episode Scheduling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The combined profile and recipe values describe a complete repeated episode.
+They are simulator-independent, so a host can validate capacity and persist the
+same schedule before assigning any physical environment row.
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.combined
+
+.. autosummary::
+   :nosignatures:
+
+   CombinedExpansionProfile
+   ReferenceFamilySpec
+   CubeInitialPoseProvider
+   CycleRecipe
+   CallRecipe
+   CandidateRecipe
+   SlotReservation
+   PhysicalSlotPool
+   enumerate_candidate_recipes
+   load_visual_profile_registry
+   schedule_digest
+
+.. autoclass:: CombinedExpansionProfile
+   :members:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: ReferenceFamilySpec
+   :members:
+
+.. autoclass:: CubeInitialPoseProvider
+   :members:
+
+.. autoclass:: CycleRecipe
+   :members:
+
+.. autoclass:: CallRecipe
+   :members:
+
+.. autoclass:: CandidateRecipe
+   :members:
+
+.. autoclass:: SlotReservation
+   :members:
+
+.. autoclass:: PhysicalSlotPool
+   :members:
+
+.. autofunction:: enumerate_candidate_recipes
+
+.. autofunction:: load_visual_profile_registry
+
+.. autofunction:: schedule_digest
+
+.. autofunction:: round_robin_recipes
+
+.. currentmodule:: embodichain.lab.sim.motion.expansion.combined_runtime
+
+.. autosummary::
+   :nosignatures:
+
+   VisualProfileApplication
+   VisualProfileRegistry
+   CombinedAssignment
+   CombinedEpisodeCoordinator
+   MeasuredValidator
+   round_robin_recipes
+
+.. autoclass:: VisualProfileApplication
+   :members:
+
+.. autoclass:: VisualProfileRegistry
+   :members:
+
+.. autoclass:: CombinedAssignment
+   :members:
+
+.. autoclass:: CombinedEpisodeCoordinator
+   :members:
+
+.. autoclass:: MeasuredValidator
+   :members:
+
+.. autofunction:: round_robin_recipes

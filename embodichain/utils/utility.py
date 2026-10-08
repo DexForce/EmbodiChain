@@ -21,7 +21,6 @@ import pickle
 import argparse
 import time
 import torch
-import functools
 import open3d as o3d
 import numpy as np
 
@@ -32,37 +31,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple, Callable
 
 from embodichain.utils.config_paths import resolve_config_path as _resolve_config_path
+from embodichain.utils.math import inv_transform  # Backward-compatible import path.
 from embodichain.utils.string import callable_to_string
-
-
-@functools.lru_cache(maxsize=None)  # memoization
-def get_func_tag(tagName):
-    return TagDecorator(tagName)
-
-
-# https://stackoverflow.com/questions/41834530/how-to-make-python-decorators-work-like-a-tag-to-make-function-calls-by-tag
-class TagDecorator(object):
-    def __init__(self, tagName):
-        self.functions = {}
-        self.tagName = tagName
-
-    def __str__(self):
-        return "<TagDecorator {tagName}>".format(tagName=self.tagName)
-
-    def __call__(self, f):
-        class_name = f.__qualname__.split(".")[0]
-        if class_name in self.functions.keys():
-            self.functions[class_name].update({f.__name__: f})
-        else:
-            self.functions.update({class_name: {f.__name__: f}})
-        return f
-
-
-def set_attributes_for_class(self, params=None):
-    if params:
-        for k, v in params.items():
-            if k != "self" and not k.startswith("_"):
-                setattr(self, k, v)
 
 
 def timer(func):
@@ -445,25 +415,6 @@ def encode_image(image: np.ndarray, format: str = "png"):
     image_encode = cv2.imencode(f".{format}", image)[1]
     base64_image = base64.b64encode(image_encode).decode("utf-8")
     return base64_image
-
-
-def inv_transform(transform: np.ndarray) -> np.ndarray:
-    """inverse transformation
-
-    Args:
-        transform (np.array): [np.array of size [4 x 4]]
-
-    Returns:
-        np.array: [np.array of size [4 x 4]]
-    """
-    r = transform[:3, :3]
-    t = transform[:3, 3].T
-    inv_r = r.T
-    inv_t = -inv_r @ t
-    inv_pose = np.eye(4, dtype=np.float32)
-    inv_pose[:3, :3] = inv_r
-    inv_pose[:3, 3] = inv_t
-    return inv_pose
 
 
 def scale_image(image, scale=0.5):

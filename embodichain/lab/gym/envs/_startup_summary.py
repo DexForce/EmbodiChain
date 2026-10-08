@@ -140,7 +140,7 @@ def _functor_cells(
     if manager_name == "ActionManager":
         func = manager.get_term(name)
         cfg = func.cfg
-        details.append(f"input={func.input_key} · dim={func.action_dim}")
+        details.append(f"command={func.command_type} · dim={func.action_dim}")
     else:
         cfg = manager.get_functor_cfg(name)
         func = cfg.func

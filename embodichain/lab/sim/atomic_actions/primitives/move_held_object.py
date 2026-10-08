@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import ClassVar
 
 import torch
@@ -26,7 +27,6 @@ import torch
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
     require_shared_task_state_key,
-    resolve_object_target,
 )
 from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.control import (
@@ -43,7 +43,8 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ActionOptions,
     ResolvedActionRequest,
 )
-from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.plans import ActionPlan, PlannerDiagnostics
+from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.lab.sim.atomic_actions.requirements import (
     CARTESIAN_POSE_CAPABILITY,
     FORWARD_KINEMATICS_CAPABILITY,
@@ -52,6 +53,7 @@ from embodichain.lab.sim.atomic_actions.requirements import (
 from embodichain.lab.sim.atomic_actions.state import PlanningContext
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
+    resolve_pose_target,
     to_full_robot_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
@@ -64,13 +66,27 @@ class HeldObjectPoseGoal:
     """Desired pose for the object held by this action's control part."""
 
     object_target_pose: PoseGoalValue
-    """Target object pose, shape ``(4, 4)`` or ``(num_envs, 4, 4)``."""
+    """Object target pose or ordered waypoints.
+
+    Accepts ``(4, 4)``, ``(num_envs, 4, 4)`` or
+    ``(num_envs, n_waypoint, 4, 4)``; every waypoint retains the held grasp.
+    """
+
+    world_yaw_free: bool = False
+    """Permit world-Z yaw changes at the final waypoint, retaining its position.
+
+    Intermediate waypoints remain exact. Planning tries the nominal heading
+    first, then seven 45-degree heading alternatives; each complete path must
+    pass the motion generator's normal checks. This is not an exhaustive search.
+    """
 
     def __post_init__(self) -> None:
+        if type(self.world_yaw_free) is not bool:
+            raise TypeError("world_yaw_free must be a boolean.")
         validate_pose_goal(
             self.object_target_pose,
             "object_target_pose",
-            allow_waypoints=False,
+            allow_waypoints=True,
         )
 
 
@@ -80,9 +96,10 @@ class MoveHeldObjectOptions(ActionOptions):
 
 
 class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
-    """Move the held object to the exact target object pose with a closed hand.
+    """Move the held object through exact target poses with a closed hand.
 
-    The requested object orientation is preserved exactly. Callers that need a
+    Requested orientations are exact unless final world yaw is explicitly free.
+    Callers that need a
     transport orientation must encode it in :class:`HeldObjectPoseGoal`; this
     action never substitutes an implicit end-effector orientation.
     """
@@ -146,7 +163,7 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
                 context,
                 message="Held object is not exclusive to the control part.",
             )
-        object_target_pose = resolve_object_target(
+        object_target_pose = resolve_pose_target(
             resolve_pose_goal(
                 target.object_target_pose,
                 context,
@@ -161,18 +178,47 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
         )
         if object_to_eef.shape == (4, 4):
             object_to_eef = object_to_eef.unsqueeze(0).repeat(self.num_envs, 1, 1)
-        move_eef_xpos = torch.bmm(object_target_pose, object_to_eef)
-
-        result = self.motion_generator.generate(
-            build_pose_plan_states(move_eef_xpos),
-            options=request.motion_policy.to_motion_gen_options(
-                start_qpos=start_arm_qpos,
-                control_part=control_part,
-                interpolation_dt=context.control_dt,
-            ),
+        if object_target_pose.ndim == 4:
+            object_to_eef = object_to_eef.unsqueeze(1)
+        motion_options = request.motion_policy.to_motion_gen_options(
+            start_qpos=start_arm_qpos,
+            control_part=control_part,
+            interpolation_dt=context.control_dt,
         )
+
+        def plan_target(poses: torch.Tensor) -> PlanResult:
+            return self.motion_generator.generate(
+                build_pose_plan_states(torch.matmul(poses, object_to_eef)),
+                options=motion_options,
+            )
+
+        result = plan_target(object_target_pose)
         assert isinstance(result.success, torch.Tensor)
-        assert result.positions is not None
+        selected_yaws = start_arm_qpos.new_zeros(self.num_envs)
+        attempts = 1
+        if target.world_yaw_free:
+            for fraction in (0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+                missing = eligible & ~result.success
+                if not missing.any():
+                    break
+                angle = math.pi * fraction
+                cosine, sine = math.cos(angle), math.sin(angle)
+                yaw = object_target_pose.new_tensor(
+                    [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
+                )
+                poses = object_target_pose.clone()
+                final_pose = poses[:, -1] if poses.ndim == 4 else poses
+                final_pose[:, :3, :3] = yaw @ final_pose[:, :3, :3]
+                candidate = plan_target(poses)
+                attempts += 1
+                accepted = missing & candidate.success
+                if accepted.any():
+                    result = _merge_yaw_paths(result, candidate, accepted)
+                    selected_yaws[accepted] = angle
+        if result.positions is None:
+            return self.failed_plan(
+                request, context, message="No feasible held-object transport path."
+            )
         success = result.success & eligible
 
         base_qpos = state.last_qpos.clone()
@@ -190,8 +236,51 @@ class MoveHeldObject(AtomicAction[HeldObjectPoseGoal, MoveHeldObjectOptions]):
             context,
             success=success,
             trajectory=timed,
+            diagnostics=(
+                PlannerDiagnostics(
+                    backend=self.planning_services.planner_name,
+                    metadata={
+                        "world_yaw_offsets_rad": selected_yaws.tolist(),
+                        "yaw_plan_attempts": attempts,
+                    },
+                )
+                if target.world_yaw_free
+                else None
+            ),
             segment_lengths={"transport": timed.waypoint_count},
         )
+
+
+def _merge_yaw_paths(
+    previous: PlanResult, candidate: PlanResult, rows: torch.Tensor
+) -> PlanResult:
+    """Retain accepted rows while selecting newly feasible, independently timed paths."""
+    assert candidate.positions is not None and candidate.dt is not None
+    if previous.positions is None:
+        return candidate
+    assert previous.dt is not None
+    count = max(previous.positions.shape[1], candidate.positions.shape[1])
+
+    def pad_positions(value: torch.Tensor) -> torch.Tensor:
+        return torch.cat(
+            [value, value[:, -1:].expand(-1, count - value.shape[1], -1)], dim=1
+        )
+
+    # Zero-time terminal padding preserves each row's duration. The action
+    # recomputes derivatives on the control grid in to_full_robot_trajectory.
+    return PlanResult(
+        success=torch.where(rows, candidate.success, previous.success),
+        positions=torch.where(
+            rows[:, None, None],
+            pad_positions(candidate.positions),
+            pad_positions(previous.positions),
+        ),
+        dt=torch.where(
+            rows[:, None],
+            torch.nn.functional.pad(candidate.dt, (0, count - candidate.dt.shape[1])),
+            torch.nn.functional.pad(previous.dt, (0, count - previous.dt.shape[1])),
+        ),
+    )
 
 
 __all__ = [

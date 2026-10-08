@@ -12,8 +12,8 @@
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
-| Standalone physical playback | `embodichain/lab/sim/motion/execution.py` |
-| Candidate generation and coverage bookkeeping | `embodichain/lab/sim/motion/expansion/` |
+| Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
+| Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |
 | Distinct trajectory variants for fixed waypoints | `embodichain/lab/sim/motion/expansion/variants.py` |
 
 ## Choose the layer
@@ -77,19 +77,33 @@ encode prepared actions rather than retiming a second time.
 
 ## Trajectory augmentation boundary
 
-`motion/expansion/` owns immutable candidate contracts, strict config decoding,
-phase-authorized residuals/retiming, sampled motion-limit checks and coverage.
-Candidate identity and local random seeds are independent of physical env slots.
-`GenerationSession` owns budgets, pending writes, coverage reservations and
-idempotent commit receipts. It never steps/resets an environment or writes a
-dataset: host integrations own restoration, rollout, validation and persistence.
-Keep algorithm modules free of direct Gym imports.
+`motion/expansion/` owns callable-free Expansion Profiles, immutable templates
+and candidates, sampled limit checks and coverage. `load_expansion_profile()`
+strictly decodes the task-local resource, separate from environment
+and Task Program deployments. `SourceAdapter` converts handwritten, planner or
+grounded Atomic sources; `CandidateCoordinator` expands, deduplicates and queues
+them. `ExpansionSession` owns identities, randomness, budgets,
+reservations and receipts. None owns physical slots, environment lifecycle or
+persistence; host integrations own those boundaries. Keep expansion algorithms
+free of direct Gym imports.
+
+The `expansion.combined` contracts extend this boundary to episode-level
+expansion: they decode the combined profile, enumerate reference-family,
+affordance and trajectory recipes, assign one visual profile per episode, and
+reserve generic compatible slots. `schedule_digest` provides deterministic
+rerun identity; restoration, measured acceptance, and artifact writing remain
+host responsibilities.
+
+The generic B=1 host orchestration and its restore/executor/sink ports live in
+`motion/execution.py`, alongside standalone playback. The runner drives injected
+host ports and applies `ExpansionSession` transitions; it does not move those
+state or coverage contracts out of `motion/expansion/`.
 
 Motion-limit checks are not collision/task-success certification.
 `rotate_grasp_about_object_axis` and `perturb_approach_direction` change TCP
 candidates around a fixed object axis or approach cone; both emit Cartesian
 poses that callers must replan, and neither certifies the contact. Grasp
-generation itself belongs to `embodichain.toolkits.graspkit`, composed by
+grasp generation itself belongs to `embodichain.toolkits.graspkit`, composed by
 Atomic Skills/Task Program rather than embedded in `MotionGenerator`.
 
 `variants.py` varies execution when waypoints are already fixed. Its qpos
@@ -122,7 +136,7 @@ and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
 shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
 joint-trajectory figure and a tool-path figure with waypoint markers. Task
-Program, Gym lifecycle, dataset persistence and `GenerationSession` collection
+Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
 bookkeeping are deliberately out of scope; this is a direct-simulation
 contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
 genuinely different variants are discarded as duplicates.
@@ -137,7 +151,7 @@ opt-in through `augmentation.factors.manipulability` and disabled by default.
 Once enabled, `register_case` requires a positive `manipulability_reference`
 for each initial state, which may differ within one case; `CoverageIndex`
 enforces a per-band quota so one well-conditioned posture cannot absorb the
-collection budget; and `GenerationSession` classifies bands from the measured
+collection budget; and `ExpansionSession` classifies bands from the measured
 `manipulability` observation rather than any planned score. Band guidance ranks
 postures only: path, dynamic and task validation stay separate.
 

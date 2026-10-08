@@ -1,0 +1,17 @@
+profile_id: cube_initial_pose
+revision: cube_initial_pose:v1
+change_scope: cube_initial_pose_only
+keep_drop_targets: true
+poses:
+  - id: cube_pose_00
+    position: [-0.42, -0.08, 0.025]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  - id: cube_pose_01
+    position: [-0.38, -0.02, 0.025]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  - id: cube_pose_02
+    position: [-0.46, -0.14, 0.025]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  - id: cube_pose_03
+    position: [-0.42, 0.04, 0.025]
+    quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]

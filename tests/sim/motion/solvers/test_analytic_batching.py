@@ -156,6 +156,23 @@ def test_best_solution_round_trip_and_limits(solver):
     assert (out <= solver.upper_qpos_limits + 1e-6).all()
 
 
+def test_tcp_updates_preserve_analytic_round_trips(solver):
+    """A rotated and translated TCP must be removed by both cached IK adapters."""
+    for translation in ([0.13, -0.02, 0.03], [-0.04, 0.05, 0.12]):
+        tcp = torch.eye(4, dtype=torch.float64)
+        tcp[:3, :3] = torch.tensor([[0, 0, 1], [0, 1, 0], [-1, 0, 0]])
+        tcp[:3, 3] = torch.tensor(translation)
+        solver.set_tcp(tcp.numpy())
+        qpos, targets = _targets(solver, 5)
+
+        valid, result = solver.get_ik_batch(targets, qpos)
+
+        assert valid.all()
+        torch.testing.assert_close(
+            _analytic_fk(solver, result), targets, atol=3e-5, rtol=3e-5
+        )
+
+
 def test_robot_batch_transforms_broadcast_and_preserve_seed_shape(solver):
     qpos, _ = _targets(solver, 6)
     qpos = qpos.reshape(2, 3, 6)

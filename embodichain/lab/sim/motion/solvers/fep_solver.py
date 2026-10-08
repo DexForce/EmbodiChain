@@ -31,6 +31,7 @@ import torch
 
 from embodichain.compute.kinematics import yoshikawa_manipulability
 from embodichain.utils import configclass
+from embodichain.utils.math import inv_transform
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 from .base_solver import BaseSolver, SolverCfg
 
@@ -137,6 +138,7 @@ class FEPSolver(BaseSolver):
         import warp as wp
 
         cfg.__post_init__()
+        tcp = cfg._get_tcp_as_numpy()
         chain = kwargs.pop("pk_serial_chain", None)
         if chain is None:
             chain = create_pk_serial_chain(
@@ -168,7 +170,7 @@ class FEPSolver(BaseSolver):
         )
         self._end_tool = tool
         self._ready = None
-        self.set_tcp(cfg._get_tcp_as_numpy())
+        self.set_tcp(tcp)
         wp.init()
 
     def set_tcp(self, xpos: np.ndarray) -> None:
@@ -177,11 +179,13 @@ class FEPSolver(BaseSolver):
         Args:
             xpos: TCP transform relative to the configured end link.
         """
-        super().set_tcp(xpos)
+        tcp = np.array(xpos)
         frames = self._model_frames.copy()
-        frames[1] = np.linalg.inv(self._end_tool @ self.tcp_xpos)
-        frames[-1] = frames[-1] @ self.tcp_xpos
-        self._frames = torch.tensor(frames, device=self.device, dtype=torch.float64)
+        frames[1] = inv_transform(self._end_tool @ tcp)
+        frames[-1] = frames[-1] @ tcp
+        updated_frames = torch.tensor(frames, device=self.device, dtype=torch.float64)
+        super().set_tcp(tcp)
+        self._frames = updated_frames
         if self.device.type == "cuda":
             current = torch.cuda.current_stream(self.device)
             if self._ready is not None:
@@ -769,7 +773,7 @@ def _extract_geometry(
     base = np.eye(4)
     base[:3, :3] = np.column_stack((x, np.cross(z, x), z))
     base[:3, 3] = shoulder
-    inverse = np.linalg.inv(base)
+    inverse = inv_transform(base)
     wrist = points[4] + z * np.dot(z, points[5] - points[4])
     local_elbow = inverse[:3, :3] @ (elbow - shoulder)
     local_wrist = inverse[:3, :3] @ (wrist - shoulder)
@@ -801,7 +805,7 @@ def _extract_geometry(
     scales = np.sign(np.sum(directions * axes, axis=-1))
     canonical_home = np.diag([1.0, -1.0, -1.0, 1.0])
     canonical_home[:3, 3] = canonical_points[6]
-    tool = np.linalg.inv(canonical_home) @ inverse @ home
+    tool = inv_transform(canonical_home) @ inverse @ home
     dimensions = np.concatenate(
         (
             dimensions,

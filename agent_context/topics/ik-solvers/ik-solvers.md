@@ -93,8 +93,9 @@ valid fixed-q7 branches, or the eight candidates retained by search, using the
 shared Yoshikawa helper. It does not rank every sampled q7 candidate. Near-equal
 scores use weighted seed distance to avoid mirror-branch jumps from roundoff.
 `num_samples` is rejected; enable adaptive `redundancy_search` explicitly.
-Franka's default remains Pytorch; the opt-in FEP example lives in
-`examples/sim/motion/solvers/fep_solver.py`.
+Franka defaults to FEP with `redundancy_search=True`; the
+`examples/sim/motion/solvers/fep_solver.py` circle demo uses that robot default
+and adds a per-step joint bound for its 50 Hz commands.
 
 ## Focused validation
 

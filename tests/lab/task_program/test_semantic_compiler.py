@@ -1195,6 +1195,52 @@ def test_analysis_is_provider_free_and_propagates_object_target() -> None:
     engine.resolve(grounded.invocation)
 
 
+def test_pick_preserves_rigidized_articulation_root_frame_geometry() -> None:
+    object_ref = SceneObjectRef("rubiks_cube")
+    grasp_ref = SceneAffordanceRef("rubiks_cube_grasp")
+    root_frame_vertices = torch.tensor(
+        ((0.1, -0.2, 0.3), (0.2, -0.2, 0.3), (0.1, -0.1, 0.3)),
+        dtype=torch.float32,
+    )
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=object_ref,
+                state_provider=_PoseProvider(torch.eye(4).repeat(2, 1, 1)),
+                default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp_ref},
+            ),
+            SceneEntityRegistration(
+                ref=grasp_ref,
+                parent=object_ref,
+                native_name="lower_two_layers",
+                affordance=AntipodalAffordance(
+                    mesh_vertices=root_frame_vertices,
+                    mesh_triangles=torch.tensor(((0, 1, 2),), dtype=torch.int64),
+                ),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    compiler, _ = _compiler(registry)
+    workflow = compiler.analyze(
+        (Pick(object=SceneObjectRef("rubiks_cube")),),
+        workflow_id="pick_rubiks_cube",
+    )
+
+    grounded = compiler.ground(workflow, 0, _context(registry))
+
+    goal = grounded.invocation.goal
+    assert isinstance(goal, GraspGoal)
+    assert goal.semantics.entity_id == "rubiks_cube"
+    assert isinstance(goal.semantics.affordance, AntipodalAffordance)
+    assert torch.allclose(
+        goal.semantics.affordance.mesh_vertices,
+        root_frame_vertices,
+    )
+
+
 def test_pick_lookahead_uses_downstream_place_orientation_policy() -> None:
     """Pickup feasibility must screen the object pose that Place will use."""
     registry, providers = _scene_registry()
@@ -1276,7 +1322,7 @@ def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> Non
     assert resolved_tracking.metrics[0].tolerance == 0.125
 
 
-def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
+def test_pick_relation_lookahead_stays_late_bound_without_recovery_dependency() -> None:
     registry, _ = _scene_registry()
     compiler, engine = _compiler(registry)
     workflow = compiler.analyze(
@@ -1299,7 +1345,7 @@ def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
     assert downstream.entity_id == "table_top"
     request = engine.resolve(grounded.invocation)
     action = engine.actions["pick_up"]
-    assert "table_top" in action._scene_dependencies(request)
+    assert "table_top" not in action._scene_dependencies(request)
 
 
 def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:

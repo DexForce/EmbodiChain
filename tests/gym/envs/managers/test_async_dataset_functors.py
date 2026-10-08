@@ -18,11 +18,17 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
 import torch
 from tensordict import TensorDict
+
+from embodichain.lab.gym.envs.managers.action_types import (
+    ActionDescriptor,
+    ActionTermDescriptor,
+)
 
 # Skip all tests if LeRobot is not available.
 try:
@@ -137,21 +143,62 @@ class _MockEnv:
         return self.episode_metadata
 
 
-def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRecorder:
+def _policy_descriptors() -> tuple[ActionDescriptor, ActionDescriptor]:
+    """Return the canonical EEF plus parallel-gripper policy layout."""
+    arm = ActionDescriptor(
+        "arm_action",
+        0,
+        6,
+        ActionTermDescriptor(
+            "eef_pose",
+            6,
+            ("x", "y", "z", "roll", "pitch", "yaw"),
+            ("m", "m", "m", "rad", "rad", "rad"),
+            None,
+            tuple(f"joint_{index}" for index in range(6)),
+            {"frame": "arena"},
+        ),
+    )
+    gripper = ActionDescriptor(
+        "gripper_action",
+        6,
+        7,
+        ActionTermDescriptor(
+            "parallel_gripper",
+            1,
+            ("gripper",),
+            ("normalized",),
+            "minus_one_to_one",
+            ("finger_joint",),
+            {},
+        ),
+    )
+    return arm, gripper
+
+
+def _make_recorder(
+    env: _MockEnv,
+    mock_dataset: _MockDataset,
+    *,
+    action_contract: dict[str, object] | None = None,
+    async_queue_maxsize: int | None = None,
+) -> AsyncLeRobotRecorder:
     """Build an AsyncLeRobotRecorder with the LeRobotDataset.create patched out."""
     from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
 
-    cfg = DatasetFunctorCfg(
-        func=AsyncLeRobotRecorder,
-        params={
-            "save_path": "/tmp/test_async_recorder",
-            "robot_meta": {"robot_type": "test"},
-            "instruction": {"lang": "test"},
-            "extra": {"scene_type": "s", "task_description": "t"},
-            "use_videos": False,
-            "image_writer_threads": 0,
-        },
-    )
+    params = {
+        "save_path": "/tmp/test_async_recorder",
+        "robot_meta": {"robot_type": "test"},
+        "instruction": {"lang": "test"},
+        "extra": {"scene_type": "s", "task_description": "t"},
+        "use_videos": False,
+        "image_writer_threads": 0,
+    }
+    if action_contract is not None:
+        params["action_contract"] = action_contract
+    if async_queue_maxsize is not None:
+        params["async_queue_maxsize"] = async_queue_maxsize
+    cfg = DatasetFunctorCfg(func=AsyncLeRobotRecorder, params=params)
     with patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset") as mock_cls:
         mock_cls.create.return_value = mock_dataset
         return AsyncLeRobotRecorder(cfg, env)
@@ -160,6 +207,64 @@ def _make_recorder(env: _MockEnv, mock_dataset: _MockDataset) -> AsyncLeRobotRec
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 class TestAsyncLeRobotRecorder:
     """Tests for AsyncLeRobotRecorder enqueue/drain behavior."""
+
+    def test_configures_bounded_queue_and_reports_stats(self):
+        """A positive queue limit enables backpressure without changing drain order."""
+        env = _MockEnv(num_envs=1, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        try:
+            assert recorder._save_queue.maxsize == 1
+            stats = recorder.async_stats
+            assert stats["queue_maxsize"] == 1
+            assert stats["queue_size"] == 0
+            assert stats["queue_peak"] == 0
+            assert stats["backpressure_events"] == 0
+        finally:
+            recorder.finalize()
+
+    def test_rejects_negative_queue_limit(self):
+        """Negative queue limits fail before starting a background worker."""
+        env = _MockEnv(num_envs=1, steps=1)
+        with pytest.raises(ValueError, match="async_queue_maxsize"):
+            _make_recorder(env, _MockDataset(), async_queue_maxsize=-1)
+
+    def test_bounded_queue_blocks_until_worker_catches_up(self):
+        """A full queue blocks the producer and records the backpressure time."""
+        env = _MockEnv(num_envs=3, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        worker_entered = threading.Event()
+        release_worker = threading.Event()
+
+        def persist_payload(*args, **kwargs):
+            worker_entered.set()
+            assert release_worker.wait(timeout=2.0)
+            return True
+
+        recorder._persist_episode_payload = Mock(side_effect=persist_payload)
+        enqueue_done = threading.Event()
+
+        def enqueue_payloads() -> None:
+            recorder(env, env_ids=torch.tensor([0, 1, 2]))
+            enqueue_done.set()
+
+        enqueue_thread = threading.Thread(target=enqueue_payloads)
+        enqueue_thread.start()
+
+        try:
+            assert worker_entered.wait(timeout=2.0)
+            assert not enqueue_done.wait(timeout=0.05)
+        finally:
+            release_worker.set()
+            enqueue_thread.join(timeout=2.0)
+            env.current_rollout_step = 0
+            recorder.finalize()
+
+        assert enqueue_done.is_set()
+        stats = recorder.async_stats
+        assert stats["queue_maxsize"] == 1
+        assert stats["queue_peak"] == 1
+        assert stats["backpressure_events"] >= 1
+        assert stats["backpressure_s"] > 0.0
 
     def test_call_accepts_construction_only_kwargs(self):
         """``__call__`` must accept image_writer_threads/processes (regression).
@@ -314,6 +419,67 @@ class TestAsyncLeRobotRecorder:
             assert frame["subtask_index"].tolist() == [0]
         assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
         assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]
+
+    def test_policy_history_is_cloned_before_async_persistence(self) -> None:
+        """Async persistence owns descriptor-ordered policy rows at enqueue."""
+        env = _MockEnv(num_envs=1, num_joints=7, steps=3)
+        source = torch.tensor(
+            [
+                [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -1.0],
+                [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 0.0],
+                [2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 1.0],
+            ]
+        )
+        expected = source.clone()
+        env.get_raw_action_history = Mock(return_value=source)
+        env.action_manager = Mock()
+        env.action_manager.descriptors = _policy_descriptors()
+        env.action_manager.get_term.return_value = Mock(_scale=torch.tensor(1.0))
+        mock_ds = _MockDataset()
+        recorder = _make_recorder(
+            env,
+            mock_ds,
+            action_contract={
+                "version": 1,
+                "representation": "eef_pose_parallel_gripper",
+                "record_eef_observation": False,
+            },
+        )
+
+        recorder(env, env_ids=torch.tensor([0]))
+        env.current_rollout_step = 0
+        source.fill_(9.0)
+        recorder.finalize()
+
+        saved = torch.stack(
+            [frame[LeRobotKey.ACTION.value] for frame in mock_ds.add_frame_calls]
+        )
+        torch.testing.assert_close(saved, expected)
+
+    def test_invalid_policy_action_never_enters_async_queue(self) -> None:
+        """Descriptor validation fails in the caller before enqueue or execution."""
+        env = _MockEnv(num_envs=1, num_joints=7, steps=1)
+        invalid = torch.tensor([[0.0, 0, 0, 0, 0, 0, 1.1]])
+        env.get_raw_action_history = Mock(return_value=invalid)
+        env.action_manager = Mock()
+        env.action_manager.descriptors = _policy_descriptors()
+        env.action_manager.get_term.return_value = Mock(_scale=torch.tensor(1.0))
+        recorder = _make_recorder(
+            env,
+            _MockDataset(),
+            action_contract={
+                "version": 1,
+                "representation": "eef_pose_parallel_gripper",
+                "record_eef_observation": False,
+            },
+        )
+
+        with pytest.raises(ValueError, match=r"within \[-1, 1\]"):
+            recorder(env, env_ids=torch.tensor([0]))
+
+        assert recorder._save_queue.empty()
+        env.current_rollout_step = 0
+        recorder.finalize()
 
     def test_finalize_drains_and_finalizes_dataset(self):
         """finalize() must drain the worker then call dataset.finalize()."""

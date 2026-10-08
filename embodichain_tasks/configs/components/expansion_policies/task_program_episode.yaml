@@ -1,0 +1,67 @@
+schema_version: 1
+
+source:
+  kind: task_program
+  source_id: task_program_source
+  source_revision: task_program_source:v1
+  unit_scope: episode
+  template_id: task_program_call
+  call_count: 1
+  affordance_call_indices: []
+  trajectory_call_indices: [0]
+
+scene_randomization:
+  enabled: false
+  reference_family_count: 1
+  profile: none
+  change_scope: none
+  keep_drop_targets: true
+
+affordance:
+  enabled: false
+  branches_per_family: 1
+  max_proposals: 1
+  fallback: next_surviving_branch
+
+trajectory:
+  variants_per_family: 1
+  spatial:
+    enabled: false
+    operators: [joint_residual]
+    joint_offset_scale: 0.0
+    via_count: 1
+  timing:
+    enabled: false
+
+visual:
+  enabled: false
+  profile_file: embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml
+  profiles: []
+  apply_per_rollout: true
+  balance: round_robin
+  restore_before_next_candidate: true
+
+observation:
+  profiles: []
+  capture_rgb: false
+  capture_video: false
+
+scheduling:
+  policy: round_robin_fifo
+  candidate_budget: 1
+  reference_family_budget: 1
+
+execution:
+  max_inflight: 1
+  compatibility: strict
+
+persistence:
+  sink: lerobot
+  output_dir: /tmp/embodichain-expansion
+
+collection:
+  target_episodes: 1
+  max_attempts: 3
+  selection:
+    mode: sequential
+    start_recipe_index: 0

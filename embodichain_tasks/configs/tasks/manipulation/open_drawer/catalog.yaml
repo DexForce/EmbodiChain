@@ -1,0 +1,13 @@
+task_key: open_drawer
+title: Open Drawer
+summary: Pull a drawer open by its handle using a configured Task Program.
+tags:
+- manipulation
+- drawer
+- task_program
+default_deployment: franka
+deployments:
+  franka:
+    config: task.franka.yaml
+  ur5:
+    config: task.ur5.yaml

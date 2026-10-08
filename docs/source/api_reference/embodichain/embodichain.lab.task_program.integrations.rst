@@ -29,9 +29,11 @@ embodichain.lab.task_program.integrations
       PlanningObservationPort
       RegisteredSemanticLowererDeclaration
       RegisteredSemanticLowererFactory
+      RigidizedArticulationAntipodalGraspBinding
       RuntimeTransportDeclaration
       SimulationArticulationBinding
       SimulationArticulationLinkBinding
+      SimulationRigidizedArticulationObjectBinding
       SimulationTaskProgramAdapterFactory
       SimulationTaskProgramFactory
       SimulationTaskProgramRegistration
@@ -116,6 +118,9 @@ Simulation bindings
 .. autoclass:: SimulationRigidObjectBinding
    :members:
 
+.. autoclass:: SimulationRigidizedArticulationObjectBinding
+   :members:
+
 .. autoclass:: SimulationArticulationBinding
    :members:
 
@@ -123,6 +128,9 @@ Simulation bindings
    :members:
 
 .. autoclass:: AntipodalGraspAffordanceBinding
+   :members:
+
+.. autoclass:: RigidizedArticulationAntipodalGraspBinding
    :members:
 
 .. autoclass:: ContainerAffordanceBinding

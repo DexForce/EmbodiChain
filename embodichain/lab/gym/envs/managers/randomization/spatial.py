@@ -171,7 +171,7 @@ def randomize_rigid_object_pose(
     )
 
     rigid_object.set_local_pose(pose, env_ids=env_ids)
-    rigid_object.clear_dynamics()
+    rigid_object.clear_dynamics(env_ids=env_ids)
 
     if physics_update_step > 0:
         env.sim.update(step=physics_update_step)
@@ -189,24 +189,36 @@ def randomize_robot_eef_pose(
     Note:
         - The position and rotation are performed randomization in a relative manner.
         - The current state of eef pose is computed based on the current joint positions of the robot.
+        - This restores selected state and publishes transforms without stepping physics.
 
     Args:
         env (EmbodiedEnv): The environment instance.
         env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
-        robot_name (str): The name of the robot.
         entity_cfg (SceneEntityCfg): The configuration of the scene entity to randomize.
         position_range (tuple[list[float], list[float]] | None): The range for the position randomization.
         rotation_range (tuple[list[float], list[float]] | None): The range for the rotation randomization.
             The rotation is represented as Euler angles (roll, pitch, yaw) in degree.
+
+    Raises:
+        ValueError: No named control parts were supplied for end-effector selection.
     """
 
-    def set_random_eef_pose(joint_ids: List[int], robot: Robot) -> None:
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    if len(env_ids) == 0:
+        return
+
+    control_parts = entity_cfg.control_parts
+    if not control_parts:
+        raise ValueError("End-effector randomization requires named control_parts.")
+
+    def set_random_eef_pose(joint_ids: List[int], robot: Robot, part: str) -> None:
         current_qpos = robot.get_qpos()[env_ids][:, joint_ids]
         if current_qpos.dim() == 1:
             current_qpos = current_qpos.unsqueeze_(0)
 
         current_eef_pose = robot.compute_fk(
-            name=part, qpos=current_qpos, to_matrix=True
+            name=part, qpos=current_qpos, env_ids=env_ids, to_matrix=True
         )
 
         new_eef_pose = get_random_pose(
@@ -219,7 +231,7 @@ def randomize_robot_eef_pose(
         )
 
         ret, new_qpos = robot.compute_ik(
-            pose=new_eef_pose, name=part, joint_seed=current_qpos
+            pose=new_eef_pose, name=part, joint_seed=current_qpos, env_ids=env_ids
         )
 
         new_qpos[ret == False] = current_qpos[ret == False]
@@ -228,17 +240,12 @@ def randomize_robot_eef_pose(
 
     robot = env.sim.get_robot(entity_cfg.uid)
 
-    control_parts = entity_cfg.control_parts
-    if control_parts is None:
-        joint_ids = robot.get_joint_ids()
-        set_random_eef_pose(joint_ids, robot)
-    else:
-        for part in control_parts:
-            joint_ids = robot.get_joint_ids(part)
-            set_random_eef_pose(joint_ids, robot)
+    for part in control_parts:
+        joint_ids = robot.get_joint_ids(part)
+        set_random_eef_pose(joint_ids, robot, part)
 
-    # simulate 1 steps to let the robot reach the target pose.
-    env.sim.update(step=1)
+    robot.clear_dynamics(env_ids=env_ids)
+    env.sim.sync_render_state()
 
 
 def randomize_robot_qpos(
@@ -251,6 +258,9 @@ def randomize_robot_qpos(
 ) -> None:
     """Randomize the initial joint positions of a robot in the environment.
 
+    Restores current positions and drive targets, clears selected dynamics,
+    and publishes transforms without advancing physics.
+
     Args:
         env (EmbodiedEnv): The environment instance.
         env_ids (torch.Tensor | None): The environment IDs to apply the randomization.
@@ -262,7 +272,11 @@ def randomize_robot_qpos(
     if qpos_range is None:
         return
 
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
     num_instance = len(env_ids)
+    if num_instance == 0:
+        return
 
     robot = env.sim.get_robot(entity_cfg.uid)
 
@@ -290,7 +304,8 @@ def randomize_robot_qpos(
         qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids, target=False
     )
     robot.set_qpos(qpos=current_qpos, env_ids=env_ids, joint_ids=joint_ids)
-    env.sim.update(step=1)
+    robot.clear_dynamics(env_ids=env_ids)
+    env.sim.sync_render_state()
 
 
 def randomize_articulation_root_pose(
@@ -571,7 +586,7 @@ class sample_rigid_object_pose_from_workspace(Functor):
             pose[valid, :3, :3] = randomized_pose[valid, :3, :3]
 
         self._rigid_object.set_local_pose(pose, env_ids=env_ids)
-        self._rigid_object.clear_dynamics()
+        self._rigid_object.clear_dynamics(env_ids=env_ids)
         if physics_update_step > 0:
             env.sim.update(step=physics_update_step)
 
@@ -733,7 +748,7 @@ class planner_grid_cell_sampler(Functor):
 
             # Set object pose
             rigid_object.set_local_pose(pose, env_ids=env_ids)
-            rigid_object.clear_dynamics()
+            rigid_object.clear_dynamics(env_ids=env_ids)
 
         if physics_update_step > 0:
             env.sim.update(step=physics_update_step)

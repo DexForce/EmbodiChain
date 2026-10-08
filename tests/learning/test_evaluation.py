@@ -85,12 +85,6 @@ class _AsyncAutoResetEnv:
 class _DeviceCheckingActionManager:
     def __init__(self, device: torch.device) -> None:
         self.device = device
-        self.received_device: torch.device | None = None
-
-    def convert_policy_action_to_env_action(self, action: torch.Tensor) -> torch.Tensor:
-        self.received_device = action.device
-        simulation_state = torch.zeros_like(action, device=self.device)
-        return simulation_state + action
 
 
 class _MixedDeviceEnv:
@@ -122,12 +116,11 @@ def test_evaluate_episodes_counts_actual_completions_and_restores_mode() -> None
 
 
 def test_policy_action_moves_to_environment_device_before_preprocessing() -> None:
-    """Mixed inference/simulation devices meet at the action-manager boundary."""
+    """The environment receives an unprocessed action on its own device."""
     env = _MixedDeviceEnv()
 
     converted = convert_policy_action_for_env(env, torch.ones(1, 2))
 
-    assert env.action_manager.received_device == env.device
     assert converted.device == env.device
 
 

@@ -183,7 +183,7 @@ class SimulationSegmentPolicyPort:
         self._settle_presets = MappingProxyType(normalized_presets)
         (
             self._settle_targets,
-            self._rigid_objects,
+            self._objects,
             self._articulations,
         ) = self._resolve_native_entities()
         self._post_policy_results: dict[int, dict[str, object]] = {}
@@ -373,10 +373,10 @@ class SimulationSegmentPolicyPort:
                     f"Unsupported compiled validator kind {validator.cfg.kind!r}."
                 )
             entity_id = validator.object.entity_id
-            if entity_id not in self._rigid_objects:
+            if entity_id not in self._objects:
                 raise KeyError(
                     f"Canonical validator object {entity_id!r} has no explicit "
-                    "rigid-object binding."
+                    "object binding."
                 )
             return
 
@@ -413,7 +413,7 @@ class SimulationSegmentPolicyPort:
         if type(validator) is not CompiledObjectNearTargetValidator:
             raise TypeError("validator must be an exact compiled validator.")
         entity_id = validator.object.entity_id
-        entity = self._rigid_objects[entity_id]
+        entity = self._objects[entity_id]
         pose = self._read_pose(entity, entity_id=entity_id)
         current_position = pose[:, :3, 3]
         target_position = validator.target_pose.position.to(
@@ -663,7 +663,7 @@ class SimulationSegmentPolicyPort:
     ]:
         """Resolve only explicitly declared canonical/native pairs."""
         settle_targets: dict[str, _SimulationSettleTarget] = {}
-        rigid_objects: dict[str, Any] = {}
+        objects: dict[str, Any] = {}
         articulation_targets: dict[str, _SimulationSettleTarget] = {}
 
         for binding in self._scene_binding.rigid_objects:
@@ -678,7 +678,20 @@ class SimulationSegmentPolicyPort:
                 entity,
             )
             settle_targets[binding.entity_id] = target
-            rigid_objects[binding.entity_id] = entity
+            objects[binding.entity_id] = entity
+
+        for binding in self._scene_binding.rigidized_articulations:
+            entity = self._require_native(
+                "get_articulation",
+                canonical_id=binding.entity_id,
+                simulation_uid=binding.simulation_uid,
+            )
+            settle_targets[binding.entity_id] = _SimulationSettleTarget(
+                binding.entity_id,
+                "articulation",
+                entity,
+            )
+            objects[binding.entity_id] = entity
 
         for binding in self._scene_binding.articulations:
             entity = self._require_native(
@@ -708,13 +721,21 @@ class SimulationSegmentPolicyPort:
                     f"object {binding.object_id!r}."
                 )
             settle_targets[binding.entity_id] = parent
+        for binding in self._scene_binding.rigidized_articulation_grasps:
+            parent = settle_targets.get(binding.object_id)
+            if parent is None or parent.kind != "articulation":
+                raise KeyError(
+                    f"Affordance {binding.entity_id!r} references unavailable "
+                    f"rigidized articulation {binding.object_id!r}."
+                )
+            settle_targets[binding.entity_id] = parent
         articulations = {
             entity_id: target.native_entity
             for entity_id, target in articulation_targets.items()
         }
         return (
             MappingProxyType(settle_targets),
-            MappingProxyType(rigid_objects),
+            MappingProxyType(objects),
             MappingProxyType(articulations),
         )
 

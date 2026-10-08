@@ -61,6 +61,7 @@ without recomputing. Pass ``--output`` to export a copy to a user path.
 from __future__ import annotations
 
 import argparse
+import time
 import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -682,7 +683,9 @@ def main(args: argparse.Namespace) -> None:
                     f"'{control_part}' has {len(joint_ids)} joints; skipping."
                 )
             else:
-                robot.set_qpos(qpos=qpos, joint_ids=joint_ids)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=False)
+                robot.set_qpos(qpos=qpos, joint_ids=joint_ids, target=True)
+                sim.sync_render_state()
 
         analyzer_cfg = build_analyzer_config(args, control_part)
         analyzer = WorkspaceAnalyzer(robot=robot, config=analyzer_cfg, sim_manager=sim)
@@ -724,7 +727,9 @@ def main(args: argparse.Namespace) -> None:
                 )
             try:
                 while True:
-                    sim.update(step=1)
+                    with sim.render_frame():
+                        pass
+                    time.sleep(0.01)
             except KeyboardInterrupt:
                 pass
     finally:

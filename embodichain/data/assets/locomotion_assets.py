@@ -36,6 +36,10 @@ __all__ = [
     "UnitreeH1_2Locomotion",
 ]
 
+_HF_HUB_PREFIX = (
+    "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+)
+
 
 class _LocomotionAsset(EmbodiChainDataset):
     """Resolve one versioned archive through the standard dataset cache."""
@@ -45,13 +49,11 @@ class _LocomotionAsset(EmbodiChainDataset):
     def __init__(self, data_root: str | None = None) -> None:
         prefix = type(self).__name__
         filename = f"robot_assets/{prefix}.zip"
-        descriptor = o3d.data.DataDescriptor(
-            [
-                f"https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/{filename}",
-                f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}",
-            ],
-            self.archive_md5,
-        )
+        # The configured prefix goes first; the Hugging Face Hub is only a fallback.
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        if EMBODICHAIN_DOWNLOAD_PREFIX != _HF_HUB_PREFIX:
+            urls.append(f"{_HF_HUB_PREFIX}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, self.archive_md5)
         super().__init__(
             prefix,
             descriptor,

@@ -1,0 +1,64 @@
+# Task-facing expansion overrides. Referenced by task.ur5.yaml.
+runtime:
+  num_envs: 16
+  env:
+    events:
+      expansion_profile_reset:
+        func: apply_expansion_profile_reset
+        mode: reset
+        params: {}
+      record_camera:
+        func: record_camera_data
+        mode: interval
+        interval_step: 1
+        params:
+          name: repeated_pick_place_16grid
+          resolution: [320, 240]
+          eye: [-1.25, -1.15, 0.95]
+          target: [-0.25, -0.02, 0.25]
+          up: [0.0, 0.0, 1.0]
+          max_env_num: 16
+          # Debug camera videos; structured datasets use env.dataset instead.
+          save_path: /tmp/repeated-pick-place/cameras
+policy:
+  component: ../../../../components/expansion_policies/task_program_episode.yaml
+overrides:
+  source:
+    source_id: repeated_cube_pick_place
+    source_revision: config:repeated_pick_place_v1
+    template_id: repeated_pick_place_episode
+    call_count: 6
+    affordance_call_indices: [0, 2, 4]
+    trajectory_call_indices: [1, 3, 5]
+  scene_randomization:
+    enabled: true
+    reference_family_count: 4
+    profile: cube_initial_pose
+    change_scope: cube_initial_pose_only
+  affordance:
+    enabled: true
+    branches_per_family: 4
+    max_proposals: 128
+  trajectory:
+    variants_per_family: 4
+    spatial:
+      enabled: true
+      operators: [joint_residual, via_points]
+      joint_offset_scale: 0.005
+  visual:
+    enabled: true
+    profiles: [rgb_canonical, rgb_material_01, rgb_camera_01, rgb_light_01]
+  observation:
+    profiles: [rgb_lowres]
+    capture_rgb: true
+  scheduling:
+    candidate_budget: 64
+    reference_family_budget: 4
+  execution:
+    max_inflight: 16
+  persistence:
+    # Expansion manifest and provenance output; dataset rows use env.dataset.
+    output_dir: /tmp/repeated-pick-place/expansion
+
+collection:
+  target_episodes: 64

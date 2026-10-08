@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Iterable, Mapping, TYPE_CHECKING
+from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
 
@@ -41,6 +41,12 @@ if TYPE_CHECKING:
     from embodichain.toolkits.graspkit import GraspPoseGenerator
 
     from .execution import ExecutionSession
+
+
+PlanTransform = Callable[
+    [ResolvedActionRequest, PlanningContext, ActionPlan],
+    ActionPlan,
+]
 
 
 class AtomicActionEngine:
@@ -316,9 +322,25 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
-        """Plan an already-resolved request without rebuilding its snapshot."""
-        return self._plan_request(request, context)
+        """Plan an already-resolved request without rebuilding its snapshot.
+
+        Args:
+            request: Immutable request previously returned by :meth:`resolve`.
+            context: Optional latest planning state; captured when omitted.
+            plan_transform: Optional callback scoped to this planning call. The
+                callback receives and must return independently owned plan values.
+
+        Returns:
+            Validated side-effect-free action plan.
+        """
+        return self._plan_request(
+            request,
+            context,
+            plan_transform=plan_transform,
+        )
 
     def _resolve(
         self,
@@ -350,6 +372,8 @@ class AtomicActionEngine:
         self,
         request: ResolvedActionRequest,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -375,12 +399,23 @@ class AtomicActionEngine:
         self._validate_context(current)
         plan = action.plan(request, current)
         self._validate_plan(plan, current, request)
+        if plan_transform is not None:
+            if not callable(plan_transform):
+                raise TypeError("plan_transform must be callable or None.")
+            transformed = plan_transform(request, current, plan.snapshot())
+            if not isinstance(transformed, ActionPlan):
+                raise TypeError("plan_transform must return an ActionPlan.")
+            owned = transformed.snapshot()
+            self._validate_plan(owned, current, request)
+            plan = owned
         return plan
 
     def plan(
         self,
         invocation: ActionInvocation,
         context: PlanningContext | None = None,
+        *,
+        plan_transform: PlanTransform | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
@@ -396,7 +431,7 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current)
+        return self._plan_request(request, current, plan_transform=plan_transform)
 
     def initial_context(
         self,
@@ -537,6 +572,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         eligible_mask: torch.Tensor | None = None,
+        plan_transform: PlanTransform | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -547,6 +583,8 @@ class AtomicActionEngine:
             eligible_mask: Optional per-environment cohort allowed to execute.
                 Ineligible rows remain excluded for the whole session. All rows
                 are eligible when omitted.
+            plan_transform: Optional transform scoped to every planning call in
+                the returned execution session.
 
         Returns:
             Stateful execution session advanced by ``session.tick(...)``.
@@ -559,6 +597,7 @@ class AtomicActionEngine:
             tuple(invocations),
             initial,
             eligible_mask=eligible_mask,
+            plan_transform=plan_transform,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:
@@ -626,6 +665,79 @@ class AtomicActionEngine:
             raise ValueError(
                 "Action plan must record the planning collision-world revision."
             )
+
+    def rebuild_plan_from_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        plan: ActionPlan,
+        trajectory: TimedTrajectory,
+    ) -> ActionPlan:
+        """Rebuild a complete plan from a same-grid full-joint trajectory.
+
+        This is the execution-side boundary for trajectory expansion. The
+        caller supplies a trajectory with the same frame count as the original
+        plan; timing-grid remapping and phase-index changes remain the
+        responsibility of a later adapter.
+
+        Args:
+            request: Resolved request that produced ``plan``.
+            context: Planning context used for the original plan.
+            plan: Original validated action plan.
+            trajectory: Replacement full-joint trajectory on the same grid.
+
+        Returns:
+            A newly lowered and validated action plan with commands, tracking,
+            segments, and effect metadata rebuilt together.
+        """
+        if not isinstance(plan, ActionPlan):
+            raise TypeError("plan must be an ActionPlan.")
+        if not isinstance(trajectory, TimedTrajectory):
+            raise TypeError("trajectory must be a TimedTrajectory.")
+        self._validate_context(context)
+        owned_plan = plan.snapshot()
+        self._validate_plan(owned_plan, context, request)
+        original = owned_plan.joint_trajectory
+        if original is None:
+            raise ValueError("same-grid plan rebuilding requires a joint trajectory.")
+        if trajectory.batch_size != context.batch_size:
+            raise ValueError("trajectory batch must match the planning context.")
+        if trajectory.waypoint_count != owned_plan.commands.frame_count:
+            raise ValueError(
+                "same-grid plan rebuilding requires the original frame count."
+            )
+        if not torch.equal(trajectory.env_ids, context.env_ids):
+            raise ValueError("trajectory env_ids must match the planning context.")
+        if trajectory.dt.shape != original.dt.shape or not torch.equal(
+            trajectory.dt,
+            original.dt,
+        ):
+            raise ValueError("same-grid plan rebuilding requires identical dt.")
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        segment_lengths = {
+            segment.name: segment.stop - segment.start
+            for segment in owned_plan.segments
+        }
+        rebuilt = action.build_plan(
+            request,
+            context,
+            success=owned_plan.plan_success,
+            trajectory=trajectory,
+            expected_effects=owned_plan.expected_effects,
+            effect_candidates=owned_plan.effect_candidates,
+            effect_verification=owned_plan.effect_verification,
+            replannable=owned_plan.replannable,
+            diagnostics=owned_plan.diagnostics,
+            segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=owned_plan.scene_dependency_monitor_until,
+            scene_dependency_end_segment=owned_plan.scene_dependency_end_segment,
+        )
+        self._validate_plan(rebuilt, context, request)
+        return rebuilt
 
 
 __all__ = ["AtomicActionEngine"]

@@ -1,7 +1,8 @@
 # Rendering Configuration
 
 The {class}`~embodichain.lab.sim.cfg.RenderCfg` class controls the renderer,
-ray-tracing sample count, tone mapping, and DLSS settings used by
+ray-tracing sample count, scoped denoising/reconstruction, tone mapping, DLSS,
+and NRD settings used by
 {class}`~embodichain.lab.sim.sim_manager.SimulationManager`.
 
 ## Core options
@@ -10,13 +11,15 @@ ray-tracing sample count, tone mapping, and DLSS settings used by
 | :--- | :--- | :--- | :--- |
 | `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `hybrid`, `fast-rt`, or `rt`. |
 | `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least `1`. |
+| `denoising` | `DenoisingCfg` | `DenoisingCfg()` | Independent `window`/`offscreen` choices: `off`, `optix`, `dlss`, or `nrd`. |
 | `tone_mapping_enabled` | `bool` | `False` | Apply modified Reinhard tone mapping to RGB output. |
 | `tone_mapping_exposure` | `float` | `1.0` | Fixed linear exposure multiplier used before tone mapping. |
 | `dlss` | `DLSSCfg` | `DLSSCfg()` | NVIDIA DLSS settings. See {doc}`dlss`. |
+| `nrd` | `NRDCfg` | `NRDCfg()` | NVIDIA NRD settings for the public `nrd` path. |
 
-Ray-traced output uses DexSim's OptiX denoiser. Tone mapping affects RGB
-output only; depth, segmentation masks, normals, and position buffers remain
-unchanged.
+The public `dlss` path maps to DexSim `DLSS_RR`; the public `nrd` path maps to
+standalone DexSim `NRD_RELAX`. Tone mapping affects RGB output only; depth,
+segmentation masks, normals, and position buffers remain unchanged.
 
 ## Renderer selection
 
@@ -44,12 +47,13 @@ SimulationManager.set_default_renderer("fast-rt")
 
 ```python
 from embodichain.lab.sim import SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg
 
 sim_config = SimulationManagerCfg(
     render_cfg=RenderCfg(
         renderer="fast-rt",
         spp=4,
+        denoising=DenoisingCfg(window="dlss", offscreen="nrd"),
         tone_mapping_enabled=True,
         tone_mapping_exposure=1.0,
     )

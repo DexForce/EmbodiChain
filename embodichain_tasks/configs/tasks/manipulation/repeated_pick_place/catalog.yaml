@@ -8,7 +8,5 @@ deployments:
     config: task.franka.yaml
   ur5:
     config: task.ur5.yaml
-  franka_newton:
-    config: task.franka.newton.yaml
-  ur5_newton:
-    config: task.ur5.newton.yaml
+  ur5_objective:
+    config: task.ur5.objective.yaml

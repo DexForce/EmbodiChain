@@ -226,9 +226,9 @@ def test_official_catalogs_resolve_real_deployments() -> None:
     assert {d.name for d in pick.deployments} >= {
         "franka",
         "ur5",
-        "franka_newton",
-        "ur5_newton",
+        "ur5_objective",
     }
+    deployments = {deployment.name: deployment for deployment in pick.deployments}
     assert catalog._select_task(tasks, "push_cube").deployments[0].capabilities == {
         catalog._RL
     }

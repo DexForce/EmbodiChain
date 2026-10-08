@@ -902,7 +902,7 @@ class ActionPlan:
             scene_dependency_end_segment=self.scene_dependency_end_segment,
             collision_world_sensitive=self.collision_world_sensitive,
             replannable=self.replannable,
-            expected_effects=self.expected_effects,
+            expected_effects=self.expected_effects.snapshot(),
             effect_candidates=self.effect_candidates,
             effect_verification=self.effect_verification,
             invocation_id=self.invocation_id,

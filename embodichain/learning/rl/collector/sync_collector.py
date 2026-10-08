@@ -99,7 +99,7 @@ class SyncCollector(BaseCollector):
             step_td = self.policy.get_action(step_td)
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(
-                self._to_action_dict(step_td["action"])
+                self._to_env_action(step_td["action"])
             )
             next_obs_td = dict_to_tensordict(next_obs, self.device)
             self._write_step(
@@ -162,12 +162,15 @@ class SyncCollector(BaseCollector):
         )
         return actor_obs, critic_obs
 
-    def _to_action_dict(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
-        am = getattr(self.env, "action_manager", None)
-        if am is None:
-            return action
-        else:
-            return am.convert_policy_action_to_env_action(action)
+    def _to_env_action(self, action: torch.Tensor) -> TensorDict | torch.Tensor:
+        """Move a policy action to the environment device without preprocessing it.
+
+        The environment owns the ActionManager lifecycle.  Preprocessing here
+        would either call a removed legacy conversion API or process a flat
+        action twice before :meth:`env.step` applies it.
+        """
+        env_device = getattr(self.env, "device", self.device)
+        return action.to(env_device)
 
     def _write_step(
         self,

@@ -53,6 +53,15 @@ DEFAULT_MANAGER_MODULES = [
 _EXTRA_MANAGER_MODULES: list[str] = []
 _PHYSICS_BACKENDS = frozenset({"default", "newton"})
 
+# Pretrained policy bundles keep the training and Gym configuration snapshots
+# that were used to produce their checkpoints.  The published locomotion
+# bundles predate stable action contracts and still contain this implementation
+# name.  Keep the migration narrow: unsupported legacy protocols must continue
+# to fail instead of being guessed at.
+_LEGACY_ACTION_CONTRACTS = {
+    "DefaultJointPositionTerm": "joint_position.default_offset@1",
+}
+
 
 def _declared_physics_backend(config: Mapping[str, object]) -> str:
     """Return the single physics backend explicitly owned by a Gym config."""
@@ -428,6 +437,8 @@ def config_to_cfg(
     policy. Inline ``robot``, ``sensor``, and scene fields remain valid when
     their corresponding component selector is absent. A resolved config
     containing ``task_program`` composes its semantic and policy components.
+    Set ``enable_sensor`` to ``False`` to keep an embodiment's sensor
+    declaration while skipping sensor acquisition.
     Every resolved environment explicitly owns one ``physics`` backend and an
     optional ``physics_config`` mapping whose fields must belong to that backend.
     The existing
@@ -453,12 +464,14 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
+        DenoisingCfg,
         RobotCfg,
         RigidObjectCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
         DLSSCfg,
+        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -513,6 +526,12 @@ def config_to_cfg(
     )
     component_resolution = _resolve_gym_components(config, base_dir=base_dir)
     config = component_resolution.config
+    if "objective" in config:
+        from embodichain.lab.gym.envs.objectives.config import load_objective_component
+
+        env_cfg.objective = load_objective_component(
+            config["objective"], base_dir=base_dir
+        )
 
     physics_backend = _declared_physics_backend(config)
     physics_config_value = config.get("physics_config", {})
@@ -635,10 +654,15 @@ def config_to_cfg(
     env_cfg.max_episode_steps = config.get("max_episode_steps", 300)
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
+    env_cfg.enable_sensor = config.get("enable_sensor", True)
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("denoising"), dict):
+        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):
         render_config["dlss"] = DLSSCfg(**render_config["dlss"])
+    if isinstance(render_config.get("nrd"), dict):
+        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -904,15 +928,65 @@ def config_to_cfg(
     if "actions" in env_config:
         env_cfg.actions = ComponentCfg()
         for term_name, term_params in env_config["actions"].items():
+            if "mode" in term_params:
+                raise ValueError(
+                    f"Action term {term_name!r} uses removed field 'mode'; "
+                    "action terms now process and apply in configuration order."
+                )
+            if term_params.get("contract") is not None and "func" in term_params:
+                raise ValueError(
+                    f"Action term {term_name!r} cannot declare both 'func' and "
+                    "'contract'; choose one action declaration."
+                )
+            term_contract = term_params.get("contract")
+            term_class_name = term_params.get("func")
+            is_legacy_default_position = term_class_name == "DefaultJointPositionTerm"
+            if term_contract is None and isinstance(term_class_name, str):
+                term_contract = _LEGACY_ACTION_CONTRACTS.get(term_class_name)
+            if term_contract is not None:
+                if not isinstance(term_contract, str):
+                    raise TypeError(
+                        f"Action term {term_name!r} contract must be a string."
+                    )
+                from embodichain.lab.gym.envs.managers.actions import (
+                    resolve_action_contract,
+                )
+
+                term_func = resolve_action_contract(term_contract)
+            else:
+                if not isinstance(term_class_name, str):
+                    raise ValueError(
+                        f"Action term {term_name!r} must declare a contract or "
+                        "implementation class."
+                    )
+                if term_class_name.endswith("Term"):
+                    raise ValueError(
+                        f"Action term {term_name!r} uses removed class "
+                        f"{term_class_name!r}; declare a stable action contract "
+                        "or use the new *Action protocol and naming."
+                    )
+                term_func = find_function_from_modules(
+                    term_class_name,
+                    manager_modules,
+                    raise_if_not_found=True,
+                )
             term_params_modified = deepcopy(term_params)
-            term_func = find_function_from_modules(
-                term_params["func"],
-                manager_modules,
-                raise_if_not_found=True,
-            )
+            term_params_modified.pop("contract", None)
+            term_params_modified.pop("func", None)
+            if is_legacy_default_position:
+                legacy_params = term_params_modified.get("params", {})
+                if not isinstance(legacy_params, dict):
+                    raise TypeError(
+                        f"Action term {term_name!r} params must be a mapping."
+                    )
+                # The removed term treated an omitted or null clip as unbounded.
+                # Preserve that behavior when loading persisted policy snapshots.
+                legacy_params.setdefault("clip", None)
+                term_params_modified["params"] = legacy_params
             action_term = ActionTermCfg(
                 func=term_func,
                 params=term_params_modified.get("params", {}),
+                contract=term_contract,
             )
             setattr(env_cfg.actions, term_name, action_term)
 
@@ -1045,6 +1119,7 @@ def add_env_launcher_args_to_parser(
         --preview: Whether to preview the environment after launching (default: False)
         --filter_visual_rand: Whether to filter out visual randomization (default: False)
         --filter_dataset_saving: Whether to filter out dataset saving (default: False)
+        --disable_sensor: Whether to skip configured sensor acquisition (default: False)
         --viser: Whether to expose the environment through Viser (default: False)
         --viser-*: Viser server, update-rate, and environment selection options
 
@@ -1075,6 +1150,7 @@ def add_env_launcher_args_to_parser(
 
     parser.add_argument(
         "--gym_config",
+        "--gym-config",
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
@@ -1100,7 +1176,19 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--filter_dataset_saving",
+        "--filter-dataset-saving",
         help="Whether to filter out dataset saving.",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--disable_sensor",
+        "--disable-sensor",
+        dest="disable_sensor",
+        help=(
+            "Disable configured sensor acquisition. Sensors declared by an "
+            "embodiment are not instantiated."
+        ),
         default=False,
         action="store_true",
     )
@@ -1180,6 +1268,32 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["arena_space"] = args.arena_space
     if args.max_episodes is not None:
         merged_config["max_episodes"] = args.max_episodes
+    if getattr(args, "disable_sensor", False):
+        merged_config["enable_sensor"] = False
+    dataset_dir = getattr(args, "expansion_dataset_dir", None)
+    if dataset_dir is not None:
+        if type(dataset_dir) is not str or not dataset_dir.strip():
+            raise ValueError("--dataset-dir must be a nonempty path")
+        env_config = merged_config.get("env")
+        if not isinstance(env_config, Mapping):
+            raise ValueError("--dataset-dir requires an env.dataset configuration")
+        datasets = env_config.get("dataset")
+        if not isinstance(datasets, Mapping) or not datasets:
+            raise ValueError("--dataset-dir requires at least one dataset manager")
+        updated_datasets = deepcopy(dict(datasets))
+        for dataset_name, dataset_config in updated_datasets.items():
+            if not isinstance(dataset_config, Mapping):
+                raise ValueError(
+                    f"env.dataset.{dataset_name} must be a mapping when using "
+                    "--dataset-dir"
+                )
+            params = deepcopy(dict(dataset_config.get("params", {})))
+            params["save_path"] = dataset_dir
+            dataset_config = deepcopy(dict(dataset_config))
+            dataset_config["params"] = params
+            updated_datasets[dataset_name] = dataset_config
+        merged_config["env"] = deepcopy(dict(env_config))
+        merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
@@ -1206,6 +1320,144 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         visualization["viser_server"] = viser_server
         merged_config["visualization"] = visualization
     return merged_config
+
+
+def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
+    """Resolve one task-owned expansion declaration path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    if type(value) is not str or not value.strip() or value != value.strip():
+        raise ValueError("expansion.config must be a nonempty path")
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        resolved = path.resolve()
+    elif path.parts[:2] == ("embodichain_tasks", "configs"):
+        resolved = resolve_config_path(path).resolve()
+    else:
+        resolved = (base_dir / path).resolve()
+    if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
+        raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"expansion.config is not a file: {resolved}")
+    return resolved
+
+
+def _merge_expansion_config(
+    base: Mapping[str, Any], patch: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge a referenced expansion config with task-local overrides."""
+    merged = deepcopy(dict(base))
+    for key, value in patch.items():
+        if isinstance(value, Mapping):
+            current = merged.get(key, {})
+            if not isinstance(current, Mapping):
+                raise ValueError(f"expansion.{key} cannot replace a scalar")
+            merged[key] = _merge_expansion_config(current, value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _load_expansion_declaration(
+    binding: Mapping[str, Any], *, base_dir: Path
+) -> tuple[dict[str, Any], Path | None]:
+    """Load an optional task-referenced expansion declaration.
+
+    A task may keep the expansion declaration inline or point ``expansion``
+    at a sibling YAML/JSON file with ``config``. The referenced file contains
+    the fields below ``expansion`` directly; a single outer ``expansion``
+    mapping is accepted as a migration convenience. Only one level of
+    references is resolved so malformed chains fail early.
+    """
+    if not isinstance(binding, Mapping):
+        raise ValueError("expansion must be a mapping")
+    if "config" not in binding:
+        return deepcopy(dict(binding)), None
+    config_value = binding["config"]
+
+    from embodichain.utils.utility import load_config
+
+    config_path = _resolve_expansion_config_path(config_value, base_dir=base_dir)
+    referenced = load_config(config_path)
+    if not isinstance(referenced, Mapping):
+        raise TypeError("expansion config must contain a mapping")
+    referenced = dict(referenced)
+    if "expansion" in referenced:
+        if set(referenced) != {"expansion"}:
+            raise ValueError(
+                "expansion config may contain either expansion fields or one "
+                "outer expansion mapping"
+            )
+        nested = referenced["expansion"]
+        if not isinstance(nested, Mapping):
+            raise TypeError("expansion config.expansion must be a mapping")
+        referenced = dict(nested)
+    if "config" in referenced:
+        raise ValueError("expansion.config cannot reference another expansion config")
+    local_overrides = {key: value for key, value in binding.items() if key != "config"}
+    return _merge_expansion_config(referenced, local_overrides), config_path
+
+
+def _apply_expansion_runtime_overlay(
+    config: dict[str, Any], *, base_dir: Path | None = None
+) -> dict[str, Any]:
+    """Apply task-owned expansion host values after environment expansion.
+
+    Physical scene and backend values remain owned by the selected environment
+    component. Expansion deployments may add recorder/reset managers and
+    batch runtime values without maintaining a duplicate expansion-owned
+    physical scene file.
+    """
+    expansion = config.get("expansion")
+    if not isinstance(expansion, Mapping):
+        return config
+    expansion, _ = _load_expansion_declaration(
+        expansion,
+        base_dir=Path.cwd() if base_dir is None else base_dir,
+    )
+    runtime = expansion.get("runtime")
+    if runtime is None:
+        return config
+    if not isinstance(runtime, Mapping):
+        raise ValueError("expansion.runtime must be a mapping")
+    allowed = {
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "env",
+    }
+    unknown = set(runtime) - allowed
+    if unknown:
+        raise ValueError(
+            f"expansion.runtime contains unsupported fields: {sorted(unknown)}"
+        )
+
+    def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+        merged = deepcopy(dict(base))
+        for key, value in patch.items():
+            if isinstance(value, Mapping):
+                current = merged.get(key, {})
+                if not isinstance(current, Mapping):
+                    raise ValueError(f"expansion.runtime.{key} cannot replace a scalar")
+                merged[key] = merge(current, value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+
+    resolved = deepcopy(config)
+    for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
+        if key in runtime:
+            resolved[key] = deepcopy(runtime[key])
+    for key in ("env",):
+        if key in runtime:
+            current = resolved.get(key, {})
+            if not isinstance(current, Mapping) or not isinstance(
+                runtime[key], Mapping
+            ):
+                raise ValueError(f"expansion.runtime.{key} must be a mapping")
+            resolved[key] = merge(current, runtime[key])
+    return resolved
 
 
 def build_env_cfg_from_args(
@@ -1237,19 +1489,30 @@ def build_env_cfg_from_args(
         gym_config = _resolve_environment_component(
             gym_config,
             base_dir=gym_config_source_path.parent,
+            selected_backend=getattr(args, "physics", None),
         )
+    gym_config = _apply_expansion_runtime_overlay(
+        gym_config, base_dir=gym_config_source_path.parent
+    )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config,
-        manager_modules=get_manager_modules(),
-        source_path=gym_config_source_path,
-        task_program_path_override=getattr(args, "task_program", None),
-    )
+    collection_config = gym_config.pop("collection", None)
+    try:
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            gym_config,
+            manager_modules=get_manager_modules(),
+            source_path=gym_config_source_path,
+            task_program_path_override=getattr(args, "task_program", None),
+        )
+    finally:
+        if collection_config is not None:
+            gym_config["collection"] = collection_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
+    if getattr(args, "disable_sensor", False):
+        cfg.enable_sensor = False
     cfg.record_trajectory = getattr(args, "record_trajectory", False)
     if getattr(args, "trajectory_save_dir", None):
         cfg.trajectory_save_dir = args.trajectory_save_dir
@@ -1439,6 +1702,7 @@ def init_rollout_buffer_from_config(
     The function creates a rollout buffer containing:
         - Basic observations: ``robot/qpos``, ``robot/qvel``, ``robot/qf``
         - Sensor observations: ``sensor/<uid>`` for each sensor in config
+          (omitted when ``enable_sensor`` is ``False``)
         - Extra observations: Custom observations from observation functors in ``add`` mode
             that have a ``shape`` specified in their ``extra`` parameter
 
@@ -1480,46 +1744,12 @@ def init_rollout_buffer_from_config(
 
     # Parse sensor
     sensor_desc = {}
-    for cfg in config.get("sensor", []):
-        desc = {}
-        width = cfg.get("width", 640)
-        height = cfg.get("height", 480)
-        desc["color"] = torch.zeros(
-            (
-                batch_size,
-                max_episode_steps,
-                height,
-                width,
-                4,
-            ),
-            dtype=torch.uint8,
-            device=device,
-        )
-        if cfg.get("enable_mask", False):
-            desc["mask"] = torch.zeros(
-                (
-                    batch_size,
-                    max_episode_steps,
-                    height,
-                    width,
-                ),
-                dtype=torch.int32,
-                device=device,
-            )
-        if cfg.get("enable_depth", False):
-            desc["depth"] = torch.zeros(
-                (
-                    batch_size,
-                    max_episode_steps,
-                    height,
-                    width,
-                ),
-                dtype=torch.float32,
-                device=device,
-            )
-
-        if cfg.get("sensor_type", "Camera") == "StereoCamera":
-            desc["color_right"] = torch.zeros(
+    if config.get("enable_sensor", True):
+        for cfg in config.get("sensor", []):
+            desc = {}
+            width = cfg.get("width", 640)
+            height = cfg.get("height", 480)
+            desc["color"] = torch.zeros(
                 (
                     batch_size,
                     max_episode_steps,
@@ -1530,8 +1760,8 @@ def init_rollout_buffer_from_config(
                 dtype=torch.uint8,
                 device=device,
             )
-            if "mask" in desc:
-                desc["mask_right"] = torch.zeros(
+            if cfg.get("enable_mask", False):
+                desc["mask"] = torch.zeros(
                     (
                         batch_size,
                         max_episode_steps,
@@ -1541,8 +1771,8 @@ def init_rollout_buffer_from_config(
                     dtype=torch.int32,
                     device=device,
                 )
-            if "depth" in desc:
-                desc["depth_right"] = torch.zeros(
+            if cfg.get("enable_depth", False):
+                desc["depth"] = torch.zeros(
                     (
                         batch_size,
                         max_episode_steps,
@@ -1553,7 +1783,42 @@ def init_rollout_buffer_from_config(
                     device=device,
                 )
 
-        sensor_desc[cfg.get("uid", "camera")] = desc
+            if cfg.get("sensor_type", "Camera") == "StereoCamera":
+                desc["color_right"] = torch.zeros(
+                    (
+                        batch_size,
+                        max_episode_steps,
+                        height,
+                        width,
+                        4,
+                    ),
+                    dtype=torch.uint8,
+                    device=device,
+                )
+                if "mask" in desc:
+                    desc["mask_right"] = torch.zeros(
+                        (
+                            batch_size,
+                            max_episode_steps,
+                            height,
+                            width,
+                        ),
+                        dtype=torch.int32,
+                        device=device,
+                    )
+                if "depth" in desc:
+                    desc["depth_right"] = torch.zeros(
+                        (
+                            batch_size,
+                            max_episode_steps,
+                            height,
+                            width,
+                        ),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+
+            sensor_desc[cfg.get("uid", "camera")] = desc
 
     # For simplicity, we initialize the observation buffer as a flat vector with dimension state_dim.
     # In practice, you may want to initialize it according to the actual observation space structure.
