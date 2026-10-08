@@ -337,9 +337,11 @@ def recover(
     }
     if (
         original.plan_success.any()
-        or not scope.rejected_raw_success
+        or (
+            not scope.rejected_raw_success
+            and any(call.raw_success for call in scope.calls)
+        )
         or len(scope.calls) != 8
-        or scope.calls[-1].raw_success
         or scope.fallback_attempted
     ):
         return _annotate(original, report)
@@ -359,7 +361,29 @@ def recover(
         or not isinstance(request.goal.object_target_pose, torch.Tensor)
     ):
         return _annotate(original, {**report, "local_fallback": "unsupported"})
+    if scope.checkpoint is None:
+        scope.checkpoint = _RandomState.capture(
+            _cuda_devices(
+                context.robot.qpos.device,
+                scope.robot.device,
+                options.start_qpos.device,
+            )
+        )
     scope.fallback_attempted = True
+    # Certify the measured hand too, not only the commanded retained grasp.
+    initial = scope.inspect(context.robot.qpos[:, None])
+    if not initial["valid"]:
+        return _annotate(
+            original,
+            {
+                **report,
+                "local_fallback": {
+                    "accepted": False,
+                    "reason": "initial_state_collision",
+                    "collision": initial,
+                },
+            },
+        )
     start = scope.robot.compute_fk(
         qpos=options.start_qpos, name=scope.part, to_matrix=True
     )

@@ -47,7 +47,7 @@ from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp, PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
-from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics, PlanningFailure
 from embodichain.lab.sim.atomic_actions.state import TaskState
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -62,6 +62,14 @@ from .adaptive_grasp import (
     opposite_grasp_end,
     select_grasp,
 )
+from .articulation_collision import robot_collision_scope
+from .held_alignment_recovery import _RandomState, _cuda_devices
+from .pick_safety import (
+    _PICK_GRASP_RULE,
+    _inspect_pick_motion,
+    _inspect_pick_plan,
+    _owns_constrained_pick,
+)
 
 __all__ = [
     "GenSimPickUp",
@@ -71,8 +79,6 @@ __all__ = [
     "GenSimPour",
 ]
 
-_PICK_GRASP_RULE = "gen_sim.pick_grasp_rule"
-
 
 @dataclass
 class _PickSelection:
@@ -80,6 +86,7 @@ class _PickSelection:
     request: object = None
     trajectory: tuple | None = None
     constrained: bool = False
+    candidates: AffordancePoseCandidates | None = None
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -194,117 +201,197 @@ class GenSimPickUp(PickUp):
         selection = _PickSelection(request=request)
         token = _PICK_SELECTION.set(selection)
         try:
-            first = super()._plan(request, context)
-            return (
-                self._recover_constrained_pick_roll(request, context, first)
-                if selection.constrained
-                else first
-            )
+            with robot_collision_scope():
+                first = super()._plan(request, context)
+                return (
+                    self._recover_constrained_pick_roll(request, context, first)
+                    if selection.constrained
+                    else first
+                )
         finally:
             _PICK_SELECTION.reset(token)
 
     def _recover_constrained_pick_roll(self, request, context, first):
-        """Try one symmetric grasp only after the original constrained path fails."""
+        """Keep failure-only roll recovery; reject robot-unsafe successful Pick paths."""
         goal, options = request.goal, request.skill_options
         affordance = goal.semantics.affordance
-        if (
-            first.plan_success.any()
-            or context.batch_size != 1
-            or goal.grasp_xpos is not None
-            or options.fixed_object_to_eef is not None
-            or options.rotate_upright is not None
-            or options.pick_object_part != "center"
-            or options.downstream_object_target_poses
-            or not isinstance(affordance, AntipodalAffordance)
-            or affordance.get_custom_config(_PICK_GRASP_RULE) is None
-            or request.motion_policy.strategy != "ik_interp"
-            or request.motion_policy.dynamic_collision_mode != "off"
-            or getattr(self.motion_generator, "direct_transport_planning", False)
-        ):
+        if not _owns_constrained_pick(request, context, self.motion_generator):
             return first
         endpoint = request.binding.endpoint("primary", "motion")
         held = first.expected_effects.held_object_updates.get(endpoint.task_state_key)
         if held is None or held.semantics.entity_id != goal.semantics.entity_id:
-            return first
+            return (
+                replace(
+                    first,
+                    plan_success=torch.zeros_like(first.plan_success),
+                    diagnostics=replace(
+                        first.diagnostics,
+                        failure=PlanningFailure(
+                            "pick_attachment_unavailable", retryable=False
+                        ),
+                    ),
+                )
+                if first.plan_success.any()
+                else first
+            )
         from .grasp_filter import TaskGraspPoseGenerator
-        from .motion import _joint_velocity_limits, _velocity_validity
 
         calibration = options.grasp_frame_to_eef.to(held.grasp_xpos)
-        grasp_pose = held.grasp_xpos @ pose_inv(calibration)
-        grasp_pose = grasp_pose.clone()
+        original_grasp = held.grasp_xpos @ pose_inv(calibration)
+        grasp_pose = original_grasp.clone()
         grasp_pose[..., :3, :2] *= -1
-        alternate = grasp_pose @ calibration
+        choices = [(grasp_pose, None, "grasp_z_roll_180")]
         object_pose = held.grasp_xpos @ pose_inv(held.object_to_eef)
         hand = request.binding.endpoint("primary", "grasp").require_target(
             JointPositionTarget
         )
-        generator = self.planning_services.grasp_pose_generator(hand.target_id)
-        if not isinstance(generator, TaskGraspPoseGenerator):
-            raise ValueError(
-                "Constrained Pick roll recovery requires its grasp filter."
-            )
-        generator = generator.for_pick(
-            *affordance.get_custom_config(_PICK_GRASP_RULE),
-            affordance.mesh_vertices,
-            affordance.mesh_triangles,
-        )
+        original_success = bool(first.plan_success.all())
+        attempts = []
 
-        def finish(plan, reason):
+        def finish(
+            plan, reason, alternate=None, candidate_id=None, variant="grasp_z_roll_180"
+        ):
             accepted = reason == "accepted"
             metadata = dict(plan.diagnostics.metadata)
-            if accepted:
+            if accepted and alternate is not None:
                 samples = dict(first.diagnostics.metadata.get("affordance_sample", {}))
                 samples["grasp"] = {
                     **samples.get("grasp", {}),
                     "selected_poses": alternate.detach().cpu().tolist(),
                 }
+                if candidate_id is not None:
+                    samples["grasp"]["candidate_ids"] = [candidate_id]
                 metadata["affordance_sample"] = samples
-            metadata["gen_sim_pick_roll_recovery"] = {
+            details = {
                 "accepted": accepted,
                 "reason": reason,
-                "variant": "grasp_z_roll_180",
+                "variant": variant,
                 "original_plan_success": first.plan_success.tolist(),
             }
+            metadata[
+                (
+                    "gen_sim_pick_safety"
+                    if original_success
+                    else "gen_sim_pick_roll_recovery"
+                )
+            ] = {**details, "attempts": attempts}
             return replace(
-                plan, diagnostics=replace(plan.diagnostics, metadata=metadata)
+                plan,
+                plan_success=(
+                    plan.plan_success
+                    if accepted
+                    else torch.zeros_like(plan.plan_success)
+                ),
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata=metadata,
+                    **(
+                        {
+                            "failure": PlanningFailure(
+                                "pick_robot_safety_failed", retryable=False
+                            )
+                        }
+                        if original_success and not accepted
+                        else {}
+                    ),
+                ),
             )
 
-        if not generator.accepts_grasp_poses(
-            grasp_pose,
-            object_pose,
-            affordance.mesh_vertices,
-            affordance.mesh_triangles,
-        ).all():
-            return finish(first, "grasp_filter_rejected")
-        direction = options.approach_direction.to(alternate)
-        direction = direction / torch.linalg.vector_norm(direction)
-        if not self._approach_alignment_mask(
-            alternate[:, None, None], options, direction
-        ).all():
-            return finish(first, "approach_alignment_rejected")
-        # Rebuild the whole plan so trajectory and proposed attachment use the
-        # same pose. Extra IK draws must not change later calls' random stream.
-        devices = [alternate.device.index] if alternate.is_cuda else []
-        with torch.random.fork_rng(devices=devices):
-            second = super()._plan(
-                replace(request, goal=replace(goal, grasp_xpos=alternate)), context
-            )
-        if not second.plan_success.all():
-            return finish(first, "planning_failed")
-        trajectory = second.joint_trajectory
-        limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)
-        if not _velocity_validity(trajectory.positions, trajectory.dt, limits).all():
-            return finish(first, "final_velocity_rejected")
         arm = endpoint.require_target(JointPositionTarget)
-        bounds = self.robot.get_qpos_limits(name=arm.control_part).to(
-            trajectory.positions
-        )
-        positions = trajectory.positions[..., list(arm.joint_ids)]
-        if not (
-            (positions >= bounds[:, None, :, 0]) & (positions <= bounds[:, None, :, 1])
-        ).all():
-            return finish(first, "joint_limits_rejected")
-        return finish(second, "accepted")
+        start = _inspect_pick_motion(self.robot, context.robot.qpos, arm.control_part)
+        if not start["valid"]:
+            attempts.append({"variant": "observed_start", **start})
+            return finish(first, "start_collision_or_unavailable")
+        if original_success:
+            certificate = _inspect_pick_plan(self.robot, request, context, first)
+            if certificate["valid"]:
+                return first
+            attempts.append({"variant": "original", **certificate})
+            if "unavailable" in certificate:
+                return finish(first, "certificate_unavailable")
+            if certificate.get("reason") == "initial_velocity_rejected":
+                from .pick_safety import _prepend_pick_opening
+
+                opened, opening_report = _prepend_pick_opening(
+                    self, request, context, first
+                )
+                attempts.append({"variant": "observed_hand_opening", **opening_report})
+                if opened is not None:
+                    return finish(opened, "accepted", variant="observed_hand_opening")
+            pool = _PICK_SELECTION.get().candidates
+            if pool is not None:
+                indices = torch.argsort(
+                    pool.costs[0].masked_fill(~pool.valid[0], torch.inf), stable=True
+                )
+                for index in indices[pool.valid[0, indices]][:4].tolist():
+                    pose = pool.poses[:, index] @ pose_inv(calibration)
+                    mirror = pose.clone()
+                    mirror[..., :3, :2] *= -1
+                    choices.extend(
+                        (candidate, index, f"candidate_{index}_{roll}")
+                        for candidate, roll in (
+                            (pose, "original"),
+                            (mirror, "z_roll_180"),
+                        )
+                        if not any(
+                            torch.equal(candidate, previous)
+                            for previous in [
+                                original_grasp,
+                                *(choice[0] for choice in choices),
+                            ]
+                        )
+                    )
+        # Every alternate is a complete shared PickUp plan; keep its proposed
+        # attachment and emitted commands together and restore all extra draws.
+        state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
+        try:
+            generator = self.planning_services.grasp_pose_generator(hand.target_id)
+            if not isinstance(generator, TaskGraspPoseGenerator):
+                raise ValueError(
+                    "Constrained Pick roll recovery requires its grasp filter."
+                )
+            generator = generator.for_pick(
+                *affordance.get_custom_config(_PICK_GRASP_RULE),
+                affordance.mesh_vertices,
+                affordance.mesh_triangles,
+            )
+            for grasp_pose, candidate_id, variant in choices:
+                alternate = grasp_pose @ calibration
+                reason = "grasp_filter_rejected"
+                if generator.accepts_grasp_poses(
+                    grasp_pose,
+                    object_pose,
+                    affordance.mesh_vertices,
+                    affordance.mesh_triangles,
+                ).all():
+                    direction = options.approach_direction.to(alternate)
+                    direction = direction / torch.linalg.vector_norm(direction)
+                    reason = "approach_alignment_rejected"
+                    if self._approach_alignment_mask(
+                        alternate[:, None, None], options, direction
+                    ).all():
+                        second = super()._plan(
+                            replace(request, goal=replace(goal, grasp_xpos=alternate)),
+                            context,
+                        )
+                        certificate = (
+                            _inspect_pick_plan(self.robot, request, context, second)
+                            if second.plan_success.all()
+                            else {"valid": False, "reason": "planning_failed"}
+                        )
+                        attempts.append({"variant": variant, **certificate})
+                        if certificate["valid"]:
+                            return finish(
+                                second, "accepted", alternate, candidate_id, variant
+                            )
+                        reason = certificate.get("reason", "robot_collision_rejected")
+                        if "unavailable" in certificate:
+                            return finish(first, "certificate_unavailable")
+                if not original_success:
+                    return finish(first, reason)
+            return finish(first, "safe_candidates_exhausted")
+        finally:
+            state.restore()
 
     def _get_full_pickup_trajectory(
         self,
@@ -435,12 +522,13 @@ class GenSimPickUp(PickUp):
             options,
             approach_direction,
         )
+        feasible = AffordancePoseCandidates(
+            poses=poses, costs=candidates.costs, valid=candidates.valid & ik_success
+        )
+        if selection is not None:
+            selection.candidates = feasible
         return affordance.sample_candidates(
-            AffordancePoseCandidates(
-                poses=poses,
-                costs=candidates.costs,
-                valid=candidates.valid & ik_success,
-            ),
+            feasible,
             sampling=context.affordance_sampling,
             env_ids=context.env_ids,
             key=sample_key,
@@ -754,6 +842,9 @@ class GenSimMoveHeldObject(MoveHeldObject):
     GoalType = MoveHeldObject.GoalType
     OptionsType = MoveHeldObject.OptionsType
     binding_contract = MoveHeldObject.binding_contract
+    _staging_rigid_entity_ids: frozenset[str] = frozenset()
+    _staging_invocation_ids: frozenset[str] = frozenset()
+    _staging_retention_sources: dict[str, dict] | None = None
 
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_transport_planning", False) is True:
@@ -795,20 +886,41 @@ class GenSimMoveHeldObject(MoveHeldObject):
             recover,
             world_yaw_free_collision_scope,
         )
+        from .staging_recovery import owns_staging, recover_staging
         from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
 
-        try:
-            with world_yaw_free_collision_scope(self.robot, request, context) as scope:
-                plan = super()._plan(request, context)
-                plan = recover(
-                    scope,
-                    request,
+        before_original = (
+            _RandomState.capture(
+                _cuda_devices(self.device, self.robot.device, context.robot.qpos.device)
+            )
+            if owns_staging(
+                request,
+                context,
+                self._staging_rigid_entity_ids,
+                self._staging_invocation_ids,
+                self.motion_generator,
+            )
+            else None
+        )
+
+        def build(selected):
+            with world_yaw_free_collision_scope(
+                self.robot, selected, context
+            ) as selected_scope:
+                candidate = super(GenSimMoveHeldObject, self)._plan(selected, context)
+                candidate = recover(
+                    selected_scope,
+                    selected,
                     context,
-                    plan,
-                    lambda selected: super(GenSimMoveHeldObject, self)._plan(
-                        selected, context
+                    candidate,
+                    lambda exact: super(GenSimMoveHeldObject, self)._plan(
+                        exact, context
                     ),
                 )
+            return candidate, selected_scope
+
+        try:
+            plan, scope = build(request)
         except AlignmentCollisionUnavailable as error:
             plan = self.failed_plan(request, context, message=str(error))
             return replace(
@@ -820,6 +932,18 @@ class GenSimMoveHeldObject(MoveHeldObject):
                     ),
                 ),
             )
+        plan = recover_staging(
+            plan,
+            request,
+            context,
+            self.robot,
+            scope,
+            before_original,
+            lambda selected: build(selected)[0],
+            retention_source=(self._staging_retention_sources or {}).get(
+                request.invocation_id
+            ),
+        )
         motion = request.binding.endpoint("primary", "motion")
         grasp = request.binding.endpoint("primary", "grasp")
         task_key = require_shared_task_state_key(

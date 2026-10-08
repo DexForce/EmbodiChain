@@ -102,6 +102,9 @@ class _TaskFactory(SimulationTaskProgramFactory):
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
         clearance_routes: tuple = (),
+        alignment_continuation_routes: tuple = (),
+        staging_calls: tuple[str, ...] = (),
+        staging_retention_sources: tuple[tuple[str, str, str, str], ...] = (),
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         **kwargs: Any,
@@ -115,6 +118,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
         self._clearance_routes = clearance_routes
+        self._alignment_continuation_routes = alignment_continuation_routes
+        self._staging_calls = staging_calls
+        self._staging_retention_sources = staging_retention_sources
+        self._staging_rigid_entity_ids = frozenset(
+            item.entity_id
+            for item in self.task_program_registration.scene_binding.rigid_objects
+        )
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._task_post_port = TaskStabilityPort(
@@ -210,7 +220,22 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
-        engine.register(GenSimMoveHeldObject(), replace=True)
+        transport = GenSimMoveHeldObject()
+        if not self._drawers:
+            from .staging_recovery import verified_retention_sources
+
+            transport._staging_rigid_entity_ids = getattr(
+                self, "_staging_rigid_entity_ids", frozenset()
+            )
+            transport._staging_retention_sources = verified_retention_sources(
+                profile,
+                getattr(self, "_runtime_preset", None),
+                getattr(self, "_staging_retention_sources", ()),
+            )
+            transport._staging_invocation_ids = frozenset(
+                transport._staging_retention_sources
+            )
+        engine.register(transport, replace=True)
         engine.register(GenSimPlace(), replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         if self._coordinated_motion:
@@ -220,7 +245,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
             engine.register(GenSimPress(), replace=True)
         self.task_program_registration.validate_engine(engine)
-        if self._clearance_routes:
+        if self._clearance_routes or self._alignment_continuation_routes:
             engine._clearance_profile = profile
         return engine
 
@@ -229,13 +254,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
     ) -> tuple[Any, ...]:
         """Bind preview calls through canonical assembly, without another executor."""
         profile = None
-        if self._clearance_routes:
+        if self._clearance_routes or self._alignment_continuation_routes:
             profile = engine._clearance_profile
             del engine._clearance_profile
         lowerers = super().create_registered_semantic_lowerers(
             scene_registry=scene_registry, engine=engine
         )
-        if self._clearance_routes:
+        if self._clearance_routes or self._alignment_continuation_routes:
             from embodichain.lab.task_program.language import TaskProgramIntegrationCfg
             from embodichain.lab.task_program.runtime.assembly import (
                 assemble_semantic_executor_components,
@@ -258,10 +283,19 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 relation_grounders=registration.relation_grounders,
                 handover_pose_providers=registration.handover_pose_providers,
             )
-            engine.bind_release_clearance(
-                bind_park_requests(semantic.compiler, self._clearance_routes),
-                simulation=self._simulation,
-            )
+            if self._clearance_routes:
+                engine.bind_release_clearance(
+                    bind_park_requests(semantic.compiler, self._clearance_routes),
+                    simulation=self._simulation,
+                )
+            if self._alignment_continuation_routes:
+                from .alignment_continuation import bind_previews
+
+                engine.bind_alignment_continuation(
+                    bind_previews(
+                        semantic.compiler, self._alignment_continuation_routes
+                    )
+                )
         return lowerers
 
     def registration_owned_segment_policy_ports(self) -> tuple[Any, Any]:
@@ -286,6 +320,9 @@ class TaskAdapterFactory:
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
     clearance_routes: tuple = ()
+    alignment_continuation_routes: tuple = ()
+    staging_calls: tuple[str, ...] = ()
+    staging_retention_sources: tuple[tuple[str, str, str, str], ...] = ()
     runtime_preset: str | None = None
     press_routes: tuple = ()
 
@@ -421,6 +458,9 @@ class TaskAdapterFactory:
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
             clearance_routes=self.clearance_routes,
+            alignment_continuation_routes=self.alignment_continuation_routes,
+            staging_calls=self.staging_calls,
+            staging_retention_sources=self.staging_retention_sources,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
         )
@@ -584,7 +624,7 @@ def load_deployment(
         from .press_binding import validate_program
 
         validate_program(program, press_routes[0])
-    from .align_held import with_held_alignment
+    from .align_held import _AlignHeldFactory, with_held_alignment
 
     registration = with_held_alignment(
         registration,
@@ -617,9 +657,56 @@ def load_deployment(
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     articulation_calls = bind_articulation_calls(compiled)
+    from .staging_recovery import (
+        STAGING_RECOVERY_REVISION,
+        bind_staging_calls,
+        bind_staging_retention_sources,
+    )
+
+    staging_calls = (
+        bind_staging_calls(
+            compiled,
+            frozenset(
+                item.entity_id for item in registration.scene_binding.rigid_objects
+            ),
+        )
+        if not drawers
+        else ()
+    )
+    staging_retention_sources = bind_staging_retention_sources(
+        compiled,
+        staging_calls,
+        frozenset(
+            {"pick"}
+            | {
+                factory.call_id
+                for factory in registration.registered_semantic_lowerer_factories
+                if getattr(
+                    getattr(factory, "target_descriptor", None), "skill_id", None
+                )
+                == "pick_up"
+                or (type(factory) is _AlignHeldFactory and factory.verify_retention)
+            }
+        ),
+    )
     from .clearance_recovery import CLEARANCE_RECOVERY_REVISION, bind_clearance_calls
 
     clearance_routes = bind_clearance_calls(compiled)
+    from .alignment_continuation import ALIGNMENT_CONTINUATION_REVISION, bind_calls
+
+    continuation_preset = next(
+        (
+            preset
+            for preset in registration.robot_profile_binding.presets
+            if preset.preset_id == base.selection.runtime_preset
+        ),
+        None,
+    )
+    alignment_continuation_routes = bind_calls(
+        compiled,
+        tuple(item[0] for item in staging_retention_sources),
+        continuation_preset,
+    )
     grasp_factories = base.integration.grasp_factories
     coordinated = any(
         item.get("steps", {}).get("call", {}).get("call_id")
@@ -628,14 +715,45 @@ def load_deployment(
     )
     pour_receivers = bind_pour_receivers(payload["pour_receivers"], compiled)
     from .articulation_recovery import ARTICULATION_RECOVERY_REVISION
+    from .park_recovery import PARK_RECOVERY_REVISION
+    from .pick_safety import PICK_OPENING_RECOVERY_REVISION
+    from .services import _PickLowererFactory
 
     fingerprint = canonical_hash(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
             **(
+                {"pick_opening_recovery_revision": PICK_OPENING_RECOVERY_REVISION}
+                if any(
+                    isinstance(factory, _PickLowererFactory)
+                    and any(
+                        route.grasp_region is not None
+                        or route.release_clearance_object_pose is not None
+                        for route in factory.routes
+                    )
+                    for factory in registration.registered_semantic_lowerer_factories
+                )
+                else {}
+            ),
+            **(
+                {"staging_recovery_revision": STAGING_RECOVERY_REVISION}
+                if staging_calls
+                else {}
+            ),
+            **(
                 {"clearance_recovery_revision": CLEARANCE_RECOVERY_REVISION}
                 if clearance_routes
+                else {}
+            ),
+            **(
+                {"park_recovery_revision": PARK_RECOVERY_REVISION}
+                if clearance_routes
+                else {}
+            ),
+            **(
+                {"alignment_continuation_revision": ALIGNMENT_CONTINUATION_REVISION}
+                if alignment_continuation_routes
                 else {}
             ),
             **(
@@ -698,6 +816,9 @@ def load_deployment(
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
         clearance_routes=clearance_routes,
+        alignment_continuation_routes=alignment_continuation_routes,
+        staging_calls=staging_calls,
+        staging_retention_sources=staging_retention_sources,
         runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
     )

@@ -456,6 +456,64 @@ def test_robot_mesh_screen_preserves_neighbor_gripper_and_other_arm_rules(
         assert free["frames"] == held["frames"] == 2
 
 
+def test_robot_mesh_checker_reuses_geometry_and_updates_every_frame(
+    tmp_path, monkeypatch
+):
+    pytest.importorskip("fcl")
+    pytest.importorskip("yourdfpy")
+    import trimesh
+    from embodichain.gen_sim.task_engine._task_program.articulation_collision import (
+        check_robot_motion,
+        robot_collision_scope,
+    )
+
+    path = tmp_path / "moving.urdf"
+    box = '<collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>'
+    path.write_text(
+        '<robot name="moving"><link name="world"/><link name="base"/>'
+        f'<link name="tool">{box}</link><link name="passive">{box}</link>'
+        '<joint name="mount" type="fixed"><parent link="world"/><child link="base"/></joint>'
+        '<joint name="slide" type="prismatic"><parent link="base"/><child link="tool"/>'
+        '<axis xyz="1 0 0"/><limit lower="0" upper="1" effort="1" velocity="1"/></joint>'
+        '<joint name="other" type="fixed"><parent link="world"/><child link="passive"/>'
+        '<origin xyz="0.5 0 0"/></joint></robot>'
+    )
+    eye = torch.eye(4)[None]
+    robot = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=str(path)),
+        joint_names=["slide"],
+        get_qpos=lambda: torch.zeros(1, 1),
+        get_solver=lambda part: SimpleNamespace(
+            root_link_name="base", end_link_name="tool"
+        ),
+        get_local_pose=lambda **kwargs: eye,
+        get_link_pose=lambda *args, **kwargs: eye,
+    )
+    created, updated = [], []
+    add = trimesh.collision.CollisionManager.add_object
+    set_transform = trimesh.collision.CollisionManager.set_transform
+
+    def add_object(self, name, mesh, transform=None):
+        created.append(name)
+        return add(self, name, mesh, transform)
+
+    def update(self, name, transform):
+        assert transform.dtype == np.float32
+        updated.append(name)
+        return set_transform(self, name, transform)
+
+    monkeypatch.setattr(trimesh.collision.CollisionManager, "add_object", add_object)
+    monkeypatch.setattr(trimesh.collision.CollisionManager, "set_transform", update)
+    with robot_collision_scope():
+        first = check_robot_motion(robot, torch.tensor([[0.0], [0.25], [0.5]]), "arm")
+        second = check_robot_motion(robot, torch.tensor([[1.0], [0.0]]), "arm")
+    assert first["valid"] is False and first["frame"] == 2
+    assert first["kind"] == "other_arm"
+    assert second["valid"] is True and second["frames"] == 2
+    assert len(created) == 2
+    assert len(updated) == 10
+
+
 @pytest.mark.parametrize("screen_candidates", [False, True])
 def test_local_branch_predicate_keeps_targets_timing_and_velocity_limits(
     monkeypatch, alignment_inputs, screen_candidates
@@ -523,8 +581,9 @@ def _heading_targets(angle):
 
 
 @pytest.mark.parametrize("qualified", [True, False])
+@pytest.mark.parametrize("last_raw_success", [True, False])
 def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
-    monkeypatch, alignment_inputs, qualified
+    monkeypatch, alignment_inputs, qualified, last_raw_success
 ):
     recovery = _recovery_module()
     robot, raw_request, context, generator, result, options = alignment_inputs
@@ -534,6 +593,8 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
     original = _AlignmentPlan(
         torch.tensor([False]), PlannerDiagnostics(backend="fixture")
     )
+    repaired = replace(result, positions=result.positions.clone())
+    repaired.positions[:, 1] = repaired.positions[:, -1]
     robot.compute_fk = lambda **kwargs: torch.eye(4)[None]
     raw_calls, inspected, local_calls, built = [], [], [], []
 
@@ -541,14 +602,19 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
         raw_calls.append(targets)
         return (
             result
-            if len(raw_calls) == 1
+            if len(raw_calls) == 1 or (last_raw_success and len(raw_calls) == 8)
             else replace(result, success=torch.tensor([False]))
         )
 
     def inspect(_robot, full, part):
         assert part == "left_arm"
         inspected.append(full.clone())
-        return {"valid": len(inspected) > 1, "kind": "self", "frame": 1}
+        return {
+            "valid": full.shape[0] == 1
+            and bool(full[0, 0] != result.positions[0, 1, 0]),
+            "kind": "self",
+            "frame": 1,
+        }
 
     def local(actual_generator, targets, actual_options, *, candidate_predicate):
         local_calls.append(targets)
@@ -559,8 +625,10 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
         assert len(targets) == len(last_targets)
         for target, last in zip(targets, last_targets):
             torch.testing.assert_close(target.xpos, last.xpos, rtol=0, atol=0)
-        assert candidate_predicate(result.positions[:, -1]) is True
-        return result
+        if last_raw_success:
+            assert candidate_predicate(result.positions[:, 1]) is False
+        assert candidate_predicate(repaired.positions[:, -1]) is True
+        return repaired
 
     def build(selected):
         built.append(selected)
@@ -572,7 +640,7 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
             selected.goal.object_target_pose[:, -1], last_targets[-1].xpos
         )
         replayed = generator.generate(last_targets, options)
-        assert replayed is result
+        assert replayed is repaired
         return _AlignmentPlan(
             torch.tensor([True]), PlannerDiagnostics(backend="fixture")
         )
@@ -594,9 +662,11 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
         recovered = recovery.recover(scope, request, context, original, build)
         assert recovered.plan_success.tolist() == [qualified]
         report = recovered.diagnostics.metadata["gen_sim_held_alignment"]
-        assert report["rejected_raw_success"] == 1
+        assert report["rejected_raw_success"] == (2 if last_raw_success else 1)
         assert report["local_fallback"]["accepted"] is qualified
-        assert report["local_fallback"]["predicate_calls"] == 1
+        assert report["local_fallback"]["predicate_calls"] == (
+            2 if last_raw_success else 1
+        )
         assert report["local_fallback"]["target_count"] == 2
         assert report["local_fallback"]["sample_count"] == 3
         assert scope.replay_call is None and scope.replay_result is None
@@ -606,7 +676,7 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
     torch.testing.assert_close(request.goal.object_target_pose, original_goal)
 
 
-@pytest.mark.parametrize("skip", ["short_search", "no_rejection", "last_raw_success"])
+@pytest.mark.parametrize("skip", ["short_search", "no_rejection"])
 def test_local_recovery_does_not_extend_other_failure_classes(
     monkeypatch, alignment_inputs, skip
 ):
@@ -620,7 +690,7 @@ def test_local_recovery_does_not_extend_other_failure_classes(
 
     def raw(self, targets, options=None):
         raw_calls.append(True)
-        ok = len(raw_calls) == 1 or (skip == "last_raw_success" and len(raw_calls) == 8)
+        ok = len(raw_calls) == 1
         return replace(result, success=torch.tensor([ok]))
 
     monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
@@ -648,6 +718,329 @@ def test_local_recovery_does_not_extend_other_failure_classes(
     assert (
         "local_fallback" not in rejected.diagnostics.metadata["gen_sim_held_alignment"]
     )
+
+
+@pytest.mark.parametrize("last_raw_success", [True, False])
+def test_local_recovery_rejects_observed_start_collision_without_escaping(
+    monkeypatch, alignment_inputs, last_raw_success
+):
+    recovery = _recovery_module()
+    robot, request, context, generator, result, options = alignment_inputs
+    observed = context.robot.qpos.clone()
+    observed[:, 2] = 0.04
+    context = replace(context, robot=replace(context.robot, qpos=observed))
+    options = replace(options, preserve_cartesian_samples=True)
+    robot.compute_fk = lambda **kwargs: torch.eye(4)[None]
+    original = _AlignmentPlan(
+        torch.tensor([False]), PlannerDiagnostics(backend="fixture")
+    )
+    raw_calls, starts = [], []
+
+    def raw(self, targets, options=None):
+        raw_calls.append(targets)
+        ok = len(raw_calls) == 1 or (last_raw_success and len(raw_calls) == 8)
+        return replace(result, success=torch.tensor([ok]))
+
+    def inspect(actual_robot, full, part):
+        assert actual_robot is robot and part == "left_arm"
+        if full.shape[0] == 1:
+            starts.append(full.clone())
+            torch.testing.assert_close(full, observed)
+            return {"valid": False, "kind": "other_arm", "frame": 0}
+        return {"valid": False, "kind": "other_arm", "frame": 1}
+
+    monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
+    monkeypatch.setattr(recovery, "check_robot_motion", inspect)
+    monkeypatch.setattr(
+        recovery,
+        "_local_place_ik",
+        lambda *args, **kwargs: pytest.fail("colliding start must not enter local IK"),
+    )
+    with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
+        for _ in range(8):
+            assert not generator.generate(
+                _heading_targets(math.pi), options
+            ).success.any()
+        rejected = recovery.recover(
+            scope,
+            request,
+            context,
+            original,
+            lambda selected: pytest.fail("colliding start must not rebuild a plan"),
+        )
+        report = rejected.diagnostics.metadata["gen_sim_held_alignment"]
+        assert not rejected.plan_success.any()
+        assert report["local_fallback"]["reason"] == "initial_state_collision"
+        assert report["local_fallback"]["accepted"] is False
+        recovery.recover(scope, request, context, original, lambda selected: None)
+    assert len(raw_calls) == 8 and len(starts) == 1
+
+
+def test_held_alignment_factory_versions_local_branch_recovery():
+    from embodichain.gen_sim.task_engine._task_program.align_held import (
+        _AlignHeldFactory,
+    )
+
+    assert _AlignHeldFactory.revision == "10"
+
+
+@pytest.mark.parametrize(
+    "outcome", ["accepted", "qualification_rejected", "ik_failed", "error"]
+)
+def test_all_eight_raw_failures_reuse_existing_last_heading_and_restore_legacy_stop(
+    monkeypatch, alignment_inputs, outcome
+):
+    recovery = _recovery_module()
+    robot, raw_request, context, generator, result, options = alignment_inputs
+    request = _AlignmentRequest(raw_request.goal, raw_request.binding)
+    options = replace(options, preserve_cartesian_samples=True)
+    robot.compute_fk = lambda **kwargs: torch.eye(4)[None]
+    original = _AlignmentPlan(
+        torch.tensor([False]), PlannerDiagnostics(backend="fixture")
+    )
+    original_goal = request.goal.object_target_pose.clone()
+    calls, local_calls, rebuilt = [], [], []
+
+    def draw():
+        torch.rand(1)
+        random.random()
+        np.random.random()
+
+    def raw(self, targets, options=None):
+        calls.append(targets)
+        draw()
+        return replace(result, success=torch.tensor([False]))
+
+    def inspect(*args):
+        draw()
+        return {"valid": True}
+
+    def local(actual_generator, targets, actual_options, *, candidate_predicate):
+        local_calls.append(targets)
+        assert (
+            actual_generator is generator and actual_options is scope.calls[-1].options
+        )
+        for target, last in zip(targets, last_targets):
+            torch.testing.assert_close(target.xpos, last.xpos, rtol=0, atol=0)
+        draw()
+        assert candidate_predicate(result.positions[:, -1])
+        if outcome == "error":
+            raise RuntimeError("extra local search aborted")
+        return None if outcome == "ik_failed" else result
+
+    def build(selected):
+        rebuilt.append(selected)
+        draw()
+        assert selected.goal.world_yaw_free is False
+        assert torch.equal(
+            selected.goal.object_target_pose[:, :-1], original_goal[:, :-1]
+        )
+        torch.testing.assert_close(
+            selected.goal.object_target_pose[:, -1], last_targets[-1].xpos
+        )
+        assert generator.generate(last_targets, options) is result
+        return _AlignmentPlan(
+            torch.tensor([True]), PlannerDiagnostics(backend="fixture")
+        )
+
+    monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
+    monkeypatch.setattr(recovery, "check_robot_motion", inspect)
+    monkeypatch.setattr(recovery, "_local_place_ik", local)
+    monkeypatch.setattr(
+        recovery,
+        "qualify_alignment_plan",
+        lambda selected, current, plan, actual_robot: replace(
+            plan, plan_success=torch.tensor([outcome == "accepted"])
+        ),
+    )
+    saved = recovery._RandomState.capture(set())
+    try:
+        with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
+            for fraction in (0.0, 0.25, -0.25, 0.5, -0.5, 0.75, -0.75, 1.0):
+                last_targets = _heading_targets(math.pi * fraction)
+                assert not generator.generate(last_targets, options).success.any()
+            assert scope.rejected_raw_success == 0 and scope.checkpoint is None
+            legacy = recovery._RandomState.capture(set())
+            if outcome == "error":
+                with pytest.raises(RuntimeError, match="extra local search aborted"):
+                    recovery.recover(scope, request, context, original, build)
+            else:
+                selected = recovery.recover(scope, request, context, original, build)
+                assert bool(selected.plan_success.all()) == (outcome == "accepted")
+                assert selected.diagnostics.metadata["gen_sim_held_alignment"][
+                    "local_fallback"
+                ]["accepted"] is (outcome == "accepted")
+                recovery.recover(
+                    scope,
+                    request,
+                    context,
+                    original,
+                    lambda selected: pytest.fail("local search repeated"),
+                )
+        assert len(calls) == 8 and len(local_calls) == 1
+        assert len(rebuilt) == int(outcome in {"accepted", "qualification_rejected"})
+        assert scope.checkpoint is not None
+        assert torch.equal(torch.random.get_rng_state(), legacy.cpu)
+        assert random.getstate() == legacy.python
+        assert pickle.dumps(np.random.get_state()) == pickle.dumps(legacy.numpy)
+        assert torch.equal(request.goal.object_target_pose, original_goal)
+    finally:
+        saved.restore()
+
+
+@pytest.mark.parametrize(
+    "skip", ["safe", "short_search", "unsupported", "actual_collision"]
+)
+def test_all_raw_failure_gate_retains_existing_negative_boundaries(
+    monkeypatch, alignment_inputs, skip
+):
+    recovery = _recovery_module()
+    robot, request, context, generator, result, options = alignment_inputs
+    options = replace(
+        options,
+        preserve_cartesian_samples=True,
+        sample_count=2 if skip == "unsupported" else 3,
+    )
+    original = _AlignmentPlan(
+        torch.tensor([skip == "safe"]), PlannerDiagnostics(backend="fixture")
+    )
+    monkeypatch.setattr(
+        CheckedMotionGenerator,
+        "_generate_checked",
+        lambda *args, **kwargs: replace(result, success=torch.tensor([False])),
+    )
+    monkeypatch.setattr(
+        recovery,
+        "check_robot_motion",
+        lambda *args: {"valid": skip != "actual_collision"},
+    )
+    monkeypatch.setattr(
+        recovery,
+        "_local_place_ik",
+        lambda *args, **kwargs: pytest.fail("negative boundary entered local IK"),
+    )
+    with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
+        for _ in range(7 if skip == "short_search" else 8):
+            generator.generate(_heading_targets(math.pi), options)
+        before = recovery._RandomState.capture(set())
+        selected = recovery.recover(
+            scope,
+            request,
+            context,
+            original,
+            lambda selected: pytest.fail("negative boundary rebuilt plan"),
+        )
+        assert torch.equal(selected.plan_success, original.plan_success)
+        assert (
+            scope.checkpoint is not None
+            if skip == "actual_collision"
+            else scope.checkpoint is None
+        )
+        if skip == "actual_collision":
+            assert (
+                selected.diagnostics.metadata["gen_sim_held_alignment"][
+                    "local_fallback"
+                ]["reason"]
+                == "initial_state_collision"
+            )
+        elif skip == "unsupported":
+            assert (
+                selected.diagnostics.metadata["gen_sim_held_alignment"][
+                    "local_fallback"
+                ]
+                == "unsupported"
+            )
+        assert torch.equal(torch.random.get_rng_state(), before.cpu)
+        assert random.getstate() == before.python
+        assert pickle.dumps(np.random.get_state()) == pickle.dumps(before.numpy)
+
+
+@pytest.mark.parametrize("raise_in_fallback", [True, False])
+def test_last_raw_success_local_recovery_restores_legacy_random_stop(
+    monkeypatch, alignment_inputs, raise_in_fallback
+):
+    recovery = _recovery_module()
+    robot, request, context, generator, result, options = alignment_inputs
+    options = replace(options, preserve_cartesian_samples=True)
+    robot.compute_fk = lambda **kwargs: torch.eye(4)[None]
+    original = _AlignmentPlan(
+        torch.tensor([False]), PlannerDiagnostics(backend="fixture")
+    )
+    saved_torch = torch.random.get_rng_state()
+    saved_python, saved_numpy = random.getstate(), np.random.get_state()
+    raw_calls, local_calls = [], []
+
+    def draw():
+        torch.rand(1)
+        random.random()
+        np.random.random()
+
+    def raw(self, targets, options=None):
+        raw_calls.append(targets)
+        draw()
+        return result
+
+    def inspect(actual_robot, full, part):
+        draw()
+        return {"valid": full.shape[0] == 1, "kind": "self", "frame": 1}
+
+    def local(*args, **kwargs):
+        local_calls.append(args)
+        draw()
+        if raise_in_fallback:
+            raise RuntimeError("local search aborted")
+        return None
+
+    monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
+    monkeypatch.setattr(recovery, "check_robot_motion", inspect)
+    monkeypatch.setattr(recovery, "_local_place_ik", local)
+    try:
+        torch.manual_seed(41)
+        random.seed(41)
+        np.random.seed(41)
+        draw()
+        expected_torch = torch.random.get_rng_state()
+        expected_python = random.getstate()
+        expected_numpy = pickle.dumps(np.random.get_state())
+        torch.manual_seed(41)
+        random.seed(41)
+        np.random.seed(41)
+
+        def run_scope():
+            with recovery.world_yaw_free_collision_scope(
+                robot, request, context
+            ) as scope:
+                for _ in range(8):
+                    assert not generator.generate(
+                        _heading_targets(math.pi), options
+                    ).success.any()
+                rejected = recovery.recover(
+                    scope,
+                    request,
+                    context,
+                    original,
+                    lambda selected: pytest.fail(
+                        "failed local search must not rebuild"
+                    ),
+                )
+                assert not rejected.plan_success.any()
+                recovery.recover(
+                    scope, request, context, original, lambda selected: None
+                )
+
+        if raise_in_fallback:
+            with pytest.raises(RuntimeError, match="local search aborted"):
+                run_scope()
+        else:
+            run_scope()
+        assert len(raw_calls) == 8 and len(local_calls) == 1
+        torch.testing.assert_close(torch.random.get_rng_state(), expected_torch)
+        assert random.getstate() == expected_python
+        assert pickle.dumps(np.random.get_state()) == expected_numpy
+    finally:
+        torch.random.set_rng_state(saved_torch)
+        random.setstate(saved_python)
+        np.random.set_state(saved_numpy)
 
 
 def _typed_alignment_plan(alignment_inputs, positions=None):

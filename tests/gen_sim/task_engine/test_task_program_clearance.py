@@ -1350,6 +1350,7 @@ def test_cleanup_factory_binds_canonical_preview_without_rebuilding_lowerers(
     semantic = SimpleNamespace(compiler=object())
     factory = object.__new__(assembly._TaskFactory)
     factory._clearance_routes = (object(),)
+    factory._alignment_continuation_routes = ()
     factory._simulation = object()
     factory._runtime_preset = "actual_runtime"
     factory._robot_profile_binding = SimpleNamespace(profile_id="robot")

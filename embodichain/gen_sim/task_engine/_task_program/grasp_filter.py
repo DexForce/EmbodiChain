@@ -36,7 +36,7 @@ from .e6_clearance import HandClearance
 
 __all__: list[str] = []
 
-GRASP_FILTER_REVISION = 4
+GRASP_FILTER_REVISION = 6
 
 
 def opening_envelope_mask(

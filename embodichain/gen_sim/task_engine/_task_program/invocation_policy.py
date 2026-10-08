@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -32,7 +33,7 @@ from embodichain.utils import logger
 
 __all__: list[str] = []
 
-INVOCATION_POLICY_REVISION = 5
+INVOCATION_POLICY_REVISION = 6
 
 
 def motion_sample_declarations(
@@ -204,7 +205,9 @@ class GenSimActionEngine(AtomicActionEngine):
         self._articulation_calls = dict(articulation_calls)
         self._clearance_requests: dict[str, Any] = {}
         self._clearance_parks: frozenset[str] = frozenset()
+        self._park_recovery_previews: dict[str, Any] = {}
         self._clearance_simulation: Any = None
+        self._alignment_continuations: dict[str, Any] = {}
         if len(self._articulation_calls) != len(articulation_calls) or any(
             not isinstance(key, str) or not key or value not in {"slide", "withdraw"}
             for key, value in articulation_calls
@@ -246,6 +249,26 @@ class GenSimActionEngine(AtomicActionEngine):
         self._clearance_requests = dict(park_requests)
         self._clearance_parks = frozenset(park_ids)
         self._clearance_simulation = simulation
+        from .clearance_recovery import _ParkPreview
+
+        self._park_recovery_previews = {
+            preview.invocation_id: preview
+            for preview in parks
+            if isinstance(preview, _ParkPreview)
+            and preview.compiler.integration.engine is self
+        }
+
+    def bind_alignment_continuation(self, previews: dict[str, Any]) -> None:
+        """Install only the factory's canonical, exact adjacent Place previews."""
+        if self._alignment_continuations or any(
+            identity != preview.route.alignment_id
+            or preview.compiler.integration.engine is not self
+            for identity, preview in previews.items()
+        ):
+            raise ValueError(
+                "Alignment continuation previews are already bound or foreign."
+            )
+        self._alignment_continuations = dict(previews)
 
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
         if self._motion_samples:
@@ -277,18 +300,93 @@ class GenSimActionEngine(AtomicActionEngine):
         from .planning_probe import _validate_final_plan_velocity
 
         capture = initial_plan_capture(request.invocation_id)
+        from .alignment_continuation import _PREVIEW
+
+        if _PREVIEW.get():
+            capture = None
         enabled = request.invocation_id in self._cartesian_calls
         alignment = (
             request.skill_id == "move_held_object"
             and getattr(request.goal, "world_yaw_free", False) is True
             and not getattr(self.motion_generator, "direct_transport_planning", False)
         )
+        pick_transform = False
+        if plan_transform is not None:
+            from .actions import GenSimPickUp
+            from .pick_safety import _owns_constrained_pick
+
+            pick_transform = isinstance(
+                getattr(self, "_actions", {}).get(request.skill_id), GenSimPickUp
+            ) and _owns_constrained_pick(request, context, self.motion_generator)
         if context is None and (
             alignment
+            or pick_transform
             or request.invocation_id in getattr(self, "_clearance_requests", {})
             or request.invocation_id in getattr(self, "_clearance_parks", ())
         ):
             context = self.initial_context()
+        staging_transform_owned = False
+        if alignment and plan_transform is not None:
+            from .actions import GenSimMoveHeldObject
+            from .staging_recovery import owns_staging
+
+            action = getattr(self, "_actions", {}).get(request.skill_id)
+            staging_transform_owned = isinstance(action, GenSimMoveHeldObject) and (
+                owns_staging(
+                    request,
+                    context,
+                    action._staging_rigid_entity_ids,
+                    action._staging_invocation_ids,
+                    self.motion_generator,
+                )
+            )
+            if staging_transform_owned:
+                transform = plan_transform
+
+                def preserve_staging_scope(selected, current, original):
+                    report = deepcopy(
+                        dict(
+                            original.diagnostics.metadata.get(
+                                "gen_sim_staging_recovery", {}
+                            )
+                        )
+                    )
+                    transformed = transform(selected, current, original)
+                    if (
+                        report.get("accepted") is True
+                        and getattr(transformed, "diagnostics", None) is not None
+                    ):
+                        transformed = replace(
+                            transformed,
+                            diagnostics=replace(
+                                transformed.diagnostics,
+                                metadata={
+                                    **transformed.diagnostics.metadata,
+                                    "gen_sim_staging_recovery": dict(report),
+                                },
+                            ),
+                        )
+                    return transformed
+
+                plan_transform = preserve_staging_scope
+        continuation = getattr(self, "_alignment_continuations", {}).get(
+            request.invocation_id
+        )
+        continuation_owned, before_continuation, continuation_request = (
+            False,
+            None,
+            None,
+        )
+        if continuation is not None:
+            from .alignment_continuation import eligible
+            from .held_alignment_recovery import _RandomState, _cuda_devices
+
+            continuation_owned = eligible(self, request, context, continuation)
+            if continuation_owned:
+                continuation_request = request.snapshot()
+                before_continuation = _RandomState.capture(
+                    _cuda_devices(self.robot.device, context.robot.qpos.device)
+                )
         selected_request = request
         retime_attempts: list[int] = []
         try:
@@ -385,6 +483,57 @@ class GenSimActionEngine(AtomicActionEngine):
                     from .held_alignment_recovery import qualify_alignment_plan
 
                     plan = qualify_alignment_plan(request, context, plan, self.robot)
+                staging_report = plan.diagnostics.metadata.get(
+                    "gen_sim_staging_recovery", {}
+                )
+                if (
+                    staging_transform_owned
+                    and staging_report.get("accepted") is True
+                    and plan.plan_success.any()
+                ):
+                    from .staging_recovery import inspect_staging_plan
+                    from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
+
+                    certificate = inspect_staging_plan(
+                        self.robot,
+                        selected_request,
+                        context,
+                        plan,
+                        retention_source=(action._staging_retention_sources or {}).get(
+                            selected_request.invocation_id
+                        ),
+                        _require_retained_command=staging_report.get(
+                            "retained_hand_boundary", {}
+                        ).get("accepted")
+                        is True,
+                    )
+                    plan = replace(
+                        plan,
+                        plan_success=(
+                            plan.plan_success
+                            if certificate["valid"]
+                            else torch.zeros_like(plan.plan_success)
+                        ),
+                        diagnostics=replace(
+                            plan.diagnostics,
+                            metadata={
+                                **plan.diagnostics.metadata,
+                                "gen_sim_staging_recovery": {
+                                    **staging_report,
+                                    "post_transform_check": certificate,
+                                },
+                            },
+                            **(
+                                {
+                                    "failure": PlanningFailure(
+                                        "held_staging_safety_failed", retryable=False
+                                    )
+                                }
+                                if not certificate["valid"]
+                                else {}
+                            ),
+                        ),
+                    )
                 park_request = getattr(self, "_clearance_requests", {}).get(
                     request.invocation_id
                 )
@@ -392,6 +541,10 @@ class GenSimActionEngine(AtomicActionEngine):
                     from .clearance_recovery import recover
 
                     def build_clearance(selected: Any, current: Any) -> Any:
+                        if selected.invocation_id in getattr(
+                            self, "_park_recovery_previews", {}
+                        ):
+                            return self._plan_request(selected, current)
                         return super(GenSimActionEngine, self)._plan_request(
                             selected,
                             current,
@@ -430,6 +583,22 @@ class GenSimActionEngine(AtomicActionEngine):
                             motion.control_part,
                         )
                     )
+                    from .park_recovery import recover
+
+                    original_park = plan
+                    plan = recover(
+                        self,
+                        selected_request,
+                        context,
+                        plan,
+                        acceptance=acceptance,
+                        build=lambda selected, current: self._plan_request(
+                            selected, current, plan_transform=plan_transform
+                        ),
+                        simulation=self._clearance_simulation,
+                    )
+                    if plan is not original_park and plan.plan_success.all():
+                        acceptance = plan.diagnostics.metadata["gen_sim_clearance_park"]
                     plan = replace(
                         plan,
                         plan_success=(
@@ -445,12 +614,54 @@ class GenSimActionEngine(AtomicActionEngine):
                             },
                             **(
                                 {
-                                    "failure": PlanningFailure(
-                                        "cleanup_park_failed", retryable=False
+                                    "failure": (
+                                        plan.diagnostics.failure
+                                        if "gen_sim_park_recovery"
+                                        in plan.diagnostics.metadata
+                                        else PlanningFailure(
+                                            "cleanup_park_failed", retryable=False
+                                        )
                                     )
                                 }
                                 if not acceptance["valid"]
                                 else {}
+                            ),
+                        ),
+                    )
+                if (
+                    pick_transform
+                    and _owns_constrained_pick(
+                        selected_request, context, self.motion_generator
+                    )
+                    and plan.plan_success.any()
+                ):
+                    from .articulation_collision import robot_collision_scope
+                    from .pick_safety import _inspect_pick_plan
+                    from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
+
+                    with robot_collision_scope():
+                        acceptance = _inspect_pick_plan(
+                            self.robot, selected_request, context, plan
+                        )
+                    plan = replace(
+                        plan,
+                        plan_success=(
+                            plan.plan_success
+                            if acceptance["valid"]
+                            else torch.zeros_like(plan.plan_success)
+                        ),
+                        diagnostics=replace(
+                            plan.diagnostics,
+                            metadata={
+                                **plan.diagnostics.metadata,
+                                "gen_sim_pick_final_command_check": acceptance,
+                            },
+                            failure=(
+                                plan.diagnostics.failure
+                                if acceptance["valid"]
+                                else PlanningFailure(
+                                    "pick_robot_safety_failed", retryable=False
+                                )
                             ),
                         ),
                     )
@@ -468,6 +679,24 @@ class GenSimActionEngine(AtomicActionEngine):
                     },
                 ),
             )
+            if (
+                continuation_owned
+                and selected_request.motion_policy.sample_count == 260
+            ):
+                from .alignment_continuation import recover
+
+                plan = recover(
+                    self,
+                    continuation_request,
+                    context,
+                    plan,
+                    preview=continuation,
+                    build=lambda selected: self._plan_request(
+                        selected, context, plan_transform=plan_transform
+                    ),
+                    before_original=before_continuation,
+                    planned_request=selected_request,
+                )
             return (
                 plan
                 if capture is None

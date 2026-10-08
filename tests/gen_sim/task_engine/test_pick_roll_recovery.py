@@ -19,17 +19,26 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
+import pickle
+import random
 
+import numpy as np
 import pytest
 import torch
 
-from embodichain.gen_sim.task_engine._task_program import actions, motion
+from embodichain.gen_sim.task_engine._task_program import (
+    actions,
+    articulation_collision,
+    motion,
+    pick_safety,
+)
 from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
     TaskGraspPoseGenerator,
 )
 from embodichain.lab.sim.atomic_actions import ObjectSemantics, PickUpOptions
 from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
 from embodichain.lab.sim.atomic_actions.effects import StateDelta
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
 from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics, TimedTrajectory
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import GraspGoal, PickUp
@@ -50,6 +59,7 @@ class _Plan:
     expected_effects: StateDelta
     diagnostics: PlannerDiagnostics
     joint_trajectory: TimedTrajectory
+    commands: object
 
 
 @pytest.fixture
@@ -62,11 +72,12 @@ def setup_pick(monkeypatch):
     )
     affordance.set_custom_config(actions._PICK_GRASP_RULE, ("can", "upright"))
     semantics = ObjectSemantics(affordance=affordance, geometry={}, entity_id="can")
-    endpoint = SimpleNamespace(
-        task_state_key="left",
-        require_target=lambda _: SimpleNamespace(
-            joint_ids=tuple(range(7)), control_part="left_arm", target_id="hand"
-        ),
+    endpoints = tuple(
+        SimpleNamespace(task_state_key="left", require_target=lambda _, t=t: t)
+        for t in (
+            JointPositionTarget("left_arm", tuple(range(7))),
+            JointPositionTarget("hand", (7,)),
+        )
     )
     request = _Request(
         GraspGoal(semantics),
@@ -74,18 +85,24 @@ def setup_pick(monkeypatch):
         MotionPolicy(
             strategy="ik_interp", sample_count=260, dynamic_collision_mode="off"
         ),
-        SimpleNamespace(endpoint=lambda *args: endpoint),
+        SimpleNamespace(
+            endpoint=lambda _, name: endpoints[name == "grasp"], endpoints=endpoints
+        ),
     )
     context = SimpleNamespace(
         batch_size=1,
         robot=SimpleNamespace(qpos=torch.zeros(1, 8)),
         task=TaskState(batch_size=1, device=torch.device("cpu")),
+        env_ids=torch.tensor([0]),
     )
     generator = Mock(spec=TaskGraspPoseGenerator)
     generator.for_pick.return_value = generator
     generator.accepts_grasp_poses = Mock(return_value=torch.ones(1, dtype=torch.bool))
     robot = SimpleNamespace(
-        get_qpos_limits=lambda name: torch.tensor([[[-1.0, 1.0]]]).expand(1, 7, 2)
+        device=torch.device("cpu"),
+        get_qpos_limits=lambda name, env_ids=None: torch.tensor([[[-1.0, 1.0]]]).expand(
+            1, 7 if name == "left_arm" else 1, 2
+        ),
     )
     action = actions.GenSimPickUp()
     action._planning_services = SimpleNamespace(
@@ -96,6 +113,9 @@ def setup_pick(monkeypatch):
     )
     monkeypatch.setattr(
         motion, "_joint_velocity_limits", lambda *args: torch.ones(1, 8)
+    )
+    monkeypatch.setattr(
+        articulation_collision, "check_robot_motion", lambda *args: {"valid": True}
     )
 
     def make_plan(goal, success):
@@ -112,6 +132,9 @@ def setup_pick(monkeypatch):
                 metadata={"affordance_sample": {"grasp": {"candidate_ids": [0]}}},
             ),
             trajectory,
+            action._joint_command_sequence(
+                request, trajectory, active_mask=torch.tensor([success])
+            ),
         )
 
     def install_planner(planner):
@@ -183,6 +206,215 @@ def test_successful_constrained_pick_is_returned_unchanged(monkeypatch, setup_pi
     probe.generator.for_pick.assert_not_called()
 
 
+def test_successful_but_robot_unsafe_pick_rebuilds_one_safe_whole_plan(
+    monkeypatch, setup_pick
+):
+    probe = setup_pick
+    calls, paths = [], []
+
+    def plan(self, request, context):
+        calls.append(request)
+        return probe.make_plan(request.goal, True)
+
+    def inspect(robot, positions, part):
+        assert part == "left_arm"
+        assert positions.shape[-1] == 8
+        paths.append(positions.clone())
+        return {"valid": len(paths) != 2, "kind": "other_arm", "frame": 2}
+
+    probe.install_planner(plan)
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", inspect)
+    result = probe.action._plan(probe.request, probe.context)
+    assert len(calls) == 2
+    assert [len(path) for path in paths] == [1, 3, 3]
+    assert result.plan_success.tolist() == [True]
+    held = result.expected_effects.held_object_updates["left"]
+    torch.testing.assert_close(held.grasp_xpos, calls[1].goal.grasp_xpos)
+    assert probe.context.task.held_objects == {}
+
+
+@pytest.mark.parametrize("failure", ["start_collision", "unavailable", "exhausted"])
+def test_robot_unsafe_success_fails_closed_without_unqualified_commands(
+    monkeypatch, setup_pick, failure
+):
+    probe = setup_pick
+    calls = []
+
+    def plan(self, request, context):
+        calls.append(request)
+        return probe.make_plan(request.goal, True)
+
+    def inspect(robot, positions, part):
+        if failure == "unavailable":
+            return None
+        return {"valid": len(positions) == 1 and failure != "start_collision"}
+
+    probe.install_planner(plan)
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", inspect)
+    result = probe.action._plan(probe.request, probe.context)
+    assert result.plan_success.tolist() == [False]
+    assert len(calls) == (2 if failure == "exhausted" else 1)
+
+
+def test_unsafe_pick_uses_only_bounded_existing_feasible_candidate_pool(
+    monkeypatch, setup_pick
+):
+    probe = setup_pick
+    calls, paths = [], []
+    poses = torch.eye(4)[None, None].repeat(1, 6, 1, 1)
+    poses[0, :, 0, 3] = torch.arange(6) * 0.01
+    valid = torch.tensor([[True, False, True, True, True, True]])
+
+    def plan(self, request, context):
+        calls.append(request)
+        if len(calls) == 1:
+            actions._PICK_SELECTION.get().candidates = SimpleNamespace(
+                poses=poses, costs=torch.arange(6)[None].float(), valid=valid
+            )
+        return probe.make_plan(request.goal, True)
+
+    def inspect(robot, positions, part):
+        paths.append(positions)
+        return {"valid": len(positions) == 1 or len(paths) == 4}
+
+    probe.install_planner(plan)
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", inspect)
+    result = probe.action._plan(probe.request, probe.context)
+    assert result.plan_success.tolist() == [True]
+    assert len(calls) == 3
+    assert calls[2].goal.grasp_xpos[0, 0, 3] == pytest.approx(0.02)
+    assert result.diagnostics.metadata["affordance_sample"]["grasp"][
+        "candidate_ids"
+    ] == [2]
+
+
+def test_pick_collision_and_extra_branches_preserve_all_legacy_random_streams(
+    monkeypatch, setup_pick
+):
+    probe = setup_pick
+    after_first = None
+    calls, paths = [], []
+
+    def draw():
+        random.random()
+        np.random.rand(2)
+        torch.rand(3)
+
+    def state():
+        return (
+            random.getstate(),
+            pickle.dumps(np.random.get_state()),
+            torch.get_rng_state(),
+        )
+
+    def plan(self, request, context):
+        nonlocal after_first
+        calls.append(request)
+        draw()
+        if len(calls) == 1:
+            after_first = state()
+        return probe.make_plan(request.goal, True)
+
+    def inspect(robot, positions, part):
+        paths.append(positions)
+        draw()
+        return {"valid": len(paths) != 2}
+
+    probe.install_planner(plan)
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", inspect)
+    result = probe.action._plan(probe.request, probe.context)
+    assert result.plan_success.tolist() == [True]
+    current = state()
+    assert current[:2] == after_first[:2]
+    torch.testing.assert_close(current[2], after_first[2])
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["scope", "dt", "start", "passive", "command", "schedule", "velocity", "limits"],
+)
+def test_final_pick_certificate_rejects_unqualified_emitted_plan(
+    monkeypatch, setup_pick, failure
+):
+    probe = setup_pick
+    plan = probe.make_plan(probe.request.goal, True)
+    trajectory = plan.joint_trajectory
+    if failure == "scope":
+        probe.context.env_ids = torch.tensor([1])
+    elif failure == "dt":
+        trajectory = SimpleNamespace(
+            positions=trajectory.positions, dt=torch.zeros(1, 1)
+        )
+    elif failure in {"start", "passive", "velocity", "limits"}:
+        positions = trajectory.positions.clone()
+        if failure == "passive":
+            probe.context.robot.qpos = torch.zeros(1, 9)
+            positions = torch.nn.functional.pad(positions, (0, 1))
+            positions[:, :, -1] = 0.01
+        elif failure == "start":
+            positions[:, :, 0] = 0.01
+        elif failure == "limits":
+            positions[:, :, 7] = 1.1
+        else:
+            positions[:, 1:, 0] = 0.2
+        trajectory = replace(trajectory, positions=positions)
+    elif failure in {"command", "schedule"}:
+        frames = list(plan.commands.frames)
+        frame = frames[1]
+        if failure == "command":
+            commands = list(frame.commands)
+            command = commands[0]
+            commands[0] = replace(
+                command,
+                payload=replace(
+                    command.payload, positions=command.payload.positions + 0.01
+                ),
+            )
+            frames[1] = replace(frame, commands=tuple(commands))
+        else:
+            frames[1] = replace(frame, hold_duration=frame.hold_duration + 0.01)
+        plan = replace(plan, commands=replace(plan.commands, frames=tuple(frames)))
+    result = pick_safety._inspect_pick_plan(
+        probe.action.robot,
+        probe.request,
+        probe.context,
+        replace(plan, joint_trajectory=trajectory),
+    )
+    assert result["valid"] is False
+
+
+def test_successful_pick_without_matching_attachment_fails_closed(
+    monkeypatch, setup_pick
+):
+    probe = setup_pick
+    first = replace(
+        probe.make_plan(probe.request.goal, True), expected_effects=StateDelta()
+    )
+    planner = Mock(return_value=first)
+    probe.install_planner(planner)
+    result = probe.action._plan(probe.request, probe.context)
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "pick_attachment_unavailable"
+    planner.assert_called_once()
+
+
+@pytest.mark.parametrize("observed_hand, accepted", [(0.0, True), (1.0, False)])
+def test_pick_checks_observed_hand_to_first_open_command_velocity(
+    setup_pick, observed_hand, accepted
+):
+    probe = setup_pick
+    probe.context.robot.qpos[:, 7] = observed_hand
+    plan = probe.make_plan(probe.request.goal, True)
+    assert plan.commands.frames[0].hold_duration.tolist() == pytest.approx([0.04])
+    result = pick_safety._inspect_pick_plan(
+        probe.action.robot, probe.request, probe.context, plan
+    )
+    assert result["valid"] is accepted
+    if not accepted:
+        # The internally stationary path still jumps 1 rad in 0.04 s at dispatch.
+        assert result["reason"] == "initial_velocity_rejected"
+
+
 def test_only_call_local_constrained_sampling_enables_recovery(monkeypatch, setup_pick):
     probe = setup_pick
     affordance = probe.request.goal.semantics.affordance
@@ -249,6 +481,9 @@ def test_roll_planning_exception_restores_rng_and_call_scope(monkeypatch, setup_
         "collision",
         "downstream",
         "region",
+        "fixed",
+        "upright",
+        "upright_axis",
     ],
 )
 def test_roll_recovery_does_not_change_other_pick_contracts(
@@ -278,10 +513,19 @@ def test_roll_recovery_does_not_change_other_pick_contracts(
                 request.skill_options, downstream_object_target_poses=(torch.eye(4),)
             ),
         )
-    else:
+    elif exemption == "region":
         request = replace(
             request,
             skill_options=replace(request.skill_options, pick_object_part="top"),
+        )
+    else:
+        field, value = {
+            "fixed": ("fixed_object_to_eef", torch.eye(4)),
+            "upright": ("rotate_upright", 0.0),
+            "upright_axis": ("obj_upright_direction", torch.tensor([0.0, 0.0, 1.0])),
+        }[exemption]
+        request = replace(
+            request, skill_options=replace(request.skill_options, **{field: value})
         )
     first = probe.make_plan(request.goal, False)
     planner = Mock(return_value=first)

@@ -195,6 +195,12 @@ def _make_checker(
     if not any(owner in active_links for _, owner, _ in geometry):
         raise ValueError("The operated arm has no collision geometry.")
     owners = {node: owner for node, owner, _ in geometry}
+    active = trimesh.collision.CollisionManager()
+    passive = trimesh.collision.CollisionManager()
+    for node, owner, mesh in geometry:
+        pose, _ = graph[node]
+        manager = active if owner in active_links else passive
+        manager.add_object(node, mesh, transform=world_root @ pose)
 
     def check(positions: torch.Tensor) -> dict[str, Any]:
         if not include_scene and (
@@ -215,12 +221,13 @@ def _make_checker(
             )
         for frame, q in enumerate(positions):
             configure(q)
-            active = trimesh.collision.CollisionManager()
-            passive = trimesh.collision.CollisionManager()
-            for node, owner, mesh in geometry:
+            # Geometry is immutable for this checker; only FK transforms change.
+            for node, owner, _ in geometry:
                 pose, _ = graph[node]
                 manager = active if owner in active_links else passive
-                manager.add_object(node, mesh, transform=world_root @ pose)
+                manager.set_transform(
+                    node, np.asarray(world_root @ pose, dtype=np.float32)
+                )
             obstacles = (
                 (("scene", world), ("other_arm", passive))
                 if include_scene

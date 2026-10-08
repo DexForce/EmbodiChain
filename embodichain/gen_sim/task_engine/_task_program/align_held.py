@@ -188,7 +188,7 @@ class _RetainedAlignHeldLowerer(_AlignHeldLowerer):
 @dataclass(frozen=True, slots=True)
 class _AlignHeldFactory:
     call_id: ClassVar[str] = ALIGN_HELD_CALL
-    revision: ClassVar[str] = "8"
+    revision: ClassVar[str] = "10"
     target_descriptor = MoveHeldObject.descriptor()
     routes: tuple[
         tuple[str, str, bool, tuple[float, ...], tuple[float, ...] | None], ...

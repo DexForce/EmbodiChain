@@ -91,13 +91,49 @@ the planner can choose the final orientation.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.
+Invocation-owned constrained center Pick also qualifies the complete emitted
+approach, close and lift against robot proxies. A safe original plan is kept;
+an unsafe successful plan may try bounded alternatives from the same filtered
+grasp pool using the shared Pick planner. Explicit grasps, upright-rotating
+Picks and downstream-lookahead Picks retain their separate contracts. Observed
+start collisions and unavailable certificates fail closed. These checks do not
+certify held-object scene contact or physical grasp success.
+A free hand whose first open command alone exceeds the observed velocity
+boundary may receive a bounded, real opening prefix within the existing hand
+interpolation budget. The arm and passive joints hold their observed positions;
+the original Pick suffix and attachment remain unchanged. The complete emitted
+plan is qualified again, without treating failed attachment as held state or
+changing the shared planner, command targets or velocity limits.
 Yaw-free non-drawer GenSim held alignment also screens robot self/other-arm
 proxies before accepting a heading. If the existing heading search exhausts,
 one bounded local IK recovery may preserve the last heading's Cartesian path
-and timing. Extra searches restore the first rejected legacy-stop random state;
+and timing, including when every heading fails IK or velocity qualification,
+or when raw IK succeeded but proxy screening rejected it.
+An observed start collision does not permit that recovery. Extra searches
+restore the first rejected legacy-stop random state, or the original exhausted
+heading-search stop when no proxy checkpoint exists;
 safe original paths retain their normal random stream. Emitted joints are
 checked again after plan transforms. This is not a held-object scene-contact
 certificate; attachment monitors and existing collision policies remain active.
+Factory-owned, adjacent same-object/resource verified yaw-free Align/Place calls
+also preview the canonical Place from a private planned endpoint. A qualified
+original continuation retains the exact Align plan and random stream. Only a
+failed joint continuation searches the original eight headings, with unchanged
+targets, timing, limits and retained-command authority. Preview effects never
+commit; actual Place still observes, grounds, replans and verifies release.
+If that search fails after robot-proxy rejection, explicitly bound native-rigid
+alignment occurrences may try two bounded staging detours. Their intermediate
+poses preserve the acquired orientation, original staging height and final
+goal; the passive arm does not move. Measured distal-mesh projections provide
+only route hints. The shared planner rebuilds each complete plan, whose emitted
+commands undergo the unchanged robot-proxy, joint-limit, velocity and retained
+grasp checks, including the observed first command and post-transform boundary.
+An unchanged, already-applied grasp target is command continuity rather than
+new finger motion only when the adjacent verified attachment contract and fresh
+native target position/velocity prove it; changed or unavailable targets still
+fail the original boundary checks. This does not certify contact force.
+Extra detours preserve the legacy-stop RNG state. Other calls and safe original
+plans do not acquire this recovery implicitly.
 Generated released-hand cleanup uses `task_engine/_task_program/clearance_recovery.py`.
 An adjacent same-object, same-resource verified Place/clearance followed by one
 or two distinct sequential Parks including the owning arm enables its bounded
@@ -111,6 +147,11 @@ only the accepted cleanup plan; each Park replans and revalidates observed state
 This gate currently supports one environment at index zero and fails closed
 outside that scope or when collision evidence is unavailable. Sampled mesh
 clearance is not continuous collision or physical-success certification.
+Only those factory-bound pure Parks may recover an interior scene collision
+using four finite joint vias derived by the existing IK solver. Original ready,
+control grid, limits, passive holds and collision exclusions remain unchanged.
+Cleanup previews and fresh actual Park planning use the same complete gates;
+safe original plans and the caller's random stream remain unchanged.
 E5 Robotiq grasp clearance is isolated in
 `task_engine/_task_program/coordinated_grasp.py`: only the dual-grasp service
 uses URDF collision surfaces and deployment open/grasp commands in TCP space.

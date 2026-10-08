@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -416,3 +417,211 @@ def test_two_pours_of_the_same_object_keep_distinct_receiver_bindings():
         action._receiver_id("unknown")
     with pytest.raises(ValueError, match="exact receiver"):
         bind_pour_receivers({"first_pour": "receiver_a"}, program)
+
+
+@dataclass(frozen=True)
+class _PickTransformPlan:
+    plan_success: torch.Tensor
+    joint_trajectory: object
+    commands: object
+    diagnostics: PlannerDiagnostics
+
+
+@pytest.fixture
+def pick_transform_inputs(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import (
+        actions,
+        articulation_collision,
+        motion,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        JointPositionTarget,
+        ObjectSemantics,
+        PickUpOptions,
+        TimedTrajectory,
+    )
+    from embodichain.lab.sim.atomic_actions.affordance import AntipodalAffordance
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import GraspGoal, PickUp
+
+    affordance = AntipodalAffordance()
+    affordance.set_custom_config(actions._PICK_GRASP_RULE, ("can", "upright"))
+    targets = (JointPositionTarget("arm", (0,)), JointPositionTarget("hand", (1,)))
+    endpoints = tuple(
+        SimpleNamespace(task_state_key="held", require_target=lambda _, t=t: t)
+        for t in targets
+    )
+    request = SimpleNamespace(
+        invocation_id="test/pick:0",
+        skill_id="pick_up",
+        goal=GraspGoal(
+            ObjectSemantics(affordance=affordance, geometry={}, entity_id="can")
+        ),
+        skill_options=PickUpOptions(),
+        motion_policy=MotionPolicy(strategy="ik_interp", dynamic_collision_mode="off"),
+        binding=SimpleNamespace(
+            endpoint=lambda _, name: endpoints[name == "grasp"], endpoints=endpoints
+        ),
+    )
+    context = SimpleNamespace(
+        batch_size=1,
+        env_ids=torch.tensor([0]),
+        robot=SimpleNamespace(qpos=torch.zeros(1, 2)),
+    )
+    robot = SimpleNamespace(
+        device=torch.device("cpu"),
+        get_qpos_limits=lambda **kwargs: torch.tensor([[[-1.0, 1.0]]]),
+    )
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._cartesian_calls = frozenset()
+    engine._articulation_calls = {}
+    engine._actions = {"pick_up": actions.GenSimPickUp()}
+    engine._planning_services = SimpleNamespace(
+        robot=robot, motion_generator=SimpleNamespace(direct_transport_planning=False)
+    )
+    engine.initial_context = Mock(return_value=context)
+
+    def make_plan(positions):
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions, env_ids=context.env_ids, step_dt=0.04
+        )
+        commands = PickUp._joint_command_sequence(
+            object.__new__(PickUp),
+            request,
+            trajectory,
+            active_mask=torch.tensor([True]),
+        )
+        return _PickTransformPlan(
+            torch.tensor([True]),
+            trajectory,
+            commands,
+            PlannerDiagnostics(backend="transform_fixture"),
+        )
+
+    first = make_plan(torch.zeros(1, 3, 2))
+
+    def shared_plan(self, selected, current=None, *, plan_transform=None):
+        return (
+            first
+            if plan_transform is None
+            else plan_transform(
+                selected, context if current is None else current, first
+            )
+        )
+
+    monkeypatch.setattr(AtomicActionEngine, "_plan_request", shared_plan)
+    monkeypatch.setattr(
+        motion, "_joint_velocity_limits", lambda *args: torch.ones(1, 2)
+    )
+    collision = Mock(
+        side_effect=lambda robot, positions, part: {
+            "valid": bool((positions[:, 0] == 0).all())
+        }
+    )
+    monkeypatch.setattr(articulation_collision, "check_robot_motion", collision)
+    return SimpleNamespace(
+        engine=engine,
+        request=request,
+        context=context,
+        first=first,
+        make_plan=make_plan,
+        collision=collision,
+    )
+
+
+@pytest.mark.parametrize("failure", ["other_arm", "velocity"])
+@pytest.mark.parametrize("implicit_context", [False, True])
+def test_pick_transform_rechecks_final_full_commands_and_fails_closed(
+    pick_transform_inputs, failure, implicit_context
+):
+    probe = pick_transform_inputs
+
+    def transform(request, context, plan):
+        positions = plan.joint_trajectory.positions.clone()
+        positions[:, 1:, 0] = 0.01 if failure == "other_arm" else 0.2
+        return probe.make_plan(positions)
+
+    result = probe.engine._plan_request(
+        probe.request,
+        None if implicit_context else probe.context,
+        plan_transform=transform,
+    )
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "pick_robot_safety_failed"
+    assert result.diagnostics.failure.retryable is False
+    assert probe.engine.initial_context.call_count == int(implicit_context)
+
+
+def test_pick_without_transform_does_not_repeat_robotproxy_inspection(
+    monkeypatch, pick_transform_inputs
+):
+    from embodichain.gen_sim.task_engine._task_program import pick_safety
+
+    probe = pick_transform_inputs
+    monkeypatch.setattr(
+        pick_safety,
+        "_inspect_pick_plan",
+        lambda *args: pytest.fail("unexpected second inspection"),
+    )
+    result = probe.engine._plan_request(probe.request)
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
+    probe.engine.initial_context.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "exemption",
+    [
+        "shared_action",
+        "explicit",
+        "fixed",
+        "upright",
+        "downstream",
+        "unmarked",
+        "batch",
+        "collision",
+        "motion_gen",
+    ],
+)
+def test_pick_transform_keeps_other_owner_contracts_unchanged(
+    monkeypatch, pick_transform_inputs, exemption
+):
+    from embodichain.gen_sim.task_engine._task_program import pick_safety
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+
+    probe = pick_transform_inputs
+    request = probe.request
+    if exemption == "shared_action":
+        probe.engine._actions["pick_up"] = PickUp()
+    elif exemption == "explicit":
+        request.goal = replace(request.goal, grasp_xpos=torch.eye(4))
+    elif exemption == "unmarked":
+        request.goal.semantics.affordance.custom_config.clear()
+    elif exemption == "batch":
+        probe.context.batch_size = 2
+    elif exemption in {"collision", "motion_gen"}:
+        request.motion_policy = replace(
+            request.motion_policy,
+            **(
+                {"dynamic_collision_mode": "required"}
+                if exemption == "collision"
+                else {"strategy": "motion_gen"}
+            ),
+        )
+    else:
+        field, value = {
+            "fixed": ("fixed_object_to_eef", torch.eye(4)),
+            "upright": ("rotate_upright", 0.0),
+            "downstream": ("downstream_object_target_poses", (torch.eye(4),)),
+        }[exemption]
+        request.skill_options = replace(request.skill_options, **{field: value})
+    monkeypatch.setattr(
+        pick_safety,
+        "_inspect_pick_plan",
+        lambda *args: pytest.fail("owner exemption was ignored"),
+    )
+    result = probe.engine._plan_request(
+        request, probe.context, plan_transform=lambda *args: probe.first
+    )
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
