@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import faulthandler
 from pathlib import Path
 import subprocess
 import sys
@@ -53,13 +54,23 @@ def test_no_render_world_steps_and_resets(backend: str, tmp_path: Path) -> None:
         </robot>""",
         encoding="utf-8",
     )
-    result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), backend, str(urdf)],
-        env=os.environ.copy(),
-        text=True,
-        capture_output=True,
-        timeout=90,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), backend, str(urdf)],
+            env=os.environ.copy(),
+            text=True,
+            capture_output=True,
+            # Newton compiles kernels for the initial and rebuilt topology.
+            timeout=180 if backend == "newton" else 90,
+        )
+    except subprocess.TimeoutExpired as error:
+        output = b"\n".join((error.stdout or b"", error.stderr or b"")).decode(
+            errors="replace"
+        )
+        pytest.fail(
+            f"{backend} NoRender worker timed out after {error.timeout}s.\n{output}",
+            pytrace=False,
+        )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -127,6 +138,7 @@ def _run_world(backend: str, urdf_path: str) -> None:
         with pytest.raises(RuntimeError, match="requires a native renderer"):
             sim.add_sensor(CameraCfg(uid="camera", width=32, height=32))
         assert not sim._sensors
+        print(f"{backend}: rigid state and renderer checks passed", flush=True)
 
         # Exercise the URDF source resolver against the selected DexSim build.
         articulation = sim.add_articulation(
@@ -144,11 +156,18 @@ def _run_world(backend: str, urdf_path: str) -> None:
         torch.testing.assert_close(articulation.body_data.qpos[1], state[1])
         sim.update(step=1)
         assert torch.isfinite(articulation.body_data.qpos).all()
+        print(f"{backend}: articulation state checks passed", flush=True)
     finally:
         body = articulation = None
         sim.destroy(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+        print(f"{backend}: cleanup complete", flush=True)
 
 
 if __name__ == "__main__":
-    _run_world(sys.argv[1], sys.argv[2])
+    faulthandler.enable()
+    faulthandler.dump_traceback_later(60, repeat=True)
+    try:
+        _run_world(sys.argv[1], sys.argv[2])
+    finally:
+        faulthandler.cancel_dump_traceback_later()
