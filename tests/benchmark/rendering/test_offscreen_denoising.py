@@ -205,6 +205,19 @@ def test_comparison_image_supports_multiple_cameras(tmp_path) -> None:
     assert image.shape[0] == 2 * 2 * 8
 
 
+@pytest.mark.parametrize(
+    ("modes", "reference_mode"),
+    [((), "nrd"), (("nrd", "dlss"), "optix")],
+)
+def test_comparison_image_rejects_invalid_selection_before_loading_artifacts(
+    tmp_path: Path, modes: tuple[str, ...], reference_mode: str
+) -> None:
+    """An invalid comparison selection fails before reading potentially large data."""
+    with pytest.raises(ValueError, match="mode"):
+        _write_comparison_image(tmp_path, modes=modes, reference_mode=reference_mode)
+    assert not (tmp_path / "comparison.png").exists()
+
+
 def test_environment_sweep_parser_and_leaderboard() -> None:
     """A sweep keeps all environment counts while ranking modes by averages."""
     args = build_parser().parse_args(["--env-sweep", "1", "4", "8"])
@@ -219,6 +232,8 @@ def test_environment_sweep_parser_and_leaderboard() -> None:
         ]
     )
     assert [row["algorithm"] for row in rows] == ["optix", "nrd"]
+    assert rows[0]["fps"] == pytest.approx(40.0)
+    assert rows[1]["fps"] == pytest.approx(65.0)
 
 
 def test_environment_sweep_rejects_non_positive_counts(tmp_path) -> None:
@@ -279,13 +294,34 @@ def test_temporal_error_returns_zero_without_adjacent_frames(
     assert _temporal_delta_error(reference, candidate) == 0.0
 
 
-def test_report_generation_keeps_at_most_two_loaded_sequences(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("modes", "reference_mode"),
+    [
+        (("optix", "dlss", "nrd"), "optix"),
+        (("optix", "dlss", "nrd"), "nrd"),
+        (("nrd", "dlss"), "optix"),
+        (("nrd", "optix", "dlss"), "dlss"),
+    ],
+)
+def test_report_generation_preserves_reference_order_and_sequence_memory_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    modes: tuple[str, ...],
+    reference_mode: str,
 ) -> None:
-    """Candidate frames and comparison views cannot retain all mode sequences."""
+    """Metrics and preview use the same reference without retaining all sequences."""
+    import cv2
+
     cfg = BenchmarkCfg(
-        width=16, height=16, num_envs=2, measure_frames=2, quality_frames=2
+        width=16,
+        height=16,
+        num_envs=2,
+        measure_frames=2,
+        quality_frames=2,
+        denoising_modes=modes,
+        reference_mode=reference_mode,
     )
+    mode_values = {"optix": 20, "dlss": 40, "nrd": 60}
     arrays: list[weakref.ReferenceType[np.ndarray]] = []
     peak_live = 0
     real_load = np.load
@@ -320,7 +356,7 @@ def test_report_generation_keeps_at_most_two_loaded_sequences(
         assert check
         mode = command[command.index("--worker-mode") + 1]
         run_dir = Path(command[command.index("--run-dir") + 1])
-        value = {"optix": 20, "dlss": 40, "nrd": 60}[mode]
+        value = mode_values[mode]
         frames = np.full((2, 2, 1, 16, 16, 4), value, dtype=np.uint8)
         np.savez_compressed(run_dir / f"{mode}_frames.npz", frames=frames)
         performance = {
@@ -347,5 +383,55 @@ def test_report_generation_keeps_at_most_two_loaded_sequences(
     assert arrays and all(ref() is None for ref in arrays)
     assert (report_path.parent / "comparison.png").is_file()
     summary = json.loads((report_path.parent / "benchmark_summary.json").read_text())
-    assert [row["mode"] for row in summary["metrics"]] == ["optix", "dlss", "nrd"]
-    assert summary["metrics"][0]["mae"] == 0.0
+    assert [row["mode"] for row in summary["metrics"]] == list(modes)
+    assert summary["settings"]["resolved_reference_mode"] == cfg.resolved_reference_mode
+    image = cv2.imread(str(report_path.parent / "comparison.png"))
+    assert image.shape == (cfg.height * 2, cfg.width * len(modes), 3)
+    reference_value = mode_values[cfg.resolved_reference_mode]
+    for column, row in enumerate(summary["metrics"]):
+        value = mode_values[row["mode"]]
+        difference = abs(value - reference_value)
+        assert row["mae"] == round(difference / 255.0, 6)
+        # Sample outside the label text so values identify the actual mode column.
+        assert image[0, column * cfg.width + 2].tolist() == [value] * 3
+        assert image[-1, column * cfg.width + 2].tolist() == [difference * 4] * 3
+
+
+@pytest.mark.parametrize("counts", [(1, 2), (64, 128)])
+def test_sweep_report_does_not_claim_unobserved_renderer_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, counts: tuple[int, ...]
+) -> None:
+    """Sweeps cannot describe historical warnings as events from this run."""
+    observed_counts: list[int] = []
+
+    def fake_run(cfg: BenchmarkCfg, output_root: Path) -> Path:
+        """Supply completed summaries without emitting renderer warnings."""
+        observed_counts.append(cfg.num_envs)
+        run_dir = output_root / f"env_{cfg.num_envs}"
+        run_dir.mkdir()
+        summary = {
+            "performance": [{"mode": "optix", "num_envs": cfg.num_envs}],
+            "metrics": [
+                {
+                    "mode": "optix",
+                    "num_envs": cfg.num_envs,
+                    "success_rate": 100.0,
+                    "ssim": 1.0,
+                    "fps": 10.0,
+                }
+            ],
+        }
+        (run_dir / "benchmark_summary.json").write_text(json.dumps(summary))
+        return run_dir / "report.md"
+
+    monkeypatch.setattr(benchmark_module, "run_all_benchmarks", fake_run)
+    report_path = run_environment_sweep(
+        BenchmarkCfg(denoising_modes=("optix",)), counts, tmp_path
+    )
+
+    assert observed_counts == list(counts)
+    report = report_path.read_text()
+    assert "this run emitted" not in report
+    summary = json.loads((report_path.parent / "sweep_summary.json").read_text())
+    assert summary["settings"]["environment_counts"] == list(counts)
+    assert [row["num_envs"] for row in summary["performance"]] == list(counts)

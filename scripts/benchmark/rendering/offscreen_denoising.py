@@ -971,13 +971,29 @@ def _modes_from_run(run_dir: Path) -> tuple[RenderMode, ...]:
     return modes  # type: ignore[return-value]
 
 
-def _write_comparison_image(run_dir: Path, frame_index: int = 0) -> Path:
-    """Write mode comparisons for the first environment and every camera."""
+def _write_comparison_image(
+    run_dir: Path,
+    frame_index: int = 0,
+    *,
+    modes: tuple[RenderMode, ...] | None = None,
+    reference_mode: RenderMode | None = None,
+) -> Path:
+    """Write selected mode columns using the report's resolved reference.
+
+    Direct artifact-only calls retain OptiX as their default reference when
+    available. Benchmark runs supply both the mode order and resolved reference.
+    """
+    selected_modes = _modes_from_run(run_dir) if modes is None else modes
+    if not selected_modes:
+        raise ValueError("Comparison images require at least one rendering mode.")
+    if reference_mode is None:
+        reference_mode = "optix" if "optix" in selected_modes else selected_modes[0]
+    if reference_mode not in selected_modes:
+        raise ValueError("Comparison reference_mode must be one of the selected modes.")
     camera_frames = {
         mode: _load_comparison_views(run_dir / f"{mode}_frames.npz", frame_index)
-        for mode in _modes_from_run(run_dir)
+        for mode in selected_modes
     }
-    reference_mode = "optix" if "optix" in camera_frames else next(iter(camera_frames))
     reference = camera_frames[reference_mode]
     camera_rows: list[np.ndarray] = []
     for camera_index in range(reference.shape[0]):
@@ -1157,7 +1173,10 @@ def run_all_benchmarks(cfg: BenchmarkCfg, output_root: Path) -> Path:
         encoding="utf-8",
     )
     comparison_path = _write_comparison_image(
-        run_dir, frame_index=min(cfg.quality_frames // 2, cfg.quality_frames - 1)
+        run_dir,
+        frame_index=min(cfg.quality_frames // 2, cfg.quality_frames - 1),
+        modes=cfg.denoising_modes,
+        reference_mode=cfg.resolved_reference_mode,
     )
     report_path = write_markdown_report(
         output_path=run_dir / "report.md",
@@ -1257,7 +1276,7 @@ def run_environment_sweep(
             "Each environment count uses an isolated simulation worker for every denoising mode.",
             f"The sweep covers num_envs={list(counts)} at {cfg.width}x{cfg.height} with {cfg.camera_count} camera(s).",
             "Leaderboard values are averages across environment counts; Time & Memory and Success & Other Metrics retain one row per environment count and mode.",
-            "DexSim may use the direct CUDA output path above the device's Vulkan overlay layer limit; this run emitted that warning for 64 and 128 environments.",
+            "DexSim may use the direct CUDA output path above the device's Vulkan overlay layer limit; this is conditional guidance, not a record of observed warnings.",
             "Individual run artifacts are stored under the runs/ directory.",
         ],
     )

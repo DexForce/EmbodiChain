@@ -61,6 +61,12 @@ does not retain all three sequences simultaneously.
 `fps` describes complete render batches; `camera_env_fps` counts individual
 camera images across all environments. Quality metrics compare each mode with
 the configured reference mode. If the reference is omitted from the evaluated
-modes, the first mode is used. These are consistency metrics, not a comparison
+modes, the first mode is used. Comparison images use that same resolved
+reference, and their columns follow the configured denoising-mode order.
+These are consistency metrics, not a comparison
 with a ground-truth image. Timing excludes world/scene construction and scene
 state updates and includes rendering, GPU completion, and image capture.
+
+Sweep output-path notes describe possible device-dependent behavior. Actual
+renderer warnings appear in worker console output; the report does not infer
+that a warning occurred from environment counts alone.
