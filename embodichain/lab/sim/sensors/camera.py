@@ -485,6 +485,11 @@ class Camera(BaseSensor):
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         self.cfg: CameraCfg
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
 
         if self.cfg.extrinsics.eye is not None:
             eye = (
@@ -510,10 +515,10 @@ class Camera(BaseSensor):
                 if self.cfg.extrinsics.up is not None
                 else None
             )
-            if env_ids is not None:
-                eye, target = eye[env_ids], target[env_ids]
+            if ids is not None:
+                eye, target = eye[ids], target[ids]
                 if up is not None:
-                    up = up[env_ids]
+                    up = up[ids]
             self.look_at(eye, target, up, env_ids=env_ids)
         else:
             pose = self.cfg.extrinsics.transformation.to(self.device)
@@ -524,6 +529,4 @@ class Camera(BaseSensor):
                 pose[:, :3, 1] = -pose[:, :3, 1]
                 pose[:, :3, 2] = -pose[:, :3, 2]
 
-            self.set_local_pose(
-                pose if env_ids is None else pose[env_ids], env_ids=env_ids
-            )
+            self.set_local_pose(pose if ids is None else pose[ids], env_ids=env_ids)
