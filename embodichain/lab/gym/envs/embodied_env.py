@@ -1213,6 +1213,7 @@ class EmbodiedEnv(BaseEnv):
         metadata = {
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
+            "seed": getattr(getattr(self, "cfg", None), "seed", None),
             "output_mode": execution_cfg.mode,
             "save_failed_fragments": execution_cfg.save_failed_fragments,
             "attempt_id": attempt_id,

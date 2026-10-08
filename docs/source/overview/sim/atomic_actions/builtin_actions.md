@@ -458,6 +458,7 @@ Important `PickUpOptions` fields:
 | `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and world-frame approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
 | `grasp_settle_steps` | Closed-hand hold frames before lifting |
+| `grasp_variant` | `closest` chooses the feasible symmetric TCP roll nearest the current pose; `original` or `mirrored` requires that side to pass screening |
 | `grasp_frame_to_eef` | Fixed SE(3) calibration from canonical grasp frames to the robot TCP |
 | `fixed_object_to_eef` | Optional task/robot-calibrated SE(3) grasp that bypasses affordance sampling when the goal has no explicit grasp |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |

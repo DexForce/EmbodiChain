@@ -1,0 +1,174 @@
+environment_id: pick_place
+max_episodes: 8
+max_episode_steps: 600
+num_envs: 1
+arena_space: 2.5
+simulation:
+  light:
+    direct:
+    - uid: main_light
+      light_type: point
+      color:
+      - 1.0
+      - 1.0
+      - 1.0
+      intensity: 60.0
+      init_pos:
+      - 1.0
+      - -0.5
+      - 2.5
+      radius: 10.0
+  background:
+  - uid: goal_marker
+    shape:
+      shape_type: Cube
+      size:
+      - 0.12
+      - 0.12
+      - 0.01
+      visual_material:
+        base_color:
+        - 0.05
+        - 0.8
+        - 0.1
+        - 1.0
+    body_type: kinematic
+    init_pos:
+    - -0.4
+    - 0.48
+    - 0.005
+    attrs:
+      mass_props:
+        mass: 0.01
+      rigid_props:
+        angular_damping: 0.7
+        linear_damping: 0.7
+        max_depenetration_velocity: 10.0
+        sleep_threshold: 0.001
+        min_position_iters: 4
+        min_velocity_iters: 1
+        max_linear_velocity: 100.0
+        max_angular_velocity: 100.0
+        enable_ccd: false
+      collision_props:
+        contact_offset: 0.002
+        rest_offset: 0.0
+      material_props:
+        restitution: 0.0
+        dynamic_friction: 0.5
+        static_friction: 0.5
+  rigid_object:
+  - uid: cube
+    shape:
+      shape_type: Cube
+      size:
+      - 0.05
+      - 0.05
+      - 0.05
+    body_type: dynamic
+    init_pos:
+    - -0.42
+    - -0.08
+    - 0.025
+    attrs:
+      mass_props:
+        mass: 0.05
+      rigid_props:
+        angular_damping: 0.7
+        linear_damping: 0.7
+        max_depenetration_velocity: 10.0
+        sleep_threshold: 0.001
+        min_position_iters: 4
+        min_velocity_iters: 1
+        max_linear_velocity: 100.0
+        max_angular_velocity: 100.0
+        enable_ccd: false
+      collision_props:
+        contact_offset: 0.003
+        rest_offset: 0.001
+      material_props:
+        restitution: 0.0
+        dynamic_friction: 0.8
+        static_friction: 0.9
+  rigid_object_group: []
+  articulation: []
+env:
+  sim_steps_per_control: 4
+  events:
+    randomize_cube:
+      func: randomize_rigid_object_pose
+      mode: reset
+      params:
+        entity_cfg:
+          uid: cube
+        position_range:
+        - - -0.43
+          - -0.09
+          - 0.025
+        - - -0.41
+          - -0.07
+          - 0.025
+        rotation_range:
+        - - 0
+          - 0
+          - -2.0
+        - - 0
+          - 0
+          - 2.0
+        relative_position: false
+    randomize_goal:
+      func: randomize_rigid_object_pose
+      mode: reset
+      params:
+        entity_cfg:
+          uid: goal_marker
+        position_range:
+        - - -0.41
+          - 0.47
+          - 0.005
+        - - -0.39
+          - 0.49
+          - 0.005
+        rotation_range:
+        - - 0
+          - 0
+          - -2.0
+        - - 0
+          - 0
+          - 2.0
+        relative_position: false
+  dataset:
+    lerobot:
+      func: LeRobotRecorder
+      mode: save
+      save_failed_episodes: false
+      params:
+        save_path: /path/to/datasets/embodichain/pick_place/smoke/val
+        robot_meta:
+          robot_type: FrankaPanda
+        instruction:
+          lang: Pick up the cube and place it on the marked target.
+        extra:
+          scene_type: tabletop
+          task_description: pick_and_place
+          data_type: sim
+          spatial_profile: smoke_val
+        use_videos: true
+  extensions:
+    deterministic_grasp: true
+    deterministic_grasp_seed: 0
+    deterministic_grasp_variant: original
+    spatial_grid_size: 1
+    spatial_cube_x_range:
+    - -0.43
+    - -0.41
+    spatial_cube_y_range:
+    - -0.09
+    - -0.07
+    spatial_goal_x_range:
+    - -0.41
+    - -0.39
+    spatial_goal_y_range:
+    - 0.47
+    - 0.49
+physics: default
