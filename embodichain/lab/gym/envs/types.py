@@ -37,11 +37,10 @@ __all__ = ["ControllerAction"]
 class ControllerAction:
     """Owned controller-ready action that must still pass through ``env.step``.
 
-    The action has already completed the raw-policy preprocessing stage. An
-    :class:`~embodichain.lab.gym.envs.embodied_env.EmbodiedEnv` therefore skips
-    ``ActionManager`` terms in ``pre`` mode, validates the controller command,
-    and continues through the normal simulation step. Terms in ``post`` mode
-    still run after the command has been applied.
+    The action is already controller-ready. An
+    :class:`~embodichain.lab.gym.envs.embodied_env.EmbodiedEnv` therefore keeps
+    the envelope through preprocessing, validates the command, and applies it
+    directly without invoking ``ActionManager``.
 
     Args:
         value: Controller-ready tensor or ``TensorDict``.

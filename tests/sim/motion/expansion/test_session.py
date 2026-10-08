@@ -24,19 +24,20 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.expansion.cfg import (
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
 )
 from embodichain.lab.sim.motion.expansion.contracts import (
     CandidateIdentity,
     CandidateTrajectoryBatch,
     CommitReceipt,
     ExpertEpisode,
+    ProposalRequest,
     SceneCase,
     TrajectoryPhase,
     ValidationCheck,
     ValidationResult,
 )
-from embodichain.lab.sim.motion.expansion.session import GenerationSession
+from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 
 CASE = SceneCase("case", "initial", "scene_v1", "lift", "robot")
 JOINT_NAMES = ("joint_a", "joint_b")
@@ -50,14 +51,17 @@ ROLLOUT_VALID = ValidationResult(
 )
 
 
-def _session(**overrides: object) -> GenerationSession:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(overrides)
-    session = GenerationSession(cfg)
-    session.register_case(CASE, LIMITS, joint_names=JOINT_NAMES)
+def _session(**overrides: object) -> ExpansionSession:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(overrides)
+    session = ExpansionSession(cfg)
+    reference = 1.0 if cfg.augmentation.factors.manipulability.enabled else None
+    session.register_case(
+        CASE, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=reference
+    )
     return session
 
 
-def _propose(session: GenerationSession, case: SceneCase = CASE, **kwargs: object):
+def _propose(session: ExpansionSession, case: SceneCase = CASE, **kwargs: object):
     return session.propose(
         case.scene_case_id,
         case.initial_state_id,
@@ -67,6 +71,44 @@ def _propose(session: GenerationSession, case: SceneCase = CASE, **kwargs: objec
         operator_id="joint_residual",
         **kwargs,
     )
+
+
+def test_expansion_streams_advance_and_replay_across_sessions() -> None:
+    def draw(session: ExpansionSession) -> torch.Tensor:
+        generator = session.expansion_generator(
+            "case",
+            "initial",
+            source_id="source",
+            source_revision="revision",
+            template_id="template",
+            operation_id="trajectory_expansion",
+        )
+        return torch.rand(4, generator=generator)
+
+    left = _session()
+    right = _session()
+
+    left_first = draw(left)
+    left_second = draw(left)
+    right_first = draw(right)
+
+    assert torch.equal(left_first, right_first)
+    assert not torch.equal(left_first, left_second)
+
+
+def test_propose_many_is_atomic_when_budget_is_insufficient() -> None:
+    session = _session(collection={"max_proposals": 1})
+    requests = (
+        ProposalRequest("case", "initial", "source", "r1", "template", "nominal"),
+        ProposalRequest("case", "initial", "source", "r1", "template", "residual"),
+    )
+
+    with pytest.raises(RuntimeError, match="Proposal budget"):
+        session.propose_many(requests)
+
+    snapshot = session.snapshot()
+    assert snapshot["counts"]["proposed"] == 0
+    assert snapshot["audit"] == ()
 
 
 def _batch(*identities: CandidateIdentity) -> CandidateTrajectoryBatch:
@@ -83,17 +125,21 @@ def _batch(*identities: CandidateIdentity) -> CandidateTrajectoryBatch:
 
 
 def _episode(
-    session: GenerationSession,
+    session: ExpansionSession,
     identity: CandidateIdentity,
     *,
     position: float = 0.5,
     duration: float = 1.0,
     validation: ValidationResult = ROLLOUT_VALID,
+    manipulability: float | None = None,
 ) -> ExpertEpisode:
     episode_id, commit_id = session.episode_ids(identity)
+    observations = {"joint_positions": torch.tensor([[0.0, 0.0], [position, 0.0]])}
+    if manipulability is not None:
+        observations["manipulability"] = torch.tensor([2.0, manipulability])
     return ExpertEpisode(
         identity,
-        {"joint_positions": torch.tensor([[0.0, 0.0], [position, 0.0]])},
+        observations,
         torch.tensor([[position, 0.0]]),
         torch.tensor([0.0, duration]),
         "qpos",
@@ -117,7 +163,7 @@ def _receipt(episode: ExpertEpisode, **kwargs: object) -> CommitReceipt:
 
 
 def _start(
-    session: GenerationSession,
+    session: ExpansionSession,
     case: SceneCase = CASE,
     *,
     episode_byte_budget: int | None = 4096,
@@ -545,7 +591,7 @@ def test_diagnostics_keep_bounded_failure_metrics_and_detail() -> None:
 
 def test_wall_time_uses_injected_clock_and_still_allows_final_receipt() -> None:
     now = [0.0]
-    session = GenerationSession(TrajectoryGenerationJobCfg(), clock=lambda: now[0])
+    session = ExpansionSession(TrajectoryExpansionJobCfg(), clock=lambda: now[0])
     session.register_case(CASE, LIMITS, joint_names=JOINT_NAMES)
     episode = _episode(session, _start(session))
     assert session.accept_episode(episode)
@@ -570,3 +616,113 @@ def test_proposal_budget_exhaustion_and_case_conditions_do_not_reset_history() -
         session.register_case(
             replace(CASE, scene_signature="changed"), LIMITS, joint_names=JOINT_NAMES
         )
+
+
+def _banded_session(**overrides: object) -> ExpansionSession:
+    return _session(
+        collection={"target_committed_episodes": 3},
+        augmentation={
+            "coverage": {"target_per_cell": 2},
+            "factors": {
+                "manipulability": {
+                    "enabled": True,
+                    "band_edges": [0.5, 0.9],
+                    "target_per_band": 1,
+                }
+            },
+        },
+        **overrides,
+    )
+
+
+def test_a_full_manipulability_band_leaves_room_for_tighter_postures() -> None:
+    session = _banded_session()
+    # The reference-level posture claims the top band, so an equally comfortable
+    # rollout is rejected even though its measured geometry is new.
+    comfortable = _episode(session, _start(session), manipulability=1.0)
+    assert session.accept_episode(comfortable)
+    crowding = _episode(session, _start(session), position=-0.5, manipulability=0.95)
+    assert not session.accept_episode(crowding)
+    assert (
+        session.snapshot()["diagnostics"][crowding.identity.candidate_id]["reason"]
+        == "coverage_rejected"
+    )
+    tight = _episode(session, _start(session), position=-0.5, manipulability=0.3)
+    assert session.accept_episode(tight)
+    session.apply_receipt(_receipt(comfortable))
+    session.apply_receipt(_receipt(tight))
+    snapshot = session.snapshot()
+    assert snapshot["counts"]["committed"] == 2
+    assert snapshot["manipulability_bands"]["case"] == {0: 1, 2: 1}
+
+
+def test_banded_coverage_classifies_the_measured_bottleneck() -> None:
+    session = _banded_session()
+    # The first observation stays at the reference level; the dip decides the band.
+    episode = _episode(session, _start(session), manipulability=0.2)
+    assert session.accept_episode(episode)
+    session.apply_receipt(_receipt(episode))
+    assert session.snapshot()["manipulability_bands"]["case"] == {0: 1}
+
+
+def test_initial_states_may_hold_different_manipulability_references() -> None:
+    session = _banded_session()
+    second = replace(CASE, initial_state_id="second")
+    # A reference bottleneck describes one reference trajectory, not the scene,
+    # so a tighter second reference is not a change of shared case conditions.
+    session.register_case(
+        second, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=0.1
+    )
+    with pytest.raises(ValueError, match="fixed conditions"):
+        session.register_case(
+            second, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=0.2
+        )
+    # One measured score of 0.3 is tight against 1.0 and comfortable against 0.1.
+    tight = _episode(session, _start(session), manipulability=0.3)
+    assert session.accept_episode(tight)
+    comfortable = _episode(
+        session, _start(session, second), position=-0.5, manipulability=0.3
+    )
+    assert session.accept_episode(comfortable)
+    session.apply_receipt(_receipt(tight))
+    session.apply_receipt(_receipt(comfortable))
+    # Quotas stay shared by scene case, and the two rollouts land in own bands.
+    assert session.snapshot()["manipulability_bands"]["case"] == {0: 1, 2: 1}
+
+
+def test_banded_coverage_requires_measured_manipulability_evidence() -> None:
+    session = _banded_session()
+    with pytest.raises(ValueError, match="measured manipulability"):
+        session.accept_episode(_episode(session, _start(session)))
+
+
+def test_negative_manipulability_evidence_is_rejected() -> None:
+    session = _banded_session()
+    with pytest.raises(ValueError, match="measured manipulability"):
+        session.accept_episode(_episode(session, _start(session), manipulability=-1.0))
+
+
+@pytest.mark.parametrize("reference", [None, 0.0, -1.0, float("nan")])
+def test_banded_coverage_requires_a_positive_reference(reference: float | None) -> None:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {"augmentation": {"factors": {"manipulability": {"enabled": True}}}}
+    )
+    with pytest.raises(ValueError, match="positive manipulability_reference"):
+        ExpansionSession(cfg).register_case(
+            CASE, LIMITS, joint_names=JOINT_NAMES, manipulability_reference=reference
+        )
+
+
+def test_unbanded_coverage_rejects_a_reference_and_reports_no_bands() -> None:
+    session = _session()
+    with pytest.raises(ValueError, match="requires factors.manipulability.enabled"):
+        session.register_case(
+            replace(CASE, initial_state_id="other"),
+            LIMITS,
+            joint_names=JOINT_NAMES,
+            manipulability_reference=1.0,
+        )
+    episode = _episode(session, _start(session))
+    assert session.accept_episode(episode)
+    session.apply_receipt(_receipt(episode))
+    assert session.snapshot()["manipulability_bands"] == {"case": {}}

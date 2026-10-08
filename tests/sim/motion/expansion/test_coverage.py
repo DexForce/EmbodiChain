@@ -142,3 +142,47 @@ def test_phase_connections_and_unlabelled_samples_are_preserved() -> None:
 def test_invalid_actual_timestamps_are_rejected(times: torch.Tensor) -> None:
     with pytest.raises(ValueError):
         describe_trajectory(torch.zeros(2, 1), times, torch.tensor([[0.0, 1.0]]))
+
+
+def test_a_full_band_rejects_new_geometry_and_leaves_other_bands_open() -> None:
+    index = CoverageIndex(target_per_band=1)
+    assert index.reserve("well_conditioned", "one", descriptor(), band=2)
+    # A new geometry cannot keep filling an exhausted manipulability band, but
+    # the same geometry still fits a band that has capacity left.
+    assert not index.reserve("second", "two", descriptor(offset=0.5), band=2)
+    assert index.reserve("tight", "three", descriptor(offset=0.5), band=0)
+    index.confirm("well_conditioned")
+    index.confirm("tight")
+    assert index.geometry_count == 2
+    assert index.band_counts == {0: 1, 2: 1}
+
+
+def test_released_band_capacity_is_reusable_and_pending_writes_are_uncounted() -> None:
+    index = CoverageIndex(target_per_band=1)
+    assert index.reserve("first", "one", descriptor(), band=1)
+    assert index.band_counts == {}
+    assert not index.reserve("second", "two", descriptor(10, 2.0), band=1)
+    index.release("first")
+    assert index.reserve("second", "two", descriptor(10, 2.0), band=1)
+    index.confirm("second")
+    assert index.band_counts == {1: 1}
+
+
+@pytest.mark.parametrize(
+    ("target_per_band", "band"),
+    [(None, 0), (1, None), (1, -1), (1, True), (0, 0)],
+)
+def test_band_arguments_must_match_the_configured_quota(
+    target_per_band: int | None, band: int | None
+) -> None:
+    with pytest.raises(ValueError):
+        CoverageIndex(target_per_band=target_per_band).reserve(
+            "commit", "family", descriptor(), band=band
+        )
+
+
+def test_unbanded_coverage_reports_no_band_counts() -> None:
+    index = CoverageIndex()
+    assert index.reserve("commit", "family", descriptor())
+    index.confirm("commit")
+    assert index.band_counts == {}

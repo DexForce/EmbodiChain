@@ -14,46 +14,128 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Tests for default-offset locomotion joint actions."""
+
 from __future__ import annotations
 
-from types import SimpleNamespace
+import numpy as np
 import pytest
 import torch
-from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
-from embodichain.lab.gym.envs.managers.actions import DefaultJointPositionTerm
+
+from embodichain.lab.gym.envs.managers import (
+    ActionManager,
+    ActionTermCfg,
+    resolve_action_contract,
+)
+from embodichain.lab.gym.envs.managers.actions import (
+    DefaultJointPositionAction,
+    JointVelocityAction,
+)
+
+from action_test_utils import make_action_env
 
 
-def make_manager():
-    robot = SimpleNamespace(
-        joint_names=["unused", "a", "b"],
-        cfg=SimpleNamespace(init_qpos=[9.0, 0.2, -0.4]),
+def make_manager() -> ActionManager:
+    """Build a two-joint default-position manager."""
+    env = make_action_env(
+        num_envs=2,
+        joint_names=("unused", "a", "b"),
+        parts={"policy": (1, 2)},
     )
-    env = SimpleNamespace(
-        num_envs=2, device=torch.device("cpu"), active_joint_ids=[1, 2], robot=robot
-    )
+    env.robot.cfg.init_qpos = [9.0, 0.2, -0.4]
     cfg = ActionTermCfg(
-        func=DefaultJointPositionTerm,
-        params=dict(joint_names=["a", "b"], scale=[0.5, 2.0], clip=1.0),
+        func=DefaultJointPositionAction,
+        params={
+            "joint_names": ["a", "b"],
+            "scale": [0.5, 2.0],
+            "clip": 1.0,
+        },
     )
-    return ActionManager({"joints": cfg}, env)
+    return ActionManager({"joint_position": cfg}, env)
 
 
-def test_joint_mapping_works_without_task_specific_attributes():
+def test_joint_mapping_works_without_task_specific_attributes() -> None:
+    """Default offset, scale, clipping, and bias remain generic."""
     manager = make_manager()
-    term = manager.get_term("joints")
+    term = manager.get_term("joint_position")
     term.position_bias[0] = torch.tensor([0.1, 0.2])
-    target = term.process_action(torch.tensor([[2.0, -2.0], [0.0, 0.0]]))
-    torch.testing.assert_close(target, torch.tensor([[0.6, -2.6], [0.2, -0.4]]))
-    assert torch.equal(term.action, torch.tensor([[1.0, -1.0], [0.0, 0.0]]))
+
+    manager.process_action(torch.tensor([[2.0, -2.0], [0.0, 0.0]]))
+
+    torch.testing.assert_close(
+        term.processed_actions,
+        torch.tensor([[0.6, -2.6], [0.2, -0.4]]),
+    )
+    torch.testing.assert_close(
+        term.raw_actions,
+        torch.tensor([[1.0, -1.0], [0.0, 0.0]]),
+    )
 
 
-def test_manager_selective_reset_clears_action_history_only_in_selected_rows():
+def test_manager_selective_reset_clears_action_history_only_in_selected_rows() -> None:
+    """Locomotion history resets selected rows without clearing encoder bias."""
     manager = make_manager()
-    term = manager.get_term("joints")
+    term = manager.get_term("joint_position")
     term.position_bias.fill_(0.1)
-    term.process_action(torch.ones(2, 2))
-    term.process_action(torch.full((2, 2), 0.5))
+    manager.process_action(torch.ones(2, 2))
+    manager.process_action(torch.full((2, 2), 0.5))
+
     manager.reset(env_ids=[0])
-    assert torch.equal(term.action, torch.tensor([[0.0, 0.0], [0.5, 0.5]]))
-    assert torch.equal(term.previous_action, torch.tensor([[0.0, 0.0], [1.0, 1.0]]))
-    assert torch.equal(term.position_bias, torch.full((2, 2), 0.1))
+
+    torch.testing.assert_close(
+        term.raw_actions,
+        torch.tensor([[0.0, 0.0], [0.5, 0.5]]),
+    )
+    torch.testing.assert_close(
+        term.previous_raw_actions,
+        torch.tensor([[0.0, 0.0], [1.0, 1.0]]),
+    )
+    torch.testing.assert_close(term.position_bias, torch.full((2, 2), 0.1))
+
+
+def test_default_position_contract_resolves_and_binds() -> None:
+    """The stable contract identifies the current implementation and term."""
+    manager = make_manager()
+
+    assert (
+        resolve_action_contract("joint_position.default_offset@1")
+        is DefaultJointPositionAction
+    )
+    assert manager.get_term_by_contract(
+        "joint_position.default_offset@1"
+    ) is manager.get_term("joint_position")
+
+
+def test_manager_rejects_contract_that_does_not_match_action_class() -> None:
+    """A configured semantic contract cannot relabel another action class."""
+    env = make_action_env(num_envs=1, joint_names=("joint_0",))
+    cfg = ActionTermCfg(
+        func=JointVelocityAction,
+        contract="joint_position.absolute@1",
+        params={"part_name": "arm"},
+    )
+
+    with pytest.raises(ValueError, match="does not match implementation"):
+        ActionManager({"joint_position": cfg}, env)
+
+
+def test_unbounded_clip_preserves_legacy_default_position_semantics() -> None:
+    """An explicit null clip keeps raw history and targets unbounded."""
+    env = make_action_env(num_envs=1, joint_names=("joint_0",))
+    env.robot.cfg.init_qpos = [0.2]
+    cfg = ActionTermCfg(
+        func=DefaultJointPositionAction,
+        params={"part_name": "arm", "offset": 0.2, "scale": 0.5, "clip": None},
+    )
+    manager = ActionManager({"joint_position": cfg}, env)
+    term = manager.get_term("joint_position")
+
+    manager.process_action(torch.tensor([[2.0]]))
+
+    torch.testing.assert_close(term.raw_actions, torch.tensor([[2.0]]))
+    torch.testing.assert_close(term.processed_actions, torch.tensor([[1.2]]))
+    np.testing.assert_array_equal(term.action_space.low, np.array([-np.inf]))
+    np.testing.assert_array_equal(term.action_space.high, np.array([np.inf]))
+
+    manager.process_action(torch.tensor([[-3.0]]))
+    torch.testing.assert_close(term.previous_raw_actions, torch.tensor([[2.0]]))

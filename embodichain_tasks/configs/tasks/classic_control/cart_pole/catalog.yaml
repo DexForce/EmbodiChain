@@ -1,0 +1,12 @@
+task_key: cart_pole
+title: Cart Pole
+summary: Balance a pole on a cart with the classic control environment.
+tags:
+- classic_control
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.yaml
+  json:
+    config: env.json

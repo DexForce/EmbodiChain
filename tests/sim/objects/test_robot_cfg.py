@@ -16,14 +16,18 @@
 from __future__ import annotations
 
 import enum
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pytest
+import torch
 
 from embodichain.lab.sim.cfg import (
     ArticulationRootPropertiesCfg,
     CollisionPropertiesCfg,
     JointDrivePropertiesCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonRigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
     RobotCfg,
 )
@@ -437,9 +441,268 @@ def test_robotcfg_to_dict_roundtrip():
 
 
 from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
+from embodichain.lab.sim.robots import AlohaMiniCfg, TianjiMarvinCfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
+
+
+def test_aloha_mini_control_parts_match_source_joints():
+    cfg = AlohaMiniCfg.from_dict({})
+    assert cfg.uid == "AlohaMini"
+    assert cfg.urdf_cfg is None
+    assert cfg.fpath.endswith("AlohaMini/alohamini2pro.urdf")
+    assert {part: len(joints) for part, joints in cfg.control_parts.items()} == {
+        "left_arm": 6,
+        "right_arm": 6,
+        "left_hand": 1,
+        "right_hand": 1,
+        "torso": 1,
+    }
+    assert cfg.control_parts["torso"] == ["vertical_move"]
+    assert cfg.control_parts["left_hand"] == ["left_gripper"]
+    assert cfg.control_parts["right_hand"] == ["right_gripper"]
+    source = ET.parse(cfg.fpath).getroot()
+    movable_joints = {
+        joint.get("name")
+        for joint in source.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    controlled = [joint for joints in cfg.control_parts.values() for joint in joints]
+    assert len(controlled) == len(set(controlled))
+    assert set(controlled) <= movable_joints
+    assert movable_joints - set(controlled) == {
+        "root_x_axis_joint",
+        "root_y_axis_joint",
+        "root_z_rotation_joint",
+        "wheel1_joint",
+        "wheel2_joint",
+        "wheel3_joint",
+    }
+
+
+def test_aloha_mini_overrides_and_roundtrip():
+    cfg = AlohaMiniCfg.from_dict(
+        {
+            "uid": "aloha_mini",
+            "init_pos": [0.0, 0.0, 0.2],
+            "joint_drive_props": {"stiffness": {"torso": 2e4}},
+            "solver_cfg": {"left_arm": {"num_samples": 8}},
+        }
+    )
+    assert cfg.uid == "aloha_mini"
+    assert cfg.joint_drive_props.stiffness["torso"] == 2e4
+    assert cfg.joint_drive_props.stiffness["left_arm"] == 7e4
+    assert cfg.solver_cfg["left_arm"].num_samples == 8
+    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert AlohaMiniCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+def test_aloha_mini_serial_chains_match_control_joint_order():
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(chains) == set(cfg.control_parts)
+    for part, chain in chains.items():
+        assert chain.get_joint_parameter_names() == cfg.control_parts[part]
+
+    # Torso motion is local +Z and must not contain the planar base joints.
+    torso = chains["torso"]
+    poses = torso.forward_kinematics(torch.tensor([[0.0], [0.1]])).get_matrix()
+    torch.testing.assert_close(
+        poses[1, :3, 3] - poses[0, :3, 3], torch.tensor([0.0, 0.0, 0.1])
+    )
+
+
+def test_aloha_mini_solvers_use_local_frames_and_source_tcp():
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+
+    cfg = AlohaMiniCfg.from_dict({})
+    chains = cfg.build_pk_serial_chain()
+    assert set(cfg.solver_cfg) == {"left_arm", "right_arm", "torso"}
+    for part, solver_cfg in cfg.solver_cfg.items():
+        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert solver_cfg.is_only_position_constraint == (part == "torso")
+        if part.endswith("_arm"):
+            side = part.removesuffix("_arm")
+            assert solver_cfg.root_link_name == f"{side}_Base"
+            assert solver_cfg.end_link_name == f"{side}_tcp"
+        solver_cfg.urdf_path = cfg.fpath
+        solver_cfg.joint_names = cfg.control_parts[part]
+        solver = solver_cfg.init_solver(device=torch.device("cpu"))
+        assert solver.dof == len(cfg.control_parts[part])
+        qpos = torch.zeros((1, solver.dof))
+        torch.testing.assert_close(
+            solver.get_fk(qpos), chains[part].forward_kinematics(qpos).get_matrix()
+        )
+
+
+def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
+    cfg = AlohaMiniCfg.from_dict({})
+    source = ET.parse(cfg.fpath)
+    torso_joint = source.getroot().find("joint[@name='vertical_move']")
+    torso_joint.find("origin").set("xyz", "0 0 0.25")
+    overridden_path = tmp_path / "aloha_mini.urdf"
+    source.write(overridden_path)
+    cfg = AlohaMiniCfg.from_dict({"fpath": str(overridden_path)})
+    chain = cfg.build_pk_serial_chain()["torso"]
+    pose = chain.forward_kinematics(torch.zeros((1, 1))).get_matrix()
+    assert pose[0, 2, 3].item() == pytest.approx(0.25)
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    filename = "robot_with_ee_acd.urdf" if with_gripper else "robot_acd.urdf"
+    assert cfg.uid == "TianjiMarvin"
+    assert cfg.fpath.endswith(f"TianjiMarvin/{filename}")
+    assert cfg.urdf_cfg is None
+    expected_dofs = {"left_arm": 7, "right_arm": 7}
+    if with_gripper:
+        expected_dofs.update(left_hand=2, right_hand=2)
+    assert {
+        part: len(joints) for part, joints in cfg.control_parts.items()
+    } == expected_dofs
+    source = ET.parse(cfg.fpath).getroot()
+    movable_joints = {
+        joint.get("name")
+        for joint in source.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    controlled = [joint for joints in cfg.control_parts.values() for joint in joints]
+    assert len(controlled) == len(set(controlled))
+    assert set(controlled) == movable_joints
+    for side in ("left", "right"):
+        if with_gripper:
+            leader, follower = cfg.control_parts[f"{side}_hand"]
+            mimic = source.find(f"joint[@name='{follower}']/mimic")
+            assert mimic.get("joint") == leader
+            assert float(mimic.get("multiplier")) == 1.0
+    for prop in ("stiffness", "damping", "max_effort"):
+        assert set(getattr(cfg.joint_drive_props, prop)) == set(expected_dofs)
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_overrides_and_roundtrip(with_gripper):
+    cfg = TianjiMarvinCfg.from_dict(
+        {
+            "with_gripper": with_gripper,
+            "uid": "marvin",
+            "joint_drive_props": {"stiffness": {"left_arm": 2e4}},
+            "solver_cfg": {"left_arm": {"num_samples": 8}},
+        }
+    )
+    cfg.validate()
+    assert cfg.with_gripper is with_gripper
+    assert cfg.uid == "marvin"
+    assert cfg.joint_drive_props.stiffness["left_arm"] == 2e4
+    assert cfg.joint_drive_props.stiffness["right_arm"] == 7e4
+    assert cfg.solver_cfg["left_arm"].num_samples == 8
+    assert cfg.solver_cfg["right_arm"].num_samples == 30
+    assert cfg.root_props.fixed_base
+    assert TianjiMarvinCfg.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+@pytest.mark.parametrize("use_link_frame", [False, True])
+def test_tianji_marvin_serial_chains_and_solvers_match_source(
+    with_gripper, use_link_frame
+):
+    from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
+
+    init_dict = {"with_gripper": with_gripper}
+    if use_link_frame:
+        init_dict["solver_cfg"] = {
+            part: {"tcp": np.eye(4).tolist()} for part in ("left_arm", "right_arm")
+        }
+    cfg = TianjiMarvinCfg.from_dict(init_dict)
+    # Documented end-link-to-TCP transform for both variants.
+    expected_tcp = (
+        torch.eye(4)
+        if use_link_frame
+        else torch.tensor([[0, 0, 1, 0.13], [0, 1, 0, 0], [-1, 0, 0, 0], [0, 0, 0, 1]])
+    )
+    chains = cfg.build_pk_serial_chain()
+    assert set(chains) == set(cfg.solver_cfg) == {"left_arm", "right_arm"}
+    for part, chain in chains.items():
+        assert chain.get_joint_parameter_names() == cfg.control_parts[part]
+        side = part.removesuffix("_arm")
+        solver_cfg = cfg.solver_cfg[part]
+        assert isinstance(solver_cfg, PytorchSolverCfg)
+        assert solver_cfg.root_link_name == f"{side}_arm_base"
+        assert solver_cfg.end_link_name == (
+            f"{side}_hand_tool_link" if with_gripper else f"{side}_ee"
+        )
+        solver_cfg.urdf_path = cfg.fpath
+        solver_cfg.joint_names = cfg.control_parts[part]
+        solver = solver_cfg.init_solver(device=torch.device("cpu"))
+        assert solver.dof == 7
+        qpos = torch.tensor([[0.1, 0.2, -0.1, -0.3, 0.2, 0.1, -0.2]])
+        tcp = torch.as_tensor(solver_cfg.tcp, dtype=qpos.dtype)
+        torch.testing.assert_close(tcp, expected_tcp)
+        expected_pose = chain.forward_kinematics(qpos).get_matrix() @ expected_tcp
+        torch.testing.assert_close(solver.get_fk(qpos), expected_pose)
+        success, solved_qpos = solver.get_ik(expected_pose, qpos_seed=qpos)
+        assert bool(success.all())
+        torch.testing.assert_close(
+            solver.get_fk(solved_qpos.reshape_as(qpos)),
+            expected_pose,
+            atol=1e-3,
+            rtol=0,
+        )
+
+
+@pytest.mark.parametrize("with_gripper", [True, False])
+def test_tianji_marvin_pk_chains_follow_overridden_asset(with_gripper, tmp_path):
+    cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+    qpos = torch.zeros((1, 7))
+    original_pose = cfg.build_pk_serial_chain()["left_arm"].forward_kinematics(qpos)
+    source = ET.parse(cfg.fpath)
+    shoulder = source.getroot().find("joint[@name='SHOULDER_PITCH_L_J1']/origin")
+    xyz = [float(value) for value in shoulder.get("xyz").split()]
+    xyz[2] += 0.25
+    shoulder.set("xyz", " ".join(str(value) for value in xyz))
+    overridden_path = tmp_path / "marvin.urdf"
+    source.write(overridden_path)
+    cfg = TianjiMarvinCfg.from_dict(
+        {"with_gripper": with_gripper, "fpath": str(overridden_path)}
+    )
+    pose = cfg.build_pk_serial_chain()["left_arm"].forward_kinematics(qpos)
+    torch.testing.assert_close(
+        pose.get_matrix()[0, :3, 3] - original_pose.get_matrix()[0, :3, 3],
+        torch.tensor([0.0, 0.0, 0.25]),
+    )
+
+
+@pytest.mark.parametrize("with_gripper", ["false", "true", 0, 1, None])
+def test_tianji_marvin_rejects_non_boolean_variant(with_gripper):
+    with pytest.raises(TypeError, match="with_gripper must be a boolean"):
+        TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
+
+
+def test_tianji_marvin_grippers_follow_position_targets():
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device="cpu", num_envs=1)
+    )
+    try:
+        robot = sim.add_robot(cfg=TianjiMarvinCfg.from_dict({}))
+        sim.prepare()
+        assert robot.dof == 18
+        assert len(robot.mimic_ids) == 2
+        # Move both ways within the URDF's [-0.05, 0] metre finger range.
+        for position in (-0.025, -0.01):
+            target = torch.full((1, 2), position)
+            for part in ("left_hand", "right_hand"):
+                robot.set_qpos(target, name=part, target=True)
+            sim.update(step=100)
+            for part in ("left_hand", "right_hand"):
+                torch.testing.assert_close(
+                    robot.get_qpos(name=part), target, atol=1e-3, rtol=0
+                )
+    finally:
+        sim.destroy(exit_process=False)
+        SimulationManager.flush_cleanup_queue()
 
 
 def test_cobotmagic_from_dict_and_roundtrip():
@@ -488,6 +751,20 @@ def test_specified_robots_use_portable_joint_drive_semantics(
     assert cfg.joint_drive_props.drive_type == "force"
     assert cfg.joint_drive_props.target_mode is None
     assert cfg.joint_drive_props._resolve_modes() == ("position_velocity", "force")
+
+
+def test_franka_panda_owns_newton_fingertip_contact_defaults() -> None:
+    cfg = FrankaPandaCfg.from_dict({})
+
+    group = cfg.link_attrs["newton_gripper_contacts"]
+    assert group.link_names_expr == ["fr3_leftfinger|fr3_rightfinger"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.condim == 4
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(400.0)
+    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
+    assert group.attrs.material_props.rolling_friction == pytest.approx(0.01)
 
 
 def test_robotcfg_save_to_file(tmp_path):

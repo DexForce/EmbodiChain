@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import os
 import random
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "apply_expansion_profile_reset",
     "replace_assets_from_group",
     "prepare_extra_attr",
     "register_entity_attrs",
@@ -69,6 +71,84 @@ __all__ = [
     "create_rigid_constraint",
     "remove_rigid_constraint",
 ]
+
+
+def apply_expansion_profile_reset(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | Sequence[int] | slice | None,
+    *,
+    cube_pose: torch.Tensor | None = None,
+    visual_registry: Any | None = None,
+    visual_assignments: Mapping[int, str] | None = None,
+    visual_seed: int = 0,
+) -> None:
+    """Apply one expansion candidate's scene and visual state at reset.
+
+    The expansion runner owns candidate enumeration and supplies the resolved
+    batch payload through the event configuration immediately before reset.
+    This event owns only the environment mutation boundary, so the same reset
+    lifecycle is used for ordinary and expansion environments.
+
+    Args:
+        env: Environment whose selected rows should be prepared.
+        env_ids: Environment rows selected by the reset lifecycle.
+        cube_pose: Optional ``(num_envs, 7)`` pose tensor in position/xyzw form.
+        visual_registry: Optional registry exposing ``apply_to_environment``.
+        visual_assignments: Row-to-profile assignments for the visual registry.
+        visual_seed: Base seed passed to the visual registry.
+    """
+    if cube_pose is None and visual_registry is None:
+        return
+
+    num_envs = int(env.num_envs)
+    if env_ids is None:
+        row_ids = torch.arange(num_envs, dtype=torch.long)
+    elif isinstance(env_ids, slice):
+        start, stop, step = env_ids.indices(num_envs)
+        row_ids = torch.arange(start, stop, step, dtype=torch.long)
+    else:
+        row_ids = torch.as_tensor(env_ids, dtype=torch.long).flatten()
+    if row_ids.numel() == 0:
+        return
+    if torch.any(row_ids < 0) or torch.any(row_ids >= num_envs):
+        raise ValueError("expansion reset env_ids are outside the environment range")
+
+    if cube_pose is not None:
+        if cube_pose.ndim != 2 or cube_pose.shape[1] != 7:
+            raise ValueError("cube_pose must have shape (N, 7)")
+        if cube_pose.shape[0] == num_envs:
+            selected_pose = cube_pose.index_select(
+                0, row_ids.to(device=cube_pose.device)
+            )
+        elif cube_pose.shape[0] == row_ids.numel():
+            selected_pose = cube_pose
+        else:
+            raise ValueError("cube_pose rows must match num_envs or selected env_ids")
+        cube = env.sim.get_rigid_object("cube")
+        if cube is None:
+            raise ValueError("expansion reset requires a rigid object named 'cube'")
+        env_device = getattr(env, "device", None)
+        if not isinstance(env_device, (torch.device, str)):
+            env_device = selected_pose.device
+        pose_env_ids = row_ids.to(device=env_device)
+        cube.set_local_pose(selected_pose, env_ids=pose_env_ids)
+
+    if visual_registry is not None:
+        if visual_assignments is None:
+            raise ValueError("visual_assignments are required with visual_registry")
+        selected_ids = {int(item) for item in row_ids.tolist()}
+        assignments = {
+            int(env_id): profile_id
+            for env_id, profile_id in visual_assignments.items()
+            if int(env_id) in selected_ids
+        }
+        if not assignments:
+            raise ValueError("visual_assignments contain no selected environment rows")
+        visual_registry.apply_to_environment(
+            env,
+            assignments,
+            seed=visual_seed,
+        )
 
 
 class replace_assets_from_group(Functor):
@@ -436,7 +516,8 @@ def register_entity_pose(
                     }
                 )
                 if compute_pose_object_to_arena:
-                    pose_arena = torch.bmm(entity_pose, entity_extra_attr_val)
+                    # matmul broadcasts a static (1, 4, 4) pose over all envs; bmm doesn't.
+                    pose_arena = torch.matmul(entity_pose, entity_extra_attr_val)
                     update_registration_dict.update(
                         {
                             entity_cfg.uid
@@ -550,11 +631,13 @@ def get_pose(
             return None
         entity_cfg.control_parts = control_parts
         control_part = control_parts[0]
-        control_part_qpos = entity.get_qpos()[
-            env_ids, entity.get_joint_ids(control_part)
+        # Select envs first, then joints: indexing with both at once pairs the
+        # two index lists element-wise instead of taking every joint per env.
+        control_part_qpos = entity.get_qpos()[env_ids][
+            :, entity.get_joint_ids(control_part)
         ]
         entity_pose = entity.compute_fk(
-            control_part_qpos, name=control_part, to_matrix=to_matrix
+            control_part_qpos, name=control_part, to_matrix=to_matrix, env_ids=env_ids
         )  # NOTE: now compute_fk returns arena pose
         entity_pose_register_name = control_part + "_pose"
     else:

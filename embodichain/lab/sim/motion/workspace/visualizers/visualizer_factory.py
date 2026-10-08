@@ -42,6 +42,10 @@ from embodichain.lab.sim.motion.workspace.visualizers.axis_visualizer import (
     AxisVisualizer,
 )
 
+from embodichain.lab.sim.motion.workspace.visualizers.manipulability_visualizer import (
+    ManipulabilityVisualizer,
+)
+
 from embodichain.utils import logger
 
 __all__ = [
@@ -114,6 +118,9 @@ class VisualizerFactory:
         self._visualizers[VisualizationType.VOXEL.value] = VoxelVisualizer
         self._visualizers[VisualizationType.SPHERE.value] = SphereVisualizer
         self._visualizers[VisualizationType.AXIS.value] = AxisVisualizer
+        self._visualizers[VisualizationType.MANIPULABILITY.value] = (
+            ManipulabilityVisualizer
+        )
 
         logger.log_debug(
             f"Registered built-in visualizers: {list(self._visualizers.keys())}"

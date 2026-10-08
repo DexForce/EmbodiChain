@@ -32,6 +32,7 @@ UV seams and render detail.
 .. autosummary::
 
    AssetPhysicsMode
+   DenoisingMode
    MeshCollisionApproximation
 
 .. rubric:: Classes
@@ -39,6 +40,9 @@ UV seams and render detail.
 .. autosummary::
 
    RenderCfg
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
    PhysicsBackendCfg
    DefaultPhysicsCfg
    NewtonPhysicsCfg
@@ -104,3 +108,67 @@ Constructors and ``from_dict()`` accept only the current fields. Surface-element
 properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
+
+Rendering configuration module
+------------------------------
+
+Rendering types live in ``embodichain.lab.sim.cfg.rendering``. The public
+``dlss`` path maps to DLSS Ray Reconstruction and ``nrd`` maps to standalone
+NRD RELAX.
+
+.. currentmodule:: embodichain.lab.sim.cfg.rendering
+
+.. autosummary::
+
+   DenoisingMode
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
+   RenderCfg
+
+Physics configuration module
+----------------------------
+
+Physics backend types live in ``embodichain.lab.sim.cfg.physics``. The legacy
+``embodichain.lab.sim.cfg.simulation`` module remains a compatibility facade.
+For manager-owned Newton steps, ``sync_to_renderer=None`` or ``False`` publishes
+only for visual consumers; ``True`` additionally requests publication on steps
+without consumers.
+
+.. currentmodule:: embodichain.lab.sim.cfg.physics
+
+.. autosummary::
+
+   GPUMemoryCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonCollisionPipelineCfg
+   NewtonPhysicsCfg
+   physics_cfg_for_backend
+   physics_backend_from_cfg
+   validate_physics_cfg
+
+Compatibility facade
+--------------------
+
+The historical ``embodichain.lab.sim.cfg.simulation`` module re-exports the
+rendering and physics configuration types for callers that have not migrated
+to the split modules.
+
+.. currentmodule:: embodichain.lab.sim.cfg.simulation
+
+.. autosummary::
+
+   DenoisingMode
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
+   RenderCfg
+   GPUMemoryCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonCollisionPipelineCfg
+   NewtonPhysicsCfg
+   physics_cfg_for_backend
+   physics_backend_from_cfg
+   validate_physics_cfg

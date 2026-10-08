@@ -29,6 +29,31 @@ not write drive targets. Set this field to ``None`` to opt out or select
 prevents automatic recreation. ``GizmoCfg(ik_start_enabled=True)`` activates
 native IK on the first update with an open window, as used by the robot tutorial.
 
+Physics and visual consumption
+------------------------------
+
+State-only headless stepping does not publish Newton state to the renderer.
+An open native window, camera groups, due recording and due Viser captures
+request publication when they consume state. ``render_frame()`` shares that
+publication within one read-only consumption phase. Gym arranges this phase
+after physics and interval events automatically. Standalone callers combining
+camera observations with recording or Viser can use:
+
+.. code-block:: python
+
+   sim.update(physics_dt, step=1, render_final_step=False)
+   # Complete direct state edits before entering the read-only frame.
+   with sim.render_frame():
+       sim.render_camera_group(camera_group_ids)
+       # Due recording and Viser captures run on context exit.
+
+The phase never advances physics and never caches publication across frames.
+Independent camera/capture calls request fresh publication. If state changes
+inside a frame, call ``sync_render_state()`` explicitly before further reads.
+Opening a window and rendering while paused also request publication. Native
+render-thread recording consumes already-published state without invoking the
+blocking physics-to-render bridge from that thread.
+
 .. rubric:: Classes
 
 .. autosummary::

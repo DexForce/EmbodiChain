@@ -15,8 +15,13 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 | `destroy()` | Stops visualization before queuing deferred simulation cleanup |
 
 During explicit `SimulationManager.update()`, each physics step increments the
-visualization step/time counters and attempts a rate-limited capture. A topology
-revision mismatch publishes a fresh manifest before its first matching frame.
+visualization step/time counters and refreshes marker attachments after the
+optional `after_substep` observer. `render_frame()` shares state publication
+across camera observations, recording and rate-limited Viser capture. With
+`render_final_step=False`, the final capture waits for that frame; state writes
+between the last substep and the frame are included when render state is
+published, including refreshed marker poses. A topology revision mismatch
+publishes a fresh manifest before its first matching frame.
 `BaseEnv.reset()` also requests a forced capture after resetting scene state.
 Drawing markers and capturing visualization do not advance physics; interactive
 loops call `SimulationManager.update(step=1)` to process Gizmos and step the world.
@@ -42,8 +47,11 @@ Marker groups publish a complete detached snapshot after `update()`,
 meshes immediately. Browser groups are included as mesh overlays and may force
 a frame only when the currently published manifest matches the manager's
 topology revision. Marker publication never calls `prepare()` or synchronizes
-physics; a dirty topology defers the browser marker update until the next
-explicit host capture or simulation update.
+physics. An unpublished host substep defers browser marker capture to
+`render_frame()`, after the observer and all attachment refreshes. Paused edits
+still publish immediately when no frame is pending. A dirty topology defers
+the browser marker update until the next explicit host capture or simulation
+update.
 
 Manager add methods mark topology dirty for rigid objects, rigid-object groups,
 volume/surface deformables, robots, articulations, and `Camera` sensors. Supported

@@ -15,8 +15,10 @@ embodichain.lab.task_program.integrations.simulation
       ControlPartCommandPreset
       ControlPartEndpointBinding
       ControlPartResourceBinding
+      RigidizedArticulationAntipodalGraspBinding
       SimulationArticulationBinding
       SimulationArticulationLinkBinding
+      SimulationRigidizedArticulationObjectBinding
       SimulationRigidObjectBinding
       SimulationRobotSkillProfileBinding
       SimulationSceneBinding

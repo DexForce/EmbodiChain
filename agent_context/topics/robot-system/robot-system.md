@@ -52,6 +52,13 @@ Mimic IDs and parents use that same final state order; select active-only IDs
 explicitly when needed. Shared mimic/actuator lowering belongs to
 [simulation](../simulation-system/simulation-system.md).
 
+Action terms resolve `control_parts` with `remove_mimic=True` and own only those
+independent joint IDs. Separate arm and gripper terms may share one robot but
+cannot overlap the same command type and joint. Parallel grippers expose one
+policy scalar while mapping it to all independent finger commands; a future
+tendon or synergy action should use its own resource namespace rather than
+pretending tendon indices are joint IDs.
+
 With control parts, solver configuration is a dictionary whose keys resolve
 against part names (including patterns); it need not configure every part.
 `Robot.init_solver()` fills absent solver joint names from the selected part

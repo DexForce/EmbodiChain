@@ -27,7 +27,7 @@ from dexsim.engine.newton_physics import (
     NewtonCollisionPipelineCfg as SpawnNewtonCollisionPipelineCfg,
 )
 from dexsim.spawn import DexsimCollisionDesc, DexsimPhysicsDesc, NewtonCollisionDesc
-from dexsim.types import DenoiserType, Renderer, ToneMappingType
+from dexsim.types import RTRenderMode, Renderer, ToneMappingType
 
 from embodichain.lab.sim.cfg import (
     ArticulationCfg,
@@ -69,6 +69,19 @@ def test_cfg_package_preserves_the_public_facade() -> None:
     assert not hasattr(sim_cfg, "PhysicsCfg")
     assert sim_cfg.RigidBodyPhysicsCfg is LeafRigidBodyPhysicsCfg
     assert sim_cfg.RobotCfg is LeafRobotCfg
+
+
+def test_simulation_cfg_legacy_module_facades_split_domains() -> None:
+    """Rendering and physics configs have dedicated modules with old aliases."""
+    from embodichain.lab.sim.cfg import physics, rendering, simulation
+
+    assert sim_cfg.RenderCfg is rendering.RenderCfg
+    assert sim_cfg.DenoisingCfg is rendering.DenoisingCfg
+    assert sim_cfg.NRDCfg is rendering.NRDCfg
+    assert sim_cfg.NewtonPhysicsCfg is physics.NewtonPhysicsCfg
+    assert sim_cfg.GPUMemoryCfg is physics.GPUMemoryCfg
+    assert simulation.RenderCfg is rendering.RenderCfg
+    assert simulation.NewtonPhysicsCfg is physics.NewtonPhysicsCfg
 
 
 def test_articulation_cfg_defaults_to_preserving_asset_physics() -> None:
@@ -274,6 +287,254 @@ def test_robot_cfg_merge_preserves_typed_backend_property_configs() -> None:
     assert merged.attrs.material_props.kd == 50.0
 
 
+def test_robot_cfg_merge_preserves_sparse_link_physics_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                        torsional_friction=0.1,
+                    ),
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "material_props": {
+                            "backend": "newton",
+                            "kd": 800.0,
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    group = merged.link_attrs["gripper_contacts"]
+    assert group.link_names_expr == ["finger_.*"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.condim == 4
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(800.0)
+    assert group.attrs.material_props.torsional_friction == pytest.approx(0.1)
+
+
+def test_robot_cfg_merge_portable_link_fields_preserve_newton_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(condim=4),
+                    material_props=NewtonRigidBodyMaterialCfg(
+                        ke=40000.0,
+                        kd=400.0,
+                    ),
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "collision_props": {"collision_enabled": False},
+                        "material_props": {"dynamic_friction": 0.8},
+                    }
+                }
+            }
+        },
+    )
+
+    group = merged.link_attrs["gripper_contacts"]
+    assert isinstance(group.attrs.collision_props, NewtonCollisionPropertiesCfg)
+    assert group.attrs.collision_props.collision_enabled is False
+    assert group.attrs.collision_props.condim == 4
+    assert group.attrs.collision_props.contact_offset is None
+    assert group.attrs.collision_props.rest_offset is None
+    assert isinstance(group.attrs.material_props, NewtonRigidBodyMaterialCfg)
+    assert group.attrs.material_props.dynamic_friction == pytest.approx(0.8)
+    assert group.attrs.material_props.ke == pytest.approx(40000.0)
+    assert group.attrs.material_props.kd == pytest.approx(400.0)
+
+
+def test_robot_cfg_merge_preserves_explicit_link_contact_envelope() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(
+                        contact_offset=0.009,
+                        rest_offset=0.003,
+                    )
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {"collision_props": {"collision_enabled": False}}
+                }
+            }
+        },
+    )
+
+    collision_props = merged.link_attrs["gripper_contacts"].attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.009)
+    assert collision_props.rest_offset == pytest.approx(0.003)
+
+
+def test_robot_cfg_merge_preserves_top_level_newton_contact_envelope() -> None:
+    base = RobotCfg(
+        attrs=RigidBodyPhysicsCfg(
+            collision_props=NewtonCollisionPropertiesCfg(
+                contact_offset=0.009,
+                rest_offset=0.003,
+            )
+        )
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {"attrs": {"collision_props": {"collision_enabled": False}}},
+    )
+
+    collision_props = merged.attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.009)
+    assert collision_props.rest_offset == pytest.approx(0.003)
+
+
+def test_robot_cfg_merge_applies_explicit_link_contact_envelope_override() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(
+                link_names_expr=["finger_.*"],
+                attrs=RigidBodyPhysicsCfg(
+                    collision_props=NewtonCollisionPropertiesCfg(
+                        contact_offset=0.009,
+                        rest_offset=0.003,
+                    )
+                ),
+            )
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "gripper_contacts": {
+                    "attrs": {
+                        "collision_props": {
+                            "contact_offset": 0.006,
+                            "rest_offset": 0.002,
+                        }
+                    }
+                }
+            }
+        },
+    )
+
+    collision_props = merged.link_attrs["gripper_contacts"].attrs.collision_props
+    assert collision_props.contact_offset == pytest.approx(0.006)
+    assert collision_props.rest_offset == pytest.approx(0.002)
+
+
+def test_robot_cfg_merge_adds_link_physics_group_without_replacing_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {
+            "link_attrs": {
+                "tool_contacts": {
+                    "link_names_expr": ["tool"],
+                    "attrs": {
+                        "material_props": {
+                            "backend": "newton",
+                            "ke": 1000.0,
+                        }
+                    },
+                }
+            }
+        },
+    )
+
+    assert set(merged.link_attrs) == {"gripper_contacts", "tool_contacts"}
+    assert merged.link_attrs["tool_contacts"].link_names_expr == ["tool"]
+
+
+def test_robot_cfg_merge_empty_link_physics_mapping_is_noop() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(base, {"link_attrs": {}})
+
+    assert set(merged.link_attrs) == {"gripper_contacts"}
+
+
+def test_robot_cfg_merge_empty_link_physics_mapping_preserves_none() -> None:
+    base = RobotCfg(link_attrs=None)
+
+    merged = merge_robot_cfg(base, {"link_attrs": {}})
+
+    assert merged.link_attrs is None
+
+
+def test_robot_cfg_merge_null_link_physics_group_removes_only_that_group() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"]),
+            "tool_contacts": LinkPhysicsOverrideCfg(link_names_expr=["tool"]),
+        }
+    )
+
+    merged = merge_robot_cfg(
+        base,
+        {"link_attrs": {"gripper_contacts": None}},
+    )
+
+    assert set(merged.link_attrs) == {"tool_contacts"}
+
+
+def test_robot_cfg_merge_null_link_physics_mapping_clears_defaults() -> None:
+    base = RobotCfg(
+        link_attrs={
+            "gripper_contacts": LinkPhysicsOverrideCfg(link_names_expr=["finger_.*"])
+        }
+    )
+
+    merged = merge_robot_cfg(base, {"link_attrs": None})
+
+    assert merged.link_attrs is None
+
+
 def test_rigid_physics_uses_one_slot_per_physical_concept() -> None:
     """Backend blocks and geometry cooking are not parallel physics owners."""
     assert {item.name for item in fields(RigidBodyPhysicsCfg)} == {
@@ -333,6 +594,10 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "collision_filter_parent",
         "is_visible",
         "is_site",
+        # DexSim 0.5.1rc1 native loader/ordering controls remain outside the
+        # backend-neutral EmbodiChain collision configuration.
+        "priority",
+        "use_native_mesh_loader",
     }
     assert (
         newton_fields == names(NewtonCollisionDesc) - intentionally_unowned_shape_fields
@@ -907,22 +1172,58 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_friction_every_iteration"] is True
 
 
-def test_render_cfg_applies_default_denoiser() -> None:
-    """Rendering always uses the default OptiX denoiser."""
+def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
+    """Default rendering follows DexSim's DLSS RR target defaults."""
     world_config = dexsim.WorldConfig()
 
     RenderCfg(renderer="hybrid").apply_to_dexsim_config(world_config)
 
-    assert world_config.raytrace_config.open_denoise is True
-    assert world_config.raytrace_config.denoiser_type == DenoiserType.OPTIX
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.DLSS_RR
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.DLSS_RR
 
 
-def test_render_cfg_does_not_expose_denoiser_options() -> None:
-    """Denoiser implementation details are not part of EmbodiChain's API."""
-    render_cfg = RenderCfg()
+@pytest.mark.parametrize(
+    ("mode", "native_mode"),
+    [
+        ("off", RTRenderMode.RAW),
+        ("optix", RTRenderMode.OPTIX_DENOISE),
+        ("dlss", RTRenderMode.DLSS_RR),
+        ("nrd", RTRenderMode.NRD_RELAX),
+    ],
+)
+def test_render_cfg_maps_public_denoising_modes(
+    mode: str, native_mode: RTRenderMode
+) -> None:
+    """Every public mode maps to one mutually exclusive DexSim pipeline."""
+    world_config = dexsim.WorldConfig()
+    denoising = sim_cfg.DenoisingCfg(window=mode, offscreen="off")
 
-    assert not hasattr(render_cfg, "denoiser_enabled")
-    assert not hasattr(render_cfg, "denoiser_type")
+    RenderCfg(denoising=denoising).apply_to_dexsim_config(world_config)
+
+    assert world_config.rt_pipeline_config.window.mode == native_mode
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.RAW
+
+
+@pytest.mark.parametrize(
+    "mode", ["dlss-rr", "nrd-sr", "nrd-relax", "nrd-reblur", "raw"]
+)
+def test_denoising_cfg_rejects_modes_outside_the_public_contract(mode: str) -> None:
+    """Native implementation details cannot leak into public mode values."""
+    with pytest.raises(ValueError, match="DenoisingCfg.window"):
+        sim_cfg.DenoisingCfg(window=mode)
+
+
+def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
+    """Window and offscreen cameras can choose different reconstruction paths."""
+    world_config = dexsim.WorldConfig()
+    render_cfg = RenderCfg(
+        denoising=sim_cfg.DenoisingCfg(window="optix", offscreen="nrd")
+    )
+
+    render_cfg.apply_to_dexsim_config(world_config)
+
+    assert world_config.rt_pipeline_config.window.mode == RTRenderMode.OPTIX_DENOISE
+    assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_RELAX
 
 
 def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
@@ -984,14 +1285,12 @@ def test_dlss_defaults_preserve_native_quality_resolution() -> None:
     assert converted.dlss_quality == 2
 
 
-@pytest.mark.parametrize("sr_enabled", [False, True])
-def test_dlss_upscale_switch_survives_conversion(sr_enabled: bool) -> None:
-    """The SR switch survives native conversion."""
-    converted = DLSSCfg(
-        upscale_enabled=sr_enabled,
-    ).to_dexsim_cfg(1920, 1080)
+@pytest.mark.parametrize("tiled_enabled", [False, True])
+def test_dlss_tiled_switch_survives_conversion(tiled_enabled: bool) -> None:
+    """Multi-camera tiled execution is a DLSS algorithm setting, not a mode."""
+    converted = DLSSCfg(tiled_enabled=tiled_enabled).to_dexsim_cfg(1920, 1080)
 
-    assert converted.upscale_enabled is sr_enabled
+    assert converted.tiled_enabled is tiled_enabled
 
 
 @pytest.mark.parametrize("quality", range(-1, 6))
@@ -1037,12 +1336,16 @@ def test_dlss_ratio_clamps_small_internal_dimensions() -> None:
     assert converted.render_width == converted.render_height == 1
 
 
-def test_render_cfg_instances_do_not_share_dlss_settings() -> None:
-    """Changing one rendering configuration does not alter another."""
+def test_render_cfg_instances_do_not_share_image_processing_settings() -> None:
+    """Changing nested settings on one config does not alter another."""
     first, second = RenderCfg(), RenderCfg()
-    first.dlss.dlss_enabled = False
+    first.denoising.window = "off"
+    first.dlss.tiled_enabled = False
+    first.nrd.max_accumulated_frame_num = 12
 
-    assert second.dlss.dlss_enabled is True
+    assert second.denoising.window == "dlss"
+    assert second.dlss.tiled_enabled is True
+    assert second.nrd.max_accumulated_frame_num == 30
 
 
 @pytest.mark.parametrize(
@@ -1083,8 +1386,7 @@ def test_dlss_rejects_invalid_settings(field_name: str, invalid_value: object) -
 @pytest.mark.parametrize(
     "field_name",
     [
-        "dlss_enabled",
-        "upscale_enabled",
+        "tiled_enabled",
     ],
 )
 @pytest.mark.parametrize("invalid_value", ["false", 0, 1, None])
@@ -1113,8 +1415,7 @@ def test_dlss_accepts_integer_and_float_numeric_settings(value: int | float) -> 
         ("upsample_ratio", 0.0),
         ("upsample_ratio", "2.0"),
         ("exposure_compensation", "1.0"),
-        ("dlss_enabled", "false"),
-        ("upscale_enabled", None),
+        ("tiled_enabled", "false"),
     ],
 )
 def test_dlss_conversion_revalidates_mutated_settings(
@@ -1126,3 +1427,35 @@ def test_dlss_conversion_revalidates_mutated_settings(
 
     with pytest.raises(ValueError, match=field_name):
         config.to_dexsim_cfg(1920, 1080)
+
+
+def test_nrd_settings_survive_native_conversion() -> None:
+    """EmbodiChain forwards NRD tuning without exposing native mode selection."""
+    converted = sim_cfg.NRDCfg(
+        max_accumulated_frame_num=24,
+        sh_mode_enabled=True,
+        taa_min_current_weight=0.125,
+        taa_sigma_scale=1.75,
+    ).to_dexsim_cfg()
+
+    assert converted.max_accumulated_frame_num == 24
+    assert converted.sh_mode_enabled is True
+    assert converted.taa_min_current_weight == pytest.approx(0.125)
+    assert converted.taa_sigma_scale == pytest.approx(1.75)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("max_indirect_bounces", -1),
+        ("history_confidence_probe_stride", 0),
+        ("denoising_range", 0.0),
+        ("taa_min_current_weight", 1.1),
+        ("min_blur_radius", -0.1),
+        ("sh_mode_enabled", 1),
+    ],
+)
+def test_nrd_rejects_invalid_settings(field_name: str, invalid_value: object) -> None:
+    """Malformed NRD values fail before entering the native renderer."""
+    with pytest.raises(ValueError, match=field_name):
+        sim_cfg.NRDCfg(**{field_name: invalid_value})

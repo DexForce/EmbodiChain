@@ -33,8 +33,10 @@ import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
+    DenoisingCfg,
     DLSSCfg,
     MarkerCfg,
+    NewtonPhysicsCfg,
     RenderCfg,
     RobotCfg,
     RobotPresetCfg,
@@ -68,15 +70,15 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
-@pytest.mark.parametrize("dlss_enabled", [False, True])
-def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
+@pytest.mark.parametrize("denoising_mode", ["optix", "dlss"])
+def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     renderer: str,
     headless: bool,
-    dlss_enabled: bool,
+    denoising_mode: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Headless and auto-selected renderers retain explicit DLSS configuration."""
+    """Headless and auto-selected renderers retain explicit pipeline settings."""
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _gpu_id: "hybrid",
@@ -88,8 +90,11 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
         height=480,
         render_cfg=RenderCfg(
             renderer=renderer,
+            denoising=DenoisingCfg(
+                window=denoising_mode,
+                offscreen="nrd",
+            ),
             dlss=DLSSCfg(
-                dlss_enabled=dlss_enabled,
                 dlss_quality=3,
                 target_width=1920,
                 target_height=1080,
@@ -103,7 +108,14 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
 
     world = SimulationManager._convert_sim_config(manager, config)
 
-    assert world.dlss_config.dlss_enabled is dlss_enabled
+    expected_window_mode = {
+        "optix": dexsim.types.RTRenderMode.OPTIX_DENOISE,
+        "dlss": dexsim.types.RTRenderMode.DLSS_RR,
+    }[denoising_mode]
+    assert world.rt_pipeline_config.window.mode == expected_window_mode
+    assert (
+        world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_RELAX
+    )
     assert world.dlss_config.dlss_quality == 3
     assert world.dlss_config.render_width == world.dlss_config.render_height == 0
     assert (world.win_config.width, world.win_config.height) == (640, 480)
@@ -258,6 +270,9 @@ class FakeVisualizationRuntime:
         self.stopped = False
 
     def capture(self, **kwargs: object) -> bool:
+        before_capture = kwargs.pop("before_capture", None)
+        if before_capture is not None:
+            before_capture()
         self.capture_calls.append(kwargs)
         return True
 
@@ -319,6 +334,8 @@ def _make_sim_manager(
     sim._window_camera_pose_input_control = None
     sim._env = FakeEnv()
     sim._world = FakeWorld()
+    sim.physics = DefaultPhysicsBackend(sim)
+    sim._pending_record_dt = 0.0
     sim._native_default_plane = object()
     sim._default_plane = SimpleNamespace(native=lambda: sim._native_default_plane)
     sim._visualization_runtime = None
@@ -341,6 +358,9 @@ def _make_visualization_sim_manager() -> (
     sim.profiler = Profiler(None, torch.device("cpu"))
     sim._is_initialized_gpu_physics = False
     sim._world = FakeWorld()
+    sim.physics = DefaultPhysicsBackend(sim)
+    sim._pending_record_dt = 0.0
+    sim.is_window_opened = False
     sim.prepare = MagicMock()
     sim.sync_render_state = MagicMock()
     sim._window_record_state = None
@@ -1237,6 +1257,7 @@ def test_constructor_starts_visualization_after_default_scene(
 def test_render_camera_group_syncs_state_before_rendering() -> None:
     lifecycle: list[str] = []
     sim = object.__new__(SimulationManager)
+    sim.is_window_opened = False
     sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
     sim._world = SimpleNamespace(
         render_camera_group=lambda _group_ids: lifecycle.append("render")
@@ -1246,6 +1267,187 @@ def test_render_camera_group_syncs_state_before_rendering() -> None:
     sim.render_camera_group([3])
 
     assert lifecycle == ["sync", "render", "summary"]
+
+
+def test_empty_camera_group_does_not_publish_render_state() -> None:
+    """State-only observations must not cross the physics-to-render bridge."""
+    sim = object.__new__(SimulationManager)
+    sim.is_window_opened = False
+    sim.sync_render_state = MagicMock()
+    sim._world = SimpleNamespace(render_camera_group=MagicMock())
+    sim._log_scene_summary = MagicMock()
+
+    sim.render_camera_group([])
+
+    sim.sync_render_state.assert_not_called()
+    sim._world.render_camera_group.assert_not_called()
+    sim._log_scene_summary.assert_called_once_with()
+
+
+def test_empty_camera_group_still_publishes_for_an_open_window() -> None:
+    sim = object.__new__(SimulationManager)
+    sim.is_window_opened = True
+    sim.sync_render_state = MagicMock()
+    sim._world = SimpleNamespace(render_camera_group=MagicMock())
+    sim._log_scene_summary = MagicMock()
+
+    sim.render_camera_group([])
+
+    sim.sync_render_state.assert_called_once_with()
+    sim._world.render_camera_group.assert_not_called()
+
+
+def test_recording_and_viser_share_substep_publication() -> None:
+    sim, runtime = _make_visualization_sim_manager()
+    sim._window_record_state = _WindowRecordState(
+        time_step=0.01,
+        max_memory_bytes=1024,
+        output_dir="unused",
+        video_name="unused",
+        save_kwargs={},
+        capture_from_sim_update=True,
+    )
+    sim._capture_window_record_frame = MagicMock()
+
+    sim.update(0.01, 1)
+
+    sim.sync_render_state.assert_called_once_with()
+    sim._capture_window_record_frame.assert_called_once()
+    assert len(runtime.capture_calls) == 1
+
+
+def _make_render_frame_sim(*, window=False, viser=False, automatic_sync=False):
+    """Track published state through real manager/backend scheduling methods."""
+    sim, runtime = _make_visualization_sim_manager()
+    sim.sim_config.physics_cfg = NewtonPhysicsCfg(sync_to_renderer=automatic_sync)
+    sim.sim_config.visualization.backend = "viser" if viser else "none"
+    sim.physics = NewtonPhysicsBackend(sim)
+    sim.is_window_opened = window
+    sim._log_scene_summary = lambda: None
+    sim._visualization_manifest_topology_revision = sim._visualization_topology_revision
+    state = {"value": 0, "published": None}
+    publications = []
+    rendered = []
+    sim._spawn_scene = SimpleNamespace(
+        builder=SimpleNamespace(is_finalized=True, result=object())
+    )
+
+    def advance(_dt, *, sync_to_dexsim):
+        # Automatic publication must not duplicate the manager's frame.
+        assert sync_to_dexsim is False
+        state["value"] += 1
+
+    def publish(_result):
+        state["published"] = state["value"]
+        publications.append(state["value"])
+
+    sim._world.update = advance
+    sim._world.render_camera_group = lambda ids: rendered.append(state["published"])
+    sim.physics.sync_render_state = publish
+    sim.sync_render_state = SimulationManager.sync_render_state.__get__(sim)
+    return sim, runtime, state, publications, rendered
+
+
+@pytest.mark.parametrize("automatic_sync", [None, False, True])
+@pytest.mark.parametrize("window", [False, True])
+def test_window_publication_respects_consumers_with_all_newton_policies(
+    automatic_sync, window
+):
+    sim, _, _, publications, rendered = _make_render_frame_sim(
+        window=window, automatic_sync=automatic_sync
+    )
+    for _ in range(3):
+        sim.update(0.01, 1, render_final_step=False)
+        with sim.render_frame():
+            sim.render_camera_group([])
+    assert publications == ([1, 2, 3] if window or automatic_sync is True else [])
+    assert rendered == []
+
+
+@pytest.mark.parametrize("camera", [False, True])
+@pytest.mark.parametrize("record", [False, True])
+@pytest.mark.parametrize("viser", [False, True])
+def test_final_substep_consumers_share_publication(camera, record, viser):
+    sim, runtime, state, publications, rendered = _make_render_frame_sim(viser=viser)
+    recorded = []
+    if record:
+        sim._window_record_state = _WindowRecordState(
+            time_step=0.01,
+            max_memory_bytes=1024,
+            output_dir="unused",
+            video_name="unused",
+            save_kwargs={},
+            capture_from_sim_update=True,
+        )
+        sim._capture_window_record_frame = lambda _: recorded.append(state["published"])
+    sim.update(0.01, 3, render_final_step=False)
+    # Interval events may directly edit state after physics. All final-frame
+    # consumers must see this edit, not a cached final-substep publication.
+    state["value"] = 30
+    with sim.render_frame():
+        sim.render_camera_group([3] if camera else [])
+    expected = [1, 2] if record or viser else []
+    if camera or record or viser:
+        expected += [30]
+    assert publications == expected
+    assert rendered == ([30] if camera else [])
+    assert recorded == ([1, 2, 30] if record else [])
+    assert len(runtime.capture_calls) == (3 if viser else 0)
+
+
+def test_render_frames_and_independent_reads_refresh_direct_state_writes():
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    for value in (4, 7):
+        state["value"] = value  # A reset/pose write without a physics step.
+        with sim.render_frame():
+            sim.render_camera_group([1])
+            sim.render_camera_group([2])
+    state["value"] = 9
+    sim.render_camera_group([1])
+    state["value"] = 12
+    sim.render_camera_group([1])
+    assert publications == [4, 7, 9, 12]
+    assert rendered == [4, 4, 7, 7, 9, 12]
+
+
+def test_explicit_publication_inside_frame_refreshes_after_state_edit():
+    sim, _, state, publications, rendered = _make_render_frame_sim()
+    with sim.render_frame():
+        sim.render_camera_group([1])
+        state["value"] = 5
+        sim.sync_render_state()
+        sim.render_camera_group([1])
+    assert publications == [0, 5]
+    assert rendered == [0, 5]
+
+
+def test_failed_frame_discards_publication_and_preserves_record_cadence():
+    sim, _, state, publications, _ = _make_render_frame_sim()
+    sim.update(0.01, 1, render_final_step=False)
+    with pytest.raises(ValueError, match="observation failed"):
+        with sim.render_frame():
+            sim.render_camera_group([1])
+            raise ValueError("observation failed")
+    assert sim._render_state_published is None
+    assert sim._pending_record_dt == pytest.approx(0.01)
+    state["value"] = 8
+    with sim.render_frame():
+        sim.render_camera_group([1])
+    assert publications == [1, 8]
+    assert sim._pending_record_dt == 0
+
+
+def test_failed_publication_retries_within_the_same_frame():
+    sim, _, _, _, _ = _make_render_frame_sim()
+    sim.physics.sync_render_state = MagicMock(
+        side_effect=[RuntimeError("bridge"), None]
+    )
+    with sim.render_frame():
+        with pytest.raises(RuntimeError, match="bridge"):
+            sim.render_camera_group([1])
+        sim.render_camera_group([1])
+        sim.render_camera_group([2])
+    assert sim.physics.sync_render_state.call_count == 2
 
 
 def test_register_kinematic_joint_trajectory_expands_each_arena() -> None:
@@ -2017,6 +2219,15 @@ def test_start_window_record_rejects_concurrent_sessions() -> None:
 
 def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
     sim = _make_sim_manager()
+    lifecycle: list[str] = []
+    sim.sync_render_state = MagicMock(side_effect=lambda: lifecycle.append("sync"))
+    original_capture = sim._capture_window_record_frame
+
+    def capture(state: _WindowRecordState) -> int:
+        lifecycle.append("capture")
+        return original_capture(state)
+
+    sim._capture_window_record_frame = capture
 
     assert sim.start_window_record(look_at=DEFAULT_LOOK_AT, fps=5, max_memory=1)
     state = sim._window_record_state
@@ -2030,14 +2241,32 @@ def test_headless_recording_uses_sim_time_and_captures_frames() -> None:
 
     sim._step_window_record_from_sim_update(state, physics_dt=0.1)
     assert len(state.frames) == 0
+    assert lifecycle == []
 
     sim._step_window_record_from_sim_update(state, physics_dt=0.1)
     assert len(state.frames) == 1
+    assert lifecycle == ["sync", "capture"]
     assert sim._window_record_camera.render_count == 1
     np.testing.assert_allclose(
         sim._window_record_camera.last_pose,
         state.fixed_pose,
     )
+
+
+def test_render_thread_recording_does_not_republish_render_state() -> None:
+    """Native recording consumes state already published by simulation calls."""
+    sim = _make_sim_manager(window=object())
+    sim.sync_render_state = MagicMock()
+    assert sim.start_window_record(look_at=DEFAULT_LOOK_AT, fps=5, max_memory=1)
+    state = sim._window_record_state
+    assert state is not None
+    assert state.capture_from_sim_update is False
+    state.last_capture_time = 0.0
+
+    sim._step_window_record(state)
+
+    assert len(state.frames) == 1
+    sim.sync_render_state.assert_not_called()
 
 
 def test_stop_window_record_waits_for_background_export(monkeypatch) -> None:
@@ -2405,7 +2634,7 @@ def _make_attachment_sim():
     sim._spawn_scene = MagicMock()
     sim._spawn_scene.builder.is_finalized = True
     sim._spawn_scene.__contains__.side_effect = lambda uid: uid in sim._rigid_objects
-    sim.physics = SimpleNamespace(sync_render_state=lambda result: None)
+    sim.physics.sync_render_state = lambda result: None
     group = sim.add_marker_group(
         MarkerGroupCfg(name="attached", prototypes={"box": MarkerPrototypeCfg()})
     )
@@ -2745,3 +2974,67 @@ def test_after_substep_marker_refresh_precedes_visualization_capture() -> None:
         False,
         True,
     ]
+
+
+def test_deferred_final_frame_refreshes_markers_after_interval_state_writes() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(1)
+    runtime = sim._visualization_runtime
+    rendered, recorded, captured = [], [], []
+
+    def marker_positions():
+        return np.array([marker.position for marker in groups[0].snapshot()])
+
+    sim._world.render_camera_group = lambda _: rendered.append(marker_positions())
+    sim._window_record_state = SimpleNamespace(capture_from_sim_update=True)
+    sim._step_window_record_from_sim_update = lambda _state, _dt: recorded.append(
+        marker_positions()
+    )
+    capture = sim.capture_visualization_safely
+
+    def capture_markers(**kwargs: object) -> None:
+        capture(**kwargs)
+        captured.append(marker_positions())
+
+    sim.capture_visualization_safely = capture_markers
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+    assert runtime.capture_calls == []
+    assert rendered == recorded == []
+    np.testing.assert_allclose(marker_positions(), [[14, 0, 0], [6, 20, 0]])
+
+    # Gym interval events may change the parent after the final physics substep.
+    pose[:, 0] += 5
+    with sim.render_frame():
+        sim.render_camera_group([0])
+
+    expected = [[19, 0, 0], [11, 20, 0]]
+    np.testing.assert_allclose(rendered, [expected])
+    np.testing.assert_allclose(recorded, [expected])
+    np.testing.assert_allclose(captured, [expected])
+    assert len(runtime.capture_calls) == 1
+    assert len(sim._world.physics_updates) == 1
+
+
+def test_marker_update_in_observer_waits_for_deferred_final_frame() -> None:
+    sim, groups, pose = _attach_groups_for_host_update(2)
+    runtime = sim._visualization_runtime
+
+    def after_substep(_dt: float) -> None:
+        pose[:, 0] += 1
+        groups[1].set_visibility(False)
+
+    sim.update(step=1, after_substep=after_substep, render_final_step=False)
+
+    assert runtime.capture_calls == []
+    assert all(not marker.visible for marker in groups[1].snapshot())
+    np.testing.assert_allclose(
+        [marker.position for marker in groups[0].snapshot()],
+        [[14, 0, 0], [6, 20, 0]],
+    )
+    with sim.render_frame():
+        pass
+    assert len(runtime.capture_calls) == 1
+    assert runtime.capture_calls[0]["sim_step"] == 1

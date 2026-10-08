@@ -48,6 +48,7 @@ embodichain.lab.sim.atomic_actions
       ArticulationAffordanceGeometry
       ArticulationGeometryProvider
       ArticulationJointGeometry
+      create_rigidized_articulation_antipodal_affordance
       sample_initial_articulation_geometry
 
    .. rubric:: Semantic resource contracts
@@ -67,6 +68,7 @@ embodichain.lab.sim.atomic_actions
 
       AtomicAction
       AtomicActionEngine
+      PlanTransform
       ExecutionSession
       ExecutionRunner
       ExecutionRunnerCfg
@@ -82,6 +84,8 @@ embodichain.lab.sim.atomic_actions
       CommandOperation
       ExecutionClock
       create_simulation_atomic_action_engine
+      create_rigidized_articulation_antipodal_semantics
+      SceneEntity
       SimulationExecutionAdapter
       ExecutionTick
       EffectVerificationRequest
@@ -172,6 +176,8 @@ geometry keys.
 
 .. autoclass:: ArticulationAffordanceGeometry
    :members:
+
+.. autofunction:: create_rigidized_articulation_antipodal_affordance
 
 .. autofunction:: sample_initial_articulation_geometry
 
@@ -299,6 +305,18 @@ Planning and state
 .. autoclass:: ActionPlan
    :members:
 
+.. autoclass:: ActionPlanTemplateAdapter
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_adapter
+
+.. autosummary::
+   :nosignatures:
+
+   ActionPlanTemplateAdapter
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
 Engine and execution
 --------------------
 
@@ -307,6 +325,8 @@ Engine and execution
 
 .. autoclass:: AtomicActionEngine
    :members:
+
+.. autodata:: PlanTransform
 
 .. autoclass:: ExecutionSession
    :members:
@@ -337,6 +357,11 @@ Engine and execution
    :members:
 
 .. autofunction:: create_simulation_atomic_action_engine
+
+.. autofunction:: create_rigidized_articulation_antipodal_semantics
+
+.. autoclass:: SceneEntity
+   :members:
 
 .. autoclass:: SimulationExecutionAdapter
    :members:

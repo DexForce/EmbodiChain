@@ -53,7 +53,7 @@ _CUBE_GYM_CONFIG_PATH = (
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
-_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "env.yaml"
+_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
 _COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
@@ -76,6 +76,26 @@ def test_env_launcher_args_include_physics():
     newton_args = parser.parse_args(["--physics", "newton"])
     assert newton_args.physics == "newton"
     assert newton_args.device is None
+
+
+def test_env_launcher_can_disable_configured_sensor_acquisition():
+    """The launcher switch preserves the config while disabling sensors."""
+    parser = argparse.ArgumentParser()
+    add_env_launcher_args_to_parser(parser, require_gym_config=True)
+
+    args = parser.parse_args(["--gym_config", "task.yaml", "--disable-sensor"])
+    merged = merge_args_with_gym_config(
+        args,
+        {"id": "Dummy-v0", "physics": "default", "enable_sensor": True},
+    )
+
+    assert args.disable_sensor is True
+    assert merged["enable_sensor"] is False
+
+    underscore_args = parser.parse_args(
+        ["--gym_config", "task.yaml", "--disable_sensor"]
+    )
+    assert underscore_args.disable_sensor is True
 
 
 def test_required_gym_launcher_preserves_device_when_omitted() -> None:
@@ -128,6 +148,79 @@ def test_config_to_cfg_requires_explicit_physics_backend():
     config = {"id": "EmbodiedEnv-v1", "env": {}, "robot": {"uid": "robot"}}
 
     with pytest.raises(ValueError, match="explicitly declare physics"):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+@pytest.mark.parametrize(
+    ("action", "message"),
+    [
+        ({"func": "Delta" + "Qpos" + "Term", "params": {}}, "removed class"),
+        (
+            {
+                "func": "RelativeJointPositionAction",
+                "mode": "pre",
+                "params": {"part_name": "arm"},
+            },
+            "removed field 'mode'",
+        ),
+    ],
+)
+def test_config_to_cfg_rejects_removed_action_protocol(
+    action: dict[str, object], message: str
+) -> None:
+    """Action decoding fails with an explicit migration error."""
+    config = {
+        "id": "RemovedActionProtocol-v1",
+        "physics": "default",
+        "env": {"actions": {"arm_action": action}},
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+def test_config_to_cfg_migrates_published_default_position_term() -> None:
+    """Published pretrained locomotion snapshots remain loadable after renaming."""
+    config = {
+        "id": "LegacyLocomotion-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "DefaultJointPositionTerm",
+                    "params": {},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert cfg.actions.joint_position.contract == "joint_position.default_offset@1"
+    assert cfg.actions.joint_position.func.__name__ == "DefaultJointPositionAction"
+    assert cfg.actions.joint_position.params["clip"] is None
+
+
+def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
+    """A YAML action cannot silently discard either semantic declaration."""
+    config = {
+        "id": "ConflictingActionDeclarations-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "JointVelocityAction",
+                    "contract": "joint_position.absolute@1",
+                    "params": {"part_name": "arm"},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match="both 'func' and 'contract'"):
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
@@ -276,6 +369,24 @@ class TestInitRolloutBufferFromConfig:
         assert not buffer["segment_accepted"].any()
         assert (buffer["segment_attempt_id"] == -1).all()
         assert (buffer["continuity_id"] == -1).all()
+
+    def test_disabled_sensor_acquisition_does_not_allocate_image_buffers(self):
+        """The shared online-data buffer follows the sensor acquisition switch."""
+        config = {
+            "enable_sensor": False,
+            "sensor": [{"uid": "camera", "width": 640, "height": 480}],
+            "env": {},
+        }
+
+        buffer = init_rollout_buffer_from_config(
+            config=config,
+            max_episode_steps=2,
+            batch_size=1,
+            state_dim=7,
+            device="cpu",
+        )
+
+        assert "sensor" not in buffer["obs"]
 
     def test_extra_observation_with_shape_tuple(self):
         """Test that extra observations with shape tuple are added correctly."""
@@ -1159,6 +1270,98 @@ class TestConfigToCfgFromFile:
                 source_path=tmp_path / "task.ur5.yaml",
             )
 
+    @classmethod
+    def _write_rigidized_articulation_deployment(
+        cls,
+        directory: Path,
+        *,
+        physical_category: str,
+    ) -> None:
+        """Write one deployment with a category-sensitive articulation object."""
+        cls._write_deployment(directory)
+        integration_path = directory / "integration.yaml"
+        integration = load_config(integration_path)
+        integration["scene_binding"]["rigid_objects"] = []
+        integration["scene_binding"]["rigidized_articulations"] = [
+            {
+                "entity_id": "cube",
+                "simulation_uid": "cube",
+                "locked_qpos": {"top_turn": 0.0},
+                "affordances": [
+                    {
+                        "kind": "antipodal_grasp",
+                        "entity_id": "cube_grasp",
+                        "grasp_link": "lower_two_layers",
+                    }
+                ],
+            }
+        ]
+        save_config(integration_path, integration)
+
+        environment_path = directory / "env.yaml"
+        environment = load_config(environment_path)
+        simulation = environment["simulation"]
+        cube_config = deepcopy(simulation["rigid_object"][0])
+        simulation["rigid_object"] = []
+        simulation["background"] = []
+        simulation["articulation"] = []
+        if physical_category == "articulation":
+            simulation["articulation"] = [
+                {
+                    "uid": "cube",
+                    "fpath": "Drawer/model_split_links_with_inertials.urdf",
+                    "init_qpos": [0.0],
+                    "root_props": {"fixed_base": False},
+                }
+            ]
+        elif physical_category == "rigid_object":
+            simulation["rigid_object"] = [cube_config]
+        elif physical_category == "background":
+            simulation["background"] = [cube_config]
+        else:
+            raise AssertionError(f"Unknown physical category {physical_category!r}.")
+        save_config(environment_path, environment)
+
+    @pytest.mark.parametrize("physical_category", ("rigid_object", "background"))
+    def test_rigidized_articulation_binding_rejects_non_articulation_physical_entity(
+        self,
+        tmp_path,
+        physical_category: str,
+    ) -> None:
+        self._write_rigidized_articulation_deployment(
+            tmp_path,
+            physical_category=physical_category,
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="rigidized_articulations.*cube.*physical environment",
+        ):
+            config_to_cfg(
+                self._minimal_gym_config(),
+                manager_modules=DEFAULT_MANAGER_MODULES,
+                source_path=tmp_path / "task.ur5.yaml",
+            )
+
+    def test_rigidized_articulation_binding_accepts_physical_articulation(
+        self,
+        tmp_path,
+    ) -> None:
+        self._write_rigidized_articulation_deployment(
+            tmp_path,
+            physical_category="articulation",
+        )
+        config = self._minimal_gym_config()
+        config["id"] = "TaskProgramRigidizedArticulationPhysical-v1"
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=tmp_path / "task.ur5.yaml",
+        )
+
+        assert [articulation.uid for articulation in cfg.articulation] == ["cube"]
+
     @pytest.mark.parametrize(
         "task_name",
         (
@@ -1197,6 +1400,27 @@ class TestConfigToCfgFromFile:
             "cam_left_wrist",
         ]
         assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+
+    def test_official_handwritten_config_can_disable_shared_embodiment_sensors(
+        self,
+    ) -> None:
+        """A deployment can keep the shared sensor declaration unused."""
+        config_path = _TABLEWARE_CONFIG_ROOT / "blocks_ranking_rgb" / "env.json"
+        config = load_config(config_path)
+        config["enable_sensor"] = False
+
+        cfg = config_to_cfg(
+            config,
+            manager_modules=DEFAULT_MANAGER_MODULES,
+            source_path=config_path,
+        )
+
+        assert cfg.enable_sensor is False
+        assert [sensor.uid for sensor in cfg.sensor] == [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist",
+        ]
 
     @pytest.mark.parametrize("field_name", ("robot", "sensor"))
     def test_configured_task_program_rejects_top_level_embodiment_fields(
@@ -1637,8 +1861,7 @@ class TestConfigToCfgFromFile:
     @pytest.mark.parametrize(
         ("field_name", "invalid_value"),
         [
-            ("dlss_enabled", "false"),
-            ("upscale_enabled", None),
+            ("tiled_enabled", "false"),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
         ],
@@ -1741,10 +1964,17 @@ class TestConfigToCfgFromFile:
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
+                "denoising": {
+                    "window": "optix",
+                    "offscreen": "nrd",
+                },
                 "dlss": {
-                    "dlss_enabled": True,
-                    "upscale_enabled": True,
                     "dlss_quality": 1,
+                    "tiled_enabled": False,
+                },
+                "nrd": {
+                    "max_accumulated_frame_num": 24,
+                    "taa_min_current_weight": 0.125,
                 },
             },
             "visualization": {
@@ -1810,15 +2040,26 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
-        from embodichain.lab.sim import DLSSCfg
+        from embodichain.lab.sim import DenoisingCfg, DLSSCfg, NRDCfg
         import dexsim
 
+        assert isinstance(cfg.sim_cfg.render_cfg.denoising, DenoisingCfg)
         assert isinstance(cfg.sim_cfg.render_cfg.dlss, DLSSCfg)
+        assert isinstance(cfg.sim_cfg.render_cfg.nrd, NRDCfg)
         world_config = dexsim.WorldConfig()
         cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
-        assert world_config.dlss_config.dlss_enabled is True
-        assert world_config.dlss_config.upscale_enabled is True
+        assert (
+            world_config.rt_pipeline_config.window.mode
+            == dexsim.types.RTRenderMode.OPTIX_DENOISE
+        )
+        assert (
+            world_config.rt_pipeline_config.offscreen.mode
+            == dexsim.types.RTRenderMode.NRD_RELAX
+        )
         assert world_config.dlss_config.dlss_quality == 1
+        assert world_config.dlss_config.tiled_enabled is False
+        assert world_config.nrd_config.max_accumulated_frame_num == 24
+        assert world_config.nrd_config.taa_min_current_weight == pytest.approx(0.125)
         assert cfg.sim_cfg.visualization.backend == "viser"
         assert cfg.sim_cfg.visualization.scene_fps == 12.5
         assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"

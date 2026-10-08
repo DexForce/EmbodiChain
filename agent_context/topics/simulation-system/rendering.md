@@ -1,16 +1,35 @@
 # Rendering, attachment and startup diagnostics
 
-Read this for physics/render synchronization, native-window/DLSS configuration
-and readiness reporting. Return to the [simulation overview](simulation-system.md).
+Read this for physics/render synchronization, native-window/offscreen image
+processing and readiness reporting. Return to the
+[simulation overview](simulation-system.md).
 
 ## Rendering does not advance physics
 
-`NewtonPhysicsCfg.sync_to_renderer=None` preserves DexSim's consumer-aware
-per-step policy. Camera rendering and reset observations explicitly synchronize
-on demand; correctness must not depend on continuous render sync in headless
-training. `SimulationManager.sync_render_state()` and backend render hooks
-publish state without advancing physics time. Marker publication while paused
-uses `capture_visualization(force=True)`.
+`SimulationManager.render_frame()` owns a read-only consumption phase after
+physics, interval events or reset writes. An open native window, nonempty camera
+groups, due simulation-time recording and due Viser captures share one state
+publication in that phase. Empty camera groups alone are not consumers; an open
+window remains a consumer even with `NewtonPhysicsCfg.sync_to_renderer=False`.
+Viser decides whether a frame is due before invoking its publication callback.
+
+`update()` renders after each substep by default. Gym uses
+`update(render_final_step=False)` and enters `render_frame()` around observations
+after interval events, so the final camera, recording and Viser reads share the
+post-event state. Standalone callers combining those consumers can use the same
+sequence. Reset completes all writes before a new frame with forced Viser capture.
+An independent camera/capture call still publishes fresh state. No publication
+cache survives a frame, so paused edits and direct writes between frames do not
+need mutation counters. State edits inside a read-only frame require an explicit
+`sync_render_state()` before further reads; that API always publishes.
+
+The Newton backend step hook suppresses automatic DexSim publication during
+manager-owned updates to avoid publishing twice. The manager honors explicit
+`sync_to_renderer=True` even without consumers; `None`/`False` publish only for
+consumers. Raw DexSim `World.update()` retains its configured automatic policy.
+Render-thread recording only consumes already-published state and must never
+call the blocking physics-to-render bridge. Marker publication while paused uses
+`capture_visualization(force=True)` without advancing physics.
 
 Viser forces headless mode and is mutually exclusive with the native window.
 An empty server may start before assets are declared; it must not finalize
@@ -33,22 +52,26 @@ Completion is marked only after all attachments succeed, so partial failures
 retry. The camera registry is the sole attachment-intent store. Detailed
 sensor behavior belongs to [sensors](../sensor-system/sensor-system.md).
 
-## Renderer and DLSS configuration
+## Renderer, denoising and reconstruction configuration
 
-`cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering and
-`DLSSCfg` into WorldConfig after automatic renderer resolution. Forward the
-DLSS master switch even when false, and retain config during headless startup
-for offscreen cameras or a later window. Native window/offscreen behavior can
-differ; settings not authored by EmbodiChain retain DexSim defaults.
+`cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering,
+`DenoisingCfg`, `DLSSCfg` and `NRDCfg` into WorldConfig after automatic renderer
+resolution. `DenoisingCfg` independently selects the window and offscreen
+pipelines from `off`, `optix`, `dlss` and `nrd`; `dlss` maps to DLSS Ray
+Reconstruction and `nrd` maps to standalone NRD RELAX. Native SR/REBLUR
+variants are not part of the EmbodiChain public contract. Retain the
+complete configuration during headless startup for offscreen cameras or a later
+window.
 
 The actual camera/window owns output dimensions; compatibility target fields
 must not resize it. Internal dimensions/upsample ratio affect FastRT/OfflineRT
 windows; hybrid/offscreen sizes derive from output size and quality.
 `frame_time_delta_ms` is render cadence, not physics/control cadence.
-`gym/utils/gym_utils.py:config_to_cfg()` decodes nested DLSS mappings. Scalar
-validation runs at construction and conversion after mutable edits. Configuration
-tests do not prove GPU/NGX support, which initializes on a rendered frame.
-Read exact renderer/quality defaults in the config source.
+`gym/utils/gym_utils.py:config_to_cfg()` decodes all three nested mappings.
+Scalar validation runs at construction and conversion after mutable edits.
+Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
+on a rendered frame. Read exact renderer and algorithm defaults in the config
+source.
 
 ## Startup summaries
 

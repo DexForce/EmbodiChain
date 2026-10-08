@@ -186,6 +186,24 @@ class PhaseGateAction(DynamicAction):
         )
 
 
+class FailedPhaseGateAction(PhaseGateAction):
+    """Fully failed planning attempt that never reaches a gated segment."""
+
+    skill_id: ClassVar[str] = "failed_phase_gate"
+    binding_contract: ClassVar[SkillBindingContract] = DynamicAction.binding_contract
+
+    def _plan(
+        self,
+        request: ResolvedActionRequest[EndEffectorPoseGoal, ActionOptions],
+        context: PlanningContext,
+    ) -> ActionPlan:
+        return self.failed_plan(
+            request,
+            context,
+            message="No feasible grasp was found.",
+        )
+
+
 class EffectAction(DynamicAction):
     """Dynamic test action that declares an attachment effect."""
 
@@ -846,13 +864,14 @@ def _destination_invocation(
 def _phase_gate_invocation(
     engine: AtomicActionEngine,
     *,
+    skill_id: str = PhaseGateAction.skill_id,
     segment_name: str = "commit",
     max_action_retries: int = 2,
 ) -> ActionInvocation[EndEffectorPoseGoal]:
     """Build a test invocation whose core owns one named segment gate."""
     base = _invocation(
         engine,
-        skill_id=PhaseGateAction.skill_id,
+        skill_id=skill_id,
         max_action_retries=max_action_retries,
     )
     return replace(
@@ -948,6 +967,28 @@ def test_phase_effect_gate_requires_a_noninitial_named_segment(
             (_phase_gate_invocation(engine, segment_name=segment_name),),
             _context(0.0, 0.0, 0.2, 0),
         )
+
+
+def test_fully_failed_plan_preserves_diagnostics_before_phase_gate_validation() -> None:
+    engine, _ = _engine()
+    action = FailedPhaseGateAction()
+    engine.register(action)
+
+    session = engine.start(
+        (
+            _phase_gate_invocation(
+                engine,
+                skill_id=FailedPhaseGateAction.skill_id,
+            ),
+        ),
+        _context(0.0, 0.0, 0.2, 0),
+    )
+
+    assert not session.active_plan.plan_success.any()
+    assert session.active_plan.diagnostics.failure == PlanningFailure(
+        "planning_failed",
+        retryable=True,
+    )
 
 
 def test_unresolved_phase_effect_gate_replays_preceding_command_for_full_cohort() -> (
@@ -1695,6 +1736,63 @@ def test_scene_motion_replans_late_bound_goal() -> None:
     assert action.plan_count == 2
     assert action.requests[0] is action.requests[1]
     assert tick.command is not None
+
+
+def test_execution_session_applies_call_scoped_plan_transform() -> None:
+    engine, _ = _engine()
+    calls: list[int] = []
+
+    def transform(request, context, plan):
+        del context
+        calls.append(request.revision)
+        return replace(
+            plan,
+            diagnostics=replace(
+                plan.diagnostics,
+                metadata={**plan.diagnostics.metadata, "generation_test": True},
+            ),
+        )
+
+    session = engine.start(
+        (_invocation(engine),),
+        _context(0.0, 0.0, 0.1, 0),
+        plan_transform=transform,
+    )
+
+    assert calls == [0]
+    assert session.active_plan.diagnostics.metadata["generation_test"] is True
+
+
+def test_execution_session_reuses_transform_for_replan() -> None:
+    engine, _ = _engine()
+    calls: list[int] = []
+
+    def transform(request, context, plan):
+        del context
+        calls.append(request.revision)
+        return plan
+
+    initial = _context(0.0, 0.0, 0.1, 0)
+    session = engine.start(
+        (_invocation(engine),),
+        initial,
+        plan_transform=transform,
+    )
+    session.tick(initial)
+    session.tick(_context(0.1, 0.0, 0.3, 1))
+
+    assert calls == [0, 0]
+
+
+def test_execution_session_without_transform_is_unchanged() -> None:
+    engine, _ = _engine()
+
+    session = engine.start(
+        (_invocation(engine),),
+        _context(0.0, 0.0, 0.1, 0),
+    )
+
+    assert "generation_test" not in session.active_plan.diagnostics.metadata
 
 
 def test_scene_motion_is_ignored_after_dependency_segment_is_dispatched() -> None:
