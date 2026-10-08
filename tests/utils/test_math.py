@@ -24,6 +24,7 @@ from embodichain.utils.math import (
     convert_quat,
     default_orientation,
     inv_transform,
+    look_at_to_pose,
     matrix_from_quat,
     quat_apply,
     quat_conjugate,
@@ -34,6 +35,24 @@ from embodichain.utils.math import (
     trans_matrix_to_xyz_quat,
     xyz_quat_to_4x4_matrix,
 )
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_look_at_keeps_vertical_camera_pose_on_eye_device(device: str) -> None:
+    eye = torch.tensor([[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]], device=device)
+
+    pose = look_at_to_pose(eye, [[0.0, 0.0, 0.0]] * 2)
+
+    assert pose.device == eye.device
+    assert torch.isfinite(pose).all()
+    torch.testing.assert_close(pose[:, :3, 3], eye)
+    rotation = pose[:, :3, :3]
+    torch.testing.assert_close(
+        rotation.transpose(1, 2) @ rotation,
+        torch.eye(3, device=device).expand(2, 3, 3),
+    )
 
 
 @pytest.mark.parametrize("backend", ["numpy", "torch"])

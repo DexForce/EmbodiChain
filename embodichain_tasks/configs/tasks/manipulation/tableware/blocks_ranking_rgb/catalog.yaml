@@ -1,0 +1,11 @@
+task_key: blocks_ranking_rgb
+title: Blocks Ranking RGB
+summary: Rank tableware blocks using RGB observations.
+tags:
+- tableware
+- vision
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json

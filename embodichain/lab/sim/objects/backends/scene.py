@@ -553,22 +553,25 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         friction: torch.Tensor | None = None,
         armature: torch.Tensor | None = None,
     ) -> None:
-        """Read current parameters through the existing Scene batch interface.
+        """Read current parameters without tracking model gradients.
 
         See :meth:`ArticulationViewBase.fetch_joint_properties` for buffer
         shapes, units and lifetime.
         """
-        _checked_batch_call(
-            self.batch,
-            "fetch_joint_properties",
-            position_limits=position_limits,
-            velocity_limit=velocity_limit,
-            effort_limit=effort_limit,
-            stiffness=stiffness,
-            damping=damping,
-            friction=friction,
-            armature=armature,
-        )
+        # Configuration snapshots must not inherit gradients from Newton's
+        # differentiable model parameters.
+        with torch.no_grad():
+            _checked_batch_call(
+                self.batch,
+                "fetch_joint_properties",
+                position_limits=position_limits,
+                velocity_limit=velocity_limit,
+                effort_limit=effort_limit,
+                stiffness=stiffness,
+                damping=damping,
+                friction=friction,
+                armature=armature,
+            )
 
     def fetch_state(
         self,

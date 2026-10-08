@@ -33,9 +33,9 @@ owners:
 The runnable `task.<embodiment>.yaml` selects these components. Composition
 checks their embodiment contracts and produces the exact
 {class}`RobotSkillProfile` and {class}`SkillPolicyPreset` values described
-below. The reusable physical `env.yaml` owns none of this Task Program metadata,
-so changing environments does not copy the robot profile and changing a
-compatible embodiment does not rewrite the source program.
+below. The reusable physical environment variants own none of this Task
+Program metadata, so changing environments does not copy the robot profile and
+changing a compatible embodiment does not rewrite the source program.
 
 ## Contracts on the two sides
 

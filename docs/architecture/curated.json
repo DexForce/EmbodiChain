@@ -976,8 +976,8 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1210,
-          "end_line": 1210,
+          "start_line": 1457,
+          "end_line": 1457,
           "excerpt": "def build_env_cfg_from_args("
         }
       ],
@@ -1190,18 +1190,18 @@
       "topic_ids": [
         "motion-planning"
       ],
-      "summary": "Tracks trajectory candidates, generation budgets, coverage, and commit receipts.",
+      "summary": "Tracks trajectory candidates, expansion budgets, coverage, and commit receipts.",
       "details": "The expansion package provides candidate contracts, residual and retiming operators, coverage metrics, and bounded session bookkeeping. Host integrations supply rollout execution, initial-state restoration, physical validation, and durable recording.",
       "boundaries": [
-        "GenerationSession does not step or reset environments and does not write datasets."
+        "ExpansionSession does not step or reset environments and does not write datasets."
       ],
       "evidence": [
         {
           "path": "embodichain/lab/sim/motion/expansion/session.py",
-          "symbol": "GenerationSession",
+          "symbol": "ExpansionSession",
           "start_line": 108,
           "end_line": 108,
-          "excerpt": "class GenerationSession:"
+          "excerpt": "class ExpansionSession:"
         }
       ],
       "documentation": [
@@ -3294,7 +3294,7 @@
           "symbol": "EmbodiedEnv.create_task_program_bridge",
           "start_line": 2242,
           "end_line": 2242,
-          "excerpt": "        return self._checked_task_program_adapter().create_bridge(program)"
+          "excerpt": "        return self._checked_task_program_adapter().create_bridge("
         }
       ]
     },
@@ -3400,9 +3400,9 @@
         {
           "path": "embodichain/lab/task_program/integrations/environment.py",
           "symbol": "TaskProgramEnvironmentAdapter._assemble_execution_runtime",
-          "start_line": 740,
-          "end_line": 747,
-          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n        )"
+          "start_line": 768,
+          "end_line": 776,
+          "excerpt": "        runtime = SemanticCallExecutor(\n            semantic.compiler,\n            observation_provider,\n            command_sink,\n            evidence_collector,\n            clock=clock,\n            runner_cfg=deepcopy(selected_runner_cfg),\n            plan_transform_factory=plan_transform_factory,\n        )"
         }
       ]
     },
@@ -3479,9 +3479,9 @@
         {
           "path": "embodichain/lab/task_program/runtime/executor.py",
           "symbol": "SemanticCallExecutor._prepare_grounded_call",
-          "start_line": 940,
-          "end_line": 944,
-          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n        )"
+          "start_line": 969,
+          "end_line": 974,
+          "excerpt": "        session = self._engine.start(\n            (invocation,),\n            context,\n            eligible_mask=active_mask,\n            plan_transform=plan_transform,\n        )"
         }
       ]
     },
@@ -3819,8 +3819,8 @@
         {
           "path": "embodichain/lab/scripts/run_env.py",
           "symbol": "cli",
-          "start_line": 1023,
-          "end_line": 1023,
+          "start_line": 1628,
+          "end_line": 1628,
           "excerpt": "    env_cfg, gym_config, action_config = build_env_cfg_from_args(args)"
         }
       ]
@@ -3862,15 +3862,15 @@
         {
           "path": "embodichain/lab/gym/utils/gym_utils.py",
           "symbol": "build_env_cfg_from_args",
-          "start_line": 1244,
-          "end_line": 1249,
-          "excerpt": "    cfg: EmbodiedEnvCfg = config_to_cfg(\n        gym_config,\n        manager_modules=get_manager_modules(),\n        source_path=gym_config_source_path,\n        task_program_path_override=getattr(args, \"task_program\", None),\n    )"
+          "start_line": 1497,
+          "end_line": 1502,
+          "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
           "path": "embodichain/lab/scripts/run_env.py",
           "symbol": "cli",
-          "start_line": 1028,
-          "end_line": 1028,
+          "start_line": 1680,
+          "end_line": 1680,
           "excerpt": "    env = gymnasium.make(id=gym_config[\"id\"], cfg=env_cfg, **action_config)"
         }
       ]

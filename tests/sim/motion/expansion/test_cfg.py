@@ -16,11 +16,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from embodichain.lab.sim.motion.expansion import (
+    TrajectoryExpansionCfg,
     TrajectoryAugmentationCfg,
-    TrajectoryGenerationJobCfg,
+    TrajectoryExpansionJobCfg,
 )
 
 
@@ -39,8 +43,34 @@ def _capabilities() -> dict[str, set[str]]:
     }
 
 
+def _task_program_profile_payload() -> dict[str, object]:
+    return {
+        "source": {
+            "kind": "task_program",
+            "source_id": "repeated_cube_pick_place",
+            "source_revision": "config:repeated_pick_place_v1",
+            "unit_scope": "action",
+            "template_id": "place",
+            "phase_permissions": {
+                "approach": [],
+                "release": [],
+                "retract": ["joint_residual", "via_points"],
+            },
+            "phase_kinds": {
+                "approach": "free",
+                "release": "contact",
+                "retract": "free",
+            },
+        },
+        "augmentation": {"max_variants_per_reference": 3},
+        "scheduling": {"candidate_budget": 3},
+        "execution": {"max_inflight": 1},
+        "observation": {"enabled": False, "profiles": []},
+    }
+
+
 def test_job_decodes_nested_schema_and_round_trips_without_imports() -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "seed": 17,
@@ -57,9 +87,136 @@ def test_job_decodes_nested_schema_and_round_trips_without_imports() -> None:
     assert cfg.persistence.sink == "lerobot"
     assert cfg.augmentation.factors.timing.duration_scales == (0.8, 1.0, 1.2)
     assert (
-        TrajectoryGenerationJobCfg.from_mapping(cfg.to_dict()).to_dict()
-        == cfg.to_dict()
+        TrajectoryExpansionJobCfg.from_mapping(cfg.to_dict()).to_dict() == cfg.to_dict()
     )
+
+
+def test_source_neutral_expansion_cfg_round_trips_without_source_fields() -> None:
+    cfg = TrajectoryExpansionCfg.from_mapping(
+        {
+            "augmentation": {
+                "max_variants_per_reference": 3,
+            },
+            "scheduling": {
+                "candidate_budget": 3,
+            },
+        }
+    )
+
+    assert cfg.augmentation.max_variants_per_reference == 3
+    assert "source" not in cfg.to_dict()
+    assert TrajectoryExpansionCfg.from_mapping(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+def test_expansion_profile_is_source_neutral_and_uses_one_family_budget():
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
+        {
+            "source": {
+                "kind": "motion_generator",
+            },
+            "affordance": {
+                "enabled": True,
+                "branches_per_family": 3,
+            },
+            "scheduling": {
+                "policy": "fifo",
+                "reference_family_budget": 4,
+                "exploration_fraction": 0.2,
+            },
+        }
+    )
+    assert cfg.source.kind == "motion_generator"
+    assert cfg.affordance.branches_per_family == 3
+    assert cfg.scheduling.policy == "fifo"
+    assert cfg.scheduling.reference_family_budget == 4
+
+
+def test_expansion_profile_rejects_unimplemented_scheduler() -> None:
+    with pytest.raises(ValueError, match="coverage_per_cost.*not implemented"):
+        TrajectoryExpansionJobCfg.from_mapping(
+            {"scheduling": {"policy": "coverage_per_cost"}}
+        )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["handwritten", "motion_generator", "atomic_action", "task_program"],
+)
+def test_expansion_profile_accepts_all_source_adapters(kind):
+    cfg = TrajectoryExpansionJobCfg.from_mapping({"source": {"kind": kind}})
+    assert cfg.source.kind == kind
+
+
+def test_expansion_profile_decodes_task_program_source_contract() -> None:
+    cfg = TrajectoryExpansionJobCfg.from_mapping(_task_program_profile_payload())
+
+    assert cfg.source.source_revision == "config:repeated_pick_place_v1"
+    assert cfg.source.phase_permissions["retract"] == (
+        "joint_residual",
+        "via_points",
+    )
+    assert cfg.augmentation.max_variants_per_reference == 3
+    assert cfg.observation.profiles == ()
+
+
+@pytest.mark.parametrize("field", ["backend", "num_envs", "control_dt", "robot"])
+def test_expansion_profile_rejects_environment_owned_fields(field: str) -> None:
+    with pytest.raises(ValueError, match="unknown fields"):
+        TrajectoryExpansionJobCfg.from_mapping({field: "forbidden"})
+
+
+def test_expansion_profile_rejects_implicit_or_inconsistent_phases() -> None:
+    payload = _task_program_profile_payload()
+    source = payload["source"]
+    assert isinstance(source, dict)
+    permissions = source["phase_permissions"]
+    assert isinstance(permissions, dict)
+    permissions.pop("release")
+
+    with pytest.raises(ValueError, match="phase_permissions.*phase_kinds"):
+        TrajectoryExpansionJobCfg.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"execution": {"max_inflight": 2}},
+        {
+            "augmentation": {"max_variants_per_reference": 4},
+            "scheduling": {"candidate_budget": 3},
+        },
+    ],
+)
+def test_expansion_profile_rejects_unsupported_t4_capacity(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        TrajectoryExpansionJobCfg.from_mapping(payload)
+
+
+def test_expansion_profile_requires_enabled_observation_profiles() -> None:
+    with pytest.raises(ValueError, match="enabled observation"):
+        TrajectoryExpansionJobCfg.from_mapping(
+            {"observation": {"enabled": True, "profiles": []}}
+        )
+
+
+def test_expansion_profile_rejects_transitional_atomic_source_kind() -> None:
+    with pytest.raises(ValueError, match="source.kind"):
+        TrajectoryExpansionJobCfg.from_mapping({"source": {"kind": "atomic"}})
+
+
+def test_load_expansion_profile_rejects_legacy_task_program(tmp_path: Path) -> None:
+    from embodichain.lab.sim.motion.expansion.profile import load_expansion_profile
+
+    path = tmp_path / "expansion.yaml"
+    path.write_text(
+        yaml.safe_dump(_task_program_profile_payload()),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="schema_version=1"):
+        load_expansion_profile(path)
 
 
 @pytest.mark.parametrize(
@@ -105,7 +262,7 @@ def test_decoder_rejects_unknown_fields_types_and_invalid_budgets(
     payload: dict[str, object],
 ) -> None:
     with pytest.raises(ValueError):
-        TrajectoryGenerationJobCfg.from_mapping(payload)
+        TrajectoryExpansionJobCfg.from_mapping(payload)
 
 
 @pytest.mark.parametrize(
@@ -131,7 +288,7 @@ def test_unsupported_modes_cannot_be_silently_enabled(
     payload: dict[str, object],
 ) -> None:
     with pytest.raises(ValueError):
-        TrajectoryGenerationJobCfg.from_mapping(payload)
+        TrajectoryExpansionJobCfg.from_mapping(payload)
 
 
 @pytest.mark.parametrize(
@@ -141,11 +298,11 @@ def test_preflight_requires_explicit_registered_implementations(registry: str) -
     capabilities = _capabilities()
     capabilities[registry] = set()
     with pytest.raises(ValueError, match="unregistered"):
-        TrajectoryGenerationJobCfg().validate_capabilities(**capabilities)
+        TrajectoryExpansionJobCfg().validate_capabilities(**capabilities)
 
 
 def test_spatial_and_timing_factors_require_available_operators() -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {"spatial": {"enabled": True, "method": "via_points"}}
@@ -154,7 +311,7 @@ def test_spatial_and_timing_factors_require_available_operators() -> None:
     )
     with pytest.raises(ValueError, match="via_points"):
         cfg.validate_capabilities(**_capabilities())
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {"timing": {"enabled": True, "duration_scales": [1.0, 2.0]}}
@@ -179,7 +336,7 @@ def test_manipulability_guidance_requires_its_operator_capability() -> None:
             }
         }
     }
-    cfg = TrajectoryGenerationJobCfg.from_mapping(payload)
+    cfg = TrajectoryExpansionJobCfg.from_mapping(payload)
     with pytest.raises(ValueError, match="manipulability guided residual"):
         cfg.validate_capabilities(**_capabilities())
     capabilities = _capabilities()
@@ -188,26 +345,26 @@ def test_manipulability_guidance_requires_its_operator_capability() -> None:
     assert cfg.augmentation.factors.manipulability.band_edges == (0.5, 0.9)
     # Banded coverage alone selects among unguided proposals and needs no operator.
     payload["augmentation"]["factors"]["manipulability"]["guided_proposals"] = 1
-    TrajectoryGenerationJobCfg.from_mapping(payload).validate_capabilities(
+    TrajectoryExpansionJobCfg.from_mapping(payload).validate_capabilities(
         **_capabilities()
     )
 
 
 def test_manipulability_is_disabled_by_default() -> None:
-    factors = TrajectoryGenerationJobCfg().augmentation.factors
+    factors = TrajectoryExpansionJobCfg().augmentation.factors
     assert not factors.manipulability.enabled
     assert factors.manipulability.guided_proposals == 1
 
 
 def test_configuration_instances_do_not_share_nested_values() -> None:
-    first = TrajectoryGenerationJobCfg()
-    second = TrajectoryGenerationJobCfg()
+    first = TrajectoryExpansionJobCfg()
+    second = TrajectoryExpansionJobCfg()
     first.augmentation.coverage.target_per_cell = 2
     assert second.augmentation.coverage.target_per_cell == 1
 
 
 def test_semantic_revalidation_rejects_mutated_configuration() -> None:
-    cfg = TrajectoryGenerationJobCfg()
+    cfg = TrajectoryExpansionJobCfg()
     cfg.persistence.async_write = True
     with pytest.raises(ValueError, match="not implemented"):
         cfg.validate_semantics()
@@ -216,7 +373,7 @@ def test_semantic_revalidation_rejects_mutated_configuration() -> None:
 
 
 def test_variant_factors_decode_and_declare_their_operator_capabilities() -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {
@@ -319,12 +476,12 @@ def test_variant_factors_decode_and_declare_their_operator_capabilities() -> Non
 )
 def test_variant_factor_settings_are_validated(payload: dict[str, object]) -> None:
     with pytest.raises(ValueError):
-        TrajectoryGenerationJobCfg.from_mapping(payload)
+        TrajectoryExpansionJobCfg.from_mapping(payload)
 
 
 def test_spatial_method_accepts_one_name_or_several() -> None:
     def decode(value: object) -> tuple[str, ...]:
-        cfg = TrajectoryGenerationJobCfg.from_mapping(
+        cfg = TrajectoryExpansionJobCfg.from_mapping(
             {"augmentation": {"factors": {"spatial": {"method": value}}}}
         )
         return cfg.augmentation.factors.spatial.method
@@ -333,13 +490,13 @@ def test_spatial_method_accepts_one_name_or_several() -> None:
     assert decode("via_points") == ("via_points",)
     assert decode(["joint_residual"]) == ("joint_residual",)
     assert decode(["joint_residual", "via_points"]) == ("joint_residual", "via_points")
-    assert TrajectoryGenerationJobCfg().augmentation.factors.spatial.method == (
+    assert TrajectoryExpansionJobCfg().augmentation.factors.spatial.method == (
         "joint_residual",
     )
 
 
 def test_every_requested_spatial_method_needs_its_operator() -> None:
-    cfg = TrajectoryGenerationJobCfg.from_mapping(
+    cfg = TrajectoryExpansionJobCfg.from_mapping(
         {
             "augmentation": {
                 "factors": {
@@ -371,4 +528,4 @@ def test_only_spatial_method_accepts_a_bare_name(payload: dict[str, object]) -> 
     # other sequence field must reach its own validator as a sequence, or an
     # unsupported name would be split into characters or silently wrapped.
     with pytest.raises(ValueError, match="must be a sequence"):
-        TrajectoryGenerationJobCfg.from_mapping(payload)
+        TrajectoryExpansionJobCfg.from_mapping(payload)

@@ -418,6 +418,34 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
     assert env.reset_options == [{"save_data": False}, None]
 
 
+def test_generate_function_updates_collection_attempt_and_reset_stats(
+    monkeypatch,
+) -> None:
+    env = _ResetTrackingEnv()
+    env._collection_stats = {
+        "attempts": 0,
+        "discard_reset_count": 0,
+        "commit_reset_count": 0,
+    }
+    results = iter(
+        [
+            _episode_result(success=False, reason="empty_plan"),
+            _episode_result(success=True, reason="success"),
+        ]
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        lambda *args, **kwargs: next(results),
+    )
+
+    assert generate_function(env, max_attempts=2, reset_before=False)
+    assert env._collection_stats == {
+        "attempts": 2,
+        "discard_reset_count": 1,
+        "commit_reset_count": 1,
+    }
+
+
 def test_generate_function_logs_failed_trace_in_debug_mode(monkeypatch) -> None:
     """Debug retries expose the owned structured episode trace."""
     env = _ResetTrackingEnv()
@@ -649,7 +677,7 @@ def test_main_prints_compact_collection_summary(monkeypatch, capsys) -> None:
     assert f"Task        {GYM_ID}" in output
     assert "Episodes    5" in output
     assert "Parallel    3 environments" in output
-    assert "Attempts    2 per batch" in output
+    assert "Attempts    2 per episode" in output
 
 
 def test_main_prints_clean_collection_completion(monkeypatch, capsys) -> None:
@@ -744,7 +772,7 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
     run_env.cli([])
 
     abort_event = ("reset", {"save_data": False})
-    assert env.events == [abort_event, abort_event, ("close", None)]
+    assert env.events == [abort_event, ("reset", None), abort_event, ("close", None)]
 
 
 def test_cli_uses_program_already_loaded_by_config_builder(

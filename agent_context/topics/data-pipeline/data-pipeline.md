@@ -75,8 +75,10 @@ deduplication and sticky partial-commit errors; they are not a crash-recovery jo
 
 Async persistence clones tensor payloads to CPU and copies metadata before
 enqueue. One FIFO worker owns LeRobot access. Finalize rejects new work, drains,
-joins and surfaces errors. The queue is unbounded: writer lag can grow memory.
-Choose synchronous persistence or throttle production when memory bounds matter.
+joins and surfaces errors. Set ``async_queue_maxsize`` to a positive payload
+count to apply producer backpressure when memory bounds matter; the default
+``0`` preserves the historical unbounded queue. Queue depth and backpressure
+time are available through the recorder's async stats.
 
 ## Change sites and focused validation
 

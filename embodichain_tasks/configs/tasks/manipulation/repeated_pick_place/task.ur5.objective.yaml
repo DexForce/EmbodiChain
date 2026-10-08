@@ -1,7 +1,7 @@
 id: TaskProgramRepeatedPickPlace-UR5-Objective-v1
 
 environment:
-  component: env.yaml
+  component: envs/default.yaml
 
 objective:
   component: objective.yaml

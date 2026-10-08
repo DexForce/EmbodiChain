@@ -690,6 +690,7 @@ embodichain.lab.sim.atomic_actions.control
    GRASP_COMMAND
    JointPositionCommand
    OPEN_COMMAND
+   PARK_COMMAND
 
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
@@ -2300,8 +2301,6 @@ joint-position action variants.
 
 .. autosummary::
 
-   RepeatedPickPlaceRlinfEnv
-   RepeatedPickPlaceRlinfJointEnv
 
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------
@@ -2395,6 +2394,15 @@ embodichain_tasks.special.stay_still_save
 .. autosummary::
 
    StayStillSaveEnv
+
+embodichain_tasks.special.stay_still_save_3cam
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
+
+.. autosummary::
+
+   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------

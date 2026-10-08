@@ -26,35 +26,27 @@ from typing import Literal, Union
 
 
 def look_at_to_pose(
-    eye: Union[torch.Tensor, list],
-    target: Union[torch.Tensor, list],
-    up: Union[torch.Tensor, list] = [0, 0, 1],
+    eye: torch.Tensor | list,
+    target: torch.Tensor | list,
+    up: torch.Tensor | list = [0, 0, 1],
 ) -> torch.Tensor:
-    """Get the camera pose from eye to target with up direction, supporting batch processing.
+    """Return batched camera poses on the eye tensor's device.
 
     Args:
-        eye (Union[torch.Tensor, list]): Camera positions with shape (N, 3).
-        target (Union[torch.Tensor, list]): Target positions with shape (N, 3).
-        up (Union[torch.Tensor, list], optional): Up directions with shape (N, 3) or (3,). Defaults to [0, 0, 1].
+        eye: Camera positions with shape (N, 3).
+        target: Target positions with shape (N, 3).
+        up: Up directions with shape (N, 3) or (3,). Defaults to [0, 0, 1].
 
     Returns:
-        torch.Tensor: Camera pose matrices with shape (N, 4, 4).
+        Camera pose matrices with shape (N, 4, 4), on the eye tensor's device.
     """
     eye = (
         torch.tensor(eye, dtype=torch.float32)
         if not isinstance(eye, torch.Tensor)
         else eye
     )
-    target = (
-        torch.tensor(target, dtype=torch.float32)
-        if not isinstance(target, torch.Tensor)
-        else target
-    )
-    up = (
-        torch.tensor(up, dtype=torch.float32)
-        if not isinstance(up, torch.Tensor)
-        else up
-    )
+    target = torch.as_tensor(target, dtype=eye.dtype, device=eye.device)
+    up = torch.as_tensor(up, dtype=eye.dtype, device=eye.device)
 
     if eye.ndim == 1:
         eye = eye.unsqueeze(0)
@@ -80,7 +72,7 @@ def look_at_to_pose(
     camera_x_norm = torch.norm(camera_x, dim=1, keepdim=True)
     if torch.any(camera_x_norm < 1e-6):  # Handle degenerate cases
         up = (
-            torch.tensor([0, 1, 0], dtype=torch.float32)
+            torch.tensor([0, 1, 0], dtype=eye.dtype, device=eye.device)
             .unsqueeze(0)
             .repeat(eye.shape[0], 1)
         )
@@ -92,7 +84,9 @@ def look_at_to_pose(
 
     # Construct camera pose matrices
     camera_pose = (
-        torch.eye(4, dtype=torch.float32).unsqueeze(0).repeat(eye.shape[0], 1, 1)
+        torch.eye(4, dtype=torch.float32, device=eye.device)
+        .unsqueeze(0)
+        .repeat(eye.shape[0], 1, 1)
     )  # (N, 4, 4)
     camera_pose[:, :3, 0] = camera_x
     camera_pose[:, :3, 1] = camera_y

@@ -1,0 +1,11 @@
+task_key: scoop_ice
+title: Scoop Ice
+summary: Scoop ice in the tableware manipulation environment.
+tags:
+- tableware
+- manipulation
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json

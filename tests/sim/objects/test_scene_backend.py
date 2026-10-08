@@ -592,6 +592,28 @@ def test_articulation_properties_use_batch_and_preserve_per_env_values(
     scalar.assert_not_called()
 
 
+def test_articulation_property_reads_do_not_track_model_parameter_gradients() -> None:
+    scene = _Scene("newton")
+    for value in scene.articulation_batch.joint_properties.values():
+        value.requires_grad_()
+
+    data = ArticulationData([_ArticulationEntity()] * 2, scene, torch.device("cpu"))
+    for output, name in (
+        (data.qpos_limits, "position_limits"),
+        (data.qvel_limits, "velocity_limit"),
+        (data.qf_limits, "effort_limit"),
+        *(
+            (getattr(data, f"joint_{name}"), name)
+            for name in ("stiffness", "damping", "friction", "armature")
+        ),
+    ):
+        source = scene.articulation_batch.joint_properties[name]
+        torch.testing.assert_close(output, source)
+        assert not output.requires_grad
+        assert output.grad_fn is None
+        assert source.requires_grad
+
+
 def test_articulation_property_initialization_reports_batch_failure() -> None:
     scene = _Scene()
     scene.articulation_batch.property_status = -1

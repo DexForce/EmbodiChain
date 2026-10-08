@@ -1,0 +1,11 @@
+task_key: place_object_drawer
+title: Place Object in Drawer
+summary: Place a tableware object into a drawer.
+tags:
+- tableware
+- manipulation
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json

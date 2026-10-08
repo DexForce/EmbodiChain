@@ -1,71 +1,99 @@
 # Repeated Pick and Place
 
 The Task Program repeats cube transfers between two authored target poses. The
-physical environment is selected separately from the robot embodiment and program.
+configuration directory separates the physical environment, robot deployments,
+and expansion settings:
+
+```text
+envs/default.yaml       # Default physics scene
+envs/newton.yaml        # Newton physics scene and solver settings
+task.franka.yaml                # Franka Task Program deployment
+task.ur5.yaml                   # UR5 deployment and expansion reference
+expansion/repeated_pick_place.yaml
+                                # task-facing expansion runtime and overrides
+task_program/{program,integration}.yaml
+```
+
+Both task deployments use the same Task Program and select the backend through
+one environment mapping. The launcher chooses the backend with `--physics`; the
+selected environment file owns its `physics` and optional `physics_config`.
+Requesting an unavailable backend fails before simulator construction. A task
+with one `environment.component` uses `--physics` only to confirm that file's
+backend.
 
 | Deployment | Robot component | Physics | Configuration |
 |---|---|---|---|
-| franka (default) | franka_panda | default | `task.franka.yaml` |
-| ur5 | ur5_dh_pgi_140_80 | default | `task.ur5.yaml` |
-| franka_newton | franka_panda | newton | `task.franka.newton.yaml` |
-| ur5_newton | ur5_dh_pgi_140_80 | newton | `task.ur5.newton.yaml` |
-| franka_rlinf | franka_panda_vla | default | `task.franka.rlinf.yaml` |
-| franka_rlinf_joint | franka_panda_vla | default | `task.franka.rlinf_joint.yaml` |
-| franka_rlinf_expert | franka_panda_vla | default | `task.franka.rlinf_expert.yaml` |
+| franka | franka_panda | default or newton | `task.franka.yaml` |
+| ur5 | ur5_dh_pgi_140_80 | default or newton | `task.ur5.yaml` |
 
 Inspect the available deployments:
 
 ```bash
 embodichain show-task embodichain_tasks:repeated_pick_place
-embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+embodichain run-env \
+  --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
 ```
 
-Each deployment owns its physics backend through its environment component. Choose
-a deployment for another backend; `--physics` does not switch an existing one.
-Task Program execution is the supported expert demonstration route. These original
-examples do not independently qualify measured physical placement. No preview or
-physical qualification result is claimed by this catalog.
+## Configured trajectory expansion
 
-The task-local `catalog.yaml` names deployments; it does not register a Gym ID.
-Generate a simulator-free local gallery from the source checkout with:
+`task.ur5.yaml` references `expansion/repeated_pick_place.yaml` through its
+`expansion.config` field. The expansion file contains the Task Program policy,
+scene/affordance/trajectory/visual overrides, runtime recorder events, and the
+collection target. The task config remains the only file that selects the
+robot and environment.
+
+Run the complete 64-recipe batch schedule through the formal task entry point:
 
 ```bash
-embodichain list-task --config-root embodichain_tasks=embodichain_tasks/configs/tasks --category manipulation --export-html task-gallery.html
+embodichain run-task \
+  --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+  --device cpu --headless --seed 7 \
+  --output-dir /tmp/repeated-pick-place/expansion \
+  --dataset-dir /tmp/repeated-pick-place/datasets
 ```
 
-## Dataset action contract
+`--expansion-profile` replaces the profile selected by the task expansion
+file. Collection uses `target_episodes` as the final data count and `num_envs`
+as batch capacity. The default sequential policy collects 64 rows in four
+batches of sixteen. For a small explicit selection, set the matching target
+and use `--max_episodes 4 --expansion-recipe-indices 0 16 32 48`; the legacy
+`--expansion-candidate-indices` spelling remains accepted. Explicit recipe
+selection requires the list length to equal `collection.target_episodes`.
+The selected environment backend provides the same LeRobot recorder for
+Default and Newton; the embodiment supplies the recorder's robot metadata.
+The recorder writes structured data below `/tmp/repeated-pick-place/datasets`,
+the Expansion manifest below `/tmp/repeated-pick-place/expansion`, and the
+debug camera videos below `/tmp/repeated-pick-place/cameras`. Each path can be
+overridden by its owning config or CLI option (`--dataset-dir` and
+`--output-dir` cover the dataset and manifest); the camera path is owned by the
+Expansion declaration. The recorder can be filtered for a dry run with
+`--filter-dataset-saving`.
 
-The LeRobot recorder keeps joint position as the default primary action. A
-recorded row is aligned as `(observation_t, action_t)`: the observation is read
-before the controller applies the action, and the next row observes the
-resulting simulation state.
+The Python showcase remains available for visual debugging and uses the same
+`task.ur5.yaml` deployment and referenced expansion config:
 
-| Contract representation | Primary `action` | `observation.state` | Auxiliary EEF field | Controller boundary |
-|---|---|---|---|---|
-| omitted (main-compatible default) | Active joints in the configured joint order | Measured active-joint qpos | None | Not recorded separately |
-| `joint_position` | Active joints in the configured joint order | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
-| `joint_position_velocity` | Active-joint `[qpos, qvel]` | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
-| `eef_pose_parallel_gripper` | `[x, y, z, roll, pitch, yaw, gripper]` from `arm_action`, then `gripper_action` | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
-| `joint_position_parallel_gripper` | Seven arm joints from `arm_action`, then one `gripper_action` scalar | Measured active-joint qpos | Optional measured `observation.eef_pose` | Not recorded separately |
+```bash
+python examples/sim/motion/repeated_pick_place_expansion_combined.py \
+  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+  --output-dir /tmp/repeated-pick-place/expansion
 
-EEF actions are absolute arena-frame targets. Rotation is XYZ Euler/RPY in
-radians, and gripper values are normalized to `[-1, 1]`. The requested EEF
-target is captured from the Action Manager's validated flat policy command; it
-is never reconstructed from the measured pose. Policy feature width, names, and
-slices come from the manager's ordered descriptors, which are stored as
-`embodichain.action_terms` in the LeRobot action feature metadata and episode
-sidecar. Configurations that omit `action_contract` keep the expert joint schema
-unchanged. Select EEF policy recording explicitly:
-
-```yaml
-params:
-  action_contract:
-    version: 1
-    representation: eef_pose_parallel_gripper
-    record_eef_observation: true
+python examples/sim/motion/repeated_pick_place_expansion_showcase.py \
+  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
+  --candidate-indices 0 16 32 48 --num_envs 16 --seed 7 \
+  --device cpu --headless --output-dir /tmp/repeated-pick-place/showcase
 ```
 
-Contract datasets use LeRobot's per-frame `task` / `task_index` mapping for
-segment instructions. Main-compatible datasets retain the legacy
-`subtask_index` sidecar behavior. Datasets with different declared action
-representations are distinct feature schemas and cannot be merged directly.
+The expansion runtime adds a reset event for the selected candidate and a
+synchronous 4×4 camera grid for sixteen environments. Combined expansion with
+visual variation requires the configured sensors; use `--disable-sensor` only
+with a expansion override that disables visual capture.
+
+The expansion manifest reports the collection boundary separately from the
+recipe schedule. `target_episodes` and `committed_episodes` describe the final
+dataset size; `batch_count` describes parallel execution; `attempts` includes
+failed retries; and the prepare, commit, and discard reset counts describe
+reset boundaries. These counters let a run be compared across different
+`num_envs` values without treating a batch or a reset as an episode.
+
+The task-local `catalog.yaml` names the two robot deployments; expansion is a
+capability of the UR5 deployment rather than a third deployment entry.

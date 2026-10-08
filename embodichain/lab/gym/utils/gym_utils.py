@@ -464,12 +464,14 @@ def config_to_cfg(
     """
 
     from embodichain.lab.sim.cfg import (
+        DenoisingCfg,
         RobotCfg,
         RigidObjectCfg,
         RigidObjectGroupCfg,
         ArticulationCfg,
         LightCfg,
         DLSSCfg,
+        NRDCfg,
         RenderCfg,
         physics_cfg_for_backend,
     )
@@ -655,8 +657,12 @@ def config_to_cfg(
     env_cfg.enable_sensor = config.get("enable_sensor", True)
 
     render_config = deepcopy(config.get("render_cfg", {}))
+    if isinstance(render_config.get("denoising"), dict):
+        render_config["denoising"] = DenoisingCfg(**render_config["denoising"])
     if isinstance(render_config.get("dlss"), dict):
         render_config["dlss"] = DLSSCfg(**render_config["dlss"])
+    if isinstance(render_config.get("nrd"), dict):
+        render_config["nrd"] = NRDCfg(**render_config["nrd"])
     if "renderer" in config:
         # Keep the existing flat renderer option as the command-line override.
         render_config["renderer"] = config["renderer"]
@@ -1144,6 +1150,7 @@ def add_env_launcher_args_to_parser(
 
     parser.add_argument(
         "--gym_config",
+        "--gym-config",
         type=str,
         help="Path to gym config file (.json, .yaml, or .yml).",
         default="",
@@ -1169,6 +1176,7 @@ def add_env_launcher_args_to_parser(
     )
     parser.add_argument(
         "--filter_dataset_saving",
+        "--filter-dataset-saving",
         help="Whether to filter out dataset saving.",
         default=False,
         action="store_true",
@@ -1262,6 +1270,30 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         merged_config["max_episodes"] = args.max_episodes
     if getattr(args, "disable_sensor", False):
         merged_config["enable_sensor"] = False
+    dataset_dir = getattr(args, "expansion_dataset_dir", None)
+    if dataset_dir is not None:
+        if type(dataset_dir) is not str or not dataset_dir.strip():
+            raise ValueError("--dataset-dir must be a nonempty path")
+        env_config = merged_config.get("env")
+        if not isinstance(env_config, Mapping):
+            raise ValueError("--dataset-dir requires an env.dataset configuration")
+        datasets = env_config.get("dataset")
+        if not isinstance(datasets, Mapping) or not datasets:
+            raise ValueError("--dataset-dir requires at least one dataset manager")
+        updated_datasets = deepcopy(dict(datasets))
+        for dataset_name, dataset_config in updated_datasets.items():
+            if not isinstance(dataset_config, Mapping):
+                raise ValueError(
+                    f"env.dataset.{dataset_name} must be a mapping when using "
+                    "--dataset-dir"
+                )
+            params = deepcopy(dict(dataset_config.get("params", {})))
+            params["save_path"] = dataset_dir
+            dataset_config = deepcopy(dict(dataset_config))
+            dataset_config["params"] = params
+            updated_datasets[dataset_name] = dataset_config
+        merged_config["env"] = deepcopy(dict(env_config))
+        merged_config["env"]["dataset"] = updated_datasets
     if viser_enabled:
         from embodichain.lab.visualization.cli import visualization_cfg_from_args
 
@@ -1288,6 +1320,144 @@ def merge_args_with_gym_config(args: argparse.Namespace, gym_config: dict) -> di
         visualization["viser_server"] = viser_server
         merged_config["visualization"] = visualization
     return merged_config
+
+
+def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
+    """Resolve one task-owned expansion declaration path."""
+    from embodichain.utils.config_paths import resolve_config_path
+
+    if type(value) is not str or not value.strip() or value != value.strip():
+        raise ValueError("expansion.config must be a nonempty path")
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        resolved = path.resolve()
+    elif path.parts[:2] == ("embodichain_tasks", "configs"):
+        resolved = resolve_config_path(path).resolve()
+    else:
+        resolved = (base_dir / path).resolve()
+    if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
+        raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"expansion.config is not a file: {resolved}")
+    return resolved
+
+
+def _merge_expansion_config(
+    base: Mapping[str, Any], patch: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge a referenced expansion config with task-local overrides."""
+    merged = deepcopy(dict(base))
+    for key, value in patch.items():
+        if isinstance(value, Mapping):
+            current = merged.get(key, {})
+            if not isinstance(current, Mapping):
+                raise ValueError(f"expansion.{key} cannot replace a scalar")
+            merged[key] = _merge_expansion_config(current, value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _load_expansion_declaration(
+    binding: Mapping[str, Any], *, base_dir: Path
+) -> tuple[dict[str, Any], Path | None]:
+    """Load an optional task-referenced expansion declaration.
+
+    A task may keep the expansion declaration inline or point ``expansion``
+    at a sibling YAML/JSON file with ``config``. The referenced file contains
+    the fields below ``expansion`` directly; a single outer ``expansion``
+    mapping is accepted as a migration convenience. Only one level of
+    references is resolved so malformed chains fail early.
+    """
+    if not isinstance(binding, Mapping):
+        raise ValueError("expansion must be a mapping")
+    if "config" not in binding:
+        return deepcopy(dict(binding)), None
+    config_value = binding["config"]
+
+    from embodichain.utils.utility import load_config
+
+    config_path = _resolve_expansion_config_path(config_value, base_dir=base_dir)
+    referenced = load_config(config_path)
+    if not isinstance(referenced, Mapping):
+        raise TypeError("expansion config must contain a mapping")
+    referenced = dict(referenced)
+    if "expansion" in referenced:
+        if set(referenced) != {"expansion"}:
+            raise ValueError(
+                "expansion config may contain either expansion fields or one "
+                "outer expansion mapping"
+            )
+        nested = referenced["expansion"]
+        if not isinstance(nested, Mapping):
+            raise TypeError("expansion config.expansion must be a mapping")
+        referenced = dict(nested)
+    if "config" in referenced:
+        raise ValueError("expansion.config cannot reference another expansion config")
+    local_overrides = {key: value for key, value in binding.items() if key != "config"}
+    return _merge_expansion_config(referenced, local_overrides), config_path
+
+
+def _apply_expansion_runtime_overlay(
+    config: dict[str, Any], *, base_dir: Path | None = None
+) -> dict[str, Any]:
+    """Apply task-owned expansion host values after environment expansion.
+
+    Physical scene and backend values remain owned by the selected environment
+    component. Expansion deployments may add recorder/reset managers and
+    batch runtime values without maintaining a duplicate expansion-owned
+    physical scene file.
+    """
+    expansion = config.get("expansion")
+    if not isinstance(expansion, Mapping):
+        return config
+    expansion, _ = _load_expansion_declaration(
+        expansion,
+        base_dir=Path.cwd() if base_dir is None else base_dir,
+    )
+    runtime = expansion.get("runtime")
+    if runtime is None:
+        return config
+    if not isinstance(runtime, Mapping):
+        raise ValueError("expansion.runtime must be a mapping")
+    allowed = {
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "env",
+    }
+    unknown = set(runtime) - allowed
+    if unknown:
+        raise ValueError(
+            f"expansion.runtime contains unsupported fields: {sorted(unknown)}"
+        )
+
+    def merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+        merged = deepcopy(dict(base))
+        for key, value in patch.items():
+            if isinstance(value, Mapping):
+                current = merged.get(key, {})
+                if not isinstance(current, Mapping):
+                    raise ValueError(f"expansion.runtime.{key} cannot replace a scalar")
+                merged[key] = merge(current, value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+
+    resolved = deepcopy(config)
+    for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
+        if key in runtime:
+            resolved[key] = deepcopy(runtime[key])
+    for key in ("env",):
+        if key in runtime:
+            current = resolved.get(key, {})
+            if not isinstance(current, Mapping) or not isinstance(
+                runtime[key], Mapping
+            ):
+                raise ValueError(f"expansion.runtime.{key} must be a mapping")
+            resolved[key] = merge(current, runtime[key])
+    return resolved
 
 
 def build_env_cfg_from_args(
@@ -1319,17 +1489,26 @@ def build_env_cfg_from_args(
         gym_config = _resolve_environment_component(
             gym_config,
             base_dir=gym_config_source_path.parent,
+            selected_backend=getattr(args, "physics", None),
         )
+    gym_config = _apply_expansion_runtime_overlay(
+        gym_config, base_dir=gym_config_source_path.parent
+    )
     gym_config = merge_args_with_gym_config(args, gym_config)
     if gym_config_modifier is not None:
         gym_config_modifier(gym_config)
 
-    cfg: EmbodiedEnvCfg = config_to_cfg(
-        gym_config,
-        manager_modules=get_manager_modules(),
-        source_path=gym_config_source_path,
-        task_program_path_override=getattr(args, "task_program", None),
-    )
+    collection_config = gym_config.pop("collection", None)
+    try:
+        cfg: EmbodiedEnvCfg = config_to_cfg(
+            gym_config,
+            manager_modules=get_manager_modules(),
+            source_path=gym_config_source_path,
+            task_program_path_override=getattr(args, "task_program", None),
+        )
+    finally:
+        if collection_config is not None:
+            gym_config["collection"] = collection_config
     cfg.filter_visual_rand = args.filter_visual_rand
     cfg.filter_dataset_saving = args.filter_dataset_saving
     if getattr(args, "disable_sensor", False):

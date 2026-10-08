@@ -40,6 +40,7 @@ from embodichain.lab.task_program.integrations.configured import (
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
+    _decode_planner_config,
     _load_configured_task_program_deployment,
     _resolve_task_program_components,
 )
@@ -252,6 +253,44 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
+def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
+    """The policy-owned planner selection stays outside semantic payloads."""
+    deployment = _deployment_from_path(
+        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+    )
+
+    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    delegate = deployment.integration.adapter_factory.delegate
+    assert delegate._planner_config == deployment.planner_config
+    assert (
+        deployment.integration.registration.robot_profile_binding.presets[
+            0
+        ].required_planner
+        == "toppra"
+    )
+
+
+def test_planner_policy_decoder_validates_backend_and_options() -> None:
+    """Planner backends remain closed while typed options stay configurable."""
+    assert _decode_planner_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        path="execution policy.planner",
+    ) == {"type": "toppra", "config": {"max_workers": 2}}
+
+    with pytest.raises(ValueError, match="execution policy.planner.type"):
+        _decode_planner_config(
+            {"type": "custom_callable", "config": {}},
+            path="execution policy.planner",
+        )
+
+    for field_name in ("world", "auto_gen"):
+        with pytest.raises(TypeError, match="must be a mapping"):
+            _decode_planner_config(
+                {"type": "curobo", "config": {field_name: None}},
+                path="execution policy.planner",
+            )
+
+
 @pytest.mark.parametrize("task_name", ("repeated_pick_place", "open_drawer"))
 def test_single_task_program_composes_with_ur5_and_franka(
     task_name: str,
@@ -277,7 +316,10 @@ def test_single_task_program_composes_with_ur5_and_franka(
     assert (
         ur5_config["environment"]
         == franka_config["environment"]
-        == {"component": "env.yaml"}
+        == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
     )
     assert ur5_config["task_program"] == franka_config["task_program"]
     assert ur5.program_path == franka.program_path
@@ -304,9 +346,11 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     assert type(drawer_embodiment) is dict
     assert repeated_embodiment["component"] == drawer_embodiment["component"]
     repeated_environment = load_config(
-        _config_path("repeated_pick_place").parent / "env.yaml"
+        _config_path("repeated_pick_place").parent / "envs/default.yaml"
     )
-    drawer_environment = load_config(_config_path("open_drawer").parent / "env.yaml")
+    drawer_environment = load_config(
+        _config_path("open_drawer").parent / "envs/default.yaml"
+    )
     assert (
         repeated_environment["environment_id"] != drawer_environment["environment_id"]
     )
