@@ -560,6 +560,41 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
 
+@pytest.mark.no_sim
+def test_axis_helper_publishes_without_advancing_simulation() -> None:
+    from embodichain.lab.sim.utility.atom_action_utils import draw_axis
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+
+    draw_axis(SimpleNamespace(sim=sim), torch.eye(4))
+
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+    assert runtime.capture_calls[-1]["sim_time"] == 0.0
+
+
+@pytest.mark.no_sim
+def test_default_state_publication_does_not_integrate_time() -> None:
+    state = SimpleNamespace(time=0.0, position=1.0, published=False)
+
+    def update(dt: float) -> None:
+        state.time += dt
+        state.position += 2.0 * dt
+        state.published = True
+
+    backend = DefaultPhysicsBackend(
+        SimpleNamespace(_world=SimpleNamespace(update=update))
+    )
+    backend.sync_render_state(object())
+
+    assert state.published
+    assert state.time == 0.0
+    assert state.position == 1.0
+
+
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
     sim, runtime = _make_visualization_sim_manager()
     overlays = SceneOverlays(

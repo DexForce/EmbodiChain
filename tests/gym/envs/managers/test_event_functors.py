@@ -20,10 +20,51 @@ from __future__ import annotations
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from unittest.mock import MagicMock, Mock, call
 
 from embodichain.lab.sim.cfg import ArticulationCfg
+
+
+@pytest.mark.parametrize("selection", [None, [1]])
+def test_information_registration_only_publishes_by_default(selection) -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, selection, registry=[])
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_called_once()
+
+
+def test_information_registration_rejects_partial_legacy_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    with pytest.raises(ValueError, match="requires all environments"):
+        register_info_to_env(env, [1], registry=[], sim_update=True)
+    env.sim.update.assert_not_called()
+    env.sim.sync_render_state.assert_not_called()
+
+
+def test_information_registration_retains_explicit_full_world_settling() -> None:
+    from embodichain.lab.gym.envs.managers.events import register_info_to_env
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        sim=SimpleNamespace(sync_render_state=Mock(), update=Mock()),
+    )
+    register_info_to_env(env, [1, 0], registry=[], sim_update=True)
+    env.sim.update.assert_called_once_with(step=100)
 
 
 class MockRobot:

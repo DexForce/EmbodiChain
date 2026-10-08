@@ -22,6 +22,9 @@ An independent camera/capture call still publishes fresh state. No publication
 cache survives a frame, so paused edits and direct writes between frames do not
 need mutation counters. State edits inside a read-only frame require an explicit
 `sync_render_state()` before further reads; that API always publishes.
+Default publishes native transforms with `World.update(0.0)`, without advancing
+physics. Pose-editing tools and display initialization use this publication
+boundary; they must not use positive-duration updates merely to refresh a view.
 
 The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit

@@ -58,6 +58,11 @@ class DefaultPhysicsBackend(PhysicsBackend):
         if self._manager.device.type == "cuda":
             self._manager._world.init_gpu_physics()
 
+    def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
+        """Publish native transforms without integrating physics."""
+        del result
+        self._manager._world.update(0.0)
+
     # -- scene ---------------------------------------------------------- #
     def get_scene(self):
         """Return the Default backend's compatibility scene after Spawn is prepared."""

@@ -61,6 +61,7 @@ without recomputing. Pass ``--output`` to export a copy to a user path.
 from __future__ import annotations
 
 import argparse
+import time
 import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
@@ -724,7 +725,9 @@ def main(args: argparse.Namespace) -> None:
                 )
             try:
                 while True:
-                    sim.update(step=1)
+                    with sim.render_frame():
+                        pass
+                    time.sleep(0.01)
             except KeyboardInterrupt:
                 pass
     finally:

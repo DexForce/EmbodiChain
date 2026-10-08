@@ -76,6 +76,17 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 - `relative_position=True` (default) adds offset to initial position; `relative_rotation=False` (default) replaces rotation.
 - After setting pose, `clear_dynamics()` is called to zero out velocities.
 - `physics_update_step > 0` triggers `env.sim.update(step=N)` to let physics settle after randomization.
+- Robot joint/end-effector randomizers restore current positions and matching
+  drive targets, clear dynamics only in selected environments, and publish
+  through `SimulationManager.sync_render_state()` without stepping physics.
+  End-effector randomization requires named `SceneEntityCfg.control_parts` and
+  passes the same `env_ids` to FK/IK and state writes.
+
+`register_info_to_env` publishes state before reading attributes and defaults to
+`sim_update=False`. Explicit `sim_update=True` retains the legacy 100-step
+settle, but requires all environments because physics advances the whole World.
+For configurable physical settling, use `wait_for_dynamic_objects_to_settle`,
+which rejects partial selections unless `allow_partial_envs=True` is explicit.
 
 ### Geometry (`geometry.py`)
 
