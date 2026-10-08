@@ -3,7 +3,7 @@
 The shared technical-report core lives in `scripts/benchmark/core/`;
 offline aggregation, comparison and report/figure outputs live in
 `scripts/benchmark/reporting/`.
-The pure-rendering R-series suite is the first complete domain consumer;
+The pure-rendering pilot suite is the first domain consumer;
 `camera-pilot` remains its smallest compatibility example. Other benchmark
 domains retain their existing owners and can adopt these helpers incrementally.
 
@@ -27,6 +27,7 @@ domains retain their existing owners and can adopt these helpers incrementally.
 | Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
 | Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
 | R-series matrices and capture contract | `scripts/benchmark/rendering/suite.py` |
+| Matching scene inputs and review previews | `scripts/benchmark/rendering/scenes.py`, `preview.py`, `backends/scene_*.py` |
 | R-series launcher, worker and offline report | `scripts/benchmark/rendering/suite_runner.py`, `suite_worker.py`, `suite_report.py` |
 | G-03 case, attempt, receipt, fixture and session adapter | `scripts/benchmark/expert_generation/` |
 
@@ -92,7 +93,7 @@ and reproduction commands.
 
 ## Pure-rendering R-series cautions
 
-R-03 varies resolution, R-04 varies camera batch size, R-05 varies RGB/depth/
+The legacy pilot catalog's R-03 varies resolution, R-04 varies camera batch size, R-05 varies RGB/depth/
 normal modalities, R-06 varies static versus moving temporal capture, and R-09
 varies device versus host delivery and duplicate host copies. All measurements
 exclude physics stepping and keep warm-up outside the denominator. EmbodiChain
@@ -100,6 +101,13 @@ uses arena camera groups; Isaac Lab uses independent USD camera views aggregated
 into one result batch, and the adapter records this treatment in renderer
 provenance. The shared comparison remains unqualified until image quality,
 lighting and modality semantics are calibrated across the two renderers.
+
+`rendering-preview` is a separate scene-review entry point. Both adapters consume
+one hashed manifest and canonical mesh arrays, including frozen robot-link and
+wrist-camera transforms. It captures all declared views and modalities without
+running a timing matrix. Review state remains pending; a preview is not a quality
+certificate. Native lighting/denoising and runtime versions remain explicit.
+Do not confuse the legacy modality R-05 with the report plan's three-camera R-05.
 
 ## Validation
 

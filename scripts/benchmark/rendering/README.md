@@ -1,5 +1,55 @@
 # Pure-rendering suite and camera pilot
 
+## Shared-scene review before measurement
+
+Use `rendering-preview` to review matching calibration, workshop and Franka
+workstation scenes before freezing a formal performance matrix:
+
+```bash
+python -m scripts.benchmark rendering-preview \
+  --output outputs/rendering-review/<new-review-id> \
+  --gpu-id 1 \
+  --isaaclab-root /path/to/frozen/IsaacLab/worktree \
+  --isaaclab-python /path/to/matching/isaaclab/python
+```
+
+Both backends consume the same `scene.json`, mesh arrays, world transforms,
+neutral PBR material overrides and pinhole camera parameters. The workstation
+includes two external views and one view attached to the frozen Franka hand
+pose. Robot meshes and FK are resolved during scene preparation; captures do
+not run a robot articulation or advance physics. The current static robot pose
+is a render fixture, not a validated grasp trajectory. Source mesh textures are
+deliberately replaced by the recorded common materials.
+
+`scenes.py` owns the shared inputs; `backends/scene_embodichain.py` and
+`backends/scene_isaaclab.py` own native scene construction. The Isaac adapter uses
+one vectorized camera over all view prims. The frozen Isaac camera API takes
+OpenGL `xyzw` rotations. The native graphics device and CUDA device are selected
+explicitly; workers execute serially using the shared process-isolation helper.
+
+The native material boundary converts the manifest's linear reflectance to
+display-sRGB for `VisualMaterialCfg`; USD receives linear values directly.
+The output includes untouched RGB PNGs, RGB/depth/instance arrays, worker logs,
+renderer/software metadata, a scene contact sheet and a three-view workstation
+contact sheet. `geometry_checks.json` records paired mask/depth consistency;
+the comparison builder also verifies resolved intrinsics and camera poses.
+Background depth is consistently represented by infinity.
+`review.json` stays `pending_user_review`; this command never
+approves a scene or starts a timing matrix. Images remain `not_qualified` until
+lighting and quality have been calibrated. Native light intensity units and
+denoising choices are recorded separately; geometry equality does not certify
+equal image quality. Failed previews retain their process evidence.
+
+`--prepare-only --scene calibration` works without simulator imports, including
+with `python -S`. `--reuse-scenes` verifies frozen geometry hashes and requires
+new worker output directories. Keep the Isaac Sim runtime and its extension
+cache packages on matching versions in a dedicated environment.
+
+The R-series catalog below is the legacy pilot matrix. Its R-05 entry measures
+modalities; it does **not** implement the technical-report plan's three-camera
+R-05 experiment. The shared-scene preview is the review boundary before the
+formal R-01–R-05 quality/performance workloads are connected.
+
 第一阶段收缩为一个可复跑的小实验：同一程序化桌面/三个方块、一个 RGB
 相机，分别在 EmbodiChain/DexSim 与已安装的 Isaac Lab 中运行。
 

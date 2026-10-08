@@ -63,7 +63,12 @@ class EmbodiChainCamera:
     def __init__(self, cfg: PilotCfg | RenderCaseCfg) -> None:
         import torch
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain.lab.sim.cfg import DLSSCfg, LightCfg, RenderCfg, RigidObjectCfg
+        from embodichain.lab.sim.cfg import (
+            DenoisingCfg,
+            LightCfg,
+            RenderCfg,
+            RigidObjectCfg,
+        )
         from embodichain.lab.sim.material import VisualMaterialCfg
         from embodichain.lab.sim.sensors import CameraCfg
         from embodichain.lab.sim.shapes import CubeCfg
@@ -86,7 +91,8 @@ class EmbodiChainCamera:
                 num_envs=self.num_envs,
                 physics_dt=1 / 240,
                 render_cfg=RenderCfg(
-                    renderer="hybrid", dlss=DLSSCfg(dlss_enabled=False)
+                    renderer="hybrid",
+                    denoising=DenoisingCfg(window="off", offscreen="off"),
                 ),
                 enable_entity_gizmo=False,
                 robot_ik_gizmo=None,

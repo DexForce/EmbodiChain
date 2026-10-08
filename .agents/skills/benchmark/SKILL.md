@@ -25,8 +25,10 @@ and `scripts/benchmark/reporting/` for aggregation and comparison eligibility.
 Keep scene construction, platform APIs and domain validation in the experiment's
 own directory. Read [the framework entry points](../../../scripts/benchmark/README.md)
 and use `scripts/benchmark/rendering/suite.py` / `suite_runner.py` for the
-R-03/R-04/R-05/R-06/R-09 pure-rendering matrix; `camera-pilot` remains the
-smallest working example.
+legacy R-series pilot matrix; `camera-pilot` remains the smallest working
+example. Use `rendering-preview` to inspect matching frozen scenes before
+formal matrix execution. Preview completion does not approve image quality;
+the pilot's modality R-05 is distinct from the report plan's three-camera R-05.
 
 Core/report rebuilds remain independent of simulator imports. Record raw seconds,
 bytes, metric populations and missing-value reasons; keep execution completion

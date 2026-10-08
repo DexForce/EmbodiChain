@@ -1,10 +1,12 @@
 # 技术报告 Benchmark 核心与纯渲染实验
 
-当前交付是技术报告 benchmark 的公共框架 v1，以及完整的纯渲染 R-03/R-04/R-05/R-06/R-09 实验套件。
+当前交付是技术报告 benchmark 的公共框架 v1、纯渲染 pilot 矩阵，以及共享场景预览入口。
 它覆盖实验定义、矩阵与预算、隔离运行、三类测量、标准产物、来源追踪、离线统计、
 图表导出和比较条件检查。
 每个纯渲染 cell 同时提供 EmbodiChain/DexSim 和 Isaac Lab 的独立进程实现与复跑命令；
 `camera-pilot` 保留为最小兼容样例。
+`rendering-preview` 先冻结相同场景并输出两平台预览，不运行性能矩阵、不自动批准质量。
+现有 pilot 的 R 编号尚未全部对齐正式计划；例如其 R-05 测量模态成本，正式计划的 R-05 是三相机扩展。
 
 ## 结构和职责
 
@@ -54,7 +56,7 @@ scripts/benchmark/
 机器人/场景配置、物理推进、图像格式与质量判定仍由领域代码及平台 API 拥有。
 
 已有 motion-generation、Atomic Action、RL 等 benchmark 有各自稳定 owner；
-纯渲染套件是这个核心的第一个完整 R-series 使用者，后续 L/P/G/D 实验可以按需要迁移共用能力。
+纯渲染 pilot 是这个核心的第一个 R-series 使用者，后续 L/P/G/D 实验可以按需要迁移共用能力。
 
 ## 最小数据流
 

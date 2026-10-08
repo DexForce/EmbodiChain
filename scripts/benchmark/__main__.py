@@ -83,6 +83,11 @@ def _run_workspace_analyzer_cli(_: argparse.Namespace) -> None:
 def main(argv: Sequence[str] | None = None) -> None:
     """Dispatch to the appropriate benchmark sub-command CLI."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "rendering-preview":
+        from scripts.benchmark.rendering.preview import main as preview_main
+
+        preview_main(arguments[1:])
+        return
     if arguments and arguments[0] == "camera-pilot":
         # Keep the offline report path independent of motion/simulator imports.
         from scripts.benchmark.rendering.run_benchmark import main as camera_main
@@ -109,6 +114,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         description="EmbodiChain benchmark command-line interface.",
     )
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser(
+        "rendering-preview",
+        add_help=False,
+        help="Render matching scenes for visual review without benchmarking.",
+    )
     subparsers.add_parser(
         "camera-pilot",
         add_help=False,
