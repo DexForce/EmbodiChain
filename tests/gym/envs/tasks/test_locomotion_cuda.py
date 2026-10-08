@@ -132,6 +132,10 @@ def _run_locomotion_smoke(robot: str, backend: str) -> None:
                 assert reward.shape[0] == 8
                 assert terminated.shape[0] == truncated.shape[0] == 8
         before = raw._elapsed_steps.clone()
+        state_fields = ("qpos", "qvel", "root_pose", "root_vel")
+        before_state = {
+            name: getattr(raw.robot.body_data, name).clone() for name in state_fields
+        }
         if newton is not None:
             assert newton.cuda_graph_status == "captured"
         observation, _ = env.reset(
@@ -141,6 +145,13 @@ def _run_locomotion_smoke(robot: str, backend: str) -> None:
         assert bool((raw._elapsed_steps[[0, 3]] == 0).all())
         remaining = [1, 2, 4, 5, 6, 7]
         assert torch.equal(raw._elapsed_steps[remaining], before[remaining])
+        for name in state_fields:
+            torch.testing.assert_close(
+                getattr(raw.robot.body_data, name)[remaining],
+                before_state[name][remaining],
+                rtol=0,
+                atol=0,
+            )
     finally:
         runtime.close()
 

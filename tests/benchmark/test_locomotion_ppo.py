@@ -17,8 +17,15 @@
 
 from __future__ import annotations
 
-import pytest
+import json
+from pathlib import Path
+import sys
+from types import SimpleNamespace
 
+import pytest
+import torch
+
+from scripts.benchmark.rl import locomotion_ppo as benchmark
 from scripts.benchmark.rl.locomotion_ppo import (
     TASK_DIR,
     _load_config,
@@ -136,3 +143,68 @@ def test_resource_output_omits_process_and_device_identifiers() -> None:
     assert "gpu_uuid" not in result
     assert "pid_candidates" not in result
     assert "local-device-id" not in str(result)
+
+
+@pytest.mark.no_sim
+def test_creation_failure_retains_resource_samples(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Write failure reports with samples taken before runtime construction."""
+    from embodichain.lab.gym.utils import registration
+    from embodichain.learning.rl import runtime as policy_runtime
+    from scripts.benchmark.rl import runtime as benchmark_runtime
+
+    env_config = tmp_path / "input.yaml"
+    env_config.write_text("physics_config:\n  solver_cfg: {}\n")
+    output = tmp_path / "result"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["locomotion_ppo", "--backend", "newton", "--output", str(output)],
+    )
+    monkeypatch.setattr(
+        benchmark,
+        "_load_config",
+        lambda *args: {
+            "trainer": {"gym_config": str(env_config), "renderer": "hybrid"},
+            "policy": {},
+            "algorithm": {},
+        },
+    )
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda device: None)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "test GPU")
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda device: SimpleNamespace(uuid="test-device"),
+    )
+    monkeypatch.setattr(torch, "set_num_threads", lambda count: None)
+    monkeypatch.setattr(benchmark_runtime, "set_random_seed", lambda *args: None)
+    monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(benchmark, "_measure", lambda operation: (operation(), {}))
+
+    def sample(resources: ProcessResources, label: str) -> dict:
+        item = {"label": label, "cpu_rss_mib": 50.0}
+        resources.samples.append(item)
+        return item
+
+    monkeypatch.setattr(ProcessResources, "sample", sample)
+    failure = RuntimeError("runtime construction failed")
+
+    def fail_creation(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(policy_runtime, "build_gym_policy_runtime", fail_creation)
+    with pytest.raises(RuntimeError) as caught:
+        benchmark.main()
+    assert caught.value is failure
+    result = json.loads((output / "result.json").read_text())
+    assert result["status"] == "failed"
+    assert result["resources"]["samples"] == [
+        {"label": "before_create", "cpu_rss_mib": 50.0}
+    ]
+    assert (
+        "| Dexsim Newton/MJWarp CUDA | failed |" in (output / "report.md").read_text()
+    )

@@ -271,20 +271,21 @@ def _run(args: argparse.Namespace, result: dict) -> None:
         },
     }
     resources = ProcessResources(str(torch.cuda.get_device_properties(device).uuid))
-    resources.sample("before_create")
-    runtime, result["create_runtime"] = _measure(
-        lambda: build_gym_policy_runtime(
-            config,
-            device=device,
-            num_envs=args.envs,
-            headless=True,
-            renderer=config["trainer"]["renderer"],
-            gpu_id=0,
-            seed=args.seed,
-            config_dir=args.task_dir,
-        )
-    )
+    runtime = None
     try:
+        resources.sample("before_create")
+        runtime, result["create_runtime"] = _measure(
+            lambda: build_gym_policy_runtime(
+                config,
+                device=device,
+                num_envs=args.envs,
+                headless=True,
+                renderer=config["trainer"]["renderer"],
+                gpu_id=0,
+                seed=args.seed,
+                config_dir=args.task_dir,
+            )
+        )
         backend = _check_backend(runtime.env, args.backend)
         trainer = _build_trainer(runtime, config, args.output)
         trainer.algorithm.bind_schedule(total_updates=args.warmup + args.updates)
@@ -338,7 +339,8 @@ def _run(args: argparse.Namespace, result: dict) -> None:
         trainer.save_checkpoint(str(args.output / "model.pt"))
     finally:
         result["resources"] = resources.result()
-        runtime.close()
+        if runtime is not None:
+            runtime.close()
 
 
 def main() -> None:
