@@ -65,6 +65,8 @@ inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 `build_env_cfg_from_args()` expands `environment.component` before applying
 launcher arguments so environment-owned run controls such as `max_episodes`
 remain visible to the run loop while explicit CLI values retain precedence.
+New offline collection configs should use `collection.target_episodes`; the
+legacy field and `--max_episodes` option map to that committed-row target.
 
 An inline runnable config must declare exactly one
 `physics: default|newton` backend. A reusable environment component also owns

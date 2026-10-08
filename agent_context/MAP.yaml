@@ -9,8 +9,8 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DLSSCfg, DLSS, frame_time_delta_ms,
-    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
+  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
+    NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
@@ -165,10 +165,12 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
-    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, trajectory variants,
-    trajectory variant expansion, 轨迹播放, 轨迹扩增, 运动规划, 轨迹规划, 轨迹变体]
+    trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
+    fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
+    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
-    expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
+    load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
     TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
     via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
@@ -286,7 +288,8 @@ topics:
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
-    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, execution_policy, SemanticPose, quaternion_xyzw,
+    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
+    CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:

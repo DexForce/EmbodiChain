@@ -1322,7 +1322,7 @@ def test_grounded_safe_invocation_requires_registered_dynamic_collision() -> Non
     assert resolved_tracking.metrics[0].tolerance == 0.125
 
 
-def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
+def test_pick_relation_lookahead_stays_late_bound_without_recovery_dependency() -> None:
     registry, _ = _scene_registry()
     compiler, engine = _compiler(registry)
     workflow = compiler.analyze(
@@ -1345,7 +1345,7 @@ def test_pick_relation_lookahead_stays_late_bound_scene_dependency() -> None:
     assert downstream.entity_id == "table_top"
     request = engine.resolve(grounded.invocation)
     action = engine.actions["pick_up"]
-    assert "table_top" in action._scene_dependencies(request)
+    assert "table_top" not in action._scene_dependencies(request)
 
 
 def test_pick_replan_resolves_downstream_target_from_latest_snapshot() -> None:

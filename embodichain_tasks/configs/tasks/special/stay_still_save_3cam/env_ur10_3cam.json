@@ -1,0 +1,180 @@
+{
+    "id": "StayStillSave3Cam-v1",
+    "physics": "default",
+    "max_episodes": 1,
+    "env": {
+        "dataset": {
+            "lerobot": {
+                "func": "AsyncLeRobotRecorder",
+                "mode": "save",
+                "params": {
+                    "robot_meta": {
+                        "robot_type": "UR10"
+                    },
+                    "instruction": {
+                        "lang": "Hold still for 300 steps while recording three RGB cameras"
+                    },
+                    "extra": {
+                        "scene_type": "benchmark",
+                        "task_description": "stay still three cameras 300 steps",
+                        "data_type": "sim"
+                    },
+                    "use_videos": false,
+                    "image_writer_threads": 8,
+                    "image_writer_processes": 0,
+                    "image_compress_level": 1,
+                    "async_queue_maxsize": 8
+                },
+                "save_failed_episodes": true
+            }
+        }
+    },
+    "robot": {
+        "uid": "UR10",
+        "fpath": "UniversalRobots/UR10/UR10.urdf",
+        "init_pos": [
+            0.0,
+            0.0,
+            0.7775
+        ],
+        "init_qpos": [
+            1.57079,
+            -1.57079,
+            1.57079,
+            -1.57079,
+            -1.57079,
+            -3.14159
+        ]
+    },
+    "sensor": [
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_high",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [
+                488.1665344238281,
+                488.1665344238281,
+                320.0,
+                240.0
+            ],
+            "extrinsics": {
+                "eye": [
+                    1,
+                    0,
+                    3
+                ],
+                "target": [
+                    0,
+                    0,
+                    1
+                ]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_left",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [
+                488.1665344238281,
+                488.1665344238281,
+                320.0,
+                240.0
+            ],
+            "extrinsics": {
+                "eye": [
+                    0,
+                    2.8,
+                    2.4
+                ],
+                "target": [
+                    0,
+                    0,
+                    1
+                ]
+            }
+        },
+        {
+            "sensor_type": "Camera",
+            "uid": "cam_right",
+            "width": 640,
+            "height": 480,
+            "intrinsics": [
+                488.1665344238281,
+                488.1665344238281,
+                320.0,
+                240.0
+            ],
+            "extrinsics": {
+                "eye": [
+                    0,
+                    -2.8,
+                    2.4
+                ],
+                "target": [
+                    0,
+                    0,
+                    1
+                ]
+            }
+        }
+    ],
+    "light": {
+        "direct": [
+            {
+                "uid": "light_1",
+                "light_type": "sun",
+                "color": [
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "intensity": 5.0,
+                "direction": [
+                    0.0,
+                    0.0,
+                    -1.0
+                ]
+            }
+        ]
+    },
+    "background": [
+        {
+            "uid": "table",
+            "shape": {
+                "shape_type": "Mesh",
+                "fpath": "CircleTableSimple/circle_table_simple.ply",
+                "compute_uv": true
+            },
+            "attrs": {
+                "mass_props": {
+                    "mass": 10.0
+                },
+                "material_props": {
+                    "static_friction": 0.95,
+                    "dynamic_friction": 0.9,
+                    "restitution": 0.01
+                }
+            },
+            "body_scale": [
+                1,
+                1,
+                1
+            ],
+            "body_type": "kinematic",
+            "init_pos": [
+                0.8,
+                0.0,
+                0.825
+            ],
+            "init_rot": [
+                0,
+                90,
+                0
+            ]
+        }
+    ],
+    "rigid_object": [],
+    "max_episode_steps": 301
+}

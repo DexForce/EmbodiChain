@@ -1,0 +1,11 @@
+task_key: hand_over
+title: Hand Over
+summary: Transfer an object between two manipulators using a configured Task Program.
+tags:
+- manipulation
+- bimanual
+- task_program
+default_deployment: default
+deployments:
+  default:
+    config: task.dual_ur5_dh_pgi_140_80.yaml

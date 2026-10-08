@@ -17,7 +17,7 @@ replaying a previously recorded trajectory.
   - No mode switch
   - Generates task actions, steps the environment, and lets configured
     dataset or video recorders save each episode.
-  - Expert demonstration generation and task smoke tests.
+  - Expert demonstration expansion and task smoke tests.
 * - Preview
   - `--preview`
   - Resets the environment and opens an interactive IPython session on
@@ -48,9 +48,9 @@ recorders inline, or select reusable components. A pure physical `env.yaml`
 component uses `environment_id` instead of `id` and is not runnable by itself.
 
 A configuration-defined Task Program deployment conventionally uses
-`task.<embodiment>.yaml`. It selects `environment.component`, all three
-`task_program` paths (`program`, `integration`, and `execution_policy`), and
-`embodiment.component`:
+`task.<embodiment>.yaml`. It selects either one `environment.component` or a
+`environment.default/newton` mapping, all three `task_program` paths (`program`,
+`integration`, and `execution_policy`), and `embodiment.component`:
 
 ```bash
 embodichain run-env \
@@ -68,10 +68,83 @@ At startup, `run-env`:
 4. creates the environment selected by the gym config's `id`; and
 5. enters rollout, preview, or replay mode.
 
-The runnable config, or its selected `environment.component`, must declare
-`physics: default` or `physics: newton`. See
-{doc}`configuration` for paired backend configuration fragments. That backend is file-owned:
-`--physics` can confirm it but cannot switch it. Omitting `--device` preserves
+Task-facing trajectory expansion can be kept in a sibling configuration and
+referenced from the runnable task:
+
+```yaml
+expansion:
+  config: expansion/<task-profile>.yaml
+```
+
+The referenced file may contain `runtime`, `policy`, `overrides`, and
+`collection`. The runner resolves it relative to the task, applies its runtime
+overlay after expanding the selected environment variant, and merges task-local
+expansion fields on top. `run-task` then uses that declaration for Task Program
+expansion. `--expansion-profile` remains a per-run profile override;
+`--expansion-recipe-indices` selects explicit logical recipes. The legacy
+`--expansion-candidate-indices` spelling is still accepted as an alias.
+
+### Episode targets and batches
+
+All offline collection paths use one target count:
+
+```yaml
+collection:
+  target_episodes: 64
+  max_attempts: 3
+  selection:
+    mode: sequential
+    start_recipe_index: 0
+```
+
+`target_episodes` is the number of successfully committed environment rows.
+`num_envs` only sets the maximum width of one parallel batch, so
+`target_episodes: 64` with `num_envs: 16` runs four batches. A final partial
+batch uses only the rows needed to reach the target. `max_attempts` applies to
+one selected batch attempt and failed attempts are discarded before retrying.
+
+The legacy `--max_episodes` CLI option remains supported and maps to
+`collection.target_episodes`. An environment component's `max_episodes` is the
+fallback when no collection target is declared. A task-level collection target
+takes precedence over that component default; conflicting explicit target
+values are rejected during parsing.
+
+Expansion selection has two modes:
+
+```yaml
+# Select recipe 0 through recipe 63 and split them into batches automatically.
+collection:
+  target_episodes: 64
+  selection:
+    mode: sequential
+    start_recipe_index: 0
+
+# Select exactly four logical recipes and collect four rows.
+collection:
+  target_episodes: 4
+  selection:
+    mode: explicit
+    recipe_indices: [0, 16, 32, 48]
+```
+
+Recipe indices identify logical expansion candidates. They do not identify
+batch starts. Affordance branches, scene families, trajectory variants, and
+visual profiles change the selected episode's content; they do not increase
+the target count.
+
+Collection manifests record `target_episodes`, `planned_episodes`,
+`committed_episodes`, `rejected_episodes`, `attempts`, `batch_count`, and the
+prepare, commit, and discard reset counts. A prepare reset happens before a
+batch, a commit reset finalizes selected rows, and a discard reset clears a
+failed attempt. None of these reset boundaries adds an episode.
+
+The runnable config, or its selected environment component, must declare
+`physics: default` or `physics: newton`. With an `environment.default/newton`
+mapping, the requested variant is expanded before this check. See
+{doc}`configuration` for paired backend configuration fragments. That backend is
+file-owned: `--physics` selects a named variant when the task declares an
+`environment.default/newton` mapping and confirms it for a single component. It
+never rewrites the selected file. Omitting `--device` preserves
 an authored `device` or the selected backend's default; supplying `--device`
 overrides both environment tensors and backend execution, including an explicit
 CPU selection for Newton.
@@ -82,7 +155,7 @@ visualization arguments.
 
 ## Preview an environment
 
-Preview mode is intended for inspection before an expensive data-generation
+Preview mode is intended for inspection before an expensive data-expansion
 run:
 
 ```bash
@@ -144,11 +217,11 @@ details.
 
 Without `--preview` or `--replay`, `run-env` enters offline rollout mode. For
 each vector batch, it asks the task for its demonstration segments, applies
-every action through `env.step()`, and commits selected environment rows with
-an explicit reset. `max_episodes` is the exact number of persisted
-per-environment episodes, not the number of vector batches. For example,
-`max_episodes=10` with `num_envs=4` runs three batches and commits only two rows
-from the final batch. `--max_episodes` overrides the value in the gym config:
+every action through `env.step()`, and commits selected environment rows with an explicit reset.
+`collection.target_episodes` is the exact number of persisted environment rows,
+not the number of vector batches. For example, `target_episodes=10` with
+`num_envs=4` runs three batches and commits only two rows from the final batch.
+The legacy `--max_episodes` option maps to the same target:
 
 ```bash
 embodichain run-env \
@@ -164,9 +237,10 @@ Headless execution is normally preferred for throughput. Use
 structured dataset.
 
 Failed attempts are discarded and retried by default, up to
-`demo_max_attempts` (default: 3). Set `save_failed_episodes: true` on a dataset
-functor to keep a failed or truncated attempt that contains recorded frames.
-Such a commit counts toward `max_episodes` and is not retried. Empty plans and
+`collection.max_attempts` (with `demo_max_attempts` retained as a legacy
+fallback). Set `save_failed_episodes: true` on a dataset functor to keep a
+failed or truncated attempt that contains recorded frames. Such a commit
+counts toward `collection.target_episodes` and is not retried. Empty plans and
 exceptions have no complete dataset transaction and are still discarded.
 
 ### Multi-segment episodes
@@ -235,7 +309,7 @@ continue. Consequently, rollout and trajectory lengths may differ by row.
 The executor's result remains batch-atomic: without failed-data saving every
 row must eventually succeed, while any failure or truncation invalidates the
 batch. With `save_failed_episodes`, selected failed rows are committed with
-their per-row failure metadata. Rows not needed to reach `max_episodes` are
+their per-row failure metadata. Rows not needed to reach `collection.target_episodes` are
 explicitly discarded, so parallel collection never overshoots the requested
 episode count.
 
@@ -275,8 +349,8 @@ The reference environment leaves `env.dataset` empty, so this command is a
 rollout smoke test and does not persist a dataset. Add a `LeRobotRecorder` to
 the reusable `env.yaml` (or a copied inline deployment) to record one overall
 task plus three per-frame subtask/segment annotations. See
-{ref}`Expert Data Generation <tutorial_data_generation>` for recorder setup and
-{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for
+{ref}`Expert Data Expansion <tutorial_data_expansion>` for recorder setup and
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>` for
 validation and preview.
 
 ### Choose the recording output you need
@@ -312,7 +386,7 @@ Dataset video is still structured training data; it is not interchangeable
 with a replay trajectory. Conversely, `--record_trajectory` does not configure
 a LeRobot dataset or export an MP4.
 
-For structured datasets, see {doc}`/tutorial/data_generation` and
+For structured datasets, see {doc}`/tutorial/data_expansion` and
 {doc}`/overview/gym/dataset_functors`. For human-viewable video, see
 {doc}`/overview/gym/event_functors`.
 
@@ -458,7 +532,7 @@ Use the modes in this order when bringing up a task:
 3. Replay the artifact in `kinematic` mode to inspect the exact recorded
    motion, then use `dynamic` mode if physics reproducibility matters.
 4. Remove `--filter_dataset_saving`, choose the desired episode count, and run
-   the full data-generation job.
+   the full data-expansion job.
 
 For rollout profiling, renderer selection, and every available CLI option, see
 the {ref}`CLI Reference <cli-run-environment>`.
