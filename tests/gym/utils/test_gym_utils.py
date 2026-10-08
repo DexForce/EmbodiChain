@@ -853,6 +853,64 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    def test_gym_config_forwards_render_bounce_limits(
+        self, tmp_path: Path, extension: str
+    ) -> None:
+        """File-defined path budgets reach the native WorldConfig through the loader."""
+        import dexsim
+
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "render_cfg": {
+                "renderer": "fast-rt",
+                "min_bounces": 1,
+                "max_bounces": 4,
+            },
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+        cfg = config_to_cfg(
+            load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+        )
+        world_config = dexsim.WorldConfig()
+
+        cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
+
+        assert world_config.raytrace_config.min_bounces == 1
+        assert world_config.raytrace_config.max_bounces == 4
+
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    @pytest.mark.parametrize(
+        "limits",
+        [
+            {"min_bounces": "1", "max_bounces": 4},
+            {"min_bounces": 1, "max_bounces": True},
+            {"min_bounces": 4, "max_bounces": 1},
+        ],
+    )
+    def test_gym_config_rejects_invalid_render_bounce_limits(
+        self, tmp_path: Path, extension: str, limits: dict[str, object]
+    ) -> None:
+        """Malformed file values fail at rendering decoding instead of coercion."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "render_cfg": limits,
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+
+        with pytest.raises(ValueError, match="bounces"):
+            config_to_cfg(
+                load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+            )
+
     @staticmethod
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""

@@ -1256,6 +1256,90 @@ def test_render_cfg_applies_renderer_and_sample_count() -> None:
     assert world_config.raytrace_config.render_iterations_per_frame == expected_spp
 
 
+def test_render_cfg_default_bounce_limits_preserve_native_defaults() -> None:
+    """Existing callers retain the native path budget when limits are omitted."""
+    world_config = dexsim.WorldConfig()
+    native_limits = (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    )
+    config = RenderCfg()
+
+    assert (config.min_bounces, config.max_bounces) == native_limits == (4, 8)
+    config.apply_to_dexsim_config(world_config)
+    assert (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    ) == native_limits
+
+
+@pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt"])
+@pytest.mark.parametrize("mode", ["off", "optix", "dlss", "nrd"])
+def test_render_cfg_forwards_bounce_limits_independently_of_pipeline(
+    renderer: str, mode: str
+) -> None:
+    """The ray budget reaches all backends without replacing NRD's own budget."""
+    world_config = dexsim.WorldConfig()
+    config = RenderCfg(
+        renderer=renderer,
+        min_bounces=1,
+        max_bounces=4,
+        denoising=sim_cfg.DenoisingCfg(window=mode, offscreen=mode),
+        nrd=sim_cfg.NRDCfg(max_indirect_bounces=2),
+    )
+
+    config.apply_to_dexsim_config(world_config)
+
+    assert world_config.raytrace_config.min_bounces == 1
+    assert world_config.raytrace_config.max_bounces == 4
+    assert world_config.nrd_config.max_indirect_bounces == 2
+
+
+@pytest.mark.parametrize("limits", [(0, 1), (1, 1), (8, 8)])
+def test_render_cfg_accepts_bounce_limit_boundaries(limits: tuple[int, int]) -> None:
+    """Immediate roulette and equal limits are supported native configurations."""
+    world_config = dexsim.WorldConfig()
+    config = RenderCfg(min_bounces=limits[0], max_bounces=limits[1])
+
+    config.apply_to_dexsim_config(world_config)
+
+    assert (
+        world_config.raytrace_config.min_bounces,
+        world_config.raytrace_config.max_bounces,
+    ) == limits
+
+
+@pytest.mark.parametrize(
+    ("settings", "error_field"),
+    [
+        ({"min_bounces": -1}, "min_bounces"),
+        ({"max_bounces": 0}, "max_bounces"),
+        ({"max_bounces": -1}, "max_bounces"),
+        ({"min_bounces": 9, "max_bounces": 8}, "min_bounces"),
+        ({"min_bounces": True}, "min_bounces"),
+        ({"max_bounces": False}, "max_bounces"),
+        ({"min_bounces": 1.5}, "min_bounces"),
+        ({"max_bounces": "8"}, "max_bounces"),
+        ({"min_bounces": None}, "min_bounces"),
+    ],
+)
+def test_render_cfg_rejects_invalid_bounce_limits_at_construction_and_conversion(
+    settings: dict[str, object], error_field: str
+) -> None:
+    """Direct construction and mutable edits fail before native config is written."""
+    with pytest.raises(ValueError, match=error_field):
+        RenderCfg(**settings)
+
+    config = RenderCfg()
+    for name, value in settings.items():
+        setattr(config, name, value)
+    world_config = dexsim.WorldConfig()
+    with pytest.raises(ValueError, match=error_field):
+        config.apply_to_dexsim_config(world_config)
+    assert world_config.raytrace_config.min_bounces == 4
+    assert world_config.raytrace_config.max_bounces == 8
+
+
 @pytest.mark.parametrize(
     ("field_name", "invalid_value"),
     [

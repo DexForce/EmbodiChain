@@ -560,6 +560,92 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
 
 
+@pytest.mark.no_sim
+def test_axis_helper_publishes_without_advancing_simulation() -> None:
+    from embodichain.lab.sim.utility.atom_action_utils import draw_axis
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+
+    draw_axis(SimpleNamespace(sim=sim), torch.eye(4))
+
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+    assert runtime.capture_calls[-1]["sim_time"] == 0.0
+
+
+@pytest.mark.no_sim
+def test_camera_keyboard_edits_capture_viser_snapshots_without_physics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim.utility import keyboard_utils
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+    pose = torch.eye(4).unsqueeze(0)
+    snapshots: list[torch.Tensor] = []
+    original_capture = runtime.capture
+
+    def set_pose(value: torch.Tensor) -> None:
+        pose.copy_(value)
+
+    def capture(**kwargs: object) -> bool:
+        assert kwargs["force"] is True
+        snapshots.append(pose.clone())
+        return original_capture(**kwargs)
+
+    runtime.capture = capture
+    sensor = SimpleNamespace(
+        num_instances=1,
+        is_attached=False,
+        _entities=[MagicMock()],
+        get_local_pose=lambda **_: pose.clone(),
+        get_arena_pose=lambda **_: pose.clone(),
+        set_local_pose=set_pose,
+        update=MagicMock(),
+        get_data=lambda: {"color": torch.zeros((1, 2, 2, 3), dtype=torch.uint8)},
+    )
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda: sim)
+    keys = iter([ord("w"), ord("d"), 255, 27])
+    monkeypatch.setattr(keyboard_utils.cv2, "waitKey", lambda _: next(keys))
+    monkeypatch.setattr(keyboard_utils.cv2, "imshow", lambda *_: None)
+    monkeypatch.setattr(keyboard_utils.cv2, "destroyAllWindows", lambda: None)
+
+    keyboard_utils.run_keyboard_control_for_camera(sensor, vis_pose=True)
+
+    assert len(snapshots) == 2
+    assert snapshots[0][0, 2, 3] == pytest.approx(0.01)
+    assert snapshots[0][0, 1, 3] == 0.0
+    assert snapshots[1][0, 2, 3] == pytest.approx(0.01)
+    assert snapshots[1][0, 1, 3] == pytest.approx(0.01)
+    assert len(runtime.capture_calls) == 2
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+
+
+@pytest.mark.no_sim
+def test_default_state_publication_does_not_integrate_time() -> None:
+    state = SimpleNamespace(time=0.0, position=1.0, published=False)
+
+    def update(dt: float) -> None:
+        state.time += dt
+        state.position += 2.0 * dt
+        state.published = True
+
+    backend = DefaultPhysicsBackend(
+        SimpleNamespace(_world=SimpleNamespace(update=update))
+    )
+    backend.sync_render_state(object())
+
+    assert state.published
+    assert state.time == 0.0
+    assert state.position == 1.0
+
+
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
     sim, runtime = _make_visualization_sim_manager()
     overlays = SceneOverlays(

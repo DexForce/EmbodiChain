@@ -2281,3 +2281,48 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
     finally:
         for name in names:
             unregister_planner_adapter(name)
+
+
+@pytest.mark.parametrize("full_state", [True, False])
+def test_scenario_reset_publishes_frozen_start_without_stepping(
+    full_state: bool,
+) -> None:
+    from types import SimpleNamespace
+    from scripts.benchmark.motion_generation.scenarios.base import ScenarioProvider
+
+    class Provider(ScenarioProvider):
+        def batch_sizes(self, *args):
+            return []
+
+        def generate_cases(self, *args):
+            return []
+
+    start = torch.tensor([[0.25, 0.5]])
+    state = SimpleNamespace(
+        qpos=torch.zeros_like(start), velocity=torch.ones_like(start), time=0.0
+    )
+
+    def set_qpos(qpos, **kwargs):
+        state.qpos.copy_(qpos)
+
+    def clear_dynamics():
+        state.velocity.zero_()
+
+    def publish():
+        torch.testing.assert_close(state.qpos, start)
+        assert not state.velocity.any()
+
+    robot = SimpleNamespace(
+        set_qpos=Mock(side_effect=set_qpos), clear_dynamics=clear_dynamics
+    )
+    sim = SimpleNamespace(
+        sync_render_state=Mock(side_effect=publish),
+        update=Mock(side_effect=AssertionError("Frozen start stepped")),
+    )
+    case = SimpleNamespace(
+        full_start_qpos=start if full_state else None, start_qpos=start
+    )
+    Provider().reset_case(sim, robot, case, "arm")
+    assert state.time == 0.0
+    sim.sync_render_state.assert_called_once()
+    sim.update.assert_not_called()
