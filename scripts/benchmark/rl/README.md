@@ -31,6 +31,14 @@ memory. CV is the population standard deviation divided by the mean of per-updat
 SPS. Process VRAM is sampled at phase boundaries; allocator peaks are measured
 inside each timed phase.
 
+Benchmark logic tests are grouped under `tests/benchmark/rl/`, mirroring
+`scripts/benchmark/rl/`. Run configuration, throughput, resource parsing,
+reporting, metrics and plot tests without creating a simulation:
+
+```bash
+pytest tests/benchmark/rl/ -v
+```
+
 Run G1/Go2 reset and inference checks, then G1 training/checkpoint tests on both backends:
 
 ```bash
