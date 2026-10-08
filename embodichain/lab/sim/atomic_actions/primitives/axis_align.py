@@ -424,6 +424,19 @@ class AxisAlign(AtomicAction[AxisAlignGoal, AxisAlignOptions]):
                 ),
             ),
             segment_lengths=segment_lengths,
+            # Contact during close/manipulate intentionally moves the aligned
+            # semantic object.  Independent scene-referenced grasp targets
+            # remain monitored for the full action.
+            scene_dependency_monitor_until={
+                entity_id: max(
+                    1,
+                    math.ceil(
+                        segment_lengths["approach"] * options.grasp_commit_fraction
+                    ),
+                )
+                for entity_id in self._scene_dependencies(request)
+                if entity_id == request.goal.semantics.entity_id
+            },
         )
 
     def _resolve_grasp_pose(

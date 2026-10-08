@@ -2,7 +2,7 @@
 
 The {class}`~embodichain.lab.sim.cfg.RenderCfg` class controls the renderer,
 ray-tracing sample count, scoped denoising/reconstruction, tone mapping, DLSS,
-and NRD settings used by
+path-depth limits, and NRD settings used by
 {class}`~embodichain.lab.sim.sim_manager.SimulationManager`.
 
 ## Core options
@@ -11,6 +11,8 @@ and NRD settings used by
 | :--- | :--- | :--- | :--- |
 | `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `hybrid`, `fast-rt`, or `rt`. |
 | `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least `1`. |
+| `min_bounces` | `int` | `4` | Path depth at which Russian Roulette may start terminating rays. Must be non-negative. |
+| `max_bounces` | `int` | `8` | Maximum traced path depth, counting the primary segment. Must be positive and at least `min_bounces`. |
 | `denoising` | `DenoisingCfg` | `DenoisingCfg()` | Independent `window`/`offscreen` choices: `off`, `optix`, `dlss`, or `nrd`. |
 | `tone_mapping_enabled` | `bool` | `False` | Apply modified Reinhard tone mapping to RGB output. |
 | `tone_mapping_exposure` | `float` | `1.0` | Fixed linear exposure multiplier used before tone mapping. |
@@ -20,6 +22,18 @@ and NRD settings used by
 The public `dlss` path maps to DexSim `DLSS_RR`; the public `nrd` path maps to
 standalone DexSim `NRD_RELAX`. Tone mapping affects RGB output only; depth,
 segmentation masks, normals, and position buffers remain unchanged.
+
+Bounce limits are validated at construction and again before conversion to
+DexSim's `WorldConfig`, including after mutable config edits. A ray can end on
+a miss or absorption before `min_bounces`; that setting controls the start of
+random path termination rather than guaranteeing a path length. The primary
+segment has depth zero. The defaults preserve DexSim's existing path budget.
+
+NRD's indirect-lighting budget remains controlled by
+{attr}`~embodichain.lab.sim.cfg.NRDCfg.max_indirect_bounces`; `max_bounces`
+also bounds NRD transparent continuations. Matching the two general bounce
+limits across denoising modes does not make their light-transport budgets
+identical.
 
 ## Renderer selection
 
@@ -53,6 +67,8 @@ sim_config = SimulationManagerCfg(
     render_cfg=RenderCfg(
         renderer="fast-rt",
         spp=4,
+        min_bounces=1,
+        max_bounces=4,
         denoising=DenoisingCfg(window="dlss", offscreen="nrd"),
         tone_mapping_enabled=True,
         tone_mapping_exposure=1.0,
