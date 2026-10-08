@@ -49,6 +49,15 @@ For an environment sweep, the report keeps one row per environment count and
 mode, while the leaderboard averages each mode across the sweep. Individual
 run reports and raw artifacts are under `runs/`.
 
+Quality aggregation retains the reference and at most one candidate sequence.
+Temporal errors use adjacent images from one environment/camera at a time,
+with reusable float32 buffers and float64 reduction, instead of converting
+whole sequences to floating point. Comparison images copy only the selected
+views and release their source sequences. NPZ archives still decompress a
+complete sequence, so raw-image RAM scales with the resolution, environment
+count, camera count, and number of quality frames; three-mode aggregation
+does not retain all three sequences simultaneously.
+
 `fps` describes complete render batches; `camera_env_fps` counts individual
 camera images across all environments. Quality metrics compare each mode with
 the configured reference mode. If the reference is omitted from the evaluated

@@ -846,14 +846,58 @@ def _run_mode_worker(mode: RenderMode, cfg: BenchmarkCfg, run_dir: Path) -> None
 
 
 def _temporal_delta_error(reference: np.ndarray, candidate: np.ndarray) -> float:
-    """Return the mean error between consecutive-frame RGB changes."""
+    """Return consecutive-frame RGB change error with image-sized scratch space.
+
+    Each environment/camera is processed separately. Previous-image buffers
+    are reused for differences; float64 reduction preserves weighting across
+    all pixels without keeping full float32 sequences or their differences.
+    """
     if len(reference) < 2:
         return 0.0
-    reference_float = reference[..., :3].astype(np.float32) / 255.0
-    candidate_float = candidate[..., :3].astype(np.float32) / 255.0
-    reference_delta = np.diff(reference_float, axis=0)
-    candidate_delta = np.diff(candidate_float, axis=0)
-    return float(np.mean(np.abs(reference_delta - candidate_delta)))
+    error_sum = 0.0
+    element_count = 0
+    for index in np.ndindex(reference.shape[1:-3]):
+        previous_reference = reference[(0, *index)][..., :3].astype(np.float32)
+        previous_candidate = candidate[(0, *index)][..., :3].astype(np.float32)
+        previous_reference /= 255.0
+        previous_candidate /= 255.0
+        for frame_index in range(1, len(reference)):
+            current_reference = reference[(frame_index, *index)][..., :3].astype(
+                np.float32
+            )
+            current_candidate = candidate[(frame_index, *index)][..., :3].astype(
+                np.float32
+            )
+            current_reference /= 255.0
+            current_candidate /= 255.0
+            np.subtract(current_reference, previous_reference, out=previous_reference)
+            np.subtract(current_candidate, previous_candidate, out=previous_candidate)
+            np.subtract(previous_reference, previous_candidate, out=previous_reference)
+            np.abs(previous_reference, out=previous_reference)
+            error_sum += float(np.sum(previous_reference, dtype=np.float64))
+            element_count += previous_reference.size
+            previous_reference = current_reference
+            previous_candidate = current_candidate
+        del current_reference, current_candidate
+    return error_sum / element_count
+
+
+def _load_frames(path: Path) -> np.ndarray:
+    """Load a quality sequence and close its archive immediately."""
+    with np.load(path, allow_pickle=False) as archive:
+        return archive["frames"]
+
+
+def _load_comparison_views(path: Path, frame_index: int) -> np.ndarray:
+    """Copy selected first-environment views without retaining their sequence."""
+    frame = _load_frames(path)[frame_index]
+    if frame.ndim == 3:
+        views = frame[None, ...]
+    elif frame.ndim == 4:
+        views = frame[0][None, ...]
+    else:
+        views = frame[0]
+    return views.copy()
 
 
 def _aggregate_quality(
@@ -929,18 +973,11 @@ def _modes_from_run(run_dir: Path) -> tuple[RenderMode, ...]:
 
 def _write_comparison_image(run_dir: Path, frame_index: int = 0) -> Path:
     """Write mode comparisons for the first environment and every camera."""
-    frames = {
-        mode: np.load(run_dir / f"{mode}_frames.npz")["frames"][frame_index]
+    camera_frames = {
+        mode: _load_comparison_views(run_dir / f"{mode}_frames.npz", frame_index)
         for mode in _modes_from_run(run_dir)
     }
-    first = next(iter(frames.values()))
-    if first.ndim == 3:
-        camera_frames = {mode: image[None, ...] for mode, image in frames.items()}
-    elif first.ndim == 4:
-        camera_frames = {mode: image[0][None, ...] for mode, image in frames.items()}
-    else:
-        camera_frames = {mode: image[0] for mode, image in frames.items()}
-    reference_mode = "optix" if "optix" in camera_frames else next(iter(frames))
+    reference_mode = "optix" if "optix" in camera_frames else next(iter(camera_frames))
     reference = camera_frames[reference_mode]
     camera_rows: list[np.ndarray] = []
     for camera_index in range(reference.shape[0]):
@@ -1062,21 +1099,26 @@ def run_all_benchmarks(cfg: BenchmarkCfg, output_root: Path) -> Path:
         )
         for mode in cfg.denoising_modes
     }
-    frames = {
-        mode: np.load(run_dir / f"{mode}_frames.npz")["frames"]
-        for mode in cfg.denoising_modes
-    }
-    reference = frames[cfg.resolved_reference_mode]
-    metric_rows = [
-        _aggregate_quality(
-            mode,
-            reference,
-            frames[mode],
-            float(performance[mode]["fps"]),
-            expected_frames=cfg.quality_frames,
+    reference_mode = cfg.resolved_reference_mode
+    reference = _load_frames(run_dir / f"{reference_mode}_frames.npz")
+    metric_rows: list[dict[str, object]] = []
+    for mode in cfg.denoising_modes:
+        candidate = (
+            reference
+            if mode == reference_mode
+            else _load_frames(run_dir / f"{mode}_frames.npz")
         )
-        for mode in cfg.denoising_modes
-    ]
+        metric_rows.append(
+            _aggregate_quality(
+                mode,
+                reference,
+                candidate,
+                float(performance[mode]["fps"]),
+                expected_frames=cfg.quality_frames,
+            )
+        )
+        del candidate
+    del reference
     perf_rows = [
         {
             "mode": mode,

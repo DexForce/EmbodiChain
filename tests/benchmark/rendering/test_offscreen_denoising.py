@@ -17,10 +17,17 @@
 from __future__ import annotations
 
 import math
+import json
+import sys
+import tracemalloc
+import weakref
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from scripts.benchmark.rendering import offscreen_denoising as benchmark_module
 from scripts.benchmark.rendering.offscreen_denoising import (
     BenchmarkCfg,
     build_leaderboard_rows,
@@ -28,7 +35,9 @@ from scripts.benchmark.rendering.offscreen_denoising import (
     compute_quality_metrics,
     _aggregate_quality,
     _build_sweep_leaderboard_rows,
+    _temporal_delta_error,
     _write_comparison_image,
+    run_all_benchmarks,
     run_environment_sweep,
     write_markdown_report,
 )
@@ -216,3 +225,127 @@ def test_environment_sweep_rejects_non_positive_counts(tmp_path) -> None:
     """Sweep validation happens before any simulation worker is started."""
     with pytest.raises(ValueError, match="positive integers"):
         run_environment_sweep(BenchmarkCfg(), [1, 0], tmp_path)
+
+
+@pytest.mark.parametrize(
+    "shape", [(5, 12, 8, 4), (5, 3, 12, 8, 4), (5, 3, 2, 12, 8, 4)]
+)
+def test_temporal_error_matches_full_sequence_formula_without_mutating_frames(
+    shape: tuple[int, ...],
+) -> None:
+    """Bounded aggregation preserves the metric for legacy and batched layouts."""
+    rng = np.random.default_rng(20261009)
+    reference = rng.integers(0, 256, size=shape, dtype=np.uint8)
+    candidate = rng.integers(0, 256, size=shape, dtype=np.uint8)
+    original_reference = reference.copy()
+    original_candidate = candidate.copy()
+    reference_delta = np.diff(reference[..., :3].astype(np.float32) / 255.0, axis=0)
+    candidate_delta = np.diff(candidate[..., :3].astype(np.float32) / 255.0, axis=0)
+    expected = float(np.mean(np.abs(reference_delta - candidate_delta)))
+
+    actual = _temporal_delta_error(reference, candidate)
+
+    assert actual == pytest.approx(expected, abs=1e-7)
+    np.testing.assert_array_equal(reference, original_reference)
+    np.testing.assert_array_equal(candidate, original_candidate)
+
+
+def test_temporal_error_bounds_temporary_memory_for_parallel_sequences() -> None:
+    """Temporary float arrays stay small as frame and environment counts grow."""
+    rng = np.random.default_rng(20261009)
+    shape = (12, 8, 1, 64, 64, 4)
+    reference = rng.integers(0, 256, size=shape, dtype=np.uint8)
+    candidate = rng.integers(0, 256, size=shape, dtype=np.uint8)
+    tracemalloc.start()
+    try:
+        error = _temporal_delta_error(reference, candidate)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert error > 0.0
+    # The former whole-sequence formula allocates about 25.5 MiB here.
+    assert peak_bytes < 1024**2
+
+
+@pytest.mark.parametrize("shape", [(1, 8, 8, 4), (1, 2, 3, 8, 8, 4)])
+def test_temporal_error_returns_zero_without_adjacent_frames(
+    shape: tuple[int, ...],
+) -> None:
+    """Single-quality-frame runs have no temporal differences to aggregate."""
+    reference = np.zeros(shape, dtype=np.uint8)
+    candidate = np.full(shape, 255, dtype=np.uint8)
+
+    assert _temporal_delta_error(reference, candidate) == 0.0
+
+
+def test_report_generation_keeps_at_most_two_loaded_sequences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Candidate frames and comparison views cannot retain all mode sequences."""
+    cfg = BenchmarkCfg(
+        width=16, height=16, num_envs=2, measure_frames=2, quality_frames=2
+    )
+    arrays: list[weakref.ReferenceType[np.ndarray]] = []
+    peak_live = 0
+    real_load = np.load
+
+    class TrackingArchive:
+        """Observe array lifetimes without retaining decompressed frame data."""
+
+        def __init__(self, archive: object) -> None:
+            self.archive = archive
+
+        def __getitem__(self, key: str) -> np.ndarray:
+            nonlocal peak_live
+            array = self.archive[key]
+            owner = array
+            while isinstance(owner.base, np.ndarray):
+                owner = owner.base
+            arrays.append(weakref.ref(owner))
+            peak_live = max(peak_live, sum(ref() is not None for ref in arrays))
+            return array
+
+        def __enter__(self) -> TrackingArchive:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            self.archive.close()
+
+    def tracking_load(*args: object, **kwargs: object) -> TrackingArchive:
+        return TrackingArchive(real_load(*args, **kwargs))
+
+    def fake_worker(command: list[str], *, check: bool) -> None:
+        """Write deterministic worker artifacts without initializing a renderer."""
+        assert check
+        mode = command[command.index("--worker-mode") + 1]
+        run_dir = Path(command[command.index("--run-dir") + 1])
+        value = {"optix": 20, "dlss": 40, "nrd": 60}[mode]
+        frames = np.full((2, 2, 1, 16, 16, 4), value, dtype=np.uint8)
+        np.savez_compressed(run_dir / f"{mode}_frames.npz", frames=frames)
+        performance = {
+            "rendered_images": 4,
+            "median_ms": 1.0,
+            "mean_ms": 1.0,
+            "p95_ms": 1.0,
+            "fps": 1000.0,
+            "cpu_delta_mb": 0.0,
+            "gpu_delta_mb": 0.0,
+            "peak_gpu_mb": 0.0,
+            "torch_peak_gpu_mb": 0.0,
+        }
+        (run_dir / f"{mode}_performance.json").write_text(json.dumps(performance))
+
+    monkeypatch.setitem(sys.modules, "dexsim", SimpleNamespace(__version__="test"))
+    monkeypatch.setattr(benchmark_module.subprocess, "run", fake_worker)
+    monkeypatch.setattr(benchmark_module, "_gpu_description", lambda _: "test GPU")
+    monkeypatch.setattr(benchmark_module.np, "load", tracking_load)
+
+    report_path = run_all_benchmarks(cfg, tmp_path)
+
+    assert peak_live <= 2
+    assert arrays and all(ref() is None for ref in arrays)
+    assert (report_path.parent / "comparison.png").is_file()
+    summary = json.loads((report_path.parent / "benchmark_summary.json").read_text())
+    assert [row["mode"] for row in summary["metrics"]] == ["optix", "dlss", "nrd"]
+    assert summary["metrics"][0]["mae"] == 0.0
