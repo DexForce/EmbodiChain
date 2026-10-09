@@ -14,7 +14,7 @@
                         "robot_type": "UR10"
                     },
                     "instruction": {
-                        "lang": "Hold still while recording"
+                        "lang": "Keep the robot stationary while recording camera observations."
                     },
                     "extra": {
                         "scene_type": "benchmark",

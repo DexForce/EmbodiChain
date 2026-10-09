@@ -241,6 +241,10 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         "manipulation/tableware/blocks_ranking_rgb/env.json",
         "manipulation/tableware/stack_blocks_two/env.json",
         "special/stay_still_save_3cam/env_ur10_3cam.json",
+        "special/stay_still_save/env_ur10.json",
+        "special/stay_still_save/env_async_ur10.json",
+        "special/simple_task/env_ur10.json",
+        "manipulation/tableware/scoop_ice/env.json",
     ],
 )
 def test_handwritten_segmented_tasks_configure_overall_instructions(

@@ -11,17 +11,21 @@ program:
   kind: repeat
   count: 3
   body:
-    kind: segment
-    name: move_cube
-    instruction: Pick up the cube and place it at the next target.
-    steps:
-      kind: sequence
-      items:
-        - kind: invoke
+    kind: sequence
+    items:
+      - kind: segment
+        name: pick_cube
+        instruction: Grasp and lift the cube.
+        steps:
+          kind: invoke
           call:
             kind: pick
             object: cube
-        - kind: invoke
+      - kind: segment
+        name: place_cube
+        instruction: Place the cube at the next target position and release it.
+        steps:
+          kind: invoke
           call:
             kind: place
             object: cube

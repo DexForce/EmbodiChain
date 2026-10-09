@@ -2328,3 +2328,43 @@ def test_parallel_factory_analyzes_claims_and_forks_owned_shared_clock_lanes() -
         result.task_state.get_articulation_joint_state("template", "joint") is None
         for result in parallel.result.branch_results.values()
     )
+
+
+def test_split_grasp_and_place_preserve_verified_held_state_across_workflows() -> None:
+    """A new segment workflow retains the grasp needed to ground its Place."""
+    system = _workflow_recovery_system(
+        (
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+            _workflow_decision(_mask(True, True), _mask(False, False)),
+        ),
+        max_recovery_attempts=0,
+    )
+    poses = torch.eye(4).unsqueeze(0).repeat(BATCH_SIZE, 1, 1)
+    system.observation.entities["cube"] = EntityState(poses)
+    system.engine.robot.compute_fk.return_value = poses.clone()
+    cube = SceneObjectRef("cube")
+    pick = Pick(object=cube)
+    place = Place(object=cube, inside=SceneObjectRef("bin"))
+
+    grasp_result = system.runtime.run(
+        (pick, place),
+        workflow_id="pick_segment",
+        execution_prefix_length=1,
+    )
+    assert grasp_result.status is SemanticExecutionStatus.COMPLETED
+    held = grasp_result.task_state.get_held_object("left_gripper")
+    assert held is not None
+    assert held.env_mask.tolist() == [True, True]
+
+    placement_result = system.runtime.run(
+        (place,),
+        workflow_id="place_segment",
+        eligible_mask=grasp_result.success_mask,
+    )
+    assert placement_result.status is SemanticExecutionStatus.COMPLETED
+    assert placement_result.task_state.get_held_object("left_gripper") is None
+    assert system.compiler.analysis_windows == [("pick", "place"), ("place",)]
+    assert [call.semantic_id for call in system.compiler.grounded_calls] == [
+        "pick",
+        "place",
+    ]

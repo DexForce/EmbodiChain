@@ -22,6 +22,15 @@ preserves it through repeated/parallel segments and the Gym bridge passes it to
 the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
 for the independent task/subtask language mapping.
 
+Choose segment boundaries around independently describable subgoals under their
+required incoming task state. A segment may own one or several Semantic Calls;
+sequential splitting retains task state and downstream planning look-ahead.
+Keep release settling and final-state validators on the subgoal that establishes
+those outcomes. Atomic trajectory phase names or arbitrary waypoint counts do
+not establish semantic boundaries for an unannotated recorded demonstration.
+Language instructions express intent; physical acceptance still depends on the
+selected effect authority and validators, not on the presence of a label.
+
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
 unresolved references fail before live providers are touched.

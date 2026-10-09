@@ -35,7 +35,7 @@
                         "robot_type": "UR10"
                     },
                     "instruction": {
-                        "lang": "Acting with Oscillatory motion"
+                        "lang": "Move the robot through a joint oscillation cycle."
                     },
                     "extra": {
                         "scene_type": "commercial",

@@ -536,23 +536,34 @@ def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions(
     assert result.all_success
 
 
-def test_handwritten_motion_generator_segment_declares_exact_progress_total() -> None:
-    """A fixed trajectory and fixed settle phase share the tqdm total contract."""
-
-    trajectory = torch.zeros(
-        1, HANDWRITTEN_TRAJECTORY_STEPS, HANDWRITTEN_TRAJECTORY_DOF
-    )
+def test_handwritten_motion_generator_segments_preserve_exact_progress_totals() -> None:
+    """Grasp and placement totals include settling only after release."""
+    pick_steps = 3
+    place_steps = HANDWRITTEN_TRAJECTORY_STEPS - pick_steps
+    pick_trajectory = torch.zeros(1, pick_steps, HANDWRITTEN_TRAJECTORY_DOF)
+    place_trajectory = torch.ones(1, place_steps, HANDWRITTEN_TRAJECTORY_DOF)
     pose = torch.eye(4).unsqueeze(0)
     env = Mock(spec=StackBlocksTwoEnv)
     env._stack_block = Mock()
-    env._plan_stack.return_value = torch.tensor([True]), trajectory, pose, pose
-    env._iter_segment_actions.side_effect = (
-        lambda value: StackBlocksTwoEnv._iter_segment_actions(env, value)
+    env._plan_stack.return_value = (
+        torch.tensor([True]),
+        torch.tensor([True]),
+        pick_trajectory,
+        place_trajectory,
+        pose,
+        pose,
     )
-    segment = StackBlocksTwoEnv.create_demo_segments(env)[0]
+    env._iter_segment_actions.side_effect = (
+        lambda value, **kwargs: StackBlocksTwoEnv._iter_segment_actions(
+            env, value, **kwargs
+        )
+    )
+    pick, place = tuple(StackBlocksTwoEnv.create_demo_segments(env))
 
-    assert segment.progress_total_steps == HANDWRITTEN_TRAJECTORY_STEPS + SETTLE_STEPS
-    assert len(tuple(segment.actions)) == segment.progress_total_steps
+    assert pick.progress_total_steps == pick_steps
+    assert place.progress_total_steps == place_steps + SETTLE_STEPS
+    assert len(tuple(pick.actions)) == pick.progress_total_steps
+    assert len(tuple(place.actions)) == place.progress_total_steps
     env._stack_block.clear_dynamics.assert_called_once()
 
 

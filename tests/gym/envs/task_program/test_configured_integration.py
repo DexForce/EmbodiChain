@@ -1293,7 +1293,26 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
         validation_context=catalog,
     )
     segments = tuple(catalog.preflight(program).iter_segments())
-    assert segments
+    expected_names = {
+        "rubiks_cube_pick_place": ["pick_rubiks_cube", "place_rubiks_cube"] * 3,
+        "repeated_pick_place": ["pick_cube", "place_cube"] * 3,
+        "open_drawer": ["open_drawer"],
+        "hand_over": ["hand_over_can"],
+        "pour_water": [
+            "pick_bottle",
+            "move_bottle_above_cup",
+            "pour_water",
+            "return_bottle",
+        ],
+    }
+    assert [segment.name for segment in segments] == expected_names[task_name]
+    if task_name == "pour_water":
+        assert all(
+            not segment.post_policies and not segment.validators
+            for segment in segments[:-1]
+        )
+        assert len(segments[-1].post_policies) == 2
+        assert len(segments[-1].validators) == 1
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall
