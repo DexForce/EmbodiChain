@@ -117,8 +117,9 @@ transition. This is a compiled recipe, not a private retry/state machine.
 
 ## Current Migration Status
 
-`configured.py` owns task service decoding and delegates public option decoding
-directly to the baseline. It does not inject extra fields into public Options.
+`configured.py` owns task service decoding and normalizes GenSim-only missing
+defaults before delegating strict option decoding to the shared implementation.
+It does not change shared Options defaults or replace public runtime identity.
 `services.py` owns immutable Pick, MoveHeldObject, relative Place and coordinated
 transport routes and lowerers. Baseline component composition, common scalar
 decoders, Park and Pour are reused without adding fields to the shared YAML
@@ -136,11 +137,32 @@ Simulation-factory internals used during assembly are isolated compatibility
 dependencies; no Session or Bridge method is replaced.
 
 The fingerprint manifest uses `semantic_integration_fingerprint/v2` with the
-explicit `gen_sim.task_program/2620929c/v3` adapter contract. Old bundles are
-rejected before component loading and must be regenerated.
-Version 3 adds the support object's stable window and a final failed-attempt
-camera fetch before reset. The v2 physical runs are retained as historical
-evidence, not qualification of this revised acceptance behavior.
+explicit `gen_sim.task_program/2620929c/v8` adapter contract. Generation and
+verification use the same v38 declaration identity through `identity.py`.
+Compatible existing bundles keep their original graph, program, components
+and recorded hashes; loading does not rewrite them or accept hash aliases.
+
+The shared registration still owns its full runtime fingerprint and validates
+declaration drift. Its `fingerprint_payload()` provides a checked, independently
+owned canonical snapshot. The GenSim protocol projection omits only
+`HandOverOptions.source_hold_mode="grasp_command"` and empty GenSim relative
+route `stage_id` fields at their actual typed option/route slots. Other fields,
+factory revisions and arbitrary metadata are not recursively stripped.
+Explicit `observed`, nonempty stage selectors, program, constraints and policy
+changes remain part of identity. A different adapter or actual behavior
+revision is still rejected before simulation rather than normalized away.
+
+New singleton routes and default HandOver configurations retain the old raw
+declaration shape. Repeated placements or graph-authored stage selectors keep
+their explicit routing declarations, including authored singleton selectors.
+The graph, emitted program and decoded route must agree on that selector.
+Pure static identity checks do not certify physical task success.
+
+Focused provider-free checks:
+
+```bash
+PYTHONPATH=. python -m pytest -q --noconftest "tests/gen_sim/task_engine/test_bundle_identity.py" "tests/gen_sim/task_engine/test_semantic_graph.py" "tests/gym/envs/task_program/test_catalog.py"
+```
 
 E1-E6 and standalone E9 are the Task Engine execution scope. E7/E8 routing is rejected before
 semantic graph generation and bundle asset writing. Initial E6 support requires

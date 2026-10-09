@@ -161,7 +161,7 @@ class CoordinatedPickmentOptions(ActionOptions):
 
     middle_empty_ratio: float = 0.4
     """Fraction of the object's left-to-right extent left grasp-free in the middle
-    so the two grippers pinch opposite ends. Must be in ``[0, 1]``."""
+    so the two grippers pinch opposite ends. Must be in ``[0, 1)``."""
 
     grasp_seed: int = 17_393
     """Deterministic seed isolated around coordinated grasp sampling."""
@@ -169,22 +169,26 @@ class CoordinatedPickmentOptions(ActionOptions):
     def __post_init__(self) -> None:
         if self.object_motion_keyframes < 2:
             raise ValueError("object_motion_keyframes must be at least 2.")
-        if self.pre_grasp_distance < 0.0:
-            raise ValueError("pre_grasp_distance must be non-negative.")
-        if self.lift_height < 0.0:
-            raise ValueError("lift_height must be non-negative.")
+        for name in ("pre_grasp_distance", "lift_height", "retreat_distance"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0.0
+            ):
+                raise ValueError(f"{name} must be finite and non-negative.")
         if not isinstance(self.release, bool):
             raise TypeError("release must be a bool.")
-        if self.retreat_distance < 0.0:
-            raise ValueError("retreat_distance must be non-negative.")
         for name in (
             "hand_interp_steps",
             "hold_steps",
             "release_steps",
             "retreat_steps",
         ):
-            if getattr(self, name) < 0:
-                raise ValueError(f"{name} must be non-negative.")
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
         for name in ("approach_direction", "left_to_right_arm_direction"):
             value = getattr(self, name)
             if value.shape != (3,):
@@ -194,8 +198,13 @@ class CoordinatedPickmentOptions(ActionOptions):
             if torch.linalg.vector_norm(value) <= 1.0e-6:
                 raise ValueError(f"{name} must be non-zero.")
             object.__setattr__(self, name, value.clone())
-        if not 0.0 <= self.middle_empty_ratio <= 1.0:
-            raise ValueError("middle_empty_ratio must be in [0, 1].")
+        if (
+            isinstance(self.middle_empty_ratio, bool)
+            or not isinstance(self.middle_empty_ratio, (int, float))
+            or not math.isfinite(self.middle_empty_ratio)
+            or not 0.0 <= self.middle_empty_ratio < 1.0
+        ):
+            raise ValueError("middle_empty_ratio must be finite and in [0, 1).")
         if type(self.grasp_seed) is not int or self.grasp_seed < 0:
             raise ValueError("grasp_seed must be a non-negative integer.")
 

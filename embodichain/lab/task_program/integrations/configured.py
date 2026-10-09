@@ -940,6 +940,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "retreat_distance",
                 "retreat_steps",
                 "receive_pick_object_part",
+                "source_hold_mode",
                 "object_motion_keyframes",
                 "grasp_settle_steps",
                 "release_settle_steps",
@@ -1439,6 +1440,7 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                     "retreat_distance",
                     "retreat_steps",
                     "receive_pick_object_part",
+                    "source_hold_mode",
                     "release_at_target",
                     "arm_selection",
                 }
@@ -1478,6 +1480,11 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
             kwargs["release_at_target"] = _boolean(
                 config["release_at_target"],
                 path=f"{path}.release_at_target",
+            )
+        if "source_hold_mode" in config:
+            kwargs["source_hold_mode"] = _identifier(
+                config["source_hold_mode"],
+                path=f"{path}.source_hold_mode",
             )
         if "arm_selection" in config:
             kwargs["arm_selection"] = _identifier(
@@ -2114,6 +2121,7 @@ def _decode_registered_lowerer(
                 "object_id",
                 "object_ids",
                 "routes",
+                "stage_id",
             }
         ),
     )
@@ -2292,6 +2300,7 @@ def _decode_registered_lowerer(
                         "world_displacement",
                     }
                 ),
+                optional=frozenset({"stage_id"}),
             )
             routes.append(
                 _RelativePlaceRoute(
@@ -2311,6 +2320,11 @@ def _decode_registered_lowerer(
                         route["world_displacement"],
                         path=f"{route_path}.world_displacement",
                         expected_length=3,
+                    ),
+                    stage_id=(
+                        _identifier(route["stage_id"], path=f"{route_path}.stage_id")
+                        if str(route.get("stage_id", "")).strip()
+                        else ""
                     ),
                 )
             )

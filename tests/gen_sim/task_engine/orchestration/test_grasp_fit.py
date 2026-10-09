@@ -257,3 +257,33 @@ def test_grasp_fit_rejects_a_later_stricter_contract_for_same_object(
             graph,
             openings={"left": 0.128, "right": 0.100},
         )
+
+
+def test_grasp_fit_updates_authoritative_matrices_with_support_preserving_height(
+    tmp_path: Path,
+) -> None:
+    import numpy as np
+    from embodichain.gen_sim.task_engine.task_program_bundle import _scene_payload
+    from embodichain.lab.sim.cfg import RigidObjectCfg
+
+    scene = _scene(tmp_path, (0.4, 0.8, 0.4))
+    pose = np.eye(4)
+    pose[:3, 3] = scene.rigid_objects[0]["init_pos"]
+    for item in (scene.rigid_objects[0], scene.planner_objects[0]):
+        item["init_local_pose"] = pose.tolist()
+    original = deepcopy(scene)
+    fitted, report = fit_grasp_assets(scene, _graph("E1"), openings={"left": 0.128})
+    assert report["records"][0]["status"] == "scaled"
+    normalized = normalize_scene_assets(fitted, tmp_path / "normalized")
+    payload = _scene_payload(normalized, program_id="fit")["simulation"][
+        "rigid_object"
+    ][0]
+    decoded = RigidObjectCfg.from_dict(payload)
+    for item in (fitted.rigid_objects[0], fitted.planner_objects[0]):
+        np.testing.assert_allclose(
+            np.asarray(item["init_local_pose"])[:3, 3], item["init_pos"]
+        )
+    assert decoded.init_pos[2] == pytest.approx(
+        report["records"][0]["adapted_origin_z"]
+    )
+    assert scene.rigid_objects == original.rigid_objects

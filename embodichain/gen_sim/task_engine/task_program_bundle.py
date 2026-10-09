@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -43,6 +44,7 @@ from ._task_program.articulation_binding import (
 )
 from ._task_program.articulation_slide import preset_id
 from ._task_program.drawer_binding import DRAWER_TRANSPORT_CALL
+from ._task_program.identity import bundle_registration_fingerprint
 from ._task_program.invocation_policy import (
     cartesian_call_declarations,
     motion_sample_declarations,
@@ -479,7 +481,9 @@ def generate_task_program_bundle(
             "adapter_contract": ADAPTER_CONTRACT,
             "integration_id": deployment.integration_id,
             "integration_fingerprint": fingerprint,
-            "registration_fingerprint": deployment.integration.registration.fingerprint,
+            "registration_fingerprint": bundle_registration_fingerprint(
+                deployment.integration.registration
+            ),
         },
     )
 
@@ -561,17 +565,17 @@ def _task_stability_payload(
         .startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
     }
     routes = {
-        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        _route_key(r): r
         for r in _relative_place_route_payloads(graph, scene, settled=True)
     }
     upright_routes = {
-        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        _route_key(r): r
         for r in _relative_place_route_payloads(
             graph, scene, settled=True, upright_only=True
         )
     }
     coordinated_on_routes = {
-        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        _route_key(r): r
         for r in _relative_place_route_payloads(
             graph, scene, settled=True, coordinated_only=True
         )
@@ -601,13 +605,16 @@ def _task_stability_payload(
         ):
             object_id = str(call["object"])
             axis = _longest_local_axis(objects[object_id])
+            world_axis = (
+                np.asarray([0.0, 0.0, 1.0])
+                if object_id in upright
+                else _initial_rotation(objects[object_id]) @ np.asarray(axis)
+            )
             presets[f"gen_sim.{node['id']}.stable"] = {
                 "kind": "hold",
                 "entity": object_id,
                 "local_axis": axis,
-                "world_axis": (
-                    _initial_rotation(objects[object_id]) @ np.asarray(axis)
-                ).tolist(),
+                "world_axis": world_axis.tolist(),
                 "minimum_alignment": math.cos(math.pi / 18.0),
                 "motion_parts": [motion_parts[call["resources"]["destination"]]],
             }
@@ -647,9 +654,13 @@ def _task_stability_payload(
                     if call["call_id"] == _UPRIGHT_PLACE_CALL_ID
                     else routes
                 )
-                route = selected_routes[
-                    (object_id, reference_id, arguments["relation"])
-                ]
+                route = _lookup_route(
+                    selected_routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
                 presets[f"gen_sim.{node['id']}.stable"] = {
                     "kind": "upright",
                     "entity": object_id,
@@ -688,7 +699,13 @@ def _task_stability_payload(
                     "minimum_alignment": math.cos(math.pi / 18.0),
                 }
             else:
-                route = routes[(object_id, reference_id, arguments["relation"])]
+                route = _lookup_route(
+                    routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
                 presets[f"gen_sim.{node['id']}.stable"] = {
                     "kind": "placement",
                     "entity": object_id,
@@ -723,9 +740,13 @@ def _task_stability_payload(
             object_id = str(arguments["object"])
             if "reference" in arguments:
                 reference_id = str(arguments["reference"])
-                route = coordinated_on_routes[
-                    (object_id, reference_id, arguments["relation"])
-                ]
+                route = _lookup_route(
+                    coordinated_on_routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
                 presets[f"gen_sim.{node['id']}.stable"] = {
                     "kind": "placement",
                     "entity": object_id,
@@ -808,7 +829,7 @@ def _program_payload(
         {}
         if scene is None
         else {
-            (route["object_id"], route["reference_entity_id"], route["relation"]): route
+            _route_key(route): route
             for route in _relative_place_route_payloads(graph, scene, settled=True)
         }
     )
@@ -816,7 +837,7 @@ def _program_payload(
         {}
         if scene is None
         else {
-            (route["object_id"], route["reference_entity_id"], route["relation"]): route
+            _route_key(route): route
             for route in _relative_place_route_payloads(
                 graph, scene, settled=True, upright_only=True
             )
@@ -959,13 +980,41 @@ def _program_payload(
 def _program_node(
     node: dict[str, Any],
     *,
-    relative_routes: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+    relative_routes: dict[tuple[str, str, str, str], dict[str, Any]] | None = None,
     axis_by_object: dict[str, list[float]] | None = None,
     task_stability: bool = False,
     articulated_reference: bool = False,
 ) -> dict[str, Any]:
     """Materialize one task node as one canonical runtime segment."""
     call = deepcopy(node["call"])
+    if call["kind"] == "registered" and call["call_id"] in {
+        _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
+        _STACK_PLACE_CALL_ID,
+    }:
+        arguments = call["arguments"]
+        stage_key = _route_key_for_node(
+            node,
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )
+        # Keep the historical three-argument program shape when a placement
+        # occurs only once.  A stage selector is needed only when the same
+        # object/reference/relation tuple has multiple occurrences; this also
+        # keeps old consumers and serialized fixtures byte-for-byte stable.
+        repeated_route = False
+        if relative_routes is not None and stage_key in relative_routes:
+            repeated_route = (
+                sum(
+                    1
+                    for key in relative_routes
+                    if len(key) == 4 and key[1:] == stage_key[1:]
+                )
+                > 1
+            )
+        if repeated_route:
+            arguments["stage_id"] = stage_key[0]
     segment: dict[str, Any] = {
         "kind": "segment",
         "name": str(node["id"]),
@@ -1005,16 +1054,18 @@ def _program_node(
         _STACK_PLACE_CALL_ID,
     }:
         arguments = call["arguments"]
-        selector = (
-            str(arguments["object"]),
-            str(arguments["reference"]),
-            str(arguments["relation"]),
-        )
         try:
-            route = (relative_routes or {})[selector]
+            route = _lookup_route(
+                relative_routes or {},
+                node,
+                str(arguments["object"]),
+                str(arguments["reference"]),
+                str(arguments["relation"]),
+            )
         except KeyError as exc:
             raise ValueError(
-                f"Relative placement has no generated route for {selector!r}."
+                "Relative placement has no generated route for "
+                f"{_route_key_for_node(node, str(arguments['object']), str(arguments['reference']), str(arguments['relation']))!r}."
             ) from exc
         if articulated_reference:
             # The shared validator is rigid-only. The GenSim post-policy uses
@@ -1119,7 +1170,7 @@ def _integration_payload(
     on_routes: list[tuple[str, str, str]] = []
     coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     coordinated_on_routes = {
-        (r["object_id"], r["reference_entity_id"], r["relation"]): r
+        _route_key(r): r
         for r in _relative_place_route_payloads(graph, scene, coordinated_only=True)
     }
     coordinated_on_lowerer_routes: list[dict[str, Any]] = []
@@ -1196,10 +1247,15 @@ def _integration_payload(
                 reference_id = str(arguments["reference"])
                 referenced_objects.add(reference_id)
                 route = coordinated_on_routes[
-                    (object_id, reference_id, arguments["relation"])
+                    _route_key_for_node(
+                        node, object_id, reference_id, arguments["relation"]
+                    )
                 ]
                 coordinated_on_lowerer_routes.append(
-                    {**route, "target_id": str(arguments["target"])}
+                    {
+                        **_public_route(route, include_stage_id=False),
+                        "target_id": str(arguments["target"]),
+                    }
                 )
                 continue
             displacement = tuple(
@@ -1885,12 +1941,32 @@ def _integration_payload(
                     for call_id, routes in pick_routes.items()
                 ],
                 *(
-                    [{"kind": "place_relative", "routes": relative_lowerer_routes}]
+                    [
+                        {
+                            "kind": "place_relative",
+                            "routes": _public_routes(
+                                relative_lowerer_routes,
+                                graph=graph,
+                                call_ids=frozenset(
+                                    {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}
+                                ),
+                            ),
+                        }
+                    ]
                     if relative_lowerer_routes
                     else []
                 ),
                 *(
-                    [{"kind": "place_upright", "routes": upright_lowerer_routes}]
+                    [
+                        {
+                            "kind": "place_upright",
+                            "routes": _public_routes(
+                                upright_lowerer_routes,
+                                graph=graph,
+                                call_ids=frozenset({_UPRIGHT_PLACE_CALL_ID}),
+                            ),
+                        }
+                    ]
                     if upright_lowerer_routes
                     else []
                 ),
@@ -2290,6 +2366,93 @@ def _bind_embodiment_to_scene(
     ]
 
 
+def _route_key(route: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    """Return a stage-qualified route key for repeated long-horizon placements."""
+    return (
+        str(route.get("stage_id", "")),
+        str(route["object_id"]),
+        str(route["reference_entity_id"]),
+        str(route["relation"]),
+    )
+
+
+def _route_key_for_node(
+    node: Mapping[str, Any],
+    object_id: str,
+    reference_id: str,
+    relation: str,
+) -> tuple[str, str, str, str]:
+    """Return the route key for one graph node occurrence."""
+    arguments = node.get("call", {}).get("arguments", {})
+    if "stage_id" in arguments:
+        stage_id = arguments["stage_id"]
+        if type(stage_id) is not str or not stage_id or stage_id != stage_id.strip():
+            raise ValueError("Placement stage_id must be a non-empty exact identifier.")
+    else:
+        stage_id = str(node.get("task_instance_id", node.get("id", "")))
+    return (stage_id, object_id, reference_id, relation)
+
+
+def _lookup_route(
+    routes: Mapping[tuple[str, ...], Mapping[str, Any]],
+    node: Mapping[str, Any],
+    object_id: str,
+    reference_id: str,
+    relation: str,
+) -> Mapping[str, Any]:
+    """Resolve stage-qualified routes with a legacy three-field fallback."""
+    stage_key = _route_key_for_node(node, object_id, reference_id, relation)
+    if stage_key in routes:
+        return routes[stage_key]
+    legacy_key = (object_id, reference_id, relation)
+    if legacy_key in routes:
+        return routes[legacy_key]
+    empty_stage_key = ("", object_id, reference_id, relation)
+    if empty_stage_key in routes:
+        return routes[empty_stage_key]
+    raise KeyError(stage_key)
+
+
+def _public_route(
+    route: Mapping[str, Any], *, include_stage_id: bool = True
+) -> dict[str, Any]:
+    """Return one route with optional stage occurrence metadata."""
+    if include_stage_id:
+        return dict(route)
+    return {key: value for key, value in route.items() if key != "stage_id"}
+
+
+def _public_routes(
+    routes: Sequence[Mapping[str, Any]],
+    *,
+    graph: SemanticTaskGraph,
+    call_ids: frozenset[str],
+) -> list[dict[str, Any]]:
+    """Keep v38 route declarations unless occurrence selection is required."""
+    counts = Counter(_route_key(route)[1:] for route in routes)
+    explicit_selectors = {
+        _route_key_for_node(
+            node,
+            str(node["call"]["arguments"]["object"]),
+            str(node["call"]["arguments"]["reference"]),
+            str(node["call"]["arguments"]["relation"]),
+        )
+        for node in graph["nodes"]
+        if node["call"].get("call_id") in call_ids
+        and "stage_id" in node["call"]["arguments"]
+    }
+    return [
+        _public_route(
+            route,
+            include_stage_id=(
+                counts[_route_key(route)[1:]] > 1
+                or _route_key(route) in explicit_selectors
+            ),
+        )
+        for route in routes
+    ]
+
+
 def _relative_place_route_payloads(
     graph: SemanticTaskGraph,
     scene: Any,
@@ -2306,7 +2469,7 @@ def _relative_place_route_payloads(
         for node in graph["nodes"]
         if node["call"].get("call_id") == SLIDE_CALL
     }
-    routes: dict[tuple[str, str, str], dict[str, Any]] = {}
+    routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for node in graph["nodes"]:
         call = node["call"]
         if call["kind"] != "registered":
@@ -2337,12 +2500,19 @@ def _relative_place_route_payloads(
             raise ValueError(
                 "Coordinated relative placement requires on a distinct rigid support."
             )
+        stage_id = _route_key_for_node(
+            node,
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )[0]
         selector = (
+            stage_id,
             str(arguments["object"]),
             str(arguments["reference"]),
             str(arguments["relation"]),
         )
-        object_id, reference_id, relation = selector
+        _, object_id, reference_id, relation = selector
         if reference_id in actuated_references:
             raise ValueError(
                 f"Spatial reference {reference_id!r} changes joints in this program; "
@@ -2387,16 +2557,19 @@ def _relative_place_route_payloads(
             ):
                 displacement[2] -= _PLACEMENT_CLEARANCE
         route = {
+            "stage_id": stage_id,
             "object_id": object_id,
             "reference_entity_id": reference_id,
             "relation": relation,
             "world_displacement": displacement,
         }
-        # The current relative-call contract has no occurrence selector. Never
-        # silently reuse a later orientation's route for an earlier placement.
+        # Long-horizon programs may place one object/reference pair more than
+        # once.  The graph task instance is the occurrence selector; do not
+        # collapse routes from different stages.
         if selector in routes and routes[selector] != route:
             raise ValueError(
-                f"Repeated placement {selector!r} requires stage-specific routes."
+                f"Repeated placement {selector!r} requires stage-specific routes; "
+                f"existing={routes[selector]!r}, new={route!r}."
             )
         routes[selector] = route
     return [routes[selector] for selector in sorted(routes)]

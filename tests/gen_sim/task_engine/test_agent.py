@@ -925,55 +925,6 @@ def test_semantic_planner_adds_profile_bound_cleanup_without_joint_data() -> Non
     assert "qpos" not in repr(graph).lower()
 
 
-def test_semantic_planner_keeps_explicit_e2_arm_through_release() -> None:
-    """E2 remains semantic while the integration owns axis and motion details."""
-    candidate = TaskAgent(
-        interpreter=lambda *_args, **_kwargs: _result(
-            {**_step(), "required_arm": "right_arm"}
-        )
-    ).generate("upright", _TEST_INSTRUCTION, candidate_count=1)["candidates"][0]
-    graph = SemanticTaskPlanner().plan(
-        candidate,
-        {
-            "schema_version": ROLE_BINDINGS_SCHEMA,
-            "task_id": "upright",
-            "candidate_id": candidate["candidate_id"],
-            "reference_bindings": {"step_01.object": ["purple_can"]},
-            "role_bindings": {},
-        },
-        [
-            {"runtime_uid": "purple_can", "init_pos": [0.0, 0.2, 0.7]},
-            {"runtime_uid": "table", "init_pos": [0.0, 0.0, 0.0]},
-        ],
-    )
-
-    assert [node["call"].get("call_id") for node in graph["nodes"]] == [
-        "simulation.pick",
-        "gen_sim.align_held",
-        "gen_sim.align_held",
-        "simulation.place_relative",
-        "gen_sim.clear_released",
-        "simulation.park",
-    ]
-    assert all(
-        node["call"]["resources"] == {"primary": "right"} for node in graph["nodes"]
-    )
-    release = next(
-        node["call"]
-        for node in graph["nodes"]
-        if node["call"].get("call_id") == "simulation.place_relative"
-    )
-    assert release["arguments"] == {
-        "object": "purple_can",
-        "reference": "table",
-        "relation": "on",
-    }
-    assert set(graph["targets"]) == {
-        "step_01_upright_target",
-        "step_01_upright_staging_target",
-    }
-
-
 def test_semantic_planner_routes_handover_through_verified_pick_state() -> None:
     """A transfer starts from a verified source attachment boundary."""
     step = _step(step_id="handover", reference="can")
@@ -1125,11 +1076,17 @@ def test_task_agent_isolates_invalid_interpreter_results():
     assert len(result["candidates"]) == 1
 
 
-def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
-    """E2 separates verified pickup, upright transport, opening, and retreat."""
+@pytest.mark.parametrize(
+    ("requested_arm", "resource"),
+    [("auto", "left"), ("left_arm", "left"), ("right_arm", "right")],
+)
+def test_semantic_planner_composes_e2_with_one_alignment(
+    requested_arm: str, resource: str
+) -> None:
+    """One E2 alignment retains the selected arm through release and retreat."""
 
     def interpreter(_instruction, **_kwargs):
-        return _result(_step(reference="purple can"))
+        return _result({**_step(reference="purple can"), "required_arm": requested_arm})
 
     candidate = TaskAgent(interpreter=interpreter).generate(
         "upright_can", _TEST_INSTRUCTION, candidate_count=1
@@ -1169,59 +1126,41 @@ def test_semantic_planner_composes_e2_from_pick_move_and_move_joints() -> None:
         ],
     )
 
-    assert [node["call"] for node in graph["nodes"]] == [
-        {
-            "kind": "registered",
-            "call_id": "simulation.pick",
-            "arguments": {"object": "can", "target": "step_01_upright_target"},
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.align_held",
-            "arguments": {
+    calls = [node["call"] for node in graph["nodes"]]
+    assert all(call["kind"] == "registered" for call in calls)
+    assert all(call["resources"] == {"primary": resource} for call in calls)
+    assert [(call["call_id"], call["arguments"]) for call in calls] == [
+        ("simulation.pick", {"object": "can", "target": "step_01_upright_target"}),
+        (
+            "gen_sim.align_held",
+            {
                 "object": "can",
                 "target": "step_01_upright_staging_target",
                 "preserve_yaw": False,
             },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.align_held",
-            "arguments": {
+        ),
+        (
+            "gen_sim.align_held",
+            {
                 "object": "can",
                 "target": "step_01_upright_target",
                 "preserve_yaw": False,
             },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "simulation.place_relative",
-            "arguments": {
-                "object": "can",
-                "reference": "table",
-                "relation": "on",
-            },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "gen_sim.clear_released",
-            "arguments": {
-                "object": "can",
-                "target": "step_01_upright_staging_target",
-            },
-            "resources": {"primary": "left"},
-        },
-        {
-            "kind": "registered",
-            "call_id": "simulation.park",
-            "arguments": {},
-            "resources": {"primary": "left"},
-        },
+        ),
+        (
+            "simulation.place_relative",
+            {"object": "can", "reference": "table", "relation": "on"},
+        ),
+        (
+            "gen_sim.clear_released",
+            {"object": "can", "target": "step_01_upright_staging_target"},
+        ),
+        ("simulation.park", {}),
     ]
+    assert set(graph["targets"]) == {
+        "step_01_upright_target",
+        "step_01_upright_staging_target",
+    }
     assert graph["targets"]["step_01_upright_target"]["values"][0][
         "position"
     ] == pytest.approx([0.1, -0.2, 0.79])
@@ -1579,6 +1518,72 @@ def test_handover_continuation_does_not_pick_an_already_held_object() -> None:
         "hand_over",
         "hand_over",
     ]
+
+
+def test_upright_handover_stack_keeps_v38_regrasp_alignment_and_clearance() -> None:
+    first = _step(step_id="source", reference="source")
+    first["required_arm"] = "left_arm"
+    second = _step(step_id="support", reference="support")
+    second.update(required_arm="right_arm", depends_on=["source"])
+    transfer = _step(step_id="transfer", reference="source")
+    transfer.update(
+        task_type="E4",
+        required_arm="none",
+        transfer_arm="left_arm",
+        receive_arm="right_arm",
+        orientation_goal="none",
+        terminal_behavior="hold",
+        depends_on=["support"],
+    )
+    stack = _step(step_id="stack", reference="source")
+    stack.update(
+        task_type="E1",
+        required_arm="right_arm",
+        target=_selector("scene_ref", reference="support"),
+        relation="on",
+        orientation_goal="preserve",
+        depends_on=["transfer"],
+    )
+    interpreted = _result(first)
+    interpreted.intent["steps"] = [first, second, transfer, stack]
+    candidate = TaskAgent(interpreter=lambda *_a, **_kw: interpreted).generate(
+        "stack_after_handover", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "stack_after_handover",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {
+                "step_01.object": ["source"],
+                "step_02.object": ["support"],
+                "step_03.object": ["source"],
+                "step_04.object": ["source"],
+                "step_04.target": ["support"],
+            },
+            "role_bindings": {},
+        },
+        [
+            {"runtime_uid": "source", "init_pos": [0.0, -0.2, 0.8]},
+            {"runtime_uid": "support", "init_pos": [0.0, 0.2, 0.8]},
+            {"runtime_uid": "table", "init_pos": [0.0, 0.0, 0.0]},
+        ],
+    )
+    calls = [
+        node["call"] for node in graph["nodes"] if node["task_instance_id"] == "step_04"
+    ]
+    assert [call["call_id"] for call in calls[:5]] == [
+        "simulation.place_relative",
+        "simulation.park",
+        "gen_sim.stack_pick",
+        "gen_sim.align_held",
+        "gen_sim.stack_place",
+    ]
+    assert calls[0]["arguments"]["reference"] == "table"
+    assert calls[1]["resources"] == {"primary": "left"}
+    assert calls[3]["arguments"]["preserve_yaw"] is True
+    assert calls[5]["call_id"] == "gen_sim.clear_released"
 
 
 @pytest.mark.parametrize("source,destination", [("left", "right"), ("right", "left")])

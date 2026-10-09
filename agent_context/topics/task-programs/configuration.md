@@ -46,6 +46,10 @@ fingerprint covers scene/profile declarations, the Semantic Call catalog,
 settling presets, grounders, endpoint transports, evidence and safety
 factories, and registered-call lowerers. Adapter creation calls
 `assert_unchanged()` and revalidates all live bindings.
+`fingerprint_payload()` exposes an independently owned canonical declaration
+snapshot only after full identity validation, including a check of the copied
+tree. Consumers may derive a protocol identity without replacing the shared
+runtime fingerprint; GenSim owns its bundle projection outside this subsystem.
 
 Configured environments use runnable `task.<embodiment>.yaml` deployments with
 three typed selections: `environment.component`,

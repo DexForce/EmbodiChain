@@ -121,8 +121,7 @@ class SubprocessActionExecutor:
             seed: Simulator random seed.
             num_envs: Number of vectorized scene replicas.
             dataset_saving: Whether to enable the Gym project's dataset recorder.
-            failure_policy: Whether failed dependencies stop or permit downstream
-                diagnostic execution.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
             open_window: Whether to open the native DexSim execution window.
 
         Returns:
@@ -130,8 +129,10 @@ class SubprocessActionExecutor:
         """
         bundle_root = Path(bundle).expanduser().resolve()
         attempt_root = Path(output_root).expanduser().resolve()
-        if failure_policy not in {"stop", "continue"}:
-            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
         attempt_root.mkdir(parents=True, exist_ok=False)
@@ -334,8 +335,7 @@ class TaskEngineWorkflow:
             model: Optional Task and grounding model override.
             base_seed: First audited scene and action attempt seed.
             dataset_saving: Whether Action attempts may initialize dataset recording.
-            failure_policy: Whether failed dependencies stop or permit downstream
-                diagnostic execution.
+            failure_policy: Must be ``"stop"``; diagnostic continuation is unsupported.
             open_window: Whether simulator attempts open the native DexSim window.
             run_id: Optional externally allocated run identifier.
             created_at: Optional timezone-aware run creation timestamp.
@@ -350,8 +350,10 @@ class TaskEngineWorkflow:
             raise TypeError("dataset_saving must be a boolean.")
         if not isinstance(open_window, bool):
             raise TypeError("open_window must be a boolean.")
-        if failure_policy not in {"stop", "continue"}:
-            raise ValueError("failure_policy must be 'stop' or 'continue'.")
+        if failure_policy != "stop":
+            raise ValueError(
+                "Only failure_policy='stop' is supported; diagnostic continuation is unavailable."
+            )
         if workflow_cfg is None or planning_cfg is None or execution_cfg is None:
             loaded_workflow, loaded_planning, loaded_execution = (
                 load_task_engine_config(config_path)
@@ -413,6 +415,12 @@ class TaskEngineWorkflow:
                     _write_json(staging / "task_candidate_set.json", candidate_set)
                 except Exception as exc:
                     analysis_future.cancel()
+                    # A running worker can still write to staging after cancellation.
+                    # Finish its writes before publishing or cleaning that directory.
+                    try:
+                        analysis_future.result()
+                    except Exception:
+                        pass
                     state = fail_stage(
                         state,
                         WorkflowStage.TASK_CANDIDATES,
@@ -951,6 +959,46 @@ class TaskEngineWorkflow:
                 raise ValueError(
                     "A bound preparation must select one non-empty candidate ID."
                 )
+            final_candidate = next(
+                item
+                for item in candidate_set["candidates"]
+                if item["candidate_id"] == final_candidate_id
+            )
+            # TaskSpec is the normative, action-sequence-independent
+            # artifact.  Keep it beside the run audit after binding has chosen
+            # the final candidate; the existing bundle/runtime remains the
+            # sole execution path.
+            from .task_spec import task_spec_from_candidate
+
+            if set(final_candidate) < {
+                "candidate_id",
+                "draft",
+                "scene_request",
+                "success_spec",
+                "semantic_hash",
+                "vote_count",
+                "attempts",
+                "normalizations",
+            }:
+                _write_json(
+                    staging / "task_spec_error.json",
+                    {
+                        "error_type": "legacy_candidate_shape",
+                        "message": (
+                            "TaskSpec generation requires a complete "
+                            "TaskCandidate contract."
+                        ),
+                    },
+                )
+            else:
+                task_spec = task_spec_from_candidate(
+                    final_candidate,
+                    metadata={
+                        "run_id": effective_run_id,
+                        "scene_attempt": attempts[-1]["scene_attempt"],
+                    },
+                )
+                _write_json(staging / "task_spec.json", task_spec.to_dict())
             selected_attempt = attempts[-1]
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (
@@ -1211,6 +1259,15 @@ class TaskEngineWorkflow:
     ) -> TaskEngineRunResult:
         state_path = staging / "workflow_state.json"
         manifest_path = staging / "run_manifest.json"
+        task_spec_path = staging / "task_spec.json"
+        task_spec_manifest = None
+        if task_spec_path.is_file():
+            task_spec = _read_json(task_spec_path)
+            if isinstance(task_spec, Mapping):
+                task_spec_manifest = {
+                    "path": task_spec_path.name,
+                    "semantic_hash": task_spec.get("semantic_hash"),
+                }
         _write_json(state_path, state.to_dict())
         _write_json(
             manifest_path,
@@ -1222,6 +1279,7 @@ class TaskEngineWorkflow:
                 "run_dir": Path(request["output_dir"]).as_posix(),
                 "status": status,
                 "failure_class": failure_class,
+                "task_spec": task_spec_manifest,
                 "request": deepcopy(dict(request)),
                 "configuration": {
                     "workflow": {

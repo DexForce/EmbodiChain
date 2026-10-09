@@ -388,6 +388,22 @@ contain canonical Semantic Calls and exclude grounded action data.
    semantic_task_graph_hash
    validate_semantic_task_graph
 
+embodichain.gen_sim.task_engine.semantic_graph_visualization
+-------------------------------------------------------------
+
+Headless PNG rendering for the current semantic graph contract. The renderer
+can show task-group overviews or individual Semantic Call cards and can overlay
+statuses from a Task Program execution report.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.semantic_graph_visualization
+
+.. autosummary::
+
+   ATOMIC_SKILL_MAP
+   SemanticGraphView
+   render_semantic_task_graph_png
+   write_semantic_task_graph_png
+
 embodichain.gen_sim.task_engine.semantic_planner
 -------------------------------------------------
 
@@ -400,6 +416,22 @@ scene bindings into provider-free semantic task graphs.
 
    SemanticTaskPlanner
    UnsupportedSemanticCapabilityError
+
+embodichain.gen_sim.task_engine.task_spec
+------------------------------------------
+
+Task Engine adapters convert validated candidates into action-sequence
+independent TaskSpecs and optionally persist them in a content-addressed
+TaskSpec cache. The TaskTemplate spelling remains a compatibility alias.
+
+.. currentmodule:: embodichain.gen_sim.task_engine.task_spec
+
+.. autosummary::
+
+   TaskSpecGenerator
+   generate_task_spec
+   task_spec_from_candidate
+   task_template_from_candidate
 
 embodichain.gen_sim.task_engine.task_program_bundle
 ----------------------------------------------------
@@ -500,15 +532,91 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdSceneBinding
    UsdSceneIndex
 
-embodichain.gen_sim.simready_pipeline.cli.start
+embodichain.gen_sim.asset_engine.cli.start
 -----------------------------------------------
 
-.. currentmodule:: embodichain.gen_sim.simready_pipeline.cli.start
+.. currentmodule:: embodichain.gen_sim.asset_engine.cli.start
 
 .. autosummary::
 
    cli_ingest_single
    main
+
+embodichain.gen_sim.asset_engine.clients
+---------------------------------------------
+
+Asset Engine clients for SimReady asset generation services.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.clients.articulated_generation
+--------------------------------------------------------------------
+
+Generate and validate articulated SimReady assets through the Asset Engine
+articulation service.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.clients.articulated_generation
+
+.. autosummary::
+
+   ArticulatedGenerationClient
+
+embodichain.gen_sim.asset_engine.configs
+---------------------------------------------
+
+Asset Engine environment configuration helpers.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.configs.environment
+----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.configs.environment
+
+.. autosummary::
+
+   read_asset_engine_env_values
+
+embodichain.gen_sim.asset_engine.pipeline
+----------------------------------------------
+
+Asset Engine articulation generation and SimReady ingestion pipeline entry
+points.
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.asset_engine.pipeline.articulation
+-----------------------------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.asset_engine.pipeline.articulation
+
+.. autosummary::
+
+   generate_articulated_usdcs
+
+embodichain.gen_sim.scene_engine.configs.environment
+--------------------------------------------------
+
+Read selected Scene Engine settings from the shared ``gen_sim/.env`` file;
+missing files or requested keys raise an error.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.configs.environment
+
+.. autosummary::
+
+   read_scene_engine_env_values
 
 embodichain.lab.gym.envs.base_env
 ---------------------------------
@@ -2324,6 +2432,176 @@ embodichain.learning.rl.utils.optimizer
    get_registered_optimizer_names
    scheduler_needs_horizon
 
+embodichain.gen_sim.task_spec
+---------------------
+
+GenSim-owned, simulator-independent TaskSpec contracts, predicate evaluation,
+and content-addressed TaskSpec persistence.
+
+.. currentmodule:: embodichain.gen_sim.task_spec
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   CANONICALIZATION_VERSION
+   EVALUATION_STATUSES
+   EXPANSION_MANIFEST_SCHEMA
+   KNOWN_PREDICATES
+   MILESTONE_SCHEMA
+   PREDICATE_OPERATORS
+   SCENE_INSTANCE_SCHEMA
+   TASK_SPEC_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   EvaluationReport
+   EvaluationStatus
+   ExpansionManifest
+   MilestoneSpec
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   RequirementSpec
+   RoleSpec
+   SceneInstance
+   TaskRequirement
+   TaskSpec
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+   TaskSpecValidationError
+   TaskTemplate
+   TemporalCondition
+   TemporalSpec
+   ValidationCertificate
+   build_validation_certificate
+   canonical_hash
+   canonical_json
+   canonicalize
+   evaluate_predicate
+   evaluate_task_spec
+   evaluate_task_template
+   evaluate_temporal_condition
+   json_snapshot
+   lookup_observation
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_task_spec
+   validate_task_template
+   validate_validation_certificate
+
+embodichain.gen_sim.task_spec.canonicalization
+---------------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.canonicalization
+
+.. autosummary::
+
+   CANONICALIZATION_VERSION
+   canonical_hash
+   canonical_json
+   canonicalize
+   json_snapshot
+
+embodichain.gen_sim.task_spec.contracts
+-------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.contracts
+
+.. autosummary::
+
+   RoleSpec
+
+embodichain.gen_sim.task_spec.compat
+-------------------------------
+
+Legacy runtime artifact contracts and one-release compatibility validators.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.compat
+
+.. autosummary::
+
+   ACTION_WITNESS_SCHEMA
+   EXPANSION_MANIFEST_SCHEMA
+   SCENE_INSTANCE_SCHEMA
+   TASK_TEMPLATE_SCHEMA
+   VALIDATION_CERTIFICATE_SCHEMA
+   ActionWitness
+   ExpansionManifest
+   RequirementSpec
+   SceneInstance
+   TaskTemplate
+   ValidationCertificate
+   build_validation_certificate
+   validate_action_witness
+   validate_expansion_manifest
+   validate_scene_instance
+   validate_validation_certificate
+
+embodichain.gen_sim.task_spec.expressions
+---------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.expressions
+
+.. autosummary::
+
+   EVALUATION_STATUSES
+   KNOWN_PREDICATES
+   PREDICATE_OPERATORS
+   EvaluationStatus
+   Predicate
+   PredicateEvaluation
+   PredicateSpec
+   TemporalCondition
+   TemporalSpec
+   evaluate_predicate
+   evaluate_temporal_condition
+   lookup_observation
+
+embodichain.gen_sim.task_spec.registry
+------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.registry
+
+.. autosummary::
+
+   TaskSpecCache
+   TaskSpecCacheError
+   TaskSpecRegistry
+
+embodichain.gen_sim.task_spec.spec
+--------------------------
+
+The compact normative TaskSpec model.  It owns roles, conditions, long-horizon
+milestones, downstream requirements, and the semantic hash; runtime artifacts
+remain with their existing owners.
+
+.. currentmodule:: embodichain.gen_sim.task_spec.spec
+
+.. autosummary::
+
+   MILESTONE_SCHEMA
+   TASK_SPEC_SCHEMA
+   MilestoneSpec
+   TaskRequirement
+   TaskSpec
+   TaskTemplate
+
+embodichain.gen_sim.task_spec.validation
+--------------------------------
+
+.. currentmodule:: embodichain.gen_sim.task_spec.validation
+
+.. autosummary::
+
+   EvaluationReport
+   TaskSpecValidationError
+   evaluate_task_spec
+   evaluate_task_template
+   validate_task_spec
+   validate_task_template
+
 embodichain.toolkits.acd
 ------------------------
 
@@ -2610,6 +2888,15 @@ embodichain_tasks.special.stay_still_save
 .. autosummary::
 
    StayStillSaveEnv
+
+embodichain_tasks.special.stay_still_save_3cam
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
+
+.. autosummary::
+
+   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------

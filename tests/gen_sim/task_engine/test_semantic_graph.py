@@ -34,6 +34,7 @@ import pytest
 import embodichain.gen_sim.task_engine.task_program_bundle as task_program_bundle
 from embodichain.gen_sim.task_engine._bundle_runner import (
     _semantic_success_by_env,
+    _verify_integration_fingerprint,
     _verify_program_projection,
 )
 from embodichain.gen_sim.task_engine.semantic_graph import (
@@ -491,6 +492,100 @@ def test_program_must_be_exact_projection_of_semantic_graph(tmp_path: Path) -> N
     save_config(program_path, program)
     with pytest.raises(ValueError, match="exact SemanticTaskGraph call projection"):
         _verify_program_projection(program_path, graph)
+
+
+@pytest.mark.parametrize(
+    "call_id",
+    ["simulation.place_relative", "gen_sim.place_upright", "gen_sim.stack_place"],
+)
+@pytest.mark.parametrize("stage_id", ["pick_group", "", None, 1])
+def test_program_projection_rejects_wrong_runtime_placement_stage(
+    tmp_path: Path, call_id: str, stage_id: object
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": call_id,
+        "arguments": {"object": "cube", "reference": "table", "relation": "on"},
+        "resources": {"primary": "left"},
+    }
+    graph = validate_semantic_task_graph(graph)
+    program = _program(graph)
+    program["program"]["items"][1]["steps"]["call"]["arguments"]["stage_id"] = stage_id
+    program_path = tmp_path / "program.yaml"
+    save_config(program_path, program)
+
+    with pytest.raises(ValueError, match="stage_id"):
+        _verify_program_projection(program_path, graph)
+
+
+@pytest.mark.parametrize(
+    "call_id",
+    ["simulation.place_relative", "gen_sim.place_upright", "gen_sim.stack_place"],
+)
+def test_program_projection_accepts_exact_runtime_placement_stage(
+    tmp_path: Path, call_id: str
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": call_id,
+        "arguments": {"object": "cube", "reference": "table", "relation": "on"},
+        "resources": {"primary": "left"},
+    }
+    graph = validate_semantic_task_graph(graph)
+    program = _program(graph)
+    program["program"]["items"][1]["steps"]["call"]["arguments"]["stage_id"] = graph[
+        "nodes"
+    ][1]["task_instance_id"]
+    program_path = tmp_path / "program.yaml"
+    save_config(program_path, program)
+
+    _verify_program_projection(program_path, graph)
+
+
+def test_program_projection_rejects_runtime_stage_for_other_calls(
+    tmp_path: Path,
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": "gen_sim.clear_released",
+        "arguments": {"object": "cube"},
+        "resources": {"primary": "left"},
+    }
+    graph = validate_semantic_task_graph(graph)
+    program = _program(graph)
+    program["program"]["items"][1]["steps"]["call"]["arguments"]["stage_id"] = graph[
+        "nodes"
+    ][1]["task_instance_id"]
+    program_path = tmp_path / "program.yaml"
+    save_config(program_path, program)
+
+    with pytest.raises(ValueError, match="stage_id"):
+        _verify_program_projection(program_path, graph)
+
+
+def test_program_projection_preserves_stage_explicitly_declared_by_graph(
+    tmp_path: Path,
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": "simulation.place_relative",
+        "arguments": {
+            "object": "cube",
+            "reference": "table",
+            "relation": "on",
+            "stage_id": "place_group",
+        },
+        "resources": {"primary": "left"},
+    }
+    graph = validate_semantic_task_graph(graph)
+    program_path = tmp_path / "program.yaml"
+    save_config(program_path, _program(graph))
+
+    _verify_program_projection(program_path, graph)
 
 
 def test_completed_task_groups_survive_later_runtime_failure() -> None:
@@ -1523,6 +1618,227 @@ def _prepared_axis_scene(
     return scene
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "authored_stage",
+        "equivalent_defaults",
+        "hold_mode",
+        "stage",
+        "stage_whitespace",
+        "route_geometry",
+        "motion_policy",
+        "constraints",
+        "runtime_revision",
+        "graph_identity",
+        "registration_identity",
+        "program",
+    ],
+)
+def test_unified_bundle_identity_accepts_old_defaults_and_rejects_contract_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str | None
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import assembly
+
+    scene = _prepared_axis_scene(tmp_path)
+    graph = _graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"] = {
+        "kind": "registered",
+        "call_id": "simulation.place_relative",
+        "arguments": {"object": "bottle", "reference": "table", "relation": "on"},
+        "resources": {"primary": "left"},
+    }
+    if change == "authored_stage":
+        graph["nodes"][1]["call"]["arguments"]["stage_id"] = "authored_stage"
+    for group in graph["task_groups"]:
+        group["success"] = {"kind": "call_completed"}
+    generated, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    integration = load_config(paths.integration)
+    handover = integration["profile"]["action_options"]["hand_over"]
+    route = next(
+        factory["routes"][0]
+        for factory in integration["runtime_services"]["registered_semantic_lowerers"]
+        if factory["kind"] == "place_relative"
+    )
+    assert "source_hold_mode" not in handover
+    if change == "authored_stage":
+        assert route["stage_id"] == "authored_stage"
+    else:
+        assert "stage_id" not in route
+    record = load_config(paths.integration_fingerprint)
+    _verify_program_projection(paths.program, generated)
+    original = _verify_integration_fingerprint(
+        paths.deployment.parent, paths.deployment, generated, record
+    )
+    original.integration.registration.assert_unchanged()
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    factory = next(
+        factory
+        for factory in original.integration.registration.registered_semantic_lowerer_factories
+        if factory.call_id == "simulation.place_relative"
+    )
+    resolved = factory.lowerer_type(factory.routes, None)._resolve_route(
+        RegisteredSemanticCall(
+            call_id="simulation.place_relative",
+            arguments=generated["nodes"][1]["call"]["arguments"],
+        )
+    )
+    assert resolved.object_id == "bottle"
+    assert resolved.stage_id == ("authored_stage" if change == "authored_stage" else "")
+
+    if change in {
+        "equivalent_defaults",
+        "hold_mode",
+        "stage",
+        "stage_whitespace",
+        "route_geometry",
+    }:
+        if change == "equivalent_defaults":
+            handover["source_hold_mode"] = "grasp_command"
+            route["stage_id"] = ""
+        elif change == "hold_mode":
+            handover["source_hold_mode"] = "observed"
+        elif change == "stage":
+            route["stage_id"] = "step_02"
+        elif change == "stage_whitespace":
+            route["stage_id"] = " "
+        else:
+            route["world_displacement"][2] += 0.01
+        save_config(paths.integration, integration)
+    elif change == "motion_policy":
+        policy = load_config(paths.execution_policy)
+        policy["motion"]["sample_count"] += 20
+        save_config(paths.execution_policy, policy)
+    elif change == "constraints":
+        path = paths.program.parent / "constraints.json"
+        constraints = load_config(path)
+        next(iter(constraints["presets"].values()))["position_tolerance"] *= 2
+        save_config(path, constraints)
+    elif change == "runtime_revision":
+        monkeypatch.setattr(
+            assembly,
+            "INVOCATION_POLICY_REVISION",
+            assembly.INVOCATION_POLICY_REVISION + 1,
+        )
+    elif change == "graph_identity":
+        generated["integration_fingerprint"] = "f" * 64
+    elif change == "registration_identity":
+        record["registration_fingerprint"] = "f" * 64
+    elif change == "program":
+        program = load_config(paths.program)
+        program["program"]["items"][0]["steps"]["call"]["object"] = "table"
+        save_config(paths.program, program)
+        with pytest.raises(ValueError, match="projection"):
+            _verify_program_projection(paths.program, generated)
+        return
+
+    if change in {None, "equivalent_defaults", "authored_stage"}:
+        _verify_integration_fingerprint(
+            paths.deployment.parent, paths.deployment, generated, record
+        )
+    else:
+        with pytest.raises(ValueError, match="fingerprint|route|stage"):
+            _verify_integration_fingerprint(
+                paths.deployment.parent, paths.deployment, generated, record
+            )
+
+
+@pytest.mark.parametrize(
+    "call_id",
+    ["simulation.place_relative", "gen_sim.place_upright", "gen_sim.stack_place"],
+)
+@pytest.mark.parametrize("stages", ["implicit", "authored", "repeated"])
+def test_placement_route_writer_decoder_and_resolver_agree(
+    call_id: str, stages: str
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.stack_place import (
+        _StackPlaceLowerer,
+    )
+    from embodichain.lab.task_program.semantics import RegisteredSemanticCall
+
+    nodes, routes = [], []
+    for index in range(2 if stages == "repeated" else 1):
+        group_id = f"group_{index}"
+        arguments = {"object": "bottle", "reference": "table", "relation": "on"}
+        if stages == "authored":
+            arguments["stage_id"] = f"author_{index}"
+        node = {
+            "id": f"node_{index}",
+            "task_instance_id": group_id,
+            "task_type": "E1",
+            "role": "primary",
+            "depends_on": [],
+            "call": {
+                "kind": "registered",
+                "call_id": call_id,
+                "arguments": arguments,
+                "resources": {"primary": "left"},
+            },
+        }
+        nodes.append(node)
+        routes.append(
+            {
+                "stage_id": task_program_bundle._route_key_for_node(
+                    node, "bottle", "table", "on"
+                )[0],
+                "object_id": "bottle",
+                "reference_entity_id": "table",
+                "relation": "on",
+                "world_displacement": [0.0, 0.0, 0.1],
+            }
+        )
+    public_routes = task_program_bundle._public_routes(
+        routes,
+        graph={"nodes": nodes},
+        call_ids=(
+            frozenset({"gen_sim.place_upright"})
+            if call_id == "gen_sim.place_upright"
+            else frozenset({"simulation.place_relative", "gen_sim.stack_place"})
+        ),
+    )
+    assert all(
+        ("stage_id" in route) is (stages != "implicit") for route in public_routes
+    )
+    factory = decode_task_lowerer(
+        {
+            "kind": (
+                "place_upright"
+                if call_id == "gen_sim.place_upright"
+                else "place_relative"
+            ),
+            "routes": public_routes,
+        },
+        path="test",
+    )
+    lowerer = (
+        _StackPlaceLowerer(
+            factory.routes,
+            approach=0.02,
+            release=0.003,
+            nominal=0.01,
+        )
+        if call_id == "gen_sim.stack_place"
+        else factory.lowerer_type(factory.routes, None)
+    )
+    route_map = {task_program_bundle._route_key(route): route for route in routes}
+    for node in nodes:
+        call = _program_node(node, relative_routes=route_map)["steps"]["call"]
+        resolved = lowerer._resolve_route(
+            RegisteredSemanticCall(call_id=call_id, arguments=call["arguments"])
+        )
+        assert resolved.stage_id == call["arguments"].get("stage_id", "")
+        assert ("stage_id" in call["arguments"]) is (stages != "implicit")
+
+
 def test_coordinated_on_bundle_reuses_relative_height_and_live_acceptance(tmp_path):
     scene = _prepared_axis_scene(tmp_path)
     path = tmp_path / "pad.glb"
@@ -1814,7 +2130,60 @@ def test_handover_source_region_follows_measured_axis(
         final = constraints[f"gen_sim.{generated['nodes'][-1]['id']}.stable"]
         assert final["kind"] == "hold"
         assert abs(final["world_axis"][2]) < 1e-6
+        assert final["minimum_alignment"] == pytest.approx(math.cos(math.pi / 18.0))
         assert final["motion_parts"] == ["right_arm"]
+
+
+@pytest.mark.parametrize("prior_upright", [False, True])
+def test_handover_hold_retains_v38_tolerance_and_uses_preceding_upright_axis(
+    tmp_path: Path, prior_upright: bool
+) -> None:
+    scene = _prepared_axis_scene(tmp_path, source_extents=(0.24, 0.06, 0.06))
+    scene.planner_objects[0]["init_rot"][:] = [0.0, 0.0, 0.0]
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"][
+        "call_id"
+    ] = "gen_sim.pick.handover_horizontal_source.bottle"
+    graph["nodes"][0]["call"]["arguments"]["object"] = "bottle"
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    if prior_upright:
+        graph["nodes"].insert(
+            0,
+            {
+                "id": "upright",
+                "task_instance_id": "upright_group",
+                "task_type": "E2",
+                "call": {
+                    "kind": "registered",
+                    "call_id": "simulation.axis_align",
+                    "arguments": {"object": "bottle"},
+                },
+            },
+        )
+        graph["task_groups"].insert(0, {"node_ids": ["upright"]})
+    constraints = task_program_bundle._task_stability_payload(
+        graph,
+        scene,
+        {
+            "skill_profile": {
+                "resources": [
+                    {
+                        "resource_id": "right",
+                        "endpoints": [
+                            {"endpoint_id": "motion", "control_part": "right_arm"}
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    hold = constraints["presets"][f"gen_sim.{graph['nodes'][-1]['id']}.stable"]
+    assert hold["kind"] == "hold"
+    assert hold["world_axis"] == pytest.approx(
+        [0.0, 0.0, 1.0] if prior_upright else [1.0, 0.0, 0.0]
+    )
+    assert hold["minimum_alignment"] == pytest.approx(math.cos(math.pi / 18.0))
+    assert hold["motion_parts"] == ["right_arm"]
 
 
 @pytest.mark.parametrize(
@@ -2009,6 +2378,9 @@ def test_stack_alignment_does_not_replace_support_acceptance_with_upright_only(
         graph, scene, {"skill_profile": {"resources": []}}
     )
     assert constraints["presets"]["gen_sim.node_2.stable"]["kind"] == "stack"
+    assert constraints["presets"]["gen_sim.node_2.stable"][
+        "minimum_alignment"
+    ] == pytest.approx(np.cos(np.pi / 18.0))
 
 
 def test_ordinary_on_placement_does_not_invent_an_orientation_requirement(tmp_path):
@@ -2112,6 +2484,9 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         not in integration["profile"]["action_options"]["hand_over"]
     )
     assert (
+        "source_hold_mode" not in integration["profile"]["action_options"]["hand_over"]
+    )
+    assert (
         load_config(paths.integration_fingerprint)["schema_version"]
         == "semantic_integration_fingerprint/v2"
     )
@@ -2126,6 +2501,12 @@ def test_coordinated_bundle_composes_against_unmodified_public_options(
         base_dir=paths.deployment.parent,
     )
     base = compose_deployment(**arguments)
+    assert (
+        base.integration.registration.robot_profile_binding.presets[0]
+        .action_option_templates["hand_over"]
+        .source_hold_mode
+        == "grasp_command"
+    )
     selected = load_deployment(**arguments).integration.adapter_factory
     assert selected.coordinated_grasp
     # E5 must not rewrite the endpoint factories also used by ordinary Pick.

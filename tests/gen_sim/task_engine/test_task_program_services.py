@@ -753,6 +753,8 @@ def test_recovered_place_checks_final_resampled_commands(
     monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
     plan = SimpleNamespace(
         plan_success=torch.tensor([True]),
+        segments=(),
+        scene_dependencies=(),
         joint_trajectory=SimpleNamespace(
             positions=torch.tensor([[[0.0], [0.2 if unsafe else 0.02]]]),
             dt=torch.tensor([[0.0, 0.04]]),
@@ -831,12 +833,13 @@ def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
     objects = {b.simulation_uid: Mock() for b in bindings}
     env = SimpleNamespace(
         robot=SimpleNamespace(uid="robot"),
-        sim=SimpleNamespace(get_rigid_object=objects.get),
+        sim=SimpleNamespace(get_rigid_object=objects.get, instance_id=1),
         step_dt=0.04,
     )
     adapter = assembly.TaskAdapterFactory(registration, "test", (), ())
     assert adapter.create_adapter(env) == "adapter"
     captured["motion_generator_factory"]()
+    assert cfgs[0].planner_cfg.sim_instance_id == env.sim.instance_id
     world = cfgs[0].planner_cfg.world
     assert world.representation == "auto"
     assert set(world.rigid_objects) == {b.entity_id for b in bindings}
@@ -1040,8 +1043,11 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
 
 @pytest.mark.parametrize("verify_retention", [False, True])
 @pytest.mark.parametrize("height", [1.3, 0.8])
+@pytest.mark.parametrize("target_name", ["staging", "step_upright_target"])
 def test_upright_alignment_lifts_before_rotating(
-    verify_retention: bool, height: float
+    verify_retention: bool,
+    height: float,
+    target_name: str,
 ) -> None:
     pose = torch.eye(4).unsqueeze(0)
     pose[:, :3, :3] = torch.tensor([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
@@ -1052,7 +1058,15 @@ def test_upright_alignment_lifts_before_rotating(
         get_link_pose=lambda **kw: torch.eye(4).unsqueeze(0),
     )
     lowerer = _AlignHeldFactory(
-        (("can", "staging", False, (0.0, 0.0, 1.0), (0.1, 0.2, height)),),
+        (
+            (
+                "can",
+                target_name,
+                False,
+                (0.0, 0.0, 1.0),
+                (0.1, 0.2, height),
+            ),
+        ),
         verify_retention=verify_retention,
     ).create(
         simulation=None,
@@ -1091,7 +1105,7 @@ def test_upright_alignment_lifts_before_rotating(
             call_id="gen_sim.align_held",
             arguments={
                 "object": "can",
-                "target": "staging",
+                "target": target_name,
                 "preserve_yaw": False,
             },
         ),
@@ -1107,6 +1121,7 @@ def test_upright_alignment_lifts_before_rotating(
         torch.tensor([[[0.1, 0.2, max(1.0, height)], [0.1, 0.2, height]]]),
     )
     assert result.goal.world_yaw_free
+    assert not result.goal.world_yaw_free_path
     torch.testing.assert_close(
         waypoints[:, 1, :3, 2], torch.tensor([[0.0, 0.0, 1.0]]), atol=1e-6, rtol=0
     )
@@ -1319,6 +1334,63 @@ def test_configured_handover_uses_baseline_timing_and_rejects_removed_wait_field
     ] = 16
     with pytest.raises(ValueError, match="source_release_settle_steps"):
         _decode_robot_profile(payload)
+
+
+@pytest.mark.parametrize("mode", [None, "observed", "grasp_command"])
+@pytest.mark.parametrize("retreat_steps", [None, 20, 36])
+def test_gensim_composition_preserves_v38_handover_default_without_mutation(
+    monkeypatch: pytest.MonkeyPatch, mode: str | None, retreat_steps: int | None
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import configured
+
+    path = (
+        Path(__file__).parents[3]
+        / "embodichain_tasks/configs/tasks/manipulation/hand_over"
+        / "task.dual_ur5_dh_pgi_140_80.yaml"
+    )
+    physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
+    program_path, task, policy = _resolve_task_program_components(
+        physical.config["task_program"], base_dir=path.parent
+    )
+    task = deepcopy(task)
+    options = task["profile"]["action_options"]["hand_over"]
+    options.pop("source_hold_mode", None)
+    options.pop("retreat_steps", None)
+    if mode is not None:
+        options["source_hold_mode"] = mode
+    if retreat_steps is not None:
+        options["retreat_steps"] = retreat_steps
+    before = deepcopy(task)
+    monkeypatch.setattr(
+        configured,
+        "_resolve_task_program_components",
+        lambda *_a, **_kw: (program_path, task, policy),
+    )
+    deployment = configured.compose_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    actual = deployment.integration.registration.robot_profile_binding.presets[
+        0
+    ].action_option_templates["hand_over"]
+    assert actual.source_hold_mode == (mode or "grasp_command")
+    assert actual.retreat_steps == (24 if retreat_steps is None else retreat_steps)
+    assert task == before
+    if mode is None:
+        payload = _compose_integration_payload(
+            task=task,
+            policy=policy,
+            skill_profile=physical.embodiment_skill_profile,
+            scene=task["scene_binding"],
+        )["robot_profile"]
+        generic = (
+            _decode_robot_profile(payload)
+            .presets[0]
+            .action_option_templates["hand_over"]
+        )
+        assert generic.source_hold_mode == "observed"
+        assert generic.retreat_steps == (20 if retreat_steps is None else retreat_steps)
 
 
 def test_configured_transport_binds_one_baseline_pose_without_planning() -> None:
@@ -1595,3 +1667,40 @@ def test_relative_place_observes_either_native_reference_root(articulated):
                 scene_registry=registry,
                 engine=SimpleNamespace(robot=robot),
             )
+
+
+def test_ordinary_adapter_planner_uses_its_environment_instance(monkeypatch) -> None:
+    from embodichain.gen_sim.task_engine._task_program import assembly
+    from embodichain.lab.sim import sim_manager as manager_module
+
+    correct = SimpleNamespace(uid="robot", device=torch.device("cpu"))
+    other = SimpleNamespace(uid="robot", device=torch.device("cpu"))
+    sim = SimpleNamespace(instance_id=1, get_robot=lambda uid: correct)
+    zero = SimpleNamespace(instance_id=0, get_robot=lambda uid: other)
+    registration = SimpleNamespace(
+        assert_unchanged=lambda: None,
+        robot_profile_binding=SimpleNamespace(
+            presets=[
+                SimpleNamespace(motion_policy=SimpleNamespace(strategy="ik_interp"))
+            ]
+        ),
+        scene_binding=SimpleNamespace(rigid_objects=[]),
+    )
+    captured = {}
+
+    def factory(*args, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(create_adapter=lambda: "adapter")
+
+    monkeypatch.setattr(assembly, "_TaskFactory", factory)
+    monkeypatch.setattr(assembly, "install_grasp_filters", lambda *args: {})
+    environment = SimpleNamespace(robot=correct, sim=sim, step_dt=0.04)
+    assembly.TaskAdapterFactory(registration, "test", (), ()).create_adapter(
+        environment
+    )
+    monkeypatch.setattr(
+        manager_module.SimulationManager, "_instances", {0: zero, 1: sim}
+    )
+    generator = captured["motion_generator_factory"]()
+    assert generator.robot is correct
+    assert generator.planner.cfg.sim_instance_id == sim.instance_id

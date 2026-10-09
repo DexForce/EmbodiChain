@@ -34,6 +34,7 @@ from embodichain.utils.utility import load_config
 from ..contracts import canonical_hash
 from .stability import StabilityConstraint, TaskStabilityPort
 from .configured import compose_deployment
+from .identity import bundle_registration_fingerprint
 from .grasp_filter import (
     GRASP_FILTER_REVISION,
     geometry_key,
@@ -369,6 +370,7 @@ class TaskAdapterFactory:
                 MotionGenCfg(
                     planner_cfg=CuroboPlannerCfg(
                         robot_uid=environment.robot.uid,
+                        sim_instance_id=environment.sim.instance_id,
                         use_cuda_graph=False,
                         world=CuroboWorldCfg(
                             rigid_objects=obstacles,
@@ -384,7 +386,10 @@ class TaskAdapterFactory:
 
             motion_factory = lambda: CheckedMotionGenerator(
                 MotionGenCfg(
-                    planner_cfg=ToppraPlannerCfg(robot_uid=environment.robot.uid)
+                    planner_cfg=ToppraPlannerCfg(
+                        robot_uid=environment.robot.uid,
+                        sim_instance_id=environment.sim.instance_id,
+                    )
                 )
             )
             if self.drawer_routes:
@@ -791,7 +796,7 @@ def load_deployment(
             "grasp_filter_revision": GRASP_FILTER_REVISION,
             "motion_validation_revision": MOTION_VALIDATION_REVISION,
             "core_integration": base.integration.integration_fingerprint,
-            "registration": registration.fingerprint,
+            "registration": bundle_registration_fingerprint(registration),
             "task_constraints": payload,
             "program": program,
             "cartesian_calls": cartesian_calls,

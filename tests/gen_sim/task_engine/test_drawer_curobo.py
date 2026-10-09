@@ -135,14 +135,18 @@ def test_native_attachment_detaches_even_when_cleanup_raises(monkeypatch) -> Non
     from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
 
     manager = SimpleNamespace(detach=Mock(side_effect=RuntimeError("detach")))
-    closed = Mock()
-    monkeypatch.setattr(CuroboPlanner, "close", closed)
+    close_calls = []
+
+    def record_close(instance):
+        close_calls.append(instance)
+
+    monkeypatch.setattr(CuroboPlanner, "close", record_close)
     planner = object.__new__(_PayloadPlanner)
     planner._attachments = {0: (manager,)}
     planner._backend_cache = {}
     with pytest.raises(RuntimeError, match="detach"):
         planner.close()
-    closed.assert_called_once()
+    assert sum(instance is planner for instance in close_calls) == 1
     planner._backend_cache = {}
 
 
@@ -158,8 +162,12 @@ def test_native_attachment_detaches_all_managers_when_one_cleanup_raises(
 
     first = SimpleNamespace(detach=Mock(side_effect=RuntimeError("first detach")))
     second = SimpleNamespace(detach=Mock())
-    closed = Mock()
-    monkeypatch.setattr(CuroboPlanner, "close", closed)
+    close_calls = []
+
+    def record_close(instance):
+        close_calls.append(instance)
+
+    monkeypatch.setattr(CuroboPlanner, "close", record_close)
     planner = object.__new__(_PayloadPlanner)
     planner._attachments = {0: (first, second)}
     planner._backend_cache = {}
@@ -169,7 +177,9 @@ def test_native_attachment_detaches_all_managers_when_one_cleanup_raises(
 
     first.detach.assert_called_once()
     second.detach.assert_called_once()
-    closed.assert_called_once()
+    assert sum(instance is planner for instance in close_calls) == 1
+    planner.close()
+    assert sum(instance is planner for instance in close_calls) == 1
 
 
 def test_attachment_updates_every_distinct_rollout_sphere_buffer() -> None:

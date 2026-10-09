@@ -47,7 +47,11 @@ from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp, PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
-from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics, PlanningFailure
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    PlannerDiagnostics,
+    PlanningFailure,
+)
 from embodichain.lab.sim.atomic_actions.state import TaskState
 from embodichain.lab.sim.atomic_actions.trajectory_ops import (
     build_pose_plan_states,
@@ -959,16 +963,31 @@ class GenSimMoveHeldObject(MoveHeldObject):
 
 
 class GenSimPlace(Place):
-    """Scope Cartesian planning and bounded IK recovery to this Place call."""
+    """Scope Place recovery and the approach-only scene guard to GenSim."""
 
     skill_id = Place.skill_id
     GoalType = Place.GoalType
     OptionsType = Place.OptionsType
     binding_contract = Place.binding_contract
 
+    @staticmethod
+    def _with_contact_monitor_boundary(plan: ActionPlan) -> ActionPlan:
+        approach = next((s for s in plan.segments if s.name == "approach"), None)
+        if approach is None or not plan.scene_dependencies:
+            return plan
+        # Preserve v38: expected contact motion must not replan release/retract.
+        monitor_until = {
+            entity_id: min(
+                approach.stop,
+                plan.scene_dependency_monitor_until.get(entity_id, approach.stop),
+            )
+            for entity_id in plan.scene_dependencies
+        }
+        return replace(plan, scene_dependency_monitor_until=monitor_until)
+
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_place_planning", False) is True:
-            return super()._plan(request, context)
+            return self._with_contact_monitor_boundary(super()._plan(request, context))
         from .motion import (
             _joint_velocity_limits,
             _velocity_validity,
@@ -988,7 +1007,7 @@ class GenSimPlace(Place):
                     context,
                     message="Recovered Place exceeds final resampled joint velocity limits.",
                 )
-        return plan
+        return self._with_contact_monitor_boundary(plan)
 
 
 class GenSimPour(Pour):
@@ -1114,7 +1133,7 @@ class GenSimPour(Pour):
                 torch.linspace(0.0, 1.0, first + 1, device=self.device)[1:],
                 torch.linspace(1.0, 0.0, count - first + 1, device=self.device)[1:],
             )
-        ) * abs(float(request.skill_options.rotate_angle))
+        ) * float(request.skill_options.rotate_angle)
         try:
             rotations = axis_angle_to_rotation_matrix(
                 axis[:, None] * angles[None, :, None]

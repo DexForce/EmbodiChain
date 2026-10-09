@@ -1,8 +1,9 @@
 # Generative simulation
 
 Scene Engine turns images into editable scenes and portable exports; the
-general SimReady pipeline ingests individual assets. Neither output is by
-itself a complete runnable Gym task deployment.
+SimReady Asset Engine ingests and generates individual assets, including
+articulated assets. Neither output is by itself a complete runnable Gym task
+deployment.
 
 ## Entry points and resolution
 
@@ -16,12 +17,14 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
-| General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
+| General asset ingest | `asset_engine/pipeline/ingest.py`: `ingest_one_asset()` |
+| Articulated asset generation | `asset_engine/clients/articulated_generation.py`, `asset_engine/utils/articulated_usdc_utils.py` |
+| Generated task semantics | `embodichain/gen_sim/task_spec/` and `task_engine/task_spec.py`: compact TaskSpec generation and cache adapter |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
 | Session-owned subprocesses | `gradio_ui/app_processes.py`: `SessionProcessRegistry` |
 
-Generate: validate input → VLM understanding → geometry/articulation generation
-→ placement refinement → export. Segmentation, geometry and articulation
+Generate: validate input → VLM understanding → Asset Engine geometry/articulation
+generation → placement refinement → export. Segmentation and Asset Engine
 clients are closed in `finally` blocks; VLM lifetime is separate.
 Edit: import export → validate graph/typed edit plan → generate additions
 → change layout → overwrite export. Combined image/edit mode generates first.
@@ -61,6 +64,16 @@ Keep parser capabilities idempotent so recorded stages support resume.
 Provider configuration belongs to its loader/client, while coordinate and graph
 contracts belong to importer/exporter. Task registration and physical/semantic
 composition belong to [env-framework](../env-framework/env-framework.md).
+TaskSpec owns the reusable normative task identity and evidence contract across
+these boundaries; its schemas, predicate rules, and cache behavior are owned by
+`embodichain/gen_sim/task_spec/` and detailed in the
+[GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
+Long-horizon specifications keep the terminal state in `goal` and represent
+ordered intermediate achievements as acyclic `milestones`.
+Completion evaluation requires trajectory evidence for those achievements and
+their predecessor order; incomplete `always` windows cannot certify success.
+Scene output is a scene-binding and measured-state input to that protocol; it
+does not by itself certify a task witness.
 
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote
@@ -77,6 +90,9 @@ from the Task Program's `quaternion_xyzw` serialization. E6 runtime binding,
 geometry bounds, rail direction and handle clearance use that same matrix;
 never reinterpret a decoder's derived extrinsic angles as source `XYZ` angles.
 Explicit proxy fitting updates an existing matrix together with its pose fields.
+Legacy editable revisions bake runtime scale into copied GLBs and use unit
+editable scale. Their scene config carries `world_alignment_applied`; preserve
+it through edits so already-normalized poses are not rotated again.
 Generated deployments retain the measured settled layout instead of teleporting
 objects back to configured X/Y after settling.
 Invocation-scoped Cartesian policy also covers single-EEF-target transports;
@@ -221,7 +237,11 @@ exhausted Cartesian IK planning may retry through the shared motion generator
 with nearby joint seeds and a joint-limit-margin preference. Successful
 Cartesian plans do not enter local IK recovery;
 the fallback preserves Cartesian samples, control timing and random state,
-and rechecks full-robot velocity after Place resampling. This is a bounded
+and rechecks full-robot velocity after Place resampling. GenSim Place retains
+v38's scene-dependency guard through approach only; expected contact motion
+does not replan release/retract. After that boundary external disturbances
+are also ignored by this guard, so final effect and stability checks remain
+required. Shared Place retains its full-action guard. This is a bounded
 kinematic recovery, not collision or physical-placement qualification.
 E6 recovery is bound to exact registered Slide/withdraw invocation IDs, not
 all calls of those underlying skills. Failed single-environment CPU
@@ -263,8 +283,10 @@ This uses the authored articulation geometry envelope, not a changing-joint
 collision envelope; a reference also actuated by Slide in the same program is
 rejected rather than reusing stale extents. Articulated `on/above/inside` support still requires qualified
 link geometry; spatial-reference support does not authorize joint manipulation.
-Explicit upright, oriented hold and stack constraints retain their axis checks;
-legacy presets are unchanged, so regenerate bundles to select the new policy.
+Explicit upright, oriented hold and stack constraints retain v38's 10-degree
+alignment tolerance. Upright handover-to-stack retains the table restaging,
+regrasp, preserve-yaw alignment and released-hand cleanup route rather than
+directly stacking from the receiving grasp.
 Source pose matrices take precedence over Euler fields.
 After UID grounding, independent E1 placement, E2 upright, and E5
 lift-and-return `count`/`all` sets lower to ordered single-object steps;
@@ -347,9 +369,15 @@ that order. Candidate, IK or path failure triggers one alternate-direction
 attempt through the complete shared HandOver planner before execution. Successful
 rows retain their first trajectories and attachment candidates. Exhaustion
 fails normally; no source regrasp or cross-call recovery is added. Transfer,
-release, retreat and state effects remain owned by shared HandOver. E5 paired
-grasping and E6 handle policies remain separate. These are GenSim-local skill replacements,
-not another executor or changes to shared goal/options types. Unmarked calls
+release, retreat and state effects remain owned by shared HandOver. Generated
+profiles select `source_hold_mode=grasp_command` to retain the bound closing
+drive during existing-hold transfers. GenSim composition applies that default
+when the field is absent and preserves explicit modes. Missing retreat budgets
+also retain v38's default; shared composition keeps its own defaults. The mode's
+contract belongs to
+[Atomic Action execution](../atomic-actions/execution.md).
+E5 paired grasping and E6 handle policies remain separate. These GenSim-local
+skill replacements use the shared goals and options. Unmarked calls
 delegate unchanged; drawer deployments install the same ordinary wrappers.
 Constrained E2 Pick lowerers
 snapshot their object/target rule selector into the goal; only that Pick uses
@@ -363,12 +391,21 @@ top-down approach so uprighting yields a side grasp instead of an end-directed
 rim approach. Standalone E2 retains its original table target and grasp policy.
 The GenSim-owned `gen_sim.place_upright` call reuses Place while
 separating the later upright release geometry from the earlier ordinary Place
-route. Repeated identical selectors within either call family still reject
-conflicting stage geometry instead of silently overwriting a prior route.
+route. Repeated occurrences retain stage selectors; conflicting geometry for
+the same stage is rejected rather than overwriting its route. An implicit
+singleton retains the v38 declaration shape, while an authored selector is
+preserved even for a singleton.
 Terminal preserve-pose handovers verify receiver attachment and the
-declared world-axis alignment; ordinary upright constraints still use world Z.
-Regenerate bundles after adaptive-policy/lowerer revisions; do not bypass their
-fingerprint checks or extend the shared Pick/AxisAlign configuration schema.
+declared world-axis alignment. A preceding upright stage makes that axis
+world Z instead of reusing the initial fallen orientation.
+`task_engine/_task_program/identity.py` owns v38 bundle identity for both
+generation and verification. It projects only equivalent default HandOver and
+empty relative-route stage fields at validated declaration slots; explicit new
+behavior, parameters, revisions, program and constraints remain fingerprinted.
+The shared registration retains its full runtime fingerprint and drift checks.
+Compatible old files are neither rewritten nor regenerated. Actual contract
+changes still fail closed; do not bypass their fingerprint checks or extend
+the shared Pick/AxisAlign configuration schema.
 Multiple children
 placed inside the same measured container reserve each prior landing footprint
 and margin; insufficient space or an unmeasured shared floor fails preflight
@@ -376,8 +413,8 @@ instead of assigning overlapping destinations. These are planning contracts,
 not physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
 GenSim installs PickUp, HandOver, MoveHeldObject, Place and Pour wrappers for all
-deployments after shared engine validation; shared Lab action classes and
-options remain unchanged. The transport wrapper stages above the target and
+deployments after shared engine validation and configure shared Lab action
+options through the skill profile. The transport wrapper stages above the target and
 returns the input attachment as its expected effect, so the existing composite
 monitor verifies retention before observed-transform reconciliation. This is
 terminal verification, not in-flight slip prevention. Regenerate older bundles
@@ -523,7 +560,7 @@ Evaluate actual placement/closing from the recorded physical outcome.
 |---|---|
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
-| Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
+| Ingest formats and metadata | `tests/gen_sim/asset_engine/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
 | Task intent and scene capability contracts | `tests/gen_sim/task_engine/test_agent.py`, `test_interpretation.py`, `orchestration/test_scene_adapter.py` |
 

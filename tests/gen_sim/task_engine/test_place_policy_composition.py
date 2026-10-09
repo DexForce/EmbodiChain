@@ -24,7 +24,124 @@ import torch
 
 from embodichain.gen_sim.task_engine._task_program import assembly, motion
 from embodichain.gen_sim.task_engine._task_program.actions import GenSimPlace
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.plans import (
+    ActionPlan,
+    PlannerDiagnostics,
+    TrajectorySegment,
+)
+from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
+from embodichain.lab.sim.atomic_actions.runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
+    TimedCommandSequence,
+)
+from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
+
+
+def _place_plan(
+    *,
+    dependencies: tuple[str, ...] = (),
+    monitor_until: dict[str, int] | None = None,
+    approach: bool = True,
+) -> ActionPlan:
+    env_ids = torch.tensor([0])
+    frame = RuntimeCommandFrame(
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget("arm", (0,)),
+                payload=JointPositionPayload(torch.zeros(1, 1)),
+            ),
+        ),
+        active_mask=torch.ones(1, dtype=torch.bool),
+        env_ids=env_ids,
+        hold_duration=torch.tensor([0.04]),
+    )
+    return ActionPlan(
+        skill_id="place",
+        plan_success=torch.ones(1, dtype=torch.bool),
+        commands=TimedCommandSequence(frames=(frame,) * 6, env_ids=env_ids),
+        recovery_policy=RecoveryPolicy(),
+        tracking_policy=TrackingPolicy.timed(),
+        planned_scene_version=0,
+        planned_collision_world_revision=(0,),
+        diagnostics=PlannerDiagnostics(backend="test"),
+        segments=(
+            (
+                TrajectorySegment("approach", 0, 2),
+                TrajectorySegment("release", 2, 4),
+                TrajectorySegment("retract", 4, 6),
+            )
+            if approach
+            else ()
+        ),
+        scene_dependencies=dependencies,
+        scene_dependency_monitor_until=monitor_until or {},
+    )
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("existing_cutoff", [None, 1])
+def test_gensim_place_restores_v38_contact_boundary_without_changing_shared_plan(
+    monkeypatch: pytest.MonkeyPatch, direct: bool, existing_cutoff: int | None
+) -> None:
+    original = _place_plan(
+        dependencies=("support", "target"),
+        monitor_until=({} if existing_cutoff is None else {"support": existing_cutoff}),
+    )
+    monkeypatch.setattr(Place, "_plan", lambda *_a: original)
+    action = GenSimPlace()
+    action._planning_services = SimpleNamespace(
+        motion_generator=SimpleNamespace(direct_place_planning=direct)
+    )
+
+    result = action._plan(object(), object())
+
+    assert result.scene_dependency_monitor_until == {
+        "support": 2 if existing_cutoff is None else existing_cutoff,
+        "target": 2,
+    }
+    torch.testing.assert_close(result.plan_success, original.plan_success)
+    torch.testing.assert_close(result.commands.env_ids, original.commands.env_ids)
+    assert len(result.commands.frames) == len(original.commands.frames)
+    for actual, expected in zip(result.commands.frames, original.commands.frames):
+        torch.testing.assert_close(actual.active_mask, expected.active_mask)
+        torch.testing.assert_close(actual.hold_duration, expected.hold_duration)
+        assert len(actual.commands) == len(expected.commands)
+        for actual_command, expected_command in zip(actual.commands, expected.commands):
+            assert actual_command.target == expected_command.target
+            torch.testing.assert_close(
+                actual_command.payload.positions, expected_command.payload.positions
+            )
+    assert result.expected_effects is original.expected_effects
+    assert result.effect_verification is original.effect_verification
+    assert result.diagnostics.backend == original.diagnostics.backend
+    assert result.diagnostics.metadata == original.diagnostics.metadata
+    assert result.segments == original.segments
+    assert result.scene_dependencies == original.scene_dependencies
+    shared = Place()._plan(object(), object())
+    assert shared is original
+    assert shared.scene_dependency_monitor_until == (
+        {} if existing_cutoff is None else {"support": existing_cutoff}
+    )
+
+
+@pytest.mark.parametrize("approach", [False, True])
+def test_gensim_place_leaves_unrelated_plans_unchanged(
+    monkeypatch: pytest.MonkeyPatch, approach: bool
+) -> None:
+    original = _place_plan(
+        dependencies=() if approach else ("support",), approach=approach
+    )
+    monkeypatch.setattr(Place, "_plan", lambda *_a: original)
+    action = GenSimPlace()
+    action._planning_services = SimpleNamespace(
+        motion_generator=SimpleNamespace(direct_place_planning=True)
+    )
+    assert action._plan(object(), object()) is original
 
 
 @pytest.mark.parametrize("kind", ["place", "transport"])
@@ -45,7 +162,7 @@ def test_explicit_drawer_scope_preserves_its_existing_primitive(kind, monkeypatc
     action._planning_services = SimpleNamespace(
         motion_generator=SimpleNamespace(**{flag: True})
     )
-    request, context, result = object(), object(), object()
+    request, context, result = object(), object(), _place_plan()
 
     def delegated(self, actual_request, actual_context):
         assert actual_request is request and actual_context is context
@@ -66,14 +183,19 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
     target = start.clone()
     target[:, 2, 3] = 0.1
     robot = SimpleNamespace(uid="robot", compute_fk=lambda **kw: start.clone())
+    captured = {}
+
+    def initialize_generator(self: motion.MotionGenerator, cfg: MotionGenCfg) -> None:
+        self.robot = robot
+        captured["planner_cfg"] = cfg.planner_cfg
+
     monkeypatch.setattr(
         motion.MotionGenerator,
         "__init__",
-        lambda self, cfg: setattr(self, "robot", robot),
+        initialize_generator,
     )
     monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
     monkeypatch.setattr(assembly, "install_grasp_filters", lambda *a: {})
-    captured = {}
 
     def factory(*args, **kwargs):
         captured["generator"] = kwargs["motion_generator_factory"]()
@@ -95,9 +217,13 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
         (),
         cartesian_calls=("other",) if cartesian_approaches else (),
     )
-    adapter.create_adapter(SimpleNamespace(robot=robot, sim=object(), step_dt=step_dt))
+    simulation = SimpleNamespace(instance_id="place-policy-composition-sim")
+    adapter.create_adapter(
+        SimpleNamespace(robot=robot, sim=simulation, step_dt=step_dt)
+    )
     generator = captured["generator"]
     assert type(generator) is motion.CheckedMotionGenerator
+    assert captured["planner_cfg"].sim_instance_id == simulation.instance_id
 
     failed = motion.PlanResult(
         success=torch.tensor([False]),
@@ -131,6 +257,8 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
         return SimpleNamespace(
             plan_success=result.success,
             joint_trajectory=SimpleNamespace(positions=result.positions, dt=result.dt),
+            segments=(),
+            scene_dependencies=(),
         )
 
     monkeypatch.setattr(Place, "_plan", plan_place)

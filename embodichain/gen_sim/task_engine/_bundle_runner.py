@@ -560,6 +560,7 @@ def _verify_integration_fingerprint(
 ) -> Any:
     """Recompose provider-free integration identity before simulation starts."""
     from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
+    from ._task_program.identity import bundle_registration_fingerprint
 
     if (
         fingerprint.get("schema_version") != "semantic_integration_fingerprint/v2"
@@ -599,7 +600,9 @@ def _verify_integration_fingerprint(
             "Regenerate the GenSim bundle against the current baseline contract."
         )
     recorded_registration = fingerprint.get("registration_fingerprint")
-    actual_registration = composed.integration.registration.fingerprint
+    actual_registration = bundle_registration_fingerprint(
+        composed.integration.registration
+    )
     if recorded_registration != actual_registration:
         raise ValueError(
             "Semantic registration fingerprint drifted before execution: "
@@ -635,10 +638,43 @@ def _verify_program_projection(
                 f"{node['id']!r}."
             )
         steps = item.get("steps")
+        projected_call = steps.get("call") if type(steps) is dict else None
+        # A runtime-only placement selector must name this graph stage before
+        # it can be omitted from the immutable call projection.
+        if type(projected_call) is dict:
+            projected_call = deepcopy(projected_call)
+            arguments = projected_call.get("arguments")
+            graph_arguments = node["call"].get("arguments")
+            declared_stage = (
+                type(graph_arguments) is dict and "stage_id" in graph_arguments
+            )
+            if (
+                type(arguments) is dict
+                and "stage_id" in arguments
+                and not declared_stage
+            ):
+                if (
+                    projected_call.get("kind") != "registered"
+                    or projected_call.get("call_id")
+                    not in {
+                        "simulation.place_relative",
+                        "gen_sim.place_upright",
+                        "gen_sim.stack_place",
+                    }
+                    or type(arguments["stage_id"]) is not str
+                    or arguments["stage_id"] != node["task_instance_id"]
+                ):
+                    raise ValueError(
+                        f"Task Program segment {node['id']!r} runtime stage_id "
+                        "must select its exact relative-placement task instance."
+                    )
+                arguments = dict(arguments)
+                arguments.pop("stage_id", None)
+                projected_call["arguments"] = arguments
         if (
             type(steps) is not dict
             or steps.get("kind") != "invoke"
-            or steps.get("call") != node["call"]
+            or projected_call != node["call"]
         ):
             raise ValueError(
                 f"Task Program segment {node['id']!r} is not an exact "
@@ -694,9 +730,7 @@ def _runner_parser() -> argparse.ArgumentParser:
     add_env_launcher_args_to_parser(parser, require_gym_config=False)
     parser.set_defaults(seed=0)
     parser.add_argument("--plan-probe-only", action="store_true")
-    parser.add_argument(
-        "--failure-policy", choices=("stop", "continue"), default="stop"
-    )
+    parser.add_argument("--failure-policy", choices=("stop",), default="stop")
     return parser
 
 

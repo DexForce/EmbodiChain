@@ -90,6 +90,14 @@ Held-object guards and phase-effect gates are observational:
 Pick gates attachment before lift. Place gates detachment before retract.
 HandOver owns independent source/destination transfer boundaries.
 
+An established held-object relation does not determine the hand's actuator
+target. For existing-hold transfers, `HandOverOptions.source_hold_mode` selects
+the measured posture (`observed`, the default) or the bound closing command
+(`grasp_command`). Contact can keep a position-controlled hand short of its
+closing target; replacing that target with measured angles removes the closing
+position error. Select the mode in the invocation or skill profile, while
+retaining ordinary measured attachment and release verification.
+
 ## Row-local state
 
 Vector environments share a synchronized call and command cursor, but success,

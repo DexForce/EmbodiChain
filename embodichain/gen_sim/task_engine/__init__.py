@@ -43,6 +43,12 @@ from .contracts import (
     validate_task_candidate_set,
     validate_task_draft,
 )
+from .task_spec import (
+    TaskSpecGenerator,
+    generate_task_spec,
+    task_spec_from_candidate,
+    task_template_from_candidate,
+)
 from .interpretation import (
     INSTRUCTION_INTENT_SCHEMA,
     InstructionCaller,
@@ -106,6 +112,7 @@ __all__ = [
     "TaskAgent",
     "TaskCandidate",
     "TaskCandidateSet",
+    "TaskSpecGenerator",
     "TaskContract",
     "TaskDraft",
     "TaskGenerationError",
@@ -129,6 +136,8 @@ __all__ = [
     "canonical_hash",
     "derive_scene_request",
     "derive_success_spec",
+    "generate_task_spec",
+    "task_spec_from_candidate",
     "complete_stage",
     "fail_stage",
     "initial_state",
@@ -136,6 +145,7 @@ __all__ = [
     "load_task_engine_config",
     "replay_events",
     "task_contract",
+    "task_template_from_candidate",
     "task_success_type",
     "scene_input_kind",
     "validate_scene_history_root",

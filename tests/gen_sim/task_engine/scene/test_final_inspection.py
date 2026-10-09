@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import trimesh
 
 from embodichain.gen_sim.task_engine.orchestration.scene_source import (
@@ -116,3 +117,41 @@ def test_final_inspection_detects_lying_rotation(tmp_path: Path) -> None:
 
     can = next(item for item in inspection["objects"] if item["uid"] == "can")
     assert can["orientation"] == "lying"
+
+
+def test_native_legacy_glb_inspection_matches_runtime_coordinate_basis(
+    tmp_path: Path,
+) -> None:
+    source = _scene_export(tmp_path, scene_id="legacy", can_rotation=[0, 0, 0])
+    native = source.with_name("source.json")
+    value = json.loads(source.read_text())
+    value.pop("format")
+    value.pop("scene_id")
+    native.write_text(json.dumps(value))
+    inspection = inspect_final_scene(native, revision_id=scene_revision_id(native))
+    by_uid = {item["uid"]: item for item in inspection["objects"]}
+    assert by_uid["table"]["world_aabb"]["max"][2] == pytest.approx(0.05, abs=1e-6)
+    assert by_uid["can"]["orientation"] == "standing"
+    assert by_uid["can"]["support"]["parent_uid"] == "table"
+
+
+def test_glb_inspection_applies_runtime_scale_after_basis_conversion(
+    tmp_path: Path,
+) -> None:
+    from embodichain.gen_sim.task_engine.orchestration.source_scene import prepare_scene
+
+    source = _scene_export(tmp_path, scene_id="scaled", can_rotation=[0, 0, 0])
+    config = json.loads(source.read_text())
+    config.pop("format")
+    config.pop("scene_id")
+    config["background"][0]["body_scale"] = [1.0, 2.0, 3.0]
+    config["background"][0]["init_pos"] = [0.0, 0.0, 0.5]
+    native = source.with_name("source.json")
+    native.write_text(json.dumps(config))
+    prepared = prepare_scene(native)
+    report = inspect_final_scene(native, revision_id=scene_revision_id(native))
+    table = next(item for item in report["objects"] if item["uid"] == "table")
+    assert table["world_aabb"]["max"][2] == pytest.approx(
+        prepared.table_top_z, abs=1e-6
+    )
+    assert prepared.table_top_z == pytest.approx(0.65, abs=1e-6)

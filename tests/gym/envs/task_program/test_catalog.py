@@ -19,7 +19,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass, replace
+import hashlib
+import json
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
@@ -1051,6 +1054,50 @@ def test_fingerprint_is_stable_for_equivalent_declarations() -> None:
     assert len(left.fingerprint) == 64
 
 
+def test_fingerprint_payload_is_detached_and_matches_full_registration() -> None:
+    registration = _registration()
+    payload = registration.fingerprint_payload()
+    before = deepcopy(payload)
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    assert hashlib.sha256(encoded).hexdigest() == registration.fingerprint
+    payload["robot_profile_binding"]["fields"]["profile_id"] = "changed"
+    payload["call_descriptors"].clear()
+    assert registration.fingerprint_payload() == before
+    registration.assert_unchanged()
+
+
+def test_fingerprint_payload_rejects_drift_during_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registration = SimulationTaskProgramRegistration(
+        scene_binding=create_cube_scene_binding(),
+        robot_profile_binding=create_cube_robot_profile_binding(),
+        handover_pose_providers=(_CatalogHandOverPoseProvider(transfer_height=0.6),),
+    )
+    checked = SimulationTaskProgramRegistration._checked_fingerprint_payload
+
+    def drift_after_check(
+        self: SimulationTaskProgramRegistration,
+    ) -> dict[str, object]:
+        payload = checked(self)
+        object.__setattr__(self.handover_pose_providers[0], "transfer_height", 0.8)
+        return payload
+
+    monkeypatch.setattr(
+        SimulationTaskProgramRegistration,
+        "_checked_fingerprint_payload",
+        drift_after_check,
+    )
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.fingerprint_payload()
+
+
 def test_fingerprint_covers_workflow_recovery_policy() -> None:
     """A recovery budget is immutable registration-owned integration behavior."""
     base = create_cube_robot_profile_binding().presets[0]
@@ -1119,6 +1166,8 @@ def test_fingerprint_owns_provider_ids_and_declarative_fields() -> None:
     object.__setattr__(provider, "transfer_height", 0.8)
     with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
         registration.assert_unchanged()
+    with pytest.raises(IntegrationFingerprintMismatch, match="changed"):
+        registration.fingerprint_payload()
 
 
 def test_fingerprint_rejects_opaque_nested_declaration_values() -> None:

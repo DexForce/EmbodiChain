@@ -49,6 +49,7 @@ from embodichain.lab.task_program.semantics import (
     builtin_semantic_call_catalog,
 )
 from ..contracts import canonical_hash
+from .identity import bundle_registration_fingerprint
 from .services import (
     _AbsolutePoseTarget,
     _SceneEntityTarget,
@@ -352,7 +353,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         "world_displacement",
                     }
                 ),
-                optional=frozenset({"world_yaw_offset"}),
+                optional=frozenset({"world_yaw_offset", "stage_id"}),
             )
             routes.append(
                 _RelativePlaceRoute(
@@ -376,6 +377,14 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     world_yaw_offset=_real(
                         route.get("world_yaw_offset", 0.0),
                         path=f"{route_path}.world_yaw_offset",
+                    ),
+                    stage_id=(
+                        _identifier(
+                            route["stage_id"],
+                            path=f"{route_path}.stage_id",
+                        )
+                        if route.get("stage_id", "") != ""
+                        else ""
                     ),
                 )
             )
@@ -464,6 +473,14 @@ def compose_deployment(
     payload = _compose_integration_payload(
         task=task, policy=policy, skill_profile=skill_profile, scene=scene
     )
+    # Preserve v38 GenSim defaults without changing the shared decoder.
+    for preset in payload["robot_profile"]["presets"]:
+        options = preset["action_options"]
+        if isinstance(options, dict):
+            for option in options.values():
+                if isinstance(option, dict) and option.get("kind") == "hand_over":
+                    option.setdefault("source_hold_mode", "grasp_command")
+                    option.setdefault("retreat_steps", 24)
     raw_services = deepcopy(payload.get("runtime_services", {}))
     raw_lowerers = raw_services.pop("registered_semantic_lowerers", ())
     lowerers = tuple(
@@ -501,7 +518,7 @@ def compose_deployment(
     fingerprint = canonical_hash(
         {
             "local_decoder_revision": 1,
-            "registration": registration.fingerprint,
+            "registration": bundle_registration_fingerprint(registration),
             "grasp_pose_generators": {
                 key: asdict(value) for key, value in services.grasp_pose_generators
             },

@@ -201,6 +201,35 @@ def test_dual_arm_gap_excludes_middle_and_boundaries_by_pair_center(
         torch.testing.assert_close(call.kwargs["mesh_center"], expected_center)
 
 
+def test_centroid_dual_arm_partition_does_not_duplicate_crossing_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vertices, _ = _box_geometry()
+    vertices[:, 0] *= 10.0
+    backend = _prepared_backend(
+        vertices,
+        # Both contacts lie beyond the gap, but their center lies inside it.
+        torch.tensor([[[-0.9, 0.0, 0.0], [0.9, 0.0, 0.0]]]),
+        center_mode="centroid",
+    )
+    filter_poses = Mock(
+        return_value=(True, torch.eye(4)[None], torch.ones(1), torch.zeros(1))
+    )
+    monkeypatch.setattr(backend, "_filter_valid_grasp_poses", filter_poses)
+
+    result = backend.get_dual_arm_valid_grasp_poses(
+        object_pose=torch.eye(4),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+        left_to_right_arm_direction=torch.tensor([1.0, 0.0, 0.0]),
+        middle_empty_ratio=0.8,
+    )
+
+    assert result is not None
+    assert filter_poses.call_count == 2
+    assert filter_poses.call_args_list[0].kwargs["origin_points_"].numel() == 0
+    assert filter_poses.call_args_list[1].kwargs["origin_points_"].numel() == 0
+
+
 def _raycast_box(*, subdivide_end: bool) -> tuple[torch.Tensor, torch.Tensor]:
     vertices, triangles = _box_geometry(subdivide_end=subdivide_end)
     sampler = AntipodalSampler()

@@ -139,7 +139,8 @@ def _candidate_set() -> dict:
 
 
 def _prepared_scene(tmp_path: Path) -> PreparedScene:
-    scene_path = tmp_path / "scene_config.json"
+    scene_path = tmp_path / "source" / "scene_config.json"
+    scene_path.parent.mkdir(exist_ok=True)
     scene_path.write_text("{}", encoding="utf-8")
     scene_object = {
         "uid": "red_can",
@@ -156,7 +157,7 @@ def _prepared_scene(tmp_path: Path) -> PreparedScene:
     }
     return PreparedScene(
         source_config_path=scene_path,
-        scene_dir=tmp_path,
+        scene_dir=scene_path.parent,
         planner_objects=(scene_object,),
         background=(),
         rigid_objects=(),
@@ -235,7 +236,7 @@ def _adaptation(tmp_path: Path, *, status: str = "bound") -> SceneAdaptation:
         },
         selected_candidate=deepcopy(candidate) if status == "bound" else None,
         prepared_scene=_prepared_scene(tmp_path),
-        source_config_path=tmp_path / "scene_config.json",
+        source_config_path=tmp_path / "source" / "scene_config.json",
         conservative_scene_graph={
             "schema_version": "embodichain.conservative-scene-graph/v1",
             "scene_id": "scene",
@@ -339,7 +340,7 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
     result = coordinator.prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
+        tmp_path / "source" / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
     )
@@ -373,7 +374,7 @@ def test_prepare_reuses_precomputed_candidates_without_rerunning_task_agent(
     result = coordinator.prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
+        tmp_path / "source" / "scene_config.json",
         tmp_path / "candidate-reuse",
         candidate_set=candidates,
         force_most_likely=True,
@@ -404,7 +405,7 @@ def test_prepare_inherits_adapter_robot_profile_for_raw_scene_path(
     result = coordinator.prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
+        tmp_path / "source" / "scene_config.json",
         tmp_path / "ur10-bundle",
         candidate_set=candidates,
     )
@@ -499,7 +500,7 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
+        tmp_path / "source" / "scene_config.json",
         tmp_path / "bundle",
         candidate_count=1,
     )
@@ -545,7 +546,7 @@ def test_prepare_publishes_semantic_planning_failure_context(
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
-        tmp_path / "scene_config.json",
+        tmp_path / "source" / "scene_config.json",
         output,
         candidate_count=1,
         overwrite=True,
@@ -1140,7 +1141,7 @@ def test_run_cli_executes_an_existing_bundle(
                 videos.mkdir()
                 (videos / "episode_0.mp4").write_bytes(b"video")
             assert kwargs["num_envs"] == 2
-            assert kwargs["failure_policy"] == "continue"
+            assert kwargs["failure_policy"] == "stop"
             assert kwargs["open_window"] is True
             return {
                 "status": "failed",
@@ -1162,7 +1163,7 @@ def test_run_cli_executes_an_existing_bundle(
             "--num-envs",
             "2",
             "--failure-policy",
-            "continue",
+            "stop",
             "--open-window",
         ]
     )
@@ -1228,3 +1229,80 @@ def test_video_listing_error_is_diagnostic_only(
     assert output.err == (
         "[Task Engine] Unable to list saved videos: recordings are unreadable\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("configured_envs", "actual_envs", "successes", "expected_exit"),
+    [(4, 8, 4, 2), (4, 2, 2, 0)],
+)
+def test_run_all_policy_uses_effective_replica_count(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    configured_envs: int,
+    actual_envs: int,
+    successes: int,
+    expected_exit: int,
+) -> None:
+    from embodichain.gen_sim.task_engine.config import TaskEngineExecutionCfg
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "success_spec.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "success_spec/v1",
+                "terms": [{"step_id": "place"}],
+            }
+        )
+    )
+    cfg = TaskEngineExecutionCfg(
+        num_envs=configured_envs,
+        success_policy="all",
+        min_successful_envs=configured_envs,
+    )
+    monkeypatch.setattr(cli, "load_task_engine_config", lambda _: (None, None, cfg))
+
+    class Executor:
+        def __call__(self, _bundle, output, **kwargs):
+            Path(output).mkdir()
+            assert kwargs["num_envs"] == actual_envs
+            return {
+                "status": "failed",
+                "environments": [
+                    {
+                        "success": i < successes,
+                        "semantic_success": {"place": i < successes},
+                    }
+                    for i in range(actual_envs)
+                ],
+            }
+
+    monkeypatch.setattr(cli, "SubprocessActionExecutor", Executor)
+    result = cli.main(
+        [
+            "run",
+            "--bundle",
+            str(bundle),
+            "--output-root",
+            str(tmp_path / "runs"),
+            "--num-envs",
+            str(actual_envs),
+        ]
+    )
+    assert result == expected_exit
+
+
+def test_cli_rejects_unimplemented_diagnostic_continuation() -> None:
+    with pytest.raises(SystemExit) as error:
+        cli.build_parser().parse_args(
+            [
+                "run",
+                "--bundle",
+                "bundle",
+                "--output-root",
+                "runs",
+                "--failure-policy",
+                "continue",
+            ]
+        )
+    assert error.value.code == 2

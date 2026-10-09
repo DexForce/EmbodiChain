@@ -57,9 +57,9 @@ debugging.
 ## Configuration
 
 Scene Engine reads the LLM, segmentation, image-generation, and
-geometry-generation settings from `embodichain/gen_sim/.env`. The same file
-also contains the optional articulation-server connection used by the
-articulated-asset generation client:
+geometry-generation settings from `embodichain/gen_sim/.env`. Articulated
+asset generation is owned by the SimReady Asset Engine; the same file contains
+its optional articulation-server connection:
 
 ```bash
 OPENAI_API_KEY="your-api-key"
@@ -86,12 +86,15 @@ SCENE_ENGINE_GEOMETRY_GENERATION_MAX_ATTEMPTS=3
 SCENE_ENGINE_GEOMETRY_GENERATION_HEALTH_PATH="/health"
 SCENE_ENGINE_GEOMETRY_GENERATION_OBJECTS_PATH="/generate_multiple_objects"
 
-SCENE_ENGINE_ARTICULATED_GENERATION_BASE_URL="http://host:port"
-SCENE_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S=7200
-SCENE_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS=3
-SCENE_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH="/health"
-SCENE_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH="/generate_articulation"
+ASSET_ENGINE_ARTICULATED_GENERATION_BASE_URL="http://host:port"
+ASSET_ENGINE_ARTICULATED_GENERATION_TIMEOUT_S=7200
+ASSET_ENGINE_ARTICULATED_GENERATION_MAX_ATTEMPTS=3
+ASSET_ENGINE_ARTICULATED_GENERATION_HEALTH_PATH="/health"
+ASSET_ENGINE_ARTICULATED_GENERATION_GENERATE_PATH="/generate_articulation"
 ```
+
+The previous `SCENE_ENGINE_ARTICULATED_GENERATION_*` names remain accepted as
+compatibility aliases during migration.
 
 ## Processing Flow
 
