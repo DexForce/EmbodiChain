@@ -1,0 +1,3321 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Materialize one SemanticTaskGraph as a configured Task Program bundle."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from copy import deepcopy
+from dataclasses import dataclass
+import json
+import math
+from pathlib import Path
+from typing import Any, Final
+
+import numpy as np
+
+from embodichain.lab.task_program.language import load_task_program
+from embodichain.utils.utility import load_config, save_config
+
+from .config import TaskEnginePlanningCfg
+from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
+from ._task_program.assembly import ADAPTER_CONTRACT, load_deployment
+from ._task_program.articulation_binding import (
+    PARK_CALL,
+    SLIDE_CALL,
+    WITHDRAW_CALL,
+    discover_prismatic_parts,
+    graph_bindings,
+)
+from ._task_program.articulation_slide import preset_id
+from ._task_program.drawer_binding import DRAWER_TRANSPORT_CALL
+from ._task_program.invocation_policy import (
+    cartesian_call_declarations,
+    motion_sample_declarations,
+    pour_receiver_declarations,
+)
+from ._task_program.e6_clearance import (
+    ARM_STIFFNESS,
+    PASSIVE_FRICTION,
+    PRISMATIC_LINK_MASS,
+    PRESHAPE_FRACTION,
+    RELEASE_RETREAT_DISTANCE,
+)
+
+__all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
+
+_EMBODIMENT_COMPONENTS: Final = {
+    "dual_franka": "dual_franka_robotiq_arg2f_140.yaml",
+    "dual_franka_robotiq_arg2f_140": "dual_franka_robotiq_arg2f_140.yaml",
+}
+
+# The generated ``move forward`` task intent has no metric distance.  Phase one
+# supports only the dual-Franka embodiment, whose two-arm top-down tray grasp
+# retains a reachable continuation over 0.14 m.  Keep this semantic route
+# target in the integration builder: the Atomic Action must execute the exact
+# grounded goal and must not silently clamp an unreachable caller request.
+_DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE: Final = 0.14
+# This is a minimum: held-object handover never lowers the current object pose.
+_DUAL_FRANKA_HANDOVER_CLEARANCE: Final = 0.10
+_DUAL_FRANKA_TABLE_MOUNT_OFFSET: Final = 0.35
+_LATERAL_RELATION_DISTANCE: Final = 0.10
+_FRONT_RELATION_DISTANCE: Final = 0.18
+# Leave enough free space around a placed object's support reference for the
+# configured parallel-jaw fingers to close during a later semantic Pick.  A
+# tall object aligned by E2 needs the larger margin because its side grasp
+# sweeps the finger length through the support plane.  Both routes still come
+# from scene geometry rather than task-owned robot poses.
+_RELATION_CLEARANCE: Final = 0.02
+_AXIS_ALIGNED_RELATION_CLEARANCE: Final = 0.04
+_PLACEMENT_CLEARANCE: Final = 0.01
+_RELATIVE_POSITION_TOLERANCE: Final = 0.05
+# Upright cans settle with a small residual tilt after a dual-arm handover;
+# the stable check accepts that measured physical tolerance while retaining a
+# stricter threshold for horizontal handovers.
+_UPRIGHT_HANDOVER_ALIGNMENT_TOLERANCE: Final = math.cos(math.radians(16.0))
+_AXIS_ALIGN_CALL_ID: Final = "simulation.axis_align"
+_COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
+_COORDINATED_DETACH_DISTANCE: Final = 0.08
+_COORDINATED_RETREAT_MARGIN: Final = 0.04
+_PARK_CALL_ID: Final = "simulation.park"
+_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_source"
+_HORIZONTAL_HANDOVER_SOURCE_PICK: Final = "gen_sim.pick.handover_horizontal_source"
+_DEFAULT_PICK_LIFT_HEIGHT: Final = 0.16
+_PLACE_RELATIVE_CALL_ID: Final = "simulation.place_relative"
+_UPRIGHT_PLACE_CALL_ID: Final = "gen_sim.place_upright"
+_STACK_PLACE_CALL_ID: Final = "gen_sim.stack_place"
+_STACK_PICK_CALL_ID: Final = "gen_sim.stack_pick"
+
+
+_MOVE_HELD_OBJECT_CALL_ID: Final = "simulation.move_held_object"
+_ALIGN_HELD_CALL_ID: Final = "gen_sim.align_held"
+_CLEAR_RELEASED_CALL_ID: Final = "gen_sim.clear_released"
+
+
+_PICK_CALL_ID: Final = "simulation.pick"
+
+_POUR_CALL_ID: Final = "simulation.pour"
+
+_COORDINATED_HOLD_CALL_ID: Final = "simulation.coordinated_hold"
+
+
+_UPRIGHT_RELEASE_CLEARANCE: Final = 0.01
+
+_SLENDER_UPRIGHT_RELEASE_CLEARANCE: Final = 0.01
+
+_UPRIGHT_STAGING_CLEARANCE: Final = 0.20
+
+# A single composite E2 alignment can settle within 12 degrees while still
+# passing the measured support-gap and relative-position checks.
+_STACK_ALIGNMENT_TOLERANCE: Final = math.cos(math.pi / 15.0)
+
+_E2_RELEASE_SAFETY_MARGIN: Final = 0.02
+
+
+@dataclass(frozen=True, slots=True)
+class TaskProgramBundlePaths:
+    """Files composing one portable configured Task Program deployment.
+
+    Attributes:
+        root: Bundle root directory.
+        deployment: Runnable Gym deployment configuration.
+        program: Embodiment-independent Task Program source.
+        integration: Scene and runtime-service integration configuration.
+        scene: Physical scene component.
+        embodiment: Robot, sensor, and skill-profile component.
+        execution_policy: Canonical runtime execution-policy component.
+        semantic_task_graph: Immutable source semantic graph.
+        integration_fingerprint: Composed integration identity artifact.
+    """
+
+    root: Path
+    deployment: Path
+    program: Path
+    integration: Path
+    scene: Path
+    embodiment: Path
+    execution_policy: Path
+    semantic_task_graph: Path
+    integration_fingerprint: Path
+
+
+def generate_task_program_bundle(
+    graph: SemanticTaskGraph,
+    prepared_scene: Any,
+    output_dir: str | Path,
+    *,
+    robot_profile: str,
+    max_episodes: int | None = None,
+    max_episode_steps: int | None = None,
+    fit_grasp_assets: bool = False,
+) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
+    """Write, compose, and provider-free preflight one semantic deployment.
+
+    Args:
+        graph: Provider-free semantic task graph. Its provisional fingerprint
+            is replaced with the exact composed integration fingerprint.
+        prepared_scene: Scene Adapter output with physical and planner views.
+        output_dir: Fresh bundle staging directory.
+        robot_profile: Task Engine robot-profile selector. Phase one supports
+            only the canonical dual-Franka embodiment.
+        max_episodes: Optional Gym episode limit.
+        max_episode_steps: Optional Gym step limit.
+
+    Returns:
+        Final fingerprint-bound graph and all generated paths.
+
+    Raises:
+        ValueError: If the robot profile is unsupported or graph/scene
+            integration cannot be composed and preflighted.
+    """
+    selected_graph = validate_semantic_task_graph(graph)
+    if type(fit_grasp_assets) is not bool:
+        raise TypeError("fit_grasp_assets must be a boolean.")
+    unsupported = sorted(
+        {node["task_type"] for node in selected_graph["nodes"]}
+        - {"E1", "E2", "E3", "E4", "E5", "E6", "E9"}
+    )
+    if unsupported:
+        raise ValueError(f"Task Engine supports E1-E6 and E9, not {unsupported}.")
+    from ._task_program.drawer_binding import prepare_drawer_graph, drawer_routes
+
+    selected_graph = prepare_drawer_graph(selected_graph, prepared_scene)
+    articulation_bindings = graph_bindings(selected_graph, prepared_scene)
+    from ._task_program.press_binding import (
+        graph_routes,
+        calibrate_scene,
+        prepare_press_scene,
+    )
+
+    source_press_routes = graph_routes(selected_graph, prepared_scene)
+    normalized_profile = str(robot_profile).strip()
+    try:
+        embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
+    except KeyError as exc:
+        raise ValueError(
+            "Phase-one semantic bundle generation supports only dual_franka; "
+            f"received robot_profile={normalized_profile!r}."
+        ) from exc
+    root = Path(output_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    component_root = root / "components"
+    task_program_root = root / "task_program"
+    component_root.mkdir(parents=True, exist_ok=True)
+    task_program_root.mkdir(parents=True, exist_ok=True)
+
+    from embodichain.gen_sim.task_engine.orchestration.scene_assets import (
+        normalize_scene_assets,
+    )
+
+    project_root = Path(__file__).resolve().parents[3]
+    embodiment_source = (
+        project_root
+        / "embodichain_tasks/configs/components/embodiments"
+        / embodiment_filename
+    )
+    embodiment_payload = load_config(embodiment_source)
+    _calibrate_task_gripper_opening(embodiment_payload)
+    adaptation = None
+    if fit_grasp_assets:
+        from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
+
+        generators = embodiment_payload["skill_profile"]["runtime_services"][
+            "grasp_pose_generators"
+        ]
+        openings = {
+            resource: float(generators[f"{resource}_eef"]["model"]["max_opening_width"])
+            for resource in ("left", "right")
+        }
+        prepared_scene, adaptation = fit_assets(
+            prepared_scene,
+            selected_graph,
+            openings=openings,
+            contact_clearances=_grasp_contact_clearances(
+                prepared_scene, embodiment_payload
+            ),
+        )
+    scene = normalize_scene_assets(prepared_scene, root)
+    scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+    press_routes = graph_routes(selected_graph, scene)
+    if press_adaptation:
+        _write_json(
+            root / "press_adaptation.json",
+            {
+                "schema_version": "gen_sim.press-adaptation/v1",
+                "policy": "unit_scale_preserve_support_and_calibration",
+                "records": press_adaptation,
+            },
+        )
+    if adaptation is not None:
+        provenance = {item["uid"]: item for item in scene.asset_provenance}
+        for record in adaptation["records"]:
+            runtime = provenance.get(record["object_id"])
+            if record["status"] == "scaled" and (
+                runtime is None or runtime["status"] not in {"generated", "reused"}
+            ):
+                raise ValueError(
+                    f"Scaled grasp asset {record['object_id']!r} could not be baked."
+                )
+            if runtime is not None:
+                record["runtime_sha256"] = runtime["runtime_sha256"]
+                record["runtime_path"] = runtime["runtime_path"]
+        _write_json(root / "asset_adaptation.json", adaptation)
+    selected_graph = _refine_upright_targets(selected_graph, scene)
+    selected_graph = _refine_coordinated_targets(selected_graph, scene)
+    scene_objects = {item["runtime_uid"]: item for item in scene.planner_objects}
+    for node in selected_graph["nodes"]:
+        if node["task_type"] == "E4" and node["call"]["kind"] == "pick":
+            call = node["call"]
+            source = scene_objects[call["object"]]
+            world_axis = _initial_rotation(source) @ np.asarray(
+                _longest_local_axis(source)
+            )
+            node["call"] = {
+                "kind": "registered",
+                "call_id": (
+                    f"{_HORIZONTAL_HANDOVER_SOURCE_PICK}.{call['object']}"
+                    if abs(float(world_axis[2])) < 0.5
+                    else _HANDOVER_SOURCE_PICK
+                ),
+                "arguments": {
+                    "object": call["object"],
+                    "target": f"{node['task_instance_id']}_source_grasp",
+                },
+                "resources": deepcopy(call["resources"]),
+            }
+        if node["call"].get("call_id") == _PICK_CALL_ID:
+            node["call"]["call_id"] = f"gen_sim.pick.{node['task_instance_id']}"
+    selected_graph = _add_handover_staging(selected_graph, scene)
+    paths = TaskProgramBundlePaths(
+        root=root,
+        deployment=root / "task_program_deployment.yaml",
+        program=task_program_root / "program.yaml",
+        integration=task_program_root / "integration.yaml",
+        scene=component_root / "scene.yaml",
+        embodiment=component_root / "embodiment.yaml",
+        execution_policy=component_root / "execution_policy.yaml",
+        semantic_task_graph=root / "semantic_task_graph.json",
+        integration_fingerprint=root / "integration_fingerprint.json",
+    )
+    policy_source = (
+        project_root
+        / "embodichain_tasks/configs/components/execution_policies"
+        / "dual_arm_trajectory_verified.yaml"
+    )
+    _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+    _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
+    if articulation_bindings:
+        # Calibrate this generated E6 deployment, not shared robot defaults.
+        stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
+        for resource in embodiment_payload["skill_profile"]["resources"]:
+            for endpoint in resource.get("endpoints", []):
+                if endpoint["endpoint_id"] == "motion":
+                    stiffness[endpoint["control_part"]] = ARM_STIFFNESS
+    save_config(paths.embodiment, embodiment_payload)
+    drawers = drawer_routes(selected_graph, scene)
+    policy_payload = load_config(policy_source)
+    if press_routes:
+        # Press has no symbolic effects. Physical truth is owned by mandatory
+        # contact-event/retreat post-policies, not a vacuous effect projection.
+        policy_payload["policy_id"] = "gen_sim_press_v1"
+        policy_payload["preset_id"] = "gen_sim_press_motion"
+        policy_payload["effect_assurance"] = "projected"
+    policy_payload["tracking"]["consecutive_acceptances"] = 5
+    policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
+    save_config(paths.execution_policy, policy_payload)
+
+    program_id = _program_identifier(selected_graph["task_id"])
+    scene_contract = f"{program_id}_scene_v1"
+    selected_graph = _refine_e3_return_targets(selected_graph, scene)
+    from ._task_program.drawer_binding import rewrite_drawer_close_resources
+
+    selected_graph = rewrite_drawer_close_resources(
+        selected_graph,
+        drawer_bindings=frozenset(
+            (route.binding.object_id, route.binding.part_id) for route in drawers
+        ),
+    )
+    stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
+    drawer_targets = {route.affordance for route in drawers}
+    drawer_groups = frozenset(
+        node["task_instance_id"]
+        for node in selected_graph["nodes"]
+        if node["call"].get("inside") in drawer_targets
+        or node["call"].get("arguments", {}).get("target") in drawer_targets
+    )
+    stability["motion_samples"] = motion_sample_declarations(
+        selected_graph, drawer_groups=drawer_groups
+    )
+    stability["cartesian_calls"] = cartesian_call_declarations(
+        selected_graph, drawer_groups=drawer_groups
+    )
+    stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
+    if drawers:
+        stability["drawers"] = [route.payload() for route in drawers]
+    save_config(
+        paths.program,
+        _program_payload(
+            selected_graph,
+            program_id,
+            scene,
+            stability_presets=set(stability["presets"]),
+        ),
+    )
+    _write_json(
+        task_program_root / "constraints.json",
+        stability,
+    )
+    save_config(
+        paths.integration,
+        _integration_payload(
+            selected_graph,
+            scene,
+            program_id=program_id,
+            scene_contract=scene_contract,
+            collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
+            embodiment=embodiment_payload,
+        ),
+    )
+    scene_payload = _scene_payload(scene, program_id=program_id)
+    press_calibration = calibrate_scene(
+        scene_payload, press_routes, source_routes=source_press_routes
+    )
+    if press_calibration:
+        _write_json(root / "press_calibration.json", {"routes": press_calibration})
+    bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+    for articulation in scene_payload["simulation"]["articulation"]:
+        if articulation["uid"] not in bound_uids:
+            continue
+        articulation.setdefault("asset_physics_mode", "overlay")
+        parts = discover_prismatic_parts(articulation)
+        link_attrs = articulation.setdefault("link_attrs", {})
+        mass_group = "gen_sim_prismatic_link_mass"
+        if mass_group in link_attrs:
+            raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
+        link_attrs[mass_group] = {
+            "link_names_expr": sorted({part.link for part in parts}),
+            "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
+        }
+        drive = articulation.setdefault("joint_drive_props", {})
+        if drive.get("drive_type", "none") == "none":
+            drive.setdefault("drive_type", "none")
+            if "friction" not in drive:
+                drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
+    save_config(paths.scene, scene_payload)
+    save_config(
+        paths.deployment,
+        {
+            "id": f"GenSimTaskProgram-{program_id}-v1",
+            "max_episodes": int(max_episodes or 1),
+            "max_episode_steps": int(
+                max_episode_steps or TaskEnginePlanningCfg().max_episode_steps
+            ),
+            "num_envs": 1,
+            "arena_space": 2.5,
+            # Gym configs own the physics backend explicitly.  Generated
+            # bundles retain the calibrated DexSim/Default path that the
+            # legacy scene attributes and CCD setting were authored for.
+            "physics": "default",
+            "physics_config": {"enable_ccd": True},
+            "env": {
+                "sim_steps_per_control": 4,
+                "events": {
+                    "settle_objects_on_reset": {
+                        "func": "wait_for_dynamic_objects_to_settle",
+                        "mode": "reset",
+                        "params": {
+                            "entity_cfgs": [
+                                {"uid": str(item["uid"])}
+                                for item in _task_settle_rigid_objects(
+                                    selected_graph,
+                                    scene,
+                                )
+                            ],
+                            "min_steps": 10,
+                            # Tall generated objects may need several seconds
+                            # to finish a final low-energy roll after import.
+                            "max_steps": 600,
+                            "check_interval_steps": 2,
+                            "required_stable_checks": 3,
+                            "timeout_behavior": "raise",
+                            # Plan from the measured settled pose. Teleporting
+                            # afterward invalidates the settled contact state.
+                            "restore_initial_xy": False,
+                        },
+                    }
+                },
+                "extensions": {},
+            },
+            "scene": {"component": "components/scene.yaml"},
+            "embodiment": {"component": "components/embodiment.yaml"},
+            "task_program": {
+                "program": "task_program/program.yaml",
+                "integration": "task_program/integration.yaml",
+                "execution_policy": "components/execution_policy.yaml",
+            },
+        },
+    )
+
+    embodiment = load_config(paths.embodiment)
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=embodiment["skill_profile"],
+        base_dir=root,
+    )
+    fingerprint = deployment.integration.integration_fingerprint
+    selected_graph["integration_fingerprint"] = fingerprint
+    selected_graph = validate_semantic_task_graph(selected_graph)
+    _write_json(paths.semantic_task_graph, selected_graph)
+    _write_json(
+        paths.integration_fingerprint,
+        {
+            "schema_version": "semantic_integration_fingerprint/v2",
+            "adapter_contract": ADAPTER_CONTRACT,
+            "integration_id": deployment.integration_id,
+            "integration_fingerprint": fingerprint,
+            "registration_fingerprint": deployment.integration.registration.fingerprint,
+        },
+    )
+
+    program = load_task_program(
+        paths.program,
+        integration=deployment.selection,
+        validation_context=deployment.integration.registration.catalog,
+    )
+    deployment.integration.registration.catalog.preflight(program)
+    return selected_graph, paths
+
+
+def _refine_coordinated_targets(
+    graph: SemanticTaskGraph, scene: Any
+) -> SemanticTaskGraph:
+    """Keep a carried object above its support at the declared terminal pose."""
+    result = deepcopy(graph)
+    objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    for node in result["nodes"]:
+        call = node["call"]
+        if call["kind"] != "registered" or call["call_id"] != _COORDINATED_HOLD_CALL_ID:
+            continue
+        displacement = list(call["arguments"]["world_displacement"])
+        if abs(float(displacement[2])) > 1e-8:
+            continue
+        source = objects[str(call["arguments"]["object"])]
+        bottom, top = _vertical_mesh_bounds(source, axis_aligned=False)
+        displacement[2] = max(0.05, min(0.10, 0.5 * (top - bottom) + 0.03))
+        call["arguments"]["world_displacement"] = displacement
+    return validate_semantic_task_graph(result)
+
+
+def _refine_e3_return_targets(
+    graph: SemanticTaskGraph, scene: Any
+) -> SemanticTaskGraph:
+    """Ground E3 return poses at the settled tabletop support height."""
+    if scene.table_top_z is None:
+        return graph
+    objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    result = deepcopy(graph)
+    for node in result["nodes"]:
+        if node.get("task_type") != "E3" or node["call"].get("kind") != "place":
+            continue
+        target = node["call"].get("at")
+        if not isinstance(target, dict) or target.get("kind") != "target_ref":
+            continue
+        target_id = str(target["target"])
+        values = result["targets"].get(target_id, {}).get("values", ())
+        object_id = str(node["call"]["object"])
+        source = objects.get(object_id)
+        if source is None or len(values) != 1:
+            continue
+        bottom, _ = _vertical_mesh_bounds(source, axis_aligned=False)
+        values[0]["position"][2] = float(scene.table_top_z) - bottom
+    return validate_semantic_task_graph(result)
+
+
+def _task_stability_payload(
+    graph: SemanticTaskGraph,
+    scene: Any,
+    embodiment: dict[str, Any],
+) -> dict[str, Any]:
+    """Declare task conditions without adding public validator or runtime types."""
+    objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    upright: set[str] = set()
+    oriented_groups = {
+        node["task_instance_id"]
+        for node in graph["nodes"]
+        if node["task_type"] in {"E1", "E4"}
+        and node["call"].get("call_id") == _ALIGN_HELD_CALL_ID
+        and node["call"]["arguments"].get("target") == "current_object_pose"
+    }
+    terminal_nodes = {group["node_ids"][-1] for group in graph["task_groups"]}
+    horizontal_handover_groups = {
+        node["task_instance_id"]
+        for node in graph["nodes"]
+        if node["call"]
+        .get("call_id", "")
+        .startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
+    }
+    routes = {
+        _route_key(r): r
+        for r in _relative_place_route_payloads(graph, scene, settled=True)
+    }
+    upright_routes = {
+        _route_key(r): r
+        for r in _relative_place_route_payloads(
+            graph, scene, settled=True, upright_only=True
+        )
+    }
+    coordinated_on_routes = {
+        _route_key(r): r
+        for r in _relative_place_route_payloads(
+            graph, scene, settled=True, coordinated_only=True
+        )
+    }
+    motion_parts = {
+        resource["resource_id"]: next(
+            endpoint["control_part"]
+            for endpoint in resource["endpoints"]
+            if endpoint["endpoint_id"] == "motion"
+        )
+        for resource in embodiment["skill_profile"]["resources"]
+    }
+    presets: dict[str, Any] = {}
+    coordinated_positions: dict[str, list[float]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        entity = call.get("object", call.get("arguments", {}).get("object"))
+        if call.get("call_id") not in {
+            _COORDINATED_HOLD_CALL_ID,
+            _COORDINATED_TRANSPORT_CALL_ID,
+        }:
+            coordinated_positions.pop(entity, None)
+        if (
+            call["kind"] == "hand_over"
+            and node["id"] in terminal_nodes
+            and node["task_instance_id"] in horizontal_handover_groups
+        ):
+            object_id = str(call["object"])
+            axis = _longest_local_axis(objects[object_id])
+            world_axis = (
+                np.asarray([0.0, 0.0, 1.0])
+                if object_id in upright
+                else _initial_rotation(objects[object_id]) @ np.asarray(axis)
+            )
+            presets[f"gen_sim.{node['id']}.stable"] = {
+                "kind": "hold",
+                "entity": object_id,
+                "local_axis": axis,
+                "world_axis": world_axis.tolist(),
+                "minimum_alignment": (
+                    _UPRIGHT_HANDOVER_ALIGNMENT_TOLERANCE
+                    if object_id in upright
+                    else math.cos(math.pi / 18.0)
+                ),
+                "motion_parts": [motion_parts[call["resources"]["destination"]]],
+            }
+        if call["kind"] == "place" and node.get("task_instance_id") in oriented_groups:
+            object_id = str(call["object"])
+            presets[f"gen_sim.{node['id']}.stable"] = {
+                "kind": "upright",
+                "entity": object_id,
+                "local_axis": _longest_local_axis(objects[object_id]),
+            }
+        if call["kind"] != "registered":
+            continue
+        arguments = call["arguments"]
+        if call["call_id"] in {_AXIS_ALIGN_CALL_ID, _ALIGN_HELD_CALL_ID} or (
+            node.get("task_type") == "E2"
+            and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
+        ):
+            upright.add(str(arguments["object"]))
+        if call["call_id"] in {
+            _PLACE_RELATIVE_CALL_ID,
+            _STACK_PLACE_CALL_ID,
+            _UPRIGHT_PLACE_CALL_ID,
+        }:
+            object_id = str(arguments["object"])
+            reference_id = str(arguments["reference"])
+            if (
+                node["task_type"] == "E2"
+                or node.get("task_instance_id") in oriented_groups
+                or (
+                    object_id in upright
+                    and reference_id == "table"
+                    and arguments["relation"] in {"on", "above"}
+                )
+            ):
+                selected_routes = (
+                    upright_routes
+                    if call["call_id"] == _UPRIGHT_PLACE_CALL_ID
+                    else routes
+                )
+                route = _lookup_route(
+                    selected_routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "upright",
+                    "entity": object_id,
+                    "local_axis": _longest_local_axis(objects[object_id]),
+                    "reference": reference_id,
+                    "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+            elif (
+                arguments["relation"] in {"on", "above"}
+                and object_id in upright
+                and reference_id in upright
+            ):
+                bottom, _ = _vertical_mesh_bounds(objects[object_id], axis_aligned=True)
+                _, top = _vertical_mesh_bounds(objects[reference_id], axis_aligned=True)
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "stack",
+                    "entity": object_id,
+                    "reference": reference_id,
+                    "local_axis": _longest_local_axis(objects[object_id]),
+                    "reference_axis": _longest_local_axis(objects[reference_id]),
+                    "object_bottom": bottom,
+                    "reference_top": top,
+                    "reference_half_extents": [
+                        max(
+                            0.001,
+                            _horizontal_half_extent(
+                                objects[reference_id],
+                                world_axis=axis,
+                                axis_aligned=True,
+                            )
+                            - 0.002,
+                        )
+                        for axis in (0, 1)
+                    ],
+                    "minimum_alignment": _STACK_ALIGNMENT_TOLERANCE,
+                }
+            else:
+                route = _lookup_route(
+                    routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "placement",
+                    "entity": object_id,
+                    "reference": reference_id,
+                    "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+                if (
+                    node["task_type"] == "E1"
+                    and arguments["relation"] == "on"
+                    and reference_id != "table"
+                ):
+                    presets[f"gen_sim.{node['id']}.stable"].update(
+                        kind="supported_placement",
+                    )
+        elif (
+            call["call_id"] == _ALIGN_HELD_CALL_ID
+            and node["task_type"] == "E4"
+            and node["id"] in terminal_nodes
+        ):
+            object_id = str(arguments["object"])
+            presets[f"gen_sim.{node['id']}.stable"] = {
+                "kind": "hold",
+                "entity": object_id,
+                "local_axis": _longest_local_axis(objects[object_id]),
+                "motion_parts": [motion_parts[call["resources"]["primary"]]],
+            }
+        elif call["call_id"] in {
+            _COORDINATED_HOLD_CALL_ID,
+            _COORDINATED_TRANSPORT_CALL_ID,
+        }:
+            object_id = str(arguments["object"])
+            if "reference" in arguments:
+                reference_id = str(arguments["reference"])
+                route = _lookup_route(
+                    coordinated_on_routes,
+                    node,
+                    object_id,
+                    reference_id,
+                    arguments["relation"],
+                )
+                presets[f"gen_sim.{node['id']}.stable"] = {
+                    "kind": "placement",
+                    "entity": object_id,
+                    "reference": reference_id,
+                    "displacement": route["world_displacement"],
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+                coordinated_positions[object_id] = [
+                    value + delta
+                    for value, delta in zip(
+                        _position(objects[reference_id]),
+                        route["world_displacement"],
+                        strict=True,
+                    )
+                ]
+                continue
+            position = coordinated_positions.get(
+                object_id, list(_position(objects[object_id]))
+            )
+            support = objects[object_id].get("attributes", {}).get("final_support", {})
+            if (
+                object_id not in coordinated_positions
+                and support.get("parent_uid") == "table"
+                and scene.table_top_z is not None
+            ):
+                # The skill offsets the live resting pose, not the import hover gap.
+                bottom, _ = _vertical_mesh_bounds(
+                    objects[object_id], axis_aligned=False
+                )
+                position[2] = float(scene.table_top_z) - bottom
+            displacement = arguments["world_displacement"]
+            position = [position[i] + float(displacement[i]) for i in range(3)]
+            coordinated_positions[object_id] = position
+            holding = call["call_id"] == _COORDINATED_HOLD_CALL_ID
+            presets[f"gen_sim.{node['id']}.stable"] = {
+                "kind": "hold" if holding else "placement",
+                "entity": object_id,
+                "target_position": position,
+                "motion_parts": (
+                    [
+                        motion_parts[call["resources"][slot]]
+                        for slot in ("left", "right")
+                    ]
+                    if holding
+                    else []
+                ),
+                "position_tolerance": 0.05 if holding else _RELATIVE_POSITION_TOLERANCE,
+            }
+    return {
+        "schema_version": "gen_sim_task_constraints/v1",
+        "presets": presets,
+        "adaptive_pick": any(
+            n["call"]["kind"] == "pick" and not n["call"].get("grasp")
+            for n in graph["nodes"]
+        ),
+        "pick_purposes": {
+            n["id"]: ("pour" if n["task_type"] == "E3" else "ordinary")
+            for n in graph["nodes"]
+            if n["call"]["kind"] == "pick" and not n["call"].get("grasp")
+        },
+    }
+
+
+def _program_payload(
+    graph: SemanticTaskGraph,
+    program_id: str,
+    scene: Any | None = None,
+    *,
+    stability_presets: set[str] | None = None,
+) -> dict[str, Any]:
+    axis_by_object = (
+        {}
+        if scene is None
+        else {
+            str(item["runtime_uid"]): _longest_local_axis(item)
+            for item in scene.planner_objects
+        }
+    )
+    relative_routes = (
+        {}
+        if scene is None
+        else {
+            _route_key(route): route
+            for route in _relative_place_route_payloads(graph, scene, settled=True)
+        }
+    )
+    upright_routes = (
+        {}
+        if scene is None
+        else {
+            _route_key(route): route
+            for route in _relative_place_route_payloads(
+                graph, scene, settled=True, upright_only=True
+            )
+        }
+    )
+    articulated_references = {
+        str(item["runtime_uid"])
+        for item in (() if scene is None else scene.planner_objects)
+        if item.get("role") == "articulation"
+    }
+    items = [
+        _program_node(
+            node,
+            relative_routes=(
+                upright_routes
+                if node["call"].get("call_id") == _UPRIGHT_PLACE_CALL_ID
+                else relative_routes
+            ),
+            axis_by_object=axis_by_object,
+            task_stability=f"gen_sim.{node['id']}.stable"
+            in (stability_presets or set()),
+            articulated_reference=node["call"].get("arguments", {}).get("reference")
+            in articulated_references,
+        )
+        for node in graph["nodes"]
+    ]
+    by_name = {item["name"]: item for item in items}
+    articulation_bindings = graph_bindings(graph, scene)
+    for group in graph["task_groups"]:
+        if group.get("task_type") == "E9":
+            from ._task_program.press_binding import graph_routes
+
+            route = graph_routes(graph, scene)[0]
+            for index, node_id in enumerate(group["node_ids"]):
+                by_name[node_id]["post"] = [
+                    {
+                        "kind": "wait_stable",
+                        "entity": route.binding.object_id,
+                        "preset": route.preset("ready" if index == 0 else "pressed"),
+                    }
+                ]
+            continue
+        if group.get("task_type") == "E6":
+            first = next(n for n in graph["nodes"] if n["id"] == group["node_ids"][0])
+            args = first["call"]["arguments"]
+            key = (
+                args["object"]
+                if "part" not in args
+                else f"{args['object']}::{args['part']}"
+            )
+            binding = articulation_bindings[key]
+            target, tolerance = binding.target(args["state"]), binding.tolerance(
+                args["state"]
+            )
+            for node_id in group["node_ids"]:
+                by_name[node_id]["post"] = [
+                    {
+                        "kind": "wait_stable",
+                        "entity": binding.object_id,
+                        "preset": preset_id(binding, args["state"]),
+                    }
+                ]
+                by_name[node_id]["validators"] = [
+                    {
+                        "kind": "articulation_joint_position",
+                        "articulation": binding.object_id,
+                        "joint": binding.joint,
+                        "minimum_position": target - tolerance,
+                        "maximum_position": target + tolerance,
+                    }
+                ]
+            continue
+        terminal = by_name[group["node_ids"][-1]]
+        for node_id in reversed(group["node_ids"]):
+            accepted = by_name[node_id]
+            policies = [
+                policy
+                for policy in accepted.get("post", ())
+                if policy["preset"].startswith("gen_sim.")
+            ]
+            if not policies:
+                policies = list(accepted.get("post", ()))
+            validators = accepted.get("validators", ())
+            if not policies and not validators:
+                continue
+            if accepted is not terminal:
+                remaining = group["node_ids"][group["node_ids"].index(node_id) + 1 :]
+                cleanup_calls = [by_name[key]["steps"]["call"] for key in remaining]
+                placement = accepted["steps"]["call"]
+                if (
+                    (
+                        placement.get("kind") == "place"
+                        or placement.get("call_id")
+                        in {
+                            _PLACE_RELATIVE_CALL_ID,
+                            _UPRIGHT_PLACE_CALL_ID,
+                            _STACK_PLACE_CALL_ID,
+                        }
+                    )
+                    and any(
+                        call.get("call_id") == _CLEAR_RELEASED_CALL_ID
+                        for call in cleanup_calls
+                    )
+                    and all(
+                        call.get("kind") == "registered"
+                        and call.get("call_id")
+                        in {_CLEAR_RELEASED_CALL_ID, _PARK_CALL_ID}
+                        for call in cleanup_calls
+                    )
+                ):
+                    # Release effects remain mandatory; final pose/stability
+                    # checks must not prevent the declared clearance sequence.
+                    policies = accepted.pop("post", [])
+                    validators = accepted.pop("validators", [])
+                # Cleanup is still physical work; it can invalidate placement.
+                terminal.setdefault("post", []).extend(deepcopy(policies))
+                terminal.setdefault("validators", []).extend(deepcopy(validators))
+            break
+    # Later recipes can disturb an earlier drawer. Check each joint's last
+    # requested state again at the end, including after non-articulation work.
+    final_joints: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        for validator in item.get("validators", ()):
+            if validator["kind"] == "articulation_joint_position":
+                final_joints[(validator["articulation"], validator["joint"])] = (
+                    validator
+                )
+    if final_joints:
+        terminal_validators = items[-1].setdefault("validators", [])
+        for validator in final_joints.values():
+            if validator not in terminal_validators:
+                terminal_validators.append(deepcopy(validator))
+    return {
+        "program_id": program_id,
+        "targets": deepcopy(graph["targets"]),
+        "program": {"kind": "sequence", "items": items},
+    }
+
+
+def _program_node(
+    node: dict[str, Any],
+    *,
+    relative_routes: dict[tuple[str, str, str, str], dict[str, Any]] | None = None,
+    axis_by_object: dict[str, list[float]] | None = None,
+    task_stability: bool = False,
+    articulated_reference: bool = False,
+) -> dict[str, Any]:
+    """Materialize one task node as one canonical runtime segment."""
+    call = deepcopy(node["call"])
+    if call["kind"] == "registered" and call["call_id"] in {
+        _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
+        _STACK_PLACE_CALL_ID,
+    }:
+        arguments = call["arguments"]
+        stage_key = _route_key_for_node(
+            node,
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )
+        # Keep the historical three-argument program shape when a placement
+        # occurs only once.  A stage selector is needed only when the same
+        # object/reference/relation tuple has multiple occurrences; this also
+        # keeps old consumers and serialized fixtures byte-for-byte stable.
+        repeated_route = False
+        if relative_routes is not None and stage_key in relative_routes:
+            repeated_route = (
+                sum(
+                    1
+                    for key in relative_routes
+                    if len(key) == 4 and key[1:] == stage_key[1:]
+                )
+                > 1
+            )
+        if repeated_route:
+            arguments["stage_id"] = stage_key[0]
+    segment: dict[str, Any] = {
+        "kind": "segment",
+        "name": str(node["id"]),
+        "steps": {"kind": "invoke", "call": call},
+    }
+    settle_entities: list[str] = []
+    settle_preset = "rigid_object"
+    if call["kind"] == "place":
+        inside = call.get("inside")
+        if inside is not None:
+            from ._task_program.drawer_binding import inside_parts
+
+            inside_parts(str(inside))
+            settle_preset = "contained_rigid_object"
+        settle_entities.append(str(call["object"]))
+    elif call["kind"] == "registered" and call["call_id"] in {
+        _COORDINATED_TRANSPORT_CALL_ID,
+        _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
+        _STACK_PLACE_CALL_ID,
+    }:
+        if call["call_id"] == _COORDINATED_TRANSPORT_CALL_ID:
+            settle_preset = "transported_rigid_object"
+        settle_entities.append(str(call["arguments"]["object"]))
+    if settle_entities:
+        segment["post"] = [
+            {
+                "kind": "wait_stable",
+                "entity": settle_entity,
+                "preset": settle_preset,
+            }
+            for settle_entity in dict.fromkeys(settle_entities)
+        ]
+    if call["kind"] == "registered" and call["call_id"] in {
+        _PLACE_RELATIVE_CALL_ID,
+        _UPRIGHT_PLACE_CALL_ID,
+        _STACK_PLACE_CALL_ID,
+    }:
+        arguments = call["arguments"]
+        try:
+            route = _lookup_route(
+                relative_routes or {},
+                node,
+                str(arguments["object"]),
+                str(arguments["reference"]),
+                str(arguments["relation"]),
+            )
+        except KeyError as exc:
+            raise ValueError(
+                "Relative placement has no generated route for "
+                f"{_route_key_for_node(node, str(arguments['object']), str(arguments['reference']), str(arguments['relation']))!r}."
+            ) from exc
+        if articulated_reference:
+            # The shared validator is rigid-only. The GenSim post-policy uses
+            # the same displacement/tolerance and observes either native root.
+            if not task_stability:
+                raise ValueError(
+                    "Articulated references require task stability acceptance."
+                )
+        else:
+            segment["validators"] = [
+                {
+                    "kind": "object_near_relative_target",
+                    "object": route["object_id"],
+                    "reference": route["reference_entity_id"],
+                    "displacement": deepcopy(route["world_displacement"]),
+                    "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
+                }
+            ]
+    if (
+        not task_stability
+        and node.get("task_type") == "E2"
+        and (
+            call["kind"] == "place"
+            or (
+                call["kind"] == "registered"
+                and call["call_id"] in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
+            )
+        )
+    ):
+        raise ValueError("E2 release requires a task-owned upright stability preset.")
+    if node.get("task_type") == "E3" and call["kind"] == "place":
+        target = call.get("at")
+        if type(target) is not dict or set(target) != {"kind", "target"}:
+            raise ValueError("Generated E3 Place requires one exact return target.")
+        segment["validators"] = [
+            {
+                "kind": "object_near_target",
+                "object": str(call["object"]),
+                "target": str(target["target"]),
+                "position_tolerance": 0.06,
+            }
+        ]
+    if task_stability:
+        arguments = call.get("arguments", {})
+        entity = call.get("object", arguments.get("object"))
+        segment.setdefault("post", []).append(
+            {
+                "kind": "wait_stable",
+                "entity": entity,
+                "preset": f"gen_sim.{node['id']}.stable",
+            }
+        )
+    return segment
+
+
+def _integration_payload(
+    graph: SemanticTaskGraph,
+    scene: Any,
+    *,
+    program_id: str,
+    scene_contract: str,
+    collision_world: bool = False,
+    embodiment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    articulation_bindings = graph_bindings(graph, scene)
+    from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
+
+    press_routes = graph_routes(graph, scene)
+    from ._task_program.drawer_binding import drawer_routes, inside_parts
+
+    drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
+    drawer_poses: dict[str, list[float]] = {}
+    if drawers:
+        from ._task_program.drawer_geometry import placement_pose
+        from .scene.articulation_geometry import _root_pose, read_articulation_geometry
+
+        configs = {str(cfg["uid"]): cfg for cfg in scene.articulations}
+        for route in drawers.values():
+            cfg = configs[route.binding.object_id]
+            local_link = (
+                read_articulation_geometry(cfg["fpath"])
+                .link_poses[route.binding.link]
+                .copy()
+            )
+            local_link[:3, 3] *= route.binding.scale
+            link = _root_pose(cfg) @ local_link
+            source = scene_objects[route.object_id]
+            target = placement_pose(
+                _mesh_vertices(source),
+                _root_pose(source)[:3, :3],
+                link,
+                np.asarray(route.lower),
+                np.asarray(route.upper),
+            )
+            drawer_poses[route.affordance] = (
+                (np.linalg.inv(link) @ target).reshape(-1).tolist()
+            )
+    referenced_objects: set[str] = set()
+    inside_routes: list[tuple[str, str, str, str]] = []
+    on_routes: list[tuple[str, str, str]] = []
+    coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
+    coordinated_on_routes = {
+        _route_key(r): r
+        for r in _relative_place_route_payloads(graph, scene, coordinated_only=True)
+    }
+    coordinated_on_lowerer_routes: list[dict[str, Any]] = []
+    coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
+    move_held_routes: list[dict[str, Any]] = []
+    drawer_transport_routes: list[dict[str, Any]] = []
+    pour_geometry: dict[str, dict[str, Any]] = {}
+    upright_move_objects: set[str] = set()
+    horizontal_handover_objects: set[str] = set()
+    pick_routes: dict[str, list[dict[str, Any]]] = {}
+    upright_released: set[str] = set()
+    generic_picks_are_upright: list[bool] = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if (
+            node.get("task_type") == "E2"
+            and call.get("call_id") == _CLEAR_RELEASED_CALL_ID
+        ):
+            upright_released.add(str(call["arguments"]["object"]))
+        elif call["kind"] == "pick":
+            generic_picks_are_upright.append(str(call["object"]) in upright_released)
+    default_pick_options = {
+        "kind": "pick_up",
+        "pick_object_part": (
+            "top"
+            if generic_picks_are_upright and all(generic_picks_are_upright)
+            else "center"
+        ),
+        "pre_grasp_distance": 0.15,
+        "lift_height": _DEFAULT_PICK_LIFT_HEIGHT,
+        "approach_alignment_max_angle": 0.10,
+        # Robotiq travels 0.7 rad with a 2 rad/s limit at 25 Hz; include
+        # enough intervals for closure, with the same budget as release.
+        "hand_interp_steps": 12,
+        "grasp_settle_steps": (
+            16 if any(n["call"]["kind"] == "hand_over" for n in graph["nodes"]) else 0
+        ),
+        "grasp_commit_fraction": 1.0,
+    }
+    pick_options: dict[str, dict[str, Any]] = {}
+    axis_align_objects: set[str] = set()
+    pour_objects: set[str] = set()
+    relative_lowerer_routes = _relative_place_route_payloads(graph, scene)
+    upright_lowerer_routes = _relative_place_route_payloads(
+        graph, scene, upright_only=True
+    )
+    supported_upright_groups = {
+        node["task_instance_id"]
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == _UPRIGHT_PLACE_CALL_ID
+    }
+    has_relative_place = False
+    has_park_call = False
+    has_articulation_park_call = False
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] in {"pick", "place", "hand_over"}:
+            referenced_objects.add(str(call["object"]))
+        if call["kind"] == "place" and "inside" in call:
+            affordance = str(call["inside"])
+            container_id, object_id, _ = inside_parts(affordance)
+            if affordance not in drawers:
+                referenced_objects.add(container_id)
+                inside_routes.append(
+                    (
+                        affordance,
+                        container_id,
+                        object_id,
+                        str(call.get("resources", {}).get("primary", "left")),
+                    )
+                )
+        if call["kind"] == "place" and "on" in call:
+            affordance = str(call["on"])
+            parts = affordance.split("__")
+            if len(parts) != 3 or parts[0] != "on":
+                raise ValueError(f"Unsupported generated on affordance {affordance!r}.")
+            support_id, object_id = parts[1], parts[2]
+            referenced_objects.add(support_id)
+            on_routes.append((affordance, support_id, object_id))
+        if call["kind"] == "registered" and call["call_id"] in {
+            "simulation.coordinated_transport",
+            _COORDINATED_HOLD_CALL_ID,
+        }:
+            arguments = call["arguments"]
+            object_id = str(arguments["object"])
+            referenced_objects.add(object_id)
+            if "reference" in arguments:
+                reference_id = str(arguments["reference"])
+                referenced_objects.add(reference_id)
+                route = coordinated_on_routes[
+                    _route_key_for_node(
+                        node, object_id, reference_id, arguments["relation"]
+                    )
+                ]
+                coordinated_on_lowerer_routes.append(
+                    {
+                        **_public_route(route, include_stage_id=False),
+                        "target_id": str(arguments["target"]),
+                    }
+                )
+                continue
+            displacement = tuple(
+                float(value)
+                for value in arguments.get(
+                    "world_displacement",
+                    (-_DUAL_FRANKA_COORDINATED_TRANSPORT_DISTANCE, 0.0, 0.0),
+                )
+            )
+            route = (object_id, str(arguments["target"]), displacement)
+            if call["call_id"] == _COORDINATED_HOLD_CALL_ID:
+                coordinated_hold_routes.append(route)
+            else:
+                coordinated_routes.append(route)
+        elif call["kind"] == "registered" and (
+            call["call_id"] == _HANDOVER_SOURCE_PICK
+            or call["call_id"].startswith(_HORIZONTAL_HANDOVER_SOURCE_PICK + ".")
+        ):
+            arguments = call["arguments"]
+            object_id = str(arguments["object"])
+            call_id = call["call_id"]
+            referenced_objects.add(object_id)
+            pick_routes.setdefault(call_id, []).append(
+                {
+                    "object_id": object_id,
+                    "target_id": str(arguments["target"]),
+                }
+            )
+            pick_options[call_id] = {
+                **default_pick_options,
+                "pick_object_part": "center",
+            }
+            horizontal_handover_objects.add(object_id)
+        elif call["kind"] == "registered" and (
+            call["call_id"] == _PICK_CALL_ID
+            or call["call_id"].startswith("gen_sim.pick.")
+        ):
+            arguments = call["arguments"]
+            object_id = str(arguments["object"])
+            final_target_id = str(arguments["target"])
+            final_pose = _single_target_pose(graph, final_target_id)
+            table_top = scene.table_top_z
+            if table_top is None or not math.isfinite(float(table_top)):
+                raise ValueError(
+                    "Upright pickup requires the scene's measured table_top_z."
+                )
+            referenced_objects.add(object_id)
+            referenced_objects.add("table")
+            call_id = call["call_id"]
+            source = scene_objects[object_id]
+            source_axis = _longest_local_axis(scene_objects[object_id])
+            if object_id in upright_move_objects | axis_align_objects:
+                world_axis = np.array([0.0, 0.0, 1.0])
+            else:
+                from scipy.spatial.transform import Rotation
+
+                world_axis = Rotation.from_euler(
+                    "XYZ",
+                    scene_objects[object_id].get("init_rot", [0.0, 0.0, 0.0]),
+                    degrees=True,
+                ).apply(source_axis)
+            approach = np.array([0.0, 0.0, -1.0]) - world_axis
+            length = np.linalg.norm(approach)
+            approach = (
+                np.array([0.0, 0.0, -1.0]) if length <= 1e-6 else approach / length
+            )
+            if node.get("task_instance_id") in supported_upright_groups:
+                # A top-down regrasp becomes a side grasp after uprighting,
+                # avoiding an end-directed approach into the rim at release.
+                approach = np.array([0.0, 0.0, -1.0])
+            options = {
+                "kind": "pick_up",
+                "hand_interp_steps": default_pick_options["hand_interp_steps"],
+                "pre_grasp_distance": 0.08,
+                "grasp_settle_steps": 16,
+                "pick_object_part": "center",
+                "approach_direction": approach.tolist(),
+            }
+            if call_id in pick_options and pick_options[call_id] != options:
+                raise ValueError(
+                    "Distinct Pick policies require task-scoped aliases; regenerate the bundle."
+                )
+            pick_options[call_id] = options
+            pick_routes.setdefault(call_id, []).append(
+                {
+                    "object_id": object_id,
+                    "target_id": final_target_id,
+                    # E2 permits all declared world-yaw alternatives. Requiring
+                    # the nominal yaw here would reject feasible upright grasps.
+                    # Transport checks live reachability; yaw does not change
+                    # the fingertip heights used by release-clearance screening.
+                    "release_clearance_object_pose": {"kind": "pose", **final_pose},
+                    "release_clearance_plane_z": (
+                        float(final_pose["position"][2])
+                        + _vertical_mesh_bounds(source, axis_aligned=True)[0]
+                        - _upright_release_clearance(source)
+                        if node.get("task_instance_id") in supported_upright_groups
+                        else float(table_top)
+                    ),
+                    "release_clearance_safety_margin": _E2_RELEASE_SAFETY_MARGIN,
+                    "grasp_region": "upper_half",
+                }
+            )
+        elif call["kind"] == "registered" and call["call_id"] == _AXIS_ALIGN_CALL_ID:
+            object_id = str(call["arguments"]["object"])
+            referenced_objects.add(object_id)
+            axis_align_objects.add(object_id)
+        elif call["kind"] == "registered" and call["call_id"] in {
+            _PLACE_RELATIVE_CALL_ID,
+            _UPRIGHT_PLACE_CALL_ID,
+            _STACK_PLACE_CALL_ID,
+        }:
+            arguments = call["arguments"]
+            referenced_objects.add(str(arguments["object"]))
+            referenced_objects.add(str(arguments["reference"]))
+            has_relative_place = True
+        elif call["kind"] == "registered" and call["call_id"] in {
+            _MOVE_HELD_OBJECT_CALL_ID,
+            DRAWER_TRANSPORT_CALL,
+        }:
+            arguments = call["arguments"]
+            object_id = str(arguments["object"])
+            target_id = str(arguments["target"])
+            referenced_objects.add(object_id)
+            if call["call_id"] == DRAWER_TRANSPORT_CALL:
+                from ._task_program.drawer_binding import TRANSPORT_CLEARANCE
+
+                if (
+                    target_id not in drawers
+                    or drawers[target_id].object_id != object_id
+                ):
+                    raise ValueError(
+                        "Drawer transport requires its exact declared object-target route."
+                    )
+                drawer_transport_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {
+                            "kind": "scene_entity",
+                            "entity_id": target_id,
+                            "relative_pose": _translation_pose(
+                                0.0, 0.0, TRANSPORT_CLEARANCE
+                            ),
+                        },
+                    }
+                )
+            elif node["task_type"] == "E2":
+                upright_move_objects.add(object_id)
+                pose = _single_target_pose(graph, target_id)
+                move_held_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {"kind": "pose", **pose},
+                    }
+                )
+            elif "reference" not in arguments:
+                pose = _single_target_pose(graph, target_id)
+                move_held_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {"kind": "pose", **pose},
+                    }
+                )
+            else:
+                reference = str(arguments["reference"])
+                referenced_objects.add(reference)
+                pose, geometry = _pour_target_geometry(
+                    scene_objects[object_id],
+                    scene_objects[reference],
+                    embodiment,
+                    call.get("resources", {}).get("primary", "left"),
+                )
+                pour_geometry[object_id] = geometry
+                move_held_routes.append(
+                    {
+                        "object_id": object_id,
+                        "target_id": target_id,
+                        "pose": {
+                            "kind": "scene_entity",
+                            "entity_id": reference,
+                            **pose,
+                        },
+                    }
+                )
+        elif call["kind"] == "registered" and call["call_id"] == _POUR_CALL_ID:
+            object_id = str(call["arguments"]["object"])
+            referenced_objects.add(object_id)
+            pour_objects.add(object_id)
+        elif call["kind"] == "registered" and call["call_id"] == _ALIGN_HELD_CALL_ID:
+            referenced_objects.add(str(call["arguments"]["object"]))
+            upright_move_objects.add(str(call["arguments"]["object"]))
+        elif call["kind"] == "registered" and call["call_id"] in {
+            _STACK_PICK_CALL_ID,
+            _CLEAR_RELEASED_CALL_ID,
+        }:
+            referenced_objects.add(str(call["arguments"]["object"]))
+        elif call["kind"] == "registered" and call["call_id"] == "simulation.park":
+            has_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] == PARK_CALL:
+            has_articulation_park_call = True
+        elif call["kind"] == "registered" and call["call_id"] in {
+            SLIDE_CALL,
+            WITHDRAW_CALL,
+        }:
+            if (
+                node["task_type"] != "E6"
+                or (
+                    call["arguments"]["object"]
+                    if "part" not in call["arguments"]
+                    else f"{call['arguments']['object']}::{call['arguments']['part']}"
+                )
+                not in articulation_bindings
+            ):
+                raise ValueError("Articulation calls require an inspected E6 recipe.")
+        elif call["kind"] == "registered" and call["call_id"] in {
+            PREPARE_CALL,
+            PRESS_CALL,
+        }:
+            if node["task_type"] != "E9" or not press_routes:
+                raise ValueError("Press calls require an inspected E9 recipe.")
+        elif call["kind"] == "registered":
+            raise ValueError(
+                f"Unsupported generated registered call {call['call_id']!r}."
+            )
+
+    if collision_world:
+        referenced_objects.update(
+            uid
+            for uid, source in scene_objects.items()
+            if source["role"] != "articulation"
+        )
+    rigid_bindings: list[dict[str, Any]] = []
+    spatial_articulations: set[str] = set()
+    for entity_id in sorted(referenced_objects | {"table"}):
+        source = scene_objects.get(entity_id)
+        if source is None:
+            raise ValueError(
+                f"Semantic graph references missing scene entity {entity_id!r}."
+            )
+        if source["role"] == "articulation":
+            if any(container == entity_id for _, container, *_ in inside_routes) or any(
+                support == entity_id for _, support, _ in on_routes
+            ):
+                raise ValueError(
+                    "Articulated supports/containers require qualified link bindings."
+                )
+            spatial_articulations.add(entity_id)
+            continue
+        affordances: list[dict[str, Any]] = []
+        if str(source["role"]) == "rigid_object":
+            grasp_affordance = {
+                "entity_id": f"{entity_id}_grasp",
+                "kind": "antipodal_grasp",
+            }
+            if (
+                entity_id
+                in axis_align_objects
+                | pour_objects
+                | upright_move_objects
+                | horizontal_handover_objects
+            ):
+                grasp_affordance["internal_axis"] = _longest_local_axis(source)
+            affordances.append(grasp_affordance)
+        occupied_landings: list[tuple[list[float], dict[str, Any]]] = []
+        inside_count = sum(
+            1 for _, container_id, _, _ in inside_routes if container_id == entity_id
+        )
+        for affordance_id, container_id, object_id, resource in inside_routes:
+            if container_id != entity_id:
+                continue
+            lateral = 0.06 if "apple" in object_id else -0.06
+            target = _container_target_pose(
+                source,
+                scene_objects[object_id],
+                resource=resource,
+                embodiment=embodiment,
+                occupied=occupied_landings,
+            )
+            if target is None and inside_count > 1:
+                raise ValueError(
+                    f"Multiple objects require a measured container floor: {entity_id!r}."
+                )
+            if target is not None:
+                occupied_landings.append((target, scene_objects[object_id]))
+            affordances.append(
+                {
+                    "entity_id": affordance_id,
+                    "kind": "container",
+                    "native_name": affordance_id,
+                    "object_target_pose": (
+                        target
+                        if target is not None
+                        else _translation_pose(lateral, 0.0, 0.008)
+                    ),
+                    "release_clearance": 0.12,
+                }
+            )
+        for affordance_id, support_id, object_id in on_routes:
+            if support_id != entity_id:
+                continue
+            child = scene_objects.get(object_id)
+            if child is None:
+                raise ValueError(
+                    f"On relation references missing scene entity {object_id!r}."
+                )
+            affordances.append(
+                {
+                    "entity_id": affordance_id,
+                    "kind": "support_surface",
+                    "native_name": affordance_id,
+                    "object_target_pose": _support_target_pose(
+                        source,
+                        child,
+                        axis_aligned=entity_id
+                        in (axis_align_objects | upright_move_objects),
+                    ),
+                }
+            )
+        rigid_bindings.append(
+            {
+                "entity_id": entity_id,
+                "simulation_uid": entity_id,
+                "dynamics": (
+                    "dynamic" if str(source["role"]) == "rigid_object" else "static"
+                ),
+                "semantic_type": str(source.get("category") or entity_id),
+                **(
+                    {
+                        "collision_role": (
+                            "dynamic"
+                            if str(source["role"]) == "rigid_object"
+                            else "static"
+                        )
+                    }
+                    if collision_world
+                    else {}
+                ),
+                "affordances": affordances,
+            }
+        )
+
+    def coordinated_lowerer_routes(
+        routes: list[tuple[str, str, tuple[float, float, float]]],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "object_id": object_id,
+                "target_id": target_id,
+                "world_displacement": list(displacement),
+            }
+            for object_id, target_id, displacement in routes
+        ]
+
+    lowerer_routes = (
+        coordinated_lowerer_routes(coordinated_routes) + coordinated_on_lowerer_routes
+    )
+    hold_lowerer_routes = coordinated_lowerer_routes(coordinated_hold_routes)
+    if len(pour_objects) > 1:
+        raise ValueError("One generated bundle currently supports one Pour object.")
+    return {
+        "integration_id": f"{program_id}_integration_v1",
+        "program_id": program_id,
+        "requires": {
+            "scene_contract": scene_contract,
+            "embodiment_contract": "dual_arm_parallel_gripper",
+        },
+        "scene_binding": {
+            "contract_id": scene_contract,
+            "registry_id": f"{program_id}_scene_registry",
+            "rigid_objects": rigid_bindings,
+            "articulations": [
+                {"entity_id": uid, "simulation_uid": uid}
+                for uid in sorted(
+                    {b.object_id for b in articulation_bindings.values()}
+                    | spatial_articulations
+                    | {r.binding.object_id for r in press_routes}
+                )
+            ],
+            "links": [
+                *[
+                    {
+                        "entity_id": r.link_id,
+                        "articulation_id": r.binding.object_id,
+                        "native_link_name": r.binding.link,
+                    }
+                    for r in press_routes
+                ],
+                *[
+                    {
+                        "entity_id": b.link_id,
+                        "articulation_id": b.object_id,
+                        "native_link_name": b.link,
+                        **(
+                            {
+                                "affordances": [
+                                    {
+                                        "entity_id": r.affordance,
+                                        "kind": "container",
+                                        "native_name": r.affordance,
+                                        "object_target_pose": drawer_poses[
+                                            r.affordance
+                                        ],
+                                        "release_clearance": 0.0,
+                                    }
+                                    for r in drawers.values()
+                                    if r.binding == b
+                                ]
+                            }
+                            if any(r.binding == b for r in drawers.values())
+                            else {}
+                        ),
+                    }
+                    for b in articulation_bindings.values()
+                ],
+            ],
+        },
+        "profile": {
+            "defaults": {
+                "pick_up": {"primary": "left"},
+                "place": {"primary": "left"},
+                "hand_over": {"source": "left", "destination": "right"},
+                "axis_align": {"primary": "left"},
+                "coordinated_pickment": {"left": "left", "right": "right"},
+            },
+            "action_options": {
+                "pick": default_pick_options,
+                "place": {
+                    "kind": "place",
+                    "hand_interp_steps": 12,
+                    "release_settle_steps": 60,
+                    "lift_height": 0.12 if pour_objects else 0.05,
+                    "cartesian_waypoint_count": 2,
+                    "preserve_current_object_orientation": True,
+                },
+                "hand_over": {
+                    "kind": "hand_over",
+                    "pre_grasp_distance": 0.15,
+                    "lift_height": 0.0,
+                    "hand_interp_steps": 16,
+                    "hold_steps": 8,
+                    "retreat_steps": 36,
+                    "retreat_distance": 0.10,
+                    "receive_pick_object_part": "center",
+                    "source_hold_mode": "grasp_command",
+                    "release_at_target": False,
+                    "arm_selection": "bound",
+                },
+                **pick_options,
+                **(
+                    {
+                        call_id: {
+                            "kind": "place",
+                            "hand_interp_steps": 12,
+                            "release_settle_steps": 60,
+                            "lift_height": 0.10,
+                            "cartesian_waypoint_count": 2,
+                            "preserve_current_object_orientation": True,
+                        }
+                        for call_id in (
+                            _PLACE_RELATIVE_CALL_ID,
+                            *(
+                                (_UPRIGHT_PLACE_CALL_ID,)
+                                if upright_lowerer_routes
+                                else ()
+                            ),
+                        )
+                    }
+                    if has_relative_place
+                    else {}
+                ),
+                **(
+                    {
+                        _MOVE_HELD_OBJECT_CALL_ID: {
+                            "kind": "move_held_object",
+                        }
+                    }
+                    if move_held_routes
+                    else {}
+                ),
+                **(
+                    {DRAWER_TRANSPORT_CALL: {"kind": "move_held_object"}}
+                    if drawer_transport_routes
+                    else {}
+                ),
+                **(
+                    {
+                        _POUR_CALL_ID: {
+                            "kind": "pour",
+                            "rotate_angle": -1.0471975512,
+                        }
+                    }
+                    if pour_objects
+                    else {}
+                ),
+                **(
+                    {
+                        _COORDINATED_HOLD_CALL_ID: {
+                            "kind": "coordinated_pickment",
+                            "object_motion_keyframes": 8,
+                            "pre_grasp_distance": 0.10,
+                            "lift_height": 0.08,
+                            "hand_interp_steps": 10,
+                            "hold_steps": 4,
+                            "release": False,
+                            "approach_direction": [0.0, 0.0, -1.0],
+                            "left_to_right_arm_direction": [0.0, 1.0, 0.0],
+                            "middle_empty_ratio": 0.4,
+                        }
+                    }
+                    if hold_lowerer_routes
+                    else {}
+                ),
+                **(
+                    {
+                        _AXIS_ALIGN_CALL_ID: {
+                            "kind": "axis_align",
+                            "pre_grasp_distance": 0.15,
+                            "lift_height": 0.16,
+                            "hand_interp_steps": 12,
+                            "grasp_settle_steps": 0,
+                            "grasp_commit_fraction": 1.0,
+                            "target_axis": [0.0, 0.0, 1.0],
+                        }
+                    }
+                    if axis_align_objects
+                    else {}
+                ),
+                **(
+                    {"simulation.park": {"kind": "move_joints"}}
+                    if has_park_call
+                    else {}
+                ),
+                **(
+                    {PARK_CALL: {"kind": "move_joints"}}
+                    if has_articulation_park_call
+                    else {}
+                ),
+                **(
+                    {
+                        SLIDE_CALL: {
+                            "kind": "slide",
+                            "approach_distance": 0.10,
+                            "hand_interp_steps": 12,
+                            "preshape_fraction": PRESHAPE_FRACTION,
+                            "release_retreat_distance": RELEASE_RETREAT_DISTANCE,
+                            "approach_along_grasp_axis": True,
+                        },
+                        WITHDRAW_CALL: {"kind": "move_end_effector"},
+                    }
+                    if articulation_bindings
+                    else {}
+                ),
+                **(
+                    {
+                        "simulation.coordinated_transport": {
+                            "kind": "coordinated_pickment",
+                            "object_motion_keyframes": 8,
+                            "pre_grasp_distance": 0.10,
+                            "lift_height": 0.08,
+                            "hand_interp_steps": 10,
+                            "hold_steps": 4,
+                            "release": True,
+                            "release_steps": 10,
+                            "retreat_distance": _COORDINATED_DETACH_DISTANCE
+                            + _COORDINATED_RETREAT_MARGIN,
+                            "retreat_steps": 12,
+                            "approach_direction": [0.0, 0.0, -1.0],
+                            "left_to_right_arm_direction": [0.0, 1.0, 0.0],
+                            "middle_empty_ratio": 0.4,
+                        }
+                    }
+                    if lowerer_routes
+                    else {}
+                ),
+            },
+            # Effect truth stays in Semantic Skill.  The generated task
+            # planner only selects the canonical built-in monitor for the
+            # curated effectful calls; it never computes a held relation or
+            # synthesizes a successful postcondition itself.
+            "effect_monitors": {
+                semantic_id: {
+                    "monitor_id": "builtin.composite_effect",
+                    "revision": "1",
+                    "params": {
+                        "consecutive_samples": 3,
+                        # Generated cube/apple meshes admit equivalent grasp
+                        # orientations.  Translation and the gripper/contact
+                        # clause remain strict physical checks; orientation
+                        # is intentionally relaxed for this calibrated scene.
+                        "attached_translation_threshold": (
+                            0.02
+                            if semantic_id
+                            in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
+                            else 0.06
+                        ),
+                        "attached_rotation_threshold": 3.0,
+                        "detached_translation_threshold": (
+                            0.03
+                            if semantic_id
+                            in {_PLACE_RELATIVE_CALL_ID, _UPRIGHT_PLACE_CALL_ID}
+                            else (
+                                _COORDINATED_DETACH_DISTANCE
+                                if semantic_id
+                                in {
+                                    _COORDINATED_TRANSPORT_CALL_ID,
+                                    _COORDINATED_HOLD_CALL_ID,
+                                }
+                                else 0.08
+                            )
+                        ),
+                        "detached_rotation_threshold": 3.141592653589793,
+                    },
+                }
+                for semantic_id in (
+                    "pick",
+                    "place",
+                    "hand_over",
+                    "simulation.coordinated_transport",
+                    _COORDINATED_HOLD_CALL_ID,
+                    _AXIS_ALIGN_CALL_ID,
+                    _MOVE_HELD_OBJECT_CALL_ID,
+                    *pick_routes,
+                    _PLACE_RELATIVE_CALL_ID,
+                    _UPRIGHT_PLACE_CALL_ID,
+                )
+                if any(
+                    node["call"].get("kind") == semantic_id
+                    or node["call"].get("call_id") == semantic_id
+                    for node in graph["nodes"]
+                )
+            },
+            "grounding_providers": {"hand_over": "simulation.configured_handover_pose"},
+        },
+        "runtime_services": {
+            "handover_pose_providers": [
+                {
+                    "kind": "configured_pose",
+                    # Keep the exchange above the tray rim.  This is a
+                    # semantic object-space staging target; the Atomic Action
+                    # derives all arm/EEF poses from it at runtime.
+                    "final_position": [
+                        0.0,
+                        -0.08,
+                        _handover_position_z(scene.table_top_z),
+                    ],
+                    # Task Program poses use EmbodiChain's public ``xyzw``
+                    # quaternion order.  The former generated bundle wrote
+                    # this 90-degree x rotation as ``wxyz``; keep the same
+                    # orientation while crossing into the configured service.
+                    "final_quaternion_xyzw": [
+                        0.7071067812,
+                        0.0,
+                        0.0,
+                        0.7071067812,
+                    ],
+                }
+            ],
+            "registered_semantic_lowerers": [
+                *[
+                    {"kind": kind, "route": route.payload()}
+                    for route in press_routes
+                    for kind in ("press_prepare", "press")
+                ],
+                *(
+                    [
+                        {
+                            "kind": kind,
+                            "bindings": [
+                                b.payload() for b in articulation_bindings.values()
+                            ],
+                        }
+                        for kind in ("articulation_slide", "articulation_withdraw")
+                    ]
+                    if articulation_bindings
+                    else []
+                ),
+                *[
+                    {"kind": "pick", "call_id": call_id, "routes": routes}
+                    for call_id, routes in pick_routes.items()
+                ],
+                *(
+                    [
+                        {
+                            "kind": "place_relative",
+                            "routes": [
+                                _public_route(route)
+                                for route in relative_lowerer_routes
+                            ],
+                        }
+                    ]
+                    if relative_lowerer_routes
+                    else []
+                ),
+                *(
+                    [{"kind": "place_upright", "routes": upright_lowerer_routes}]
+                    if upright_lowerer_routes
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "kind": "move_held_object",
+                            "routes": move_held_routes,
+                        }
+                    ]
+                    if move_held_routes
+                    else []
+                ),
+                *(
+                    [{"kind": "drawer_transport", "routes": drawer_transport_routes}]
+                    if drawer_transport_routes
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "kind": "pour",
+                            "object_id": next(iter(pour_objects)),
+                        }
+                    ]
+                    if pour_objects
+                    else []
+                ),
+                *(
+                    [
+                        {
+                            "kind": "axis_align",
+                            "object_ids": sorted(axis_align_objects),
+                        }
+                    ]
+                    if axis_align_objects
+                    else []
+                ),
+                *([{"kind": "park"}] if has_park_call else []),
+                *(
+                    [{"kind": "articulation_park"}]
+                    if has_articulation_park_call
+                    else []
+                ),
+                *(
+                    [{"kind": "coordinated_hold", "routes": hold_lowerer_routes}]
+                    if hold_lowerer_routes
+                    else []
+                ),
+                *(
+                    [{"kind": "coordinated_transport", "routes": lowerer_routes}]
+                    if lowerer_routes
+                    else []
+                ),
+            ],
+        },
+    }
+
+
+def _scene_payload(scene: Any, *, program_id: str) -> dict[str, Any]:
+    def runtime_pose(config: Any) -> dict[str, Any]:
+        from scipy.spatial.transform import Rotation
+
+        result = deepcopy(config)
+        if result.get("init_local_pose") is None:
+            # PreparedScene uses intrinsic XYZ; dictionary decoders infer
+            # extrinsic xyz. Serialize the matrix to preserve the planner pose.
+            pose = np.eye(4)
+            pose[:3, :3] = Rotation.from_euler(
+                "XYZ", result.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+            ).as_matrix()
+            pose[:3, 3] = result.get("init_pos", [0.0, 0.0, 0.0])
+            result["init_local_pose"] = pose.tolist()
+        return result
+
+    def runtime_rigid(config: Any) -> dict[str, Any]:
+        result = runtime_pose(config)
+        max_hulls = int(result.pop("max_convex_hull_num", 1))
+        acd_method = str(result.pop("acd_method", "visacd"))
+        shape = result.get("shape")
+        if isinstance(shape, dict) and shape.get("shape_type") == "Mesh":
+            shape.pop("max_convex_hull_num", None)
+            shape.pop("acd_method", None)
+            shape.setdefault(
+                "collision",
+                {
+                    "approximation": (
+                        "convex_hull" if max_hulls == 1 else "convex_decomposition"
+                    ),
+                    **(
+                        {"max_hulls": max_hulls, "acd_method": acd_method}
+                        if max_hulls > 1
+                        else {}
+                    ),
+                },
+            )
+        return result
+
+    articulations = [runtime_pose(value) for value in scene.articulations]
+    for articulation in articulations:
+        for semantic_only_key in (
+            "affordances",
+            "attributes",
+            "category",
+            "description",
+            "initial_state",
+            "is_articulated",
+            "name",
+            "proxy_body_scale",
+            "proxy_glb_fpath",
+            "proxy_init_pos",
+        ):
+            articulation.pop(semantic_only_key, None)
+        fixed_base = articulation.pop("fix_base", None)
+        if fixed_base is not None:
+            articulation.setdefault("root_props", {})["fixed_base"] = fixed_base
+        if articulation.get("joint_drive_props") is not None:
+            articulation.setdefault("asset_physics_mode", "overlay")
+        suffix = Path(str(articulation.get("fpath", ""))).suffix.lower()
+        if suffix in {".usd", ".usda", ".usdc"}:
+            # pytorch-kinematics accepts URDF XML only.  These task skills use
+            # DexSim's native link poses/geometry and do not need a PK chain.
+            articulation["build_pk_chain"] = False
+    return {
+        "scene_id": f"{program_id}_generated_scene",
+        "simulation": {
+            "light": {
+                "direct": [
+                    {
+                        "uid": "main_light",
+                        "color": [0.6, 0.6, 0.6],
+                        "intensity": 30.0,
+                        "init_pos": [0.5, 0.0, 3.0],
+                    }
+                ]
+            },
+            "background": [runtime_rigid(value) for value in scene.background],
+            "rigid_object": [runtime_rigid(value) for value in scene.rigid_objects],
+            "rigid_object_group": [],
+            "articulation": articulations,
+        },
+    }
+
+
+def _task_settle_rigid_objects(
+    graph: SemanticTaskGraph,
+    scene: Any,
+) -> tuple[dict[str, Any], ...]:
+    """Return task-referenced rigid objects for reset stabilization."""
+    rigid_objects = tuple(scene.rigid_objects)
+    scene_uids = {str(item["uid"]) for item in rigid_objects}
+    referenced_uids: set[str] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            if value in scene_uids:
+                referenced_uids.add(value)
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                collect(child)
+            return
+        if isinstance(value, (list, tuple)):
+            for child in value:
+                collect(child)
+
+    for node in graph["nodes"]:
+        collect(node["call"])
+
+    selected = tuple(
+        item for item in rigid_objects if str(item["uid"]) in referenced_uids
+    )
+    return selected or rigid_objects
+
+
+def _add_handover_staging(graph: SemanticTaskGraph, scene: Any) -> SemanticTaskGraph:
+    """Propose a table-inward transfer using existing skills after a fresh E4 pick.
+
+    This is a geometric candidate, not a reachability certificate. Normal
+    planning and effect gates remain responsible for rejecting invalid motion.
+    Previously manipulated objects cannot use source-scene pose predictions.
+    """
+    from scipy.spatial.transform import Rotation
+
+    result = deepcopy(graph)
+    prior = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "hand_over" or not prior:
+            prior.append(node)
+            continue
+        pick = prior[-1]
+        pick_call = pick["call"]
+        object_id = call["object"]
+        eligible = (
+            node["task_type"] == "E4"
+            and pick["task_instance_id"] == node["task_instance_id"]
+            and (
+                pick_call.get("call_id") == _HANDOVER_SOURCE_PICK
+                or pick_call.get("call_id", "").startswith(
+                    _HORIZONTAL_HANDOVER_SOURCE_PICK + "."
+                )
+            )
+            and pick_call.get("arguments", {}).get("object") == object_id
+            and pick_call.get("resources", {}).get("primary")
+            == call["resources"]["source"]
+            and node["depends_on"] == [pick["id"]]
+            and not any(
+                earlier["call"].get(
+                    "object", earlier["call"].get("arguments", {}).get("object")
+                )
+                == object_id
+                for earlier in prior[:-1]
+            )
+        )
+        prior.append(node)
+        if not eligible:
+            continue
+        source = next(
+            item for item in scene.planner_objects if item["runtime_uid"] == object_id
+        )
+        table = next(item for item in scene.background if item["uid"] == "table")
+        if table.get("shape", {}).get("shape_type") == "Cube":
+            center = np.asarray(table["init_pos"], dtype=float)[:2]
+        else:
+            vertices = np.asarray(_mesh_vertices(table))
+            world = vertices @ Rotation.from_euler(
+                "XYZ", table.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+            ).as_matrix().T + np.asarray(table["init_pos"])
+            center = (world[:, :2].min(0) + world[:, :2].max(0)) * 0.5
+        position = np.asarray(source["init_pos"], dtype=float).copy()
+        position[:2] = (position[:2] + center) * 0.5
+        position[2] += _DEFAULT_PICK_LIFT_HEIGHT
+        quat = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_quat()
+        staging_id = f"{node['id']}__staging"
+        target_id = f"{staging_id}_target"
+        if target_id in result["targets"] or any(
+            item["id"] == staging_id for item in result["nodes"]
+        ):
+            raise ValueError(
+                "Generated handover staging identity collides with existing content."
+            )
+        result["targets"][target_id] = {
+            "kind": "cyclic_pose",
+            "values": [
+                {
+                    "position": position.tolist(),
+                    "quaternion_xyzw": quat.tolist(),
+                }
+            ],
+        }
+        stage = deepcopy(node)
+        stage["id"] = staging_id
+        stage["call"] = {
+            "kind": "registered",
+            "call_id": _MOVE_HELD_OBJECT_CALL_ID,
+            "arguments": {"object": object_id, "target": target_id},
+            "resources": {"primary": call["resources"]["source"]},
+        }
+        index = next(
+            i for i, item in enumerate(result["nodes"]) if item["id"] == node["id"]
+        )
+        result["nodes"][index]["depends_on"] = [staging_id]
+        result["nodes"].insert(index, stage)
+        group = next(
+            item
+            for item in result["task_groups"]
+            if item["id"] == node["task_instance_id"]
+        )
+        group["node_ids"].insert(group["node_ids"].index(node["id"]), staging_id)
+    return validate_semantic_task_graph(result)
+
+
+def _grasp_contact_clearances(
+    scene: Any, embodiment: dict[str, Any]
+) -> dict[str, float]:
+    """Reserve both contact envelopes for the Default-backed GenSim deployment."""
+    from dexsim.spawn import DexsimCollisionDesc
+
+    default_offset = DexsimCollisionDesc().contact_offset
+
+    def contact_offset(attrs: Any, fallback: float | None) -> float:
+        configured = ((attrs or {}).get("collision_props") or {}).get("contact_offset")
+        value = fallback if configured is None else configured
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("Grasp-fit requires a finite non-negative contact_offset.")
+        return float(value)
+
+    simulation = embodiment["simulation"]
+    robot_offset = contact_offset(simulation.get("attrs"), default_offset)
+    # Conservatively include explicit link overrides without importing a robot
+    # or starting a simulator during provider-free bundle generation.
+    robot_offset = max(
+        [robot_offset]
+        + [
+            contact_offset(group.get("attrs"), robot_offset)
+            for group in (simulation.get("link_attrs") or {}).values()
+        ]
+    )
+    return {
+        str(obj["uid"]): robot_offset + contact_offset(obj.get("attrs"), default_offset)
+        for obj in scene.rigid_objects
+    }
+
+
+def _calibrate_task_gripper_effort(
+    embodiment: dict[str, Any], scene: Any, graph: SemanticTaskGraph
+) -> None:
+    """Bound qualified <=10 g E1/E2 grips, including light E5 compositions.
+
+    The canonical Robotiq keeps its complete closing range. Unknown/heavier
+    payloads and other recipe families retain their declared actuator limits.
+    This does not change the imported mechanism or any collision properties.
+    """
+    families = {node["task_type"] for node in graph["nodes"]}
+    if not families <= {"E1", "E2", "E5"} or not families & {"E1", "E2"}:
+        return
+    picks = []
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] == "pick":
+            object_id = call["object"]
+        elif call["kind"] == "registered" and (
+            call["call_id"] == _PICK_CALL_ID
+            or call["call_id"].startswith("gen_sim.pick.")
+        ):
+            object_id = call["arguments"]["object"]
+        else:
+            continue
+        picks.append((object_id, call.get("resources", {}).get("primary", "left")))
+    if not picks:
+        return
+    objects = {item["uid"]: item for item in scene.rigid_objects}
+    # A hand shared with E5 must also be qualified for its carried rigid body.
+    payloads = {object_id for object_id, _ in picks}
+    payloads.update(
+        node["call"]["arguments"]["object"]
+        for node in graph["nodes"]
+        if node["call"].get("call_id")
+        in {_COORDINATED_HOLD_CALL_ID, _COORDINATED_TRANSPORT_CALL_ID}
+    )
+    for object_id in payloads:
+        mass = (
+            objects.get(object_id, {})
+            .get("attrs", {})
+            .get("mass_props", {})
+            .get("mass")
+        )
+        if (
+            isinstance(mass, bool)
+            or not isinstance(mass, (int, float))
+            or not math.isfinite(mass)
+            or not 0.0 < mass <= 0.01
+        ):
+            return
+    limits = embodiment["simulation"]["joint_drive_props"].get("max_effort")
+    if not isinstance(limits, dict):
+        return
+    grasp_parts = {
+        resource["resource_id"]: endpoint["control_part"]
+        for resource in embodiment["skill_profile"]["resources"]
+        for endpoint in resource["endpoints"]
+        if endpoint["endpoint_id"] == "grasp"
+    }
+    for resource in {resource for _, resource in picks}:
+        part = grasp_parts[resource]
+        if part in limits:
+            limits[part] = min(float(limits[part]), 0.5)
+
+
+def _calibrate_task_gripper_opening(embodiment: dict[str, Any]) -> None:
+    """Bound this deployment's grasp proposals by the mounted pad clearance."""
+    generators = embodiment["skill_profile"]["runtime_services"][
+        "grasp_pose_generators"
+    ]
+    for generator in generators.values():
+        model = generator["model"]
+        if model["model_id"] == "robotiq_arg2f_140":
+            # At the profile's zero-angle open command, the assembled URDF pad
+            # centers are 0.1360346 m apart, with 0.0075 m total pad thickness.
+            # Round the resulting 0.1285346 m free gap down, never up.
+            model["max_opening_width"] = min(float(model["max_opening_width"]), 0.128)
+
+
+def _bind_embodiment_to_scene(
+    embodiment: dict[str, Any],
+    *,
+    table_top_z: float | None,
+) -> None:
+    """Bind the generated deployment's robot mount to the current tabletop."""
+    if table_top_z is None or not math.isfinite(float(table_top_z)):
+        raise ValueError("Dual-Franka deployment requires a derived tabletop height.")
+    simulation = embodiment.get("simulation")
+    if not isinstance(simulation, dict):
+        raise ValueError("Embodiment component has no simulation mapping.")
+    # Keep the qualified GenSim tolerance local instead of relaxing shared IK.
+    for solver in simulation.get("solver_cfg", {}).values():
+        if solver.get("class_type") == "PytorchSolver":
+            solver.setdefault("pos_eps", 5e-3)
+    init_pos = simulation.get("init_pos")
+    if not isinstance(init_pos, list) or len(init_pos) != 3:
+        raise ValueError("Embodiment simulation.init_pos must contain three values.")
+    simulation["init_pos"] = [
+        float(init_pos[0]),
+        float(init_pos[1]),
+        float(table_top_z) - _DUAL_FRANKA_TABLE_MOUNT_OFFSET,
+    ]
+
+
+def _route_key(route: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    """Return a stage-qualified route key for repeated long-horizon placements."""
+    return (
+        str(route.get("stage_id", "")),
+        str(route["object_id"]),
+        str(route["reference_entity_id"]),
+        str(route["relation"]),
+    )
+
+
+def _route_key_for_node(
+    node: Mapping[str, Any],
+    object_id: str,
+    reference_id: str,
+    relation: str,
+) -> tuple[str, str, str, str]:
+    """Return the route key for one graph node occurrence."""
+    return (str(node.get("task_instance_id", "")), object_id, reference_id, relation)
+
+
+def _lookup_route(
+    routes: Mapping[tuple[str, ...], Mapping[str, Any]],
+    node: Mapping[str, Any],
+    object_id: str,
+    reference_id: str,
+    relation: str,
+) -> Mapping[str, Any]:
+    """Resolve stage-qualified routes with a legacy three-field fallback."""
+    stage_key = _route_key_for_node(node, object_id, reference_id, relation)
+    if stage_key in routes:
+        return routes[stage_key]
+    legacy_key = (object_id, reference_id, relation)
+    if legacy_key in routes:
+        return routes[legacy_key]
+    empty_stage_key = ("", object_id, reference_id, relation)
+    if empty_stage_key in routes:
+        return routes[empty_stage_key]
+    raise KeyError(stage_key)
+
+
+def _public_route(
+    route: Mapping[str, Any], *, include_stage_id: bool = True
+) -> dict[str, Any]:
+    """Return one route with optional stage occurrence metadata."""
+    if include_stage_id:
+        return dict(route)
+    return {key: value for key, value in route.items() if key != "stage_id"}
+
+
+def _relative_place_route_payloads(
+    graph: SemanticTaskGraph,
+    scene: Any,
+    *,
+    settled: bool = False,
+    upright_only: bool = False,
+    coordinated_only: bool = False,
+) -> list[dict[str, Any]]:
+    """Project each release using only orientation changes preceding that call."""
+    axis_align_objects: set[str] = set()
+    scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    actuated_references = {
+        node["call"].get("arguments", {}).get("object")
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == SLIDE_CALL
+    }
+    routes: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for node in graph["nodes"]:
+        call = node["call"]
+        if call["kind"] != "registered":
+            continue
+        if call["call_id"] in {_AXIS_ALIGN_CALL_ID, _ALIGN_HELD_CALL_ID} or (
+            node.get("task_type") == "E2"
+            and call["call_id"] == _MOVE_HELD_OBJECT_CALL_ID
+        ):
+            axis_align_objects.add(str(call["arguments"]["object"]))
+        selected_calls = (
+            {_COORDINATED_TRANSPORT_CALL_ID}
+            if coordinated_only
+            else (
+                {_UPRIGHT_PLACE_CALL_ID}
+                if upright_only
+                else {_PLACE_RELATIVE_CALL_ID, _STACK_PLACE_CALL_ID}
+            )
+        )
+        if call["call_id"] not in selected_calls:
+            continue
+        arguments = call["arguments"]
+        if coordinated_only and "reference" not in arguments:
+            continue
+        if coordinated_only and (
+            arguments.get("relation") != "on"
+            or arguments["reference"] == arguments["object"]
+        ):
+            raise ValueError(
+                "Coordinated relative placement requires on a distinct rigid support."
+            )
+        stage_id = str(node.get("task_instance_id", node.get("id", "")))
+        selector = (
+            stage_id,
+            str(arguments["object"]),
+            str(arguments["reference"]),
+            str(arguments["relation"]),
+        )
+        _, object_id, reference_id, relation = selector
+        if reference_id in actuated_references:
+            raise ValueError(
+                f"Spatial reference {reference_id!r} changes joints in this program; "
+                "use qualified link geometry instead of an authored root envelope."
+            )
+        if scene_objects.get(reference_id, {}).get(
+            "role"
+        ) == "articulation" and relation in {
+            "on",
+            "above",
+        }:
+            raise ValueError(
+                "Articulated supports require qualified link bindings; root references support side relations only."
+            )
+        if reference_id == "table" and relation not in {"on", "above"}:
+            raise ValueError(
+                "A lateral table-relative placement has no supported landing surface. "
+                "Bind the named relation anchor, not the surrounding tabletop region."
+            )
+        if node.get("task_type") == "E2":
+            target_id = f"{node['task_instance_id']}_upright_target"
+            target = _single_target_pose(graph, target_id)
+            reference_position = _position(scene_objects[reference_id])
+            displacement = [
+                float(target["position"][index]) - reference_position[index]
+                for index in range(3)
+            ]
+            if settled:
+                # Release clearance is a command target, not a resting height.
+                displacement[2] -= _upright_release_clearance(scene_objects[object_id])
+        else:
+            displacement = _relative_world_displacement(
+                relation,
+                object_id=object_id,
+                reference_id=reference_id,
+                scene_objects=scene_objects,
+                axis_align_objects=axis_align_objects,
+                table_top_z=scene.table_top_z,
+            )
+            if settled and (
+                call["call_id"] == _STACK_PLACE_CALL_ID or coordinated_only
+            ):
+                displacement[2] -= _PLACEMENT_CLEARANCE
+        route = {
+            "stage_id": stage_id,
+            "object_id": object_id,
+            "reference_entity_id": reference_id,
+            "relation": relation,
+            "world_displacement": displacement,
+        }
+        # Long-horizon programs may place one object/reference pair more than
+        # once.  The graph task instance is the occurrence selector; do not
+        # collapse routes from different stages.
+        if selector in routes and routes[selector] != route:
+            raise ValueError(
+                f"Repeated placement {selector!r} requires stage-specific routes; "
+                f"existing={routes[selector]!r}, new={route!r}."
+            )
+        routes[selector] = route
+    return [routes[selector] for selector in sorted(routes)]
+
+
+def _relative_world_displacement(
+    relation: str,
+    *,
+    object_id: str,
+    reference_id: str,
+    scene_objects: dict[str, Any],
+    axis_align_objects: set[str],
+    table_top_z: float | None,
+) -> list[float]:
+    """Derive one world-frame semantic relation from trusted scene geometry."""
+    try:
+        obj = scene_objects[object_id]
+        reference = scene_objects[reference_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"Relative placement references missing scene entity {exc.args[0]!r}."
+        ) from exc
+    if relation in {"on", "above"}:
+        object_bottom, _ = _vertical_mesh_bounds(
+            obj,
+            axis_aligned=object_id in axis_align_objects,
+        )
+        if reference_id == "table":
+            if table_top_z is None:
+                raise ValueError(
+                    "Relative placement on the table requires a derived tabletop height."
+                )
+            reference_position = _position(reference)
+            reference_top = float(table_top_z) - reference_position[2]
+            object_position = _position(obj)
+            x_offset = object_position[0] - reference_position[0]
+            y_offset = object_position[1] - reference_position[1]
+        else:
+            _, reference_top = _vertical_mesh_bounds(
+                reference,
+                axis_aligned=reference_id in axis_align_objects,
+            )
+            x_offset = 0.0
+            y_offset = 0.0
+        return [
+            x_offset,
+            y_offset,
+            reference_top - object_bottom + _PLACEMENT_CLEARANCE,
+        ]
+
+    diagonal_relations = {
+        "front_left_of": ("front_of", "left_of"),
+        "front_right_of": ("front_of", "right_of"),
+        "back_left_of": ("behind", "left_of"),
+        "back_right_of": ("behind", "right_of"),
+    }
+    if relation in diagonal_relations:
+        components = [
+            _relative_world_displacement(
+                component,
+                object_id=object_id,
+                reference_id=reference_id,
+                scene_objects=scene_objects,
+                axis_align_objects=axis_align_objects,
+                table_top_z=table_top_z,
+            )
+            for component in diagonal_relations[relation]
+        ]
+        return [components[0][0], components[1][1], components[0][2]]
+
+    object_support_z = _support_origin_z(
+        obj,
+        axis_aligned=object_id in axis_align_objects,
+        table_top_z=table_top_z,
+    )
+    reference_support_z = _support_origin_z(
+        reference,
+        axis_aligned=reference_id in axis_align_objects,
+        table_top_z=table_top_z,
+    )
+    displacement = [
+        0.0,
+        0.0,
+        object_support_z - reference_support_z + _PLACEMENT_CLEARANCE,
+    ]
+    if relation == "right_of":
+        displacement[1] = _horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=1,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_LATERAL_RELATION_DISTANCE,
+        )
+    elif relation == "left_of":
+        displacement[1] = -_horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=1,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_LATERAL_RELATION_DISTANCE,
+            reference_direction=-1,
+        )
+    elif relation == "front_of":
+        displacement[0] = -_horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=0,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_FRONT_RELATION_DISTANCE,
+            reference_direction=-1,
+        )
+    elif relation == "behind":
+        displacement[0] = _horizontal_relation_distance(
+            obj,
+            reference,
+            world_axis=0,
+            object_axis_aligned=object_id in axis_align_objects,
+            reference_axis_aligned=reference_id in axis_align_objects,
+            minimum=_FRONT_RELATION_DISTANCE,
+        )
+    else:
+        raise ValueError(f"Unsupported relative placement relation {relation!r}.")
+    return displacement
+
+
+def _horizontal_relation_distance(
+    obj: dict[str, Any],
+    reference: dict[str, Any],
+    *,
+    world_axis: int,
+    object_axis_aligned: bool,
+    reference_axis_aligned: bool,
+    minimum: float,
+    reference_direction: int = 1,
+) -> float:
+    """Return geometry-aware center separation for one planar relation."""
+    if reference.get("role") == "articulation":
+        # An articulation root need not be at its geometry center. Measure the
+        # outward edge in its actual root frame, not half the aggregate span.
+        points = _mesh_vertices(reference) @ _initial_rotation(reference).T
+        edge = float((points[:, world_axis] * reference_direction).max())
+        return max(
+            minimum,
+            edge
+            + _horizontal_half_extent(
+                obj, world_axis=world_axis, axis_aligned=object_axis_aligned
+            )
+            + (
+                _AXIS_ALIGNED_RELATION_CLEARANCE
+                if object_axis_aligned
+                else _RELATION_CLEARANCE
+            ),
+        )
+    return max(
+        minimum,
+        _horizontal_half_extent(
+            obj,
+            world_axis=world_axis,
+            axis_aligned=object_axis_aligned,
+        )
+        + _horizontal_half_extent(
+            reference,
+            world_axis=world_axis,
+            axis_aligned=reference_axis_aligned,
+        )
+        + (
+            _AXIS_ALIGNED_RELATION_CLEARANCE
+            if object_axis_aligned
+            else _RELATION_CLEARANCE
+        ),
+    )
+
+
+def _horizontal_half_extent(
+    source: dict[str, Any],
+    *,
+    world_axis: int,
+    axis_aligned: bool,
+) -> float:
+    """Return a conservative horizontal half extent in the intended pose."""
+    vertices = _mesh_vertices(source)
+    if axis_aligned:
+        dominant_axis = int(np.argmax(np.ptp(vertices, axis=0)))
+        horizontal_extents = np.delete(np.ptp(vertices, axis=0), dominant_axis)
+        return 0.5 * float(horizontal_extents.max())
+    world_vertices = vertices @ _initial_rotation(source).T
+    return 0.5 * float(np.ptp(world_vertices[:, world_axis]))
+
+
+def _support_origin_z(
+    source: dict[str, Any],
+    *,
+    axis_aligned: bool,
+    table_top_z: float | None,
+) -> float:
+    """Return the object-origin height when resting on the scene table."""
+    if not axis_aligned:
+        return _position(source)[2]
+    if table_top_z is None:
+        raise ValueError("Axis-aligned placement requires a derived tabletop height.")
+    bottom, _ = _vertical_mesh_bounds(source, axis_aligned=True)
+    return float(table_top_z) - bottom + _PLACEMENT_CLEARANCE
+
+
+def _dominant_local_axis(source: dict[str, Any]) -> list[float]:
+    """Return the unique major mesh axis in DexSim's object-local basis."""
+    vertices = _mesh_vertices(source)
+    extents = np.ptp(vertices, axis=0)
+    order = np.argsort(extents)
+    major = int(order[-1])
+    if extents[major] <= max(float(extents[order[-2]]) * 1.25, 1.0e-6):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no unique dominant "
+            "local axis for semantic upright alignment."
+        )
+    axis = [0.0, 0.0, 0.0]
+    axis[major] = 1.0
+    return axis
+
+
+def _pour_target_geometry(
+    source: dict[str, Any],
+    reference: dict[str, Any],
+    embodiment: dict[str, Any] | None,
+    resource: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Keep the swept vessel and finger envelope above the receiving rim."""
+    from scipy.spatial.transform import Rotation
+
+    vertices = _mesh_vertices(source)
+    pivot = (vertices.min(0) + vertices.max(0)) * 0.5
+    radius = float(np.linalg.norm(vertices - pivot, axis=1).max())
+    upright = np.asarray(_longest_local_axis(source))
+    rotation = _initial_rotation(source)
+    world_up = rotation @ upright
+    vertical = np.array([0.0, 0.0, 1.0])
+    cross = np.cross(world_up, vertical)
+    sine = np.linalg.norm(cross)
+    cosine = np.clip(world_up @ vertical, -1.0, 1.0)
+    if sine > 1e-8:
+        rotation = (
+            Rotation.from_rotvec(cross / sine * math.atan2(sine, cosine)).as_matrix()
+            @ rotation
+        )
+    elif cosine < 0:
+        transverse = rotation[:, int(np.argmin(np.abs(upright)))]
+        rotation = Rotation.from_rotvec(transverse * math.pi).as_matrix() @ rotation
+    if embodiment is None:
+        raise ValueError("Pour clearance requires the selected gripper geometry.")
+    model = embodiment["skill_profile"]["runtime_services"]["grasp_pose_generators"][
+        f"{resource}_eef"
+    ]["model"]
+    finger_radius = float(
+        np.linalg.norm(
+            [
+                (float(model["max_opening_width"]) + float(model["finger_thickness"]))
+                * 0.5,
+                float(model["finger_width"]) * 0.5,
+                float(model["finger_length"]) * 0.5,
+            ]
+        )
+    )
+    _, top = _vertical_mesh_bounds(reference, axis_aligned=False)
+    offset = np.array([0.0, 0.0, top + radius + finger_radius + 0.015])
+    relative = np.eye(4)
+    relative[:3, 3] = rotation.T @ offset - pivot
+    return (
+        {
+            "relative_pose": relative.reshape(-1).tolist(),
+            "world_orientation": rotation.reshape(-1).tolist(),
+        },
+        {"upright_axis": upright.tolist(), "pivot_local": pivot.tolist()},
+    )
+
+
+def _initial_rotation(source: dict[str, Any]) -> np.ndarray:
+    """Use the authoritative matrix, or the prepared scene's intrinsic angles."""
+    from scipy.spatial.transform import Rotation
+
+    if source.get("init_local_pose") is not None:
+        rotation = np.asarray(source["init_local_pose"], dtype=float)[:3, :3]
+    else:
+        rotation = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_matrix()
+    return rotation
+
+
+def _initial_local_up(source: dict[str, Any]) -> list[float]:
+    """Preserve the source's vertical orientation without fixing its heading."""
+    return _initial_rotation(source)[2].tolist()
+
+
+def _vertical_mesh_bounds(
+    source: dict[str, Any],
+    *,
+    axis_aligned: bool,
+) -> tuple[float, float]:
+    """Return bottom/top offsets for the intended object orientation."""
+    vertices = _mesh_vertices(source)
+    if axis_aligned:
+        axis = np.asarray(_dominant_local_axis(source), dtype=np.float64)
+        heights = vertices @ axis
+    else:
+        heights = vertices @ np.asarray(_initial_local_up(source))
+    return float(heights.min()), float(heights.max())
+
+
+def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
+    """Load native geometry in the configured entity's runtime root frame."""
+    if source.get("role") == "articulation":
+        from .scene.articulation_geometry import read_articulation_geometry
+
+        path = source.get("fpath")
+        if not path:
+            raise ValueError(
+                f"Articulated reference {source.get('runtime_uid')!r} has no native USD asset."
+            )
+        scale = np.asarray(source.get("body_scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+        if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0).any():
+            raise ValueError(
+                "Articulated reference requires a finite positive body_scale."
+            )
+        return read_articulation_geometry(path).vertices * scale
+    shape = source.get("shape")
+    if not isinstance(shape, dict) or not shape.get("fpath"):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no mesh geometry."
+        )
+    try:
+        import trimesh
+
+        loaded = trimesh.load(str(shape["fpath"]), force="scene")
+        geometry = (
+            loaded.to_geometry()
+            if hasattr(loaded, "to_geometry")
+            else loaded.dump(concatenate=True)
+        )
+        vertices = np.asarray(geometry.vertices, dtype=np.float64)
+    except Exception as exc:
+        raise ValueError(
+            f"Could not inspect scene mesh for {source.get('runtime_uid')!r}: {exc}"
+        ) from exc
+    if vertices.ndim != 2 or vertices.shape[1] != 3 or not vertices.size:
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has empty mesh geometry."
+        )
+    # DexSim converts glTF's Y-up vertices into its Z-up object-local basis.
+    result = np.column_stack((vertices[:, 0], -vertices[:, 2], vertices[:, 1]))
+    scale = np.asarray(source.get("body_scale", [1.0, 1.0, 1.0]), dtype=np.float64)
+    if scale.shape != (3,) or not np.isfinite(scale).all():
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has invalid body_scale."
+        )
+    return result * scale
+
+
+def _position(source: dict[str, Any]) -> tuple[float, float, float]:
+    """Return one finite source position."""
+    value = source.get("init_pos")
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has no three-value init_pos."
+        )
+    result = tuple(float(item) for item in value)
+    if not all(math.isfinite(item) for item in result):
+        raise ValueError(
+            f"Scene object {source.get('runtime_uid')!r} has invalid init_pos."
+        )
+    return result
+
+
+def _handover_position_z(table_top_z: float | None) -> float:
+    """Place the dual-arm exchange at a scene-relative reachable clearance."""
+    if table_top_z is None or not math.isfinite(float(table_top_z)):
+        raise ValueError("Hand-over grounding requires a derived tabletop height.")
+    return float(table_top_z) + _DUAL_FRANKA_HANDOVER_CLEARANCE
+
+
+def _translation_pose(x: float, y: float, z: float) -> list[float]:
+    return [
+        1.0,
+        0.0,
+        0.0,
+        float(x),
+        0.0,
+        1.0,
+        0.0,
+        float(y),
+        0.0,
+        0.0,
+        1.0,
+        float(z),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+
+
+def _program_identifier(task_id: str) -> str:
+    normalized = "".join(
+        character if character.isalnum() or character == "_" else "_"
+        for character in str(task_id).strip().lower()
+    ).strip("_")
+    if not normalized:
+        raise ValueError("task_id does not contain a usable program identifier.")
+    return f"gen_sim_{normalized}"
+
+
+def _write_json(path: Path, value: Any) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _single_target_pose(
+    graph: SemanticTaskGraph,
+    target_id: str,
+) -> dict[str, Any]:
+    """Return one exact generated target pose."""
+    target = graph["targets"].get(target_id)
+    if not isinstance(target, dict):
+        raise ValueError(f"Missing generated target {target_id!r}.")
+    values = target.get("values")
+    if not isinstance(values, list) or len(values) != 1:
+        raise ValueError(f"Generated target {target_id!r} must contain one pose.")
+    pose = values[0]
+    if (
+        not isinstance(pose, dict)
+        or not isinstance(pose.get("position"), list)
+        or len(pose["position"]) != 3
+        or not isinstance(pose.get("quaternion_xyzw"), list)
+        or len(pose["quaternion_xyzw"]) != 4
+    ):
+        raise ValueError(f"Generated target {target_id!r} has an invalid pose.")
+    return pose
+
+
+def _longest_local_axis(source: dict[str, Any]) -> list[float]:
+    """Return the longest axis in the simulator rigid-body local frame."""
+    source_axis = _longest_source_axis(source)
+    shape = source.get("shape", {})
+    path = shape.get("fpath") if isinstance(shape, dict) else None
+    if path and Path(str(path)).suffix.lower() in {".glb", ".gltf"}:
+        # glTF is Y-up. DexSim converts it to Z-up while importing the render
+        # mesh, so semantic axes must follow the same source-to-body mapping.
+        x_axis, y_axis, z_axis = source_axis
+        return [x_axis, -z_axis, y_axis]
+    return source_axis
+
+
+def _longest_source_axis(source: dict[str, Any]) -> list[float]:
+    """Return the longest axis in the source mesh coordinate frame."""
+    extents = _local_extents(source)
+    if extents is None:
+        return [0.0, 0.0, 1.0]
+    axis = [0.0, 0.0, 0.0]
+    axis[max(range(3), key=extents.__getitem__)] = 1.0
+    return axis
+
+
+def _local_extents(source: dict[str, Any]) -> list[float] | None:
+    """Return finite positive local geometry extents when available."""
+    bounds = _local_bounds(source)
+    if bounds is None:
+        return None
+    return [maximum - minimum for minimum, maximum in zip(*bounds, strict=True)]
+
+
+def _local_bounds(source: dict[str, Any]) -> tuple[list[float], list[float]] | None:
+    """Return finite local geometry bounds when available."""
+    shape = source.get("shape", {})
+    if not isinstance(shape, dict):
+        return None
+    if shape.get("shape_type") == "Cube":
+        size = shape.get("size")
+        if isinstance(size, list) and len(size) == 3:
+            extents = [float(value) for value in size]
+            if min(extents) <= 0.0:
+                return None
+            return (
+                [-value / 2.0 for value in extents],
+                [value / 2.0 for value in extents],
+            )
+    path = shape.get("fpath")
+    if not path:
+        return None
+    try:
+        import trimesh
+
+        geometry = trimesh.load(str(path), force="scene").to_geometry()
+        bounds = [[float(value) for value in row] for row in geometry.bounds]
+    except (OSError, TypeError, ValueError):
+        return None
+    if (
+        len(bounds) != 2
+        or any(len(row) != 3 for row in bounds)
+        or any(maximum <= minimum for minimum, maximum in zip(*bounds, strict=True))
+    ):
+        return None
+    return bounds[0], bounds[1]
+
+
+def _upright_release_clearance(source: dict[str, Any]) -> float:
+    """Return the E2 recipe's drop distance above the final support surface."""
+    extents = _local_extents(source)
+    if extents is None:
+        raise ValueError("Upright release requires finite object extents.")
+    ordered_extents = sorted(extents)
+    slenderness = ordered_extents[-1] / max(ordered_extents[-2], 1.0e-6)
+    return (
+        _SLENDER_UPRIGHT_RELEASE_CLEARANCE
+        if slenderness >= 2.5
+        else _UPRIGHT_RELEASE_CLEARANCE
+    )
+
+
+def _refine_upright_targets(
+    graph: SemanticTaskGraph,
+    scene: Any,
+) -> SemanticTaskGraph:
+    """Use normalized mesh origins and the stage's declared supporting surface."""
+    selected = deepcopy(graph)
+    objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    table = objects.get("table")
+    if table is None:
+        return selected
+    if scene.table_top_z is None:
+        return selected
+    table_top = float(scene.table_top_z)
+    support_heights: dict[str, float] = {}
+    upright_objects: set[str] = set()
+    for node in selected["nodes"]:
+        call = node["call"]
+        if call.get("call_id") in {_ALIGN_HELD_CALL_ID, _AXIS_ALIGN_CALL_ID}:
+            upright_objects.add(call["arguments"]["object"])
+        if call.get("call_id") == _UPRIGHT_PLACE_CALL_ID:
+            support_id = call["arguments"]["reference"]
+            support = objects[support_id]
+            _, top = _vertical_mesh_bounds(
+                support, axis_aligned=support_id in upright_objects
+            )
+            support_heights[node["task_instance_id"]] = _position(support)[2] + top
+    target_routes: dict[str, tuple[str, str]] = {}
+    target_heights: dict[str, float] = {}
+    for node in selected["nodes"]:
+        call = node["call"]
+        if (
+            node.get("task_type") not in {"E1", "E2", "E4"}
+            or call.get("kind") != "registered"
+            or call.get("call_id")
+            not in {
+                _MOVE_HELD_OBJECT_CALL_ID,
+                _PICK_CALL_ID,
+                _ALIGN_HELD_CALL_ID,
+                _CLEAR_RELEASED_CALL_ID,
+            }
+        ):
+            continue
+        arguments = call.get("arguments", {})
+        object_id = str(arguments.get("object", ""))
+        target_id = str(arguments.get("target", ""))
+        resource = str(call.get("resources", {}).get("primary", ""))
+        target_routes[target_id] = (object_id, resource)
+        support_height = support_heights.get(node["task_instance_id"], table_top)
+        target_heights[target_id] = support_height
+        # Place owns the final descent; its release target still needs the
+        # same mesh-origin refinement when no separate final Move is emitted.
+        target_routes[f"{node['task_instance_id']}_upright_target"] = (
+            object_id,
+            resource,
+        )
+        target_heights[f"{node['task_instance_id']}_upright_target"] = support_height
+    for target_id, (object_id, resource) in target_routes.items():
+        source = objects.get(object_id)
+        target = selected["targets"].get(target_id) if target_id is not None else None
+        bounds = _local_bounds(source) if source is not None else None
+        if bounds is None or not isinstance(target, dict):
+            continue
+        source_axis = _longest_source_axis(source)
+        axis = _longest_local_axis(source)
+        axis_index = source_axis.index(1.0)
+        local_minimum = bounds[0][axis_index]
+        values = target.get("values")
+        if not isinstance(values, list) or len(values) != 1:
+            continue
+        position = values[0].get("position")
+        if not isinstance(position, list) or len(position) != 3:
+            continue
+        clearance = _upright_release_clearance(source)
+        position[2] = target_heights[target_id] + clearance - local_minimum
+        if target_id.endswith("_upright_staging_target"):
+            position[2] += _UPRIGHT_STAGING_CLEARANCE
+        values[0]["quaternion_xyzw"] = _upright_target_quaternion(
+            source,
+            axis,
+            world_yaw=(math.pi if resource == "right" else 0.0),
+        )
+    return validate_semantic_task_graph(selected)
+
+
+def _upright_target_quaternion(
+    source: dict[str, Any],
+    local_axis: list[float],
+    *,
+    world_yaw: float,
+) -> list[float]:
+    """Rotate the current object frame so its selected positive axis is world +Z."""
+    import torch
+
+    from embodichain.utils.math import (
+        axis_angle_to_rotation_matrix,
+        matrix_from_quat,
+        quat_from_euler_xyz,
+        quat_from_matrix,
+    )
+
+    init_rot = source.get("init_rot")
+    if not isinstance(init_rot, list) or len(init_rot) != 3:
+        raise ValueError(
+            f"E2 object {source.get('runtime_uid')!r} requires three-value init_rot."
+        )
+    angles = torch.deg2rad(torch.tensor(init_rot, dtype=torch.float32))
+    quaternion = quat_from_euler_xyz(angles[0], angles[1], angles[2])
+    rotation = matrix_from_quat(quaternion)
+    axis = torch.tensor(local_axis, dtype=torch.float32)
+    source_axis = torch.nn.functional.normalize(rotation @ axis, dim=0)
+    target_axis = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32)
+    cross = torch.linalg.cross(source_axis, target_axis)
+    dot = torch.clamp(torch.dot(source_axis, target_axis), -1.0, 1.0)
+    cross_norm = torch.linalg.vector_norm(cross)
+    if float(cross_norm) <= 1.0e-6:
+        if float(dot) >= 0.0:
+            delta = torch.eye(3, dtype=torch.float32)
+        else:
+            basis = torch.eye(3, dtype=torch.float32)[
+                torch.argmin(torch.abs(source_axis))
+            ]
+            perpendicular = torch.nn.functional.normalize(
+                torch.linalg.cross(source_axis, basis), dim=0
+            )
+            delta = axis_angle_to_rotation_matrix(perpendicular * math.pi)
+    else:
+        rotation_axis = cross / cross_norm
+        angle = torch.atan2(cross_norm, dot)
+        delta = axis_angle_to_rotation_matrix(rotation_axis * angle)
+    target_rotation = delta @ rotation
+    if world_yaw:
+        target_rotation = (
+            axis_angle_to_rotation_matrix(
+                torch.tensor([0.0, 0.0, world_yaw], dtype=torch.float32)
+            )
+            @ target_rotation
+        )
+    target_quaternion = quat_from_matrix(target_rotation)
+    return [float(value) for value in target_quaternion]
+
+
+def _container_target_pose(
+    container: dict[str, Any],
+    child: dict[str, Any],
+    *,
+    resource: str,
+    embodiment: dict[str, Any] | None,
+    occupied: Sequence[tuple[list[float], dict[str, Any]]] = (),
+) -> list[float] | None:
+    """Ground an arm-side landing on a measured, nearly level container floor."""
+    if embodiment is None:
+        return None
+    import trimesh
+    from scipy.spatial.transform import Rotation
+
+    from ._task_program.container_targets import select_container_landing
+
+    simulation = embodiment["simulation"]
+    mount = next(
+        (
+            item
+            for item in simulation.get("urdf_cfg", {}).get("components", ())
+            if item["component_type"] == f"{resource}_arm"
+        ),
+        None,
+    )
+    if mount is None:
+        return None
+
+    def pose(source: dict[str, Any]) -> np.ndarray:
+        if source.get("init_local_pose") is not None:
+            return np.asarray(source["init_local_pose"], dtype=float)
+        result = np.eye(4)
+        result[:3, :3] = Rotation.from_euler(
+            "XYZ", source.get("init_rot", [0.0, 0.0, 0.0]), degrees=True
+        ).as_matrix()
+        result[:3, 3] = _position(source)
+        return result
+
+    container_pose = pose(container)
+    container_rotation = container_pose[:3, :3]
+    if container_rotation[2, 2] < math.cos(math.radians(5.0)):
+        return None
+    robot_pose = pose(simulation)
+    root_world = (
+        robot_pose[:3, :3] @ np.asarray(mount["transform"], dtype=float)[:3, 3]
+        + robot_pose[:3, 3]
+    )
+    root_local = container_rotation.T @ (root_world - container_pose[:3, 3])
+    mesh = trimesh.load(str(container["shape"]["fpath"]), force="scene").to_geometry()
+    mesh.vertices = _mesh_vertices(container)
+
+    def local_vertices(item: dict[str, Any]) -> np.ndarray:
+        return _mesh_vertices(item) @ (container_rotation.T @ pose(item)[:3, :3]).T
+
+    child_vertices = local_vertices(child)
+    occupied_footprints = [
+        (
+            float(target[3]),
+            float(target[7]),
+            float(np.linalg.norm(local_vertices(previous)[:, :2], axis=1).max()),
+        )
+        for target, previous in occupied
+    ]
+    translation = select_container_landing(
+        mesh, child_vertices, root_local, occupied=occupied_footprints
+    )
+    return None if translation is None else _translation_pose(*translation)
+
+
+def _support_target_pose(
+    support: dict[str, Any],
+    child: dict[str, Any],
+    *,
+    axis_aligned: bool,
+) -> list[float]:
+    """Build a conservative object-center target above a support entity."""
+    support_extents = _local_extents(support) or [0.1, 0.1, 0.1]
+    child_extents = _local_extents(child) or [0.05, 0.05, 0.05]
+    child_half_height = max(child_extents) / 2.0
+    translation = [0.0, 0.0, 0.0]
+    if axis_aligned:
+        normal = _longest_local_axis(support)
+        support_bounds = _local_bounds(support)
+        source_axis = _longest_source_axis(support)
+        source_axis_index = source_axis.index(1.0)
+        support_top = (
+            support_extents[source_axis_index] / 2.0
+            if support_bounds is None
+            else support_bounds[1][source_axis_index]
+        )
+        distance = support_top + child_half_height + 0.01
+        translation = [component * distance for component in normal]
+    else:
+        attributes = support.get("attributes", {})
+        aabb = (
+            attributes.get("final_world_aabb") if isinstance(attributes, dict) else None
+        )
+        position = support.get("init_pos", [0.0, 0.0, 0.0])
+        if isinstance(aabb, dict) and isinstance(aabb.get("max"), list):
+            surface_height = float(aabb["max"][2]) - float(position[2])
+        else:
+            surface_height = support_extents[2] / 2.0
+        translation[2] = surface_height + child_half_height + 0.01
+    return _translation_pose(*translation)

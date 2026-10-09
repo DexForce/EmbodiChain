@@ -39,6 +39,8 @@ from embodichain.lab.sim.utility.import_utils import (
     lazy_import_pytorch_kinematics,
 )
 
+__all__ = ["PytorchSolverCfg", "PytorchSolver"]
+
 
 @configclass
 class PytorchSolverCfg(SolverCfg):

@@ -174,7 +174,9 @@ class SceneLayoutConstructor:
                 assert table.support_surface_z is not None
                 update_scene_object_y_up_pose_from_z_up_support(
                     scene_object=assets_by_id[root_id],
-                    support_region_z=table.support_surface_z,
+                    support_region_z=(
+                        table.support_surface_z * table.scale[1] + table.pos[1]
+                    ),
                     center_xy=solved_xy,
                     clearance_m=0.02,  # Lift dynamic roots before gravity settling.
                 )

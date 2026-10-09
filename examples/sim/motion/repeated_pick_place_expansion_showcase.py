@@ -332,7 +332,7 @@ def main(argv: list[str] | None = None) -> None:
                 "task config must bind a expansion policy when "
                 "--expansion-profile is omitted"
             )
-        profile, _, _ = request
+        profile, _, _, _ = request
     else:
         profile = load_expansion_profile(args.expansion_profile)
     if not isinstance(profile, CombinedExpansionProfile):

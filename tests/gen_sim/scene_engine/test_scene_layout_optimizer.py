@@ -472,3 +472,67 @@ def test_parent_optimizer_applies_sibling_planar_relation(tmp_path: Path) -> Non
         solved_xy_by_id[right_id][0] - solved_xy_by_id[left_id][0]
         >= _ASSET_SIDE_LENGTH_M + _RELATION_CLEARANCE_M - 1e-6
     )
+
+
+def test_offset_legacy_table_uses_world_support_for_edit_layout(tmp_path: Path) -> None:
+    import json
+    from types import SimpleNamespace
+    from embodichain.gen_sim.task_engine.orchestration.legacy_scene import (
+        convert_legacy_gym_project,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_importer import (
+        SceneExportImporter,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_utils import (
+        measure_scene_object_z_up_world_aabb,
+    )
+    from embodichain.gen_sim.scene_engine.pipeline.utils.scene_layout_constructor import (
+        SceneLayoutGroup,
+        SceneLayoutProblem,
+    )
+
+    source = tmp_path / "source.json"
+    source.write_text(
+        json.dumps(
+            {
+                "background": [
+                    {
+                        "uid": "table",
+                        "shape": {"shape_type": "Cube", "size": [1.0, 1.0, 0.1]},
+                        "init_pos": [0.0, 0.0, 0.5],
+                    }
+                ],
+                "rigid_object": [
+                    {
+                        "uid": "cube",
+                        "shape": {"shape_type": "Cube", "size": [0.05] * 3},
+                        "init_pos": [0.3, 0.2, 0.6],
+                    }
+                ],
+            }
+        )
+    )
+    revision = convert_legacy_gym_project(source, tmp_path / "revision")
+    scene, graph = SceneExportImporter(
+        output_root=revision.output_root
+    ).import_scene_and_graph()
+    group = SceneLayoutGroup("table", ["cube"])
+    problem = SceneLayoutProblem(
+        scene, graph, {"cube"}, {"cube": scene.assets[0].center_xy}, [group]
+    )
+    constructor = SceneLayoutConstructor(
+        formal_scene=scene,
+        goal_scene_graph=graph,
+        layout_variable_ids={"cube"},
+        generated_scene_objects=[],
+        output_root=tmp_path / "layout",
+    )
+    constructor._current_xy_by_id = {"cube": scene.assets[0].center_xy}
+    constructor.table_surface_layout_optimizer = SimpleNamespace(
+        optimize=lambda problem: {"cube": [0.0, 0.0]}
+    )
+    constructor._settle_table_group_dynamic_roots = lambda **kwargs: None
+    constructor._optimize_table_group(layout_problem=problem, group=group)
+    top = measure_scene_object_z_up_world_aabb(scene_object=scene.table)[1][2]
+    bottom = measure_scene_object_z_up_world_aabb(scene_object=scene.assets[0])[0][2]
+    np.testing.assert_allclose(bottom, top + 0.02, atol=1e-6)

@@ -310,7 +310,7 @@ pip install -e ".[gensim]" \
 > [!TIP]
 > When using **uv** from a source checkout, `pyproject.toml` already defines the Blender index under `[tool.uv.index]` for the `bpy` source. You still need the DexForce index flags for `dexsim_engine`.
 
-For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/simready_pipeline.md).
+For SimReady pipeline usage and LLM configuration, see [SimReady Asset Pipeline](../features/generative_sim/asset_engine.md).
 
 ## Verify installation
 

@@ -66,7 +66,10 @@ gensim = [
   "requests",
   "Pillow",
   "scipy",
+  "shapely",
   "matplotlib",
+  "yourdfpy>=0.0.60",
+  "python-fcl>=0.7.0.11",
 ]
 
 [project.scripts]

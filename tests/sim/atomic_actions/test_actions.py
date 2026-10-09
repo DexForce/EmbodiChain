@@ -1422,6 +1422,69 @@ def test_move_held_object_yaw_freedom_retains_successful_rows() -> None:
     torch.testing.assert_close(held.object_to_eef, grasp_before)
 
 
+def test_move_held_object_staged_yaw_reuses_clearance_heading() -> None:
+    generator = _motion_generator()
+    dt_first = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1)
+    dt_second = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT, CONTROL_DT]]).repeat(
+        NUM_ENVS, 1
+    )
+    second_positions = torch.full((NUM_ENVS, 4, ARM_DOF), 0.3)
+    second_positions[:, 0] = 0.1
+    second_positions[1, 0] = 0.2
+    generator.generate = Mock(
+        side_effect=[
+            PlanResult(
+                success=torch.zeros(NUM_ENVS, dtype=torch.bool),
+                positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.tensor([True, False]),
+                positions=torch.full((NUM_ENVS, 3, ARM_DOF), 0.1),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.tensor([False, True]),
+                positions=torch.full((NUM_ENVS, 3, ARM_DOF), 0.2),
+                dt=dt_first,
+            ),
+            PlanResult(
+                success=torch.ones(NUM_ENVS, dtype=torch.bool),
+                positions=second_positions,
+                dt=dt_second,
+            ),
+        ]
+    )
+    action = _bind_action(generator, MoveHeldObject())
+    held = _held()
+    task = TaskState(batch_size=NUM_ENVS, device="cpu", held_objects={"arm": held})
+    target = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    target[:, :, 2, 3] = torch.tensor([0.8, 0.8, 0.6])
+
+    plan = _plan_action(
+        action,
+        _invocation(
+            action,
+            HeldObjectPoseGoal(
+                target,
+                world_yaw_free=True,
+                world_yaw_free_path=True,
+            ),
+        ),
+        _context(task),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert generator.generate.call_count == 4
+    final_states = generator.generate.call_args_list[-1].args[0]
+    final_pose = final_states[0].xpos
+    assert final_pose.shape == (NUM_ENVS, 4, 4)
+    assert plan.diagnostics is not None
+    assert plan.diagnostics.metadata["world_yaw_offsets_rad"] == pytest.approx(
+        [math.pi / 4, -math.pi / 4]
+    )
+
+
 @pytest.mark.parametrize("free_yaw, attempts", [(False, 1), (True, 8)])
 def test_move_held_object_yaw_search_fails_closed(
     free_yaw: bool, attempts: int
@@ -5351,8 +5414,10 @@ def test_handover_can_end_with_receiving_resource_holding_object(
     assert torch.all(trajectory.positions[:, -1, DUAL_ARM_DOF + 2 :] == 1)
 
 
+@pytest.mark.parametrize("source_hold_mode", ["observed", "grasp_command"])
 def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
+    source_hold_mode: str,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
     action = _bind_action(_dual_motion_generator(), HandOver())
@@ -5412,6 +5477,20 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         ),
     )
 
+    binding = _dual_binding(action, "source", "destination")
+    expected_source_hold = (
+        source_hand_qpos
+        if source_hold_mode == "observed"
+        else binding.endpoint("source", "grasp").joint_positions(
+            "grasp", num_envs=NUM_ENVS, device="cpu", dtype=torch.float32
+        )
+    )
+    options = HandOverOptions(
+        release_at_target=False,
+        receive_pick_object_part="center",
+    )
+    if source_hold_mode == "grasp_command":
+        options = replace(options, source_hold_mode=source_hold_mode)
     plan = _plan_action(
         action,
         ActionInvocation(
@@ -5420,12 +5499,9 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
                 semantics,
                 target_pose=SceneEntityPose("handover_target"),
             ),
-            binding=_dual_binding(action, "source", "destination"),
+            binding=binding,
             motion_policy=MotionPolicy(sample_count=60),
-            skill_options=HandOverOptions(
-                release_at_target=False,
-                receive_pick_object_part="center",
-            ),
+            skill_options=options,
         ),
         context,
     )
@@ -5468,11 +5544,11 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         trajectory[
             :, transfer.start : release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF
         ],
-        source_hand_qpos[:, None].expand(-1, release.start - transfer.start, -1),
+        expected_source_hold[:, None].expand(-1, release.start - transfer.start, -1),
     )
     torch.testing.assert_close(
         trajectory[:, release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF],
-        source_hand_qpos,
+        expected_source_hold,
     )
 
 
@@ -5932,6 +6008,15 @@ def test_handover_requires_antipodal_affordance_and_valid_options() -> None:
         HandOverOptions(hand_interp_steps=0)
     with pytest.raises(ValueError, match="retreat_distance"):
         HandOverOptions(retreat_distance=float("nan"))
+
+
+def test_handover_source_hold_option_preserves_positional_constructor() -> None:
+    """Existing callers keep their release and resource-selection arguments."""
+    options = HandOverOptions(0.1, 0.1, 10, 4, 20, 0.1, "bottom", False, "bound")
+
+    assert options.release_at_target is False
+    assert options.arm_selection == "bound"
+    assert options.source_hold_mode == "observed"
 
 
 def test_handover_source_retreat_retraces_grasp_before_lifting() -> None:
@@ -7297,3 +7382,35 @@ def test_assemble_place_reports_sampled_symmetry() -> None:
     assert plan.diagnostics.metadata["affordance_sample"]["assembly"][
         "candidate_ids"
     ] == [0, 1]
+
+
+def test_staged_yaw_fallback_replans_clearance_and_descent_together() -> None:
+    generator = _motion_generator()
+    dt = torch.tensor([[0.0, CONTROL_DT, CONTROL_DT]]).repeat(NUM_ENVS, 1)
+    replies = iter([True, False, True, True])
+    calls = []
+
+    def generate(states, options=None):
+        calls.append([state.xpos.clone() for state in states])
+        return PlanResult(
+            success=torch.full((NUM_ENVS,), next(replies)),
+            positions=torch.zeros(NUM_ENVS, 3, ARM_DOF),
+            dt=dt.clone(),
+        )
+
+    generator.generate = generate
+    action = _bind_action(generator, MoveHeldObject())
+    targets = torch.eye(4).repeat(NUM_ENVS, 3, 1, 1)
+    before = targets.clone()
+    options = SimpleNamespace(start_qpos=torch.zeros(NUM_ENVS, ARM_DOF))
+    result, yaws, _ = action._plan_staged_yaw_free_path(
+        targets,
+        torch.eye(4).repeat(NUM_ENVS, 1, 1, 1),
+        options,
+        torch.ones(NUM_ENVS, dtype=torch.bool),
+    )
+    assert result.success.all()
+    assert len(calls) == 4
+    torch.testing.assert_close(calls[2][1][:, :3, :3], calls[3][0][:, :3, :3])
+    torch.testing.assert_close(yaws, torch.full((NUM_ENVS,), math.pi / 4))
+    torch.testing.assert_close(targets, before)
