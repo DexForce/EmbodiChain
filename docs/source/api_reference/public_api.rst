@@ -1600,6 +1600,20 @@ embodichain.lab.sim.spawn.usd
    articulation_desc_from_usd
    rigid_desc_from_usd
 
+embodichain.lab.sim.utility.dynamic_pybind
+----------------------------------------
+
+Install the projective UV helper on DexSim render bodies. The helper projects
+vertices across mesh segments and adapts UV storage to the pinned DexSim
+0.5.1rc1 binding before writing each segment.
+
+.. currentmodule:: embodichain.lab.sim.utility.dynamic_pybind
+
+.. autosummary::
+
+   set_projective_uv
+   init_dynamic_pybind
+
 embodichain.lab.sim.utility.render_utils
 ----------------------------------------
 
