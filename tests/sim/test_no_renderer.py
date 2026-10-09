@@ -29,7 +29,7 @@ import pytest
 
 @pytest.mark.subprocess_sim
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", ["default", "newton"])
+@pytest.mark.parametrize("backend", ["default", "default-cuda", "newton"])
 def test_no_render_world_steps_and_resets(backend: str, tmp_path: Path) -> None:
     urdf = tmp_path / "slider.urdf"
     urdf.write_text(
@@ -98,7 +98,9 @@ def _run_world(backend: str, urdf_path: str) -> None:
             },
         )
         if backend == "newton"
-        else DefaultPhysicsCfg(device="cpu", physics_dt=0.005)
+        else DefaultPhysicsCfg(
+            device="cuda:0" if backend == "default-cuda" else "cpu", physics_dt=0.005
+        )
     )
     cfg = SimulationManagerCfg(
         headless=True,
@@ -146,6 +148,46 @@ def _run_world(backend: str, urdf_path: str) -> None:
         )
         sim.prepare()
         assert articulation.dof == 1
+        # Root-only writes must move descendants immediately without a step.
+        links_before = articulation.body_data.body_link_pose.clone()
+        body_before = body.get_local_pose().clone()
+        moved_root = articulation.get_local_pose()[1:2].clone()
+        moved_root[:, 0] += 1.0
+        articulation.set_state(env_ids=[1], root_pose=moved_root)
+        links_after = articulation.body_data.body_link_pose.clone()
+        expected_links = links_before.clone()
+        expected_links[1, :, 0] += 1.0
+        torch.testing.assert_close(links_after, expected_links)
+        torch.testing.assert_close(body.get_local_pose(), body_before)
+        print(f"{backend}: root-only descendant propagation passed", flush=True)
+        if backend == "newton":
+            # The published native API must not download command selections.
+            with pytest.MonkeyPatch.context() as patch:
+
+                def reject_host_selection(tensor, *args, **kwargs):
+                    if tensor.dtype == torch.long and tensor.device.type == "cuda":
+                        raise AssertionError("CUDA selection was copied to CPU")
+                    return original_cpu(tensor, *args, **kwargs)
+
+                original_cpu = torch.Tensor.cpu
+                patch.setattr(torch.Tensor, "cpu", reject_host_selection)
+                articulation.set_qpos(
+                    torch.full((2, 1), 0.03, device=sim.device), env_ids=[0, 1]
+                )
+                articulation.set_qvel(
+                    torch.full((1, 1), 0.04, device=sim.device),
+                    env_ids=torch.tensor([1], device=sim.device),
+                    joint_ids=torch.tensor([0], device=sim.device),
+                )
+            torch.testing.assert_close(
+                articulation.body_data.target_qpos,
+                torch.full((2, 1), 0.03, device=sim.device),
+            )
+            torch.testing.assert_close(
+                articulation.body_data.target_qvel,
+                torch.tensor([[0.0], [0.04]], device=sim.device),
+            )
+            print(f"{backend}: device-resident control selections passed", flush=True)
         state = torch.full((2, 1), 0.05, device=sim.device)
         articulation.set_qpos(state, target=False)
         torch.testing.assert_close(articulation.body_data.qpos, state)

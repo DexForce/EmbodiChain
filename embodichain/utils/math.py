@@ -45,6 +45,8 @@ def look_at_to_pose(
         if not isinstance(eye, torch.Tensor)
         else eye
     )
+    if not eye.is_floating_point():
+        eye = eye.to(dtype=torch.float32)
     target = torch.as_tensor(target, dtype=eye.dtype, device=eye.device)
     up = torch.as_tensor(up, dtype=eye.dtype, device=eye.device)
 

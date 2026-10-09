@@ -1898,7 +1898,7 @@ class Articulation(BatchEntity):
                     )
                 fields[name] = value
         self._data.articulation_view.apply_state(
-            None if env_ids is None else local_env_ids,
+            env_ids,
             joint_ids,
             clear_dynamics=clear_dynamics,
             **fields,
@@ -1908,6 +1908,13 @@ class Articulation(BatchEntity):
                 self._stabilize_newton_mimic_target_write(
                     fields[name], local_env_ids, local_joint_ids, velocity=velocity
                 )
+        if (
+            root_pose is not None
+            and self.device.type == "cpu"
+            and not self._data.is_newton_backend
+        ):
+            # Publish native CPU link transforms without advancing physics.
+            self._world.update(0.0)
 
     def set_qpos(
         self,
@@ -2679,9 +2686,11 @@ class Articulation(BatchEntity):
     ) -> None:
         """Set root-link linear and angular velocity in world coordinates.
 
-        If a native write fails, restore both velocity components for the
-        selected rows before propagating the error. A failed restoration raises
-        a rollback error chained from the original write error.
+        Default snapshots both components and attempts to restore them if a
+        native write fails. A failed restoration raises a rollback error
+        chained from the original write error. Newton validates both components
+        before writing through the batch API; execution failures do not roll
+        back state.
 
         Args:
             velocity: Selected root velocities with shape ``(N, 6)``; linear

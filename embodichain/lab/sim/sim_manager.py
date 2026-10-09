@@ -4532,14 +4532,19 @@ class SimulationManager:
         self,
         env_ids: Sequence[int] | None = None,
         excluded_uids: Sequence[str] | None = None,
+        *,
+        excluded_sensor_uids: Sequence[str] | None = None,
     ) -> None:
         """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
+            excluded_sensor_uids: Sensor UIDs to exclude without excluding
+                physical assets with the same UID.
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        excluded_sensor_uids = set(excluded_sensor_uids or ())
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
             uid for uid in articulation_uids if uid not in excluded_uids
@@ -4595,7 +4600,7 @@ class SimulationManager:
             if uid not in excluded_uids:
                 light.reset(env_ids)
         for uid, sensor in self._sensors.items():
-            if uid not in excluded_uids:
+            if uid not in excluded_uids and uid not in excluded_sensor_uids:
                 sensor.reset(env_ids)
         if use_coordinated_newton_clear:
             self._clear_newton_articulation_dynamics(newton_articulation_batch)

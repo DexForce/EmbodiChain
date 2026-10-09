@@ -891,7 +891,7 @@ def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
         torch.tensor([[1.0, 2.0, 3.0], [4.0, 50.0, 6.0]]),
     )
     assert batch.selections == []
-    assert batch.last_dof_ids == (1,)
+    assert batch.last_dof_ids == (0, 1, 2)
 
 
 def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
@@ -907,8 +907,23 @@ def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
     assert torch.equal(columns, torch.tensor([1]))
 
 
-def test_articulation_joint_write_keeps_selections_on_device() -> None:
+def test_articulation_joint_write_keeps_selections_on_device(monkeypatch) -> None:
     batch = _ArticulationBatch()
+    store_state = batch.apply_state
+
+    def native_write(**fields) -> int:
+        return store_state(
+            **{name: value for name, value in fields.items() if value is not None}
+        )
+
+    batch._binding = SimpleNamespace(apply_state=native_write)
+    # Run the published batch entry point: it normalizes rows via select(),
+    # including identity selections, before forwarding to the native binding.
+    monkeypatch.setattr(
+        batch,
+        "apply_state",
+        lambda **fields: ArticulationBatch.apply_state(batch, **fields),
+    )
     view = SceneArticulationView(
         SimpleNamespace(backend="newton"),
         batch,
@@ -923,6 +938,56 @@ def test_articulation_joint_write_keeps_selections_on_device() -> None:
 
     assert batch.force[1, 1] == 50.0
     assert batch.selections == []
+
+
+def test_articulation_static_full_rows_bypass_native_selection(monkeypatch) -> None:
+    batch = _ArticulationBatch()
+    write = Mock(wraps=batch.apply_state)
+    monkeypatch.setattr(batch, "apply_state", write)
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"), batch, torch.device("cpu")
+    )
+
+    view.apply_qf(torch.full((2, 3), 9.0), env_ids=[0, 1], joint_ids=None)
+
+    assert write.call_args.kwargs["rows"] is None
+    torch.testing.assert_close(batch.force, torch.full((2, 3), 9.0))
+
+
+@pytest.mark.parametrize(
+    ("field", "attribute", "native_field"),
+    [
+        ("qpos", "position", "joint_position"),
+        ("target_qpos", "target_position", "joint_target_position"),
+        ("qvel", "velocity", "joint_velocity"),
+        ("target_qvel", "target_velocity", "joint_target_velocity"),
+        ("qf", "force", "joint_force"),
+    ],
+)
+def test_selected_joint_state_preserves_live_unselected_values(
+    field: str, attribute: str, native_field: str, monkeypatch
+) -> None:
+    batch = _ArticulationBatch()
+    current = getattr(batch, attribute)
+
+    def fetch(out: torch.Tensor) -> int:
+        out.copy_(current)
+        return len(batch)
+
+    monkeypatch.setattr(batch, f"fetch_{native_field}", fetch, raising=False)
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"), batch, torch.device("cpu")
+    )
+    expected = current.clone()
+    for value in (50.0, 60.0):
+        current[0, 0] = expected[0, 0] = value + 1.0
+        view.apply_state(
+            env_ids=_NoHostTransferTensor([1]),
+            joint_ids=_NoHostTransferTensor([1]),
+            **{field: torch.tensor([[value]])},
+        )
+        expected[1, 1] = value
+        torch.testing.assert_close(current, expected)
 
 
 def test_articulation_clear_dynamics_clears_selected_root_and_joint_motion() -> None:

@@ -943,9 +943,9 @@ class BaseEnv(gym.Env):
                     env_ids=reset_ids,
                     # Environment sensors are reset below, including sensors
                     # supplied by custom _setup_sensors implementations.
-                    excluded_uids=[
-                        *self._detached_uids_for_reset,
-                        *(sensor.uid for sensor in self.sensors.values()),
+                    excluded_uids=self._detached_uids_for_reset,
+                    excluded_sensor_uids=[
+                        sensor.uid for sensor in self.sensors.values()
                     ],
                 )
 

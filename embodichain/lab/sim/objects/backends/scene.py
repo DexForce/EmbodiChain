@@ -442,6 +442,7 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         self._link_com_scratch: torch.Tensor | None = None
         self._root_velocity_snapshot: torch.Tensor | None = None
         self._root_pose_scratch: torch.Tensor | None = None
+        self._joint_apply_scratch: dict[str, torch.Tensor] = {}
 
     def _validate_homogeneous_layout(self) -> None:
         """Require the uniform topology promised by one EC Articulation."""
@@ -800,6 +801,9 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
         Shapes and selection semantics follow
         :meth:`ArticulationViewBase.apply_state`.
         """
+        if not isinstance(env_ids, torch.Tensor) and env_ids is not None:
+            if tuple(env_ids) == tuple(range(self._row_count)):
+                env_ids = None
         rows = None if env_ids is None else self._select_rows(env_ids)
         count = self._row_count if rows is None else len(rows)
         if count == 0:
@@ -816,6 +820,44 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
             if value is not None
         }
         columns = self._joint_columns(joint_ids) if fields else None
+        if (
+            fields
+            and root_pose is None
+            and root_velocity is None
+            and not clear_dynamics
+            and (rows is not None or isinstance(columns, torch.Tensor))
+        ):
+            # Selected control commands use the existing full-batch scatter
+            # path: DexSim otherwise downloads tensor row/DOF selections.
+            selected_rows = self._row_indices if rows is None else rows
+            selected_columns = (
+                self._joint_dof_columns
+                if columns is None
+                else torch.as_tensor(columns, dtype=torch.long, device=self.device)
+            )
+            expected = (len(selected_rows), len(selected_columns))
+            for name, value in fields.items():
+                if tuple(value.shape) != expected:
+                    raise ValueError(
+                        f"Expected {name} shape {expected}, got {tuple(value.shape)}."
+                    )
+            if not len(selected_columns):
+                return
+            for name, value in tuple(fields.items()):
+                scratch = self._joint_apply_scratch.get(name)
+                if scratch is None:
+                    scratch = torch.empty(
+                        (self._row_count, self.dof),
+                        dtype=torch.float32,
+                        device=self.device,
+                    )
+                    self._joint_apply_scratch[name] = scratch
+                _checked_batch_call(self.batch, f"fetch_{name}", scratch)
+                scratch[selected_rows[:, None], selected_columns] = value.to(
+                    self.device, torch.float32
+                )
+                fields[name] = scratch
+            rows = columns = None
         if root_pose is not None:
             if tuple(root_pose.shape) != (count, 7):
                 raise ValueError(f"Expected root_pose shape {(count, 7)}.")
@@ -825,14 +867,28 @@ class SceneArticulationView(_SceneBatchSelectionAdapter, ArticulationViewBase):
                 raise ValueError(f"Expected root_velocity shape {(count, 6)}.")
             fields["root_linear_velocity"] = root_velocity[:, :3]
             fields["root_angular_velocity"] = root_velocity[:, 3:]
+        propagate_root = (
+            root_pose is not None
+            and qpos is None
+            and not clear_dynamics
+            and not self.is_newton_backend
+        )
+        batch = self.batch
+        if propagate_root and rows is not None:
+            batch = batch.select(rows)
+            rows = None
         _checked_batch_call(
-            self.batch,
+            batch,
             "apply_state",
             rows=rows,
             dof_ids=columns,
             clear_dynamics=clear_dynamics,
             **fields,
         )
+        if propagate_root:
+            # Default's native state writer propagates qpos/clear operations,
+            # but root-only writes need an explicit descendant update.
+            _checked_batch_call(batch, "compute_kinematics")
 
     def apply_qpos(
         self,

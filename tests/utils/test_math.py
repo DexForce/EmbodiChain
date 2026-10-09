@@ -55,6 +55,23 @@ def test_look_at_keeps_vertical_camera_pose_on_eye_device(device: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "device", ["cpu", pytest.param("cuda:0", marks=pytest.mark.gpu)]
+)
+def test_look_at_promotes_integer_eye_before_converting_float_coordinates(
+    device: str,
+) -> None:
+    eye = torch.tensor([[0, 0, 1]], device=device)
+    target = [[0.25, 0.5, 0.0]]
+    up = [[0.0, 0.25, 1.0]]
+
+    pose = look_at_to_pose(eye, target, up)
+
+    assert pose.device == eye.device
+    assert torch.isfinite(pose).all()
+    torch.testing.assert_close(pose, look_at_to_pose(eye.float(), target, up))
+
+
 @pytest.mark.parametrize("backend", ["numpy", "torch"])
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("kind", ["identity", "translation", "rotation_translation"])

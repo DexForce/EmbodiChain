@@ -52,10 +52,12 @@ reads. Fetch after reset or direct writes rather than caching across them.
 `Articulation.set_root_velocity()` writes selected world-frame linear and
 angular velocities as `(N, 6)` rows. The Scene adapter validates the complete
 input before writing one selected batch; other environment rows are preserved.
-The adapter snapshots both velocity components into reusable device buffers
-before the independent native writes. On a write failure it attempts both
-restores, then propagates the original error; rollback failures are reported
-with the write error preserved as their cause.
+Default snapshots both velocity components into reusable device buffers
+before its independent native writes. On a write failure it attempts both
+restores, then propagates the original error; rollback failures preserve that
+error as their cause. Newton submits both components through the batch state
+writer, which validates before mutation and does not roll back execution
+failures.
 
 Newton root-pose writes filter unchanged rows before forwarding genuine
 changes, preserving CUDA graphs on ordinary fixed-root reset. Intentional
