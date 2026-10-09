@@ -780,6 +780,12 @@ def config_to_cfg(
 
     env_cfg.control_parts = config["env"].get("control_parts", None)
     env_cfg.sim_steps_per_control = config["env"].get("sim_steps_per_control", 4)
+    ignore_terminations = config["env"].get(
+        "ignore_terminations", env_cfg.ignore_terminations
+    )
+    if type(ignore_terminations) is not bool:
+        raise TypeError("env.ignore_terminations must be a bool.")
+    env_cfg.ignore_terminations = ignore_terminations
     env_cfg.target_control_frequency = config["env"].get(
         "target_control_frequency", None
     )

@@ -853,6 +853,44 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @pytest.mark.parametrize("value", (True, False))
+    def test_config_to_cfg_forwards_ignore_terminations(self, value: bool) -> None:
+        """The explicit environment field reaches the public typed config."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {"ignore_terminations": value},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        assert config_to_cfg(config).ignore_terminations is value
+
+    def test_config_to_cfg_preserves_default_terminations(self) -> None:
+        """Omitting the field retains the environment's termination default."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        assert config_to_cfg(config).ignore_terminations is False
+
+    @pytest.mark.parametrize("value", ("false", 0, 1, None))
+    def test_config_to_cfg_rejects_non_boolean_termination_flag(
+        self, value: object
+    ) -> None:
+        """Configuration mistakes cannot silently disable terminations."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {"ignore_terminations": value},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        with pytest.raises(TypeError, match="ignore_terminations must be a bool"):
+            config_to_cfg(config)
+
     @pytest.mark.parametrize("extension", ["json", "yaml"])
     def test_gym_config_forwards_render_bounce_limits(
         self, tmp_path: Path, extension: str
