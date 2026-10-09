@@ -1,7 +1,5 @@
 embodichain.data_pipeline.recording
-==================================
-
-.. automodule:: embodichain.data_pipeline.recording
+===================================
 
 Overview
 --------
