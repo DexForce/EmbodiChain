@@ -202,11 +202,29 @@ class PickUpOptions(ActionOptions):
     sampling and the sampled-grasp orientation/calibration adjustments.
     """
 
+    grasp_variant: str = "closest"
+    """Symmetric TCP-roll variant to select after feasibility screening.
+
+    The default ``"closest"`` preserves selection of the feasible original or
+    mirrored grasp with the smallest rotation error from the current TCP.
+    ``"original"`` and ``"mirrored"`` force one side and report an infeasible
+    pickup when that side cannot pass the kinematic checks. Explicit goal
+    grasps and ``fixed_object_to_eef`` bypass this sampled-grasp selection.
+    """
+
     def __post_init__(self) -> None:
         if self.hand_interp_steps < 1:
             raise ValueError("hand_interp_steps must be at least 1.")
         if type(self.grasp_settle_steps) is not int or self.grasp_settle_steps < 0:
             raise ValueError("grasp_settle_steps must be a non-negative integer.")
+        if not isinstance(self.grasp_variant, str) or self.grasp_variant not in {
+            "closest",
+            "original",
+            "mirrored",
+        }:
+            raise ValueError(
+                "grasp_variant must be one of 'closest', 'original', or 'mirrored'."
+            )
         if not isinstance(self.pick_object_part, str) or not self.pick_object_part:
             raise ValueError("pick_object_part must be a non-empty string.")
         if self.lift_height < 0.0:
@@ -779,12 +797,23 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             variant_quat.reshape(-1, 4),
             start_quat.reshape(-1, 4),
         ).reshape(num_envs, n_pose, 2)
-        feasible_rotation_error = torch.where(
-            pickup_success,
-            rotation_error,
-            torch.full_like(rotation_error, torch.inf),
-        )
-        best_variant_idx = feasible_rotation_error.argmin(dim=2)
+        if options.grasp_variant == "closest":
+            feasible_rotation_error = torch.where(
+                pickup_success,
+                rotation_error,
+                torch.full_like(rotation_error, torch.inf),
+            )
+            best_variant_idx = feasible_rotation_error.argmin(dim=2)
+        else:
+            # A forced variant keeps its own feasibility result instead of
+            # falling back to the other side after screening.
+            variant_index = 0 if options.grasp_variant == "original" else 1
+            best_variant_idx = torch.full(
+                (num_envs, n_pose),
+                variant_index,
+                dtype=torch.long,
+                device=self.device,
+            )
 
         env_idx = torch.arange(num_envs, device=self.device)[:, None]
         pose_idx = torch.arange(n_pose, device=self.device)[None, :]

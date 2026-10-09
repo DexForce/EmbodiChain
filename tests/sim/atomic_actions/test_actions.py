@@ -2431,6 +2431,172 @@ def test_pick_maps_canonical_grasp_frames_to_the_robot_eef() -> None:
     )
 
 
+@pytest.mark.parametrize("variant", (None, "closest"))
+@pytest.mark.parametrize(
+    "feasible_variants", ((True, True), (True, False), (False, True), (False, False))
+)
+def test_pick_default_grasp_variant_preserves_closest_feasible_selection(
+    variant: str | None, feasible_variants: tuple[bool, bool]
+) -> None:
+    """Default pickup keeps the nearest feasible roll independently per row."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    grasp_xpos = torch.eye(4).repeat(NUM_ENVS, 1, 1, 1)
+    mirrored = grasp_xpos.clone()
+    mirrored[..., :3, 0] *= -1
+    mirrored[..., :3, 1] *= -1
+    # Each row starts at a different symmetric roll, making the nearest side
+    # unambiguous when both variants pass screening.
+    start_poses = torch.cat((grasp_xpos[:1, 0], mirrored[1:, 0]))
+    generator.robot.compute_fk.side_effect = None
+    generator.robot.compute_fk.return_value = start_poses
+
+    def feasible_ik(
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed, manipulator
+        return (
+            torch.tensor(feasible_variants).expand(poses.shape[:3]).clone(),
+            torch.zeros(*poses.shape[:3], ARM_DOF),
+        )
+
+    action._compute_batch_candidate_ik = Mock(side_effect=feasible_ik)
+    options = (
+        PickUpOptions() if variant is None else PickUpOptions(grasp_variant=variant)
+    )
+    selected, success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        torch.zeros(NUM_ENVS, ARM_DOF),
+        torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        JointPositionTarget("arm", tuple(range(ARM_DOF))),
+        options,
+        torch.tensor((0.0, 0.0, -1.0)),
+    )
+
+    assert options.grasp_variant == "closest"
+    assert success.tolist() == [[any(feasible_variants)]] * NUM_ENVS
+    if all(feasible_variants):
+        expected = start_poses[:, None]
+    elif feasible_variants[1]:
+        expected = mirrored
+    else:
+        expected = grasp_xpos
+    assert torch.allclose(selected, expected)
+
+
+@pytest.mark.parametrize("variant", (None, "", "nearest", 0, [], {}))
+def test_pick_rejects_invalid_grasp_variant(variant: object) -> None:
+    """Invalid variant values fail at the options boundary."""
+    with pytest.raises(ValueError, match="grasp_variant must be one of"):
+        PickUpOptions(grasp_variant=variant)
+
+
+def test_pick_forced_grasp_variant_selects_requested_symmetric_frame() -> None:
+    """Forced grasp variants bypass the closest-roll preference."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    grasp_xpos = torch.eye(4).repeat(NUM_ENVS, 1, 1, 1)
+    grasp_xpos[..., 0, 0] = 0.0
+    grasp_xpos[..., 1, 1] = 0.0
+    grasp_xpos[..., 0, 1] = -1.0
+    grasp_xpos[..., 1, 0] = 1.0
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+    manipulator = JointPositionTarget("arm", tuple(range(ARM_DOF)))
+
+    def feasible_ik(
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed, manipulator
+        return (
+            torch.ones(poses.shape[:3], dtype=torch.bool),
+            torch.zeros(*poses.shape[:3], ARM_DOF),
+        )
+
+    action._compute_batch_candidate_ik = Mock(side_effect=feasible_ik)
+    approach_direction = torch.tensor((0.0, 0.0, -1.0))
+    original, original_success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        PickUpOptions(grasp_variant="original"),
+        approach_direction,
+    )
+    mirrored, mirrored_success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        PickUpOptions(grasp_variant="mirrored"),
+        approach_direction,
+    )
+
+    assert original_success.all() and mirrored_success.all()
+    assert torch.allclose(original, grasp_xpos)
+    expected_mirrored = grasp_xpos.clone()
+    expected_mirrored[..., :3, 0] *= -1
+    expected_mirrored[..., :3, 1] *= -1
+    assert torch.allclose(mirrored, expected_mirrored)
+
+
+@pytest.mark.parametrize("requested_variant", ("original", "mirrored"))
+def test_pick_forced_infeasible_variant_does_not_use_feasible_counterpart(
+    requested_variant: str,
+) -> None:
+    """Forced selection reports its own failure even when the other side works."""
+    generator = _motion_generator()
+    action = _bind_action(generator, PickUp())
+    grasp_xpos = torch.eye(4).repeat(NUM_ENVS, 1, 1, 1)
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    start_qpos = torch.zeros(NUM_ENVS, ARM_DOF)
+    manipulator = JointPositionTarget("arm", tuple(range(ARM_DOF)))
+    requested_index = 0 if requested_variant == "original" else 1
+
+    def counterpart_only_ik(
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del joint_seed, manipulator
+        success = torch.zeros(poses.shape[:3], dtype=torch.bool)
+        success[..., 1 - requested_index] = True
+        return success, torch.zeros(*poses.shape[:3], ARM_DOF)
+
+    action._compute_batch_candidate_ik = Mock(side_effect=counterpart_only_ik)
+    approach_direction = torch.tensor((0.0, 0.0, -1.0))
+    forced_pose, forced_success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        PickUpOptions(grasp_variant=requested_variant),
+        approach_direction,
+    )
+    default_pose, default_success = action._select_feasible_grasp_variants(
+        grasp_xpos,
+        start_qpos,
+        object_pose,
+        manipulator,
+        PickUpOptions(),
+        approach_direction,
+    )
+
+    expected_mirrored = grasp_xpos.clone()
+    expected_mirrored[..., :3, 0] *= -1
+    expected_mirrored[..., :3, 1] *= -1
+    expected_forced = grasp_xpos if requested_index == 0 else expected_mirrored
+    expected_default = expected_mirrored if requested_index == 0 else grasp_xpos
+    assert not forced_success.any()
+    assert torch.allclose(forced_pose, expected_forced)
+    assert default_success.all()
+    assert torch.allclose(default_pose, expected_default)
+
+
 def test_pick_candidate_pregrasp_uses_configured_world_approach_direction() -> None:
     """Candidate screening and trajectory generation share one approach frame."""
     generator = _motion_generator()

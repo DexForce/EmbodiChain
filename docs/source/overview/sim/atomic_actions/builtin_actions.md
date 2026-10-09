@@ -458,12 +458,17 @@ Important `PickUpOptions` fields:
 | `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and world-frame approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
 | `grasp_settle_steps` | Closed-hand hold frames before lifting |
+| `grasp_variant` | Default `closest` preserves the nearest feasible symmetric TCP roll; `original` or `mirrored` requires that side to pass screening without falling back to the other side |
 | `grasp_frame_to_eef` | Fixed SE(3) calibration from canonical grasp frames to the robot TCP |
 | `fixed_object_to_eef` | Optional task/robot-calibrated SE(3) grasp that bypasses affordance sampling when the goal has no explicit grasp |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
 | `approach_alignment_max_angle` | Optional TCP approach-alignment filter |
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
 | `obj_upright_direction`, `rotate_upright` | Optional orientation-selection behavior |
+
+`grasp_variant` controls the symmetric branch of sampled grasps, not candidate
+generation or trajectory determinism. Explicit goal grasps and
+`fixed_object_to_eef` bypass this selection.
 
 `ObjectSemantics.entity` without an ID is a deprecated compatibility path. Its
 live pose does not create an automatic scene dependency.
