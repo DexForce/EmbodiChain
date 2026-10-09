@@ -13,6 +13,7 @@ program:
   body:
     kind: segment
     name: move_rubiks_cube
+    instruction: Pick up the Rubik's cube and place it at the next target position.
     steps:
       kind: sequence
       items:

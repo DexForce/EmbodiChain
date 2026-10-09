@@ -44,7 +44,7 @@ env:
         robot_meta:
           robot_type: UR5
         instruction:
-          lang: Pull the drawer open using its handle.
+          lang: Open the drawer.
         extra:
           scene_type: cabinet
           task_description: open_drawer_generation

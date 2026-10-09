@@ -8,6 +8,7 @@ targets:
 program:
   kind: segment
   name: pour_and_return_bottle
+  instruction: Pick up the bottle, move it above the cup, pour water into the cup, and place the bottle back on the table.
   steps:
     kind: sequence
     items:

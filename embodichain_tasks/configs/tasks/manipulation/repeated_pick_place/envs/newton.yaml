@@ -83,7 +83,7 @@ env:
         # Keep the Newton deployment's dataset contract aligned with Default.
         save_path: /tmp/repeated-pick-place/datasets
         instruction:
-          lang: Move the cube through the repeated pick and place program.
+          lang: Move the cube between the two target positions three times.
         extra:
           scene_type: tabletop
           task_description: repeated_pick_place_combined

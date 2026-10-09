@@ -115,7 +115,10 @@ class StackBlocksTwoEnv(EmbodiedEnv):
                 actions=self._iter_segment_actions(trajectory),
                 name="stack_block_2_on_block_1",
                 target_uid=STACK_BLOCK_UID,
-                instruction="Pick up block 2 and place it on top of block 1.",
+                instruction=(
+                    "Pick up block 2, place it on top of block 1, "
+                    "and wait for the stack to settle."
+                ),
                 progress_total_steps=int(trajectory.shape[1]) + SETTLE_STEPS,
                 metadata={
                     "segment_index": 0,

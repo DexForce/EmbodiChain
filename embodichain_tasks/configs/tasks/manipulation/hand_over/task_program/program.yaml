@@ -9,6 +9,7 @@ targets:
 program:
   kind: segment
   name: hand_over_can
+  instruction: Transfer the can between the two grippers and move it to the delivery position.
   steps:
     kind: sequence
     items:

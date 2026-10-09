@@ -1245,3 +1245,55 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         _decode_motion_policy(
             {"sample_count": 40, "velocity_targets": mode}, path="motion"
         )
+
+
+@pytest.mark.parametrize(
+    ("task_name", "backend"),
+    [
+        ("rubiks_cube_pick_place", "default"),
+        ("repeated_pick_place", "default"),
+        ("repeated_pick_place", "newton"),
+        ("open_drawer", "default"),
+        ("open_drawer", "newton"),
+        ("hand_over", "default"),
+        ("pour_water", "default"),
+    ],
+)
+def test_segmented_examples_preserve_overall_and_segment_instructions(
+    task_name: str,
+    backend: str,
+    registered_test_ids: list[str],
+) -> None:
+    """Production composition retains both language levels for every backend."""
+    path = (
+        _tableware_config_path(task_name)
+        if task_name in _TABLEWARE_TASKS
+        else _config_path(task_name)
+    )
+    config = load_config(path)
+    if backend == "newton":
+        config["environment"] = {"component": config["environment"][backend]}
+    config["id"] = _TEST_ENV_ID
+    registered_test_ids.append(_TEST_ENV_ID)
+    cfg = config_to_cfg(config, source_path=path)
+    overall = cfg.dataset.lerobot.params["instruction"]["lang"]
+    assert isinstance(overall, str) and overall.strip()
+    assert overall != "unknown_task"
+
+    physical = _physical_components(path, config)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    catalog = deployment.integration.registration.catalog
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=catalog,
+    )
+    segments = tuple(catalog.preflight(program).iter_segments())
+    assert segments
+    for segment in segments:
+        assert isinstance(segment.instruction, str) and segment.instruction.strip()
+        assert segment.instruction != overall
