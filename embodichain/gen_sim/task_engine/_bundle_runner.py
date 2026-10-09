@@ -101,6 +101,7 @@ def execute_bundle(
     row_success = [False] * int(args.num_envs)
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
+    feedback_evidence: dict[str, Any] = {}
     env: Any = None
     probe: dict[str, Any] | None = None
     try:
@@ -230,6 +231,7 @@ def execute_bundle(
                     if not accepted and row_success[index]:
                         row_success[index] = False
                         terminal_reasons[index] = "cargo_envelope_failed"
+            feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             if result.completed and all(row_success):
                 env.reset()
             else:
@@ -240,6 +242,8 @@ def execute_bundle(
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            if not feedback_evidence:
+                feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             _write_terminal_robot_state(env, output)
             try:
                 _preserve_failed_execution_recording(
@@ -308,6 +312,7 @@ def execute_bundle(
                                         "table_actor_id": sensor.table_actor,
                                         "startup_evidence": sensor.startup_evidence(),
                                         "geometry_evidence": sensor.geometry_evidence(),
+                                        **feedback_evidence,
                                     }
                                     if twist_routes
                                     else {}
@@ -509,6 +514,28 @@ def _build_execution_report(
         "runtime_result": deepcopy(runtime_result),
         "failure": failure,
     }
+
+
+def _snapshot_twist_feedback_audit(env: Any, deployment: Any) -> dict[str, Any]:
+    """Own optional diagnostics before reset clears the episode ledger."""
+    try:
+        routes = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+        if not routes or getattr(routes[0], "feedback_enabled", False) is not True:
+            return {}
+        from ._task_program.twist_runtime import SENSOR_UID
+
+        sensor = getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
+        feedback = getattr(sensor, "_feedback_state", None)
+        if feedback is None:
+            return {}
+        return {"feedback_audit": deepcopy(list(feedback.audit))}
+    except Exception as error:
+        return {
+            "feedback_audit_error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
+        }
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:

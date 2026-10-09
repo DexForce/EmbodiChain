@@ -116,6 +116,7 @@ class TaskEngineCoordinator:
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
+        twist_mass_source: bool = False,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -213,6 +214,8 @@ class TaskEngineCoordinator:
                 for height in height_candidates:
                     try:
                         extra = {"twist_support_lift_m": height} if is_twist else {}
+                        if twist_mass_source:
+                            extra["twist_mass_source"] = True
                         graph, generated = generate_task_program_bundle(
                             graph,
                             adaptation.prepared_scene,

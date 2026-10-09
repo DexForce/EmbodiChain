@@ -218,7 +218,7 @@ def _normalize_revision_value(value: Any, *, config_root: Path) -> Any:
 
 
 def _asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
-    """Return one asset and every local XML-declared dependency transitively."""
+    """Return asset semantics and local XML-declared dependencies transitively."""
     pending = [asset_path.resolve()]
     visited: set[Path] = set()
     while pending:
@@ -228,6 +228,10 @@ def _asset_dependency_files(asset_path: Path) -> tuple[Path, ...]:
         if not path.is_file():
             raise FileNotFoundError(f"Scene asset dependency does not exist: {path}")
         visited.add(path)
+        if path.suffix.lower() in {".usd", ".usda", ".usdc"}:
+            semantics = path.with_suffix(".twist.json")
+            if semantics.is_file():
+                pending.append(semantics.resolve())
         if path.suffix.lower() not in {".urdf", ".xml", ".mjcf", ".xacro"}:
             continue
         try:

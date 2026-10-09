@@ -39,8 +39,15 @@ GRIPPER_COLLISION_CALIBRATIONS = {
 }
 
 
+class TwistGripDimensionError(ValueError):
+    """An explicit assembly candidate violates unchanged gripper dimensions."""
+
+
 def select_twist_scale(
-    route: TwistRoute, embodiment: Mapping[str, Any]
+    route: TwistRoute,
+    embodiment: Mapping[str, Any],
+    *,
+    grip_depth_candidate: float | None = None,
 ) -> tuple[float | None, dict[str, Any]]:
     """Keep compatible sizes; propose a measured uniform scale for mismatches.
 
@@ -95,15 +102,65 @@ def select_twist_scale(
         reasons.append("insufficient_axial_grip_depth")
     if not values["minimum_opening_width"] <= width <= usable_width:
         reasons.append("outside_usable_gripper_opening")
-    factor = PREFERRED_GRIP_DEPTH / depth if reasons else 1.0
+    if grip_depth_candidate is not None and (
+        type(grip_depth_candidate) not in (int, float)
+        or not math.isfinite(grip_depth_candidate)
+        or grip_depth_candidate <= 0
+    ):
+        raise ValueError(
+            "E8 explicit grip-depth candidate must be finite and positive."
+        )
+    factor = (
+        float(grip_depth_candidate) / depth
+        if grip_depth_candidate is not None
+        else PREFERRED_GRIP_DEPTH / depth if reasons else 1.0
+    )
+    selection_audit = {}
+    if grip_depth_candidate is None and reasons:
+        lower = max(minimum_depth / depth, values["minimum_opening_width"] / width)
+        upper = usable_width / width
+        # Keep the representable interval inside the measured dimensional bounds.
+        if (
+            depth * lower < minimum_depth
+            or width * lower < values["minimum_opening_width"]
+        ):
+            lower = math.nextafter(lower, math.inf)
+        if width * upper > usable_width:
+            upper = math.nextafter(upper, 0.0)
+        if lower > upper:
+            raise ValueError(
+                "E8 grip-depth candidate cannot satisfy the selected gripper's "
+                "depth and opening bounds."
+            )
+        preferred_factor = factor
+        factor = min(max(factor, lower), upper)
+        if factor != preferred_factor:
+            selection_audit = {
+                "candidate_selection": "preferred_depth_clamped_to_feasible_scale_interval",
+                "feasible_uniform_scale_factor_interval": [lower, upper],
+                "preferred_candidate_limit": (
+                    "maximum_opening_width"
+                    if preferred_factor > upper
+                    else (
+                        "minimum_grip_depth"
+                        if minimum_depth / depth
+                        >= values["minimum_opening_width"] / width
+                        else "minimum_opening_width"
+                    )
+                ),
+            }
     candidate_depth, candidate_width = depth * factor, width * factor
+    if grip_depth_candidate is not None and 0 < candidate_width - usable_width <= 1e-8:
+        factor = math.nextafter(usable_width / width, 0.0)
+        candidate_depth, candidate_width = depth * factor, width * factor
     if (
         candidate_depth < minimum_depth - 1e-8
         or not values["minimum_opening_width"] <= candidate_width <= usable_width
     ):
-        raise ValueError(
-            "E8 preferred 10 mm grip-depth candidate cannot satisfy the selected "
-            "gripper's depth and opening bounds."
+        error = ValueError if grip_depth_candidate is None else TwistGripDimensionError
+        raise error(
+            "E8 grip-depth candidate cannot satisfy the selected gripper's "
+            "depth and opening bounds."
         )
     selected_scale = values["source_scale"] * factor
     audit = {
@@ -131,5 +188,14 @@ def select_twist_scale(
         "assembly_uniform_scale_factor": factor,
         "qualification": "dimensional_candidate_only_runtime_checks_required",
         "source_edited": False,
+        **selection_audit,
     }
-    return (selected_scale if reasons else None), audit
+    if grip_depth_candidate is not None:
+        audit.update(
+            policy="bounded_runtime_uniform_scale_candidate",
+            status="candidate_scaled",
+            requested_grip_depth=float(grip_depth_candidate),
+        )
+    return (
+        selected_scale if reasons or grip_depth_candidate is not None else None
+    ), audit

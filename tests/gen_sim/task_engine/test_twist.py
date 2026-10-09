@@ -55,7 +55,7 @@ from embodichain.utils.utility import load_config, save_config
 @pytest.fixture
 def knob_scene(tmp_path, monkeypatch):
     import trimesh
-    from pxr import Usd, UsdGeom, UsdPhysics
+    from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
     path = tmp_path / "knob.usda"
     stage = Usd.Stage.CreateNew(str(path))
@@ -67,7 +67,11 @@ def knob_scene(tmp_path, monkeypatch):
     for name in ("base", "knob"):
         p = UsdGeom.Xform.Define(stage, "/Control/" + name).GetPrim()
         UsdPhysics.RigidBodyAPI.Apply(p)
-        UsdPhysics.MassAPI.Apply(p).CreateMassAttr(0.02)
+        mass = UsdPhysics.MassAPI.Apply(p)
+        mass.CreateMassAttr(0.02)
+        mass.CreateCenterOfMassAttr(Gf.Vec3f(0))
+        mass.CreateDiagonalInertiaAttr(Gf.Vec3f(0.01, 0.02, 0.03))
+        mass.CreatePrincipalAxesAttr(Gf.Quatf(1.0, Gf.Vec3f(0)))
     for body, name, position, size in [
         ("base", "panel", (0, 0, -0.01), (0.2, 0.2, 0.02)),
         ("knob", "grip", (0, 0, 0.02), (0.06, 0.06, 0.02)),
@@ -90,10 +94,19 @@ def knob_scene(tmp_path, monkeypatch):
     joint.CreateUpperLimitAttr(0.0)
     stage.GetRootLayer().Save()
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    monkeypatch.setitem(
-        twist_binding._CALIBRATIONS,
-        digest,
-        ("knob_rotation", "grip", "pointer", {0: "label0", 90: "label90"}),
+    save_config(
+        path.with_suffix(".twist.json"),
+        {
+            "schema": "gen_sim.twist-control/v1",
+            "source_sha256": digest,
+            "joint": "/Control/knob_rotation",
+            "grip": "/Control/knob/grip",
+            "pointer": "/Control/knob/pointer",
+            "settings": {
+                "0": ["/Control/base/label0"],
+                "90": ["/Control/base/label90"],
+            },
+        },
     )
     art = {
         "uid": "control",
@@ -341,7 +354,7 @@ def test_twist_source_hash_and_unknown_settings_fail_closed(knob_scene):
     stage = Usd.Stage.Open(art["fpath"])
     stage.GetRootLayer().comment = "changed source"
     stage.GetRootLayer().Save()
-    with pytest.raises(ValueError, match="calibration"):
+    with pytest.raises(ValueError, match="annotation source digest is stale"):
         discover_twist(art, 90)
 
 

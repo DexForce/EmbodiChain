@@ -26,11 +26,12 @@ from typing import Any
 import numpy as np
 
 from .articulation_binding import PARK_CALL, _fixed_base
+from .twist_semantics import MissingTwistSemanticsError, resolve_twist_semantics
 
 __all__: list[str] = []
 PREPARE_CALL = "gen_sim.twist_prepare"
 TWIST_CALL = "gen_sim.twist"
-TWIST_REVISION = "8"
+TWIST_REVISION = "14"
 TWIST_CHUNK_COUNT = 8
 TWIST_CHUNK_ANGLE = math.radians(5.0)
 TWIST_SETTLE_STEPS = 5
@@ -53,36 +54,6 @@ def required_chunk_count(target_qpos: float) -> int:
     return TWIST_CHUNK_COUNT if target_qpos == 0.0 else TWIST_MAX_CHUNK_COUNT
 
 
-# Audited mesh identities, not task IDs or inferred ordinal-to-angle mappings.
-# Each label angle is measured anew from its geometry and the source pointer.
-_CALIBRATIONS = {
-    "45ce12e718439a33af674c4cc797f836c5b72cfb28d1161be2f96ba48bc7de91": (
-        "left_selector_rotation",
-        "toothed_black_grip",
-        "black_pointer_line",
-        {0: "label_0_0_", 2: "label_2_2_", 3: "label_3_3_"},
-    ),
-    "52c558ed024f20a3904adfeb2272d0c09079764319bfdb2ef5dd3996d0240bb3": (
-        "knob_axis",
-        "black_grip_ring",
-        "black_pointer_inlay",
-        {0: "zero_mark", 90: "ninety_zero_mark"},
-    ),
-    "48df433eec8aa98a7630e2d012e4f79f5f40a6596fa4dfbd34dddb5d6276a01d": (
-        "knob_rotation",
-        "black_grip_ring",
-        "pointer_inlay",
-        {0: "number_0_", 2: "number_2_"},
-    ),
-    "a8a859f7b22e076bea2c0e1ae9c5cac725cb0fe2faae247e3f7cde9c480d72e3": (
-        "control_dial",
-        "dial_body",
-        "dial_pointer",
-        {0: "off_mark", 1: "low_mark"},
-    ),
-}
-
-
 @dataclass(frozen=True, slots=True)
 class KnobBinding:
     object_id: str
@@ -100,6 +71,8 @@ class KnobBinding:
     limits: tuple[float, float]
     target_setting: int
     target_qpos: float
+    calibration_sha256: str = ""
+    mass_lineage_sha256: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +85,8 @@ class TwistRoute:
     chunk_count: int = TWIST_CHUNK_COUNT
     chunk_angle: float = TWIST_CHUNK_ANGLE
     fixed_roll: float | None = None
+    feedback_enabled: bool = False
+    grip_extra_m: float = 0.0
 
     def __post_init__(self) -> None:
         if self.arm not in {"left", "right"}:
@@ -148,6 +123,15 @@ class TwistRoute:
             or abs(self.fixed_roll) > math.pi
         ):
             raise ValueError("E8 fixed_roll must be finite and within [-pi, pi].")
+        if type(self.feedback_enabled) is not bool:
+            raise ValueError("E8 feedback_enabled must be an explicit boolean.")
+        if (
+            type(self.grip_extra_m) not in (int, float)
+            or not math.isfinite(self.grip_extra_m)
+            or self.grip_extra_m not in (0.0, 0.002)
+            or (not self.feedback_enabled and self.grip_extra_m != 0)
+        ):
+            raise ValueError("E8 extra grip requires explicit bounded feedback.")
 
     @property
     def link_id(self) -> str:
@@ -172,20 +156,40 @@ class TwistRoute:
             "chunk_count",
             "chunk_angle",
             "fixed_roll",
+            "feedback_enabled",
+            "grip_extra_m",
         }:
             raise ValueError("E8 route has missing or unexpected fields.")
         data = dict(value["binding"])
         if set(data) != {f.name for f in fields(KnobBinding)}:
             raise ValueError("E8 binding has missing or unexpected fields.")
-        for key in ("object_id", "joint", "link", "parent", "source_sha256"):
+        for key in (
+            "object_id",
+            "joint",
+            "link",
+            "parent",
+            "source_sha256",
+            "calibration_sha256",
+        ):
             if (
                 type(data[key]) is not str
                 or not data[key]
                 or data[key].strip() != data[key]
             ):
                 raise ValueError("E8 identities must be exact nonempty strings.")
-        if data["source_sha256"] not in _CALIBRATIONS:
-            raise ValueError("E8 source has no audited setting calibration.")
+        for key in ("source_sha256", "calibration_sha256"):
+            if len(data[key]) != 64 or any(
+                c not in "0123456789abcdef" for c in data[key]
+            ):
+                raise ValueError("E8 source and semantics require SHA-256 identities.")
+        lineage = data["mass_lineage_sha256"]
+        if type(lineage) is not str or (
+            lineage
+            and (
+                len(lineage) != 64 or any(c not in "0123456789abcdef" for c in lineage)
+            )
+        ):
+            raise ValueError("E8 mass lineage must be empty or a SHA-256 identity.")
         for key, size in (
             ("axis", 3),
             ("origin", 3),
@@ -213,7 +217,6 @@ class TwistRoute:
             or data["limits"][0] >= data["limits"][1]
             or not data["limits"][0] <= data["target_qpos"] <= data["limits"][1]
             or type(data["target_setting"]) is not int
-            or data["target_setting"] not in _CALIBRATIONS[data["source_sha256"]][3]
         ):
             raise ValueError("Invalid E8 calibrated target.")
         return cls(
@@ -225,12 +228,14 @@ class TwistRoute:
             value["chunk_count"],
             value["chunk_angle"],
             value["fixed_roll"],
+            value["feedback_enabled"],
+            value["grip_extra_m"],
         )
 
 
 def discover_twist(config: dict, setting: int) -> TwistRoute:
-    """Bind an audited revolute knob and measure its printed-label target."""
-    from pxr import Gf, Usd, UsdGeom, UsdPhysics
+    """Resolve source-declared roles and measure the printed-label target."""
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
     if not _fixed_base(config):
         raise ValueError("E8 requires a fixed base.")
@@ -243,20 +248,35 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
     ):
         raise ValueError("E8 requires a positive uniform scale.")
     path = Path(config["fpath"])
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    if digest not in _CALIBRATIONS:
-        raise ValueError(
-            "E8 source lacks an audited knob/label calibration; do not guess settings."
-        )
-    joint_name, grip_name, pointer_name, labels = _CALIBRATIONS[digest]
+    semantics = resolve_twist_semantics(path)
+    digest = semantics.source_sha256
+    from .twist_mass_source import adjacent_manifest_path, qualify_mass_source_copy
+
+    mass_copy = (
+        qualify_mass_source_copy(path)
+        if adjacent_manifest_path(path).exists()
+        else None
+    )
+    if mass_copy is not None and float(scale[0]) != mass_copy.scale:
+        raise ValueError("E8 deployment mass scale differs from its source lineage.")
+    labels = dict(semantics.settings)
     if type(setting) is not int or setting not in labels:
         raise ValueError(
             f"E8 setting {setting!r} is not calibrated; available: {sorted(labels)}."
         )
-    stage = Usd.Stage.Open(str(path))
+    layer = Sdf.Layer.OpenAsAnonymous(str(path))
+    stage = None if layer is None else Usd.Stage.Open(layer)
     if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
         raise ValueError("E8 requires metre-authored USD.")
-    joints = [p for p in stage.Traverse() if p.GetName() == joint_name]
+    selected_joint = stage.GetPrimAtPath(semantics.joint_path)
+    if not selected_joint or not selected_joint.IsA(UsdPhysics.RevoluteJoint):
+        raise ValueError("E8 semantic joint changed while binding.")
+    joint_name = selected_joint.GetName()
+    joints = [
+        p
+        for p in stage.Traverse()
+        if p.IsA(UsdPhysics.Joint) and p.GetName() == joint_name
+    ]
     if len(joints) != 1 or not joints[0].IsA(UsdPhysics.RevoluteJoint):
         raise ValueError("E8 requires an unambiguous calibrated revolute joint.")
     joint = UsdPhysics.RevoluteJoint(joints[0])
@@ -285,27 +305,9 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
         raise ValueError("E8 requires a root parent and a directly owned knob.")
     cache = UsdGeom.XformCache()
     inverse = np.linalg.inv(np.asarray(cache.GetLocalToWorldTransform(child)).T)
-    meshes = {}
-    for prim in stage.Traverse():
-        if not prim.IsA(UsdGeom.Mesh):
-            continue
-        owner = prim.GetParent()
-        while (
-            owner
-            and not owner.IsPseudoRoot()
-            and not owner.HasAPI(UsdPhysics.RigidBodyAPI)
-        ):
-            owner = owner.GetParent()
-        if owner not in (parent, child):
-            continue
-        if prim.GetName() in meshes:
-            raise ValueError(
-                "E8 calibrated mesh names must be unambiguous within the selected bodies."
-            )
-        meshes[prim.GetName()] = prim
 
-    def points(name: str) -> np.ndarray:
-        prim = meshes[name]
+    def points(prim_path: str) -> np.ndarray:
+        prim = stage.GetPrimAtPath(prim_path)
         transform = inverse @ np.asarray(cache.GetLocalToWorldTransform(prim)).T
         values = np.asarray(UsdGeom.Mesh(prim).GetPointsAttr().Get(), dtype=float)
         return values @ transform[:3, :3].T + transform[:3, 3]
@@ -317,10 +319,8 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
     )
     axis /= np.linalg.norm(axis)
     origin = np.asarray(joint.GetLocalPos1Attr().Get(), dtype=float)
-    pointer = points(pointer_name).mean(0) - origin
-    label_points = np.concatenate(
-        [points(n) for n in meshes if n.startswith(labels[setting])]
-    )
+    pointer = points(semantics.pointer_path).mean(0) - origin
+    label_points = np.concatenate([points(p) for p in labels[setting]])
     label = (label_points.min(0) + label_points.max(0)) / 2 - origin
     pointer -= axis * np.dot(pointer, axis)
     label -= axis * np.dot(label, axis)
@@ -340,7 +340,7 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
     ]
     if len(targets) != 1:
         raise ValueError("E8 label does not identify one reachable joint coordinate.")
-    grip = points(grip_name)
+    grip = points(semantics.grip_path)
     radial = grip - origin
     radial -= (radial @ axis)[:, None] * axis
     outward_sign = math.copysign(1.0, np.dot(grip.mean(0) - origin, axis))
@@ -363,7 +363,14 @@ def discover_twist(config: dict, setting: int) -> TwistRoute:
         limits,
         setting,
         min(limits[1], max(limits[0], targets[0])),
+        semantics.semantics_sha256,
+        "" if mass_copy is None else mass_copy.manifest_sha256,
     )
+    if (
+        hashlib.sha256(path.read_bytes()).hexdigest() != digest
+        or resolve_twist_semantics(path) != semantics
+    ):
+        raise ValueError("E8 source or semantics changed while binding.")
     return TwistRoute.decode(
         TwistRoute(
             binding, chunk_count=required_chunk_count(binding.target_qpos)
@@ -380,18 +387,18 @@ def enrich_twist_inventory(objects: list[dict], articulations: list[dict]) -> No
         config = configs[item["runtime_uid"]]
         if not _fixed_base(config):
             continue
-        digest = hashlib.sha256(Path(item["fpath"]).read_bytes()).hexdigest()
-        if digest not in _CALIBRATIONS:
+        try:
+            semantics = resolve_twist_semantics(config["fpath"])
+        except MissingTwistSemanticsError:
             continue
-        values = {
-            k: discover_twist(config, k).binding.target_qpos
-            for k in _CALIBRATIONS[digest][3]
-        }
+        routes = {k: discover_twist(config, k) for k, _ in semantics.settings}
+        values = {k: r.binding.target_qpos for k, r in routes.items()}
         attributes = item.setdefault("attributes", {})
-        joint = _CALIBRATIONS[digest][0]
+        joint = next(iter(routes.values())).binding.joint
         attributes["joint_settings"] = {joint: list(values.values())}
         attributes["twist_setting_labels"] = {str(k): v for k, v in values.items()}
-        attributes["twist_source_sha256"] = digest
+        attributes["twist_source_sha256"] = semantics.source_sha256
+        attributes["twist_semantics_sha256"] = semantics.semantics_sha256
         attributes["twist_control_joint"] = joint
 
 

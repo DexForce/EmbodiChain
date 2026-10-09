@@ -103,8 +103,9 @@ def test_support_retry_requires_specific_startup_failure(tmp_path, reason, expec
     assert support_failure(tmp_path) is expected
 
 
+@pytest.mark.parametrize("mass_source", (False, True))
 def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, mass_source
 ):
     from embodichain.gen_sim.task_engine import task_program_bundle as generator
 
@@ -122,6 +123,9 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
 
     def generate(graph, scene, output, **kwargs):
         assert scene is source and graph is prep.semantic_task_graph
+        assert kwargs.get("twist_mass_source", False) is mass_source
+        if not mass_source:
+            assert "twist_mass_source" not in kwargs
         built.append(kwargs["twist_support_lift_m"])
         bundle(output, height=kwargs["twist_support_lift_m"])
         return graph, "fresh_paths"
@@ -146,7 +150,11 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
 
     monkeypatch.setattr(generator, "generate_task_program_bundle", generate)
     report, selected, output, attempts = execute_support_candidates(
-        prep, tmp_path / "action", execute, {"seed": 7}, TaskEnginePlanningCfg()
+        prep,
+        tmp_path / f"action_{int(mass_source)}",
+        execute,
+        {"seed": 7},
+        TaskEnginePlanningCfg(twist_mass_source=mass_source),
     )
     assert report["status"] == "succeeded" and built == [0.002, 0.003]
     assert [attempt["height_m"] for attempt in attempts] == [0.001, 0.002, 0.003]
@@ -227,6 +235,135 @@ def test_missed_target_does_not_retry_height(tmp_path, monkeypatch):
         prep, tmp_path / "action", execute, {}, TaskEnginePlanningCfg()
     )
     assert selected is prep and len(attempts) == 1
+
+
+@pytest.mark.parametrize("mass_source", (False, True))
+def test_scale_search_uses_original_source_fixed_seed_and_stops_on_success(
+    tmp_path, monkeypatch, mass_source
+):
+    from embodichain.gen_sim.task_engine._task_program import twist_attempts
+    from embodichain.gen_sim.task_engine import task_program_bundle as generator
+
+    root = bundle(tmp_path / "bundle")
+    adaptation = json.loads((root / "twist_adaptation.json").read_text())
+    adaptation["scale_candidate"] = {"candidate_grip_depth": 0.0094}
+    (root / "twist_adaptation.json").write_text(json.dumps(adaptation))
+    (root / "provider.json").write_text('{"source": "frozen"}')
+    source, graph = object(), {"source": "original"}
+    preparation = Preparation(
+        root,
+        graph,
+        SimpleNamespace(
+            prepared_scene=source, scene_manifest={"robot_profile": "dual_franka"}
+        ),
+    )
+    generated, executed = [], []
+
+    def generate(g, scene, path, **kwargs):
+        assert g is graph and scene is source
+        assert kwargs.get("twist_mass_source", False) is mass_source
+        if not mass_source:
+            assert "twist_mass_source" not in kwargs
+        assert kwargs["twist_support_lift_m"] == 0.001
+        generated.append(kwargs["twist_grip_depth_m"])
+        bundle(path)
+        return {"generated": kwargs["twist_grip_depth_m"]}, path
+
+    def execute(path, output, **options):
+        assert options == {"seed": 17, "num_envs": 1}
+        output.mkdir(parents=True)
+        executed.append(path)
+        (output / "twist_evidence.json").write_text(
+            '{"acceptance": {"phase": "initial_stable", "accepted": true}}'
+        )
+        return {"status": "succeeded" if len(executed) == 5 else "failed"}
+
+    monkeypatch.setattr(generator, "generate_task_program_bundle", generate)
+    monkeypatch.setattr(
+        twist_attempts,
+        "size_failure",
+        lambda output, report: report["status"] == "failed",
+    )
+    report, selected, output, attempts = execute_support_candidates(
+        preparation,
+        tmp_path / f"action_{int(mass_source)}",
+        execute,
+        {"seed": 17, "num_envs": 1},
+        TaskEnginePlanningCfg(twist_mass_source=mass_source),
+    )
+    assert report["status"] == "succeeded"
+    assert generated == [0.010, 0.0125, 0.015, 0.020]
+    assert executed[0] is root and len(executed) == 5
+    assert selected.adaptation.prepared_scene is source
+    assert selected.generated_paths is selected.output_dir
+    assert (selected.output_dir / "provider.json").read_bytes() == (
+        root / "provider.json"
+    ).read_bytes()
+    assert output.name == f"action_{int(mass_source)}_d4"
+    rows = json.loads(
+        (tmp_path / f"action_{int(mass_source)}" / "scale_attempts.json").read_text()
+    )
+    assert len(rows) == 5 and rows[-1]["size_rejected"] is False
+
+
+def test_normal_success_never_enters_scale_search(tmp_path, monkeypatch):
+    from embodichain.gen_sim.task_engine import task_program_bundle as generator
+
+    root = bundle(tmp_path / "bundle")
+    preparation = Preparation(root, {}, None)
+    monkeypatch.setattr(
+        generator,
+        "generate_task_program_bundle",
+        lambda *args, **kw: pytest.fail("Successful source must remain unchanged."),
+    )
+    report, selected, output, _ = execute_support_candidates(
+        preparation,
+        tmp_path / "action",
+        lambda *args, **kw: {"status": "succeeded"},
+        {},
+        TaskEnginePlanningCfg(),
+    )
+    assert report["status"] == "succeeded" and selected is preparation
+    assert not (output / "scale_attempts.json").exists()
+
+
+def test_non_dimension_generation_failure_stops_search_and_preserves_first_run(
+    tmp_path, monkeypatch
+):
+    from embodichain.gen_sim.task_engine._task_program import twist_attempts
+    from embodichain.gen_sim.task_engine import task_program_bundle as generator
+
+    root = bundle(tmp_path / "bundle")
+    adaptation = json.loads((root / "twist_adaptation.json").read_text())
+    adaptation["scale_candidate"] = {"candidate_grip_depth": 0.0094}
+    (root / "twist_adaptation.json").write_text(json.dumps(adaptation))
+    preparation = Preparation(
+        root,
+        {},
+        SimpleNamespace(
+            prepared_scene=object(), scene_manifest={"robot_profile": "dual_franka"}
+        ),
+    )
+    (tmp_path / "action").mkdir()
+    (tmp_path / "action/twist_evidence.json").write_text(
+        '{"acceptance": {"phase": "initial_stable", "accepted": true}}'
+    )
+    monkeypatch.setattr(twist_attempts, "size_failure", lambda *args: True)
+    monkeypatch.setattr(
+        generator,
+        "generate_task_program_bundle",
+        lambda *args, **kw: (_ for _ in ()).throw(ValueError("source hash changed")),
+    )
+    calls = []
+    with pytest.raises(ValueError, match="source hash"):
+        execute_support_candidates(
+            preparation,
+            tmp_path / "action",
+            lambda *args, **kw: calls.append(args) or {"status": "failed"},
+            {},
+            TaskEnginePlanningCfg(),
+        )
+    assert len(calls) == 1 and root.is_dir()
 
 
 def test_resource_retry_keeps_seed_and_never_selects_interrupted_attempt(

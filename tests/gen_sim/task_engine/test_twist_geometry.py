@@ -17,18 +17,22 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
 from embodichain.gen_sim.task_engine._task_program import twist_geometry
 from embodichain.gen_sim.task_engine._task_program.twist_binding import (
     KnobBinding,
     discover_twist,
+)
+from embodichain.gen_sim.task_engine._task_program.twist_semantics import (
+    resolve_twist_semantics,
 )
 
 _POINTS = np.asarray(
@@ -40,12 +44,6 @@ _GRIP_LOCAL_TRANSLATION = np.asarray([0.005, -0.004, 0.003])
 _GRIP_GROUP_TRANSLATION = np.asarray([0.04, 0.05, 0.06])
 _PANEL_LOCAL_TRANSLATION = np.asarray([0.001, 0.002, 0.003])
 _PANEL_GROUP_TRANSLATION = np.asarray([-0.04, 0.03, -0.02])
-_SOURCE_CALIBRATION = (
-    "knob_rotation",
-    "grip",
-    "pointer",
-    {0: "label0", 90: "label90"},
-)
 
 
 def _mesh(
@@ -64,15 +62,23 @@ def _mesh(
     return mesh
 
 
-def _qualify(fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> KnobBinding:
+def _qualify(fixture: SimpleNamespace) -> KnobBinding:
     fixture.stage.GetRootLayer().Save()
     digest = hashlib.sha256(fixture.path.read_bytes()).hexdigest()
-    monkeypatch.setitem(twist_geometry._CALIBRATIONS, digest, _SOURCE_CALIBRATION)
-    return replace(fixture.binding, source_sha256=digest)
+    fixture.annotation["source_sha256"] = digest
+    fixture.path.with_suffix(".twist.json").write_text(
+        json.dumps(fixture.annotation), encoding="utf-8"
+    )
+    semantics = resolve_twist_semantics(fixture.path)
+    return replace(
+        fixture.binding,
+        source_sha256=digest,
+        calibration_sha256=semantics.semantics_sha256,
+    )
 
 
 @pytest.fixture
-def geometry_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def geometry_source(tmp_path: Path) -> SimpleNamespace:
     path = tmp_path / "knob.usda"
     stage = Usd.Stage.CreateNew(str(path))
     root = UsdGeom.Xform.Define(stage, "/Control")
@@ -105,6 +111,9 @@ def geometry_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNa
     panel.AddTranslateOp().Set(Gf.Vec3d(*_PANEL_LOCAL_TRANSLATION))
     cap = _mesh(stage, "/Control/knob/cap")
     cap.AddTranslateOp().Set(Gf.Vec3d(0.3, 0.0, 0.0))
+    _mesh(stage, "/Control/knob/pointer", collision=False)
+    _mesh(stage, "/Control/base/label0", collision=False)
+    _mesh(stage, "/Control/base/label90", collision=False)
     render = _mesh(stage, "/Control/knob/render_only", collision=False)
     render.AddTranslateOp().Set(Gf.Vec3d(100.0, 100.0, 100.0))
     disabled = _mesh(stage, "/Control/knob/disabled_collider")
@@ -135,15 +144,26 @@ def geometry_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNa
         target_setting=90,
         target_qpos=0.0,
     )
-    fixture = SimpleNamespace(path=path, stage=stage, binding=binding)
-    fixture.binding = _qualify(fixture, monkeypatch)
+    annotation = {
+        "schema": "gen_sim.twist-control/v1",
+        "source_sha256": "",
+        "joint": "/Control/knob_rotation",
+        "grip": "/Control/knob/grip_group/grip",
+        "pointer": "/Control/knob/pointer",
+        "settings": {
+            "0": ["/Control/base/label0"],
+            "90": ["/Control/base/label90"],
+        },
+    }
+    fixture = SimpleNamespace(
+        path=path, stage=stage, binding=binding, annotation=annotation
+    )
+    fixture.binding = _qualify(fixture)
     return fixture
 
 
-def _load(fixture: SimpleNamespace, monkeypatch: pytest.MonkeyPatch):
-    return twist_geometry.load_twist_geometry(
-        fixture.path, _qualify(fixture, monkeypatch)
-    )
+def _load(fixture: SimpleNamespace):
+    return twist_geometry.load_twist_geometry(fixture.path, _qualify(fixture))
 
 
 @pytest.mark.parametrize("scale", [0.4, 1.0, 1.736111111, 2.5])
@@ -172,14 +192,12 @@ def test_parent_collision_retains_its_own_rigid_body_frame(geometry_source):
     assert geometry.parent_collisions[0].owner_path == "/Control/base"
 
 
-def test_root_authored_world_placement_does_not_rebase_link_geometry(
-    geometry_source, monkeypatch
-):
-    original = _load(geometry_source, monkeypatch)
+def test_root_authored_world_placement_does_not_rebase_link_geometry(geometry_source):
+    original = _load(geometry_source)
     root = UsdGeom.Xformable(geometry_source.stage.GetPrimAtPath("/Control"))
     root.GetOrderedXformOps()[0].Set(Gf.Vec3d(-17.0, 23.0, 4.0))
     root.GetOrderedXformOps()[1].Set(-65.0)
-    changed = _load(geometry_source, monkeypatch)
+    changed = _load(geometry_source)
     np.testing.assert_allclose(changed.grip.vertices, original.grip.vertices, atol=1e-9)
     np.testing.assert_allclose(
         changed.parent_collisions[0].vertices,
@@ -223,7 +241,7 @@ def test_articulation_clearance_inventory_preserves_other_link_owners(
     np.testing.assert_allclose(nested.vertices, _POINTS, atol=1e-9)
 
 
-def test_grip_proxy_is_calibrated_mesh_not_full_collision_union(geometry_source):
+def test_grip_proxy_is_declared_mesh_not_full_collision_union(geometry_source):
     geometry = twist_geometry.load_twist_geometry(
         geometry_source.path, geometry_source.binding
     )
@@ -265,16 +283,104 @@ def test_changed_source_bytes_invalidate_previously_loaded_binding(geometry_sour
         )
 
 
-def test_matching_source_sha_without_audited_calibration_is_rejected(
-    geometry_source, monkeypatch
+def test_new_source_bytes_on_same_identifier_do_not_reuse_old_usd_layer(
+    geometry_source,
 ):
-    monkeypatch.delitem(
-        twist_geometry._CALIBRATIONS, geometry_source.binding.source_sha256
+    original = twist_geometry.load_twist_geometry(
+        geometry_source.path, geometry_source.binding
     )
+    fresh_layer = Sdf.Layer.OpenAsAnonymous(str(geometry_source.path))
+    external_stage = Usd.Stage.Open(fresh_layer)
+    mesh = UsdGeom.Mesh(external_stage.GetPrimAtPath("/Control/knob/grip_group/grip"))
+    mesh.CreatePointsAttr((_POINTS + [0.1, 0.0, 0.0]).tolist())
+    fresh_layer.Export(str(geometry_source.path))
+    geometry_source.annotation["source_sha256"] = hashlib.sha256(
+        geometry_source.path.read_bytes()
+    ).hexdigest()
+    geometry_source.path.with_suffix(".twist.json").write_text(
+        json.dumps(geometry_source.annotation), encoding="utf-8"
+    )
+    semantics = resolve_twist_semantics(geometry_source.path)
+    binding = replace(
+        geometry_source.binding,
+        source_sha256=semantics.source_sha256,
+        calibration_sha256=semantics.semantics_sha256,
+    )
+    changed = twist_geometry.load_twist_geometry(geometry_source.path, binding)
+    np.testing.assert_allclose(
+        changed.grip.vertices, original.grip.vertices + [0.0, 0.2, 0.0], atol=1e-8
+    )
+
+
+def test_matching_source_sha_without_declared_semantics_is_rejected(
+    geometry_source, tmp_path
+):
+    path = tmp_path / "unannotated.usda"
+    path.write_bytes(geometry_source.path.read_bytes())
     with pytest.raises(ValueError):
+        twist_geometry.load_twist_geometry(path, geometry_source.binding)
+
+
+@pytest.mark.parametrize("digest", ["", "0" * 64])
+def test_semantic_digest_must_match_without_legacy_empty_bypass(
+    geometry_source, digest
+):
+    with pytest.raises(ValueError, match="semantics do not match"):
+        twist_geometry.load_twist_geometry(
+            geometry_source.path,
+            replace(geometry_source.binding, calibration_sha256=digest),
+        )
+
+
+def test_sidecar_role_change_invalidates_old_binding_even_when_usd_is_unchanged(
+    geometry_source,
+):
+    source_digest = geometry_source.binding.source_sha256
+    geometry_source.annotation["grip"] = "/Control/knob/cap"
+    geometry_source.path.with_suffix(".twist.json").write_text(
+        json.dumps(geometry_source.annotation), encoding="utf-8"
+    )
+    assert (
+        hashlib.sha256(geometry_source.path.read_bytes()).hexdigest() == source_digest
+    )
+    with pytest.raises(ValueError, match="semantics do not match"):
         twist_geometry.load_twist_geometry(
             geometry_source.path, geometry_source.binding
         )
+
+
+def test_fresh_annotation_selects_exact_mesh_without_name_inference(geometry_source):
+    geometry_source.annotation["grip"] = "/Control/knob/cap"
+    geometry = _load(geometry_source)
+    assert geometry.grip.path == "/Control/knob/cap"
+    np.testing.assert_allclose(
+        geometry.grip.vertices, _POINTS + [0.3, 0.0, 0.0], atol=1e-9
+    )
+
+
+def test_semantic_roles_are_revalidated_after_geometry_loading(
+    geometry_source, monkeypatch
+):
+    calls = 0
+
+    def change_before_refresh(path):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            geometry_source.annotation["pointer"] = "/Control/knob/render_only"
+            geometry_source.path.with_suffix(".twist.json").write_text(
+                json.dumps(geometry_source.annotation), encoding="utf-8"
+            )
+        return resolve_twist_semantics(path)
+
+    monkeypatch.setattr(
+        twist_geometry, "resolve_twist_semantics", change_before_refresh
+    )
+    with pytest.raises(ValueError, match="changed while loading"):
+        twist_geometry.load_twist_geometry(
+            geometry_source.path, geometry_source.binding
+        )
+    assert calls == 2
 
 
 @pytest.mark.parametrize("scale", [0.0, -1.0, np.nan, np.inf, True])
@@ -298,17 +404,17 @@ def test_binding_joint_and_body_identity_cannot_be_substituted(
 
 
 @pytest.mark.parametrize("body", ["base", "knob"])
-def test_selected_body_requires_rigid_ownership(geometry_source, monkeypatch, body):
+def test_selected_body_requires_rigid_ownership(geometry_source, body):
     geometry_source.stage.GetPrimAtPath("/Control/" + body).RemoveAPI(
         UsdPhysics.RigidBodyAPI
     )
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 @pytest.mark.parametrize("kind", ["missing", "render_only", "disabled", "other_owner"])
-def test_calibrated_grip_must_be_enabled_target_owned_collision_mesh(
-    geometry_source, monkeypatch, kind
+def test_declared_grip_must_be_enabled_target_owned_collision_mesh(
+    geometry_source, kind
 ):
     path = "/Control/knob/grip_group/grip"
     prim = geometry_source.stage.GetPrimAtPath(path)
@@ -321,31 +427,27 @@ def test_calibrated_grip_must_be_enabled_target_owned_collision_mesh(
     else:
         UsdPhysics.RigidBodyAPI.Apply(prim.GetParent())
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_empty_enabled_parent_collision_inventory_fails_closed(
-    geometry_source, monkeypatch
-):
+def test_empty_enabled_parent_collision_inventory_fails_closed(geometry_source):
     prim = geometry_source.stage.GetPrimAtPath("/Control/base/panel_group/panel")
     UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr(False)
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 def test_unsupported_enabled_collision_primitive_cannot_be_silently_omitted(
-    geometry_source, monkeypatch
+    geometry_source,
 ):
     cube = UsdGeom.Cube.Define(geometry_source.stage, "/Control/base/cube")
     UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 @pytest.mark.parametrize("role", ["joint", "target_body", "parent_body"])
-def test_disabled_bound_joint_or_rigid_body_fails_closed(
-    geometry_source, monkeypatch, role
-):
+def test_disabled_bound_joint_or_rigid_body_fails_closed(geometry_source, role):
     if role == "joint":
         joint = UsdPhysics.RevoluteJoint(
             geometry_source.stage.GetPrimAtPath("/Control/knob_rotation")
@@ -358,27 +460,60 @@ def test_disabled_bound_joint_or_rigid_body_fails_closed(
         )
         api.CreateRigidBodyEnabledAttr(False)
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_duplicate_calibrated_grip_name_is_rejected(geometry_source, monkeypatch):
+def test_duplicate_mesh_basename_does_not_change_exact_grip_selection(geometry_source):
     _mesh(geometry_source.stage, "/Control/knob/duplicate/grip")
+    _mesh(geometry_source.stage, "/Control/base/duplicate/grip")
+    geometry = _load(geometry_source)
+    assert geometry.grip.path == "/Control/knob/grip_group/grip"
+    assert "/Control/knob/duplicate/grip" in {
+        mesh.path for mesh in geometry.target_collisions
+    }
+    assert "/Control/base/duplicate/grip" in {
+        mesh.path for mesh in geometry.parent_collisions
+    }
+
+
+def test_nonselected_mesh_may_share_native_joint_basename(geometry_source):
+    _mesh(geometry_source.stage, "/Control/base/knob_rotation", collision=False)
+    geometry = _load(geometry_source)
+    assert geometry.grip.path == "/Control/knob/grip_group/grip"
+
+
+def test_duplicate_native_joint_name_is_not_disambiguated_by_prim_path(geometry_source):
+    joint = UsdPhysics.RevoluteJoint.Define(
+        geometry_source.stage, "/Control/other/knob_rotation"
+    )
+    joint.CreateBody0Rel().SetTargets(["/Control/base"])
+    joint.CreateBody1Rel().SetTargets(["/Control/knob"])
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
+
+
+@pytest.mark.parametrize("name", ["knob", "base"])
+def test_duplicate_native_rigid_body_name_is_not_disambiguated_by_prim_path(
+    geometry_source, name
+):
+    body = UsdGeom.Xform.Define(geometry_source.stage, "/Control/other/" + name)
+    UsdPhysics.RigidBodyAPI.Apply(body.GetPrim())
+    with pytest.raises(ValueError):
+        _load(geometry_source)
 
 
 def test_collision_approximation_metadata_is_not_silently_reinterpreted(
-    geometry_source, monkeypatch
+    geometry_source,
 ):
     prim = geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group/grip")
     api = UsdPhysics.MeshCollisionAPI.Apply(prim)
     api.CreateApproximationAttr("convexDecomposition")
-    geometry = _load(geometry_source, monkeypatch)
+    geometry = _load(geometry_source)
     assert geometry.grip.approximation == "convexDecomposition"
 
 
 def test_unhashed_external_layer_cannot_supply_collision_geometry(
-    geometry_source, monkeypatch, tmp_path
+    geometry_source, tmp_path
 ):
     external_path = tmp_path / "external.usda"
     external = Usd.Stage.CreateNew(str(external_path))
@@ -386,21 +521,19 @@ def test_unhashed_external_layer_cannot_supply_collision_geometry(
     external.GetRootLayer().Save()
     geometry_source.stage.GetRootLayer().subLayerPaths.append(str(external_path))
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_non_metre_authored_stage_units_fail_closed(geometry_source, monkeypatch):
+def test_non_metre_authored_stage_units_fail_closed(geometry_source):
     UsdGeom.SetStageMetersPerUnit(geometry_source.stage, 0.01)
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_stage_up_axis_does_not_rotate_native_link_local_mesh_again(
-    geometry_source, monkeypatch
-):
-    original = _load(geometry_source, monkeypatch)
+def test_stage_up_axis_does_not_rotate_native_link_local_mesh_again(geometry_source):
+    original = _load(geometry_source)
     UsdGeom.SetStageUpAxis(geometry_source.stage, "Y")
-    changed = _load(geometry_source, monkeypatch)
+    changed = _load(geometry_source)
     np.testing.assert_allclose(changed.grip.vertices, original.grip.vertices)
     np.testing.assert_allclose(
         changed.parent_collisions[0].vertices, original.parent_collisions[0].vertices
@@ -416,20 +549,18 @@ def test_stage_up_axis_does_not_rotate_native_link_local_mesh_again(
 
 @pytest.mark.parametrize("scale", [(2.0, 1.0, 2.0), (-1.0, 1.0, 1.0), (0.0, 1.0, 1.0)])
 def test_unsupported_mesh_transform_does_not_receive_guessed_geometry(
-    geometry_source, monkeypatch, scale
+    geometry_source, scale
 ):
     group = UsdGeom.Xformable(
         geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group")
     )
     group.GetOrderedXformOps()[2].Set(Gf.Vec3f(*scale))
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 @pytest.mark.parametrize("kind", ["shear", "body_scale"])
-def test_non_rigid_link_frame_or_mesh_shear_is_rejected(
-    geometry_source, monkeypatch, kind
-):
+def test_non_rigid_link_frame_or_mesh_shear_is_rejected(geometry_source, kind):
     if kind == "body_scale":
         body = UsdGeom.Xformable(geometry_source.stage.GetPrimAtPath("/Control/knob"))
         body.AddScaleOp().Set(Gf.Vec3f(2.0))
@@ -441,7 +572,7 @@ def test_non_rigid_link_frame_or_mesh_shear_is_rejected(
         matrix[0, 1] = 0.2
         group.AddTransformOp().Set(matrix)
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 @pytest.mark.parametrize(
@@ -459,7 +590,7 @@ def test_non_rigid_link_frame_or_mesh_shear_is_rejected(
     ],
 )
 def test_invalid_collision_topology_fails_closed(
-    geometry_source, monkeypatch, points, counts, indices
+    geometry_source, points, counts, indices
 ):
     mesh = UsdGeom.Mesh(
         geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group/grip")
@@ -468,12 +599,10 @@ def test_invalid_collision_topology_fails_closed(
     mesh.CreateFaceVertexCountsAttr(counts)
     mesh.CreateFaceVertexIndicesAttr(indices)
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_convex_polygon_is_triangulated_without_changing_its_bounds(
-    geometry_source, monkeypatch
-):
+def test_convex_polygon_is_triangulated_without_changing_its_bounds(geometry_source):
     mesh = UsdGeom.Mesh(
         geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group/grip")
     )
@@ -481,7 +610,7 @@ def test_convex_polygon_is_triangulated_without_changing_its_bounds(
     mesh.CreatePointsAttr(points.tolist())
     mesh.CreateFaceVertexCountsAttr([4])
     mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
-    geometry = _load(geometry_source, monkeypatch)
+    geometry = _load(geometry_source)
     assert geometry.grip.faces.shape == (2, 3)
     triangles = geometry.grip.vertices[geometry.grip.faces]
     area = (
@@ -496,9 +625,7 @@ def test_convex_polygon_is_triangulated_without_changing_its_bounds(
     assert area == pytest.approx(0.02 * 0.03 * 2.0**2)
 
 
-def test_concave_polygon_cannot_use_unvalidated_fan_triangulation(
-    geometry_source, monkeypatch
-):
+def test_concave_polygon_cannot_use_unvalidated_fan_triangulation(geometry_source):
     mesh = UsdGeom.Mesh(
         geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group/grip")
     )
@@ -506,18 +633,16 @@ def test_concave_polygon_cannot_use_unvalidated_fan_triangulation(
     mesh.CreateFaceVertexCountsAttr([5])
     mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3, 4])
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
-def test_authored_mesh_holes_cannot_be_filled_by_collision_proxy(
-    geometry_source, monkeypatch
-):
+def test_authored_mesh_holes_cannot_be_filled_by_collision_proxy(geometry_source):
     mesh = UsdGeom.Mesh(
         geometry_source.stage.GetPrimAtPath("/Control/knob/grip_group/grip")
     )
     mesh.CreateHoleIndicesAttr([0])
     with pytest.raises(ValueError):
-        _load(geometry_source, monkeypatch)
+        _load(geometry_source)
 
 
 @pytest.fixture
@@ -924,8 +1049,13 @@ def test_sensor_geometry_evidence_declares_frame_scale_and_uncertified_cooking(
         geometry_source.path, replace(geometry_source.binding, scale=2.0)
     )
     pad = replace(geometry.grip, path="pad/mesh", owner_path="pad")
-    sensor = SimpleNamespace(geometry=geometry, finger_collisions={"pad": (pad,)})
+    sensor = SimpleNamespace(
+        geometry=geometry,
+        finger_collisions={"pad": (pad,)},
+        mass_evidence={"policy": "fixed_mass", "verified": True},
+    )
     evidence = TwistContactSensor.geometry_evidence(sensor)
+    assert evidence["mass_properties"] == sensor.mass_evidence
     assert evidence["schema"] == "scaled_owning_link_collision_inputs/v1"
     assert evidence["frame"] == "scaled owning rigid-link local"
     assert evidence["units"] == "m"

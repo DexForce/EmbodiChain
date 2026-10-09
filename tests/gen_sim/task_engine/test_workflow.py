@@ -300,6 +300,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 1000000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is False
     assert TaskEnginePlanningCfg().max_episode_steps == 10000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
@@ -320,6 +321,7 @@ planning:
   max_episodes: 2
   max_episode_steps: 5000
   fit_grasp_assets: true
+  twist_mass_source: true
 execution:
   num_envs: 6
   success_policy: at_least
@@ -337,6 +339,7 @@ execution:
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is True
     assert execution.num_envs == 6
     assert execution.required_successes == 2
 
@@ -366,6 +369,8 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(planning_mode="unsupported")
     with pytest.raises(TypeError, match="fit_grasp_assets"):
         TaskEnginePlanningCfg(fit_grasp_assets="true")
+    with pytest.raises(TypeError, match="twist_mass_source"):
+        TaskEnginePlanningCfg(twist_mass_source="true")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(gripper_model="unsupported")
     with pytest.raises(TypeError):

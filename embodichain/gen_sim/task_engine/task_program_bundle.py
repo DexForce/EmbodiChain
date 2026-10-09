@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -182,6 +182,9 @@ def generate_task_program_bundle(
     max_episode_steps: int | None = None,
     fit_grasp_assets: bool = False,
     twist_support_lift_m: float = 0.001,
+    twist_grip_depth_m: float | None = None,
+    twist_contact_feedback: bool = False,
+    twist_mass_source: bool = False,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -197,6 +200,13 @@ def generate_task_program_bundle(
             without increasing a smaller requested limit.
         twist_support_lift_m: E8 total extra support lift, selected from 1--4 mm.
             Live startup checks must qualify this dimensional candidate.
+        twist_grip_depth_m: Explicit E8 whole-assembly depth candidate selected
+            after a typed runtime mismatch. None preserves ordinary source sizing.
+        twist_contact_feedback: Enable bounded precontact feedback only after
+            a qualified exhausted no-contact attempt. Defaults to disabled.
+        twist_mass_source: Opt in to the Default-only deployment MassAPI copy
+            instead of the Lab mass conversion. This is also selected when the
+            unmodified Lab loader does not expose the mass policy capability.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -228,6 +238,22 @@ def generate_task_program_bundle(
     from ._task_program.twist_binding import graph_routes as twist_graph_routes
 
     source_twist_routes = twist_graph_routes(selected_graph, prepared_scene)
+    if type(twist_contact_feedback) is not bool:
+        raise ValueError("E8 contact feedback must be an explicit boolean.")
+    if twist_contact_feedback and not source_twist_routes:
+        raise ValueError("Contact feedback requires a standalone E8 deployment.")
+    if type(twist_mass_source) is not bool:
+        raise ValueError("E8 deployment mass source must be an explicit boolean.")
+    if twist_mass_source and not source_twist_routes:
+        raise ValueError("Deployment mass source requires a standalone E8 deployment.")
+    if source_twist_routes and not twist_mass_source:
+        from embodichain.lab.sim.cfg import ArticulationCfg
+
+        twist_mass_source = (
+            "body_scale_mass_policy" not in ArticulationCfg.__dataclass_fields__
+        )
+    if twist_grip_depth_m is not None and not source_twist_routes:
+        raise ValueError("Explicit knob depth candidates require an E8 deployment.")
     normalized_profile = str(robot_profile).strip()
     try:
         embodiment_filename = _EMBODIMENT_COMPONENTS[normalized_profile]
@@ -328,9 +354,16 @@ def generate_task_program_bundle(
     if source_twist_routes:
         from ._task_program.twist_adaptation import select_twist_scale
 
-        twist_scale, twist_scale_audit = select_twist_scale(
-            source_twist_routes[0], embodiment_payload
-        )
+        if twist_grip_depth_m is None:
+            twist_scale, twist_scale_audit = select_twist_scale(
+                source_twist_routes[0], embodiment_payload
+            )
+        else:
+            twist_scale, twist_scale_audit = select_twist_scale(
+                source_twist_routes[0],
+                embodiment_payload,
+                grip_depth_candidate=twist_grip_depth_m,
+            )
     scene, twist_adaptation = prepare_press_scene(
         scene,
         source_twist_routes,
@@ -350,8 +383,85 @@ def generate_task_program_bundle(
                 "records": twist_adaptation,
             },
         )
+    mass_source_routes = ()
+    if twist_mass_source:
+        from ._task_program.twist_mass_source import create_mass_source_copy
+        from ._task_program.twist_binding import enrich_twist_inventory
+
+        articulations = deepcopy(list(scene.articulations))
+        planner = deepcopy(list(scene.planner_objects))
+        asset_hashes = dict(scene.asset_hashes)
+        mass_records = []
+        mass_source_routes = twist_graph_routes(selected_graph, scene)
+        for route in mass_source_routes:
+            art = next(a for a in articulations if a["uid"] == route.binding.object_id)
+            groups = [art.get("attrs") or {}]
+            groups.extend(
+                (group.get("attrs") or {})
+                for group in (art.get("link_attrs") or {}).values()
+            )
+            if any(group.get("mass_props") for group in groups):
+                raise ValueError(
+                    "E8 mass deployment cannot combine with mass overlays."
+                )
+            mass_copy = create_mass_source_copy(
+                Path(art["fpath"]), root / "mass_sources", tuple(art["body_scale"])
+            )
+            art["fpath"] = str(mass_copy.runtime)
+            art.pop("body_scale_mass_policy", None)
+            asset_hashes[art["uid"]] = mass_copy.runtime_sha256
+            for item in planner:
+                if item.get("runtime_uid") == art["uid"]:
+                    item["fpath"] = art["fpath"]
+            mass_records.append(
+                {
+                    "object_id": art["uid"],
+                    "origin_source_sha256": mass_copy.source_sha256,
+                    "runtime_sha256": mass_copy.runtime_sha256,
+                    "mass_lineage_sha256": mass_copy.manifest_sha256,
+                    "source_path": str(mass_copy.source.relative_to(root)),
+                    "runtime_path": str(mass_copy.runtime.relative_to(root)),
+                    "manifest_path": str(mass_copy.manifest.relative_to(root)),
+                    "body_scale": mass_copy.scale,
+                    "source_edited": False,
+                    "conversion_owner": "gen_sim_deployment_source",
+                }
+            )
+        enrich_twist_inventory(planner, articulations)
+        scene = replace(
+            scene,
+            articulations=tuple(articulations),
+            planner_objects=tuple(planner),
+            asset_hashes=asset_hashes,
+        )
+        _write_json(
+            root / "twist_mass_adaptation.json",
+            {
+                "schema": "gen_sim.twist-mass-adaptation/v1",
+                "records": mass_records,
+            },
+        )
     press_routes = graph_routes(selected_graph, scene)
     twist_routes = twist_graph_routes(selected_graph, scene)
+    if mass_source_routes:
+        for original, derived in zip(mass_source_routes, twist_routes, strict=True):
+            comparable = replace(
+                derived,
+                binding=replace(
+                    derived.binding,
+                    source_sha256=original.binding.source_sha256,
+                    mass_lineage_sha256=original.binding.mass_lineage_sha256,
+                ),
+            )
+            if comparable != original:
+                raise ValueError(
+                    "E8 derived mass source changed its numeric binding or roles."
+                )
+    if twist_contact_feedback:
+        twist_routes = tuple(
+            replace(route, feedback_enabled=True, grip_extra_m=0.002)
+            for route in twist_routes
+        )
     if press_adaptation:
         _write_json(
             root / "press_adaptation.json",
@@ -488,6 +598,7 @@ def generate_task_program_bundle(
             scene_contract=scene_contract,
             collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
             embodiment=embodiment_payload,
+            twist_contact_feedback=twist_contact_feedback,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -1214,6 +1325,7 @@ def _integration_payload(
     scene_contract: str,
     collision_world: bool = False,
     embodiment: dict[str, Any] | None = None,
+    twist_contact_feedback: bool = False,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
@@ -1227,6 +1339,11 @@ def _integration_payload(
     )
 
     twist_routes = twist_graph_routes(graph, scene)
+    if twist_contact_feedback:
+        twist_routes = tuple(
+            replace(route, feedback_enabled=True, grip_extra_m=0.002)
+            for route in twist_routes
+        )
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}

@@ -361,9 +361,17 @@ the measured qpos again. Nonzero targets reserve 32 feedback calls; nominal 5-de
 plus three contact retries must fit that bound. Verified coarse contact travel permits
 unused calls to become one-frame holds; Park still checks release and clearance. The printed setting uses
 pointer/label geometry and an asset hash; ordinal settings and joint-limit guesses are rejected.
+`twist_semantics.py` resolves asset-owned joint/grip/pointer/label roles through the
+[twist source semantics contract](twist-source-semantics.md), not a source-SHA allowlist or
+mesh-name heuristics. Source and normalized semantics identities remain separate integrity
+checks. Missing semantics are unavailable, while stale or conflicting declarations fail
+closed. This supports unseen annotated assets, not visual recognition of arbitrary unlabeled
+knobs; hash integrity alone does not supply printed-label semantics.
 `twist_adaptation.py` screens source-qualified geometry against the active gripper: compatible
 dimensions remain unchanged; mismatches propose a uniform assembly scale with preferred 10 mm
-grip depth. The canonical minimum depth is empirically qualified, not inferred from opening-axis
+grip depth. The preference is clamped to the uniformly scaled depth/opening feasible interval;
+an empty interval still rejects rather than bypassing physical dimensional limits.
+The canonical minimum depth is empirically qualified, not inferred from opening-axis
 finger thickness. Dimensional candidates still require actual physics acceptance. Audited XY
 relayout moves only unreferenced rigid `on(table)` children,
 excluding supports/parents. Four axis-separation candidates reuse Scene Engine's 20 mm target
@@ -371,9 +379,30 @@ margin and check table bounds and other AABBs; this is not its full layout optim
 The formal generator proposes 1 mm total extra lift after preserving the resized support bottom.
 `twist_support.py` checks full swept geometry; `twist_attempts.py` rebuilds from the original
 PreparedScene at 2/3/4 mm only after support-related startup rejection. Geometric penetration also
-gets bounded preflight alternatives. Source USD/physics remain unchanged; the adaptation audit
+gets bounded preflight alternatives. Source USD, mass, drives and contact envelopes remain unchanged;
+after verified startup/mass readback, typed table-screen rejection or exhausted zero-contact
+candidates may trigger the finite grip-depth search owned by `twist_attempts.py`. Every candidate
+is rebuilt from the original PreparedScene; scale and lift never accumulate across attempts.
+Other failures, resource stops and unqualified observations do not authorize dimension retries.
+E8 retains source scalar mass while converting COM/inertia to the scaled actor
+frame before Default materialization, not through runtime native writes. `twist_mass.py` verifies
+the source-bound native mass, local COM and full body-frame inertia at sensor configuration,
+including the SDK's bounded near-diagonal numerical conversion. When the Lab loader exposes
+`body_scale_mass_policy`, the compatibility path may select its USD `fixed_mass` conversion.
+Otherwise bundle generation automatically uses GenSim's `twist_mass_source.py`; the planning
+field `twist_mass_source` can also explicitly select this path. It generates a self-contained
+deployment USD that only scales authored COM and principal inertia, retaining a pristine
+source copy, sealed roles and a separately pinned mass-lineage manifest. The deployment removes
+the Lab mass-policy field, so the pristine asset is not edited and conversion is not repeated
+by Lab. Default-only qualification compares the complete authored layer and rejects external
+asset-valued dependencies. Native readback still uses the pristine source and existing
+tolerances; the deployment conversion is not guaranteed bitwise equivalent to the compatibility
+path. Mass ownership does not change feedback or execution ownership. A raw or repeated scale fails
+closed rather than applying another runtime correction. The adaptation audit
 separates actual gap from conservative contact-envelope reference. Direct helper calls retain
-their conservative default. Startup evidence covers reset-to-ready substeps; invalid/overflowed
+their conservative default. Canonical startup evidence covers sensor-observed Prepare substeps,
+not direct World updates during reset/settling; its `complete` flag means the observation window
+was finalized, not that every reset physics step was captured. Invalid/overflowed
 observations, motion or table/robot contact fail closed. Final E8 coarse acceptance requires at
 least 15 degrees of debounced absolute travel during target contact, release and stability;
 Park rechecks all conditions. The 0.5-degree anchor deadband excludes small oscillations,
@@ -397,10 +426,42 @@ silently fall back to an undeclared base pose. The lowerer measures matching jaw
 overrides; public `Twist` and non-E8 routes remain unchanged.
 Reaching the coarse contact threshold makes remaining Twist calls stationary holds; it does
 not skip final release/clearance checks or imply precise arrival at the printed setting.
+An opted-in feedback controller still records those successful guarded stationary calls;
+they require no correction but cannot be mistaken for unowned/missing plans.
 Completed holds and waits retain the issued joint target instead of re-anchoring to measured
 gravity sag; dynamic-goal and velocity checks remain active.
-Regenerate E8 bundles for revision 8; non-E8 routes retain their behavior. The experimental
-local-continuation and adaptive-grip loops are not enabled by this geometry revision.
+The E8 factory borrows its existing acceptance sensor for an instance-owned
+`twist_geometry_guard.py`. Before ranking, successful candidates must clear the actual
+native table bounds plus measured contact offsets across all command waypoints in
+approach/reach/retract, covering the active arm and hand source collision inputs.
+Unsupported snapshots fail closed; source meshes and paths remain bound to their hashes.
+This discrete source-input screen is not continuous clearance or actual servo-tracking proof.
+Finalized plans may monitor the fixed root parent instead of the rotating child only when
+source shell topology, native hinge/current qpos, public grasp invariance and every extra
+rotor collider's swept-envelope separation qualify. Complete convex projection can prove
+separation where a conservative AABB cannot; unresolved qualification retains the original
+child dependency. Commands, trajectories, recovery/tracking policies and the reach cutoff
+are unchanged, and merged dependency cutoffs cannot shorten an existing monitor window.
+The public Twist and non-E8 registrations do not construct this guard.
+The qualified zero-contact retry may explicitly enable route-owned `twist_feedback.py`;
+ordinary compatible routes leave the controller absent. `GenSimActionEngine.start` selects
+GenSim's `TwistFeedbackSession` only for the opted-in single-environment, effectless,
+empty-hand Twist call. It extends the public `ExecutionSession.tick` and `revise_current`
+boundary while retaining the original Runner, SemanticCallExecutor, Gym bridge and transports.
+The public phase view supplies scheduling identity only, not a held-object assertion.
+Native observations remain measured; continuation seeds require matching native command-target
+readback, and replacements retain the original logical/wall deadlines. Correlated effect,
+gate or held-guard results fail closed rather than entering a revised plan with stale identity.
+`twist_continuation.py` plans only a bounded local suffix, screened through the same geometry
+guard before installation. Its joint angle comes from the same-timestamp live SceneSnapshot,
+not TaskState's verified symbolic joint accessor or a lowering-time geometry measurement.
+Opted-in initial approach/reach retain endpoint alignment holds before checking native feedback;
+the holds consume the original deadline and undergo the final velocity/geometry checks.
+Closure uses one paired aperture/tip-offset calculation; no native
+pose or physical-property setter supplies success. Adaptive closure and convex-cooking
+experiments remain unintegrated; this opt-in does not certify dual-pad grasp or printed-setting
+convergence. Regenerate bundles for adapter contract v9 and E8 lowerer revision 14;
+non-E8 routes retain their behavior.
 E8 remains standalone; mixed E1 transport plus E8 twist graphs fail closed before bundle
 generation and must be qualified as separate stages.
 `twist_evidence.json` records measured qpos/contact evidence. `no_twist` and `centroid` are
