@@ -22,11 +22,8 @@ real-device controllers, and browser visualization.
 
 from __future__ import annotations
 
-from . import devices
-from . import task_program
-from . import gym
-from . import sim
-from . import visualization
+from importlib import import_module
+from types import ModuleType
 
 __all__ = [
     "devices",
@@ -35,3 +32,22 @@ __all__ = [
     "sim",
     "visualization",
 ]
+
+
+def __getattr__(name: str) -> ModuleType:
+    """Import laboratory subsystems on first attribute access.
+
+    This keeps CPU-only consumers of the visualization protocol from loading
+    the simulation runtime while preserving ``embodichain.lab.sim`` and the
+    other historical package attributes.
+    """
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(f"{__name__}.{name}")
+    globals()[name] = module
+    return module
+
+
+def __dir__() -> list[str]:
+    """Include lazily exported subsystems in interactive discovery."""
+    return sorted(set(globals()) | set(__all__))
