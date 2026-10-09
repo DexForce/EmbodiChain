@@ -1059,10 +1059,10 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
         Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
     ),
 )
-def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
+def test_example_gym_configs_keep_minimal_recording_configuration(
     relative_path: Path,
 ) -> None:
-    """Runnable examples keep only deterministic simulation and motion inputs."""
+    """Runnable examples retain deterministic physics and LeRobot recording."""
     payload = _read_payload(relative_path)
     if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
         environment = _read_payload(relative_path.parent / "envs/default.yaml")
@@ -1085,10 +1085,12 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
-    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
-        assert set(environment["env"]["dataset"]) == {"lerobot"}
-    else:
-        assert environment["env"]["dataset"] == {}
+    assert set(environment["env"]["dataset"]) == {"lerobot"}
+    recorder = environment["env"]["dataset"]["lerobot"]
+    assert recorder["func"] == "LeRobotRecorder"
+    assert recorder["mode"] == "save"
+    instruction = recorder["params"]["instruction"]["lang"]
+    assert isinstance(instruction, str) and instruction.strip()
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
 
