@@ -57,9 +57,15 @@ Gym configs remain supported when no conflicting component selector is used.
 parsing. This is not
 coupled to Task Program: an import-registered handwritten-demo task can reuse
 an embodiment's simulation robot and sensor suite while keeping its events,
-observations, objects, and Python demo logic task-local. All deployment-owned
-component paths resolve relative to the runnable config that declares them
-(conventionally `task.<embodiment>.yaml`). Component-owned fields and their
+observations, objects, and Python demo logic task-local. Ordinary component
+paths resolve relative to the runnable config that declares them
+(conventionally `task.<embodiment>.yaml`). References starting with
+`embodichain_tasks/configs/` resolve through the imported SDK's configs, including
+from an external deployment or installed wheel; same-named CWD files do not
+override these selections. Both component resolvers reuse
+`resolve_config_path(..., base_dir=owner_directory)`. Calling that public helper
+without `base_dir` retains its ordinary filesystem/CWD behavior.
+Component-owned fields and their
 inline counterparts are mutually exclusive; without a selector, the original
 inline `robot`, `sensor`, and scene fields continue to parse unchanged.
 `build_env_cfg_from_args()` expands `environment.component` before applying

@@ -1204,6 +1204,66 @@ class TestConfigToCfgFromFile:
         assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
         assert cfg.max_episode_steps == 1200
 
+    def test_deployment_resolves_packaged_components_despite_cwd_shadows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All five selections use the imported SDK from an external deployment."""
+        cwd = tmp_path / "cwd"
+        owner = tmp_path / "external_deployment"
+        cwd.mkdir()
+        owner.mkdir()
+        config = self._minimal_gym_config()
+        config["id"] = "PackagedPrefixComposition-v1"
+        references = {
+            "environment": _CUBE_ENVIRONMENT_PATH,
+            "embodiment": _CUBE_EMBODIMENT_PATH,
+            "program": _CUBE_TASK_PROGRAM_DIR / "program.yaml",
+            "integration": _CUBE_INTEGRATION_PATH,
+            "execution_policy": _CUBE_POLICY_PATH,
+        }
+        for field, target in references.items():
+            reference = target.relative_to(_REPOSITORY_ROOT).as_posix()
+            shadow = cwd / reference
+            shadow.parent.mkdir(parents=True, exist_ok=True)
+            shadow.write_text("shadow: true\n")
+            if field in ("environment", "embodiment"):
+                config[field]["component"] = reference
+            else:
+                config["task_program"][field] = reference
+        original = deepcopy(config)
+        monkeypatch.chdir(cwd)
+
+        cfg = config_to_cfg(config, source_path=owner / "deployment.yaml")
+
+        assert config == original
+        assert cfg.task_program.program_id == "repeated_cube_pick_place"
+        assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.robot.uid == load_config(_CUBE_EMBODIMENT_PATH)["simulation"]["uid"]
+
+    def test_owner_relative_components_ignore_cwd_namesakes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ordinary references keep their source-file base despite CWD files."""
+        owner = self._write_deployment(tmp_path / "owner")
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        for name in (
+            "env.yaml",
+            "embodiment.yaml",
+            "program.yaml",
+            "integration.yaml",
+            "policy.yaml",
+        ):
+            (cwd / name).write_text("shadow: true\n")
+        config = self._minimal_gym_config()
+        config["id"] = "OwnerRelativeComposition-v1"
+        monkeypatch.chdir(cwd)
+
+        cfg = config_to_cfg(config, source_path=owner / "deployment.yaml")
+
+        assert cfg.task_program.program_id == "configured_pick"
+        assert cfg.max_episode_steps == 1200
+
     def test_launcher_returns_environment_component_runtime_values(
         self,
         tmp_path,
