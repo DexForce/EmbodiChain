@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Iterable
 from typing import Any
 
 from embodichain.lab.sim.atomic_actions import AtomicActionEngine
@@ -195,6 +196,7 @@ class GenSimActionEngine(AtomicActionEngine):
         **kwargs: Any,
     ) -> None:
         self._motion_samples = dict(motion_samples)
+        self._twist_session_controller = None
         if any(type(value) is not str or not value for value in cartesian_calls):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
@@ -214,6 +216,50 @@ class GenSimActionEngine(AtomicActionEngine):
                 "Invocation motion budgets require unique IDs and integer sample counts."
             )
         super().__init__(*args, **kwargs)
+
+    def configure_twist_feedback(self, controller: Any) -> None:
+        """Bind one E8 policy to this engine's public-session extension."""
+        from .twist_feedback import TwistFeedbackState
+        from .twist_runtime import GenSimTwist
+
+        action = self.actions.get("twist")
+        if (
+            self._twist_session_controller is not None
+            or not isinstance(controller, TwistFeedbackState)
+            or not controller.enabled
+            or controller.robot is not self.robot
+            or not isinstance(action, GenSimTwist)
+            or action._feedback_state is not controller
+        ):
+            raise ValueError("E8 session feedback must own the exact action and robot.")
+        self._twist_session_controller = controller
+
+    def start(
+        self,
+        invocations: Iterable[ActionInvocation],
+        context: Any = None,
+        *,
+        eligible_mask: Any = None,
+    ) -> Any:
+        """Retain the public runner while extending effectless E8 sessions only."""
+        selected = tuple(invocations)
+        controller = self._twist_session_controller
+        if (
+            controller is None
+            or not any(item.skill_id == "twist" for item in selected)
+            or (eligible_mask is not None and not bool(eligible_mask.any()))
+        ):
+            return super().start(selected, context, eligible_mask=eligible_mask)
+        from .twist_session import TwistFeedbackSession
+
+        initial = self.initial_context() if context is None else context
+        return TwistFeedbackSession(
+            self,
+            selected,
+            initial,
+            revision_controller=controller,
+            eligible_mask=eligible_mask,
+        )
 
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
         if self._motion_samples:

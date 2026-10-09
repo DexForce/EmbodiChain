@@ -25,7 +25,8 @@ from typing import Any
 
 import numpy as np
 
-from .twist_binding import KnobBinding, _CALIBRATIONS
+from .twist_binding import KnobBinding
+from .twist_semantics import resolve_twist_semantics
 
 __all__: list[str] = []
 
@@ -43,7 +44,7 @@ class LinkMesh:
 
 @dataclass(frozen=True, slots=True)
 class TwistGeometry:
-    """Keep calibrated grip and each body's collider inputs distinct."""
+    """Keep the declared grip and each body's collider inputs distinct."""
 
     grip: LinkMesh
     target_collisions: tuple[LinkMesh, ...]
@@ -180,17 +181,17 @@ def _mesh(prim: Any, body: Any, cache: Any, scale: float) -> LinkMesh:
 def load_twist_geometry(path: str | Path, binding: KnobBinding) -> TwistGeometry:
     """Read qualified collider inputs in separate native rigid-link frames.
 
-    The calibrated grip is never replaced by a union of cap, shaft or pointer.
+    The declared grip is never replaced by a union of cap, shaft or pointer.
     Vertices already include ``binding.scale``; consumers apply only each
     owning link's observed rigid pose, not another asset-scale multiplication.
     ``approximation`` retains USD cooking semantics, so these triangles alone
     do not certify backend convex decomposition or continuous path clearance.
     """
-    from pxr import Usd, UsdGeom, UsdPhysics
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
 
     path = Path(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    if digest != binding.source_sha256 or digest not in _CALIBRATIONS:
+    if digest != binding.source_sha256:
         raise ValueError("E8 collision source does not match its audited binding.")
     if (
         type(binding.scale) not in (int, float)
@@ -198,10 +199,14 @@ def load_twist_geometry(path: str | Path, binding: KnobBinding) -> TwistGeometry
         or binding.scale <= 0.0
     ):
         raise ValueError("E8 collision deployment scale must be finite and positive.")
-    joint_name, grip_name, _, _ = _CALIBRATIONS[digest]
-    if binding.joint != joint_name:
-        raise ValueError("E8 collision binding selects a different calibrated joint.")
-    stage = Usd.Stage.Open(str(path))
+    semantics = resolve_twist_semantics(path)
+    if (
+        semantics.source_sha256 != digest
+        or semantics.semantics_sha256 != binding.calibration_sha256
+    ):
+        raise ValueError("E8 collision semantics do not match its audited binding.")
+    layer = Sdf.Layer.OpenAsAnonymous(str(path))
+    stage = Usd.Stage.Open(layer) if layer is not None else None
     if stage is None or UsdGeom.GetStageMetersPerUnit(stage) != 1.0:
         raise ValueError("E8 collision source must be metre-authored USD.")
     if any(
@@ -209,10 +214,20 @@ def load_twist_geometry(path: str | Path, binding: KnobBinding) -> TwistGeometry
         for layer in stage.GetUsedLayers()
     ):
         raise ValueError("E8 collision source must be self-contained and hash-bound.")
-    joints = [prim for prim in stage.Traverse() if prim.GetName() == joint_name]
-    if len(joints) != 1 or not joints[0].IsA(UsdPhysics.RevoluteJoint):
-        raise ValueError("E8 collision source requires one calibrated revolute joint.")
-    joint = UsdPhysics.RevoluteJoint(joints[0])
+    joint_prim = stage.GetPrimAtPath(semantics.joint_path)
+    joints = [
+        prim
+        for prim in stage.Traverse()
+        if prim.GetName() == binding.joint and prim.IsA(UsdPhysics.Joint)
+    ]
+    if (
+        not joint_prim
+        or joint_prim.GetName() != binding.joint
+        or not joint_prim.IsA(UsdPhysics.RevoluteJoint)
+        or len(joints) != 1
+    ):
+        raise ValueError("E8 collision source requires one declared revolute joint.")
+    joint = UsdPhysics.RevoluteJoint(joint_prim)
     parent_paths, target_paths = (
         joint.GetBody0Rel().GetTargets(),
         joint.GetBody1Rel().GetTargets(),
@@ -261,13 +276,13 @@ def load_twist_geometry(path: str | Path, binding: KnobBinding) -> TwistGeometry
         owner = _owner(prim)
         if owner is None or not owner.GetPath().HasPrefix(root_path):
             continue
-        calibrated = prim.GetName() == grip_name and owner in (parent, target)
+        selected = str(prim.GetPath()) == semantics.grip_path
         collision = (
             prim.HasAPI(UsdPhysics.CollisionAPI)
             and UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is True
         )
-        if calibrated and (owner != target or not collision):
-            raise ValueError("E8 calibrated grip must be an enabled target collider.")
+        if selected and (owner != target or not collision):
+            raise ValueError("E8 declared grip must be an enabled target collider.")
         if not collision:
             continue
         if not prim.IsA(UsdGeom.Mesh):
@@ -276,15 +291,20 @@ def load_twist_geometry(path: str | Path, binding: KnobBinding) -> TwistGeometry
         articulation_meshes.append(value)
         if owner in (parent, target):
             groups[str(owner.GetPath())].append(value)
-        if calibrated:
+        if selected:
             if grip is not None:
-                raise ValueError("E8 calibrated grip collider must be unambiguous.")
+                raise ValueError("E8 declared grip collider must be unambiguous.")
             grip = value
     target_meshes = tuple(groups[str(target.GetPath())])
     parent_meshes = tuple(groups[str(parent.GetPath())])
     if grip is None or not target_meshes or not parent_meshes:
         raise ValueError("E8 requires grip, target and parent collision meshes.")
-    if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+    refreshed = resolve_twist_semantics(path)
+    if (
+        refreshed.source_sha256 != digest
+        or refreshed.semantics_sha256 != semantics.semantics_sha256
+        or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+    ):
         raise ValueError("E8 collision source changed while loading.")
     return TwistGeometry(
         grip,

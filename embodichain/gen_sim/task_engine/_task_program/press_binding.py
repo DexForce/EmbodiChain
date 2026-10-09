@@ -481,6 +481,8 @@ def prepare_press_scene(
         else:
             scale = 1.0 if body_scale is None else float(body_scale)
         adapted["body_scale"] = [scale] * 3
+        if interaction == "E8":
+            adapted["body_scale_mass_policy"] = "fixed_mass"
         after = geometry.world_vertices(adapted)
         pose = _root_pose(original).copy()
         pose[2, 3] += float(before[:, 2].min() - after[:, 2].min())
@@ -555,7 +557,11 @@ def prepare_press_scene(
                 "adapted_init_pos": adapted["init_pos"],
                 "support_bottom_z": float(before[:, 2].min()),
                 "source_edited": False,
-                "physics_policy": "preserve_pre_resize_calibration",
+                "physics_policy": (
+                    "fixed_mass_source_to_scaled_actor_frame"
+                    if interaction == "E8"
+                    else "preserve_pre_resize_calibration"
+                ),
                 "scale_policy": (
                     "preserve_source"
                     if interaction == "E8" and interaction_scale is None

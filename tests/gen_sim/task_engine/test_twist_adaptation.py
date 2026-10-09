@@ -16,11 +16,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 from types import SimpleNamespace
 
 import pytest
 
 from embodichain.gen_sim.task_engine._task_program.twist_adaptation import (
+    TwistGripDimensionError,
     select_twist_scale,
 )
 
@@ -104,12 +106,33 @@ def test_canonical_hand_adapts_only_below_qualified_minimum():
     assert audit["candidate_grip_depth"] == 0.010
 
 
+def test_preferred_depth_clamps_to_feasible_opening_bound():
+    route = _route(0.004, 0.055)
+    profile = _profile(model_id="robotiq_arg2f_140")
+    before = deepcopy(profile)
+    scale, audit = select_twist_scale(route, profile)
+    assert scale == pytest.approx(0.2 * 0.125 / 0.055)
+    assert audit["candidate_grip_depth"] == pytest.approx(0.004 * 0.125 / 0.055)
+    assert audit["candidate_grip_width"] <= 0.125
+    assert audit["candidate_grip_width"] == pytest.approx(0.125)
+    assert audit["preferred_grip_depth"] == 0.010
+    assert audit["preferred_candidate_limit"] == "maximum_opening_width"
+    assert (
+        audit["candidate_selection"]
+        == "preferred_depth_clamped_to_feasible_scale_interval"
+    )
+    assert profile == before
+
+
 def test_canonical_hand_opening_uses_measured_gap_not_larger_profile_estimate():
-    with pytest.raises(ValueError, match="cannot satisfy"):
-        select_twist_scale(
-            _route(0.010, 0.13),
-            _profile(opening=0.15, model_id="robotiq_arg2f_140"),
-        )
+    scale, audit = select_twist_scale(
+        _route(0.010, 0.13),
+        _profile(opening=0.15, model_id="robotiq_arg2f_140"),
+    )
+    assert scale == pytest.approx(0.2 * 0.125 / 0.13)
+    assert audit["candidate_grip_width"] <= 0.125
+    assert audit["candidate_grip_depth"] >= 0.0075
+    assert audit["preferred_candidate_limit"] == "maximum_opening_width"
 
 
 def test_wide_knob_can_shrink_only_when_depth_still_fits():
@@ -120,14 +143,116 @@ def test_wide_knob_can_shrink_only_when_depth_still_fits():
 
 
 @pytest.mark.parametrize("depth,width", [(0.003, 0.1), (0.010, 0.2)])
-def test_preferred_candidate_rejects_incompatible_width(depth, width):
+def test_empty_feasible_scale_interval_rejects_incompatible_width(depth, width):
     with pytest.raises(ValueError, match="cannot satisfy"):
         select_twist_scale(_route(depth, width), _profile())
 
 
 def test_selected_finger_thickness_is_not_assumed_from_task_or_robot_id():
+    scale, audit = select_twist_scale(_route(0.005, 0.02), _profile(thickness=0.012))
+    assert scale == pytest.approx(0.2 * 0.012 / 0.005)
+    assert audit["candidate_grip_depth"] >= 0.012
+    assert audit["candidate_grip_width"] == pytest.approx(0.048)
+    assert audit["preferred_candidate_limit"] == "minimum_grip_depth"
+
+
+def test_feasible_lower_bound_respects_selected_minimum_opening():
+    profile = _profile(thickness=0.005)
+    model = profile["skill_profile"]["runtime_services"]["grasp_pose_generators"][
+        "right_eef"
+    ]["model"]
+    model["min_opening_width"] = 0.090
+    scale, audit = select_twist_scale(_route(0.002, 0.010), profile)
+    assert scale == pytest.approx(1.8)
+    assert audit["candidate_grip_width"] >= 0.090
+    assert audit["candidate_grip_depth"] == pytest.approx(0.018)
+    assert audit["preferred_candidate_limit"] == "minimum_opening_width"
+
+
+def test_clamped_width_never_rounds_above_measured_maximum():
+    usable_width = 0.1231 - 0.003
+    width = 0.030
+    assert width * (usable_width / width) > usable_width
+    _, audit = select_twist_scale(
+        _route(0.002, width),
+        _profile(opening=0.1231, model_id="robotiq_arg2f_140"),
+    )
+    assert audit["candidate_grip_width"] <= usable_width
+    assert audit["candidate_grip_depth"] >= 0.0075
+    assert audit["assembly_uniform_scale_factor"] == math.nextafter(
+        usable_width / width, 0.0
+    )
+
+
+def test_clamped_depth_never_rounds_below_qualified_minimum():
+    depth, minimum_depth = 0.004066, 0.012
+    assert depth * (minimum_depth / depth) < minimum_depth
+    _, audit = select_twist_scale(
+        _route(depth, 0.030), _profile(thickness=minimum_depth)
+    )
+    assert audit["candidate_grip_depth"] >= minimum_depth
+    assert audit["candidate_grip_width"] <= 0.125
+    assert audit["assembly_uniform_scale_factor"] == math.nextafter(
+        minimum_depth / depth, math.inf
+    )
+
+
+def test_clamped_dimensions_do_not_depend_on_task_uid_or_source_hash():
+    route = _route(0.004, 0.055)
+    scale, audit = select_twist_scale(route, _profile(model_id="robotiq_arg2f_140"))
+    route.binding.object_id = "previously_unseen_control"
+    route.binding.source_sha256 = "f" * 64
+    renamed_scale, renamed_audit = select_twist_scale(
+        route, _profile(model_id="robotiq_arg2f_140")
+    )
+    assert renamed_scale == scale
+    for key in ("object_id", "source_sha256"):
+        audit.pop(key)
+        renamed_audit.pop(key)
+    assert renamed_audit == audit
+
+
+def test_explicit_preferred_depth_is_rejected_instead_of_silently_clamped():
+    with pytest.raises(TwistGripDimensionError, match="cannot satisfy"):
+        select_twist_scale(
+            _route(0.004, 0.055),
+            _profile(model_id="robotiq_arg2f_140"),
+            grip_depth_candidate=0.010,
+        )
+
+
+def test_explicit_depth_candidate_uniformly_scales_original_assembly():
+    route = _route(0.0094, 0.0282, scale=0.47)
+    profile = _profile(model_id="robotiq_arg2f_140")
+    scale, audit = select_twist_scale(route, profile, grip_depth_candidate=0.020)
+    assert scale == pytest.approx(1.0)
+    assert audit["candidate_grip_depth"] == pytest.approx(0.020)
+    assert audit["candidate_grip_width"] == pytest.approx(0.060)
+    assert audit["requested_grip_depth"] == 0.020
+    assert audit["policy"] == "bounded_runtime_uniform_scale_candidate"
+    assert route.binding.scale == 0.47 and route.binding.grip_depth == 0.0094
+
+
+def test_explicit_none_keeps_default_selection_and_audit_identical():
+    route, profile = _route(0.015, 0.100), _profile()
+    assert select_twist_scale(route, profile) == select_twist_scale(
+        route, profile, grip_depth_candidate=None
+    )
+
+
+@pytest.mark.parametrize("depth", (True, 0.0, -0.01, float("nan"), float("inf")))
+def test_explicit_depth_candidate_requires_finite_positive_number(depth):
+    with pytest.raises(ValueError, match="candidate"):
+        select_twist_scale(_route(0.010, 0.060), _profile(), grip_depth_candidate=depth)
+
+
+def test_explicit_depth_candidate_cannot_bypass_gripper_width_limit():
     with pytest.raises(ValueError, match="cannot satisfy"):
-        select_twist_scale(_route(0.005, 0.02), _profile(thickness=0.012))
+        select_twist_scale(
+            _route(0.010, 0.083333333),
+            _profile(model_id="robotiq_arg2f_140"),
+            grip_depth_candidate=0.020,
+        )
     scale, audit = select_twist_scale(_route(0.008, 0.02), _profile(thickness=0.006))
     assert scale is None
     assert audit["finger_thickness"] == 0.006

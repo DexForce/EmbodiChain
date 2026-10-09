@@ -987,6 +987,11 @@ class TaskEngineWorkflow:
                         max_episodes=planning_cfg.max_episodes,
                         max_episode_steps=planning_cfg.max_episode_steps,
                         fit_grasp_assets=planning_cfg.fit_grasp_assets,
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
                         candidate_set=candidate_set,
                         force_most_likely=False,
                         final_inspection=final_inspection,
@@ -1405,6 +1410,11 @@ class TaskEngineWorkflow:
                         "max_episodes": planning_cfg.max_episodes,
                         "max_episode_steps": planning_cfg.max_episode_steps,
                         "fit_grasp_assets": planning_cfg.fit_grasp_assets,
+                        **(
+                            {"twist_mass_source": True}
+                            if planning_cfg.twist_mass_source
+                            else {}
+                        ),
                     },
                     "execution": {
                         "num_envs": execution_cfg.num_envs,

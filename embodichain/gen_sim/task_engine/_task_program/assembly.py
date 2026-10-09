@@ -56,7 +56,7 @@ from .invocation_policy import (
     bind_articulation_calls,
 )
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v9"
 
 
 def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
@@ -230,8 +230,31 @@ class _TaskFactory(SimulationTaskProgramFactory):
             engine.register(GenSimPress(), replace=True)
         if self._twist_routes:
             from .twist_runtime import GenSimTwist
+            from .twist_geometry_guard import E8GeometryGuard
 
-            engine.register(GenSimTwist(), replace=True)
+            guard = E8GeometryGuard(
+                self._twist_routes[0],
+                self._simulation,
+                self._robot,
+                self._task_post_port.sensor,
+            )
+            feedback = None
+            if getattr(self._twist_routes[0], "feedback_enabled", False):
+                from .twist_feedback import TwistFeedbackState
+
+                feedback = TwistFeedbackState(
+                    self._twist_routes[0],
+                    self._simulation,
+                    self._robot,
+                    self._task_post_port.sensor,
+                    guard,
+                )
+                self._task_post_port.sensor._feedback_state = feedback
+            engine.register(
+                GenSimTwist(geometry_guard=guard, feedback_state=feedback), replace=True
+            )
+            if feedback is not None:
+                engine.configure_twist_feedback(feedback)
         self.task_program_registration.validate_engine(engine)
         return engine
 

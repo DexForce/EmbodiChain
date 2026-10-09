@@ -500,9 +500,11 @@ def compose_deployment(
     )
     from .twist_runtime import TwistFactory, with_twist_options
 
-    robot_profile = with_twist_options(
-        robot_profile, tuple(f.route for f in lowerers if type(f) is TwistFactory)
-    )
+    twist_routes = tuple(f.route for f in lowerers if type(f) is TwistFactory)
+    robot_profile = with_twist_options(robot_profile, twist_routes)
+    if any(route.feedback_enabled for route in twist_routes):
+        if len(twist_routes) != 1:
+            raise ValueError("E8 precontact feedback requires one standalone route.")
     registration = SimulationTaskProgramRegistration(
         scene_binding=_decode_scene(payload["scene"]),
         robot_profile_binding=robot_profile,
@@ -513,7 +515,7 @@ def compose_deployment(
     )
     fingerprint = canonical_hash(
         {
-            "local_decoder_revision": 1,
+            "local_decoder_revision": 2,
             "registration": registration.fingerprint,
             "grasp_pose_generators": {
                 key: asdict(value) for key, value in services.grasp_pose_generators

@@ -20,7 +20,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, replace
 import math
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TYPE_CHECKING
 from contextvars import ContextVar
 
 import torch
@@ -73,6 +73,9 @@ from .twist_binding import (
     discover_twist,
 )
 from .articulation_binding import PARK_CALL
+
+if TYPE_CHECKING:
+    from .twist_geometry_guard import E8GeometryGuard
 
 __all__: list[str] = []
 SENSOR_UID = "gen_sim_twist_evidence"
@@ -240,6 +243,35 @@ class GenSimTwist(Twist):
     OptionsType = Twist.OptionsType
     binding_contract = Twist.binding_contract
 
+    def __init__(
+        self,
+        default_options: TwistOptions | None = None,
+        *,
+        geometry_guard: E8GeometryGuard | None = None,
+        feedback_state: Any = None,
+    ) -> None:
+        super().__init__(default_options)
+        self._geometry_guard = geometry_guard
+        self._feedback_state = feedback_state
+
+    def _guard_dependency(self, plan: Any, request: Any, context: Any) -> Any:
+        guard = getattr(self, "_geometry_guard", None)
+        if guard is None or not plan.plan_success.any():
+            return plan
+        plan, evidence = guard.root_dependency(plan, request, context)
+        if plan.diagnostics is not None:
+            plan = replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "gen_sim_twist_root_dependency": evidence,
+                    },
+                ),
+            )
+        return plan
+
     @staticmethod
     def _current_qpos(request: Any, context: Any) -> float | None:
         geometry = request.goal.semantics.geometry
@@ -375,6 +407,33 @@ class GenSimTwist(Twist):
         from .motion import _joint_velocity_limits, _velocity_validity
 
         geometry = request.goal.semantics.geometry
+        feedback = getattr(self, "_feedback_state", None)
+        if geometry.get("gen_sim_twist_continuation") is True:
+            if feedback is None:
+                raise ValueError(
+                    "E8 continuation requires its owned feedback controller."
+                )
+            plan = feedback.plan_continuation(self, request, context)
+            measured = plan.diagnostics.metadata.get("continuation_measured_qpos")
+            if type(measured) is not float or not math.isfinite(measured):
+                raise ValueError("E8 continuation requires a fresh joint observation.")
+            request = replace(
+                request,
+                goal=replace(
+                    request.goal,
+                    semantics=replace(
+                        request.goal.semantics,
+                        geometry={**geometry, "gen_sim_twist_measured_qpos": measured},
+                    ),
+                ),
+            )
+            guard = getattr(self, "_geometry_guard", None)
+            if guard is not None:
+                plan = guard.filter_continuation(self, plan, request, context)
+            plan = GenSimTwist._guard_dependency(self, plan, request, context)
+            if plan.plan_success.all():
+                feedback.record_plan(self, request, context, plan)
+            return plan
         angle = geometry["gen_sim_twist_angle"]
         current_qpos = self._current_qpos(request, context)
         if current_qpos is not None:
@@ -391,10 +450,12 @@ class GenSimTwist(Twist):
         base_request = replace(
             request, skill_options=replace(request.skill_options, twist_angle=angle)
         )
+        if feedback is not None:
+            base_request = feedback.apply_bias(base_request, context)
         state = _candidate_state()
         if state.goal_complete:
             if current_qpos is not None and math.isfinite(current_qpos):
-                return self.build_plan(
+                plan = self.build_plan(
                     request,
                     context,
                     success=torch.ones(
@@ -409,6 +470,15 @@ class GenSimTwist(Twist):
                     diagnostics=None,
                     segment_lengths={"approach": 1},
                 )
+                if getattr(self, "_geometry_guard", None) is None:
+                    return plan
+                plan = GenSimTwist._guard_dependency(self, plan, request, context)
+                if (
+                    getattr(feedback, "enabled", False) is True
+                    and plan.plan_success.all()
+                ):
+                    feedback.record_plan(self, request, context, plan)
+                return plan
             state.goal_complete = False
         bite = geometry["gen_sim_twist_bite_depth"]
         table = _candidate_table(
@@ -432,6 +502,11 @@ class GenSimTwist(Twist):
             candidate_plan = self._annotate_plan(
                 candidate_plan, roll=roll, candidate_index=candidate_index
             )
+            guard = getattr(self, "_geometry_guard", None)
+            if guard is not None and candidate_plan.plan_success.any():
+                candidate_plan = guard.filter_candidate(
+                    self, candidate_plan, candidate_request, context
+                )
             if first_failed is None:
                 first_failed = (candidate_index, candidate_plan, candidate_request)
             if candidate_plan.plan_success.any():
@@ -479,14 +554,26 @@ class GenSimTwist(Twist):
             logger.log_warning(f"E8 public Twist planning rejected: {plan.diagnostics}")
         if plan.plan_success.any():
             settle = request.goal.semantics.geometry["gen_sim_twist_settle_steps"]
-            if settle:
+            alignment_hold = 0
+            if getattr(feedback, "enabled", False) is True and any(
+                segment.name == "close" for segment in plan.segments
+            ):
+                from .twist_continuation import _ALIGNMENT_HOLD_STEPS
+
+                alignment_hold = _ALIGNMENT_HOLD_STEPS
+            if settle or alignment_hold:
                 trajectory = plan.joint_trajectory
                 pieces, lengths = [], {}
                 for segment in plan.segments:
                     piece = trajectory.positions[:, segment.start : segment.stop]
+                    hold = 0
                     if segment.name in {"close", "twist"}:
+                        hold = settle
+                    elif segment.name in {"approach", "reach"}:
+                        hold = alignment_hold
+                    if hold:
                         piece = torch.cat(
-                            (piece, piece[:, -1:].expand(-1, settle, -1)), dim=1
+                            (piece, piece[:, -1:].expand(-1, hold, -1)), dim=1
                         )
                     pieces.append(piece)
                     lengths[segment.name] = piece.shape[1]
@@ -524,6 +611,13 @@ class GenSimTwist(Twist):
             # rotation. The next chunk lowers from a fresh physical observation.
             if plan.scene_dependencies:
                 plan = replace(plan, scene_dependency_end_segment="reach")
+            if alignment_hold:
+                guard = getattr(self, "_geometry_guard", None)
+                if guard is not None:
+                    plan = guard.filter_candidate(self, plan, request, context)
+        plan = GenSimTwist._guard_dependency(self, plan, request, context)
+        if feedback is not None and plan.plan_success.all():
+            feedback.record_plan(self, request, context, plan)
         return plan
 
 
@@ -744,7 +838,12 @@ class _TwistLowerer(RegisteredSemanticLowerer):
             else 0.0
         )
         offset, grasp_command = _grasp_tip_offset(
-            self.robot, context, bound, b.grip_width + 2 * (rest + pad_rest)
+            self.robot,
+            context,
+            bound,
+            b.grip_width
+            + 2 * (rest + pad_rest)
+            - getattr(self.route, "grip_extra_m", 0.0),
         )
         if self.route.variant == "closed_tip":
             offset = _closed_collision_tip_offset(self.robot, context, bound)
@@ -867,6 +966,9 @@ class TwistContactSensor(PressContactSensor):
     def configure(self, route: TwistRoute, robot: Any) -> None:
         super().configure(route, robot)
         self.geometry = load_twist_geometry(self.art.cfg.fpath, route.binding)
+        from .twist_mass import verify_scaled_mass
+
+        self.mass_evidence = verify_scaled_mass(self.art, route.binding)
         self.finger_collisions = load_robot_link_meshes(
             robot.cfg.fpath,
             self.finger_names,
@@ -913,6 +1015,7 @@ class TwistContactSensor(PressContactSensor):
 
         return {
             "schema": "scaled_owning_link_collision_inputs/v1",
+            "mass_properties": self.mass_evidence,
             "frame": "scaled owning rigid-link local",
             "units": "m",
             "asset_scale_applied": self.geometry.scale,
@@ -1022,6 +1125,9 @@ class TwistContactSensor(PressContactSensor):
 
     def reset(self, env_ids: Any = None) -> None:
         super().reset(env_ids)
+        feedback = getattr(self, "_feedback_state", None)
+        if feedback is not None:
+            feedback.reset()
         if hasattr(self, "route"):
             if self._startup_recording and len(self.startup_trace) > 1:
                 self._finalized_startup = self._startup_record(complete=False)
@@ -1035,6 +1141,9 @@ class TwistContactSensor(PressContactSensor):
             self.trace[-1]["hand_target"] = self.robot.get_qpos(
                 part, target=True
             ).tolist()
+        feedback = getattr(self, "_feedback_state", None)
+        if feedback is not None:
+            feedback.capture_native()
         return sample
 
 
@@ -1402,6 +1511,19 @@ class TwistAcceptancePort:
                 "candidate_fallback": fallback,
                 "candidate_fallback_count": self._candidate_state.fallback_count,
                 "candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
+                "candidate_order": list(self._candidate_state.order),
+                "candidate_attempt_count": self._candidate_state.fallback_count + 1,
+                "candidate_exhausted": bool(
+                    valid_chunk
+                    and not good
+                    and not self._candidate_state.locked
+                    and self._candidate_state.order
+                    and self._candidate_state.fallback_count
+                    >= min(
+                        TWIST_CANDIDATE_FALLBACKS,
+                        len(self._candidate_state.order) - 1,
+                    )
+                ),
                 "coarse_turn_threshold": COARSE_TURN_THRESHOLD,
                 "cumulative_contact_path": self._candidate_state.contact_path,
                 "coarse_turn_reached": self._candidate_state.goal_complete,

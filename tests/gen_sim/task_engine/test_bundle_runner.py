@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import Mock
 from typing import ClassVar
@@ -29,6 +30,41 @@ import torch
 
 from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
+
+
+def test_feedback_audit_snapshot_owns_rows_before_reset():
+    row = {"window_timestamps": [1.0, 1.01, 1.02], "alignment_accepted": True}
+    audit = deque([row])
+    sensor = SimpleNamespace(_feedback_state=SimpleNamespace(audit=audit))
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=Mock(return_value=sensor)))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            adapter_factory=SimpleNamespace(
+                twist_routes=(SimpleNamespace(feedback_enabled=True),)
+            )
+        )
+    )
+    evidence = _bundle_runner._snapshot_twist_feedback_audit(env, deployment)
+    row["window_timestamps"][0] = 99.0
+    audit.clear()
+    assert evidence == {
+        "feedback_audit": [
+            {"window_timestamps": [1.0, 1.01, 1.02], "alignment_accepted": True}
+        ]
+    }
+
+
+@pytest.mark.parametrize("routes", [(), (SimpleNamespace(feedback_enabled=False),)])
+def test_default_feedback_snapshot_does_not_lookup_sensor_or_add_keys(routes):
+    lookup = Mock(side_effect=AssertionError("Default None may not add sensor reads"))
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=lookup))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            adapter_factory=SimpleNamespace(twist_routes=routes)
+        )
+    )
+    assert _bundle_runner._snapshot_twist_feedback_audit(env, deployment) == {}
+    lookup.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -206,16 +242,24 @@ def test_initial_capture_counts_sequential_workflows_not_segments():
 
 
 @pytest.mark.parametrize(
-    "probe_only, outcome",
+    "probe_only, outcome, evidence_mode",
     [
-        (False, "success"),
-        (True, "success"),
-        (False, "planning_failure"),
-        (False, "velocity_failure"),
-        (False, "exception"),
+        (False, "success", "none"),
+        (True, "success", "none"),
+        (False, "planning_failure", "none"),
+        (False, "velocity_failure", "none"),
+        (False, "exception", "none"),
+        (False, "success", "twist_default"),
+        (False, "exception", "twist_default"),
+        (False, "success", "twist_feedback"),
+        (False, "exception", "twist_feedback"),
+        (False, "success", "twist_audit_error"),
+        (False, "exception", "twist_audit_error"),
     ],
 )
-def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outcome):
+def test_bundle_plans_initial_call_once(
+    tmp_path, monkeypatch, probe_only, outcome, evidence_mode
+):
     import gymnasium
     from dataclasses import dataclass
     from embodichain.lab.gym.envs import demo
@@ -313,6 +357,56 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         planning.side_effect = ValueError("fixture planning exception")
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", planning)
     env = SimpleNamespace(reset=Mock(), close=Mock())
+    audit_record = {
+        "decision": "tracking_window",
+        "alignment_accepted": True,
+        "angle_deg": 1.0,
+        "spread_mm": 0.2,
+        "position_error_mm": 10.0,
+        "window_timestamps": [1.0, 1.01, 1.02],
+    }
+    feedback = None
+    if evidence_mode != "none":
+        from embodichain.gen_sim.task_engine._task_program.press_runtime import (
+            PressContactSensor,
+        )
+
+        enabled = evidence_mode != "twist_default"
+        route = SimpleNamespace(
+            feedback_enabled=enabled,
+            binding=SimpleNamespace(link="rotor"),
+            payload=lambda: {"feedback_enabled": enabled},
+        )
+        deployment.integration.adapter_factory.twist_routes = (route,)
+        sensor = object.__new__(PressContactSensor)
+        sensor.route = route
+        sensor.acceptance = {"accepted": outcome == "success"}
+        sensor.target_actor, sensor.parent_actor, sensor.table_actor = 3, 4, 5
+        sensor.contact_envelopes, sensor.trace = {}, []
+        sensor.finger_actors, sensor.joint_index = {1, 2}, 0
+        sensor.art = SimpleNamespace(
+            get_mass=lambda *a: torch.tensor([[0.18]]),
+            get_qpos_limits=lambda: torch.tensor([[[-2.0, 2.0]]]),
+            get_joint_drive=lambda **kw: (torch.ones(1), torch.ones(1)),
+        )
+        sensor.startup_evidence = lambda: {"summary": {"accepted": True}}
+        sensor.geometry_evidence = lambda: {"source_edited": False}
+        feedback = SimpleNamespace(audit=deque()) if enabled else None
+        sensor._feedback_state = feedback
+        env.sim = SimpleNamespace(get_sensor=lambda uid: sensor)
+        env.reset.side_effect = lambda *a, **kw: (
+            feedback.audit.clear() if feedback is not None else None
+        )
+        monkeypatch.setattr(
+            _bundle_runner, "_configure_twist_recorders", lambda *a: None
+        )
+        if evidence_mode == "twist_audit_error":
+
+            class Uncopyable:
+                def __deepcopy__(self, memo):
+                    raise RuntimeError("fixture feedback audit snapshot error")
+
+            audit_record["uncopyable"] = Uncopyable()
     monkeypatch.setattr(gymnasium, "make", lambda **kw: env)
     monkeypatch.setattr(registration, "discover_task_packages", lambda: None)
     monkeypatch.setattr(registration, "execute_init_hooks", lambda: None)
@@ -358,6 +452,8 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     dispatched = []
 
     def execute(*args, **kwargs):
+        if feedback is not None:
+            feedback.audit.append(audit_record)
         plan = engine._plan_request(request)
         if plan.plan_success.any():
             dispatched.append(plan)
@@ -410,6 +506,24 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
         )
     if outcome == "exception":
         assert report["failure"]["message"] == "fixture planning exception"
+    if evidence_mode != "none":
+        evidence = json.loads((tmp_path / "execution/twist_evidence.json").read_text())
+        if evidence_mode == "twist_default":
+            assert (
+                "feedback_audit" not in evidence
+                and "feedback_audit_error" not in evidence
+            )
+        elif evidence_mode == "twist_feedback":
+            assert evidence["feedback_audit"] == [audit_record]
+            assert "feedback_audit_error" not in evidence
+        else:
+            assert "feedback_audit" not in evidence
+            assert evidence["feedback_audit_error"] == {
+                "type": "RuntimeError",
+                "message": "fixture feedback audit snapshot error",
+            }
+        if feedback is not None:
+            assert not feedback.audit
 
 
 @pytest.mark.parametrize("fails", [False, True])
