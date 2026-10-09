@@ -75,6 +75,23 @@ their predecessor order; incomplete `always` windows cannot certify success.
 Scene output is a scene-binding and measured-state input to that protocol; it
 does not by itself certify a task witness.
 
+Task Engine preparation derives the normative specification before binding,
+then `SemanticTaskPlanner.plan_spec()` retains the original witness and emits
+explicit expansion lineage. `semantic_graph_validation.py` checks every source
+member, required resource, milestone dependency and surviving terminal clause.
+The existing v38 graph/reader/executor and fingerprint rules remain unchanged;
+new bundles add root-level `task_spec.json`, `semantic_graph_validation.json`
+and offline `semantic_graph.html`. Transaction publication verifies companions
+before relocating private paths, then rebuilds their full digests and root HTML;
+readers never reseal stale artifacts. Missing legacy companions are not generated
+implicitly. `validate-graph --bundle` is read-only, and `visualize --output *.html`
+uses the same graph data rather than a separate execution representation.
+Runtime captures supported final geometry before reset, separately from measured
+milestone events. New-contract success requires a satisfied TaskSpec evaluation;
+raw program success remains in `runtime_result.program_success`. Unsupported
+observers, incomplete `all` selector universes and sparse temporal/invariant
+windows remain unavailable, not certified. Historical reports are not rewritten.
+
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote
 access requires complete basic auth; repository/dotenv path restrictions belong

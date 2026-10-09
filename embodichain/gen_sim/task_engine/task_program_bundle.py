@@ -57,6 +57,7 @@ from ._task_program.e6_clearance import (
     PRESHAPE_FRACTION,
     RELEASE_RETREAT_DISTANCE,
 )
+from embodichain.gen_sim.task_spec import TaskSpec
 
 __all__ = ["TaskProgramBundlePaths", "generate_task_program_bundle"]
 
@@ -156,6 +157,10 @@ def generate_task_program_bundle(
     max_episodes: int | None = None,
     max_episode_steps: int | None = None,
     fit_grasp_assets: bool = False,
+    task_spec: TaskSpec | None = None,
+    task_candidate: Mapping[str, Any] | None = None,
+    role_bindings: Mapping[str, Any] | None = None,
+    step_lineage: Mapping[str, Any] | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -493,6 +498,25 @@ def generate_task_program_bundle(
         validation_context=deployment.integration.registration.catalog,
     )
     deployment.integration.registration.catalog.preflight(program)
+    validation = None
+    if task_spec is not None:
+        if task_candidate is None or role_bindings is None or step_lineage is None:
+            raise ValueError(
+                "TaskSpec generation requires its source witness and expansion lineage."
+            )
+        from .semantic_graph_validation import write_graph_contract
+
+        validation = write_graph_contract(
+            root, selected_graph, task_spec, task_candidate, role_bindings, step_lineage
+        )
+    from .semantic_graph_html import write_semantic_task_graph_html
+
+    write_semantic_task_graph_html(
+        selected_graph,
+        root / "semantic_graph.html",
+        task_spec=task_spec,
+        validation=validation,
+    )
     return selected_graph, paths
 
 

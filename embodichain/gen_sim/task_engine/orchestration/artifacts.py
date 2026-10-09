@@ -274,6 +274,20 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
     """Replace staging-root absolute paths embedded in JSON and YAML artifacts."""
     source_prefix = staging.resolve().as_posix()
     destination_prefix = destination.resolve().as_posix()
+    contract_roots = [
+        path.parent for path in staging.rglob("semantic_graph_validation.json")
+    ]
+    if contract_roots:
+        from ..semantic_graph_validation import (
+            verify_graph_contract,
+            write_graph_contract,
+        )
+        from ..semantic_graph_html import write_semantic_task_graph_html
+        from embodichain.gen_sim.task_spec import TaskSpec
+
+        # Only this checked, controlled relocation may reseal generated identities.
+        for root in contract_roots:
+            verify_graph_contract(root, load_config(root / "semantic_task_graph.json"))
 
     def relocate(value: Any) -> Any:
         if isinstance(value, str):
@@ -305,6 +319,23 @@ def _relocate_artifact_paths(staging: Path, destination: Path) -> None:
             relocated = relocate(value)
             if relocated != value:
                 save_config(path, relocated)
+
+    for root in contract_roots:
+        graph = load_config(root / "semantic_task_graph.json")
+        spec = TaskSpec.from_dict(load_config(root / "task_spec.json"))
+        envelope = load_config(root / "semantic_graph_validation.json")
+        envelope = write_graph_contract(
+            root,
+            graph,
+            spec,
+            envelope["source"]["candidate"],
+            envelope["source"]["role_bindings"],
+            envelope["coverage"]["lineage"],
+        )
+        verify_graph_contract(root, graph)
+        write_semantic_task_graph_html(
+            graph, root / "semantic_graph.html", task_spec=spec, validation=envelope
+        )
 
 
 def _remove_path(path: Path) -> None:

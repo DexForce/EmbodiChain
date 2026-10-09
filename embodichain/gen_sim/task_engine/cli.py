@@ -91,14 +91,20 @@ def build_parser() -> argparse.ArgumentParser:
     annotate_parser.add_argument("--apply", action="store_true")
     annotate_parser.add_argument("--backup-root", default=None)
     visualize_parser = subparsers.add_parser(
-        "visualize", help="Render a semantic task graph as a PNG."
+        "visualize", help="Render a semantic graph as offline HTML or PNG."
     )
     visualize_parser.add_argument("--graph", required=True)
     visualize_parser.add_argument("--report", default=None)
     visualize_parser.add_argument("--output", required=True)
+    visualize_parser.add_argument("--task-spec", default=None)
+    visualize_parser.add_argument("--validation", default=None)
     visualize_parser.add_argument(
         "--view", choices=("groups", "calls"), default="groups"
     )
+    validate_parser = subparsers.add_parser(
+        "validate-graph", help="Strictly audit an existing bundle without simulation."
+    )
+    validate_parser.add_argument("--bundle", required=True)
     return parser
 
 
@@ -161,6 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "run-all",
         "annotate-endpoints",
         "visualize",
+        "validate-graph",
         "-h",
         "--help",
     }:
@@ -170,6 +177,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_endpoint_annotations(args)
     if args.command == "visualize":
         return _run_visualize(args, parser)
+    if args.command == "validate-graph":
+        return _run_validate_graph(args, parser)
     if args.command == "run":
         return _run_prepared_bundle(args)
     return _run_workflow(
@@ -188,17 +197,92 @@ def _run_visualize(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
             if args.report is None
             else json.loads(Path(args.report).expanduser().read_text(encoding="utf-8"))
         )
-        from .semantic_graph_visualization import write_semantic_task_graph_png
+        if Path(args.output).suffix.lower() == ".html":
+            from .semantic_graph_html import write_semantic_task_graph_html
 
-        output = write_semantic_task_graph_png(
-            graph,
-            args.output,
-            report,
-            view=args.view,
-        )
+            root = Path(args.graph).expanduser().parent
+            spec_path = (
+                Path(args.task_spec).expanduser()
+                if args.task_spec
+                else root / "task_spec.json"
+            )
+            validation_path = (
+                Path(args.validation).expanduser()
+                if args.validation
+                else root / "semantic_graph_validation.json"
+            )
+            for explicit, path in (
+                (args.task_spec, spec_path),
+                (args.validation, validation_path),
+            ):
+                if explicit and not path.is_file():
+                    raise ValueError(f"Explicit companion file is missing: {path}.")
+            spec = (
+                json.loads(spec_path.read_text(encoding="utf-8"))
+                if spec_path.is_file()
+                else None
+            )
+            validation = (
+                json.loads(validation_path.read_text(encoding="utf-8"))
+                if validation_path.is_file()
+                else None
+            )
+            output = write_semantic_task_graph_html(
+                graph, args.output, report, task_spec=spec, validation=validation
+            )
+        else:
+            if Path(args.output).suffix.lower() != ".png":
+                raise ValueError("Visualization output must end in .html or .png.")
+            from .semantic_graph_visualization import write_semantic_task_graph_png
+
+            output = write_semantic_task_graph_png(
+                graph, args.output, report, view=args.view
+            )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         parser.error(str(exc))
     print(json.dumps({"output": output.as_posix(), "view": args.view}))
+    return 0
+
+
+def _run_validate_graph(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    from ._bundle_runner import (
+        _verify_source,
+        _verify_program_projection,
+        _verify_integration_fingerprint,
+    )
+    from .semantic_graph import validate_semantic_task_graph
+    from .semantic_graph_validation import verify_graph_contract
+
+    try:
+        root = Path(args.bundle).expanduser().resolve()
+        graph = validate_semantic_task_graph(
+            json.loads((root / "semantic_task_graph.json").read_text(encoding="utf-8"))
+        )
+        _verify_source(root)
+        _verify_integration_fingerprint(
+            root,
+            root / "task_program_deployment.yaml",
+            graph,
+            json.loads(
+                (root / "integration_fingerprint.json").read_text(encoding="utf-8")
+            ),
+        )
+        _verify_program_projection(root / "task_program/program.yaml", graph)
+        contract = verify_graph_contract(root, graph)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        parser.error(str(exc))
+    _print_json(
+        {
+            "bundle": str(root),
+            "structure_and_integration": "validated",
+            "task_spec_coverage": (
+                "unavailable" if contract is None else contract["coverage"]["status"]
+            ),
+            "runtime_evidence": "not_run",
+        }
+    )
     return 0
 
 
@@ -285,6 +369,9 @@ def _run_workflow(
                 None if result.final_bundle is None else result.final_bundle.as_posix()
             ),
             "video_paths": _report_saved_videos(result.output_dir) if execute else [],
+            "semantic_graph_html": _report_semantic_graph_html(
+                result.output_dir, bundle=result.final_bundle, announce=execute
+            ),
         }
     )
     accepted = result.succeeded if execute else result.status == "prepared"
@@ -350,6 +437,9 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
             "output_dir": allocation.path.as_posix(),
             "execution_report": report,
             "video_paths": _report_saved_videos(allocation.path),
+            "semantic_graph_html": _report_semantic_graph_html(
+                allocation.path, bundle=Path(args.bundle).expanduser()
+            ),
         }
     )
     return 0 if accepted else 2
@@ -377,6 +467,64 @@ def _report_saved_videos(output_dir: Path) -> list[str]:
     if not paths:
         print("[Task Engine] No video files generated for this run.", file=sys.stderr)
     return paths
+
+
+def _report_semantic_graph_html(
+    output_dir: Path, *, bundle: Path | None = None, announce: bool = True
+) -> str | None:
+    """Report an existing current-run viewer, preferring selected execution evidence."""
+    candidates = [output_dir / "semantic_graph.html"]
+    selection_path = output_dir / "final" / "selection.json"
+    try:
+        if selection_path.is_file():
+            selection = json.loads(selection_path.read_text(encoding="utf-8"))
+            if isinstance(selection, dict):
+                scene, action = (
+                    selection.get("scene_attempt"),
+                    selection.get("action_attempt"),
+                )
+                if all(type(value) is int and value > 0 for value in (scene, action)):
+                    candidates.append(
+                        output_dir
+                        / "attempts"
+                        / f"scene_{scene:04d}"
+                        / "action_attempts"
+                        / f"action_{action:04d}"
+                        / "semantic_graph.html"
+                    )
+        if bundle is not None:
+            candidates.append(bundle / "semantic_graph.html")
+        else:
+            for pattern in (
+                "attempts/scene_*/action_attempts/action_*/semantic_graph.html",
+                "attempts/scene_*/bundle/semantic_graph.html",
+            ):
+                candidates.extend(sorted(output_dir.glob(pattern), reverse=True))
+        path = next(
+            (
+                candidate.resolve().as_posix()
+                for candidate in candidates
+                if candidate.is_file()
+            ),
+            None,
+        )
+    except (OSError, ValueError) as exc:
+        if announce:
+            print(
+                f"[Task Engine] Unable to locate semantic graph HTML: {exc}",
+                file=sys.stderr,
+            )
+        return None
+    if announce:
+        print(
+            (
+                f"[Task Engine] Semantic graph HTML: {path}"
+                if path is not None
+                else "[Task Engine] No semantic graph HTML generated for this run."
+            ),
+            file=sys.stderr,
+        )
+    return path
 
 
 def _instruction(args: argparse.Namespace) -> str:

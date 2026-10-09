@@ -964,41 +964,19 @@ class TaskEngineWorkflow:
                 for item in candidate_set["candidates"]
                 if item["candidate_id"] == final_candidate_id
             )
-            # TaskSpec is the normative, action-sequence-independent
-            # artifact.  Keep it beside the run audit after binding has chosen
-            # the final candidate; the existing bundle/runtime remains the
-            # sole execution path.
-            from .task_spec import task_spec_from_candidate
-
-            if set(final_candidate) < {
-                "candidate_id",
-                "draft",
-                "scene_request",
-                "success_spec",
-                "semantic_hash",
-                "vote_count",
-                "attempts",
-                "normalizations",
-            }:
+            # Reuse the specification consumed during planning; do not regenerate
+            # a second normative identity after final binding.
+            prepared_spec_path = preparation.output_dir / "task_spec.json"
+            if not prepared_spec_path.is_file():
                 _write_json(
                     staging / "task_spec_error.json",
                     {
-                        "error_type": "legacy_candidate_shape",
-                        "message": (
-                            "TaskSpec generation requires a complete "
-                            "TaskCandidate contract."
-                        ),
+                        "error_type": "legacy_bundle_without_task_spec",
+                        "message": "No normative companion was provided by preparation.",
                     },
                 )
             else:
-                task_spec = task_spec_from_candidate(
-                    final_candidate,
-                    metadata={
-                        "run_id": effective_run_id,
-                        "scene_attempt": attempts[-1]["scene_attempt"],
-                    },
-                )
-                _write_json(staging / "task_spec.json", task_spec.to_dict())
+                _write_json(staging / "task_spec.json", _read_json(prepared_spec_path))
             selected_attempt = attempts[-1]
             final_unbound = getattr(preparation, "unbound_action_plan", None)
             if (
@@ -1114,6 +1092,7 @@ class TaskEngineWorkflow:
                     successes = _environment_successes(
                         report,
                         required_semantic_steps=success_terms,
+                        bundle=preparation.output_dir,
                     )
                     if len(successes) != execution_cfg.num_envs:
                         raise ValueError(
@@ -1267,6 +1246,23 @@ class TaskEngineWorkflow:
                 task_spec_manifest = {
                     "path": task_spec_path.name,
                     "semantic_hash": task_spec.get("semantic_hash"),
+                    "bundle_companions": (
+                        None
+                        if final_bundle is None
+                        else {
+                            "task_spec": (final_bundle / "task_spec.json")
+                            .relative_to(staging)
+                            .as_posix(),
+                            "coverage": (
+                                final_bundle / "semantic_graph_validation.json"
+                            )
+                            .relative_to(staging)
+                            .as_posix(),
+                            "html": (final_bundle / "semantic_graph.html")
+                            .relative_to(staging)
+                            .as_posix(),
+                        }
+                    ),
                 }
         _write_json(state_path, state.to_dict())
         _write_json(
@@ -1423,6 +1419,7 @@ def _environment_successes(
     report: Mapping[str, Any],
     *,
     required_semantic_steps: Sequence[str] = (),
+    bundle: Path | None = None,
 ) -> list[bool]:
     environments = report.get("environments")
     if not isinstance(environments, Sequence) or isinstance(environments, (str, bytes)):
@@ -1444,6 +1441,32 @@ def _environment_successes(
         values.append(success)
     if not values:
         raise ValueError("Execution report must contain at least one environment.")
+    if bundle is not None and (bundle / "task_spec.json").exists():
+        from .semantic_graph_validation import (
+            verify_graph_contract,
+            _validate_runtime_evaluation,
+        )
+        from embodichain.gen_sim.task_spec import TaskSpec
+
+        graph = _read_json(bundle / "semantic_task_graph.json")
+        contract = verify_graph_contract(bundle, graph)
+        evaluation = (report.get("runtime_result") or {}).get("task_spec_evaluation")
+        if not isinstance(evaluation, Mapping) or contract is None:
+            return [False] * len(values)
+        _validate_runtime_evaluation(
+            evaluation,
+            TaskSpec.from_dict(_read_json(bundle / "task_spec.json")),
+            graph,
+            [row["env_id"] for row in environments],
+            contract=contract,
+        )
+        rows = evaluation["environments"]
+        values = [
+            success
+            and row.get("certificate_ready") is True
+            and row.get("status") == "satisfied"
+            for success, row in zip(values, rows, strict=True)
+        ]
     return values
 
 

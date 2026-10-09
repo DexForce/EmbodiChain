@@ -331,7 +331,7 @@ def test_unbound_prepare_publishes_only_audit_artifacts(tmp_path: Path) -> None:
         task_agent=task_agent,
         scene_adapter=scene_adapter,
         semantic_planner=SimpleNamespace(
-            plan=lambda *_args, **_kwargs: pytest.fail(
+            plan_spec=lambda *_args, **_kwargs: pytest.fail(
                 "Semantic Task Planner must not run"
             )
         ),
@@ -496,7 +496,23 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
     result = TaskEngineCoordinator(
         task_agent=task_agent,
         scene_adapter=scene_adapter,
-        semantic_planner=SimpleNamespace(plan=lambda *_args, **_kwargs: graph),
+        semantic_planner=SimpleNamespace(
+            plan_spec=lambda selected, bindings, *_args, task_spec, **_kwargs: SimpleNamespace(
+                graph=graph,
+                task_spec=task_spec,
+                candidate=selected,
+                role_bindings=bindings,
+                lineage={
+                    "upright": [
+                        {
+                            "group_id": "upright",
+                            "object_uid": "red_can",
+                            "object_part_id": None,
+                        }
+                    ]
+                },
+            )
+        ),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
@@ -513,6 +529,18 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
             "max_episodes": None,
             "max_episode_steps": None,
             "fit_grasp_assets": False,
+            "task_spec": generated_calls[0]["task_spec"],
+            "task_candidate": adaptation.selected_candidate,
+            "role_bindings": adaptation.role_bindings,
+            "step_lineage": {
+                "upright": [
+                    {
+                        "group_id": "upright",
+                        "object_uid": "red_can",
+                        "object_part_id": None,
+                    }
+                ]
+            },
         }
     ]
     assert result.semantic_task_graph == graph
@@ -542,7 +570,7 @@ def test_prepare_publishes_semantic_planning_failure_context(
             robot_profile="franka",
             adapt=lambda *args, **kwargs: adaptation,
         ),
-        semantic_planner=SimpleNamespace(plan=unsupported),
+        semantic_planner=SimpleNamespace(plan_spec=unsupported),
     ).prepare(
         "upright_can",
         _UPRIGHT_CAN_INSTRUCTION,
@@ -1045,6 +1073,7 @@ def test_prepare_cli_stops_before_simulator_execution(
     assert captured["execute"] is False
     output = capsys.readouterr()
     assert json.loads(output.out)["video_paths"] == []
+    assert json.loads(output.out)["semantic_graph_html"] is None
     assert output.err == ""
 
 
@@ -1077,6 +1106,19 @@ def test_run_all_cli_reports_published_videos_for_every_attempt(
                     video = staging / relative_path
                     video.parent.mkdir(parents=True)
                     video.write_bytes(b"video")
+                    (video.parent.parent / "semantic_graph.html").write_text(
+                        "<html>execution evidence</html>", encoding="utf-8"
+                    )
+                if succeeded:
+                    final = staging / "final"
+                    (final / "bundle").mkdir(parents=True)
+                    (final / "bundle" / "semantic_graph.html").write_text(
+                        "<html>static graph</html>", encoding="utf-8"
+                    )
+                    (final / "selection.json").write_text(
+                        json.dumps({"scene_attempt": 1, "action_attempt": 2}),
+                        encoding="utf-8",
+                    )
                 (staging / "videos" / "directory.mp4").mkdir(parents=True)
                 (staging / "not_a_recording.mp4").write_bytes(b"unrelated asset")
                 published = transaction.commit()
@@ -1116,19 +1158,27 @@ def test_run_all_cli_reports_published_videos_for_every_attempt(
         for relative_path in relative_paths
     ]
     assert payload["video_paths"] == expected
+    html_path = (
+        Path(payload["output_dir"])
+        / relative_paths[1 if succeeded else 2].parent.parent
+        / "semantic_graph.html"
+    ).as_posix()
+    assert payload["semantic_graph_html"] == html_path
     assert all(Path(path).is_absolute() and Path(path).is_file() for path in expected)
     assert output.err.splitlines() == [
         f"[Task Engine] Video saved: {path}" for path in expected
-    ]
+    ] + [f"[Task Engine] Semantic graph HTML: {html_path}"]
     assert ".staging-" not in output.out + output.err
 
 
 @pytest.mark.parametrize("has_video", [True, False])
+@pytest.mark.parametrize("has_html", [True, False])
 def test_run_cli_executes_an_existing_bundle(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     has_video: bool,
+    has_html: bool,
 ) -> None:
     bundle = tmp_path / "bundle"
     bundle.mkdir()
@@ -1136,6 +1186,10 @@ def test_run_cli_executes_an_existing_bundle(
     class Executor:
         def __call__(self, _bundle, output, **kwargs):
             Path(output).mkdir()
+            if has_html:
+                (Path(output) / "semantic_graph.html").write_text(
+                    "<html>execution evidence</html>", encoding="utf-8"
+                )
             if has_video:
                 videos = Path(output) / "videos"
                 videos.mkdir()
@@ -1174,10 +1228,45 @@ def test_run_cli_executes_an_existing_bundle(
     if has_video:
         expected = (Path(payload["output_dir"]) / "videos" / "episode_0.mp4").as_posix()
         assert payload["video_paths"] == [expected]
-        assert output.err == f"[Task Engine] Video saved: {expected}\n"
+        video_line = f"[Task Engine] Video saved: {expected}\n"
     else:
         assert payload["video_paths"] == []
-        assert output.err == "[Task Engine] No video files generated for this run.\n"
+        video_line = "[Task Engine] No video files generated for this run.\n"
+    html_path = (Path(payload["output_dir"]) / "semantic_graph.html").as_posix()
+    assert payload["semantic_graph_html"] == (html_path if has_html else None)
+    assert output.err == video_line + (
+        f"[Task Engine] Semantic graph HTML: {html_path}\n"
+        if has_html
+        else "[Task Engine] No semantic graph HTML generated for this run.\n"
+    )
+
+
+def test_html_reporting_falls_back_to_published_bundle_without_inventing_a_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = tmp_path / "run"
+    run.mkdir()
+    bundle = run / "final" / "bundle"
+    bundle.mkdir(parents=True)
+    html = bundle / "semantic_graph.html"
+    html.mkdir()
+    assert cli._report_semantic_graph_html(run, bundle=bundle) is None
+    assert (
+        capsys.readouterr().err
+        == "[Task Engine] No semantic graph HTML generated for this run.\n"
+    )
+    other = tmp_path / "old_run" / "semantic_graph.html"
+    other.parent.mkdir()
+    other.write_text("old graph", encoding="utf-8")
+    assert cli._report_semantic_graph_html(run) is None
+    capsys.readouterr()
+    # A different fresh bundle exercises the file fallback, not the directory.
+    fresh = tmp_path / "fresh_bundle"
+    fresh.mkdir()
+    (fresh / "semantic_graph.html").write_text("<html>static</html>", encoding="utf-8")
+    expected = (fresh / "semantic_graph.html").resolve().as_posix()
+    assert cli._report_semantic_graph_html(run, bundle=fresh) == expected
+    assert capsys.readouterr().err == f"[Task Engine] Semantic graph HTML: {expected}\n"
 
 
 @pytest.mark.parametrize("semantic_success", [{}, {"finish": False}, {"finish": True}])

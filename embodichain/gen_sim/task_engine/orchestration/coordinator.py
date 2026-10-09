@@ -159,6 +159,12 @@ class TaskEngineCoordinator:
                     raise ValueError(
                         "TaskCandidateSet.instruction must match instruction."
                     )
+            from ..task_spec import task_spec_from_candidate
+
+            specifications = {
+                candidate["candidate_id"]: task_spec_from_candidate(candidate)
+                for candidate in normalized_candidates["candidates"]
+            }
 
             adaptation_kwargs: dict[str, Any] = {"force_most_likely": force_most_likely}
             if final_inspection is not None:
@@ -198,12 +204,14 @@ class TaskEngineCoordinator:
                 "status": "running",
             }
             try:
-                graph = self.semantic_planner.plan(
+                plan = self.semantic_planner.plan_spec(
                     selected,
                     role_bindings,
                     adaptation.prepared_scene.planner_objects,
+                    task_spec=specifications[selected["candidate_id"]],
                     planner_route=planning_mode,
                 )
+                graph = plan.graph
                 graph, generated = generate_task_program_bundle(
                     graph,
                     adaptation.prepared_scene,
@@ -212,6 +220,10 @@ class TaskEngineCoordinator:
                     max_episodes=max_episodes,
                     max_episode_steps=max_episode_steps,
                     fit_grasp_assets=fit_grasp_assets,
+                    task_spec=plan.task_spec,
+                    task_candidate=plan.candidate,
+                    role_bindings=plan.role_bindings,
+                    step_lineage=plan.lineage,
                 )
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
@@ -242,6 +254,9 @@ class TaskEngineCoordinator:
                     "semantic_task_graph_hash": semantic_task_graph_hash(graph),
                     "semantic_call_count": len(graph["nodes"]),
                     "integration_fingerprint": graph["integration_fingerprint"],
+                    "task_spec_semantic_hash": plan.task_spec.semantic_hash,
+                    "semantic_graph_validation": "semantic_graph_validation.json",
+                    "semantic_graph_html": "semantic_graph.html",
                 }
             )
             _write_json(staging / "planner_report.json", planning_attempt)

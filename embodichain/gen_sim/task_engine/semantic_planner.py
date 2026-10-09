@@ -20,15 +20,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 from typing import Any, Final
+
+from embodichain.gen_sim.task_spec import TaskSpec, validate_task_spec
 
 from .agent import derive_scene_request, derive_success_spec
 from .contracts import TaskCandidate, canonical_hash, validate_task_candidate
 from .orchestration.contracts import RoleBindings, validate_role_bindings
 from .semantic_graph import SemanticTaskGraph, validate_semantic_task_graph
 
-__all__ = ["SemanticTaskPlanner", "UnsupportedSemanticCapabilityError"]
+__all__ = [
+    "SemanticTaskPlanner",
+    "SemanticTaskPlan",
+    "UnsupportedSemanticCapabilityError",
+]
 
 _COORDINATED_TRANSPORT_CALL_ID: Final = "simulation.coordinated_transport"
 _COORDINATED_HOLD_CALL_ID: Final = "simulation.coordinated_hold"
@@ -46,6 +53,21 @@ _POUR_CALL_ID: Final = "simulation.pour"
 
 class UnsupportedSemanticCapabilityError(ValueError):
     """Raised when a TaskSpec has no executable canonical Semantic Call route."""
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticTaskPlan:
+    """A normative specification and its single semantic-graph witness.
+
+    Lineage is emitted by the same grounded-set expansion that produces calls;
+    consumers must not reconstruct it from call-ID prefixes.
+    """
+
+    graph: SemanticTaskGraph
+    task_spec: TaskSpec
+    candidate: TaskCandidate
+    role_bindings: RoleBindings
+    lineage: dict[str, list[dict[str, Any]]]
 
 
 class SemanticTaskPlanner:
@@ -102,7 +124,85 @@ class SemanticTaskPlanner:
             raise ValueError("RoleBindings.task_id must match the TaskCandidate.")
         if bindings["candidate_id"] != selected["candidate_id"]:
             raise ValueError("RoleBindings.candidate_id must match the TaskCandidate.")
-        selected, bindings = _expand_multi_object_steps(selected, bindings)
+        selected, bindings, _ = _expand_multi_object_steps(selected, bindings)
+        return self._plan_expanded(
+            selected,
+            bindings,
+            scene_objects,
+            planner_route=planner_route,
+            integration_fingerprint=integration_fingerprint,
+        )
+
+    def plan_spec(
+        self,
+        candidate: Mapping[str, Any],
+        role_bindings: Mapping[str, Any],
+        scene_objects: Sequence[Mapping[str, Any]],
+        *,
+        task_spec: TaskSpec | Mapping[str, Any] | None = None,
+        planner_route: str = "offline",
+        integration_fingerprint: str = "0" * 64,
+    ) -> SemanticTaskPlan:
+        """Plan one witness while retaining normative identity and exact lineage.
+
+        Args:
+            candidate: Validated semantic task draft used as a solution witness.
+            role_bindings: Grounded scene references for that candidate.
+            scene_objects: Provider-free measured scene metadata.
+            task_spec: Authoritative specification, or derive it before lowering.
+            planner_route: Provenance label, not an execution policy.
+            integration_fingerprint: Provisional or composed bundle identity.
+
+        Returns:
+            Specification, graph, source inputs and explicit expansion lineage.
+        """
+        from .task_spec import task_spec_from_candidate
+
+        source = validate_task_candidate(candidate)
+        bindings = validate_role_bindings(role_bindings)
+        if (
+            bindings["task_id"] != source["draft"]["task_id"]
+            or bindings["candidate_id"] != source["candidate_id"]
+        ):
+            raise ValueError(
+                "TaskSpec witness bindings do not match candidate identity."
+            )
+        specification = (
+            task_spec_from_candidate(source)
+            if task_spec is None
+            else TaskSpec.from_dict(task_spec)
+        )
+        validate_task_spec(specification)
+        selected, expanded_bindings, lineage = _expand_multi_object_steps(
+            source, bindings
+        )
+        graph = self._plan_expanded(
+            selected,
+            expanded_bindings,
+            scene_objects,
+            planner_route=planner_route,
+            integration_fingerprint=integration_fingerprint,
+        )
+        from .semantic_graph_validation import validate_graph_coverage
+
+        coverage = validate_graph_coverage(
+            graph, specification, source, bindings, lineage
+        )
+        if coverage["status"] != "covered":
+            raise ValueError(
+                f"TaskSpec witness is not covered: {coverage['issues']!r}."
+            )
+        return SemanticTaskPlan(graph, specification, source, bindings, lineage)
+
+    def _plan_expanded(
+        self,
+        selected: TaskCandidate,
+        bindings: RoleBindings,
+        scene_objects: Sequence[Mapping[str, Any]],
+        *,
+        planner_route: str,
+        integration_fingerprint: str,
+    ) -> SemanticTaskGraph:
 
         objects = {
             str(item.get("runtime_uid", item.get("uid", ""))): deepcopy(dict(item))
@@ -1048,12 +1148,13 @@ def _preceding_support(object_id: str, nodes: Sequence[Mapping[str, Any]]) -> st
 
 def _expand_multi_object_steps(
     candidate: TaskCandidate, bindings: RoleBindings
-) -> tuple[TaskCandidate, RoleBindings]:
+) -> tuple[TaskCandidate, RoleBindings, dict[str, list[dict[str, Any]]]]:
     """Lower independently repeatable task sets after UID grounding."""
     steps = candidate["draft"]["steps"]
     used_ids = {str(step["id"]) for step in steps}
     expanded_steps: list[dict[str, Any]] = []
     expanded_bindings = deepcopy(bindings)
+    lineage: dict[str, list[dict[str, Any]]] = {}
     changed = False
     for step in steps:
         step_id = str(step["id"])
@@ -1062,6 +1163,20 @@ def _expand_multi_object_steps(
         uids = bindings["reference_bindings"].get(reference_id, [])
         if len(uids) <= 1 or object_selector["kind"] != "scene_ref":
             expanded_steps.append(deepcopy(step))
+            if object_selector["kind"] == "step_result":
+                members = lineage[str(object_selector["step_id"])]
+                if len(members) != 1:
+                    raise UnsupportedSemanticCapabilityError(
+                        "A step_result has multiple subjects."
+                    )
+                uid, part = members[0]["object_uid"], members[0]["object_part_id"]
+            else:
+                if len(uids) != 1:
+                    raise ValueError(f"{reference_id} must resolve to one subject.")
+                uid, part = uids[0], bindings["role_bindings"].get(reference_id)
+            lineage[step_id] = [
+                {"group_id": step_id, "object_uid": uid, "object_part_id": part}
+            ]
             continue
         e5_return = (
             step["task_type"] == "E5"
@@ -1106,6 +1221,7 @@ def _expand_multi_object_steps(
             )
         used_ids.update(copy_ids)
         previous_id: str | None = None
+        lineage[step_id] = []
         for copy_id, uid in zip([*copy_ids, step_id], uids):
             copy = deepcopy(step)
             copy["id"] = copy_id
@@ -1118,6 +1234,17 @@ def _expand_multi_object_steps(
             if e6_parts:
                 uid, _, part_id = uid.rpartition("::")
                 expanded_bindings["role_bindings"][f"{copy_id}.object"] = part_id
+            lineage[step_id].append(
+                {
+                    "group_id": copy_id,
+                    "object_uid": uid,
+                    "object_part_id": (
+                        part_id
+                        if e6_parts
+                        else bindings["role_bindings"].get(reference_id)
+                    ),
+                }
+            )
             expanded_bindings["reference_bindings"][f"{copy_id}.object"] = [uid]
             if step["target"]["kind"] == "scene_ref":
                 expanded_bindings["reference_bindings"][f"{copy_id}.target"] = list(
@@ -1126,13 +1253,17 @@ def _expand_multi_object_steps(
             previous_id = copy_id
         changed = True
     if not changed:
-        return candidate, bindings
+        return candidate, bindings, lineage
     expanded = deepcopy(candidate)
     expanded["draft"]["steps"] = expanded_steps
     expanded["scene_request"] = derive_scene_request(expanded["draft"])
     expanded["success_spec"] = derive_success_spec(expanded["draft"])
     expanded["semantic_hash"] = canonical_hash(expanded_steps)
-    return validate_task_candidate(expanded), validate_role_bindings(expanded_bindings)
+    return (
+        validate_task_candidate(expanded),
+        validate_role_bindings(expanded_bindings),
+        lineage,
+    )
 
 
 def _resource(value: Any, *, field: str) -> str:

@@ -132,7 +132,10 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.asset_engine.configs": ["*.json"],
-            "embodichain.gen_sim.task_engine": ["*.yaml"],
+            "embodichain.gen_sim.task_engine": [
+                "*.yaml",
+                "_semantic_graph_viewer.html",
+            ],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

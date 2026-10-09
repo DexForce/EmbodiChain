@@ -86,6 +86,9 @@ def execute_bundle(
         root, deployment_path, graph, fingerprint
     )
     _verify_program_projection(program_path, graph)
+    from .semantic_graph_validation import verify_graph_contract
+
+    task_spec_contract = verify_graph_contract(root, graph)
 
     args = _runner_parser().parse_args(list(forwarded))
     args.gym_config = deployment_path.as_posix()
@@ -190,11 +193,54 @@ def execute_bundle(
             ):
                 result = execute_demo_episode(env, episode_index=0, attempt_id=0)
             result_metadata = result.to_metadata()
+            if task_spec_contract is not None:
+                from embodichain.gen_sim.task_spec import TaskSpec
+                from ._task_program.task_spec_runtime import (
+                    capture_final_goals,
+                    evaluate_runtime_evidence,
+                )
+
+                spec = TaskSpec.from_dict(_read_json(root / "task_spec.json"))
+                try:
+                    final_goals = capture_final_goals(
+                        env,
+                        deployment,
+                        root,
+                        graph,
+                        task_spec_contract,
+                        len(result.success),
+                    )
+                except (AttributeError, TypeError, ValueError, KeyError) as error:
+                    final_goals = {p.id: {"unavailable": str(error)} for p in spec.goal}
+                evaluation = evaluate_runtime_evidence(
+                    spec,
+                    task_spec_contract,
+                    graph,
+                    result_metadata,
+                    final_goals,
+                    num_envs=len(result.success),
+                    run_id=output.as_posix(),
+                    program=load_config(program_path),
+                    constraints=load_config(root / "task_program/constraints.json"),
+                )
+                result_metadata["task_spec_evaluation"] = evaluation
+                (output / "task_spec_evaluation.json").write_text(
+                    json.dumps(
+                        evaluation, ensure_ascii=False, indent=2, allow_nan=False
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
             _write_terminal_robot_state(env, output)
             row_success = [bool(value) for value in result.success]
             terminal_reasons = list(result.terminal_reasons) or [
                 str(result.terminal_reason)
             ] * len(row_success)
+            if task_spec_contract is not None:
+                result_metadata["program_success"] = list(row_success)
+                row_success, terminal_reasons = _apply_task_spec_verdict(
+                    result_metadata, row_success, terminal_reasons
+                )
             initial_rejected = (
                 probe is not None
                 and bool(probe["plan_success"])
@@ -366,6 +412,16 @@ def execute_bundle(
         for row in report["environments"]:
             row["terminal_reason"] = "initial_plan_rejected"
     write_execution_report(output, report)
+    if task_spec_contract is not None:
+        from .semantic_graph_html import write_semantic_task_graph_html
+
+        write_semantic_task_graph_html(
+            graph,
+            output / "semantic_graph.html",
+            report,
+            task_spec=_read_json(root / "task_spec.json"),
+            validation=task_spec_contract,
+        )
     _print_json(report)
     return 0 if report["status"] == "succeeded" else 2
 
@@ -429,6 +485,9 @@ def _build_execution_report(
     cargo_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a report without turning row-local failure into global failure."""
+    row_success, terminal_reasons = _apply_task_spec_verdict(
+        runtime_result, row_success, terminal_reasons
+    )
     semantic_success = _semantic_success_by_env(
         graph,
         runtime_result,
@@ -473,6 +532,32 @@ def _build_execution_report(
         "runtime_result": deepcopy(runtime_result),
         "failure": failure,
     }
+
+
+def _apply_task_spec_verdict(
+    runtime_result: dict[str, Any] | None,
+    row_success: list[bool],
+    terminal_reasons: list[str],
+) -> tuple[list[bool], list[str]]:
+    """Keep legacy success unchanged; new contracts require a verified verdict."""
+    if not runtime_result or "task_spec_evaluation" not in runtime_result:
+        return row_success, terminal_reasons
+    rows = runtime_result["task_spec_evaluation"]["environments"]
+    if [r.get("env_id") for r in rows] != list(range(len(row_success))):
+        raise ValueError("TaskSpec evaluation environment identities differ.")
+    success, reasons = list(row_success), list(terminal_reasons)
+    for row in rows:
+        index = row["env_id"]
+        if success[index] and not (
+            row.get("certificate_ready") is True and row.get("status") == "satisfied"
+        ):
+            success[index] = False
+            reasons[index] = (
+                "task_spec_failed"
+                if row.get("status") == "failed"
+                else "task_spec_unverified"
+            )
+    return success, reasons
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:
