@@ -6,8 +6,8 @@ embodichain.data_pipeline
 Overview
 --------
 
-Online data streaming and recording for live-simulation training. The package
-has three parts: :mod:`~embodichain.data_pipeline.datasets` (online datasets
+Online data streaming, recording, and offline expert-dataset inspection. The
+online components are :mod:`~embodichain.data_pipeline.datasets` (online datasets
 and samplers that stream trajectories from a running simulation),
 :mod:`~embodichain.data_pipeline.engine` (a process-safe shared buffer that
 decouples simulation producers from training consumers), and
@@ -21,6 +21,7 @@ storage for LeRobot datasets on Python 3.10--3.12).
       datasets
       depth_video
       engine
+      recording
 
 Datasets
 --------
@@ -54,3 +55,15 @@ Online Data Engine
    .. autosummary::
 
       data
+
+Recording integrity
+-------------------
+
+The offline recording utilities import without the simulator or training
+stack. They maintain stable episode identities, configuration fingerprints,
+and durable evidence for conservative metadata repair.
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.data_pipeline.recording

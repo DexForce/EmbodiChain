@@ -80,6 +80,11 @@ COMMANDS = (
         help="Inspect a logical task and its deployments.",
     ),
     Command(
+        name="dataset",
+        target="embodichain.cli.dataset:main",
+        help="Validate, split, and recover recorded expert datasets.",
+    ),
+    Command(
         name="preview_lerobot_data",
         target="embodichain.lab.scripts.preview_lerobot_data:cli",
         help="Print and validate a recorded LeRobot dataset episode.",

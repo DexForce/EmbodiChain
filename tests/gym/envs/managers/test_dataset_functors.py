@@ -22,6 +22,7 @@ import threading
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import numpy as np
 import pytest
@@ -2276,6 +2277,88 @@ def test_post_commit_fragment_failure_is_sticky_and_not_duplicated() -> None:
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_recording_journal_survives_restart_and_deduplicates_commits(tmp_path) -> None:
+    """A fresh writer recognizes persisted identity instead of saving twice."""
+    from embodichain.data_pipeline.recording import RecordingJournal, recover_recording
+
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(params={"save_path": tmp_path}),
+        MockEnvForDataset(num_envs=1, has_sensors=False),
+    )
+    identity = str(uuid4())
+    metadata = {"episode_uuid": identity, "run_uuid": str(uuid4())}
+    observations = TensorDict(
+        {
+            "robot": {
+                "qpos": torch.zeros(2, 6),
+                "qvel": torch.zeros(2, 6),
+                "qf": torch.zeros(2, 6),
+            }
+        },
+        batch_size=[2],
+    )
+    assert recorder._persist_episode_payload(
+        0, observations, torch.zeros(2, 6), episode_metadata=metadata
+    )
+    recorder.finalize()
+    root = recorder.dataset_full_path
+    assert recover_recording(root)["ok"]
+
+    # No official SDK reopen is attempted; this exercises persistent duplicate
+    # detection with the same root after all SDK writers have been finalized.
+    restarted = LeRobotRecorder.__new__(LeRobotRecorder)
+    restarted._env = recorder._env
+    restarted._recording_journal = RecordingJournal(root)
+    restarted._save_single_episode = MagicMock()
+    assert restarted._persist_episode_payload(
+        0, observations, torch.zeros(2, 6), episode_metadata=metadata
+    )
+    restarted._save_single_episode.assert_not_called()
+
+
+def test_unknown_sdk_commit_blocks_later_payloads(tmp_path) -> None:
+    """A worker cannot reuse an episode index after a failed SDK save."""
+    from embodichain.data_pipeline.recording import RecordingJournal
+
+    recorder = LeRobotRecorder.__new__(LeRobotRecorder)
+    recorder._env = MockEnvForDataset(has_sensors=False)
+    recorder.instruction = None
+    recorder.extra = {}
+    recorder.total_time = 0.0
+    recorder.curr_episode = 0
+    recorder.dataset_full_path = tmp_path
+    recorder._recording_journal = RecordingJournal(tmp_path)
+    recorder.dataset = MagicMock()
+    recorder.dataset.meta.info = {"fps": 30}
+    recorder.dataset.save_episode.side_effect = OSError("unknown SDK state")
+    recorder._depth_manager = None
+    recorder._register_subtasks = MagicMock(return_value={"unknown_task": 0})
+    recorder._convert_frame_to_lerobot = MagicMock(return_value={})
+    recorder._write_episode_metadata = MagicMock()
+    first_uuid = str(uuid4())
+
+    with pytest.raises(OSError, match="unknown SDK state"):
+        recorder._persist_episode_payload(
+            0, [object()], [object()], episode_metadata={"episode_uuid": first_uuid}
+        )
+    with pytest.raises(RuntimeError, match="unknown state"):
+        recorder._persist_episode_payload(
+            1, [object()], [object()], episode_metadata={"episode_uuid": str(uuid4())}
+        )
+
+    recorder.dataset.save_episode.assert_called_once()
+    assert recorder._recording_journal.get(first_uuid)["phase"] == "lerobot_committing"
+
+
+@pytest.mark.parametrize("buffer_size", [0, -1, 1.5, True])
+def test_metadata_buffer_size_rejects_invalid_values(buffer_size) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        LeRobotRecorder(
+            MockFunctorCfg(params={"metadata_buffer_size": buffer_size}),
+            MockEnvForDataset(has_sensors=False),
+        )
+
+
 def test_missing_dense_annotations_fall_back_to_segment_sidecar_outcome() -> None:
     """Legacy buffers do not silently label a retained failed segment accepted."""
     recorder = LeRobotRecorder.__new__(LeRobotRecorder)

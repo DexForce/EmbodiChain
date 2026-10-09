@@ -16,10 +16,15 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py` |
+| File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
+| Durable commit diagnostics and metadata repair | `embodichain/data_pipeline/recording/journal.py`; `embodichain dataset recover` |
+| Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
 errors, continuity and DataLoader behavior. Read [persistence](persistence.md)
-for fragment transactions, async ownership, depth output and shutdown.
+for fragment transactions, async ownership, depth output and shutdown. Read
+[offline dataset tools](offline-datasets.md) for lineage, quality filtering,
+validation, and conversion across Python/LeRobot versions.
 
 ## Online worker contract
 
@@ -74,7 +79,11 @@ overall task. Executed controller commands are not a separate dataset feature.
 
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder
-deduplication and sticky partial-commit errors; they are not a crash-recovery journal.
+deduplication and sticky partial-commit errors. Per-episode fsynced commit
+journals add durable evidence for offline diagnosis and conservative sidecar
+repair; they cannot roll back an unknown SDK commit or resume unfinished videos.
+Recording run/source/episode UUIDs link full episodes, fragments and optional
+`.pt` replay artifacts. The host still owns state capture and restore.
 
 Async persistence clones tensor payloads to CPU and copies metadata before
 enqueue. One FIFO worker owns LeRobot access. Finalize rejects new work, drains,
@@ -99,3 +108,5 @@ followed the LeRobot commit before changing retry logic. For engine failure,
 inspect the shared worker error and attempt limit before adding consumer retries.
 Benchmark throughput using `scripts/benchmark/data_pipeline/benchmark_lerobot_save.py`
 with recorded hardware, image size, environment count and writer settings.
+The CPU-only `benchmark_segment_annotations.py` isolates the validated frame-map
+lookup from simulation and storage costs.
