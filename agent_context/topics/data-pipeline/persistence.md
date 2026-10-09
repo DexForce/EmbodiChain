@@ -15,8 +15,11 @@
    Omitting recorder `action_contract` retains this schema exactly. An explicit
    version-1 expert contract selects `joint_position` or
    `joint_position_velocity`. Policy contracts select descriptor-driven
-   `eef_pose_parallel_gripper` or `joint_position_parallel_gripper`; they also
-   switch segment language to LeRobot's per-frame `task` / `task_index` mapping.
+   `eef_pose_parallel_gripper` or `joint_position_parallel_gripper`. All
+   representations preserve the overall instruction in LeRobot `task` /
+   `task_index` and segment instructions in `subtask_index` with
+   `meta/subtasks.parquet`, including independent fragments. Episode sidecars
+   retain the overall `instruction` and each segment's own `instruction`.
 2. Recorder construction requires `1 / env.step_dt` to be an exact integer FPS. Non-integral
    simulation rates fail early.
 3. `_save_episodes()` slices only valid lengths. Segment-fragment mode creates independent

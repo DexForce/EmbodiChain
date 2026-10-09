@@ -250,6 +250,7 @@ class _FakeSegment:
     segment_index: int = 0
     segment_id: str = "segment-0"
     name: str = "pick-and-place"
+    instruction: str | None = None
     calls: tuple[_FakeCompiledCall, ...] = (
         _FakeCompiledCall(0, "pick"),
         _FakeCompiledCall(1, "place"),
@@ -2271,3 +2272,14 @@ def test_parallel_segment_fails_closed_without_safety_validator() -> None:
         tuple(next(bridge.iter_segments()).actions)
 
     assert runtime.start_count == 0
+
+
+@pytest.mark.parametrize(
+    "instruction", [None, "Pick up the cube and place it on the table."]
+)
+def test_bridge_preserves_segment_instruction(instruction: str | None) -> None:
+    bridge, _, _ = _bridge(
+        duration=STEP_DT, segment=_FakeSegment(instruction=instruction)
+    )
+    demo_segment = next(bridge.iter_segments())
+    assert demo_segment.instruction == instruction

@@ -16,6 +16,12 @@ Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
 `PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
 extension form.
 
+Explicit segments may declare a natural-language `instruction`. The compiler
+preserves it through repeated/parallel segments and the Gym bridge passes it to
+`DemoSegment`; omission retains the overall dataset-instruction fallback. See
+the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
+for the independent task/subtask language mapping.
+
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
 unresolved references fail before live providers are touched.

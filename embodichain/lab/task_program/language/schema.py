@@ -557,17 +557,24 @@ class RepeatCfg:
 
 @configclass
 class SegmentCfg:
-    """Logical program transaction with post-policies and validators."""
+    """Logical transaction with optional segment-specific language instruction.
+
+    ``instruction`` describes this segment for dataset annotation. When omitted,
+    Gym demonstrations fall back to the recorder's overall task instruction.
+    """
 
     name: str = MISSING
     steps: ProgramNodeCfg = MISSING
     post: tuple[PostPolicyCfg, ...] = field(default_factory=tuple)
     validators: tuple[ValidatorCfg, ...] = field(default_factory=tuple)
     kind: str = "segment"
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the segment boundary and its declarative hooks."""
         _validate_identifier(self.name, field_name="name")
+        if self.instruction is not None:
+            _validate_identifier(self.instruction, field_name="instruction")
         if type(self.steps) not in _PROGRAM_NODE_TYPES:
             raise TypeError("steps must be an exact ProgramNodeCfg value.")
         if type(self.post) not in (list, tuple):

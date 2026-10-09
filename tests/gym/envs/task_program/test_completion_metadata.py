@@ -357,6 +357,7 @@ class _CompiledSegment:
     validators: tuple[object, ...] = ()
     parallel_block: None = None
     implicit: bool = False
+    instruction: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

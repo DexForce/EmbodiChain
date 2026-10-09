@@ -66,8 +66,11 @@ match the declared representation and is stored as
 Policy recorders validate EEF finiteness and normalized gripper bounds before
 ActionManager processing, then validate again before persistence. A
 `ControllerAction` cannot be written into this policy schema.
-Contract datasets use per-frame LeRobot `task` / `task_index` for segment
-instructions. Executed controller commands are not a separate dataset feature.
+Language annotations are independent of the action contract: LeRobot `task` /
+`task_index` retain the overall task and `subtask` / `subtask_index` identify the
+current segment instruction through `meta/subtasks.parquet`. Natural-segment
+fragments retain both levels. Missing segment instructions fall back to the
+overall task. Executed controller commands are not a separate dataset feature.
 
 `dataset.save_episode()` is the LeRobot commit point. A later depth/sidecar
 failure cannot roll back that episode. Fragment IDs provide same-recorder

@@ -13,6 +13,7 @@ program:
   body:
     kind: segment
     name: move_cube
+    instruction: Pick up the cube and place it at the next target.
     steps:
       kind: sequence
       items:

@@ -267,6 +267,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     poses = (_pose(0.45, -0.2), _pose(0.45, 0.0), _pose(0.45, 0.2))
     body = SegmentCfg(
         name="move_cube",
+        instruction="Pick up the cube and move it to the next target.",
         steps=SequenceCfg(
             items=(
                 InvokeCfg(call=PickCfg(object="cube")),
@@ -288,7 +289,11 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     )
 
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    body.instruction = "Changed after compilation."
     segments = list(compiled)
+    assert {segment.instruction for segment in segments} == {
+        "Pick up the cube and move it to the next target."
+    }
     second_pass = list(compiled)
 
     assert [segment.segment_id for segment in segments] == [

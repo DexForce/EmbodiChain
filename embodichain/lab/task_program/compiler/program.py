@@ -393,6 +393,7 @@ class CompiledTaskProgramSegment:
     validators: tuple[CompiledTaskProgramValidator, ...] = ()
     parallel_block: CompiledParallelBlock | None = None
     implicit: bool = False
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.segment_index) is not int or self.segment_index < 0:
@@ -401,6 +402,14 @@ class CompiledTaskProgramSegment:
             value = getattr(self, field_name)
             if type(value) is not str or not value:
                 raise ValueError(f"{field_name} must be a non-empty string.")
+        if self.instruction is not None and (
+            type(self.instruction) is not str
+            or not self.instruction
+            or self.instruction.strip() != self.instruction
+        ):
+            raise ValueError(
+                "instruction must be a non-empty string without outer whitespace or None."
+            )
         calls = tuple(self.calls)
         if not calls or not all(
             type(call) is CompiledTaskProgramCall for call in calls
@@ -571,6 +580,7 @@ _ValidatorTemplate: TypeAlias = (
 @dataclass(frozen=True, slots=True)
 class _SegmentTemplate:
     name: str
+    instruction: str | None
     steps: _NodeTemplate
     post: tuple[_PostTemplate, ...]
     validators: tuple[_ValidatorTemplate, ...]
@@ -946,6 +956,7 @@ def _iter_segments(
             implicit=False,
         ),
         name=template.name,
+        instruction=template.instruction,
         calls=tuple(calls),
         source_path=template.source_path,
         repeat_frames=repeat_frames,
@@ -1578,6 +1589,7 @@ class TaskProgramCompiler:
                 )
             return _SegmentTemplate(
                 name=node.name,
+                instruction=node.instruction,
                 steps=steps,
                 post=tuple(post),
                 validators=tuple(validators),

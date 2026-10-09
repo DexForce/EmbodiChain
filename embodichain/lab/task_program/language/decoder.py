@@ -819,7 +819,9 @@ def _decode_program_node(
     if kind == "segment":
         _validate_fields(
             mapping,
-            allowed=frozenset({"kind", "name", "steps", "post", "validators"}),
+            allowed=frozenset(
+                {"kind", "name", "steps", "post", "validators", "instruction"}
+            ),
             required=frozenset({"kind", "name", "steps"}),
             path=path,
         )
@@ -847,6 +849,13 @@ def _decode_program_node(
             path=path,
             kind=kind,
             name=_expect_identifier(mapping["name"], path=(*path, "name")),
+            instruction=(
+                None
+                if mapping.get("instruction") is None
+                else _expect_identifier(
+                    mapping["instruction"], path=(*path, "instruction")
+                )
+            ),
             steps=_decode_program_node(
                 mapping["steps"],
                 path=(*path, "steps"),

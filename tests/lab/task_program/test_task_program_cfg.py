@@ -227,3 +227,13 @@ def test_articulation_joint_validator_requires_an_ordered_bound(
             joint="cabinet_to_drawer",
             **kwargs,
         )
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True])
+def test_segment_cfg_rejects_invalid_instruction(instruction: object) -> None:
+    with pytest.raises(ValueError, match="instruction"):
+        SegmentCfg(
+            name="pick_cube",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            instruction=instruction,
+        )

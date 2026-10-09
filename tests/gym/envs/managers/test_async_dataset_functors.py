@@ -308,7 +308,10 @@ class TestAsyncLeRobotRecorder:
         assert mock_ds.save_episode_calls == 2
         assert len(mock_ds.add_frame_calls) == 8
 
-    def test_call_enqueues_each_accepted_segment_as_independent_fragment(self):
+    @pytest.mark.parametrize("with_contract", [False, True])
+    def test_call_enqueues_each_accepted_segment_as_independent_fragment(
+        self, with_contract
+    ):
         env = _MockEnv(num_envs=1, steps=4)
         env.rollout_buffer["segment_id"][0] = torch.tensor([0, 0, 1, 1])
         env.rollout_buffer["segment_step"][0] = torch.tensor([0, 1, 0, 1])
@@ -345,7 +348,15 @@ class TestAsyncLeRobotRecorder:
             ],
         }
         mock_ds = _MockDataset()
-        recorder = _make_recorder(env, mock_ds)
+        recorder = _make_recorder(
+            env,
+            mock_ds,
+            action_contract=(
+                {"version": 1, "representation": "joint_position"}
+                if with_contract
+                else None
+            ),
+        )
 
         recorder(env, env_ids=torch.tensor([0]))
         env.current_rollout_step = 0
@@ -353,7 +364,11 @@ class TestAsyncLeRobotRecorder:
 
         assert mock_ds.save_episode_calls == 1
         assert len(mock_ds.add_frame_calls) == 2
-        assert {frame["task"] for frame in mock_ds.add_frame_calls} == {"pick task"}
+        assert {frame["task"] for frame in mock_ds.add_frame_calls} == {"test"}
+        assert mock_ds.meta.subtasks.index.tolist() == ["pick task"]
+        assert all(
+            frame["subtask_index"].tolist() == [0] for frame in mock_ds.add_frame_calls
+        )
         assert all(
             frame["annotation.segment_accepted"].tolist() == [1]
             for frame in mock_ds.add_frame_calls
