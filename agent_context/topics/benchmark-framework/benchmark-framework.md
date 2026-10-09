@@ -1,120 +1,123 @@
 # Benchmark framework
 
-The shared technical-report core lives in `scripts/benchmark/core/`;
-offline aggregation, comparison and report/figure outputs live in
-`scripts/benchmark/reporting/`.
-The pure-rendering pilot suite is the first domain consumer;
-`camera-pilot` remains its smallest compatibility example. Other benchmark
-domains retain their existing owners and can adopt these helpers incrementally.
+Shared execution/artifact contracts live in `scripts/benchmark/core/`; shared
+aggregation and comparison helpers live in `scripts/benchmark/reporting/`.
+`rendering-formal` is the document-aligned rendering consumer: artifact schema
+version 1, experiment definition version `2.0`. Its 82 declared cases retain
+unselected, unsupported, failed and interrupted work. `camera-pilot` and
+`rendering-suite` are compatibility routes with their original R-series meanings.
+Commands, matrices and runtime requirements are in the
+[rendering operator guide](../../../scripts/benchmark/rendering/README.md).
 
 ## Entry points and ownership
 
 | Request | Start here |
 |---|---|
-| Public command | `embodichain/cli/main.py` → `scripts/benchmark/__main__.py` |
-| Experiment definition and lifecycle states | `scripts/benchmark/core/contracts.py` |
-| Matrix expansion and budget conservation | `scripts/benchmark/core/planning.py` |
-| Run identity and worker-result validation | `scripts/benchmark/core/records.py` |
-| Repeats, subprocesses, timeout/interruption and status ledger | `scripts/benchmark/core/execution.py` |
-| Stage, continuous and attempt measurement | `scripts/benchmark/core/measurement.py` |
-| Standard artifacts, JSONL idempotency and config hashes | `scripts/benchmark/core/artifacts.py` |
-| Software/source/device provenance | `scripts/benchmark/core/provenance.py` |
-| Grouped metrics, missing values, denominators and uncertainty | `scripts/benchmark/reporting/aggregation.py` |
-| Comparison eligibility and paired ratios | `scripts/benchmark/reporting/comparison.py` |
-| Legacy conversion and report tables/figures | `scripts/benchmark/reporting/compat.py`, `tables.py`, `figures.py` |
-| Offline generic report | `scripts/benchmark/reporting/report.py` |
-| Camera workload and runtime selection | `scripts/benchmark/rendering/workload.py`, `run_benchmark.py` |
-| Camera process and platform APIs | `scripts/benchmark/rendering/worker.py`, `backends/` |
-| Camera-specific report layout | `scripts/benchmark/rendering/report.py` |
-| R-series matrices and capture contract | `scripts/benchmark/rendering/suite.py` |
-| Matching scene inputs and review previews | `scripts/benchmark/rendering/scenes.py`, `preview.py`, `backends/scene_*.py` |
-| R-series launcher, worker and offline report | `scripts/benchmark/rendering/suite_runner.py`, `suite_worker.py`, `suite_report.py` |
-| G-03 case, attempt, receipt, fixture and session adapter | `scripts/benchmark/expert_generation/` |
+| Public dispatch | `embodichain/cli/main.py` → `scripts/benchmark/__main__.py` |
+| Shared definitions, run identities and lifecycle states | `scripts/benchmark/core/contracts.py`, `records.py` |
+| Budgets, repeat ordering, subprocesses and interruption | `scripts/benchmark/core/planning.py`, `execution.py` |
+| Timing and standard artifacts/provenance | `scripts/benchmark/core/measurement.py`, `artifacts.py`, `provenance.py` |
+| Aggregate populations and comparison gates | `scripts/benchmark/reporting/aggregation.py`, `comparison.py` |
+| Formal cases, profiles, approval and view identities | `scripts/benchmark/rendering/formal.py` |
+| Formal selection, runtime environment and recovery | `scripts/benchmark/rendering/formal_runner.py` |
+| Worker capture, freshness, samples and cleanup | `scripts/benchmark/rendering/formal_worker.py`, `capture.py` |
+| Approved scene manifests, assets and twenty views | `scripts/benchmark/rendering/scenes.py`, `scene_cases.py`, `preview.py` |
+| Frozen CPU replay and external deformation validation | `scripts/benchmark/rendering/replay.py` |
+| Native APIs and resolved renderer evidence | `scripts/benchmark/rendering/backends/scene_embodichain.py`, `scene_isaaclab.py` |
+| Process/device memory and delivery/overhead diagnostics | `scripts/benchmark/rendering/resources.py`, `diagnostics.py` |
+| Frozen policy, reference renderer and quality metrics | `scripts/benchmark/rendering/quality_protocol.py`, `reference.py`, `quality.py` |
+| Measured photometric calibration and held-out verification | `scripts/benchmark/rendering/calibration.py` |
+| Append-only offline evaluation events | `scripts/benchmark/rendering/evaluate.py` |
+| Formal offline Markdown, CSV, SVG and PDF | `scripts/benchmark/rendering/publication_report.py`, `_publication_figures.py` |
+| Legacy camera / R-series pilot | `scripts/benchmark/rendering/run_benchmark.py`, `suite_runner.py`, `suite_report.py` |
+| G-03 attempts, receipts and production-session adapter | `scripts/benchmark/expert_generation/` |
 
-## Boundaries
+## Shared boundaries
 
-Core and shared reporting import only the standard library. They must not
-import domain workers, NumPy, Torch or simulators. Domain configuration and
-worker modules may use their own installed dependencies. The camera CLI's
-report-only path stays ahead of simulation-dependent configuration imports.
-The R-series list and report-only paths follow the same rule; their resolved
-cell record is standard-library only and simulator-specific adapters are
-imported inside worker processes.
+Core/shared reporting import only the standard library. Formal list, dry-run and
+report-only paths remain independent of simulator/array imports; dry-run does
+not prepare assets or create directories. Simulator adapters load only in their
+workers. Keep Isaac-specific comparison code under `scripts/benchmark/` and use
+an external frozen Isaac checkout; do not alter production simulator APIs or
+the external checkout to implement the comparison.
 
-The launcher freezes `RunSpec` values and runs platforms serially in separate
-processes. Core writes the complete plan and not-run records before starting.
-Timeout and interruption terminate/reap the isolated worker group. Invalid
-worker JSON is retained, not silently interpreted as success. JSON writes are
-validated and atomically replaced; existing experiments cannot be overwritten.
+`ExperimentDefinition` freezes matrix, budget, quality protocol and invariants.
+`RunSpec` contains a resolved command, not simulator objects. Core reserves one
+run and attempt together, writes not-run records before execution, and reaps
+isolated process groups on timeout/interruption. Invalid worker JSON and logs
+are retained. `ArtifactStore` accepts identical replayed records but rejects
+conflicting identities; existing experiment directories are not overwritten.
 
-`ExperimentDefinition` freezes the parameter matrix, quality protocol,
-comparison invariants and `Budget`. `BudgetLedger.reserve_run()` atomically
-consumes one run and one attempt, so retries cannot evade the fixed budget.
-The standard directory contains definition/config/assets, raw JSONL, metrics,
-quality and artifact-index files. `ArtifactStore` rejects conflicting duplicate
-record identities while allowing an identical retry submission to be replayed.
+Formal selection freezes the full case universe separately from selected
+runnable attempts. Exclusions and CPU replay-preparation failures remain
+reportable not-run rows; renderer construction errors remain execution failures.
+Do not infer full-matrix completion from a filtered or smoke command. Approval,
+canonical assets and needed replays are copied into experiment roots; case hashes
+exclude host paths. Source pinning and lexical virtualenv paths belong to the
+runner, not the simulator adapter.
 
-Domain callbacks own completion synchronization and value validation. Core
-excludes warm-up, measures callback latency, and separately retains the full
-loop window. A host-return timer alone is not proof of GPU completion.
+Domain callbacks own GPU completion and validation. Latency excludes validation;
+whole-window throughput includes validation and record bookkeeping. Warmup,
+initialization and persistence are outside the measured denominator. A callback
+return is not proof of GPU completion. Missing measurements remain null with
+reasons; failures stay in trial counts. Hardware/config groups and paired repeat
+identities cannot be merged into a cross-workload leaderboard.
 
-Reports keep execution status independent of quality/task/data outcomes.
-Aggregation separates workload fingerprints and excludes failed measurements
-without dropping failures from scheduled counts. Missing values remain null.
-The domain declares comparison invariants and supplies quality qualification;
-core never substitutes image non-emptiness for quality certification.
+## Rendering decisions and limits
 
-Aggregate metric records include a definition version, SI unit, population,
-aggregation rule, denominator, uncertainty summary, missing reasons and source
-run IDs. The generic report/figure helpers are standard-library only; SVG/CSV
-outputs are generated from already frozen run IDs and do not initialize a GPU.
+Layout approval binds reviewed scene/camera hashes; preview completion and
+nonempty images do not certify quality. Static scenes and 30 Hz kinematic replay
+do not step physics or establish physical grasp success. Formal R-05 has three
+cameras; the legacy pilot's R-05 measures modalities. External deformation cells
+remain unsupported without the actual approved topology and frozen input.
 
-Physical stepping, reset, task predicates and production commit receipts
-remain in existing domain/host owners. Shared benchmark execution does not
-provide a second generation coordinator or dataset sink.
+`capture.py` owns device-ready, blocking host-ready, duplicate real D2H and
+additional CPU-copy boundaries. Exposures count environments × cameras, without
+a modality multiplier. Camera-frame and output-pixel rates use the whole window.
+Native camera-group chunk assembly remains inside capture timing; its batching
+semantics are recorded rather than hidden by reducing N.
 
-The G-03 benchmark runner consumes those owner-provided outcomes through an
-executor callback. Its accepted-yield rule requires completed execution,
-measured validation, task success and a confirmed persistence receipt. It keeps
-attempt failures, duplicate commits and budget-exhausted not-run rows visible;
-the fixture under `scripts/benchmark/expert_generation/` is deliberately
-simulator-free, while `session_adapter.py` translates the existing #670
-`GenerationSession` and receipt lifecycle without replacing its coordinator.
+Profiles freeze explicit per-renderer settings. High-quality Isaac capture uses
+PT16 with accumulation reset per exposure. Realtime DLAA may enlarge internal
+work at low output resolutions. Read `renderer.resolution_evidence` and native
+settings; output/atlas shape and lack of a warning do not establish internal
+native resolution. CPU capture latency and CUPTI traces do not provide a complete
+native graphics kernel timer. Native-render seconds remain null when unverified.
 
-## Camera-specific cautions
+`ResourceSampler` uses one selected physical NVML device and deduplicates graphics
+and compute entries for the PID. Process memory, whole-device usage, CPU RSS and
+Torch allocator peaks have different scopes. Missing NVML support must not become
+zero or a fabricated UUID. Diagnostic R-09 cases save traces and matched minimal,
+shared-capture and common-loop windows after primary measurements. The 3% overhead
+target is a target, not an automatic pass from a few in-process windows.
 
-The pilot measures render-to-blocking-host RGB, not pure GPU rendering or RL
-throughput. Its two adapters share procedural geometry and camera parameters;
-lighting/quality equivalence is not established. Isaac Lab's render generation
-must advance before reading the camera's ProxyArray buffer when physics does
-not step. EmbodiChain uses its public camera-group render and camera look-at
-APIs. See `scripts/benchmark/rendering/README.md` for exact supported runtime
-and reproduction commands.
+Reference rendering and quality evaluation run separately on CPU. Known immutable
+policies bind requested modalities, thresholds, frame/sequence coverage and
+checksummed evidence. The original full policy and the explicit 30 Hz temporal
+policy remain distinct. Unrequested metrics are explicit; missing requested
+metrics, calibration, reference noise evidence or temporal coverage cannot pass.
+Calibration receipts bind real training and disjoint held-out artifacts; a manual
+qualified status plus an arbitrary file is insufficient. Normal-specific quality
+remains unassessed. Evaluation preserves original
+execution snapshots, timing fields and `raw.jsonl`, appending quality events and
+updating only derived quality projections. The report verifies proof bindings and
+policy requirements before any equal-quality ratio.
 
-## Pure-rendering R-series cautions
+Declared large-N cells are capacity probes, not support promises. Failed and
+interrupted probes do not establish a capacity boundary. RTX PRO 5000 smoke work
+does not satisfy the external RTX 5090 acceptance requirement. No publication
+performance conclusion follows from implementation coverage or short smoke runs.
 
-The legacy pilot catalog's R-03 varies resolution, R-04 varies camera batch size, R-05 varies RGB/depth/
-normal modalities, R-06 varies static versus moving temporal capture, and R-09
-varies device versus host delivery and duplicate host copies. All measurements
-exclude physics stepping and keep warm-up outside the denominator. EmbodiChain
-uses arena camera groups; Isaac Lab uses independent USD camera views aggregated
-into one result batch, and the adapter records this treatment in renderer
-provenance. The shared comparison remains unqualified until image quality,
-lighting and modality semantics are calibrated across the two renderers.
-
-`rendering-preview` is a separate scene-review entry point. Both adapters consume
-one hashed manifest and canonical mesh arrays, including frozen robot-link and
-wrist-camera transforms. It captures all declared views and modalities without
-running a timing matrix. Review state remains pending; a preview is not a quality
-certificate. Native lighting/denoising and runtime versions remain explicit.
-Do not confuse the legacy modality R-05 with the report plan's three-camera R-05.
+G-03 acceptance still requires completed execution, measured validation, task
+success and a confirmed persistence receipt. `session_adapter.py` translates the
+production session lifecycle; benchmark code does not create another generation
+coordinator, physics controller or dataset sink.
 
 ## Validation
 
-Use `tests/benchmark/core/`, `tests/benchmark/reporting/`, the camera pilot and
-R-series suite tests under `tests/benchmark/rendering/`, and `tests/test_main.py`
-for CLI regressions.
-The scalar-core tests prove reuse without images or simulators; import tests
-use Python without site-packages. Real GPU camera runs qualify the installed
-backends separately. Tutorial scripts are references, not production test
-subjects.
+Use the matching CPU contracts under `tests/benchmark/core/`,
+`tests/benchmark/reporting/` and `tests/benchmark/rendering/`. The rendering guide
+separates simulator-free contract tests, optional learned-metric/reference tests
+and serial GPU smoke commands. Keep `tests/test_main.py` for public dispatch
+regressions and Python `-S` checks for offline routes. Tutorial scripts are
+examples rather than production test subjects.

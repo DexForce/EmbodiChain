@@ -24,16 +24,43 @@ For experiments using the technical-report framework, reuse
 and `scripts/benchmark/reporting/` for aggregation and comparison eligibility.
 Keep scene construction, platform APIs and domain validation in the experiment's
 own directory. Read [the framework entry points](../../../scripts/benchmark/README.md)
-and use `scripts/benchmark/rendering/suite.py` / `suite_runner.py` for the
-legacy R-series pilot matrix; `camera-pilot` remains the smallest working
-example. Use `rendering-preview` to inspect matching frozen scenes before
-formal matrix execution. Preview completion does not approve image quality;
-the pilot's modality R-05 is distinct from the report plan's three-camera R-05.
+and use `rendering-formal` / `rendering/formal.py` for the version-two rendering
+matrix. `formal_runner.py` freezes all declared cases, explicit selections,
+per-case quality policies and budgets; `formal_worker.py` owns isolated capture.
+The 82 declared cells include unsupported or capacity-limited workloads; a
+matrix entry is not evidence that a backend can execute it. `suite.py` /
+`suite_runner.py` and `camera-pilot` retain their legacy meanings, including the
+pilot's modality R-05; formal R-05 is three-camera scaling and modality costs
+have their own `modality-ablation` track.
+
+Use `rendering-preview` for the common custom scene and camera review. Formal
+execution verifies an approval receipt against the original scene hashes.
+Persist an already authorized review decision without asking again. Layout
+approval never qualifies image quality. Keep Isaac-specific comparison code
+under `scripts/benchmark/`; Isaac Lab is an external frozen source dependency,
+not a reason to add Isaac imports to production `embodichain` modules.
 
 Core/report rebuilds remain independent of simulator imports. Record raw seconds,
 bytes, metric populations and missing-value reasons; keep execution completion
 separate from quality/task/data acceptance. Platform runtimes execute in their
 own Python processes. Domain callbacks supply actual completion synchronization.
+For rendering, reuse `capture.measure_rendering` and its explicit device/host
+delivery contract. Count camera frames as batch steps × environments × cameras;
+modalities do not multiply exposures. Resource sampling separates selected-PID
+NVML graphics/compute memory, device-wide memory, CPU RSS and Torch allocation.
+Install optional `nvidia-ml-py` in each worker environment; retain nulls and
+reasons when counters or GPU identity are unavailable. Do not call CPU callback
+latency native GPU rendering time or infer internal resolution from output size.
+
+Keep quality evaluation, reference rendering, sample persistence and R-09
+traces/overhead diagnostics outside primary performance windows. Use frozen
+`quality_protocol.py` policies and checksummed independent evidence; missing
+calibration, reference noise qualification, requested metrics or temporal
+coverage must not qualify. Normal-specific quality remains unassessed. Reports
+rebuild through `publication_report.py` with standard-library-only CSV/SVG/PDF
+outputs and independent process-repeat uncertainty. Default performance repeats
+are three; `--publication` requires at least ten. A one-repeat smoke preserves
+resolution/workload semantics and cannot substantiate an equal-quality speedup.
 
 For new shared-framework experiments, freeze an `ExperimentDefinition` with a
 parameter matrix, `Budget`, quality protocol and declared comparison invariants.

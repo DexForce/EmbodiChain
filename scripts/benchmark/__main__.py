@@ -88,6 +88,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         preview_main(arguments[1:])
         return
+    if arguments and arguments[0] == "rendering-formal":
+        from scripts.benchmark.rendering.formal_runner import main as formal_main
+
+        formal_main(arguments[1:])
+        return
     if arguments and arguments[0] == "camera-pilot":
         # Keep the offline report path independent of motion/simulator imports.
         from scripts.benchmark.rendering.run_benchmark import main as camera_main
@@ -120,6 +125,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Render matching scenes for visual review without benchmarking.",
     )
     subparsers.add_parser(
+        "rendering-formal",
+        add_help=False,
+        help="Run document-aligned v2 rendering experiments from approved scenes.",
+    )
+    subparsers.add_parser(
         "camera-pilot",
         add_help=False,
         help="Run the minimal camera comparison or rebuild its report offline.",
@@ -127,7 +137,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     subparsers.add_parser(
         "rendering-suite",
         add_help=False,
-        help="Run the R-03/R-04/R-05/R-06/R-09 pure-rendering suite.",
+        help="Run the legacy v1 rendering pilot matrix or rebuild its report.",
     )
     subparsers.add_parser(
         "expert-generation",

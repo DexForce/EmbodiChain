@@ -1,62 +1,38 @@
 # 技术报告 Benchmark 核心与纯渲染实验
 
-当前交付是技术报告 benchmark 的公共框架 v1、纯渲染 pilot 矩阵，以及共享场景预览入口。
-它覆盖实验定义、矩阵与预算、隔离运行、三类测量、标准产物、来源追踪、离线统计、
-图表导出和比较条件检查。
-每个纯渲染 cell 同时提供 EmbodiChain/DexSim 和 Isaac Lab 的独立进程实现与复跑命令；
-`camera-pilot` 保留为最小兼容样例。
-`rendering-preview` 先冻结相同场景并输出两平台预览，不运行性能矩阵、不自动批准质量。
-现有 pilot 的 R 编号尚未全部对齐正式计划；例如其 R-05 测量模态成本，正式计划的 R-05 是三相机扩展。
+正式纯渲染入口是 `rendering-formal`：公共产物 schema 为 1，实验定义版本为 `2.0`。
+它声明 R-01/R-02/R-03/R-04/R-05/R-09 和独立模态消融共 **82 个 cell**，复用公共的
+进程隔离、预算、计时、来源追踪和离线统计。声明矩阵不保证全部规模在每个后端都受支持；
+未选、未运行、OOM、unsupported、失败和中断都必须保留。
+
+`rendering-preview` 提供自定义共享场景和相机布局的审阅；布局批准不等于画质合格。
+`camera-pilot` 与 `rendering-suite` 保留旧实验含义，其中旧 R-05 是模态测试，正式 R-05
+是三相机扩展。完整复跑、运行环境、参考图像、质量评估及诊断说明见[渲染操作指南](rendering/README.md)。
+当前没有统计和质量均合格的 publication 性能结论。
 
 ## 结构和职责
 
-```text
-scripts/benchmark/
-  __main__.py                  统一 CLI；保留已有 benchmark 命令
-  core/
-    contracts.py               ExperimentDefinition、Budget、RunRecord、RawObservation
-                                 和 AggregateMetric
-    records.py                 RunSpec、执行状态与结果版本检查
-    planning.py                参数矩阵展开、重复计划和预算记账
-    execution.py               固定重复顺序、独立进程、超时/中断回收
-    measurement.py             阶段、连续循环、尝试和资源采样接口
-    artifacts.py               标准产物、JSONL 幂等账本和原子 JSON
-    provenance.py              软件版本、源文件哈希与设备快照
-  reporting/
-    aggregation.py             按平台和工作负载聚合；单位/分母/不确定性保留
-    comparison.py              检查质量、硬件、配置、计时边界并计算成对比较
-    compat.py                  旧 benchmark 结果转为公共记录
-    tables.py                  稳定 Markdown 表格
-    figures.py                 无绘图库依赖的 CSV/SVG 及共享样式
-    report.py                  通用离线 summary/report 重建
-  rendering/
-    suite.py                   R-03/R-04/R-05/R-06/R-09 矩阵、边界和 capture 合同
-    suite_runner.py            全部纯渲染实验的 launcher
-    suite_worker.py            一个矩阵 cell 的隔离 worker
-    suite_report.py            纯渲染离线报告、CSV 和 SVG
-    workload.py                相机配置、共同几何场景、RGB 校验及指标
-    run_benchmark.py           选择本机两个 Python 环境，构建 RunSpec
-    worker.py                  单个实验进程的场景/采集/验证生命周期
-    backends/
-      embodichain.py           EmbodiChain/DexSim 渲染与主机回读
-      isaaclab.py               Isaac Lab 3 对照实现
-    report.py                  相机专用报告模板，调用 reporting 公共逻辑
-    camera_pilot.json           首个样例实验的参数
-  expert_generation/
-    contracts.py                G-03 case、attempt、persistence receipt
-    runner.py                   有预算的 attempt runner 和 accepted yield
-    fixtures.py                 无仿真依赖的协议 fixture
-    report.py                   attempt/stage/confirmed-yield 报告
-    session_adapter.py          #670 GenerationSession/receipt adapter
-    common.py                  v0.1 导入兼容层
-```
+| Owner | 职责 |
+|---|---|
+| `scripts/benchmark/__main__.py` | 统一 CLI，保留其他 benchmark 入口 |
+| `core/contracts.py`, `records.py` | Definition、RunSpec、状态与版本 |
+| `core/planning.py`, `execution.py` | 矩阵、预算、独立进程、超时/中断 |
+| `core/measurement.py`, `artifacts.py`, `provenance.py` | 计时、标准产物、来源追踪 |
+| `reporting/aggregation.py`, `comparison.py` | 分母、缺失值、不确定性及比较资格 |
+| `rendering/formal.py`, `formal_runner.py`, `formal_worker.py` | v2 矩阵、profile、批准、选择和运行 |
+| `rendering/scenes.py`, `scene_cases.py`, `preview.py`, `replay.py` | 共同资产、固定视角、审阅与 CPU 冻结运动 |
+| `rendering/capture.py`, `resources.py`, `diagnostics.py` | 完成交付、资源、trace 与 overhead |
+| `rendering/backends/scene_*.py` | 两个平台的原生场景和渲染 API |
+| `rendering/quality_protocol.py`, `reference.py`, `quality.py`, `evaluate.py` | 独立质量证据与追加评估事件 |
+| `rendering/calibration.py` | 实测 photometric receipt、独立 held-out 验证 |
+| `rendering/publication_report.py` | 标准库离线 Markdown/CSV/SVG/PDF |
+| `rendering/suite*.py`, `run_benchmark.py`, `report.py` | 兼容 R-series pilot 与 camera-pilot |
+| `expert_generation/` | G-03 attempt/receipt、fixture 和生产 session adapter |
 
-依赖方向为：领域 launcher/worker → `core`；领域报告 → `reporting` + 文件协议。
-`core` 和 `reporting` 只依赖标准库，导入及离线分析均不启动 GPU 或仿真器。
-机器人/场景配置、物理推进、图像格式与质量判定仍由领域代码及平台 API 拥有。
-
-已有 motion-generation、Atomic Action、RL 等 benchmark 有各自稳定 owner；
-纯渲染 pilot 是这个核心的第一个 R-series 使用者，后续 L/P/G/D 实验可以按需要迁移共用能力。
+表中短路径相对于 `scripts/benchmark/`。依赖方向为领域 launcher/worker → `core`，
+领域报告 → `reporting` + 冻结文件协议。Core、shared reporting 和正式离线报告不导入
+NumPy、Torch 或模拟器。机器人配置、物理推进和数据质量仍由对应领域 owner 负责。
+其他 motion-generation、Atomic Action、RL benchmark 保持原有 owner，可逐步复用公共能力。
 
 ## 最小数据流
 
@@ -98,73 +74,96 @@ case/run/repeat/attempt 身份、命令、预算和超时；完整环境变量�
 而不是用一个 success-rate 字段混合三种 population。核心当前不负责集群、候选生成、
 Gym reset 或数据集 commit。
 
-## 纯渲染 R-series 与 Isaac Lab 复现
+## 正式纯渲染 v2
 
-统一入口覆盖 issue #679 中的全部纯渲染实验：
+| 实验 | Cell 数 | 正式含义 |
+|---|---:|---|
+| R-01 | 8 | calibration/workshop，20 固定视角，N=1/64，两个 profile，RGB/depth/seg 质量采集 |
+| R-02 | 4 | Franka 的 100 帧、30 Hz 运动序列；两个三相机刚体 cell 和两个外部形变占位 cell |
+| R-03 | 48 | 场景、静态/移动、256²/512²/1920×1080、RGB/完整模态、两个 profile 的性能矩阵 |
+| R-04 | 5 | 128² RGB、一个相机，N=1/16/64/256/1024 |
+| R-05 | 5 | 相同 N、三个相机；不是旧 pilot 的模态实验 |
+| R-09 | 8 | 四种交付边界 × 普通/诊断处理，N=16、三个相机 |
+| modality-ablation | 4 | RGB、RGB+depth、RGB+normals、RGB+depth+seg |
 
-| 实验 | 变化轴 | 主要指标 |
-|---|---|---|
-| R-03 | 128/256/512 分辨率 | observation 1/s、camera exposure 1/s、P50/P95、读回带宽 |
-| R-04 | 1/4/16 个环境批次 | 批量 exposure throughput、render/readback 计数 |
-| R-05 | RGB、RGB+depth、RGB+normals | 模态增量耗时、读回字节和吞吐 |
-| R-06 | 静态/移动时间序列 | 新曝光检查、时间序列吞吐和延迟 |
-| R-09 | device、单次 host readback、重复 host readback | GPU completion、读回次数和端到端 observation cost |
-
-列出冻结矩阵，不启动模拟器：
-
-```bash
-python -m scripts.benchmark rendering-suite --list
-```
-
-先以三个测量帧做两个平台 smoke run：
+只读列出或选择矩阵；dry-run 不读场景资产、不准备 replay、不创建输出目录：
 
 ```bash
-python -m scripts.benchmark rendering-suite \
-  --experiment all --smoke \
-  --embodichain-python /home/dex/miniconda3/envs/open/bin/python \
-  --isaaclab-root /home/dex/workspace/sources/IsaacLab \
-  --isaaclab-python /home/dex/workspace/sources/IsaacLab/env_isaaclab/bin/python \
-  --output outputs/benchmarks/rendering-suite-smoke
+python -S -m scripts.benchmark rendering-formal --list --experiment R04
+python -S -m scripts.benchmark rendering-formal --list --json --show-excluded
+python -S -m scripts.benchmark rendering-formal --experiment R04 --num-envs 1 --dry-run
 ```
 
-正式运行时去掉 `--smoke`，并按硬件预算设置 `--repeats`、`--warmup-frames` 和
-`--measured-frames`。每个 R 实验写入自己的时间戳目录；同一命令不会复用或覆盖旧结果。
-使用 `--backend embodichain` 或 `--backend isaaclab` 可单独运行平台。
+在已经审阅并保存 `approval.json` 的场景根目录上运行一个小规模 smoke：
 
-每个 cell 的边界是 `render → declared GPU completion → observation delivery`。
-`render_only` 不执行 host readback；`host_readback` 执行一次阻塞读回；
-`duplicate_readback` 对同一完成曝光执行两次 host copy。R-04 的 EmbodiChain 使用 arena
-camera groups，Isaac Lab 使用独立 USD camera views 聚合成同一 batch；实现差异会写入
-`renderer.batch_semantics`，不自动升级为等质量性能结论。
+```bash
+python -m scripts.benchmark rendering-formal \
+  --scene-root /path/to/approved-review \
+  --experiment R04 --num-envs 1 --smoke --gpu-id 1 \
+  --embodichain-python /path/to/embodichain-python \
+  --isaaclab-root /path/to/frozen/IsaacLab \
+  --isaaclab-python /path/to/matching/isaaclab-python \
+  --output outputs/benchmarks/rendering-formal
+```
 
-质量协议目前只验证新曝光和非空/有限样本，光照与模态语义尚未完成跨渲染器标定，
-所以报告的 comparison 保持 `not_qualified`，不会生成等画质 speedup。
+性能默认三个新进程重复、30 次预热、300 次测量；`--publication` 把选定性能 cell
+的重复数提高到至少十个。R-01/R-02 质量采集默认每平台一次。`--smoke` 仅改为
+一次重复、两次预热、四次性能测量，不偷偷降低分辨率、N、相机数或质量采集覆盖范围。
+过滤、后端选择和 `--max-cases` 限制均写入完整清单；全计划、选定、可运行、已启动与
+已完成的数量分别报告。形变输入缺失为 unsupported，不生成替代形变来通过。
 
-### 最小 camera-pilot 样例
+每个新 invocation 有 `selection.json`、`index.json`、`acceptance.json`；实验子目录
+保留标准产物、批准的 canonical 资产、replay、独立 worker 结果和质量证据。
+RTX PRO 5000 上的工作不算 RTX 5090 验收；外部 5090 要求仍需实际执行。
+Isaac Lab 是固定版本的外部依赖；本仓库的 Isaac 专用比较代码只放在
+`scripts/benchmark/`，不改生产 `embodichain` API 或外部 Isaac 源码来实现 benchmark。
 
-实验是程序化桌面与三个方块、一个 RGB 相机。两个 backend 使用同一几何、
-相机内参/视角和计时终点：发起渲染到 CPU RGB 可读。具体设置和安装路径参数见
-[相机实验说明](rendering/README.md)。
+计时和计数由 `capture.py` 定义。设完整窗口为 T、batch 数为 B、环境数为 N、
+每环境相机数为 C、输出大小为 W×H：
 
-Isaac Lab 对照固定为 `v3.0.0-beta2.patch1` 的提交
-`ffff603eafc6b74264a5261cc0183d6a65390d78`，对应 Isaac Sim `6.0.1.0`。
-Python 环境、安装前提和版本校验命令见相机实验说明中的 [Isaac Lab 对照环境](rendering/README.md#isaac-lab-对照环境)。
+- `batch_steps_per_s = B / T`；`camera_frames_per_s = B × N × C / T`。
+- `gpixel_per_s = B × N × C × W × H / (T × 10^9)`，只计输出像素，不乘模态数，
+  也不声称是渲染器内部像素工作量。
+- 边界包含需要的状态发布、渲染、选定交付和 GPU completion，不推进物理。
+  Latency 不含验证；吞吐窗口包含验证/记录 bookkeeping。初始化、预热、落盘和质量评估在窗外。
+- `host_ready` 是一次真实 D2H；`duplicate_d2h` 从原 device buffer 读回两次；
+  `host_copy` 是一次 D2H 加额外 CPU copy，两类字节计数分开。
+- CPU timer 和 Torch allocator 不是 native kernel timer 或全部 VRAM。NVML PID/device
+  字节、CPU RSS 与 Torch allocation 分列，两套运行环境均需可用的 NVML Python 绑定。
+
+R-09 诊断另存 CPU/CUDA trace 和 overhead 窗口，不混入 publication throughput。
+CUPTI 不能证明 Vulkan/RTX 全部可见；没有事件不等于没有传输。
+高质量 Isaac profile 使用 PT16 且每曝光重置累积；realtime DLAA 在低分辨率可能扩大内部
+工作尺寸。读取实际 profile/renderer evidence，不能从最终输出或 atlas 推断内部原生分辨率。
+
+报告和质量评估是独立操作：
+
+```bash
+python -S -m scripts.benchmark rendering-formal \
+  --report-only /path/to/invocation/R-04/experiment-timestamp
+
+/path/to/reference-python -m scripts.benchmark.rendering.evaluate \
+  --experiment-root /path/to/invocation/R-04/experiment-timestamp \
+  --spp 256 --threads 4
+```
+
+报告重建只依赖标准库。Mitsuba reference、学得的 LPIPS/SqueezeNet 权重和显式
+photometric calibration 属于额外 CPU 评估环境；数值完整也不自动合格。
+Reference 噪声、光照/颜色标定、声明 metric/check 和时序覆盖必须通过且证据 hash 匹配。
+评估追加质量事件并保留原始执行快照，不重写计时值或 `raw.jsonl`。
+具体安装、缓存、输出与诊断用法见[操作指南](rendering/README.md)。
+
+### 兼容 pilot
+
+`camera-pilot` 保留桌面/三个方块/单 RGB 相机的最小示例。
+`rendering-suite` 保留旧 R-03 分辨率、R-04 小批量、R-05 模态、R-06 静态/移动和 R-09 交付实验。
+这些旧入口、配置及报告不升级为 v2，不能用旧 R-05 结果代替正式三相机扩展。
 
 ```bash
 python -m scripts.benchmark camera-pilot --help
-python -m scripts.benchmark camera-pilot \
-  --embodichain-python /home/dex/miniconda3/envs/open/bin/python \
-  --isaaclab-root /home/dex/workspace/sources/IsaacLab \
-  --isaaclab-python /home/dex/workspace/sources/IsaacLab/env_isaaclab/bin/python \
-  --repeats 3
+python -S -m scripts.benchmark rendering-suite --list
+python -S -m scripts.benchmark rendering-suite --report-only /path/to/legacy-experiment
 ```
-
-Isaac adapter 在独立解释器里启动 Kit，使用本机固定 Isaac Lab 3 提交的
-`ProxyArray.torch` 取得图像，并推进 render generation，确保静态物理状态下
-每次仍产生新曝光。相机位置变化检查会拦截重复读取旧缓冲的错误。
-
-首个样例尚未完成独立画质标定，保持 `not_qualified`，报告不计算等画质加速比。
-旧版相机 `runs.json` 可以继续重建，旧导入 `rendering.common` 也保留兼容。
 
 ## G-03 最小纵向切片
 
@@ -201,11 +200,17 @@ persistence 状态机。
 
 ## 验证
 
+最小的 CPU/离线合同验证：
+
 ```bash
-python -m pytest tests/benchmark/core tests/benchmark/reporting \
-  tests/benchmark/rendering/test_camera_pilot.py tests/test_main.py -q
+python -m pytest -q -c /dev/null --noconftest \
+  tests/benchmark/core tests/benchmark/reporting \
+  tests/benchmark/rendering/test_formal_runner.py \
+  tests/benchmark/rendering/test_rendering_capture.py \
+  tests/benchmark/rendering/test_publication_report.py
 ```
 
-这些检查覆盖纯标量操作计时、JSON 原子写入、错误 worker 输出、计划顺序与失败保留、
-分组/缺失指标、比较资格，以及相机的配置和命令兼容。离线重建可用 `python -S`
-验证完全不依赖 site-packages。真实 GPU 测试使用相机实验命令，串行运行两个平台。
+匹配测试还覆盖 worker 生命周期、资源、trace/overhead、replay、独立 reference 和质量评估。
+可选 learned-metric/reference 测试需要额外 CPU 依赖；真实 GPU 验证必须串行。
+`python -S` 检查 list/dry-run/report-only 边界。已完成 smoke、声明矩阵和实现测试是不同证据；
+目前没有等质量的 publication 性能结果。
