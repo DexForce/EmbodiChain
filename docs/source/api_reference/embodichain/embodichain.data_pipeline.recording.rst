@@ -14,6 +14,8 @@ commits. ``recover_recording(..., repair=True)`` can restore a missing sidecar
 from its journal only when committed frame and depth artifacts verify. It
 never replays actions or rewrites an unfinished SDK write.
 
+.. currentmodule:: embodichain.data_pipeline.recording
+
 .. autosummary::
 
    RecordingJournal
