@@ -93,6 +93,13 @@ def main(argv: Sequence[str] | None = None) -> None:
 
         formal_main(arguments[1:])
         return
+    if arguments and arguments[0] == "maniskill-reference":
+        from scripts.benchmark.rendering.maniskill_reference import (
+            main as reference_main,
+        )
+
+        reference_main(arguments[1:])
+        return
     if arguments and arguments[0] == "camera-pilot":
         # Keep the offline report path independent of motion/simulator imports.
         from scripts.benchmark.rendering.run_benchmark import main as camera_main
@@ -128,6 +135,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         "rendering-formal",
         add_help=False,
         help="Run document-aligned v2 rendering experiments from approved scenes.",
+    )
+    subparsers.add_parser(
+        "maniskill-reference",
+        add_help=False,
+        help="Run two separate, unqualified ManiSkill raster reference points.",
     )
     subparsers.add_parser(
         "camera-pilot",

@@ -33,9 +33,12 @@ from scripts.benchmark.rendering.backends.scene_isaaclab import (
     IsaacLabScene,
     _advance_pt_history,
     _apply_carb_overrides,
+    _apply_light_contract,
     _configure_accumulation,
     _geometry_prototypes,
     _instance_geometry,
+    _isaac_light_contract,
+    _light_evidence,
     _object_matrix,
     _native_lighting,
     _render_settings,
@@ -138,6 +141,158 @@ def test_invalid_isaac_lighting_controls_are_rejected(
     }
     with pytest.raises(ValueError):
         _native_lighting(scene, {"lighting_controls": {"isaaclab": overrides}})
+
+
+def test_light_evidence_preserves_authored_values_and_schema_fallbacks() -> None:
+    pytest.importorskip("pxr")
+    from pxr import Gf, Usd, UsdGeom, UsdLux
+
+    stage = Usd.Stage.CreateInMemory()
+    sun = UsdLux.DistantLight.Define(stage, "/World/Sun")
+    sun.CreateIntensityAttr(3.0)
+    sun.CreateAngleAttr(0.0)
+    dome = UsdLux.DomeLight.Define(stage, "/World/Dome")
+    dome.CreateIntensityAttr(0.15)
+    dome.CreateColorAttr(Gf.Vec3f(0.5, 1.0, 1.0))
+    UsdGeom.Cube.Define(stage, "/World/Cube")
+    settings = {
+        "/rtx/lighting/defaultUsdLuxVersion": 2505,
+        "/rtx/sceneDb/ambientLightIntensity": 1.0,
+        "/rtx/sceneDb/ambientLightColor": [0.1, 0.1, 0.1],
+    }
+    before = stage.GetRootLayer().ExportToString()
+    evidence = _light_evidence(stage, SimpleNamespace(get_setting=settings.get))
+    assert stage.GetRootLayer().ExportToString() == before
+    lights = {light["path"]: light for light in evidence["lights"]}
+    assert set(lights) == {"/World/Sun", "/World/Dome"}
+    attrs = lights["/World/Sun"]["attributes"]
+    assert attrs["inputs:intensity"] == {
+        "value": 3.0,
+        "authored": True,
+        "type": "float",
+    }
+    assert attrs["inputs:normalize"]["value"] is False
+    assert attrs["inputs:normalize"]["authored"] is False
+    assert attrs["inputs:exposure"]["value"] == 0.0
+    assert attrs["omni:rtx:usdluxVersion"] == {
+        "value": None,
+        "authored": False,
+        "type": None,
+    }
+    assert lights["/World/Dome"]["attributes"]["inputs:color"]["value"] == [
+        0.5,
+        1.0,
+        1.0,
+    ]
+    assert evidence["settings"]["/rtx/lighting/defaultUsdLuxVersion"] == 2505
+    assert "/rtx/scenedb/skipMostLights" in evidence["missing_settings"]
+
+
+def test_light_evidence_reports_extra_lights_and_explicit_usdlux_version() -> None:
+    pytest.importorskip("pxr")
+    from pxr import Sdf, Usd, UsdLux
+
+    stage = Usd.Stage.CreateInMemory()
+    sun = UsdLux.DistantLight.Define(stage, "/World/Sun")
+    sun.CreateNormalizeAttr(True)
+    sun.GetPrim().CreateAttribute(
+        "omni:rtx:usdluxVersion", Sdf.ValueTypeNames.Int, custom=True
+    ).Set(2505)
+    UsdLux.SphereLight.Define(stage, "/UnexpectedLight")
+    evidence = _light_evidence(stage, SimpleNamespace(get_setting=lambda _: None))
+    lights = {light["path"]: light for light in evidence["lights"]}
+    assert lights["/UnexpectedLight"]["type"] == "SphereLight"
+    attrs = lights["/World/Sun"]["attributes"]
+    assert attrs["omni:rtx:usdluxVersion"]["value"] == 2505
+    assert attrs["omni:rtx:usdluxVersion"]["authored"] is True
+    assert attrs["inputs:normalize"]["value"] is True
+    assert attrs["inputs:normalize"]["authored"] is True
+
+
+@pytest.mark.parametrize("version", [2411, 2505])
+def test_explicit_light_contract_authors_usd_without_rescaling_intensity(
+    version: int,
+) -> None:
+    pytest.importorskip("pxr")
+    from pxr import Usd, UsdLux
+
+    profile = render_profile("realtime")
+    profile["isaaclab_light_contract"] = {
+        "usdlux_version": version,
+        "sun_normalize": True,
+        "sun_exposure": -1.0,
+        "sun_angle_deg": 0.0,
+        "dome_exposure": 2.0,
+    }
+    original = copy.deepcopy(profile)
+    contract = _isaac_light_contract(profile)
+    stage = Usd.Stage.CreateInMemory()
+    sun = UsdLux.DistantLight.Define(stage, "/World/Sun")
+    sun.CreateIntensityAttr(3.0)
+    dome = UsdLux.DomeLight.Define(stage, "/World/Dome")
+    dome.CreateIntensityAttr(0.15)
+    _apply_light_contract(sun, dome, contract)
+    assert sun.GetIntensityAttr().Get() == 3.0
+    assert dome.GetIntensityAttr().Get() == pytest.approx(0.15)
+    assert sun.GetNormalizeAttr().Get() is True
+    assert sun.GetExposureAttr().Get() == -1.0
+    assert sun.GetAngleAttr().Get() == 0.0
+    assert dome.GetExposureAttr().Get() == 2.0
+    for light in (sun, dome):
+        attr = light.GetPrim().GetAttribute("omni:rtx:usdluxVersion")
+        assert attr.Get() == version and attr.HasAuthoredValueOpinion()
+    assert profile == original
+    assert "isaaclab_light_contract" not in _render_settings(profile)
+    contract["sun_exposure"] = 4.0
+    assert profile["isaaclab_light_contract"]["sun_exposure"] == -1.0
+
+
+def test_missing_or_partial_light_contract_preserves_preview_defaults() -> None:
+    pytest.importorskip("pxr")
+    from pxr import Usd, UsdLux
+
+    assert _isaac_light_contract(None) == _isaac_light_contract({}) == {}
+    stage = Usd.Stage.CreateInMemory()
+    sun = UsdLux.DistantLight.Define(stage, "/World/Sun")
+    sun.CreateIntensityAttr(3000.0)
+    sun.CreateAngleAttr(0.0)
+    before = stage.GetRootLayer().ExportToString()
+    _apply_light_contract(sun, None, _isaac_light_contract(None))
+    assert stage.GetRootLayer().ExportToString() == before
+    _apply_light_contract(
+        sun,
+        None,
+        _isaac_light_contract({"isaaclab_light_contract": {"sun_normalize": False}}),
+    )
+    assert sun.GetNormalizeAttr().Get() is False
+    assert sun.GetNormalizeAttr().HasAuthoredValueOpinion()
+    assert not sun.GetExposureAttr().HasAuthoredValueOpinion()
+    assert not sun.GetPrim().GetAttribute("omni:rtx:usdluxVersion")
+    assert sun.GetIntensityAttr().Get() == 3000.0
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        None,
+        [],
+        {"unexpected": 0},
+        {"usdlux_version": 2400},
+        {"usdlux_version": 2505.0},
+        {"usdlux_version": True},
+        {"sun_normalize": 1},
+        {"sun_normalize": "false"},
+        {"sun_exposure": float("nan")},
+        {"sun_exposure": True},
+        {"dome_exposure": float("inf")},
+        {"dome_exposure": "0"},
+        {"sun_angle_deg": -0.1},
+        {"sun_angle_deg": float("inf")},
+    ],
+)
+def test_invalid_usd_light_contract_is_rejected(contract: Any) -> None:
+    with pytest.raises(ValueError):
+        _isaac_light_contract({"isaaclab_light_contract": contract})
 
 
 def test_explicit_post_camera_overrides_preserve_pathtracing_mode() -> None:

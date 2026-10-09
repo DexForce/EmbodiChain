@@ -24,6 +24,7 @@ and never marks a scene or quality profile as approved.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -35,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.benchmark.core.artifacts import write_json
+from scripts.benchmark.core.artifacts import read_json_object, stable_hash, write_json
 from scripts.benchmark.core.execution import execute_worker
 from scripts.benchmark.core.provenance import (
     git_revision,
@@ -51,6 +52,55 @@ from scripts.benchmark.rendering.scenes import (
 )
 
 __all__ = ["compare_geometry", "main", "write_comparison"]
+
+
+def _read_render_profile(
+    path: Path, expected_sha256: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read the exact copied profile and bind its bytes and resolved values."""
+    path = Path(path).resolve()
+    profile = read_json_object(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise ValueError("Frozen preview render profile checksum mismatch")
+    return profile, {
+        "path": str(path),
+        "sha256": digest,
+        "profile_sha256": stable_hash(profile),
+    }
+
+
+def _freeze_render_profile(
+    source: Path | None, output: Path
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """Copy a profile once; reuse cannot overwrite a different frozen profile."""
+    frozen = output / "render_profile.json"
+    if source is None:
+        if not frozen.exists():
+            return None, None
+        previous = read_json_object(output / "review.json").get("render_profile")
+        if not isinstance(previous, dict):
+            raise ValueError(
+                "Existing render_profile.json has no frozen review binding"
+            )
+        profile, record = _read_render_profile(frozen, previous["sha256"])
+        if stable_hash(profile) != previous["profile_sha256"]:
+            raise ValueError("Frozen preview render profile values changed")
+    else:
+        source = Path(source).resolve()
+        _, record = _read_render_profile(source)
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != record["sha256"]:
+            raise ValueError("Render profile changed while preparing the preview")
+        if frozen.exists():
+            if frozen.read_bytes() != data:
+                raise FileExistsError(
+                    "A different render profile is already frozen; use a new output directory"
+                )
+        else:
+            frozen.write_bytes(data)
+        _, record = _read_render_profile(frozen, record["sha256"])
+    return frozen, {**record, "path": frozen.name}
 
 
 def compare_geometry(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
@@ -110,12 +160,20 @@ def _worker(args: argparse.Namespace) -> None:
             [
                 Path(__file__).resolve(),
                 Path(__file__).with_name("scenes.py"),
+                Path(__file__).with_name("color.py"),
                 Path(__file__).parent / "backends" / f"scene_{args.worker}.py",
             ],
         ),
     }
     renderer = None
     try:
+        profile_options = {}
+        if args.render_profile is not None:
+            profile, record = _read_render_profile(
+                args.render_profile, args.render_profile_sha256
+            )
+            profile_options["profile"] = profile
+            result["render_profile"] = record
         if args.worker == "embodichain":
             from scripts.benchmark.rendering.backends.scene_embodichain import (
                 EmbodiChainScene,
@@ -137,6 +195,7 @@ def _worker(args: argparse.Namespace) -> None:
             height=args.height,
             gpu_id=args.gpu_id,
             modalities=("rgb", "depth", "seg"),
+            **profile_options,
         )
         for _ in range(args.settle_frames):
             arrays = renderer.capture()
@@ -189,6 +248,14 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
 
     outputs = []
     audit = []
+    review = read_json_object(root / "review.json")
+    expected_profile = review.get("render_profile")
+    if expected_profile is not None:
+        _, frozen = _read_render_profile(
+            root / expected_profile["path"], expected_profile["sha256"]
+        )
+        if frozen["profile_sha256"] != expected_profile["profile_sha256"]:
+            raise ValueError("Comparison render profile differs from the frozen review")
     for name in scene_names:
         scene = load_scene(root / name / "scene.json")
         metadata = [
@@ -197,6 +264,19 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
         ]
         if any(record["status"] != "completed" for record in metadata):
             raise ValueError(f"Cannot compare incomplete previews: {name}")
+        for record in metadata:
+            used = record.get("render_profile")
+            if (
+                (expected_profile is None) != (used is None)
+                or expected_profile is not None
+                and any(
+                    used.get(key) != expected_profile[key]
+                    for key in ("sha256", "profile_sha256")
+                )
+            ):
+                raise ValueError(
+                    f"Preview render profile fingerprints do not match: {name}"
+                )
         lhs, rhs = [record["renderer"] for record in metadata]
         if any(
             record["scene_sha256"] != scene_fingerprint(scene) for record in (lhs, rhs)
@@ -254,7 +334,11 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
                 )
                 ax.axis("off")
         fig.suptitle(
-            "Shared geometry and camera poses — raw renderer output",
+            (
+                "Shared geometry and camera poses — declared RGB delivery"
+                if expected_profile is not None
+                else "Shared geometry and camera poses — raw renderer output"
+            ),
             fontsize=16,
             y=0.995,
         )
@@ -279,7 +363,6 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
             "franka_camera_comparison.png",
         )
     review_path = root / "review.json"
-    review = json.loads(review_path.read_text())
     review.update(
         preview_execution_status="completed",
         comparison_figures=[path.name for path in outputs],
@@ -303,6 +386,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--isaaclab-root", type=Path)
     parser.add_argument("--isaaclab-python", type=Path)
     parser.add_argument("--franka-urdf", type=Path)
+    parser.add_argument(
+        "--render-profile",
+        type=Path,
+        help="Optional render-profile JSON copied and hashed into this preview; no benchmark/quality approval is implied.",
+    )
+    parser.add_argument("--render-profile-sha256", help=argparse.SUPPRESS)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument(
         "--reuse-scenes",
@@ -314,6 +403,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--manifest", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.render_profile_sha256 is not None and args.render_profile is None:
+        parser.error("--render-profile-sha256 requires --render-profile")
     if min(args.width, args.height, args.settle_frames) < 1 or args.gpu_id < 0:
         parser.error(
             "width, height and settle-frames must be positive; gpu-id must be nonnegative"
@@ -329,6 +420,9 @@ def main(argv: list[str] | None = None) -> None:
             "Both --isaaclab-root and --isaaclab-python are required for previews"
         )
     args.output.mkdir(parents=True, exist_ok=args.reuse_scenes)
+    frozen_profile, profile_record = _freeze_render_profile(
+        args.render_profile, args.output
+    )
     scene_names = SCENE_NAMES if args.scene == "all" else (args.scene,)
     records = []
     for name in scene_names:
@@ -354,6 +448,9 @@ def main(argv: list[str] | None = None) -> None:
             "width": args.width,
             "height": args.height,
             "gpu_id": args.gpu_id,
+            **(
+                {"render_profile": profile_record} if profile_record is not None else {}
+            ),
         },
     )
     if args.prepare_only:
@@ -386,6 +483,15 @@ def main(argv: list[str] | None = None) -> None:
                 "--isaaclab-root",
                 str(args.isaaclab_root),
             ]
+            if frozen_profile is not None:
+                command.extend(
+                    [
+                        "--render-profile",
+                        str(frozen_profile),
+                        "--render-profile-sha256",
+                        profile_record["sha256"],
+                    ]
+                )
             environment = os.environ.copy()
             environment["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
             environment.pop("CUDA_VISIBLE_DEVICES", None)

@@ -29,6 +29,8 @@ Commands, matrices and runtime requirements are in the
 | Measured photometric calibration and held-out verification | `scripts/benchmark/rendering/calibration.py` |
 | Append-only offline evaluation events | `scripts/benchmark/rendering/evaluate.py` |
 | Formal offline Markdown, CSV, SVG and PDF | `scripts/benchmark/rendering/publication_report.py`, `_publication_figures.py` |
+| Optional ManiSkill raster reference points | `scripts/benchmark/rendering/maniskill_reference.py`, `maniskill_reference_worker.py`, `backends/scene_maniskill.py` |
+| Canonical GPU RGB delivery transfer | `scripts/benchmark/rendering/color.py` |
 | Legacy camera / R-series pilot | `scripts/benchmark/rendering/run_benchmark.py`, `suite_runner.py`, `suite_report.py` |
 | G-03 attempts, receipts and production-session adapter | `scripts/benchmark/expert_generation/` |
 
@@ -76,6 +78,23 @@ additional CPU-copy boundaries. Exposures count environments × cameras, without
 a modality multiplier. Camera-frame and output-pixel rates use the whole window.
 Native camera-group chunk assembly remains inside capture timing; its batching
 semantics are recorded rather than hidden by reducing N.
+Initial or changed native state is published explicitly; unchanged static captures
+submit fresh camera-group renders without repeating `World.update(0)`.
+Publication-policy profile hashes distinguish earlier measurements that included
+that synchronization on every capture. GPU colour-transfer work remains timed.
+
+`rendering-preview --render-profile` copies and hashes an explicit profile without
+starting a timing matrix. Isaac Clamp delivery verifies disabled colour transforms
+and converts linear bytes to sRGB on device. Formal light contracts explicitly
+author UsdLux version/normalization and disable extra preset ambient illumination;
+image similarity and measured calibration remain independent requirements.
+
+`maniskill-reference` runs only the declared N=1/16 raster points in a separate
+experiment, without equal-quality ray-tracing ratios. Its selected-device setup
+initializes PhysX GPU pose storage with one source-documented warm-start step;
+capture never steps physics. Missing runtime libraries fail before measurement,
+and workers do not download them. Preserve native shader gamma evidence instead
+of labeling it exact IEC sRGB without verification.
 
 Profiles freeze explicit per-renderer settings. High-quality Isaac capture uses
 PT16 with accumulation reset per exposure. Realtime DLAA may enlarge internal
@@ -103,8 +122,9 @@ execution snapshots, timing fields and `raw.jsonl`, appending quality events and
 updating only derived quality projections. The report verifies proof bindings and
 policy requirements before any equal-quality ratio.
 
-Declared large-N cells are capacity probes, not support promises. Failed and
-interrupted probes do not establish a capacity boundary. RTX PRO 5000 smoke work
+Declared large-N cells are capacity probes, not support promises. Generic failures
+and interruptions do not prove a maximum supported N; retain explicit renderer-limit
+or OOM evidence and the surrounding tested successes separately. RTX PRO 5000 smoke work
 does not satisfy the external RTX 5090 acceptance requirement. No publication
 performance conclusion follows from implementation coverage or short smoke runs.
 

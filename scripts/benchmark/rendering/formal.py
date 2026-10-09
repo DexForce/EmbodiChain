@@ -44,18 +44,19 @@ __all__ = [
 DEFINITION_VERSION = "2.0"
 EXPERIMENTS = ("R-01", "R-02", "R-03", "R-04", "R-05", "R-09", "modality-ablation")
 
-# Freeze the settings actually observed in the pinned RTX runtime. This records
-# its ACES response; it does not assert photometric equality with native RGB.
+# Explicit linear lighting/colour contract: the adapter verifies Clamp and
+# disabled colour transforms before performing the GPU sRGB delivery transfer.
 _ISAAC_POSTPROCESS = {
     "/rtx/post/histogram/enabled": False,
-    "/rtx/post/tonemap/op": 6,
+    "/rtx/post/tonemap/op": 0,
+    "/rtx/sceneDb/ambientLightIntensity": 0.0,
     "/rtx/post/tonemap/filmIso": 100.0,
     "/rtx/post/tonemap/exposureTime": 0.02,
     "/rtx/post/tonemap/fNumber": 5.0,
     "/rtx/post/tonemap/responsivity": 1.1026709079742432,
     "/rtx/post/tonemap/whitepoint": [1.0, 1.0, 1.0],
     "/rtx/post/tonemap/colorMode": 0,
-    "/rtx/post/tonemap/enableSrgbToGamma": True,
+    "/rtx/post/tonemap/enableSrgbToGamma": False,
     "/rtx/post/tonemap/wrapValue": 0.0,
     "/rtx/post/tonemap/dither": 0.0,
     "/rtx/post/tonemap/ocio/enabled": False,
@@ -65,7 +66,7 @@ _ISAAC_POSTPROCESS = {
 
 _PROFILES = {
     "realtime": {
-        "version": "1.5",
+        "version": "1.7",
         "name": "realtime",
         "frame_time_s": 1 / 30,
         "embodichain": {
@@ -79,6 +80,7 @@ _PROFILES = {
             "tone_mapping_exposure": 1.0,
             "auto_exposure": False,
             "camera_group_capacity": 32,
+            "state_publication_policy": "on_frozen_state_change",
         },
         "isaaclab": {
             "rendering_mode": "balanced",
@@ -90,6 +92,13 @@ _PROFILES = {
             "carb_settings": dict(_ISAAC_POSTPROCESS),
         },
         "frame_generation": False,
+        "isaaclab_light_contract": {
+            "usdlux_version": 2505,
+            "sun_normalize": True,
+            "sun_exposure": 0.0,
+            "sun_angle_deg": 0.0,
+            "dome_exposure": 0.0,
+        },
         "lighting_controls": {
             "embodichain": {
                 "directional_intensity": 12.0,
@@ -97,8 +106,8 @@ _PROFILES = {
                 "environment_color": [1.0, 1.0, 1.0],
             },
             "isaaclab": {
-                "directional_intensity": 3000.0,
-                "environment_intensity": 150.0,
+                "directional_intensity": 3.0,
+                "environment_intensity": 0.15,
                 "environment_color": [1.0, 1.0, 1.0],
             },
         },
@@ -107,7 +116,7 @@ _PROFILES = {
         "photometric_calibration": {"status": "not_qualified"},
     },
     "high_quality": {
-        "version": "1.5",
+        "version": "1.7",
         "name": "high_quality",
         "frame_time_s": 1 / 30,
         "embodichain": {
@@ -121,6 +130,7 @@ _PROFILES = {
             "tone_mapping_exposure": 1.0,
             "auto_exposure": False,
             "camera_group_capacity": 32,
+            "state_publication_policy": "on_frozen_state_change",
         },
         "isaaclab": {
             "rendering_mode": "quality",
@@ -141,6 +151,13 @@ _PROFILES = {
         },
         "accumulation_policy": "reset_each_exposure",
         "frame_generation": False,
+        "isaaclab_light_contract": {
+            "usdlux_version": 2505,
+            "sun_normalize": True,
+            "sun_exposure": 0.0,
+            "sun_angle_deg": 0.0,
+            "dome_exposure": 0.0,
+        },
         "lighting_controls": {
             "embodichain": {
                 "directional_intensity": 12.0,
@@ -148,8 +165,8 @@ _PROFILES = {
                 "environment_color": [1.0, 1.0, 1.0],
             },
             "isaaclab": {
-                "directional_intensity": 3000.0,
-                "environment_intensity": 150.0,
+                "directional_intensity": 3.0,
+                "environment_intensity": 0.15,
                 "environment_color": [1.0, 1.0, 1.0],
             },
         },

@@ -24,24 +24,10 @@ import math
 from pathlib import Path
 from typing import Any
 
+from ..color import linear_u8_to_srgb_u8 as _linear_u8_to_srgb_u8
 from ..scenes import camera_intrinsics, load_scene, scene_fingerprint
 
 __all__ = ["EmbodiChainScene", "material_display_color"]
-
-
-def _linear_u8_to_srgb_u8(value: Any, torch: Any) -> Any:
-    """Encode native Hybrid/DLSS linear UNORM bytes on the existing device.
-
-    This is a delivery conversion, not a photometric fit. It cannot recover
-    precision already lost by the native linear-UNORM8 output packing.
-    """
-    linear = value.to(torch.float32) / 255.0
-    encoded = torch.where(
-        linear <= 0.0031308,
-        12.92 * linear,
-        1.055 * linear.pow(1.0 / 2.4) - 0.055,
-    )
-    return (encoded.clamp(0.0, 1.0) * 255.0).round().to(torch.uint8)
 
 
 class _ArenaSlice:
@@ -272,6 +258,12 @@ class EmbodiChainScene:
         group_capacity = settings.get("camera_group_capacity", 32)
         if type(group_capacity) is not int or not 1 <= group_capacity <= 32:
             raise ValueError("Native camera-group capacity must be between 1 and 32")
+        self._state_publication_policy = "on_frozen_state_change"
+        if (
+            settings.get("state_publication_policy", self._state_publication_policy)
+            != self._state_publication_policy
+        ):
+            raise ValueError("Unsupported native state-publication policy")
         self._render_calls = 0
         self._scene_frame_id = 0
         self._pending_frame = None
@@ -462,7 +454,9 @@ class EmbodiChainScene:
             "physics_steps": 0,
             "physics_enabled": False,
             "physics_evidence": "World.enable_physics(False); transforms published without positive-time stepping",
-            "publication_completion": "World.update(0) plus World._flush_render_updates after changed transforms; native render-thread/GPU transfers complete without camera exposure",
+            "state_publication_policy": self._state_publication_policy,
+            "state_publication_count_scope": "adapter sync_render_state calls; construction-internal updates excluded",
+            "publication_completion": "World.update(0) plus World._flush_render_updates on initial or changed frozen state; unchanged captures perform neither",
             "batch_semantics": "arena_camera_groups_chunked_by_environment",
             "native_camera_group_capacity": group_capacity,
             "native_camera_group_count": sum(
@@ -476,25 +470,28 @@ class EmbodiChainScene:
             "batch_assembly": "device concatenation of completed arena chunks, then environment_then_camera ordering; included in delivery timing",
             "effective_profile": self.profile,
             "native_profiler_enabled": enable_native_profiling,
-            "render_boundary": "render_camera_group followed by blocking host delivery",
+            "render_submission_api": "SimulationManager.get_world().render_camera_group",
+            "render_boundary": "fresh native camera-group submission through canonical device tensors; completion and host delivery follow the selected capture boundary",
             "quality_status": "not_qualified",
             "material_input_encoding": "linear reflectance encoded as display-sRGB for VisualMaterialCfg",
         }
 
     def _begin_frame(self) -> None:
-        if self._pending_frame is None:
-            self._pending_frame = self.sim.render_frame(capture_camera_images=False)
-            self._pending_frame.__enter__()
-            try:
-                self.sim.sync_render_state()
-                if getattr(self, "_pending_native_flush", False):
-                    self.sim._world._flush_render_updates()
-                    self._pending_native_flush = False
-                    self._state_flushes += 1
-                self._state_publications += 1
-            except BaseException:
-                self._end_frame()
-                raise
+        """Publish initial or changed frozen state without a camera exposure."""
+        if self._pending_frame is not None or not self._pending_native_flush:
+            return
+        context = self.sim.render_frame(capture_camera_images=False)
+        context.__enter__()
+        self._pending_frame = context
+        try:
+            self.sim.sync_render_state()
+            self._state_publications += 1
+            self.sim.get_world()._flush_render_updates()
+            self._state_flushes += 1
+            self._pending_native_flush = False
+        except BaseException:
+            self._end_frame()
+            raise
 
     def _end_frame(self) -> None:
         if self._pending_frame is not None:
@@ -511,7 +508,10 @@ class EmbodiChainScene:
 
     def _render_published_device(self) -> dict[str, Any]:
         torch = self.torch
-        self.sim.render_camera_group(
+        # The public native API enqueues ApplyFrame for every selected group on
+        # every call, including a static scene. Render seeds and DLSS/NRD history
+        # advance there; the manager wrapper would add a World.update(0) here.
+        self.sim.get_world().render_camera_group(
             [group for camera in self.cameras for group in camera.group_ids]
         )
         for camera in self.cameras:
@@ -614,7 +614,10 @@ class EmbodiChainScene:
         """
         if len(specs) != len(self.cameras):
             raise ValueError("Changing camera topology requires a new worker")
+        if specs == self.scene["cameras"]:
+            return
         self._end_frame()
+        self._pending_native_flush = True
         for camera, spec in zip(self.cameras, specs, strict=True):
             values = [
                 self.torch.tensor(
@@ -626,7 +629,6 @@ class EmbodiChainScene:
             ]
             camera.look_at(*values)
         self.scene["cameras"] = copy.deepcopy(specs)
-        self._pending_native_flush = True
 
     def apply_state(self, frame: dict[str, Any]) -> None:
         """Publish frozen object and camera transforms without running physics.
@@ -640,9 +642,9 @@ class EmbodiChainScene:
                 values = self.torch.tensor(
                     [pose] * self.num_envs, dtype=self.torch.float32
                 )
+                self._pending_native_flush = True
                 self.objects[uid].set_local_pose(values)
                 self._object_poses[uid] = pose
-                self._pending_native_flush = True
         views = [
             frame["cameras"].get(view["name"], view) for view in self.scene["cameras"]
         ]

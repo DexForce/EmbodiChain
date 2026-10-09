@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from scripts.benchmark.core.artifacts import stable_hash
 
+from ..color import linear_u8_to_srgb_u8
 from ..scenes import camera_intrinsics, camera_world_pose, load_scene, scene_fingerprint
 
 if TYPE_CHECKING:
@@ -84,6 +85,93 @@ _RTX_POSTPROCESS_SETTINGS = (
     "/rtx/post/colorgrad/enabled",
     "/rtx/post/colorgrad/gamma",
 )
+
+_CLAMP_COLOR_SETTINGS = (
+    "/rtx/post/tonemap/op",
+    "/rtx/post/colorcorr/enabled",
+    "/rtx/post/colorgrad/enabled",
+    "/rtx/post/tonemap/ocio/enabled",
+)
+
+_RTX_LIGHT_SETTINGS = (
+    "/rtx/lighting/defaultUsdLuxVersion",
+    "/rtx/sceneDb/ambientLightIntensity",
+    "/rtx/sceneDb/ambientLightColor",
+    "/rtx/scenedb/skipMostLights",
+    "/rtx/domeLight/upperLowerStrategy",
+)
+
+_USD_LIGHT_ATTRIBUTES = (
+    "inputs:intensity",
+    "inputs:exposure",
+    "inputs:color",
+    "inputs:normalize",
+    "inputs:angle",
+    "inputs:diffuse",
+    "inputs:specular",
+    "inputs:enableColorTemperature",
+    "inputs:colorTemperature",
+    "omni:rtx:usdluxVersion",
+    "photometric:illuminance",
+    "photometric:power",
+)
+
+
+def _light_evidence(stage: Any, sim: Any) -> dict[str, Any]:
+    """Read composed USD lights and ambient settings without authoring changes."""
+    from pxr import Usd, UsdGeom, UsdLux
+
+    lights = []
+    for prim in stage.Traverse():
+        if not prim.HasAPI(UsdLux.LightAPI):
+            continue
+        attributes = {}
+        for name in _USD_LIGHT_ATTRIBUTES:
+            attribute = prim.GetAttribute(name)
+            value = attribute.Get() if attribute else None
+            if value is not None and not isinstance(value, (bool, int, float, str)):
+                value = list(value)
+            attributes[name] = {
+                "value": value,
+                "authored": bool(attribute and attribute.HasAuthoredValueOpinion()),
+                "type": str(attribute.GetTypeName()) if attribute else None,
+            }
+        lights.append(
+            {
+                "path": str(prim.GetPath()),
+                "type": prim.GetTypeName(),
+                "applied_schemas": list(prim.GetAppliedSchemas()),
+                "visibility": str(UsdGeom.Imageable(prim).ComputeVisibility()),
+                "attributes": attributes,
+            }
+        )
+    settings = {name: sim.get_setting(name) for name in _RTX_LIGHT_SETTINGS}
+    return {
+        "scope": "composed_usd_light_attributes_and_runtime_carb_readback",
+        "usd_version": list(Usd.GetVersion()),
+        "lights": lights,
+        "settings": settings,
+        "missing_settings": [name for name, value in settings.items() if value is None],
+        "interpretation": "Attribute values include USD fallbacks; authored marks explicit opinions. The defaultUsdLuxVersion command setting is not proof of an unauthored light's renderer behavior. No radiometric unit equivalence is inferred.",
+    }
+
+
+def _clamp_rgb_conversion(overrides: dict[str, Any], observed: dict[str, Any]) -> bool:
+    """Allow conversion only for an explicit, runtime-verified bare Clamp path."""
+    requested = overrides.get("/rtx/post/tonemap/op")
+    if type(requested) is not int or requested != 0:
+        return False
+    actual = observed.get("/rtx/post/tonemap/op")
+    if type(actual) is not int or actual != 0:
+        raise RuntimeError(
+            "Explicit Clamp RGB conversion requires observed tonemap op 0"
+        )
+    for name in _CLAMP_COLOR_SETTINGS[1:]:
+        if observed.get(name) is not False:
+            raise RuntimeError(
+                f"Clamp RGB conversion requires observed disabled {name}"
+            )
+    return True
 
 
 def _resolution_evidence(
@@ -212,6 +300,58 @@ def _native_lighting(
             raise ValueError("Isaac light controls must be finite and nonnegative")
     values["environment_color"] = list(color)
     return values
+
+
+def _isaac_light_contract(profile: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate only explicitly supplied USD light attributes before Kit starts."""
+    contract = (profile or {}).get("isaaclab_light_contract", {})
+    allowed = {
+        "usdlux_version",
+        "sun_normalize",
+        "sun_exposure",
+        "sun_angle_deg",
+        "dome_exposure",
+    }
+    if not isinstance(contract, dict) or set(contract) - allowed:
+        raise ValueError("Unsupported isaaclab_light_contract attribute")
+    for name, value in contract.items():
+        if name == "usdlux_version":
+            if type(value) is not int or value not in {2411, 2505}:
+                raise ValueError("usdlux_version must be integer 2411 or 2505")
+        elif name == "sun_normalize":
+            if type(value) is not bool:
+                raise ValueError("sun_normalize must be a boolean")
+        elif (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or (name == "sun_angle_deg" and value < 0)
+        ):
+            raise ValueError(
+                "Light exposures must be finite numbers and sun_angle_deg nonnegative"
+            )
+    return copy.deepcopy(contract)
+
+
+def _apply_light_contract(sun: Any, dome: Any | None, contract: dict[str, Any]) -> None:
+    """Author the selected contract without applying Kit's look-preserving upgrade."""
+    from pxr import Sdf
+
+    if "usdlux_version" in contract:
+        for light in (sun, dome):
+            if light is not None:
+                light.GetPrim().CreateAttribute(
+                    "omni:rtx:usdluxVersion", Sdf.ValueTypeNames.Int, custom=True
+                ).Set(contract["usdlux_version"])
+    for name, create in (
+        ("sun_normalize", sun.CreateNormalizeAttr),
+        ("sun_exposure", sun.CreateExposureAttr),
+        ("sun_angle_deg", sun.CreateAngleAttr),
+    ):
+        if name in contract:
+            create(contract[name])
+    if dome is not None and "dome_exposure" in contract:
+        dome.CreateExposureAttr(contract["dome_exposure"])
 
 
 def _explicit_carb_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -452,6 +592,7 @@ class IsaacLabScene:
         self.camera_specs = _selected_cameras(self.scene, camera_names, camera_specs)
         settings = _render_settings(profile)
         lighting_controls = _native_lighting(self.scene, profile)
+        light_contract = _isaac_light_contract(profile)
         self._accumulation_policy = (profile or {}).get(
             "accumulation_policy", "renderer_default"
         )
@@ -606,10 +747,12 @@ class IsaacLabScene:
         UsdGeom.Xformable(light).AddOrientOp().Set(
             Gf.Quatf(rotation.GetReal(), Gf.Vec3f(rotation.GetImaginary()))
         )
+        dome = None
         if lighting_controls["environment_intensity"]:
             dome = UsdLux.DomeLight.Define(stage, "/World/Dome")
             dome.CreateIntensityAttr(lighting_controls["environment_intensity"])
             dome.CreateColorAttr(Gf.Vec3f(*lighting_controls["environment_color"]))
+        _apply_light_contract(light, dome, light_contract)
         sim_utils.update_stage()
         self.camera = Camera(
             CameraCfg(
@@ -632,6 +775,10 @@ class IsaacLabScene:
         # Camera initialization and native render-product creation may select
         # their own RTX mode. Reapply only the caller's explicitly frozen keys.
         self._post_camera_overrides = _apply_carb_overrides(self.sim, settings)
+        self._clamp_rgb_requested = (
+            type(self._post_camera_overrides.get("/rtx/post/tonemap/op")) is int
+            and self._post_camera_overrides["/rtx/post/tonemap/op"] == 0
+        )
         accumulation_setup = _configure_accumulation(
             self.sim, self._accumulation_policy
         )
@@ -694,11 +841,21 @@ class IsaacLabScene:
             "camera_sensor_instances": 1,
             "camera_prim_paths": observed_paths,
             "rgb_encoding": "srgb_uint8",
+            "native_rgb_encoding": (
+                "linear_unorm8" if self._clamp_rgb_requested else "display_srgb_uint8"
+            ),
+            "delivered_rgb_encoding": "display_srgb_uint8",
+            "rgb_delivery_conversion": (
+                "IEC sRGB OETF on device after verified Clamp, included in render-to-device timing; native linear-UNORM8 precision is not recoverable"
+                if self._clamp_rgb_requested
+                else "none"
+            ),
             "segmentation_semantics": "canonical_instance_ids_zero_background",
             "instance_ids": [obj["instance_id"] for obj in self.scene["objects"]],
             "depth_semantics": "optical_axis_metres; invalid_or_beyond_far_is_infinity",
             "lighting": lighting,
             "effective_lighting_controls": lighting_controls,
+            "requested_usd_light_contract": light_contract,
             "lighting_control_units": "native USD light intensities and linear RGB environment colour; physical conversion requires measured calibration",
             "geometry_strategy": "immutable anonymous USD layer; instanceable object references; per-instance root transforms and semantic labels",
             "geometry_prototype_count": len(set(prototypes.values())),
@@ -828,6 +985,18 @@ class IsaacLabScene:
         )
         return mapped.contiguous()
 
+    def _canonical_rgb(self, value: torch.Tensor) -> torch.Tensor:
+        if not getattr(self, "_clamp_rgb_requested", False):
+            return value
+        observed = {name: self.sim.get_setting(name) for name in _CLAMP_COLOR_SETTINGS}
+        if not _clamp_rgb_conversion(self._post_camera_overrides, observed):
+            raise RuntimeError("Clamp RGB conversion is no longer explicitly selected")
+        if value.dtype != self.torch.uint8:
+            raise RuntimeError("Clamp RGB normalization requires native uint8 storage")
+        encoded = linear_u8_to_srgb_u8(value, self.torch)
+        self.metadata["rgb_conversion_verified_settings"] = observed
+        return encoded
+
     def render_device(self) -> dict[str, torch.Tensor]:
         """Produce a fresh canonical GPU batch without image host readback.
 
@@ -864,7 +1033,7 @@ class IsaacLabScene:
                     f"Renderer output {modality} is not on the selected CUDA device"
                 )
             if modality == "rgb":
-                value = value[..., :3]
+                value = self._canonical_rgb(value[..., :3])
             elif modality in {"depth", "seg"} and value.ndim == 4:
                 value = value[..., 0]
             if modality == "depth":
@@ -1032,6 +1201,7 @@ class IsaacLabScene:
             },
             "encoding_caution": "Installed tonemap op 0 Clamp bypasses exposure and sRGB conversion; op 1 Linear retains exposure adjustments. No operator/encoding equivalence inferred from defaults.",
         }
+        self.metadata["light_evidence"] = _light_evidence(self.stage, self.sim)
         if evidence["runtime_resize_warnings"]:
             reason = "Runtime DLSS resized internal input; native_output_resolution contract is unsupported for this captured workload"
         else:

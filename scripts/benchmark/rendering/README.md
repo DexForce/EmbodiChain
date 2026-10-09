@@ -10,6 +10,22 @@ unsupported inputs, failures, OOM and interruption. It does not promise that
 every declared scale fits every renderer or GPU. There are currently no
 statistically and quality-qualified publication performance results.
 
+`maniskill-reference` is a separate, explicitly unqualified raster reference:
+the approved Franka scene at N=1/16, C=1, 128×128 RGB. For a serial smoke, run
+`.venv-maniskill-reference/bin/python -m scripts.benchmark maniskill-reference --scene-root "$SCENE_ROOT" --gpu-id 5 --smoke`;
+`--num-envs 1`, `--shader minimal`, and `--delivery host_ready` select a point,
+raster variant, or one blocking D2H boundary. The default is the `default` shader
+and device-ready delivery, with three independent repeats outside smoke mode.
+The isolated Python 3.11 environment pins ManiSkill 3.0.0b22/SAPIEN 3.0.1 and an
+explicit, checksum-verified PhysX GPU library (`--physx-gpu-library`); workers
+never download stock assets or runtime libraries. PhysX pose-buffer warm-start
+is setup-only, and capture does not step physics. Native gamma-2.2 RGB is retained
+without claiming exact IEC sRGB or equivalence to the formal ray-tracing profiles.
+`--list`, `--dry-run`, and `--report-only EXPERIMENT_ROOT` work offline; the separate
+report preserves failures, exclusions, run hashes and independent-repeat
+uncertainty. CPU tests validate contracts; actual GPU support and image quality
+require their own evidence before any stronger claim.
+
 ## Formal matrix
 
 Counts below are workload cells, before backend selection and independent process
@@ -175,6 +191,10 @@ physics. Initialization, warmup, sample persistence, reference rendering and qua
 evaluation are excluded. Per-capture latency excludes validation; whole-window
 throughput includes validation and metadata bookkeeping. Neither timer is a native
 GPU rendering-kernel timer.
+Native initial/changed state is published before exposure. Unchanged static state
+does not repeat `World.update(0)`; every capture still submits all native camera
+groups and advances their rendering/reconstruction history. Older profile hashes
+include per-capture synchronization and must not be pooled with this boundary.
 
 Let B be completed batch captures, T the complete measured window in seconds, N
 environments, C cameras per environment and W×H the output resolution:
@@ -208,8 +228,10 @@ The earlier NRD profile exposed jittered depth/labels; FastRT/NRD additionally
 exported range rather than optical-axis depth. Those measurements are retained
 as diagnostics, and the adapter rejects FastRT/NRD canonical depth requests.
 RGB transfer, lighting and tone-response equivalence still require measured
-qualification. Isaac's observed ACES/exposure controls are explicitly frozen;
-neither this configuration nor the native DLAA choice certifies matching RGB.
+qualification. Isaac uses explicitly authored UsdLux 25.05 lights, zero extra
+scene ambient intensity, Clamp output and verified GPU sRGB conversion. The
+earlier ACES profiles remain separate historical measurements. Neither the
+current light contract nor the native DLAA choice certifies matching RGB.
 Native Hybrid/DLSS packs linear UNORM8 while FastRT emits display-sRGB bytes;
 the Hybrid adapter applies the IEC sRGB transfer on device before delivery.
 Its time and temporary buffers remain inside the device-ready boundary, and

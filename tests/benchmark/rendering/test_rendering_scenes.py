@@ -19,12 +19,14 @@
 from __future__ import annotations
 
 import copy
+import argparse
 import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
 from pathlib import PurePosixPath
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -43,6 +45,9 @@ from scripts.benchmark.rendering.backends.scene_embodichain import (
     material_display_color,
 )
 from scripts.benchmark.rendering.preview import compare_geometry
+from scripts.benchmark.rendering import preview
+from scripts.benchmark.core.artifacts import stable_hash
+from scripts.benchmark.rendering.color import linear_to_srgb, linear_u8_to_srgb_u8
 
 
 def test_geometry_check_excludes_invalid_depth_and_keeps_instance_mismatch() -> None:
@@ -162,3 +167,270 @@ def test_preview_prepare_and_help_do_not_require_a_simulator(tmp_path: Path) -> 
     assert review["approval_status"] == "pending_user_review"
     assert review["benchmark_executed"] is False
     assert not list(output.rglob("metrics.json"))
+    assert "render_profile" not in review
+    assert not (output / "render_profile.json").exists()
+
+
+def test_custom_preview_profile_is_copied_hashed_and_reused_without_approval(
+    tmp_path: Path,
+) -> None:
+    profile = {
+        "name": "fixture-probe",
+        "frame_time_s": 1 / 30,
+        "isaaclab": {"carb_settings": {"/rtx/post/tonemap/op": 0}},
+        "lighting_controls": {
+            "isaaclab": {"directional_intensity": 3, "environment_intensity": 0.15}
+        },
+    }
+    source = tmp_path / "input-profile.json"
+    source.write_text(json.dumps(profile, indent=4) + "\n")
+    output = tmp_path / "preview"
+    preview.main(
+        [
+            "--scene",
+            "calibration",
+            "--prepare-only",
+            "--output",
+            str(output),
+            "--render-profile",
+            str(source),
+        ]
+    )
+    frozen = output / "render_profile.json"
+    assert frozen.read_bytes() == source.read_bytes()
+    review = json.loads((output / "review.json").read_text())
+    assert review["render_profile"] == {
+        "path": "render_profile.json",
+        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "profile_sha256": stable_hash(profile),
+    }
+    scene_hash = review["scenes"][0]["sha256"]
+    assert review["approval_status"] == "pending_user_review"
+    assert review["benchmark_executed"] is False
+    # Reusing the prepared geometry also reuses its explicitly frozen profile.
+    preview.main(
+        [
+            "--scene",
+            "calibration",
+            "--prepare-only",
+            "--reuse-scenes",
+            "--output",
+            str(output),
+        ]
+    )
+    assert (
+        json.loads((output / "review.json").read_text())["scenes"][0]["sha256"]
+        == scene_hash
+    )
+    source.write_text(json.dumps({**profile, "name": "different"}))
+    with pytest.raises(FileExistsError, match="different render profile"):
+        preview.main(
+            [
+                "--scene",
+                "calibration",
+                "--prepare-only",
+                "--reuse-scenes",
+                "--output",
+                str(output),
+                "--render-profile",
+                str(source),
+            ]
+        )
+    assert json.loads(frozen.read_text()) == profile
+
+
+def test_preview_launcher_passes_only_frozen_profile_to_both_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = {"name": "fixture-probe", "frame_time_s": 1 / 30}
+    source = tmp_path / "probe.json"
+    source.write_text(json.dumps(profile))
+    isaac_root = tmp_path / "isaac"
+    (isaac_root / "source").mkdir(parents=True)
+    commands = []
+
+    def execute(command: list[str], *args: object, **kwargs: object) -> dict[str, str]:
+        commands.append(command)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(preview, "execute_worker", execute)
+    monkeypatch.setattr(preview, "write_comparison", lambda *args: [])
+    output = tmp_path / "preview"
+    preview.main(
+        [
+            "--scene",
+            "calibration",
+            "--output",
+            str(output),
+            "--render-profile",
+            str(source),
+            "--isaaclab-root",
+            str(isaac_root),
+            "--isaaclab-python",
+            sys.executable,
+        ]
+    )
+    assert {command[command.index("--worker") + 1] for command in commands} == {
+        "embodichain",
+        "isaaclab",
+    }
+    for command in commands:
+        assert command[command.index("--render-profile") + 1] == str(
+            output / "render_profile.json"
+        )
+        assert (
+            command[command.index("--render-profile-sha256") + 1]
+            == hashlib.sha256(source.read_bytes()).hexdigest()
+        )
+
+
+@pytest.mark.parametrize("backend", ["embodichain", "isaaclab"])
+@pytest.mark.parametrize("custom", [False, True])
+def test_preview_worker_profile_forwarding_preserves_default_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str, custom: bool
+) -> None:
+    import importlib
+
+    scene_path = build_scene("calibration", tmp_path / "scene")
+    received = []
+    profile = {"name": "fixture-probe", "frame_time_s": 1 / 30}
+    profile_path = tmp_path / "render_profile.json"
+    profile_path.write_text(json.dumps(profile))
+
+    class FixtureScene:
+        def __init__(self, manifest: Path, **kwargs: object) -> None:
+            received.append(kwargs)
+            self.metadata = {
+                "camera_names": [
+                    item["name"] for item in load_scene(manifest)["cameras"]
+                ]
+            }
+
+        def capture(self) -> dict[str, np.ndarray]:
+            return {
+                "rgb": np.arange(2 * 6 * 8 * 3, dtype=np.uint8).reshape(2, 6, 8, 3),
+                "depth": np.ones((2, 6, 8), dtype=np.float32),
+                "seg": np.ones((2, 6, 8), dtype=np.int32),
+            }
+
+        def close(self) -> None:
+            pass
+
+    module = importlib.import_module(
+        f"scripts.benchmark.rendering.backends.scene_{backend}"
+    )
+    monkeypatch.setattr(
+        module,
+        "EmbodiChainScene" if backend == "embodichain" else "IsaacLabScene",
+        FixtureScene,
+    )
+    args = argparse.Namespace(
+        output=tmp_path / "worker",
+        worker=backend,
+        manifest=scene_path,
+        width=8,
+        height=6,
+        gpu_id=0,
+        settle_frames=1,
+        isaaclab_root=tmp_path,
+        render_profile=profile_path if custom else None,
+        render_profile_sha256=(
+            hashlib.sha256(profile_path.read_bytes()).hexdigest() if custom else None
+        ),
+    )
+    preview._worker(args)
+    record = json.loads((args.output / "preview.json").read_text())
+    assert record["status"] == "completed"
+    assert record["approval_status"] == "pending_user_review"
+    assert record["benchmark_executed"] is False
+    if custom:
+        assert received[0]["profile"] == profile
+        assert record["render_profile"]["profile_sha256"] == stable_hash(profile)
+    else:
+        assert "profile" not in received[0]
+        assert "render_profile" not in record
+
+
+def test_profile_checksum_mismatch_stops_before_adapter_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.benchmark.rendering.backends import scene_isaaclab
+
+    called = []
+    monkeypatch.setattr(
+        scene_isaaclab, "IsaacLabScene", lambda *args, **kwargs: called.append(True)
+    )
+    profile = tmp_path / "profile.json"
+    profile.write_text('{"name":"changed"}')
+    args = argparse.Namespace(
+        output=tmp_path / "worker",
+        worker="isaaclab",
+        render_profile=profile,
+        render_profile_sha256="not-the-file-hash",
+    )
+    with pytest.raises(SystemExit):
+        preview._worker(args)
+    assert not called
+    record = json.loads((args.output / "preview.json").read_text())
+    assert record["status"] == "failed"
+    assert "checksum mismatch" in record["error"]
+
+
+def test_shared_color_transfer_preserves_device_and_native_helper_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torch
+    from scripts.benchmark.rendering.backends.scene_embodichain import (
+        _linear_u8_to_srgb_u8,
+    )
+
+    assert _linear_u8_to_srgb_u8 is linear_u8_to_srgb_u8
+    source = torch.tensor([0, 1, 38, 128, 255], dtype=torch.uint8)
+    monkeypatch.setattr(
+        torch.Tensor, "cpu", lambda *args: pytest.fail("Unexpected host transfer")
+    )
+    result = linear_u8_to_srgb_u8(source, torch)
+    assert result.device == source.device
+    assert torch.equal(result, torch.tensor([0, 13, 108, 188, 255], dtype=torch.uint8))
+    grey = linear_to_srgb(torch.tensor([0.0, 0.18, 1.0]), torch)
+    assert torch.allclose(grey, torch.tensor([0.0, 0.46135613, 1.0]), atol=1e-6)
+
+
+def test_isaac_clamp_conversion_is_explicit_verified_and_has_no_host_readback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torch
+    from scripts.benchmark.rendering.backends.scene_isaaclab import (
+        IsaacLabScene,
+        _clamp_rgb_conversion,
+    )
+
+    observed = {
+        "/rtx/post/tonemap/op": 0,
+        "/rtx/post/colorcorr/enabled": False,
+        "/rtx/post/colorgrad/enabled": False,
+        "/rtx/post/tonemap/ocio/enabled": False,
+    }
+    assert _clamp_rgb_conversion({}, observed) is False
+    assert _clamp_rgb_conversion({"/rtx/post/tonemap/op": 6}, observed) is False
+    adapter = IsaacLabScene.__new__(IsaacLabScene)
+    adapter._clamp_rgb_requested = False
+    adapter.torch = torch
+    source = torch.tensor([[[38, 38, 38]]], dtype=torch.uint8)
+    assert adapter._canonical_rgb(source) is source
+    adapter._clamp_rgb_requested = True
+    adapter._post_camera_overrides = {"/rtx/post/tonemap/op": 0}
+    adapter.sim = SimpleNamespace(get_setting=observed.get)
+    adapter.metadata = {}
+    monkeypatch.setattr(
+        torch.Tensor, "cpu", lambda *args: pytest.fail("Unexpected host transfer")
+    )
+    converted = adapter._canonical_rgb(source)
+    assert torch.equal(converted, torch.full_like(source, 108))
+    assert torch.equal(source, torch.full_like(source, 38))
+    assert adapter.metadata["rgb_conversion_verified_settings"] == observed
+    for path in observed:
+        changed = dict(observed)
+        changed[path] = 6 if path.endswith("/op") else True
+        with pytest.raises(RuntimeError, match="requires observed"):
+            _clamp_rgb_conversion(adapter._post_camera_overrides, changed)

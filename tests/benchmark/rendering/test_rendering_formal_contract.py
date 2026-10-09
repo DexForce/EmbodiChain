@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -79,6 +81,11 @@ def test_profiles_are_independent_and_forbid_frame_generation() -> None:
     assert original["frame_generation"] is False
     for name in ("realtime", "high_quality"):
         profile = render_profile(name)
+        assert profile["version"] == "1.7"
+        assert (
+            profile["embodichain"]["state_publication_policy"]
+            == "on_frozen_state_change"
+        )
         # NRD exposes jittered public geometry and FastRT range depth. Formal
         # RGBD+Seg cells require the native output-grid AOV path instead.
         assert profile["embodichain"]["denoising"] == "dlss"
@@ -87,6 +94,13 @@ def test_profiles_are_independent_and_forbid_frame_generation() -> None:
         assert (
             profile["isaaclab"]["carb_settings"]["/rtx/post/histogram/enabled"] is False
         )
+        assert profile["isaaclab"]["carb_settings"]["/rtx/post/tonemap/op"] == 0
+        assert (
+            profile["isaaclab"]["carb_settings"]["/rtx/sceneDb/ambientLightIntensity"]
+            == 0.0
+        )
+        assert profile["isaaclab_light_contract"]["usdlux_version"] == 2505
+        assert profile["isaaclab_light_contract"]["sun_normalize"] is True
 
 
 def test_native_lighting_overrides_preserve_scene_and_other_backend() -> None:
@@ -203,93 +217,201 @@ def test_native_chunks_preserve_every_environment_and_pose_slice() -> None:
     assert destroyed == list(range(65))
 
 
-@pytest.mark.parametrize("published_before_render", [False, True])
-def test_native_render_reuses_one_state_publication(
-    published_before_render: bool,
-) -> None:
-    events = []
+def _native_adapter(events: list[str]) -> EmbodiChainScene:
+    """Exercise real adapter methods with CPU tensors and a strict native fake."""
+    import torch
+
+    class World:
+        def __init__(self):
+            self.submissions = []
+            self.exposures = 0
+
+        def _flush_render_updates(self):
+            events.append("flush")
+            if sim.fail_at == "flush":
+                raise RuntimeError("flush failed")
+
+        def render_camera_group(self, groups):
+            events.append("render")
+            if sim.fail_at == "render":
+                raise RuntimeError("render failed")
+            self.submissions.append(groups)
+            self.exposures += 1
 
     class Sim:
+        fail_at = None
+
         @contextmanager
         def render_frame(self, **kwargs):
+            assert kwargs == {"capture_camera_images": False}
             events.append("enter")
             try:
+                if self.fail_at == "enter":
+                    raise RuntimeError("enter failed")
                 yield
             finally:
                 events.append("exit")
 
         def sync_render_state(self):
             events.append("publish")
+            if self.fail_at == "publish":
+                raise RuntimeError("publish failed")
 
+        def render_camera_group(self, groups):
+            raise AssertionError("Manager render wrapper would republish static state")
+
+        def get_world(self):
+            return world
+
+    class Camera:
+        def __init__(self, index):
+            self.index = index
+            self.group_ids = [10 + 2 * index, 11 + 2 * index]
+
+        def update(self, **kwargs):
+            assert kwargs == {"fetch_only": True}
+
+        def get_data(self):
+            return {
+                "color": torch.full((2, 2, 2, 4), world.exposures, dtype=torch.uint8)
+            }
+
+        def look_at(self, eye, target, up):
+            assert eye.shape == target.shape == up.shape == (2, 3)
+            events.append("camera")
+
+        def get_arena_pose(self, to_matrix=False):
+            assert to_matrix
+            return torch.eye(4).repeat(2, 1, 1)
+
+    sim, world = Sim(), World()
     adapter = object.__new__(EmbodiChainScene)
-    adapter.sim = Sim()
-    adapter._pending_frame = None
-    adapter._state_publications = 0
-
-    def render():
-        events.append("render")
-        return {"rgb": object()}
-
-    adapter._render_published_device = render
-    if published_before_render:
-        adapter._begin_frame()
-    adapter.render_device()
-    assert events == ["enter", "publish", "render", "exit"]
-    assert adapter._pending_frame is None
-    assert adapter._state_publications == 1
-
-
-def test_failed_native_render_releases_publication_scope() -> None:
-    class Sim:
-        @contextmanager
-        def render_frame(self, **kwargs):
-            yield
-
-        def sync_render_state(self):
-            pass
-
-    adapter = object.__new__(EmbodiChainScene)
-    adapter.sim = Sim()
-    adapter._pending_frame = None
-    adapter._state_publications = 0
-
-    def fail():
-        raise RuntimeError("native render failed")
-
-    adapter._render_published_device = fail
-    with pytest.raises(RuntimeError, match="native render failed"):
-        adapter.render_device()
-    assert adapter._pending_frame is None
-
-
-def test_changed_transforms_flush_before_exposure_without_repeating_static_flush() -> (
-    None
-):
-    from types import SimpleNamespace
-
-    events = []
-
-    class Sim:
-        _world = SimpleNamespace(_flush_render_updates=lambda: events.append("flush"))
-
-        @contextmanager
-        def render_frame(self, **kwargs):
-            yield
-
-        def sync_render_state(self):
-            events.append("publish")
-
-    adapter = object.__new__(EmbodiChainScene)
-    adapter.sim = Sim()
+    adapter.sim = sim
+    adapter.torch, adapter.device = torch, "cpu"
+    adapter.num_envs = 2
+    adapter.modalities = ("rgb",)
+    adapter._linear_rgb_source = False
     adapter._pending_frame = None
     adapter._state_publications = adapter._state_flushes = 0
+    adapter._render_calls = adapter._scene_frame_id = 0
     adapter._pending_native_flush = True
-    adapter._render_published_device = lambda: events.append("exposure")
+    adapter.cameras = [Camera(index) for index in range(3)]
+    adapter._object_poses = {"box": torch.eye(4).tolist()}
+    adapter.objects = {
+        "box": SimpleNamespace(set_local_pose=lambda values: events.append("object"))
+    }
+    adapter.scene = {
+        "cameras": [
+            {
+                "name": name,
+                "eye": [1.0, -1.0, 1.0],
+                "target": [0.0, 0.0, 0.0],
+                "up": [0.0, 0.0, 1.0],
+            }
+            for name in ("external_front", "external_side", "wrist")
+        ]
+    }
+    adapter.metadata = {}
+    return adapter
+
+
+@pytest.mark.parametrize("published_before_render", [False, True])
+def test_static_native_captures_submit_every_group_without_republishing(
+    published_before_render: bool,
+) -> None:
+    events = []
+    adapter = _native_adapter(events)
+    if published_before_render:
+        adapter._begin_frame()
+    for exposure in range(1, 4):
+        arrays = adapter.render_device()
+        assert arrays["rgb"].shape == (6, 2, 2, 3)
+        assert arrays["rgb"].unique().tolist() == [exposure]
+    assert events == [
+        "enter",
+        "publish",
+        "flush",
+        "render",
+        "exit",
+        "render",
+        "render",
+    ]
+    assert adapter.sim.get_world().submissions == [[10, 11, 12, 13, 14, 15]] * 3
+    assert adapter._pending_frame is None
+    metadata = adapter.refresh_metadata()
+    assert metadata["state_publications"] == metadata["changed_state_flushes"] == 1
+    assert metadata["render_submissions"] == 3
+
+
+@pytest.mark.parametrize("changed", ["object", "camera", "both"])
+def test_changed_frozen_state_publishes_during_prepare_before_exposure(
+    changed: str,
+) -> None:
+    events = []
+    adapter = _native_adapter(events)
     adapter.render_device()
+    events.clear()
+    frame = {
+        "frame_id": 1,
+        "objects": deepcopy(adapter._object_poses),
+        "cameras": {view["name"]: deepcopy(view) for view in adapter.scene["cameras"]},
+    }
+    if changed in {"object", "both"}:
+        frame["objects"]["box"][0][3] = 0.25
+    if changed in {"camera", "both"}:
+        frame["cameras"]["wrist"]["eye"][0] = 0.5
+    adapter.apply_state(frame)
+    assert events[-3:] == ["enter", "publish", "flush"]
+    assert "render" not in events
     adapter.render_device()
-    assert events == ["publish", "flush", "exposure", "publish", "exposure"]
+    assert events[-2:] == ["render", "exit"]
+    assert adapter._state_publications == adapter._state_flushes == 2
+    events.clear()
+    frame["frame_id"] = 2
+    adapter.apply_state(frame)
+    adapter.render_device()
+    assert events == ["render"]
+    assert adapter._scene_frame_id == 2
+    assert adapter._state_publications == adapter._state_flushes == 2
+
+
+def test_camera_changes_are_dirty_and_identical_specs_do_not_republish() -> None:
+    events = []
+    adapter = _native_adapter(events)
+    adapter.render_device()
+    events.clear()
+    adapter.set_cameras(deepcopy(adapter.scene["cameras"]))
+    assert not events
+    changed = deepcopy(adapter.scene["cameras"])
+    changed[1]["target"][2] = 0.5
+    adapter.set_cameras(changed)
+    assert adapter._pending_native_flush
+    assert events == ["camera"] * 3
+    adapter.set_cameras(deepcopy(changed))
+    assert events == ["camera"] * 3
+    adapter.render_device()
+    assert events[3:] == ["enter", "publish", "flush", "render", "exit"]
+    assert adapter._state_publications == adapter._state_flushes == 2
+
+
+@pytest.mark.parametrize("failure", ["enter", "publish", "flush", "render"])
+def test_failed_native_publication_or_render_releases_context(failure: str) -> None:
+    events = []
+    adapter = _native_adapter(events)
+    adapter.sim.fail_at = failure
+    with pytest.raises(RuntimeError, match=f"{failure} failed"):
+        adapter.render_device()
+    assert events[0] == "enter" and events[-1] == "exit"
+    assert adapter._pending_frame is None
+    assert adapter._pending_native_flush == (failure != "render")
+    assert adapter._state_publications == int(failure in {"flush", "render"})
+    assert adapter._state_flushes == int(failure == "render")
+    adapter.sim.fail_at = None
+    adapter.render_device()
+    assert adapter._pending_frame is None
+    assert not adapter._pending_native_flush
     assert adapter._state_flushes == 1
-    assert adapter._state_publications == 2
+    assert adapter._render_calls == 1
 
 
 def test_freshness_probe_rejects_stale_secondary_cameras(tmp_path, monkeypatch) -> None:
