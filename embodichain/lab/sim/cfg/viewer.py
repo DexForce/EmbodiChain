@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import List, Literal
 
 import torch
-from dexsim.types import AxisArrowType, AxisCornerType
+from dexsim.types import AxisArrowType, AxisCornerType, InputKey
 
 from embodichain.utils import configclass
 
@@ -81,6 +81,36 @@ class WindowRecordCfg:
 
     video_prefix: str = "viewer_record"
     """Video file prefix used when no explicit save path is provided."""
+
+
+@configclass
+class WindowCaptureCfg:
+    """Configuration for single-frame native viewer captures.
+
+    The capture hotkey is intentionally separate from the recording and camera
+    pose controls.  ``c`` is reserved for this control by default and is not
+    used by DexSim's built-in camera, selection, or EmbodiChain gizmo controls.
+    """
+
+    enable_hotkey: bool = True
+    """Whether to register the capture hotkey when a native window opens."""
+
+    hotkey: InputKey | str | int = InputKey.SCANCODE_C
+    """Key used to capture one frame from the native viewer.
+
+    Accepts a DexSim ``InputKey``, an SDL scancode, or a key name such as
+    ``"c"``.
+    """
+
+    save_path: str | None = None
+    """Optional output path for hotkey captures.
+
+    When omitted, hotkey captures are written to ``outputs/images`` with a
+    timestamped name based on :attr:`image_prefix`.
+    """
+
+    image_prefix: str = "viewer_capture"
+    """File name prefix used when :attr:`save_path` is omitted."""
 
 
 @configclass
