@@ -4,7 +4,7 @@
 
 | What | Path |
 |------|------|
-| Unified CLI | `embodichain train-rl --config <train.yaml-or-json>` |
+| Unified CLI | `embodichain train-rl --config <train.yaml-or-json>`; `--resume FILE` or `--resume latest/best --run RUN` |
 | CLI implementation | `embodichain/learning/rl/train.py` → `cli()` |
 | Standalone evaluation | `embodichain/learning/rl/policy_evaluation/cli.py`; local RUN/checkpoint, pretrained bundle or external Profile |
 | Programmatic training | `embodichain/learning/rl/train.py` → `train_from_config()` |

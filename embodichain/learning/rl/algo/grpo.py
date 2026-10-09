@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict
+from typing import Any, Dict
 
 import torch
 from tensordict import TensorDict
@@ -63,6 +63,53 @@ class GRPO(BaseAlgorithm[TensorDict]):
                 param.requires_grad_(False)
         else:
             self.ref_policy = None
+
+    def state_dict(self) -> dict[str, Any]:
+        """Include the fixed KL reference policy in optimization state.
+
+        Returns:
+            Optimization state with the KL reference when enabled.
+        """
+        state = super().state_dict()
+        if self.ref_policy is not None:
+            state["ref_policy"] = self.ref_policy.state_dict()
+        return state
+
+    def validate_state_dict(
+        self, state: dict[str, Any], *, resume_scheduler: str = "restore"
+    ) -> None:
+        """Reject checkpoints missing the active KL reference policy.
+
+        Args:
+            state: Optimization and reference-policy checkpoint fields.
+            resume_scheduler: Restore the saved curve or restart configuration.
+
+        Raises:
+            ValueError: If the optimizer or active reference policy is incompatible.
+        """
+        super().validate_state_dict(state, resume_scheduler=resume_scheduler)
+        if self.ref_policy is not None:
+            if "ref_policy" not in state:
+                raise ValueError("GRPO with KL requires checkpoint ref_policy state.")
+            current = self.ref_policy.state_dict()
+            saved = state["ref_policy"]
+            if current.keys() != saved.keys() or any(
+                current[k].shape != saved[k].shape for k in current
+            ):
+                raise ValueError("Incompatible GRPO reference policy state.")
+
+    def load_state_dict(
+        self, state: dict[str, Any], *, resume_scheduler: str = "restore"
+    ) -> None:
+        """Restore optimization state and the original KL reference policy.
+
+        Args:
+            state: Optimization and reference-policy checkpoint fields.
+            resume_scheduler: Restore the saved curve or restart configuration.
+        """
+        super().load_state_dict(state, resume_scheduler=resume_scheduler)
+        if self.ref_policy is not None:
+            self.ref_policy.load_state_dict(state["ref_policy"])
 
     def _compute_step_returns_and_mask(
         self, rewards: torch.Tensor, dones: torch.Tensor
@@ -186,6 +233,7 @@ class GRPO(BaseAlgorithm[TensorDict]):
 
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                self._sync_gradients()
                 torch.nn.utils.clip_grad_norm_(
                     self.policy.parameters(), self.cfg.max_grad_norm
                 )
