@@ -64,7 +64,7 @@ def set_projective_uv(self: RenderBody, proj_direct: np.ndarray | None = None) -
     start_idx = 0
     for i in range(n_mesh):
         mesh_vert_uvs = vert_uvs[start_idx : start_idx + n_vert_list[i], :]
-        # DexSim 0.5.1rc1 converts the argument to column-major Eigen storage,
+        # The native binding converts the argument to column-major Eigen storage,
         # then reads that storage as interleaved (u, v) pairs. Repack each mesh
         # separately so the native buffer contains the generated coordinates.
         native_uvs = np.asarray(mesh_vert_uvs, dtype=np.float32).ravel(order="C")
