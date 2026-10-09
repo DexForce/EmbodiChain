@@ -142,6 +142,7 @@ class PPO(BaseAlgorithm[TensorDict]):
 
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                self._sync_gradients()
                 self._clip_gradients()
                 self.optimizer.step()
 
@@ -232,6 +233,10 @@ class PPO(BaseAlgorithm[TensorDict]):
             - 0.5,
             dim=-1,
         ).mean()
+        if isinstance(self.policy, torch.nn.parallel.DistributedDataParallel):
+            kl = kl.detach()
+            torch.distributed.all_reduce(kl)
+            kl.div_(torch.distributed.get_world_size())
         mean_kl = float(kl)
         learning_rate = self.current_learning_rate()
         if mean_kl > desired_kl * 2.0:
