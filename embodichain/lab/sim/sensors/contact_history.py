@@ -29,24 +29,12 @@ from embodichain.lab.sim.sensors._warp.contact_history import (
     reduce_contact_batch,
     finish_contact_sample,
 )
+from embodichain.utils.device_utils import current_warp_stream
 
 if TYPE_CHECKING:
     from dexsim.scene import ContactBuffer
 
 __all__ = ["ContactHistory"]
-
-
-def _current_warp_stream(device: torch.device) -> wp.Stream | None:
-    """Reuse a registered Warp stream when Torch is already running on it."""
-    if device.type != "cuda":
-        return None
-    current = torch.cuda.current_stream(device)
-    stream = wp.get_stream(str(device))
-    # A temporary second Warp wrapper unregisters the shared native handle on
-    # destruction in Warp 1.17, invalidating an enclosing capture.
-    if stream.cuda_stream == current.cuda_stream:
-        return stream
-    return wp.stream_from_torch(current)
 
 
 class ContactHistory:
@@ -145,7 +133,7 @@ class ContactHistory:
             dim=dim,
             inputs=inputs,
             device=str(self.actor_ids.device),
-            stream=_current_warp_stream(self.actor_ids.device),
+            stream=current_warp_stream(self.actor_ids.device),
         )
 
     def _finish_sample(self, dt: float) -> None:

@@ -27,11 +27,9 @@ from tensordict import TensorDict
 
 from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.sensors._warp.contact import scatter_contact_rows
-from embodichain.lab.sim.sensors.contact_history import (
-    ContactHistory,
-    _current_warp_stream,
-)
+from embodichain.lab.sim.sensors.contact_history import ContactHistory
 from embodichain.utils import configclass, logger
+from embodichain.utils.device_utils import current_warp_stream
 
 if TYPE_CHECKING:
     from dexsim.scene import (
@@ -386,7 +384,7 @@ class ContactSensor(BaseSensor):
                 wp.from_torch(self._sample_scatter_dropped_count),
             ],
             device=str(self.device),
-            stream=_current_warp_stream(self.device),
+            stream=current_warp_stream(self.device),
         )
 
     @property
