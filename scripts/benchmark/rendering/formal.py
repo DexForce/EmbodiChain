@@ -483,6 +483,17 @@ def metric_definitions() -> tuple[MetricDefinition, ...]:
         "torch_peak_allocated_bytes": ("byte", "torch_allocator"),
         "d2h_bytes_per_capture": ("byte", "batch"),
         "host_copy_bytes_per_capture": ("byte", "batch"),
+        "assembly_operations_per_capture": ("operation", "batch_adapter_assembly"),
+        "assembly_output_bytes_per_capture": ("byte", "batch_adapter_assembly"),
+        **{
+            f"{stage}_p{percentile}_s": ("s", "batch_application_ready")
+            for stage in (
+                "render_submit_to_ready",
+                "state_publish_to_ready",
+                "state_publish_return_to_ready",
+            )
+            for percentile in (50, 95)
+        },
     }
     return tuple(
         MetricDefinition(name, unit, population, DEFINITION_VERSION)

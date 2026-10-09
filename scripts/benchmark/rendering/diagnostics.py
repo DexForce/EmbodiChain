@@ -238,6 +238,16 @@ class _TraceAdapter:
         with self.ranges.scope("r09/synchronize"):
             self.adapter.synchronize()
 
+    def capture_evidence(self) -> Mapping[str, Any]:
+        """Forward optional host-only counters outside annotated GPU callbacks."""
+        getter = getattr(self.adapter, "capture_evidence", None)
+        if not callable(getter):
+            return {
+                "status": "missing",
+                "reason": "adapter_capture_evidence_unavailable",
+            }
+        return getter()
+
     def to_host(self, arrays: Mapping[str, Any]) -> Mapping[str, Any]:
         with self.ranges.scope("r09/to_host"):
             host = self.adapter.to_host(arrays)

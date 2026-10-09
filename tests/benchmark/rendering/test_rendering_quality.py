@@ -358,6 +358,78 @@ def test_protocol_requirement_lookup_needs_no_site_packages() -> None:
     subprocess.run(command, check=True, capture_output=True, text=True)
 
 
+def test_semantic_crops_use_frozen_geometry_not_candidate_errors(
+    tmp_path: Path,
+) -> None:
+    from scripts.benchmark.rendering.quality_regions import export_quality_regions
+    from scripts.benchmark.rendering.reference import camera_metadata
+    from scripts.benchmark.rendering.scenes import build_scene, load_scene
+
+    scene = load_scene(build_scene("calibration", tmp_path / "scene"))
+    ids = {obj["uid"]: obj["instance_id"] for obj in scene["objects"]}
+    ref = _frame(size=128)
+    ref["metadata"].update(
+        instance_ids=list(ids.values()),
+        camera=camera_metadata(scene, scene["cameras"][0], 128, 128),
+        world_from_objects={
+            obj["uid"]: obj["world_from_object"] for obj in scene["objects"]
+        },
+    )
+    ref["seg"][:] = ids["table"]
+    ref["seg"][40:50, 70:80] = ids["metal_block"]
+    ref["seg"][60:70, 20:30] = ids["shadow_step_high"]
+    candidate = copy.deepcopy(ref)
+    first = export_quality_regions(scene, candidate, ref, tmp_path / "first")
+    candidate["rgb"][:64] = 0
+    candidate["seg"][:] = 0
+    second = export_quality_regions(scene, candidate, ref, tmp_path / "changed")
+    assert {row["name"] for row in first["regions"]} == {"shadow", "reflection", "edge"}
+    assert all(row["status"] == "available" for row in first["regions"])
+    assert [row["box_xyxy"] for row in first["regions"]] == [
+        row["box_xyxy"] for row in second["regions"]
+    ]
+    assert first["candidate_error_used_for_selection"] is False
+    assert len(first["artifacts"]) == 4
+    # Hidden fixtures are recorded as unavailable, never replaced with an error ROI.
+    ref["seg"][:] = ids["table"]
+    hidden = export_quality_regions(scene, candidate, ref, tmp_path / "hidden")
+    assert all(
+        row["status"] == "not_visible_or_unavailable" for row in hidden["regions"]
+    )
+
+
+def test_rgb_sequence_uses_reference_geometry_and_exports_error_curves(
+    tmp_path: Path,
+) -> None:
+    references = [_frame(index=index) for index in range(100)]
+    for index, frame in enumerate(references):
+        frame["metadata"].update(time_s=index / 30, run_id="frozen-test-run")
+    candidates = copy.deepcopy(references)
+    for frame in candidates:
+        del frame["depth"], frame["seg"]
+    candidates[50]["rgb"] += 0.2
+    policy = protocol_for_modalities(("rgb",), temporal_dt_s=1 / 30)
+    result = evaluate_sequence(candidates, references, policy, output_dir=tmp_path)
+    assert result["required_metrics"] == [
+        "static_region_flicker",
+        "reprojection_rgb_mae",
+    ]
+    assert result["metrics"]["static_region_flicker"]["value"] == pytest.approx(0.2)
+    assert result["metrics"]["static_region_flicker"]["status"] == "failed"
+    assert result["metrics"]["temporal_depth_rmse_m"]["status"] == "not_requested"
+    assert result["metrics"]["temporal_silhouette_iou"]["status"] == "not_requested"
+    assert (tmp_path / "static_region_flicker.svg").is_file()
+    assert (tmp_path / "static_region_flicker.pdf").read_bytes().startswith(b"%PDF")
+    assert "frozen-test-run" in (tmp_path / "temporal_errors.csv").read_text()
+    assert len((tmp_path / "temporal_errors.csv").read_text().splitlines()) == 100
+    missing = evaluate_sequence(candidates, None, policy)
+    assert missing["quality_status"] == "not_qualified"
+    assert missing["metrics"]["reprojection_rgb_mae"]["value"] is None
+    # A frame-only policy cannot be relabelled as a temporal proof.
+    with pytest.raises(ValueError, match="temporal modality scope"):
+        evaluate_sequence(candidates, references, protocol_for_modalities(("rgb",)))
+
+
 def test_static_sequence_rejects_one_brightness_and_depth_glitch() -> None:
     references = [_frame(index=index) for index in range(100)]
     candidates = copy.deepcopy(references)

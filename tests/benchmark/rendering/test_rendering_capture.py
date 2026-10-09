@@ -27,7 +27,7 @@ import weakref
 import numpy as np
 import pytest
 
-from scripts.benchmark.rendering.capture import measure_rendering
+from scripts.benchmark.rendering.capture import capture_packet, measure_rendering
 
 
 class FakeClock:
@@ -240,6 +240,164 @@ def test_temporal_publication_precedes_each_render_and_is_in_the_boundary() -> N
     for row in result["raw"]:
         assert row["timestamps_s"]["state_publish_started_s"] == row["started_s"]
         assert row["completed_s"] - row["started_s"] == pytest.approx(0.12)
+
+
+@pytest.mark.parametrize(
+    "delivery,expected",
+    [
+        ("device_ready", 0.07),
+        ("host_ready", 0.13),
+        ("duplicate_d2h", 0.19),
+        ("host_copy", 0.16),
+    ],
+)
+def test_observation_ready_latency_uses_one_clock_without_extra_sync(
+    delivery: str, expected: float
+) -> None:
+    adapter = FakeAdapter()
+    result = measure(adapter, delivery=delivery)
+    assert adapter.sync_calls == 3
+    assert result["metrics"]["render_submit_to_ready_p50_s"] == pytest.approx(expected)
+    assert result["metrics"]["render_submit_to_ready_p95_s"] == pytest.approx(expected)
+    assert result["metrics"]["state_publish_to_ready_p50_s"] is None
+    for row in result["raw"]:
+        age = row["observation_age"]
+        assert age["render_submit_to_ready_s"] == pytest.approx(expected)
+        assert age["ready_boundary"] == delivery
+        assert age["state_publish_to_ready_s"] is None
+        assert age["renderer_source_timestamp_s"] is None
+        assert age["renderer_source_age_s"] is None
+        assert age["static_identical_pixels_are_valid"]
+        assert row["timestamps_s"]["render_started_s"] == row["started_s"]
+
+
+def test_publication_ready_latency_does_not_subtract_logical_replay_time() -> None:
+    adapter = FakeAdapter()
+    logical = {"frame_id": None, "time_s": None}
+
+    def prepare(index: int) -> None:
+        logical.update(frame_id=index % 2, time_s=10000.0 + index / 30)
+        adapter.clock.now += 0.05
+
+    adapter.capture_evidence = lambda: {"logical_state": logical}
+    result = measure(adapter, prepare=prepare, delivery="device_ready")
+    assert adapter.sync_calls == 3
+    assert result["metrics"]["state_publish_to_ready_p95_s"] == pytest.approx(0.12)
+    assert result["metrics"]["state_publish_return_to_ready_p50_s"] == pytest.approx(
+        0.07
+    )
+    assert result["metrics"]["render_submit_to_ready_p50_s"] == pytest.approx(0.07)
+    assert [
+        r["adapter_evidence"]["logical_state"]["frame_id"] for r in result["raw"]
+    ] == [0, 1, 0]
+    assert result["raw"][0]["adapter_evidence"]["logical_state"]["time_s"] == 10000.0
+    assert result["raw"][0]["observation_age"]["renderer_source_age_s"] is None
+
+
+def test_adapter_evidence_is_outside_callback_latency_and_inside_loop_window() -> None:
+    adapter = FakeAdapter()
+
+    def evidence() -> dict[str, Any]:
+        adapter.clock.now += 1.0
+        return {"status": "recorded", "render_submission_id": adapter.render_calls}
+
+    adapter.capture_evidence = evidence
+    result = measure(adapter, iterations=1)
+    assert result["metrics"]["latency_p50_s"] == pytest.approx(0.13)
+    assert result["metrics"]["window_s"] == pytest.approx(1.13)
+    assert result["raw"][0]["observation_age"][
+        "render_submit_to_ready_s"
+    ] == pytest.approx(0.13)
+    assert result["raw"][0]["adapter_evidence"]["render_submission_id"] == 1
+
+
+def test_assembly_counts_exclude_warmup_and_do_not_become_d2h_counts() -> None:
+    adapter = FakeAdapter()
+    operations = [
+        {
+            "operation": "camera_stack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 480,
+        },
+        {
+            "operation": "contiguous_pack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 360,
+        },
+    ]
+    adapter.capture_evidence = lambda: {
+        "assembly": {"status": "recorded", "operations": operations}
+    }
+    result = measure(adapter, warmup=2, delivery="device_ready")
+    assert result["assembly_summary"]["operations"] == 6
+    assert result["assembly_summary"]["output_bytes"] == 3 * 840
+    assert result["warmup_assembly_summary"]["operations"] == 4
+    assert result["metrics"]["assembly_operations_per_capture"] == 2
+    assert result["metrics"]["assembly_output_bytes_per_capture"] == 840
+    assert result["counts"]["d2h_calls"] == result["counts"]["host_copy_calls"] == 0
+    operations[0]["calls"] = 99
+    assert (
+        result["raw"][0]["adapter_evidence"]["assembly"]["operations"][0]["calls"] == 1
+    )
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_unavailable_assembly_counters_remain_null_without_losing_capture(
+    invalid: bool,
+) -> None:
+    adapter = FakeAdapter()
+    if invalid:
+        adapter.capture_evidence = lambda: {
+            "assembly": {
+                "status": "recorded",
+                "operations": [{"calls": "1", "output_bytes": 4}],
+            }
+        }
+    result = measure(adapter)
+    assert result["counts"]["render_calls"] == 3
+    assert result["metrics"]["assembly_operations_per_capture"] is None
+    assert result["assembly_summary"]["status"] == "missing"
+    assert result["metric_reasons"]["assembly_operations_per_capture"]
+
+
+def test_standalone_packet_snapshots_adapter_identity_after_completion() -> None:
+    adapter = FakeAdapter()
+    adapter.capture_evidence = lambda: {"render_submission_id": adapter.render_calls}
+    packet = capture_packet(
+        adapter,
+        frame_index=7,
+        exposure_count=6,
+        delivery="device_ready",
+        clock=adapter.clock,
+    )
+    adapter.render_device()
+    assert packet.to_metadata()["adapter_evidence"]["render_submission_id"] == 1
+
+
+@pytest.mark.parametrize("assembly", [None, "unknown"])
+def test_malformed_optional_evidence_does_not_erase_completed_timing(
+    assembly: Any,
+) -> None:
+    adapter = FakeAdapter()
+    adapter.capture_evidence = lambda: {"assembly": assembly}
+    result = measure(adapter, iterations=1)
+    assert result["counts"]["render_calls"] == 1
+    assert result["metrics"]["latency_p50_s"] == pytest.approx(0.13)
+    assert result["metrics"]["assembly_operations_per_capture"] is None
+
+
+def test_optional_evidence_reader_error_is_a_missing_reason() -> None:
+    adapter = FakeAdapter()
+
+    def evidence() -> dict[str, Any]:
+        raise RuntimeError("counter unavailable")
+
+    adapter.capture_evidence = evidence
+    result = measure(adapter, iterations=1)
+    assert result["counts"]["render_calls"] == 1
+    assert "counter unavailable" in result["raw"][0]["adapter_evidence"]["reason"]
 
 
 def test_completed_buffers_are_released_before_memory_hook_and_next_render() -> None:

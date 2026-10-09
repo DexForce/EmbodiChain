@@ -363,6 +363,42 @@ def test_dynamic_performance_sample_keeps_last_wrapped_replay_frame(
     assert result["counts"]["state_publish_calls"] == 102
 
 
+@pytest.mark.parametrize("modalities", [("rgb",), ("rgb", "depth", "seg")])
+def test_dynamic_quality_sequence_is_outside_timing_and_resource_window(
+    tmp_path: Path, runtime: dict[str, Any], modalities: tuple[str, ...]
+) -> None:
+    case = RenderCase(
+        "R-03",
+        "calibration",
+        width=8,
+        height=6,
+        temporal_mode="moving",
+        modalities=modalities,
+    )
+    config = config_file(tmp_path, case, measured=3, warmup=2)
+    data = json.loads(config.read_text())
+    data["post_measurement_quality_capture"] = "frozen_sequence_100"
+    write_json(config, data)
+    output = tmp_path / "run"
+    result = worker.run_worker(config, output, "embodichain", 1)
+    assert result["status"] == "completed", result.get("error")
+    assert result["counts"]["batch_steps"] == 3
+    assert result["counts"]["state_publish_calls"] == 3
+    manifest, frames = frame_records(output)
+    assert manifest["saved_exposures"] == 100
+    assert [frame["metadata"]["frame_id"] for frame in frames] == list(range(100))
+    assert result["quality_capture"]["outside_resource_window"] is True
+    assert result["quality_capture"]["throughput_claim"] is False
+    outside = [
+        event
+        for event in runtime["events"]
+        if event[0] == "render" and event[2] is False
+    ]
+    assert len(outside) == 102  # quality warmup plus every sequence frame
+    assert [event[1] for event in outside[2:]] == list(range(100))
+    assert runtime["adapters"][0].applied_ids[-1] == 2
+
+
 def test_r01_captures_twenty_full_batches_but_saves_representative_environments(
     tmp_path: Path, runtime: dict[str, Any]
 ) -> None:

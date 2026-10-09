@@ -24,6 +24,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from ..capture import assembly_operation
 from ..color import linear_u8_to_srgb_u8 as _linear_u8_to_srgb_u8
 from ..scenes import camera_intrinsics, load_scene, scene_fingerprint
 
@@ -59,6 +60,7 @@ class _CameraBatch:
         self.torch = torch
         self.parts: list[tuple[int, int, Any]] = []
         self._data: dict[str, Any] = {}
+        self.assembly_operations: list[dict[str, Any]] = []
         try:
             for start in range(0, owner.num_envs, capacity):
                 stop = min(start + capacity, owner.num_envs)
@@ -82,9 +84,18 @@ class _CameraBatch:
             camera.update(**kwargs)
         data = [camera.get_data() for _, _, camera in self.parts]
         # TensorDict iteration yields batch members, whereas keys() names modalities.
-        self._data = {
-            key: self._join([part[key] for part in data]) for key in data[0].keys()
-        }
+        self._data = {}
+        self.assembly_operations = []
+        names = {"color": "rgb", "mask": "seg", "normal": "normals"}
+        for key in data[0].keys():
+            value = self._join([part[key] for part in data])
+            self._data[key] = value
+            if len(data) > 1:
+                self.assembly_operations.append(
+                    assembly_operation(
+                        "environment_chunk_concat", names.get(key, key), value
+                    )
+                )
 
     def get_data(self) -> dict[str, Any]:
         return self._data
@@ -266,6 +277,8 @@ class EmbodiChainScene:
             raise ValueError("Unsupported native state-publication policy")
         self._render_calls = 0
         self._scene_frame_id = 0
+        self._scene_time_s: float | None = 0.0
+        self._assembly_operations: list[dict[str, Any]] = []
         self._pending_frame = None
         self._state_publications = 0
         self._pending_native_flush = True
@@ -514,8 +527,10 @@ class EmbodiChainScene:
         self.sim.get_world().render_camera_group(
             [group for camera in self.cameras for group in camera.group_ids]
         )
+        self._assembly_operations = []
         for camera in self.cameras:
             camera.update(fetch_only=True)
+            self._assembly_operations.extend(getattr(camera, "assembly_operations", []))
         arrays = {}
         for modality in self.modalities:
             key = {
@@ -526,6 +541,9 @@ class EmbodiChainScene:
             }[modality]
             value = torch.stack(
                 [camera.get_data()[key] for camera in self.cameras], dim=1
+            )
+            self._assembly_operations.append(
+                assembly_operation("camera_stack", modality, value)
             )
             if modality == "rgb":
                 value = value[..., :3]
@@ -542,9 +560,56 @@ class EmbodiChainScene:
                 safe = indices.clamp(max=self._id_keys.numel() - 1)
                 valid = valid & (self._id_keys[safe] == value)
                 value = torch.where(valid, self._id_values[safe], 0).to(torch.int32)
-            arrays[modality] = value.flatten(0, 1).contiguous()
+            flattened = value.flatten(0, 1)
+            if flattened.data_ptr() != value.data_ptr():
+                self._assembly_operations.append(
+                    assembly_operation("flatten_materialize", modality, flattened)
+                )
+            arrays[modality] = flattened.contiguous()
+            if not flattened.is_contiguous():
+                self._assembly_operations.append(
+                    assembly_operation("contiguous_pack", modality, arrays[modality])
+                )
         self._render_calls += 1
+        self._last_capture_submission_id = self._render_calls
+        self._last_capture_identity = {
+            "frame_id": self._scene_frame_id,
+            "time_s": getattr(self, "_scene_time_s", None),
+            "identity_scope": "frozen state used by the last successful render submission; not a renderer source timestamp",
+            "camera_names": [view["name"] for view in self.scene["cameras"]],
+            "num_envs": self.num_envs,
+            "modalities": list(self.modalities),
+            "batch_order": "environment_then_camera",
+            "state_publications": self._state_publications,
+        }
+        self._last_assembly_operations = self._assembly_operations
         return arrays
+
+    def capture_evidence(self) -> dict[str, Any]:
+        """Return host-only identity and assembly evidence for the latest capture.
+
+        Returns:
+            Application submission/state counters and executed tensor operations.
+            The native renderer does not expose a same-clock source timestamp.
+        """
+        if not hasattr(self, "_last_capture_identity"):
+            return {"status": "missing", "reason": "no_successful_render_submission"}
+        return {
+            "status": "recorded",
+            "render_submission_id": self._last_capture_submission_id,
+            "counter_provenance": "benchmark adapter successful render_device calls; not a native GPU exposure counter",
+            "logical_state": copy.deepcopy(self._last_capture_identity),
+            "renderer_source_frame_id": None,
+            "renderer_source_timestamp_s": None,
+            "renderer_source_missing_reason": "native per-camera GPU source frame/timestamp is not exposed",
+            "assembly": {
+                "status": "recorded",
+                "operations": copy.deepcopy(self._last_assembly_operations),
+                "scope": "executed adapter chunk concatenation, camera stacking and buffer materialization; color/geometry conversions excluded",
+                "renderer_internal_operations": None,
+                "renderer_internal_missing_reason": "native renderer allocation/copy totals are not exposed",
+            },
+        }
 
     def synchronize(self) -> None:
         """Wait for the selected device's native-interoperability tensor work."""
@@ -604,6 +669,7 @@ class EmbodiChainScene:
         self.metadata["scene_frame_id"] = self._scene_frame_id
         self.metadata["state_publications"] = self._state_publications
         self.metadata["changed_state_flushes"] = self._state_flushes
+        self.metadata["last_capture_evidence"] = self.capture_evidence()
         return self.metadata
 
     def set_cameras(self, specs: list[dict[str, Any]]) -> None:
@@ -652,6 +718,7 @@ class EmbodiChainScene:
             self.set_cameras(views)
         self._begin_frame()
         self._scene_frame_id = int(frame["frame_id"])
+        self._scene_time_s = frame.get("time_s")
 
     def close(self) -> None:
         """Release native child views before their world."""

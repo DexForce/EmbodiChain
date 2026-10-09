@@ -206,6 +206,14 @@ def test_native_chunks_preserve_every_environment_and_pose_slice() -> None:
     assert batch.group_ids == [0, 1, 2]
     batch.update(fetch_only=True)
     assert batch.get_data()["color"].ravel().tolist() == list(range(65))
+    assert batch.assembly_operations == [
+        {
+            "operation": "environment_chunk_concat",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 65 * 8,
+        }
+    ]
     assert batch.get_intrinsics().tolist() == list(range(65))
     assert batch.get_arena_pose(True).tolist() == list(range(65))
     poses = np.arange(65 * 3).reshape(65, 3)
@@ -341,6 +349,33 @@ def test_static_native_captures_submit_every_group_without_republishing(
     metadata = adapter.refresh_metadata()
     assert metadata["state_publications"] == metadata["changed_state_flushes"] == 1
     assert metadata["render_submissions"] == 3
+    evidence = adapter.capture_evidence()
+    assert evidence["render_submission_id"] == 3
+    assert evidence["logical_state"]["frame_id"] == 0
+    assert evidence["logical_state"]["num_envs"] == 2
+    assert evidence["logical_state"]["camera_names"] == [
+        "external_front",
+        "external_side",
+        "wrist",
+    ]
+    assert evidence["renderer_source_frame_id"] is None
+    assert evidence["renderer_source_timestamp_s"] is None
+    # One stack plus actual strided RGB packing; unchanged buffers are not
+    # interpreted as stale, and view-only flattening is not counted as a copy.
+    assert evidence["assembly"]["operations"] == [
+        {
+            "operation": "camera_stack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 96,
+        },
+        {
+            "operation": "contiguous_pack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 72,
+        },
+    ]
 
 
 @pytest.mark.parametrize("changed", ["object", "camera", "both"])
@@ -353,6 +388,7 @@ def test_changed_frozen_state_publishes_during_prepare_before_exposure(
     events.clear()
     frame = {
         "frame_id": 1,
+        "time_s": 1 / 30,
         "objects": deepcopy(adapter._object_poses),
         "cameras": {view["name"]: deepcopy(view) for view in adapter.scene["cameras"]},
     }
@@ -366,6 +402,7 @@ def test_changed_frozen_state_publishes_during_prepare_before_exposure(
     adapter.render_device()
     assert events[-2:] == ["render", "exit"]
     assert adapter._state_publications == adapter._state_flushes == 2
+    assert adapter.capture_evidence()["logical_state"]["time_s"] == 1 / 30
     events.clear()
     frame["frame_id"] = 2
     adapter.apply_state(frame)
@@ -392,6 +429,29 @@ def test_camera_changes_are_dirty_and_identical_specs_do_not_republish() -> None
     adapter.render_device()
     assert events[3:] == ["enter", "publish", "flush", "render", "exit"]
     assert adapter._state_publications == adapter._state_flushes == 2
+
+
+def test_last_capture_identity_survives_later_frozen_state_publication() -> None:
+    adapter = _native_adapter([])
+    frame = {
+        "frame_id": 99,
+        "time_s": 99 / 30,
+        "objects": deepcopy(adapter._object_poses),
+        "cameras": {view["name"]: deepcopy(view) for view in adapter.scene["cameras"]},
+    }
+    adapter.apply_state(frame)
+    adapter.render_device()
+    captured = adapter.capture_evidence()
+    frame = deepcopy(frame)
+    frame.update(frame_id=3, time_s=3 / 30)
+    frame["objects"]["box"][0][3] = 0.5
+    adapter.apply_state(frame)
+    assert adapter._scene_frame_id == 3
+    assert adapter.capture_evidence() == captured
+    assert captured["logical_state"]["frame_id"] == 99
+    assert captured["logical_state"]["time_s"] == 99 / 30
+    assert adapter.refresh_metadata()["last_capture_evidence"] == captured
+    adapter._end_frame()
 
 
 @pytest.mark.parametrize("failure", ["enter", "publish", "flush", "render"])

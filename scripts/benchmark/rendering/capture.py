@@ -26,17 +26,19 @@ phase measurements add synchronization and are a distinct timing treatment.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 import math
 import statistics
 from time import perf_counter
 from typing import Any, Protocol
 
-from scripts.benchmark.core.measurement import measure_loop
+from scripts.benchmark.core.measurement import Measurement, measure_loop
 
 __all__ = [
     "CaptureAdapter",
     "CapturePacket",
+    "assembly_operation",
     "capture_packet",
     "measure_rendering",
     "validate_capture_packet",
@@ -47,11 +49,38 @@ _DTYPES = {"rgb": "uint8", "depth": "float32", "seg": "int32", "normals": "float
 _ITEM_SIZES = {"uint8": 1, "float32": 4, "int32": 4}
 
 
+def assembly_operation(operation: str, modality: str, array: Any) -> dict[str, Any]:
+    """Describe one executed adapter buffer-materialization operation.
+
+    Args:
+        operation: Executed operation, such as chunk concatenation or RGB packing.
+        modality: Canonical modality name.
+        array: Materialized output; only its byte-size metadata is read.
+
+    Returns:
+        One call and output-buffer bytes. These are not measured native transfer
+        bytes, memory bandwidth, or a claim about renderer-internal operations.
+    """
+    size = getattr(array, "nbytes", None)
+    if size is None:
+        size = _array_spec(array)["nbytes"]
+    if isinstance(size, bool) or int(size) != size or size < 0:
+        raise ValueError("Assembly output byte count must be nonnegative")
+    return {
+        "operation": operation,
+        "modality": modality,
+        "calls": 1,
+        "output_bytes": int(size),
+    }
+
+
 class CaptureAdapter(Protocol):
     """Backend callbacks; each ``to_host`` invocation performs actual D2H.
 
     ``synchronize`` completes renderer interoperability and the selected CUDA
     device, including work initiated by state publication and image delivery.
+    Optional ``capture_evidence()`` returns host-only logical identity and
+    adapter assembly counters; it must not synchronize or read device pixels.
     """
 
     def render_device(self) -> Mapping[str, Any]:
@@ -91,6 +120,19 @@ def _array_spec(array: Any) -> dict[str, Any]:
     }
 
 
+def _adapter_capture_evidence(adapter: CaptureAdapter) -> dict[str, Any]:
+    getter = getattr(adapter, "capture_evidence", None)
+    if not callable(getter):
+        return {"status": "missing", "reason": "adapter_capture_evidence_unavailable"}
+    try:
+        return deepcopy(dict(getter()))
+    except Exception as exc:
+        return {
+            "status": "missing",
+            "reason": f"adapter_capture_evidence_error: {type(exc).__name__}: {exc}",
+        }
+
+
 @dataclass(frozen=True)
 class CapturePacket:
     """One completed batch with original buffers and observed callback counts.
@@ -113,6 +155,7 @@ class CapturePacket:
     completed_s: float
     timestamps_s: Mapping[str, float | None]
     phases_s: Mapping[str, float | None]
+    adapter_evidence: Mapping[str, Any] = field(default_factory=dict)
 
     def to_metadata(self) -> dict[str, Any]:
         """Return timing and transfer evidence without reading array contents.
@@ -127,6 +170,33 @@ class CapturePacket:
         copies_by_modality = {
             name: int(name in self.host_copy_arrays) for name in self.device_arrays
         }
+        age = {}
+        reasons = {}
+        for name, stamp in (
+            ("render_submit_to_ready_s", "render_started_s"),
+            ("state_publish_to_ready_s", "state_publish_started_s"),
+            ("state_publish_return_to_ready_s", "state_publish_callback_returned_s"),
+        ):
+            value = self.timestamps_s.get(stamp)
+            age[name] = self.completed_s - value if value is not None else None
+            if value is None:
+                reasons[name] = (
+                    "state_not_published_in_this_capture"
+                    if name.startswith("state_publish")
+                    else "capture_submission_timestamp_unavailable"
+                )
+        age.update(
+            clock_domain="capture_clock_monotonic_seconds",
+            ready_boundary=self.delivery,
+            scope="batch application completion; an upper bound for each exposure's availability, not a per-camera GPU source age",
+            renderer_source_timestamp_s=None,
+            renderer_source_age_s=None,
+            static_identical_pixels_are_valid=True,
+            missing_reasons={
+                **reasons,
+                "renderer_source_age_s": "renderer_source_timestamp_in_capture_clock_unavailable",
+            },
+        )
         return {
             "frame_index": self.frame_index,
             "delivery": self.delivery,
@@ -134,6 +204,8 @@ class CapturePacket:
             "completed_s": self.completed_s,
             "timestamps_s": dict(self.timestamps_s),
             "phases_s": dict(self.phases_s),
+            "observation_age": age,
+            "adapter_evidence": deepcopy(dict(self.adapter_evidence)),
             "batch_steps": 1,
             "render_calls": 1,
             "exposure_count": self.exposure_count,
@@ -165,6 +237,7 @@ def capture_packet(
     prepare: Callable[[int], None] | None = None,
     diagnostic: bool = False,
     clock: Callable[[], float] = perf_counter,
+    collect_evidence: bool = True,
 ) -> CapturePacket:
     """Capture one batch and complete the requested delivery boundary.
 
@@ -176,6 +249,9 @@ def capture_packet(
         prepare: State-publication callback, executed before render submission.
         diagnostic: Synchronize each phase for separate diagnostic durations.
         clock: Monotonic seconds source, injectable for CPU-only contract tests.
+        collect_evidence: Snapshot optional host-only adapter identity/counters
+            after completion. The measured loop collects these in its validation
+            callback instead, outside per-operation callback latency.
 
     Returns:
         Completed packet. Call :func:`validate_capture_packet` outside its timed
@@ -188,6 +264,7 @@ def capture_packet(
     timestamps: dict[str, float | None] = {
         "state_publish_started_s": None,
         "state_publish_completed_s": None,
+        "state_publish_callback_returned_s": None,
         "render_started_s": None,
         "device_ready_s": None,
         "host_delivery_started_s": None,
@@ -201,6 +278,7 @@ def capture_packet(
     if prepare is not None:
         timestamps["state_publish_started_s"] = started
         prepare(frame_index)
+        timestamps["state_publish_callback_returned_s"] = clock()
         if diagnostic:
             adapter.synchronize()
             sync_calls += 1
@@ -208,7 +286,15 @@ def capture_packet(
             phases["state_publish_s"] = (
                 timestamps["state_publish_completed_s"] - started
             )
-    render_started = clock() if diagnostic else None
+    render_started = (
+        clock()
+        if diagnostic
+        else (
+            timestamps["state_publish_callback_returned_s"]
+            if prepare is not None
+            else started
+        )
+    )
     timestamps["render_started_s"] = render_started
     device = adapter.render_device()
     if not isinstance(device, Mapping) or not device:
@@ -241,10 +327,23 @@ def capture_packet(
         adapter.synchronize()
         sync_calls += 1
     completed = clock()
+    if delivery == "device_ready" and not diagnostic:
+        timestamps["device_ready_s"] = completed
+    if delivery != "device_ready":
+        timestamps["host_delivery_completed_s"] = completed
     if diagnostic and delivery != "device_ready":
         timestamps["host_delivery_completed_s"] = completed
         phases["host_ready_s"] = completed - timestamps["host_delivery_started_s"]
-    for elapsed in [completed - started, *phases.values()]:
+    for elapsed in [
+        completed - started,
+        *phases.values(),
+        *(
+            completed - value
+            for key, value in timestamps.items()
+            if key in {"render_started_s", "state_publish_callback_returned_s"}
+            and value is not None
+        ),
+    ]:
         if elapsed is not None and (not math.isfinite(elapsed) or elapsed < 0):
             raise ValueError("Capture durations must be finite and nonnegative")
     return CapturePacket(
@@ -261,6 +360,7 @@ def capture_packet(
         completed_s=completed,
         timestamps_s=timestamps,
         phases_s=phases,
+        adapter_evidence=_adapter_capture_evidence(adapter) if collect_evidence else {},
     )
 
 
@@ -370,6 +470,46 @@ def _sum_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _assembly_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    operations = []
+    reasons = []
+    valid = 0
+    for row in rows:
+        evidence = row.get("adapter_evidence", {})
+        assembly = evidence.get("assembly", {})
+        if not isinstance(assembly, Mapping):
+            reasons.append("invalid_adapter_assembly_counters")
+            continue
+        entries = assembly.get("operations")
+        if assembly.get("status") != "recorded" or not isinstance(entries, list):
+            reasons.append(evidence.get("reason", "adapter_assembly_unavailable"))
+            continue
+        if any(
+            not isinstance(item, dict)
+            or any(
+                type(item.get(key)) is not int or item[key] < 0
+                for key in ("calls", "output_bytes")
+            )
+            for item in entries
+        ):
+            reasons.append("invalid_adapter_assembly_counters")
+            continue
+        valid += 1
+        operations.extend(entries)
+    complete = valid == len(rows) and bool(rows)
+    return {
+        "status": "recorded" if complete else "missing",
+        "captures": len(rows),
+        "valid_captures": valid,
+        "operations": sum(item["calls"] for item in operations) if complete else None,
+        "output_bytes": (
+            sum(item["output_bytes"] for item in operations) if complete else None
+        ),
+        "missing_reasons": sorted(set(reasons)),
+        "scope": "executed adapter tensor assembly; materialized output bytes, not native transfer totals; conversions and renderer-internal tiling excluded",
+    }
+
+
 def measure_rendering(
     adapter: CaptureAdapter,
     *,
@@ -434,6 +574,7 @@ def measure_rendering(
             prepare=prepare,
             diagnostic=diagnostic,
             clock=clock,
+            collect_evidence=False,
         )
 
     def validate(packet: CapturePacket) -> None:
@@ -451,10 +592,15 @@ def measure_rendering(
             )
         specs = current
 
+    def metadata(packet: CapturePacket) -> dict[str, Any]:
+        row = packet.to_metadata()
+        row["adapter_evidence"] = _adapter_capture_evidence(adapter)
+        return row
+
     for index in range(warmup):
         packet = capture(index)
         validate(packet)
-        warmup_raw.append(packet.to_metadata())
+        warmup_raw.append(metadata(packet))
         del packet
     if on_measurement_start is not None:
         on_measurement_start()
@@ -471,7 +617,7 @@ def measure_rendering(
         if pending_packet is None:
             raise RuntimeError("Capture operation did not provide a completed packet")
         validate(pending_packet)
-        raw.append(pending_packet.to_metadata())
+        raw.append(metadata(pending_packet))
         # The shared timer retains its operation return until the next call.
         # Return None and release this separate holder so previous GPU/host
         # arrays do not inflate the next capture's memory footprint.
@@ -483,7 +629,32 @@ def measure_rendering(
     for row, latency in zip(raw, timing.latencies_s, strict=True):
         row["latency_s"] = latency
     counts = _sum_counts(raw)
+    assembly = _assembly_summary(raw)
     metric_reasons = {"native_render_s": "native_backend_timer_unavailable"}
+    age_metrics = {}
+    for name in (
+        "render_submit_to_ready",
+        "state_publish_to_ready",
+        "state_publish_return_to_ready",
+    ):
+        values = [
+            row["observation_age"][name + "_s"]
+            for row in raw
+            if row["observation_age"][name + "_s"] is not None
+        ]
+        sample = Measurement(0, tuple(values), timing.window_s) if values else None
+        for percentile in (50, 95):
+            key = f"{name}_p{percentile}_s"
+            age_metrics[key] = getattr(sample, f"p{percentile}_s") if sample else None
+            if sample is None:
+                metric_reasons[key] = "state_not_published_in_this_capture"
+    for key in ("operations", "output_bytes"):
+        metric = f"assembly_{key}_per_capture"
+        age_metrics[metric] = (
+            assembly[key] / iterations if assembly[key] is not None else None
+        )
+        if age_metrics[metric] is None:
+            metric_reasons[metric] = "; ".join(assembly["missing_reasons"])
     phase_metrics = {}
     for phase in ("state_publish", "device_ready", "host_ready"):
         name = phase + "_p50_s"
@@ -521,10 +692,13 @@ def measure_rendering(
         "latency_p50_s": timing.p50_s,
         "latency_p95_s": timing.p95_s,
         **phase_metrics,
+        **age_metrics,
         "d2h_bytes_per_capture": counts["d2h_bytes"] / iterations,
         "host_copy_bytes_per_capture": counts["host_copy_bytes"] / iterations,
         "native_render_s": None,
         "phase_semantics": "incremental synchronized stages; diagnostic treatment only",
+        "observation_age_clock": "capture_clock_monotonic_seconds",
+        "observation_age_scope": "batch submission/publication-to-selected-ready latency; logical replay timestamps are not subtracted and native per-camera source age is unavailable",
         "throughput_window": "all measured captures plus validation and record bookkeeping",
         "copy_count_basis": "one blocking D2H per modality per adapter.to_host invocation",
         "freshness_evidence": "one render_device invocation per batch; identical pixels are valid for a static scene",
@@ -534,7 +708,9 @@ def measure_rendering(
         "metric_reasons": metric_reasons,
         "raw": raw,
         "counts": counts,
+        "assembly_summary": assembly,
         "warmup_raw": warmup_raw,
         "warmup_counts": _sum_counts(warmup_raw),
+        "warmup_assembly_summary": _assembly_summary(warmup_raw),
         "array_specs": specs,
     }

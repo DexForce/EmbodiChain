@@ -194,7 +194,7 @@ def _print_list(
 def _case_policy(case: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Freeze only quality evidence supported by the actual requested outputs."""
     moving = case["temporal_mode"] == "moving"
-    sequence = moving and set(case["modalities"]) == {"rgb", "depth", "seg"}
+    sequence = moving and set(case["modalities"]) in ({"rgb"}, {"rgb", "depth", "seg"})
     policy = protocol_for_modalities(
         tuple(case["modalities"]), temporal_dt_s=1 / 30 if sequence else None
     )
@@ -558,6 +558,12 @@ def _freeze_experiment(
             "approved_scene_receipt": approval,
             "quality_protocol": _case_policy(case.to_dict())[0],
             "quality_requirements": _case_policy(case.to_dict())[1],
+            "post_measurement_quality_capture": (
+                "frozen_sequence_100"
+                if case.temporal_mode == "moving"
+                and case.experiment_id not in {"R-01", "R-02"}
+                else "final_frame"
+            ),
         }
         worker_configs[case.case_id] = config
         if record["selected"]:

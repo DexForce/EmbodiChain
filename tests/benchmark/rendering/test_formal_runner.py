@@ -265,7 +265,15 @@ def test_smoke_preserves_case_semantics_and_publication_repeat_policy(
         if record["case"]["temporal_mode"] == "moving"
         and record["case"]["modalities"] == ["rgb"]
     )
-    assert moving_rgb["quality_protocol"]["temporal_quality"] == "unassessed"
+    assert (
+        moving_rgb["quality_protocol"]["temporal_quality"]
+        == "assessed_by_declared_policy"
+    )
+    assert (
+        moving_rgb["quality_protocol"]["protocol_id"]
+        == "pure-render-quality/rgb-temporal30-v1"
+    )
+    assert moving_rgb["quality_protocol"]["evaluation_kind"] == "sequence"
     sequence = next(
         record for record in publication["cases"] if record["experiment_id"] == "R-02"
     )

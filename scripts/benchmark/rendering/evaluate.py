@@ -371,7 +371,15 @@ def _load_run(root: Path, row: dict[str, Any]) -> dict[str, Any]:
     count = (
         20
         if case.experiment_id == "R-01"
-        else 100 if case.experiment_id == "R-02" else 1
+        else (
+            100
+            if (
+                case.experiment_id == "R-02"
+                or config.get("post_measurement_quality_capture")
+                == "frozen_sequence_100"
+            )
+            else 1
+        )
     )
     expected = len(envs) * case.cameras_per_env * count
     actual = len(descriptors)
@@ -405,6 +413,10 @@ def _load_run(root: Path, row: dict[str, Any]) -> dict[str, Any]:
                     and item["metadata"]["camera_name"] == name
                 ]
                 complete = complete and len(members) == count
+                if count == 100:
+                    complete = complete and {
+                        item["metadata"]["frame_id"] for item in members
+                    } == set(range(100))
     return {
         "row": row,
         "renderer": deepcopy(result.get("renderer", {})),
@@ -427,7 +439,7 @@ def _load_run(root: Path, row: dict[str, Any]) -> dict[str, Any]:
                 {item["metadata"]["camera_name"] for item in descriptors}
             ),
             "view_count": case.view_count,
-            "sequence_frames": count if case.experiment_id == "R-02" else None,
+            "sequence_frames": count if count == 100 else None,
             "sequence_groups": 0,
             "complete": bool(complete),
         },
@@ -742,11 +754,14 @@ def _evaluate_run(
     from scripts.benchmark.rendering.quality import evaluate_frame, evaluate_sequence
 
     row, case = run["row"], run["case"]
-    temporal = case.temporal_mode == "moving" and set(case.modalities) == {
-        "rgb",
-        "depth",
-        "seg",
-    }
+    temporal = case.temporal_mode == "moving" and (
+        set(case.modalities) == {"rgb", "depth", "seg"}
+        or (
+            set(case.modalities) == {"rgb"}
+            and run["config"].get("post_measurement_quality_capture")
+            == "frozen_sequence_100"
+        )
+    )
     policy = protocol_for_modalities(
         case.modalities, temporal_dt_s=1 / 30 if temporal else None
     )
@@ -767,7 +782,11 @@ def _evaluate_run(
             len(run["coverage"]["representative_env_ids"]) * case.cameras_per_env * 100
         )
         run["coverage"]["sequence_frames"] = 100
-        run["coverage"]["complete"] = False
+        run["coverage"]["complete"] = (
+            run["coverage"]["complete"]
+            and run["coverage"]["evaluated_samples"]
+            == run["coverage"]["expected_samples"]
+        )
     directory.mkdir(parents=True, exist_ok=False)
     write_json(directory / "protocol.json", policy)
     reports, bindings = [], []
@@ -776,6 +795,7 @@ def _evaluate_run(
 
     def inputs(item: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
         candidate = _candidate(item)
+        candidate["metadata"]["run_id"] = row["run_id"]
         for key in ("effective_lighting_controls", "postprocess_evidence"):
             candidate["metadata"][key] = deepcopy(run["renderer"].get(key))
         ref, binding = _independent_reference(root, run, item, settings)
@@ -813,11 +833,30 @@ def _evaluate_run(
     else:
         for index, item in enumerate(run["descriptors"]):
             candidate, ref = inputs(item)
-            reports.append(
-                evaluate_frame(
-                    candidate, ref, policy, output_dir=directory / f"sample_{index:04d}"
+            sample_dir = directory / f"sample_{index:04d}"
+            report = evaluate_frame(candidate, ref, policy, output_dir=sample_dir)
+            if ref is not None and case.experiment_id == "R-01":
+                from scripts.benchmark.rendering.quality_regions import (
+                    export_quality_regions,
                 )
-            )
+
+                try:
+                    regions = export_quality_regions(
+                        load_scene(run["scene_path"]),
+                        candidate,
+                        ref,
+                        sample_dir / "regions",
+                    )
+                    report["semantic_regions"] = regions["regions"]
+                    report["artifacts"].extend(regions["artifacts"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    # Preserve numerical quality failures even when malformed
+                    # arrays cannot produce optional diagnostic pictures.
+                    report["semantic_regions"] = [
+                        {"status": "missing", "reason": f"{type(exc).__name__}: {exc}"}
+                    ]
+                write_json(sample_dir / "quality_evidence.json", report)
+            reports.append(report)
         expected = run["coverage"]["expected_samples"]
     checks, metrics = _aggregate(reports, contract, policy, expected)
     checks["sample_population"] = {
@@ -830,9 +869,14 @@ def _evaluate_run(
         "evidence": deepcopy(run["coverage"]),
     }
     if case.temporal_mode == "moving" and case.experiment_id != "R-02":
+        has_sequence = temporal and run["coverage"]["complete"]
         checks["temporal_evidence"] = {
-            "status": "missing",
-            "reason": "Only final-frame performance samples exist; no linked matching hundred-frame temporal proof",
+            "status": "passed" if has_sequence else "missing",
+            "reason": (
+                "Same worker/configuration captured every frozen replay state outside measurement"
+                if has_sequence
+                else "Only final-frame performance samples exist; no matching hundred-frame temporal proof"
+            ),
         }
     if contract["unassessed_modalities"]:
         checks["all_requested_modalities_assessed"] = {
@@ -998,6 +1042,8 @@ def evaluate_experiment(
                     "evaluate.py",
                     "quality.py",
                     "quality_protocol.py",
+                    "quality_regions.py",
+                    "_publication_figures.py",
                     "reference.py",
                     "calibration.py",
                 )

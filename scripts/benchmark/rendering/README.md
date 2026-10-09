@@ -16,7 +16,8 @@ the approved Franka scene at N=1/16, C=1, 128×128 RGB. For a serial smoke, run
 `--num-envs 1`, `--shader minimal`, and `--delivery host_ready` select a point,
 raster variant, or one blocking D2H boundary. The default is the `default` shader
 and device-ready delivery, with three independent repeats outside smoke mode.
-The isolated Python 3.11 environment pins ManiSkill 3.0.0b22/SAPIEN 3.0.1 and an
+The isolated Python 3.11 environment pins ManiSkill source commit
+`62ff3a5896b4d5b4cf0ac4c8d79afe600c9404a3` (package 3.0.1), SAPIEN 3.0.3 and an
 explicit, checksum-verified PhysX GPU library (`--physx-gpu-library`); workers
 never download stock assets or runtime libraries. PhysX pose-buffer warm-start
 is setup-only, and capture does not step physics. Native gamma-2.2 RGB is retained
@@ -25,6 +26,8 @@ without claiming exact IEC sRGB or equivalence to the formal ray-tracing profile
 report preserves failures, exclusions, run hashes and independent-repeat
 uncertainty. CPU tests validate contracts; actual GPU support and image quality
 require their own evidence before any stronger claim.
+The v3 raster profile checks pip's VCS commit metadata and records source hashes.
+Earlier v2 wheel-only 3.0.0b22/SAPIEN 3.0.1 smokes remain separate historical runs.
 
 ## Formal matrix
 
@@ -218,6 +221,16 @@ Declared D2H and CPU-copy bytes count different operations. Native/pose transfer
 may exist outside these observation counters. Static identical pixels are valid;
 freshness probes perturb the view/state outside timed windows.
 
+`observation_age` records monotonic render-submission/publication-to-ready
+latencies and the selected completion boundary. Logical replay timestamps and
+frame IDs remain separate; they are never subtracted from a host clock. Native
+per-camera source timestamps/age stay null when unavailable. Static unchanged
+state has no new publication-age sample, even though every render is a new
+capture. Adapter assembly counts describe executed tensor organization and
+materialized output bytes, not total native D2D traffic or renderer tiling work.
+Evidence bookkeeping occurs outside callback latency and inside whole-window
+throughput; normal capture adds no extra GPU synchronization or readback.
+
 Profiles are full versioned payloads and hashes in `formal.py`, not merely names.
 Realtime uses native hybrid with tiled DLAA and Isaac balanced/DLAA settings.
 High quality uses native fast-rt with tiled DLAA at 16 spp and explicit Isaac PathTracing at 16 spp;
@@ -336,14 +349,47 @@ against the candidate and independent reference. Training/held-out overlap and a
 manual `qualified` status with arbitrary attachments are rejected. Creating a
 receipt does not guarantee that its qualification passes.
 
+To reuse a genuinely passing measured receipt for a different experiment, first
+evaluate that experiment to create its independent references, then run:
+
+```bash
+"$REFERENCE_PYTHON" -m scripts.benchmark.rendering.calibration_binding \
+  --receipt /path/to/source/measured_receipt.json \
+  --target-root "$EXPERIMENT_ROOT"
+```
+
+The returned `evidence_document` can be passed to the evaluator's existing
+`--calibration-evidence` option. The binder recomputes held-out proof, imports
+its source files byte for byte, verifies every target frame's actual profile,
+light/postprocess settings and physical reference signature, and records rejected
+scopes. Matching photometric controls can cover another scene, but each target
+image/sequence must still pass its own quality checks. Binding never modifies
+raw execution or assigns a passing target quality status.
+
 `quality_protocol.py` freezes SSIM, learned LPIPS, optical-depth RMSE/coverage,
 instance/silhouette measures and temporal rules. RGB/RGBD variants retain the same
 thresholds for requested metrics; unrequested rows are explicitly `not_requested`.
 The original full policy's 60 Hz sequence and `temporal30-v1` are distinct contracts;
 formal 30 Hz timestamps are never rescaled to fit the former. Every required frame,
 view and sequence group must be represented. A moving performance singleton cannot
-prove 100-frame temporal quality. RGB+normals checks storage shape/type/finite values,
+prove 100-frame temporal quality. New moving performance runs freeze
+`post_measurement_quality_capture=frozen_sequence_100`: after timing and resource
+sampling finish, the same worker replays and saves all 100 states with the same
+resolution, cameras and requested outputs. A warmup at state zero matches R-02;
+quality readbacks and video encoding never enter the throughput denominator.
+Historical final-frame samples remain insufficient. `rgb-temporal30-v1` evaluates
+RGB flicker/reprojection using independent reference geometry for correspondence;
+it makes no claim about unrequested candidate depth or segmentation. RGB+normals checks storage shape/type/finite values,
 but normal-specific quality remains unassessed and cannot support equal-quality ratios.
+
+R-01 additionally exports scene-defined shadow-fixture, reflective-material and
+reference-instance-edge crops. Selection uses frozen geometry/materials and
+reference IDs, never candidate errors. The shadow region encloses casters and
+their directional projection on the table; it is not a certified shadow mask.
+Occluded or unavailable regions remain explicit in `regions.json`. Each available
+PNG has candidate, independent reference and absolute-error panels on one scale.
+Temporal evaluations export pair data, CSV and SVG/PDF error curves with source
+run IDs; missing pairs are retained and curves do not bridge missing data.
 
 Evaluation preserves original execution snapshots and raw timing fields, appends
 `quality_events.jsonl` and immutable evaluation directories, verifies artifact hashes,
@@ -353,6 +399,21 @@ known policy hashes, complete checksummed qualification and paired independent
 repeats before returning an equal-quality ratio.
 
 ## Artifacts and offline rebuilding
+
+Compare the single- and three-camera tracks with explicit compatible roots:
+
+```bash
+python -S -m scripts.benchmark.rendering.camera_scaling_report \
+  --r04 /path/to/R-04/experiment --r05 /path/to/R-05/experiment \
+  --output /path/to/new-camera-count-report
+```
+
+The report pairs independent repeats within each backend, verifies the common
+external-front view and frozen hardware/profile/workload/delivery/window, and
+exports throughput ratios/deltas and steady/peak process-VRAM deltas. Failed,
+missing and incompatible trials remain in CSV/JSON. Unqualified pairs are
+descriptive camera-count scaling observations, with no equal-quality speedup
+claim. Separate SVG/PDF/data artifacts retain the paired run IDs.
 
 Per-experiment files include `definition.json`, `effective_config.yaml`,
 `assets_manifest.json`, `approval.json`, `selection.json`, `manifest.json`,

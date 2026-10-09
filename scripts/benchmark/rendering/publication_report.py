@@ -61,6 +61,26 @@ _METRICS = {
     "d2h_bytes_per_capture": ("byte/capture", "device-to-host transfers"),
     "host_copy_bytes_per_capture": ("byte/capture", "CPU memory copies"),
     "native_render_s": ("s", "native renderer timer, when available"),
+    "assembly_operations_per_capture": (
+        "operation/capture",
+        "adapter tensor assembly operations",
+    ),
+    "assembly_output_bytes_per_capture": (
+        "byte/capture",
+        "materialized assembly outputs, not native transfer totals",
+    ),
+    **{
+        f"{stage}_p{percentile}_s": (
+            "s",
+            f"per-run {stage} application completion P{percentile}",
+        )
+        for stage in (
+            "render_submit_to_ready",
+            "state_publish_to_ready",
+            "state_publish_return_to_ready",
+        )
+        for percentile in (50, 95)
+    },
 }
 _CONFIG_FIELDS = (
     "scene_id",
@@ -838,6 +858,13 @@ def _charts(
             "memory (GiB; 2^30 bytes)",
             1.0 / 2**30,
         ),
+        (
+            "observation-latency",
+            "Batch render submission to application-ready observations",
+            ("render_submit_to_ready_p50_s", "render_submit_to_ready_p95_s"),
+            "application-ready latency (ms); native source age unavailable",
+            1000.0,
+        ),
     )
     metric_labels = {
         "latency_p50_s": "P50",
@@ -846,6 +873,8 @@ def _charts(
         "gpu_process_steady_bytes": "GPU process steady",
         "gpu_device_peak_bytes": "GPU device peak",
         "cpu_peak_rss_bytes": "CPU RSS",
+        "render_submit_to_ready_p50_s": "submission to ready P50",
+        "render_submit_to_ready_p95_s": "submission to ready P95",
     }
     scaling: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for group in groups:

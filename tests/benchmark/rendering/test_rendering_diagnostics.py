@@ -267,6 +267,39 @@ def test_trace_routes_genuine_readbacks_and_cpu_copies_separately(
     assert profiler.started == profiler.stopped == 1
 
 
+def test_trace_retains_optional_identity_and_assembly_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = Adapter()
+    adapter.capture_evidence = lambda: {
+        "render_submission_id": adapter.events.count("render"),
+        "assembly": {
+            "status": "recorded",
+            "operations": [
+                {"operation": "pack", "modality": "rgb", "calls": 1, "output_bytes": 36}
+            ],
+        },
+    }
+    monkeypatch.setattr(diagnostics, "_load_profiler", lambda: Profiler(adapter))
+    result = diagnostics.trace_delivery(
+        adapter,
+        output=tmp_path,
+        warmup=1,
+        iterations=2,
+        **_options(adapter, "device_ready"),
+    )
+    assert adapter.events.count("sync") == adapter.events.count("render") == 3
+    measurement = result["measurement"]
+    assert [
+        row["adapter_evidence"]["render_submission_id"] for row in measurement["raw"]
+    ] == [2, 3]
+    assert measurement["assembly_summary"]["operations"] == 2
+    assert measurement["assembly_summary"]["output_bytes"] == 72
+    assert measurement["counts"]["d2h_calls"] == 0
+    saved = json.loads((tmp_path / "delivery_diagnostics.json").read_text())
+    assert saved["measurement"]["assembly_summary"] == measurement["assembly_summary"]
+
+
 def test_trace_attributes_native_pose_and_observation_transfers_by_launch_ids(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

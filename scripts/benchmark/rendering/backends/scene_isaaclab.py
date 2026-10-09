@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from scripts.benchmark.core.artifacts import stable_hash
 
+from ..capture import assembly_operation
 from ..color import linear_u8_to_srgb_u8
 from ..scenes import camera_intrinsics, camera_world_pose, load_scene, scene_fingerprint
 
@@ -590,6 +591,7 @@ class IsaacLabScene:
         self.scene = load_scene(scene_path)
         self._scene_sha256 = scene_fingerprint(self.scene)
         self.camera_specs = _selected_cameras(self.scene, camera_names, camera_specs)
+        self._assembly_operations: list[dict[str, Any]] = []
         settings = _render_settings(profile)
         lighting_controls = _native_lighting(self.scene, profile)
         light_contract = _isaac_light_contract(profile)
@@ -1025,6 +1027,7 @@ class IsaacLabScene:
         )
         torch_stream.wait_stream(self.wp.get_stream(self.device))
         arrays = {}
+        self._assembly_operations = []
         for modality in self.modalities:
             key = "instance_id_segmentation_fast" if modality == "seg" else modality
             value = data.output[key].torch
@@ -1045,6 +1048,9 @@ class IsaacLabScene:
                 value = self._canonical_segmentation(value, data.info)
             elif modality == "normals":
                 value = value[..., :3].clone()
+                self._assembly_operations.append(
+                    assembly_operation("normal_channel_pack", modality, value)
+                )
             expected_dtype = {
                 "rgb": self.torch.uint8,
                 "depth": self.torch.float32,
@@ -1057,6 +1063,10 @@ class IsaacLabScene:
             if value.dtype != expected_dtype or tuple(value.shape) != shape:
                 raise RuntimeError(f"Noncanonical {modality} output shape or dtype")
             arrays[modality] = value.contiguous()
+            if not value.is_contiguous():
+                self._assembly_operations.append(
+                    assembly_operation("contiguous_pack", modality, arrays[modality])
+                )
         self._verify_no_step(before)
         actual_generation = int(self.sim.render_generation)
         if actual_generation != generation + 1:
@@ -1090,7 +1100,44 @@ class IsaacLabScene:
             raise RuntimeError(
                 "Native camera capture did not advance an observed Kit app-update event"
             )
+        self._last_capture_submission_id = actual_generation
+        self._last_capture_identity = {
+            "frame_id": self.metadata.get("frame_id"),
+            "time_s": self.metadata.get("time_s"),
+            "identity_scope": "frozen state used by the last successful render submission; not a renderer source timestamp",
+            "camera_names": [view["name"] for view in self.camera_specs],
+            "num_envs": self.num_envs,
+            "modalities": list(self.modalities),
+            "batch_order": "environment_then_camera",
+        }
+        self._last_assembly_operations = self._assembly_operations
         return arrays
+
+    def capture_evidence(self) -> dict[str, Any]:
+        """Return latest application identity and explicit assembly counters.
+
+        Returns:
+            Host-only evidence. Renderer GPU source timestamps and internal tile
+            assembly operations remain unavailable, rather than inferred zero.
+        """
+        if not hasattr(self, "_last_capture_identity"):
+            return {"status": "missing", "reason": "no_successful_render_submission"}
+        return {
+            "status": "recorded",
+            "render_submission_id": self._last_capture_submission_id,
+            "counter_provenance": "observed Isaac render_generation application render-request counter; not a native GPU exposure counter",
+            "logical_state": copy.deepcopy(self._last_capture_identity),
+            "renderer_source_frame_id": None,
+            "renderer_source_timestamp_s": None,
+            "renderer_source_missing_reason": "Pinned RTX camera API does not expose per-render-product GPU source frames/timestamps",
+            "assembly": {
+                "status": "recorded",
+                "operations": copy.deepcopy(self._last_assembly_operations),
+                "scope": "executed adapter buffer packing/materialization; color/geometry conversions and renderer-internal untile excluded",
+                "renderer_internal_operations": None,
+                "renderer_internal_missing_reason": "Isaac/Warp render-product untile operation and transfer totals are not exposed",
+            },
+        }
 
     def synchronize(self) -> None:
         """Complete renderer/Warp interop and all work on the selected CUDA device."""
@@ -1127,6 +1174,7 @@ class IsaacLabScene:
         self.camera._update_poses()
         self.synchronize()
         data = self._camera_data
+        self.metadata["last_capture_evidence"] = self.capture_evidence()
         self.metadata["intrinsics"] = data.intrinsic_matrices.torch.cpu().tolist()
         self.metadata["camera_positions"] = data.pos_w.torch.cpu().tolist()
         self.metadata["camera_quaternions_xyzw"] = (

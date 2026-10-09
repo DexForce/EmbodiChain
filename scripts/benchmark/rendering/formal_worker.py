@@ -496,6 +496,7 @@ def _save_batch(
     directory = output / "frames"
     directory.mkdir(parents=True, exist_ok=True)
     capture_index = manifest["capture_batches"]
+    capture_metadata = packet.to_metadata()
     manifest["capture_batches"] += 1
     manifest["captured_exposures"] += case.num_envs * case.cameras_per_env
     for env_id in manifest["representative_env_ids"]:
@@ -544,6 +545,8 @@ def _save_batch(
                 "physics_steps": 0,
                 "physical_validation": "not_performed",
                 "photometric_calibration": "not_qualified",
+                "observation_age": deepcopy(capture_metadata.get("observation_age")),
+                "capture_evidence": deepcopy(capture_metadata.get("adapter_evidence")),
             }
             record_path = directory / f"{stem}.json"
             write_json(
@@ -1090,26 +1093,66 @@ def run_worker(
         phase = "sample_persistence"
         if case.experiment_id not in {"R-01", "R-02"}:
             write_json(output / "capture.json", measured)
-            packet = _capture(adapter, case, last_state["frame_id"])
-            views = [last_state["cameras"][name] for name in _camera_names(case)]
-            _save_batch(
-                output,
-                manifest,
-                packet,
-                case,
-                scene,
-                config,
-                backend,
-                last_state,
-                views,
-                moving_ids,
+            sequence_capture = (
+                config.get("post_measurement_quality_capture") == "frozen_sequence_100"
             )
-            result["sample_capture"] = {
-                **packet.to_metadata(),
-                "outside_measured_window": True,
-                "replay_frame_id": last_state["frame_id"],
-            }
-            del packet
+            if sequence_capture and (replay is None or case.temporal_mode != "moving"):
+                raise ValueError(
+                    "Sequence quality capture requires the frozen moving replay"
+                )
+            states = (
+                [frame_at(replay, index) for index in range(100)]
+                if sequence_capture
+                else [last_state]
+            )
+            sample_records = []
+            for index, state in enumerate(states):
+                if sequence_capture:
+                    adapter.apply_state(state)
+                    # Warm history at frame zero just as in R-02. These renders,
+                    # readbacks and persistence are outside both timing and VRAM
+                    # measurement windows; the measured workload stays intact.
+                    if index == 0:
+                        for warmup_index in range(config["warmup_frames"]):
+                            _capture(adapter, case, warmup_index, device_only=True)
+                packet = _capture(adapter, case, state["frame_id"])
+                views = [state["cameras"][name] for name in _camera_names(case)]
+                _save_batch(
+                    output,
+                    manifest,
+                    packet,
+                    case,
+                    scene,
+                    config,
+                    backend,
+                    state,
+                    views,
+                    moving_ids,
+                )
+                sample_records.append(
+                    {
+                        **packet.to_metadata(),
+                        "outside_measured_window": True,
+                        "replay_frame_id": state["frame_id"],
+                    }
+                )
+                del packet
+            if sequence_capture:
+                result["quality_capture"] = {
+                    "mode": "frozen_sequence_100",
+                    "outside_measured_window": True,
+                    "outside_resource_window": True,
+                    "throughput_claim": False,
+                    "capture_batches": len(sample_records),
+                    "raw": sample_records,
+                }
+                write_json(output / "quality_capture.json", result["quality_capture"])
+                result["evidence"].append("quality_capture.json")
+                # Optional diagnostics continue from the actual final timed
+                # state, not the quality replay's final state.
+                adapter.apply_state(last_state)
+            else:
+                result["sample_capture"] = sample_records[0]
         if hasattr(adapter, "refresh_metadata"):
             adapter.refresh_metadata()
         result["renderer"] = deepcopy(adapter.metadata)
@@ -1137,7 +1180,10 @@ def run_worker(
                     "publication_eligible": False,
                     "reason": f"{type(exc).__name__}: {exc}",
                 }
-        if case.experiment_id == "R-02":
+        if (
+            case.experiment_id == "R-02"
+            or config.get("post_measurement_quality_capture") == "frozen_sequence_100"
+        ):
             result["video"] = _videos(output, manifest, replay["fps"])
             write_json(output / "video.json", result["video"])
             result["evidence"].append("video.json")

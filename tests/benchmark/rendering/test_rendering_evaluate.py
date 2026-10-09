@@ -266,12 +266,22 @@ def experiment(
     monkeypatch: pytest.MonkeyPatch,
     *,
     backends: tuple[str, ...] = ("embodichain",),
+    sequence_quality: bool = False,
 ) -> list[dict[str, Any]]:
     # Reuse the simulator-free worker integration fixture to produce the real
     # worker schema. It uses only fake device buffers and a fake NVML sampler.
     fixture = runpy.run_path(str(Path(__file__).with_name("test_formal_worker.py")))
     fixture["runtime"].__wrapped__(monkeypatch)
     config_path = fixture["config_file"](root / "inputs", case, measured=3, warmup=0)
+    if sequence_quality:
+        from scripts.benchmark.rendering.formal_runner import _case_policy
+
+        config = read_json_object(config_path)
+        config["post_measurement_quality_capture"] = "frozen_sequence_100"
+        config["quality_protocol"], config["quality_requirements"] = _case_policy(
+            case.to_dict()
+        )
+        write_json(config_path, config)
     rows = []
     for backend in backends:
         run_id = "r00_" + backend
@@ -474,6 +484,41 @@ def test_full_modality_moving_singleton_keeps_missing_hundred_frame_population(
     assert record["coverage"]["evaluated_samples"] == 1
     assert record["checks"]["temporal_evidence"]["status"] == "missing"
     assert offline["sequence_calls"][0][0] == 1
+
+
+@pytest.mark.parametrize("modalities", [("rgb",), ("rgb", "depth", "seg")])
+def test_moving_performance_can_bind_its_own_complete_quality_sequence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    offline: dict[str, Any],
+    modalities: tuple[str, ...],
+) -> None:
+    rows = experiment(
+        tmp_path,
+        RenderCase(
+            "R-03",
+            "calibration",
+            width=8,
+            height=6,
+            temporal_mode="moving",
+            modalities=modalities,
+        ),
+        monkeypatch,
+        sequence_quality=True,
+    )
+    raw = (tmp_path / "raw.jsonl").read_bytes()
+    evaluate.evaluate_experiment(tmp_path, spp=2, threads=1)
+    record = read_json_object(tmp_path / "quality.json")["runs"][0]
+    assert record["evaluation_kind"] == "sequence"
+    assert record["coverage"]["complete"] is True
+    assert record["coverage"]["expected_samples"] == 100
+    assert record["checks"]["temporal_evidence"]["status"] == "passed"
+    assert offline["sequence_calls"][0][0] == 100
+    assert (tmp_path / "raw.jsonl").read_bytes() == raw
+    assert (
+        json.loads((tmp_path / "runs.json").read_text())[0]["metrics"]
+        == rows[0]["metrics"]
+    )
 
 
 def test_missing_required_metric_is_retained_in_aggregate_denominator() -> None:

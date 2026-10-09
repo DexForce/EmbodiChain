@@ -555,6 +555,75 @@ def test_device_delivery_is_fresh_and_performs_no_host_image_copy(
         == adapter.metadata["no_step_evidence"]["after"]
     )
     assert adapter.metadata["physics_steps"] == 0
+    evidence = adapter.capture_evidence()
+    assert evidence["render_submission_id"] == 2
+    assert "application render-request counter" in evidence["counter_provenance"]
+    assert evidence["renderer_source_frame_id"] is None
+    assert evidence["renderer_source_timestamp_s"] is None
+    assert evidence["assembly"]["renderer_internal_operations"] is None
+    assert evidence["assembly"]["operations"] == [
+        {
+            "operation": "contiguous_pack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 36,
+        }
+    ]
+
+
+def test_normal_channel_materialization_has_explicit_assembly_evidence() -> None:
+    adapter, _ = _adapter()
+    adapter.modalities = ("rgb", "normals")
+    adapter.camera.data.output["normals"] = SimpleNamespace(
+        torch=torch.ones((2, 2, 3, 4), dtype=torch.float32)
+    )
+    adapter.metadata.update(frame_id=9, time_s=9 / 30)
+    adapter.render_device()
+    evidence = adapter.capture_evidence()
+    assert evidence["logical_state"]["frame_id"] == 9
+    assert evidence["logical_state"]["time_s"] == 9 / 30
+    assert evidence["logical_state"]["modalities"] == ["rgb", "normals"]
+    assert evidence["assembly"]["operations"] == [
+        {
+            "operation": "contiguous_pack",
+            "modality": "rgb",
+            "calls": 1,
+            "output_bytes": 36,
+        },
+        {
+            "operation": "normal_channel_pack",
+            "modality": "normals",
+            "calls": 1,
+            "output_bytes": 144,
+        },
+    ]
+
+
+def test_last_capture_identity_survives_unrendered_state_restoration() -> None:
+    from contextlib import nullcontext
+
+    adapter, _ = _adapter()
+    adapter.Sdf = SimpleNamespace(ChangeBlock=nullcontext)
+    adapter._objects = {obj["uid"]: obj for obj in adapter.scene["objects"]}
+    adapter._object_poses = {"cube": np.eye(4)}
+    adapter._geometry_radii = {"cube": 2.0}
+    adapter._publish_cameras = lambda specs: setattr(
+        adapter, "camera_specs", copy.deepcopy(specs)
+    )
+    frame = {
+        "frame_id": 99,
+        "time_s": 99 / 30,
+        "objects": {"cube": np.eye(4).tolist()},
+        "cameras": {view["name"]: copy.deepcopy(view) for view in adapter.camera_specs},
+    }
+    adapter.apply_state(frame)
+    adapter.render_device()
+    captured = adapter.capture_evidence()
+    adapter.apply_state({**frame, "frame_id": 3, "time_s": 3 / 30})
+    assert adapter.metadata["frame_id"] == 3
+    assert adapter.capture_evidence() == captured
+    assert captured["logical_state"]["frame_id"] == 99
+    assert captured["logical_state"]["time_s"] == 99 / 30
 
 
 def test_unmapped_pixels_and_absent_mapping_are_errors() -> None:

@@ -288,7 +288,27 @@ def test_pinned_runtime_hash_check_does_not_load_library(
     monkeypatch.setattr(
         backend, "_PHYSX_SHA256", hashlib.sha256(library.read_bytes()).hexdigest()
     )
-    assert backend.runtime_evidence(library)["automatic_downloads"] is False
+    source = {
+        "url": "https://github.com/haosulab/ManiSkill.git",
+        "vcs_info": {"commit_id": backend._MANISKILL_COMMIT},
+    }
+    monkeypatch.setattr(
+        backend.metadata,
+        "distribution",
+        lambda _: SimpleNamespace(
+            read_text=lambda _: json.dumps(source),
+            locate_file=lambda _: library,
+        ),
+    )
+    result = backend.runtime_evidence(library)
+    assert result["automatic_downloads"] is False
+    assert (
+        result["maniskill_source"]["vcs_info"]["commit_id"] == backend._MANISKILL_COMMIT
+    )
+    assert len(result["source_file_sha256"]) == 3
+    source["vcs_info"]["commit_id"] = "different-revision"
+    with pytest.raises(RuntimeError, match="frozen ManiSkill source commit"):
+        backend.runtime_evidence(library)
 
 
 def test_capture_adapter_uses_same_stream_and_never_steps_physics() -> None:

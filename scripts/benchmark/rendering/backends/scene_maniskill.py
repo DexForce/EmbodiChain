@@ -28,6 +28,7 @@ from copy import deepcopy
 import ctypes
 import hashlib
 from importlib import metadata
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -36,7 +37,8 @@ from scripts.benchmark.rendering.scenes import camera_intrinsics, load_scene
 
 __all__ = ["ManiSkillSceneReference", "raster_profile", "runtime_evidence"]
 
-_VERSIONS = {"mani-skill": "3.0.0b22", "sapien": "3.0.1"}
+_VERSIONS = {"mani-skill": "3.0.1", "sapien": "3.0.3"}
+_MANISKILL_COMMIT = "62ff3a5896b4d5b4cf0ac4c8d79afe600c9404a3"
 _PHYSX_VERSION = "105.1-physx-5.3.1.patch0"
 _PHYSX_SHA256 = "4c582a16509a71faf5592fe9708586dfcc7ab61ae932eabc1ddd81f290818706"
 
@@ -61,9 +63,10 @@ def raster_profile(shader: str = "default") -> dict[str, Any]:
     if shader not in {"default", "minimal"}:
         raise ValueError("Only default/minimal raster reference shaders are supported")
     return {
-        "id": f"maniskill_raster_{shader}-v2",
+        "id": f"maniskill_raster_{shader}-v3",
         "shader": shader,
         "packages": dict(_VERSIONS),
+        "maniskill_commit": _MANISKILL_COMMIT,
         "physx_version": _PHYSX_VERSION,
         "physx_library_sha256": _PHYSX_SHA256,
         "msaa": 1,
@@ -100,8 +103,28 @@ def runtime_evidence(library: Path) -> dict[str, Any]:
     digest = _sha256(library)
     if digest != _PHYSX_SHA256:
         raise ValueError("PhysX GPU library does not match the frozen release SHA256")
+    distribution = metadata.distribution("mani-skill")
+    source = json.loads(distribution.read_text("direct_url.json") or "{}")
+    if (
+        source.get("vcs_info", {}).get("commit_id") != _MANISKILL_COMMIT
+        or source.get("url", "").removesuffix(".git")
+        != "https://github.com/haosulab/ManiSkill"
+    ):
+        raise RuntimeError(
+            "Install the frozen ManiSkill source commit, not an unverified version-only wheel"
+        )
+    source_files = {
+        name: _sha256(Path(distribution.locate_file(name)))
+        for name in (
+            "mani_skill/envs/scene.py",
+            "mani_skill/sensors/camera.py",
+            "mani_skill/render/shaders.py",
+        )
+    }
     return {
         "packages": versions,
+        "maniskill_source": source,
+        "source_file_sha256": source_files,
         "library_path": str(library),
         "library_sha256": digest,
         "physx_version": _PHYSX_VERSION,

@@ -861,8 +861,10 @@ def evaluate_sequence(
             (0..99), camera matrices, and optional moving-instance transforms.
         references: Corresponding independent frames, or ``None`` for explicitly
             unqualified consistency diagnostics using candidate visibility.
-        protocol: Full frozen policy from :func:`default_protocol`, or an explicit
-            full temporal30-v1 selected before rendering. Timestamps are preserved.
+        protocol: Frozen full or RGB-only temporal policy selected before
+            rendering. RGB-only scoring uses independent reference depth/IDs
+            for correspondence; no candidate geometry quality is inferred.
+            Timestamps are preserved.
         output_dir: Optional directory for pair evidence and the aggregate JSON.
 
     Returns:
@@ -1011,10 +1013,11 @@ def evaluate_sequence(
         "Every frame must pass the independent frame protocol",
     )
     geometry_frames = references if references is not None else candidates
+    required_metrics = set(requirements["required_metrics"])
     pair_values = {
         name: []
         for name in policy["temporal_thresholds"]
-        if name != "temporal_silhouette_iou"
+        if name != "temporal_silhouette_iou" and name in required_metrics
     }
     for index in range(1, len(candidates)):
         pair = {"previous_frame": index - 1, "current_frame": index}
@@ -1048,27 +1051,32 @@ def evaluate_sequence(
                 np.sqrt(np.mean(rgb_change[static] ** 2))
             )
             pair["reprojection_rgb_mae"] = float(np.mean(np.abs(rgb_change)))
-            old_depth, _ = _geometry(candidates[index - 1])
-            new_depth, _ = _geometry(candidates[index])
-            valid = np.isfinite(old_depth[rows, cols]) & np.isfinite(new_depth[ys, xs])
-            if not valid.any():
-                raise ValueError(
-                    "No candidate depth on reference-visible correspondences"
+            if "temporal_depth_rmse_m" in required_metrics:
+                old_depth, _ = _geometry(candidates[index - 1])
+                new_depth, _ = _geometry(candidates[index])
+                valid = np.isfinite(old_depth[rows, cols]) & np.isfinite(
+                    new_depth[ys, xs]
                 )
-            # Compare geometry errors along the reference motion, which also
-            # avoids counting genuine camera/object translation as instability.
-            old_ref = np.asarray(geometry_frames[index - 1]["depth"])[rows, cols]
-            new_ref = np.asarray(geometry_frames[index]["depth"])[ys, xs]
-            if references is None:
-                depth_change = new_depth[ys[valid], xs[valid]] - projected_depth[valid]
-            else:
-                depth_change = (
-                    new_depth[ys[valid], xs[valid]] - new_ref[valid]
-                ) - depth_scale[valid] * (
-                    old_depth[rows[valid], cols[valid]] - old_ref[valid]
-                )
-            pair["temporal_depth_rmse_m"] = float(np.sqrt(np.mean(depth_change**2)))
-            pair["temporal_depth_coverage"] = float(valid.mean())
+                if not valid.any():
+                    raise ValueError(
+                        "No candidate depth on reference-visible correspondences"
+                    )
+                # Compare geometry errors along the reference motion, which also
+                # avoids counting genuine camera/object translation as instability.
+                old_ref = np.asarray(geometry_frames[index - 1]["depth"])[rows, cols]
+                new_ref = np.asarray(geometry_frames[index]["depth"])[ys, xs]
+                if references is None:
+                    depth_change = (
+                        new_depth[ys[valid], xs[valid]] - projected_depth[valid]
+                    )
+                else:
+                    depth_change = (
+                        new_depth[ys[valid], xs[valid]] - new_ref[valid]
+                    ) - depth_scale[valid] * (
+                        old_depth[rows[valid], cols[valid]] - old_ref[valid]
+                    )
+                pair["temporal_depth_rmse_m"] = float(np.sqrt(np.mean(depth_change**2)))
+                pair["temporal_depth_coverage"] = float(valid.mean())
             pair.update(
                 status="passed",
                 visible_correspondences=len(rows),
@@ -1109,6 +1117,13 @@ def evaluate_sequence(
         "Independent silhouettes absent" if value is None else "",
         aggregation="worst_frame",
     )
+    for name, rule in policy["temporal_thresholds"].items():
+        if name not in required_metrics:
+            result["metrics"][name] = {
+                **_metric(None, rule, 0, "modality_not_requested"),
+                "status": "not_requested",
+                "required": False,
+            }
     _finish(result)
     if output_dir is not None:
         destination = Path(output_dir)
@@ -1116,5 +1131,89 @@ def evaluate_sequence(
         pairs_path = destination / "temporal_pairs.json"
         write_json(pairs_path, result["pairs"])
         result["artifacts"].append(_artifact(pairs_path, "temporal_pairs"))
+        result["artifacts"].extend(_save_temporal_plots(destination, result, metadata))
         write_json(destination / "quality_evidence.json", result)
     return result
+
+
+def _save_temporal_plots(
+    directory: Path, result: dict[str, Any], metadata: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Export pair-level data and error curves without bridging missing pairs."""
+    import csv
+
+    from ._publication_figures import write_chart
+
+    metric_names = [
+        name for name in result["required_metrics"] if name != "temporal_silhouette_iou"
+    ]
+    rows = []
+    for pair in result["pairs"]:
+        frame = pair["current_frame"]
+        rows.append(
+            {
+                "run_id": metadata[0].get("run_id") if metadata else None,
+                "previous_frame": pair["previous_frame"],
+                "current_frame": frame,
+                "time_s": metadata[frame].get("time_s"),
+                "status": pair["status"],
+                "reason": pair.get("reason"),
+                "visible_correspondences": pair.get("visible_correspondences"),
+                **{name: pair.get(name) for name in metric_names},
+            }
+        )
+    csv_path = directory / "temporal_errors.csv"
+    with csv_path.open("w", newline="") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "run_id",
+                "previous_frame",
+                "current_frame",
+                "time_s",
+                "status",
+                "reason",
+                "visible_correspondences",
+                *metric_names,
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    artifacts = [_artifact(csv_path, "temporal_plot_data")]
+    for name in metric_names:
+        segments, points = [], []
+        for row in rows:
+            value = row.get(name)
+            if (
+                row["status"] == "passed"
+                and isinstance(value, (int, float))
+                and np.isfinite(value)
+            ):
+                points.append({"x": row["current_frame"], "y": value})
+            elif points:
+                segments.append({"label": name, "points": points})
+                points = []
+        if points:
+            segments.append({"label": name, "points": points})
+        svg, pdf = write_chart(
+            directory / name,
+            title=f"Temporal error: {name}",
+            x_label="Frozen replay frame",
+            y_label=f"{name} ({result['metrics'][name]['unit']})",
+            series=segments,
+            provenance={
+                "run_id": metadata[0].get("run_id") if metadata else None,
+                "scene_sha256": result["scene_sha256"],
+                "profile_sha256": result["profile_sha256"],
+                "protocol_sha256": result["protocol_sha256"],
+                "source": artifacts[0],
+                "pairs": rows,
+                "scope": {
+                    "statistics": "per-sequence errors, not independent performance repeats"
+                },
+            },
+        )
+        artifacts.extend(
+            [_artifact(svg, "temporal_error_svg"), _artifact(pdf, "temporal_error_pdf")]
+        )
+    return artifacts

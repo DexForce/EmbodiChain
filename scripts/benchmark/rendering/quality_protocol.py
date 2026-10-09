@@ -117,6 +117,14 @@ def protocol_by_id(protocol_id: str) -> dict[str, Any]:
     policy["id"] = protocol_id
     if protocol_id == "pure-render-quality/temporal30-v1":
         policy["sequence_dt_s"] = 1 / 30
+    elif protocol_id == "pure-render-quality/rgb-temporal30-v1":
+        policy.update(
+            sequence_dt_s=1 / 30,
+            requested_modalities=["rgb"],
+            assessed_modalities=["rgb"],
+            unassessed_modalities=[],
+            temporal_geometry_source="independent_reference_only",
+        )
     elif protocol_id in _MODALITY_POLICIES:
         requested = _MODALITY_POLICIES[protocol_id]
         policy["requested_modalities"] = list(requested)
@@ -140,7 +148,9 @@ def protocol_for_modalities(
         modalities: Requested outputs: RGB, RGB+depth, RGB+normals, or full
             RGB/depth/segmentation. Ordering does not change quality semantics.
         temporal_dt_s: ``None`` for frame quality; full sequences may declare
-            exactly ``1/60`` or ``1/30``. Captured timestamps are never converted.
+            exactly ``1/60`` or ``1/30``. RGB-only sequences support ``1/30``
+            using independent reference geometry for visibility and motion.
+            Captured timestamps are never converted.
 
     Returns:
         Frozen policy with unchanged numeric thresholds for all required metrics.
@@ -154,6 +164,8 @@ def protocol_for_modalities(
         if temporal_dt_s == 1 / 30:
             return protocol_by_id("pure-render-quality/temporal30-v1")
         raise ValueError("Full temporal quality supports only declared 30 or 60 Hz")
+    if selected == {"rgb"} and temporal_dt_s == 1 / 30:
+        return protocol_by_id("pure-render-quality/rgb-temporal30-v1")
     if temporal_dt_s is not None:
         raise ValueError("Temporal qualification requires full RGB/depth/segmentation")
     for protocol_id, required in _MODALITY_POLICIES.items():
@@ -167,7 +179,9 @@ def protocol_requirements(protocol_id: str, kind: str = "frame") -> dict[str, An
 
     Args:
         protocol_id: Known policy identifier.
-        kind: ``frame`` or ``sequence``; sequence quality requires full modalities.
+        kind: ``frame`` or ``sequence``. RGB temporal quality uses independent
+            reference depth/IDs for correspondences without claiming output
+            depth or segmentation quality.
 
     Returns:
         Protocol hash, exact required metric/check lists, and modality scope.
@@ -198,8 +212,15 @@ def protocol_requirements(protocol_id: str, kind: str = "frame") -> dict[str, An
             checks.extend(["geometry_semantics", "reference_geometry_integrity"])
         elif "depth" in requested:
             checks.extend(["depth_semantics", "reference_depth_semantics"])
-    elif kind == "sequence" and set(requested) == {"rgb", "depth", "seg"}:
-        metrics = list(policy["temporal_thresholds"])
+    elif kind == "sequence" and (
+        set(requested) == {"rgb", "depth", "seg"}
+        or protocol_id == "pure-render-quality/rgb-temporal30-v1"
+    ):
+        metrics = (
+            list(policy["temporal_thresholds"])
+            if "depth" in requested
+            else ["static_region_flicker", "reprojection_rgb_mae"]
+        )
         checks = [
             "scene_profile_fixed",
             "sequence_length",
