@@ -19,6 +19,9 @@
 from __future__ import annotations
 
 import random
+import json
+from unittest.mock import Mock
+import importlib
 
 import numpy as np
 import pytest
@@ -82,6 +85,29 @@ def test_learning_env_rejects_profile(tmp_path):
 
     with pytest.raises(ValueError, match="--profile_output requires --profile"):
         train_from_config(str(config_path), profile_output="prof.json")
+
+
+@pytest.mark.parametrize("renderer", [None, "no-render", "hybrid"])
+def test_training_passes_only_explicit_renderer_override(
+    tmp_path, monkeypatch, renderer
+):
+    module = importlib.import_module("embodichain.learning.rl.train")
+    trainer = {"gym_config": "task.yaml", "device": "cpu"}
+    if renderer is not None:
+        trainer["renderer"] = renderer
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps({"trainer": trainer, "policy": {}, "algorithm": {}})
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+    build_runtime = Mock(side_effect=RuntimeError("stop at environment construction"))
+    monkeypatch.setattr(module, "build_gym_policy_runtime", build_runtime)
+
+    with pytest.raises(RuntimeError, match="stop at environment construction"):
+        train_from_config(str(config_path))
+
+    assert build_runtime.call_args.kwargs["renderer"] == renderer
 
 
 def test_camera_recording_defaults_to_the_run_directory(tmp_path):

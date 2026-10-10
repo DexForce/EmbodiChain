@@ -4,7 +4,6 @@ trainer:
   seed: 42
   device: cuda:0
   headless: true
-  renderer: hybrid
   num_envs: 4096
   iterations: 10000
   buffer_size: 24

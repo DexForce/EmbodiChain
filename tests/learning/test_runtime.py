@@ -28,6 +28,8 @@ from embodichain.learning.rl.runtime import (
     _build_gym_environment,
     build_gym_policy_runtime,
 )
+from embodichain.lab.sim import SimulationManagerCfg
+from embodichain.lab.sim.cfg import RenderCfg
 
 
 def _policy_config() -> dict:
@@ -99,6 +101,42 @@ def test_gym_environment_applies_runtime_overrides(tmp_path, monkeypatch):
     assert runtime.env_cfg.sim_cfg.sim_device == torch.device("cpu")
     assert runtime.env_cfg.sim_cfg.headless is True
     assert runtime.env_cfg.sim_cfg.render_cfg.renderer == "hybrid"
+
+
+@pytest.mark.parametrize("authored", ["auto", "hybrid", "no-render"])
+@pytest.mark.parametrize("override", [None, "fast-rt"])
+def test_gym_runtime_preserves_task_renderer_when_override_is_omitted(
+    tmp_path, monkeypatch, authored, override
+) -> None:
+    gym_config = tmp_path / "gym.yaml"
+    gym_config.write_text("id: Example\n", encoding="utf-8")
+    env_cfg = SimpleNamespace(
+        num_envs=1,
+        sim_cfg=SimulationManagerCfg(render_cfg=RenderCfg(renderer=authored)),
+    )
+    original_render_cfg = env_cfg.sim_cfg.render_cfg
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.config_to_cfg",
+        lambda value, manager_modules: env_cfg,
+    )
+    monkeypatch.setattr(
+        "embodichain.learning.rl.runtime.build_env",
+        lambda env_id, base_env_cfg: GymEnvironment(),
+    )
+
+    runtime = _build_gym_environment(
+        {"trainer": {"gym_config": "gym.yaml"}},
+        simulation_device=torch.device("cpu"),
+        num_envs=None,
+        headless=True,
+        renderer=override,
+        gpu_id=0,
+        config_dir=tmp_path,
+    )
+
+    assert runtime.env_cfg.sim_cfg.render_cfg.renderer == (override or authored)
+    if override is None:
+        assert runtime.env_cfg.sim_cfg.render_cfg is original_render_cfg
 
 
 @pytest.mark.parametrize(
