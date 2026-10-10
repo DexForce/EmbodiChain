@@ -352,7 +352,11 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
     For ``solver_type='dexuni'``, the current DexSim contract keeps expert
     options under ``vbd_options``, ``mujoco_options`` and
     ``collision_options``; use ``joint_mode`` and ``contact_mode`` for the
-    coupled dispatch policy.
+    coupled dispatch policy. ``coupling='two_way'`` enables contact reactions
+    on dynamically integrated articulations. Optional ``coupling_options``
+    accepts ``mass_scale``, ``proxy_relaxation`` and ``iterations``. Two-way
+    coupling requires ``joint_mode='dynamic'`` and does not support full-surface
+    rigid-soft contacts; DexSim validates these combinations.
     """
 
     collision_cfg: NewtonCollisionPipelineCfg | Mapping[str, Any] | None = field(

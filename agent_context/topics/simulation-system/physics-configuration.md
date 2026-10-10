@@ -6,7 +6,7 @@ Return to the [simulation overview](simulation-system.md) for lifecycle entry.
 ## Backend, solver and device resolution
 
 `SimulationManagerCfg.physics_cfg` selects the backend by config type.
-`cfg/simulation.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
+`cfg/physics.py` owns `PhysicsBackendCfg`, `DefaultPhysicsCfg` and
 `NewtonPhysicsCfg`; do not add another backend string to the manager config.
 Gym's file-owned selector and composition rules belong to
 [environment configuration](../env-framework/configuration.md).
@@ -26,7 +26,7 @@ The concrete solver is resolved from the complete Spawn scene, then exposed
 through `NewtonPhysicsBackend.solver_type`. Do not guess a solver-specific robot
 preset while it is unresolved. Gradient mode requires an explicit
 `semi_implicit` solver. Read exact solver options/defaults in
-`cfg/simulation.py` and the installed DexSim config types; do not substitute a
+`cfg/physics.py` and the installed DexSim config types; do not substitute a
 hardcoded fallback when an expected DexSim API is absent.
 
 `collision_cfg` owns the external Newton contact pipeline. Its
@@ -38,10 +38,19 @@ external-pipeline tuning does not configure internal contact generation.
 The manual differentiable trajectory requires the external pipeline; see
 [differentiable environment](../differentiable-env/differentiable-env.md).
 
+DexUni preserves its one-way contact policy unless `coupling="two_way"` is
+explicit. Two-way feedback requires dynamically integrated MuJoCo joints and
+rejects full-surface rigid-soft contacts. Prescribed kinematic trajectories
+cannot respond to contact reactions. Forward solver expert options through
+`NewtonPhysicsCfg.solver_cfg`; DexSim owns their validation and dispatch.
+Articulation gravity compensation and passive damping are separate creation
+settings; see [articulation adapters](articulation-adapters.md).
+
 Capability checks remain explicit: Default owns native rigid constraints and
 Newton deformables are separate. Contact support is rechecked after Newton
-solver resolution; DexUni and MuJoCo-Warp on CPU do not expose the supported
-ContactQuery path. See `physics/` and [sensors](../sensor-system/sensor-system.md).
+solver resolution; capabilities depend on the concrete DexUni contact path
+and whether MuJoCo runs on CUDA. See `physics/` and the
+[contact capability contract](../sensor-system/lifecycle.md#contact-queries).
 
 ## Sparse source physics
 

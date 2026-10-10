@@ -1004,6 +1004,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_gravity_compensation": None,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
 
