@@ -43,6 +43,13 @@ config's `enable_sensor` switch to false; this keeps reusable embodiment sensor
 declarations available to the config while skipping their instantiation and
 image acquisition.
 
+Environment construction predicts native render demand before creating the
+World, so auto can use NoRender for headless tasks without visual consumers.
+Custom camera/visual code selects an explicit native renderer or reserves
+rendering through `BaseEnv._requires_native_renderer()`.
+See [render selection](../simulation-system/rendering.md#norender-initialization)
+for precedence, manager cameras, Viser and filter ordering.
+
 ## Timing contract
 
 `BaseEnv._configure_timing()` resolves `EnvCfg` before constructing the scene:

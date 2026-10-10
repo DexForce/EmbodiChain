@@ -43,6 +43,12 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 
 ### Visual (`visual.py`)
 
+Gym filters disabled sensor and configured visual-randomization terms before
+predicting renderer demand. If the World uses NoRender, it also skips built-in
+native visual effects, including deterministic material setters; physical
+randomization remains active. See the owning
+[render selection contract](../simulation-system/rendering.md#norender-initialization).
+
 | Function | Target | Key params |
 |---|---|---|
 | `set_rigid_object_visual_material` | Deterministic material set | `mat_cfg` (`VisualMaterialCfg` or dict) |
