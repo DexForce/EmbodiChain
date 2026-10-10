@@ -335,6 +335,28 @@ EXPERIMENT_ROOT=/path/to/invocation/R-04/experiment-timestamp
   --experiment-root "$EXPERIMENT_ROOT" --spp 256 --threads 4 --seed 0
 ```
 
+An optional, fixed reference-only precision policy can reuse a valid 4096-spp
+cache and try 16384 spp only when its independent-repeat noise exceeds 0.01:
+
+```bash
+"$REFERENCE_PYTHON" -m scripts.benchmark.rendering.evaluate \
+  --experiment-root "$EXPERIMENT_ROOT" --spp 4096 --threads 8 --seed 0 \
+  --reference-precision-policy reference-noise/4096-16384-v1
+```
+
+This opt-in freezes `reference_precision/policy.json` before acquisition. Both
+rungs use seeds 0/1, eight threads, unchanged physical reference settings and the
+same full-frame display-sRGB RMSE threshold. Selection recomputes `rgb` versus
+`rgb_repeat` from checksum-verified NPZ files before loading candidate pixels. It
+uses the first passing rung, retains every attempted source and decision, and
+keeps a failed 16384-spp result unqualified. Missing, corrupt or inconsistent
+evidence stops the evaluation and retains a failure receipt without escalation.
+There is one selected alias per exposure; repeated history states retain their
+original IDs/timestamps. Report-only rebuilding checks all attempt hashes,
+generator/recomputed noise agreement and the fixed selection rule without NumPy.
+The default remains single-precision evaluation; no quality or calibration
+threshold changes, fitted references, or performance measurements are introduced.
+
 `--run-id` is repeatable for staged evaluation. Supply
 `--calibration-evidence /path/inside/experiment/calibration.json` only when real,
 case/backend/reference/profile-bound lighting/colour evidence exists. Scene approval

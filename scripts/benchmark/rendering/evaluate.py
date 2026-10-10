@@ -42,7 +42,7 @@ from scripts.benchmark.core.artifacts import (
     stable_hash,
     write_json,
 )
-from scripts.benchmark.rendering import reference
+from scripts.benchmark.rendering import reference, reference_precision
 from scripts.benchmark.rendering.formal import RenderCase, view_fingerprint
 from scripts.benchmark.rendering.quality_protocol import (
     protocol_for_modalities,
@@ -871,6 +871,7 @@ def _evaluate_run(
     run: dict[str, Any],
     settings: dict[str, int],
     calibration: dict[str, Any] | None,
+    precision: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from scripts.benchmark.rendering.quality import evaluate_frame, evaluate_sequence
 
@@ -963,13 +964,26 @@ def _evaluate_run(
     reports, bindings = [], []
     reference_ids = set()
     reference_artifacts = {}
+    precision_passed = True
 
     def inputs(item: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        nonlocal precision_passed
+        # Precision selection observes only independent repeats. It completes
+        # before loading candidate pixels or invoking any quality metric.
+        if precision is not None:
+            ref, binding = reference_precision.select_reference(
+                root,
+                precision["directory"],
+                precision["policy"],
+                lambda selected: _independent_reference(root, run, item, selected),
+            )
+            precision_passed &= ref["reference_validation"]["passed"]
         candidate = _candidate(item)
         candidate["metadata"]["run_id"] = row["run_id"]
         for key in ("effective_lighting_controls", "postprocess_evidence"):
             candidate["metadata"][key] = deepcopy(run["renderer"].get(key))
-        ref, binding = _independent_reference(root, run, item, settings)
+        if precision is None:
+            ref, binding = _independent_reference(root, run, item, settings)
         bindings.append(binding)
         if ref is not None:
             reference_ids.add(ref["reference_provenance"]["reference_id"])
@@ -1064,6 +1078,16 @@ def _evaluate_run(
             "reason": "No quality policy assesses: "
             + ", ".join(contract["unassessed_modalities"]),
         }
+    if precision is not None:
+        checks["reference_precision"] = {
+            "status": "passed" if precision_passed else "failed",
+            "reason": (
+                None
+                if precision_passed
+                else "Independent reference noise still exceeds 0.01 at the fixed 16384 spp cap"
+            ),
+            "policy_id": reference_precision.PRECISION_POLICY_ID,
+        }
     statuses = {**checks, **metrics}
     failed = [name for name, item in statuses.items() if item["status"] == "failed"]
     missing = [name for name, item in statuses.items() if item["status"] == "missing"]
@@ -1115,6 +1139,17 @@ def _evaluate_run(
     if history:
         result["timed_history"] = history
         result["original_quality_contract"] = original_contract
+    if precision is not None:
+        result["reference_precision"] = {
+            "policy": precision["policy"],
+            "evaluation_inputs": precision["evaluation_inputs"],
+            "bindings": _artifact(
+                root,
+                directory / "reference_bindings.json",
+                "reference_precision_bindings",
+            ),
+        }
+        result["artifacts"].extend(result["reference_precision"].values())
     proof_path = write_json(directory / "aggregate.json", result)
     result["artifacts"].append(_artifact(root, proof_path, "aggregate_quality_proof"))
     return result
@@ -1129,6 +1164,7 @@ def evaluate_experiment(
     run_ids: list[str] | None = None,
     calibration_evidence: Path | None = None,
     history_evidence: list[Path] | None = None,
+    reference_precision_policy: str | None = None,
 ) -> Path:
     """Evaluate selected completed runs, append evidence, and rebuild the report.
 
@@ -1146,6 +1182,9 @@ def evaluate_experiment(
         history_evidence: Checksummed fresh-worker history manifests under the
             experiment root, one per selected original moving performance run.
             They replace only quality inputs; original raw timing is preserved.
+        reference_precision_policy: Optional fixed reference-only 4096/16384 spp
+            selection. Requires explicitly supplied spp=4096, seed=0, threads=8;
+            the default single-precision evaluation remains unchanged.
 
     Returns:
         Path of the rebuilt Markdown report. Timing fields and raw.jsonl bytes
@@ -1159,6 +1198,11 @@ def evaluate_experiment(
     ):
         if type(value) is not int or value < minimum:
             raise ValueError(f"{name} must be an integer >= {minimum}")
+    settings = {"spp": spp, "threads": threads, "seed": seed}
+    if reference_precision_policy is not None:
+        reference_precision.validate_precision_settings(
+            reference_precision_policy, settings
+        )
     rows = read_json(root / "runs.json")
     if (
         not isinstance(rows, list)
@@ -1228,7 +1272,17 @@ def evaluate_experiment(
     )
     event_dir = directory / f"evaluation_{version:04d}"
     event_dir.mkdir(exist_ok=False)
-    settings = {"spp": spp, "threads": threads, "seed": seed}
+    precision = None
+    if reference_precision_policy is not None:
+        precision = {
+            "directory": event_dir / "reference_precision",
+            "policy": reference_precision.freeze_precision_policy(
+                root,
+                event_dir / "reference_precision",
+                settings,
+                reference_precision_policy,
+            ),
+        }
     evaluation_id = f"evaluation_{version:04d}"
     write_json(
         event_dir / "inputs.json",
@@ -1240,6 +1294,9 @@ def evaluate_experiment(
             "run_ids": sorted(selected),
             "calibration_evidence": calibration_record,
             "history_evidence": history_records,
+            **(
+                {"reference_precision_policy": precision["policy"]} if precision else {}
+            ),
             "source_sha256": {
                 name: _sha256(Path(__file__).with_name(name))
                 for name in (
@@ -1250,6 +1307,7 @@ def evaluate_experiment(
                     "_publication_figures.py",
                     "reference.py",
                     "calibration.py",
+                    *(("reference_precision.py",) if precision else ()),
                     *(
                         ("history_contract.py", "frozen_source.py")
                         if history_records
@@ -1259,11 +1317,15 @@ def evaluate_experiment(
             },
         },
     )
+    if precision is not None:
+        precision["evaluation_inputs"] = _artifact(
+            root, event_dir / "inputs.json", "reference_precision_evaluation_inputs"
+        )
     records = {record["run_id"]: record for record in previous.get("runs", [])}
     evaluated = {}
     for index, run in enumerate(runs):
         record = _evaluate_run(
-            root, event_dir / f"run_{index:04d}", run, settings, calibration
+            root, event_dir / f"run_{index:04d}", run, settings, calibration, precision
         )
         if calibration_record is not None:
             record["artifacts"].append(calibration_record)
@@ -1350,6 +1412,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", action="append", dest="run_ids")
     parser.add_argument("--calibration-evidence", type=Path)
     parser.add_argument("--history-evidence", type=Path, action="append")
+    parser.add_argument(
+        "--reference-precision-policy",
+        choices=[reference_precision.PRECISION_POLICY_ID],
+        help="Opt into fixed reference-only 4096/16384 spp selection; requires --spp 4096 --seed 0 --threads 8",
+    )
     args = parser.parse_args(argv)
     print(
         evaluate_experiment(
@@ -1360,6 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
             run_ids=args.run_ids,
             calibration_evidence=args.calibration_evidence,
             history_evidence=args.history_evidence,
+            reference_precision_policy=args.reference_precision_policy,
         )
     )
     return 0

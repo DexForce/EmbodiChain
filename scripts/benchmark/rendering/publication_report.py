@@ -45,6 +45,7 @@ from .quality_protocol import (
     protocol_for_modalities,
     protocol_requirements,
 )
+from .reference_precision import precision_quality_reasons
 
 __all__ = ["rebuild_report"]
 
@@ -593,6 +594,7 @@ def _quality_evidence(
     ):
         reasons.append("quality_checks")
     reasons.extend(_quality_policy_reasons(record))
+    reasons.extend(precision_quality_reasons(root, record))
     try:
         history_policy = protocol_by_id(record.get("protocol_id", "")).get(
             "history_contract"
