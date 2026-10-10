@@ -916,17 +916,31 @@ class BaseEnv(gym.Env):
 
         Args:
             seed: The seed for the random number generator. Defaults to None, in which case the seed is not set.
-            options: Additional options for resetting the environment. This can include:
+            options: Additional reset options. A trusted host may supply a
+                zero-argument ``scene_expansion_prepare`` callback for B=1.
+                It runs after reset events and before objective initialization
+                and the final observation. The callback is not forwarded to
+                observation or event functors.
 
         Returns:
             A tuple containing the observations and infos.
         """
+        options = {} if options is None else dict(options)
+        scene_prepare = options.pop("scene_expansion_prepare", None)
+        if scene_prepare is not None:
+            if not callable(scene_prepare):
+                raise TypeError("scene_expansion_prepare must be callable.")
+            reset_selection = torch.as_tensor(options.get("reset_ids", [0]))
+            if (
+                self.num_envs != 1
+                or reset_selection.shape != (1,)
+                or reset_selection.dtype not in (torch.int32, torch.int64)
+                or not bool((reset_selection == 0).all())
+            ):
+                raise ValueError("Scene preparation requires a complete B=1 reset.")
         if seed is not None:
             seed = self._set_seed(seed)
         super().reset(seed=seed)
-
-        if options is None:
-            options = dict()
 
         with self._profiler.section("reset", is_root=True):
             reset_ids = options.get(
@@ -955,6 +969,9 @@ class BaseEnv(gym.Env):
             # Reset hook for user to perform any custom reset logic.
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
+            if scene_prepare is not None:
+                with self._profiler.section("scene_expansion_prepare"):
+                    scene_prepare()
             self._reset_physical_objective(reset_ids)
             elapsed_ids = torch.as_tensor(reset_ids, dtype=torch.long).to(
                 device=self._elapsed_steps.device, non_blocking=True

@@ -61,6 +61,7 @@ registration, and simulation assembly. Gym stepping remains in
    :maxdepth: 1
 
    embodichain.lab.task_program.integrations.scene_expansion
+   embodichain.lab.task_program.integrations.simulation
 
 .. autoclass:: TaskProgramEnvironmentAdapter
    :members:
