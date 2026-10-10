@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
@@ -50,7 +50,7 @@ from embodichain.lab.sim.cfg import (
     LightCfg,
 )
 from embodichain.lab.sim.objects import Robot
-from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
+from embodichain.lab.sim.sensors import BaseSensor, Camera, SensorCfg
 from embodichain.lab.sim.types import EnvObs, EnvAction
 from embodichain.lab.gym.envs import BaseEnv, EnvCfg
 from embodichain.lab.gym.envs._startup_summary import format_functor_summary
@@ -79,6 +79,7 @@ from embodichain.lab.gym.envs.managers import (
     ActionManager,
     ActionTrace,
     DatasetManager,
+    FunctorCfg,
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
@@ -87,6 +88,7 @@ from embodichain.lab.gym.utils.gym_utils import (
 )
 from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
 from embodichain.utils import configclass, logger
+from embodichain.utils.string import string_to_callable
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
@@ -727,7 +729,8 @@ class EmbodiedEnv(BaseEnv):
     def _init_sim_state(self, **kwargs):
         """Initialize the simulation state at the beginning of scene creation."""
 
-        self._apply_functor_filter()
+        if not self.sim.has_native_renderer:
+            self._filter_native_visual_functors()
 
         # create event manager
         self.cfg: EmbodiedEnvCfg
@@ -826,15 +829,114 @@ class EmbodiedEnv(BaseEnv):
             if name.startswith("randomize_")
         }
         if self.cfg.filter_visual_rand and self.cfg.events:
-            # Iterate through all attributes of the events object
-            for attr_name in dir(self.cfg.events):
-                attr = getattr(self.cfg.events, attr_name)
-                if isinstance(attr, EventCfg):
-                    if attr.func.__name__ in functors_to_remove:
-                        logger.log_info(
-                            f"Filtering out visual randomization functor: {attr.func.__name__}"
-                        )
-                        setattr(self.cfg.events, attr_name, None)
+            for collection, name, term in self._iter_configured_functors():
+                if collection is not self.cfg.events:
+                    continue
+                func = self._configured_functor_callable(term)
+                if getattr(func, "__name__", None) in functors_to_remove:
+                    logger.log_info(
+                        f"Filtering out visual randomization functor: {func.__name__}"
+                    )
+                    if isinstance(collection, Mapping):
+                        collection[name] = None
+                    else:
+                        setattr(collection, name, None)
+
+    def _iter_configured_functors(
+        self,
+    ) -> Iterable[tuple[object, str, FunctorCfg | dict[str, Any]]]:
+        """Iterate terms of managers that will actually be initialized."""
+        for manager_name in ("events", "observations", "rewards", "actions", "dataset"):
+            if manager_name == "dataset" and getattr(
+                self.cfg, "filter_dataset_saving", False
+            ):
+                continue
+            collection = getattr(self.cfg, manager_name, None)
+            if collection is None:
+                continue
+            items = (
+                collection.items()
+                if isinstance(collection, Mapping)
+                else vars(collection).items()
+            )
+            for name, term in items:
+                if isinstance(term, FunctorCfg) or (
+                    manager_name == "dataset"
+                    and isinstance(term, dict)
+                    and "func" in term
+                ):
+                    yield collection, name, term
+
+    @staticmethod
+    def _configured_functor_callable(
+        term: FunctorCfg | dict[str, Any],
+    ) -> Callable[..., Any]:
+        """Resolve a configured function/class without constructing it."""
+        func = term["func"] if isinstance(term, dict) else term.func
+        return string_to_callable(func) if isinstance(func, str) else func
+
+    def _setup_scene(self, **kwargs) -> None:
+        """Filter configuration independently of the overridable demand hook."""
+        self._apply_functor_filter()
+        super()._setup_scene(**kwargs)
+
+    def _requires_native_renderer(self) -> bool:
+        """Predict cameras from the already-filtered manager configuration."""
+        from embodichain.lab.gym.envs.managers.record import (
+            record_camera_data,
+            validation_cameras,
+        )
+        from embodichain.lab.sim import SimulationManager
+
+        if super()._requires_native_renderer():
+            return True
+        if self.cfg.enable_sensor:
+            for sensor_cfg in self.cfg.sensor:
+                sensor_factory = SimulationManager.SUPPORTED_SENSOR_TYPES.get(
+                    sensor_cfg.sensor_type
+                )
+                if isinstance(sensor_factory, type) and issubclass(
+                    sensor_factory, Camera
+                ):
+                    return True
+        for _, _, term in self._iter_configured_functors():
+            func = self._configured_functor_callable(term)
+            if not isinstance(func, type):
+                continue
+            if issubclass(func, record_camera_data):
+                return True
+            if issubclass(func, validation_cameras):
+                params = (
+                    term.get("params", {}) if isinstance(term, dict) else term.params
+                )
+                if params.get("cameras", []):
+                    return True
+        return False
+
+    def _filter_native_visual_functors(self) -> None:
+        """Skip built-in native visual effects when the World uses NoRender."""
+        from embodichain.lab.gym.envs.managers.randomization import visual
+
+        visual_functions = {getattr(visual, name) for name in visual.__all__}
+        for collection, name, term in self._iter_configured_functors():
+            func = self._configured_functor_callable(term)
+            if any(func is builtin for builtin in visual_functions) or (
+                isinstance(func, type)
+                and issubclass(
+                    func,
+                    (
+                        visual.randomize_visual_material,
+                        visual.randomize_indirect_lighting,
+                    ),
+                )
+            ):
+                logger.log_info(
+                    f"Skipping native visual functor '{name}' in no-render mode."
+                )
+                if isinstance(collection, Mapping):
+                    collection[name] = None
+                else:
+                    setattr(collection, name, None)
 
     def _hook_after_sim_step(
         self,
@@ -2462,6 +2564,8 @@ class EmbodiedEnv(BaseEnv):
 
     def _setup_lights(self) -> None:
         """Setup the lights in the environment."""
+        if not self.sim.has_native_renderer:
+            return
         # Set direct lights.
         for cfg in self.cfg.light.direct:
             self.sim.add_light(cfg=cfg)

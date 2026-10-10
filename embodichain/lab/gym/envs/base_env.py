@@ -19,6 +19,7 @@ from __future__ import annotations
 import zlib
 
 import math
+from copy import deepcopy
 from collections.abc import Mapping
 from numbers import Integral, Real
 
@@ -141,7 +142,9 @@ class BaseEnv(gym.Env):
         cfg: EnvCfg,
         **kwargs,
     ):
-        self.cfg = cfg
+        # Renderer resolution and manager filtering belong to this instance.
+        # Reusing the authored configuration must still start from auto.
+        self.cfg = deepcopy(cfg)
         self._initialization_summary_logged = False
 
         # the number of envs to be simulated in parallel.
@@ -527,14 +530,36 @@ class BaseEnv(gym.Env):
             self._camera_group_ids: List[int] = []
         self._camera_group_ids.append(group_id)
 
+    def _requires_native_renderer(self) -> bool:
+        """Predict native render consumers before constructing the World.
+
+        Subclasses should extend this hook for cameras created by custom code.
+        It must not construct sensors or consume scene metadata.
+
+        Returns:
+            Whether the environment needs native rendering.
+        """
+        return (
+            not self.sim_cfg.headless
+            or self.sim_cfg.visualization.backend != "none"
+            or getattr(self.sim_cfg.physics_cfg, "sync_to_renderer", None) is True
+        )
+
     def _setup_scene(self, **kwargs):
         """Declare physical scene topology without consuming runtime metadata."""
         # Init sim manager. We want to open the GUI window after the scene is
         # materialized, so construct the manager in headless mode first.
+        requires_native_renderer = self._requires_native_renderer()
         headless = self.sim_cfg.headless
         self.sim_cfg.headless = True
-        self.sim = SimulationManager(self.sim_cfg, defer_startup_summary=True)
-        self.sim_cfg.headless = headless
+        try:
+            self.sim = SimulationManager(
+                self.sim_cfg,
+                defer_startup_summary=True,
+                requires_native_renderer=requires_native_renderer,
+            )
+        finally:
+            self.sim_cfg.headless = headless
 
         logger.log_info(
             f"Initializing {self.num_envs} environments on {self.sim_cfg.device}."

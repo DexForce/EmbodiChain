@@ -59,3 +59,17 @@ def test_manual_docs_build_trusts_checkout_before_architecture_generation() -> N
     assert (
         'git config --global --add safe.directory "$GITHUB_WORKSPACE"' in trust_command
     )
+
+
+def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install test package")
+    commands = install["run"].split("pip install")[1:]
+
+    # Each invocation must override any mirror inherited from the runner image.
+    assert commands
+    assert all("--index-url https://pypi.org/simple" in command for command in commands)
+    package_install = next(command for command in commands if "${package}" in command)
+    assert "--extra-index-url http://pyp.open3dv.site:2345/simple/" in package_install
+    assert "--trusted-host pyp.open3dv.site" in package_install
+    assert "--extra-index-url https://download.blender.org/pypi/" in package_install

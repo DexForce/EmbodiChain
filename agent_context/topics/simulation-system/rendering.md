@@ -7,11 +7,30 @@ processing and readiness reporting. Return to the
 ## NoRender initialization
 
 `RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires
-headless mode. The manager skips background, light and visual-material setup,
-keeps physical ground, and skips Newton render-state publication. DexSim uses
-its existing package and device-free NoRender engine. Native camera and window
-operations require a native renderer. Checkpoint evaluation with `--viewer`
-defaults to Hybrid when the saved training configuration uses NoRender.
+headless mode. Task environments preflight native render demand before World
+construction: enabled Camera/StereoCamera subclasses, built-in recording or
+nonempty validation cameras, the original window intent, Viser, forced Newton
+render synchronization, and custom environment demand hooks reserve
+rendering. Existing sensor/visual filters run before preflight; disabled dataset
+managers do not contribute demand. Contact-only environments do not require it.
+
+`BaseEnv._requires_native_renderer()` is the extension hook. Its result reaches
+`SimulationManager(..., requires_native_renderer=...)` before Gym temporarily
+sets headless for scene setup. With auto, no global default override and demand
+explicitly false, the manager selects NoRender without probing the GPU. Explicit
+renderer selections and global defaults retain precedence. The default demand
+`None` preserves standalone GPU selection. Custom camera/visual code, including
+cameras added after startup, must reserve rendering before construction; no
+runtime renderer switching or speculative constructors are used.
+
+The manager skips native background, light and visual-material setup, keeps
+physical ground, and skips Newton render-state publication. Gym additionally
+skips configured lights/IBL and built-in native visual effects; background
+objects and collision geometry remain. DexSim uses its existing package and
+device-free NoRender engine. Native camera and window operations require a
+native renderer. Viser retains native rendering because its current exporter
+reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
+when the saved training configuration uses NoRender.
 
 ## Rendering does not advance physics
 

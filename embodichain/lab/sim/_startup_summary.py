@@ -110,6 +110,9 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
             f"[{', '.join(f'{x:g}' for x in physics.gravity)}] m/s²",
         ),
     ]
+    renderer_reason = getattr(sim, "_renderer_selection_reason", None)
+    if renderer_reason is not None:
+        rows.insert(5, ("Rendering", "Renderer selection", renderer_reason))
     if isinstance(physics, NewtonPhysicsCfg):
         rows.extend(
             [

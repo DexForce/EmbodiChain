@@ -166,7 +166,7 @@ def _build_gym_environment(
     simulation_device: torch.device,
     num_envs: int | None,
     headless: bool,
-    renderer: str,
+    renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
     config_dir: str | Path | None = None,
@@ -188,7 +188,8 @@ def _build_gym_environment(
         env_cfg.sim_cfg = SimulationManagerCfg()
     env_cfg.sim_cfg.sim_device = simulation_device
     env_cfg.sim_cfg.headless = headless
-    env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
+    if renderer is not None:
+        env_cfg.sim_cfg.render_cfg = RenderCfg(renderer=renderer)
     env_cfg.sim_cfg.gpu_id = (
         simulation_device.index
         if simulation_device.type == "cuda" and simulation_device.index is not None
@@ -211,14 +212,31 @@ def build_gym_policy_runtime(
     device: torch.device,
     num_envs: int | None,
     headless: bool,
-    renderer: str,
+    renderer: str | None,
     gpu_id: int,
     seed: int | None = None,
     config_dir: str | Path | None = None,
     profiler: EnvProfilerCfg | None = None,
     simulation_device: torch.device | None = None,
 ) -> PolicyRuntime:
-    """Build a simulator task and the Policy declared by its training config."""
+    """Build a simulator task and the Policy declared by its training config.
+
+    Args:
+        config: Training configuration containing trainer and policy blocks.
+        device: Policy tensor device.
+        num_envs: Optional override for the number of environments.
+        headless: Whether to suppress the native window.
+        renderer: Explicit renderer override; None preserves the task's render
+            configuration, including demand-based auto selection.
+        gpu_id: Renderer GPU index when the simulation device has no CUDA index.
+        seed: Optional environment seed override.
+        config_dir: Directory used to resolve the referenced task configuration.
+        profiler: Optional environment profiler configuration.
+        simulation_device: Optional simulation device distinct from the policy.
+
+    Returns:
+        The constructed environment, policy and resolved task configuration.
+    """
     task = _build_gym_environment(
         config,
         simulation_device=simulation_device or device,

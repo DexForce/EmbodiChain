@@ -405,7 +405,7 @@ def train_from_config(
     num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
     headless = bool(trainer_cfg.get("headless", True))
-    renderer = trainer_cfg.get("renderer", "hybrid")
+    renderer = trainer_cfg.get("renderer")
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
     num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")

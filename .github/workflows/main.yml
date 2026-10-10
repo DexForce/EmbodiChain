@@ -359,17 +359,19 @@ jobs:
             package='.'
           fi
           pip install -e "${package}" \
+            --index-url https://pypi.org/simple \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
             --extra-index-url https://download.blender.org/pypi/
           if [[ "${NEEDS_CUROBO}" == "true" ]]; then
             pip install \
               "nvidia-curobo[cu12] @ git+https://github.com/NVlabs/curobo.git@v0.8.0" \
+              --index-url https://pypi.org/simple \
               --extra-index-url http://pyp.open3dv.site:2345/simple/ \
               --trusted-host pyp.open3dv.site \
               --extra-index-url https://download.blender.org/pypi/
           fi
-          pip install pytest-xdist
+          pip install --index-url https://pypi.org/simple pytest-xdist
 
       - name: Verify Scene Engine gensim installation
         if: env.NEEDS_GENSIM == 'true'

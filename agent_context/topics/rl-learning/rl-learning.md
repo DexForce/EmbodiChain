@@ -61,8 +61,9 @@ Select this path with `trainer.gym_config`.
 1. The CLI discovers installed task packages and executes their init hooks.
 2. `train_from_config()` loads the gym config.
 3. `config_to_cfg()` builds the environment config and manager functors.
-4. Trainer runtime fields override simulation device, GPU, renderer, headless
-   mode, environment count, and optional profiling.
+4. Trainer runtime fields override simulation device, GPU, headless mode,
+   environment count, and optional profiling. An explicit `trainer.renderer`
+   overrides rendering; omission preserves the task's render configuration.
 5. `build_env()` constructs the registered Gym environment.
 6. A sample reset determines flattened observation and action dimensions.
 
@@ -104,6 +105,11 @@ Humanoid Run lives under `classic_control/humanoid/`. Matching task config
 directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity
 randomization use the standard manager components.
+
+The six flat velocity tasks omit renderer overrides in both environment and
+PPO files. Their headless, contact-only environments resolve auto to NoRender;
+custom viewers can still request a native renderer. See
+[render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned
 [contact history contract](../sensor-system/contact-history.md). Root-velocity

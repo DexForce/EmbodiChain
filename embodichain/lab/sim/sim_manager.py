@@ -503,6 +503,10 @@ class SimulationManager:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
         defer_startup_summary: Let an owning environment emit one combined table
             after task and manager initialization. Standalone callers keep False.
+        requires_native_renderer: Predeclared native render demand. False permits
+            auto to select NoRender; None preserves standalone GPU selection.
+            Windows, Viser, forced synchronization and renderer overrides retain
+            precedence. The renderer is fixed before the World is constructed.
     """
 
     _instances = {}
@@ -521,6 +525,7 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ):
         """Create or return the instance based on instance_id."""
         n_instance = 0
@@ -539,8 +544,21 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ) -> None:
+        """Construct the simulation World with a fixed renderer selection.
+
+        Args:
+            sim_config: Simulation, physics and rendering configuration.
+            defer_startup_summary: Let the owning environment emit the summary.
+            requires_native_renderer: Predeclared render demand. ``False`` allows
+                auto to select NoRender when there are no window, browser or
+                forced-sync consumers. ``None`` preserves standalone GPU-based
+                selection. Explicit and global renderer overrides take precedence.
+        """
         self._defer_startup_summary = defer_startup_summary
+        self._requires_native_renderer = requires_native_renderer
+        self._renderer_selection_reason: str | None = None
         self._startup_summary_logged = False
         self._scene_summary_logged = False
         self._requested_renderer = sim_config.render_cfg.renderer
@@ -838,7 +856,10 @@ class SimulationManager:
     def _require_native_renderer(self, operation: str) -> None:
         if not self.has_native_renderer:
             raise RuntimeError(
-                f"{operation} requires a native renderer; the World uses no-render."
+                f"{operation} requires a native renderer; the World uses no-render. "
+                "Explicitly select renderer='hybrid', 'fast-rt', or 'rt' before "
+                "construction, or override BaseEnv._requires_native_renderer() "
+                "to reserve rendering for custom cameras."
             )
 
     @cached_property
@@ -1155,11 +1176,23 @@ class SimulationManager:
         world_config.cache_path = str(self._material_cache_dir)
 
         if sim_config.render_cfg.renderer == "auto":
+            from embodichain.lab.sim import cfg
             from embodichain.lab.sim.utility.render_utils import (
                 select_default_renderer,
             )
 
-            resolved_renderer = select_default_renderer(sim_config.gpu_id)
+            if (
+                cfg.DEFAULT_RENDERER == "auto"
+                and getattr(self, "_requires_native_renderer", None) is False
+                and sim_config.headless
+                and sim_config.visualization.backend == "none"
+                and getattr(sim_config.physics_cfg, "sync_to_renderer", None)
+                is not True
+            ):
+                resolved_renderer = "no-render"
+                self._renderer_selection_reason = "no native render consumers"
+            else:
+                resolved_renderer = select_default_renderer(sim_config.gpu_id)
             logger.log_debug(
                 f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
             )
