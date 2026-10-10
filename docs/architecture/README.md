@@ -12,6 +12,7 @@ Local and CI Sphinx builds regenerate their own version-specific assets.
 - [Original Task Program sample](task-program.sample.json): unchanged historical contract example.
 - [Earlier frontend snapshot](preview.snapshot.json): retained as a reference, no longer consumed by the app.
 - [GenSim / TaskSpec design](gen-sim-taskspec-design.md): current implementation status, ownership boundaries, and staged target architecture.
+- [Task Program scene expansion design](task-program-scene-expansion-design.md): workspace integration, shared expert generation workflow, and three-developer implementation plan.
 
 `agent_context/MAP.yaml` remains the sole topic inventory. Groups are presentation
 choices. Neither import declarations nor adjacency establish runtime order. Every

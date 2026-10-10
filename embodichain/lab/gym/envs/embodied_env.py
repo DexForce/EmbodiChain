@@ -1047,6 +1047,22 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
+        # Scene acceptance is independent of Task Program completion. A
+        # rejected or interrupted single-row expansion attempt must not become
+        # saveable through a later reset, even with failed-episode recording or
+        # explicit commit rows enabled. Reset consumes and clears this metadata.
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if self.num_envs == 1 and episode_metadata:
+            scene_expansion = episode_metadata[0].get("scene_expansion")
+            if (
+                isinstance(scene_expansion, Mapping)
+                and scene_expansion.get("accepted") is not True
+            ):
+                save_data = False
+                env_ids_to_commit = torch.empty(
+                    0, device=status_device, dtype=torch.long
+                )
+
         # Persist replay state before the dataset recorder snapshots metadata
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.

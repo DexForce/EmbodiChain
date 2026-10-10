@@ -764,36 +764,39 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
             else (DemoSegment(actions, name="legacy", metadata={"segment_count": 1}),)
         )
 
+    return _validated_demo_segments(
+        env, segments, task_program=kwargs.get("task_program")
+    )
+
+
+def _validated_demo_segments(
+    env: Any,
+    segments: Iterable[DemoSegment] | DemoSegment | None,
+    *,
+    task_program: Any | None = None,
+) -> Iterable[DemoSegment]:
+    """Apply the same segment and instruction contract to every plan source."""
     if segments is None:
-        return ()
+        return
     if isinstance(segments, DemoSegment):
         segments = (segments,)
 
-    fallback_instruction, _ = _episode_instruction(
-        env, task_program=kwargs.get("task_program")
-    )
-
-    def _validate() -> Iterable[DemoSegment]:
-        for segment in segments:
-            if not isinstance(segment, DemoSegment):
-                raise TypeError(
-                    "create_demo_segments() must yield DemoSegment objects, "
-                    f"got {type(segment).__name__}."
-                )
-            if (
-                segment.instruction is None
-                or segment.instruction_source == "task_fallback"
-            ):
-                segment = replace(
-                    segment,
-                    instruction=fallback_instruction,
-                    instruction_source="task_fallback",
-                )
-            elif segment.instruction_source is None:
-                segment = replace(segment, instruction_source="segment")
-            yield segment
-
-    return _validate()
+    fallback_instruction, _ = _episode_instruction(env, task_program=task_program)
+    for segment in segments:
+        if not isinstance(segment, DemoSegment):
+            raise TypeError(
+                "create_demo_segments() must yield DemoSegment objects, "
+                f"got {type(segment).__name__}."
+            )
+        if segment.instruction is None or segment.instruction_source == "task_fallback":
+            segment = replace(
+                segment,
+                instruction=fallback_instruction,
+                instruction_source="task_fallback",
+            )
+        elif segment.instruction_source is None:
+            segment = replace(segment, instruction_source="segment")
+        yield segment
 
 
 def execute_demo_episode(
@@ -805,6 +808,7 @@ def execute_demo_episode(
     instruction: str | None = None,
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
+    segments: Iterable[DemoSegment] | None = None,
     **plan_kwargs: Any,
 ) -> DemoEpisodeResult:
     """Plan and execute every segment in one environment episode.
@@ -823,6 +827,11 @@ def execute_demo_episode(
         instruction: Optional overall language override bound to this episode.
         should_stop: Optional callback checked before every action.
         progress: Optional wrapper such as ``tqdm`` for action iterables.
+        segments: Optional trusted segment iterable. When provided, bypasses
+            task planner selection while retaining ordinary segment validation,
+            instruction fallback, execution, and recording. An empty iterable
+            produces an empty-plan failure. Otherwise planning methods are
+            selected as usual.
         **plan_kwargs: Arguments forwarded to the task's planning method.
 
     Returns:
@@ -891,7 +900,13 @@ def execute_demo_episode(
             )
         publish_active_mask()
         segment_count = 0
-        segments = iter(resolve_demo_segments(env, **plan_kwargs))
+        segment_iterator = iter(
+            resolve_demo_segments(env, **plan_kwargs)
+            if segments is None
+            else _validated_demo_segments(
+                env, segments, task_program=plan_kwargs.get("task_program")
+            )
+        )
         while any(active):
             if should_stop is not None and should_stop():
                 fatal_reason = "interrupted"
@@ -902,7 +917,7 @@ def execute_demo_episode(
                 publish_active_mask()
                 break
             try:
-                segment = next(segments)
+                segment = next(segment_iterator)
             except StopIteration:
                 break
 
