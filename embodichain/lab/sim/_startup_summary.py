@@ -58,6 +58,7 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
     cfg = sim.sim_config
     physics = cfg.physics_cfg
     render = cfg.render_cfg
+    native_rendering = render.renderer != "no-render"
     gpu_name = getattr(sim, "_render_device_name", None) or "name unavailable"
     gpu = f"{gpu_name} · GPU {cfg.gpu_id}"
     rows = [
@@ -73,16 +74,24 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
             f"{sim.num_envs} · spacing {cfg.arena_space:g} m",
         ),
         ("Rendering", "Renderer", _selection(sim._requested_renderer, render.renderer)),
-        ("Rendering", "Graphics API", "Vulkan"),
-        ("Rendering", "Render GPU", gpu),
+        ("Rendering", "Graphics API", "Vulkan" if native_rendering else "OFF"),
+        ("Rendering", "Render GPU", gpu if native_rendering else "OFF"),
         ("Rendering", "Native window", "OPEN" if sim.is_window_opened else "CLOSED"),
         (
             "Rendering",
             "Browser viewer",
             cfg.visualization.backend if cfg.visualization.backend != "none" else "OFF",
         ),
-        ("Rendering", "Viewer resolution", f"{cfg.width} × {cfg.height}"),
-        ("Rendering", "Tone mapping", _switch(render.tone_mapping_enabled)),
+        (
+            "Rendering",
+            "Viewer resolution",
+            f"{cfg.width} × {cfg.height}" if native_rendering else "OFF",
+        ),
+        (
+            "Rendering",
+            "Tone mapping",
+            _switch(native_rendering and render.tone_mapping_enabled),
+        ),
         (
             "Physics",
             "Backend",
@@ -113,7 +122,7 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
                 ("Physics", "Gradients", _switch(physics.requires_grad)),
             ]
         )
-    if cfg.startup_summary == "full":
+    if cfg.startup_summary == "full" and native_rendering:
         rows.extend(
             [
                 (
@@ -130,6 +139,7 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
                 ),
             ]
         )
+    if cfg.startup_summary == "full":
         if isinstance(physics, DefaultPhysicsCfg):
             rows.extend(
                 [
@@ -172,11 +182,7 @@ def simulation_rows(sim: SimulationManager) -> list[Row]:
                     (
                         "Physics detail",
                         "Broad phase",
-                        str(
-                            collision.broad_phase
-                            or physics.broad_phase
-                            or "backend default"
-                        ),
+                        str(collision.broad_phase or "backend default"),
                     ),
                     (
                         "Physics detail",

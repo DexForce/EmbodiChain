@@ -142,3 +142,23 @@ may be left over from an earlier update.
 Newton MuJoCo-Warp exposes contact forces, so both impulse fields are available. Other supported Newton rigid solvers currently expose contact geometry with zero-valued impulse fields. MuJoCo CPU mode does not expose device contact buffers, and DexUni does not currently publish rigid contacts through `ContactQuery`; those modes are therefore unsupported by this sensor.
 
 Default Direct GPU reports static counterparts with actor ID `-1` because its raw contact buffer does not expose their object identity. To monitor a dynamic body or articulation link against arbitrary static geometry, select the dynamic/link object and set `filter_need_both_actor=False`. Default CPU and Newton can identify registered static shapes.
+
+
+## CUDA substep sampling
+
+When a contact history is registered, `BaseEnv` samples the sensor after every
+physics substep. On CUDA, the sensor captures dense-row scattering, overflow
+accumulation and all history reductions in one graph. The first sample warms
+kernels; capture on the following sample does not advance history, and replay
+advances it exactly once. Selected-row reset writes into the same live buffers.
+Changing the sampling interval, history threshold or counterpart option, or
+registering another history rebuilds this graph.
+
+Contact fetching and actor metadata refresh still run before sampling. DexSim
+owns its snapshot and query graphs; the sensor consumes the current query
+buffer and its device-resident count. Results are ordered onto the caller's
+Torch stream. CPU sampling uses the same reductions without capture.
+
+The physics loop, simulation clock and rendering callbacks remain outside the
+sensor graph. Window, offscreen and browser visualization retain their existing
+update order.

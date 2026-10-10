@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -109,6 +110,9 @@ def test_scene_views_match_installed_dexsim_batch_surface() -> None:
         "apply_joint_force",
         "fetch_joint_force",
         "clear_dynamics",
+        "fetch_joint_properties",
+        "fetch_state",
+        "apply_state",
         "fetch_joint_acceleration",
         "fetch_link_pose",
         "fetch_link_linear_velocity",
@@ -327,6 +331,96 @@ class _ArticulationBatch:
         self.root_pose_apply_rows: list[tuple[int, ...]] = []
         self.clear_dynamics_rows: list[tuple[int, ...]] = []
         self.selections: list[tuple[int, ...]] = []
+        self.joint_properties = {
+            "position_limits": torch.tensor(
+                [
+                    [[-1.0, 1.0], [-2.0, 2.0], [-3.0, 3.0]],
+                    [[-4.0, 4.0], [-5.0, 5.0], [-6.0, 6.0]],
+                ]
+            ),
+            **{
+                field: self.position + offset
+                for offset, field in enumerate(
+                    (
+                        "velocity_limit",
+                        "effort_limit",
+                        "stiffness",
+                        "damping",
+                        "friction",
+                        "armature",
+                    )
+                )
+            },
+        }
+        self.property_reads: list[tuple[str, ...]] = []
+        self.property_status = len(self)
+
+    def fetch_joint_properties(self, **outputs: torch.Tensor | None) -> int:
+        selected = {name: out for name, out in outputs.items() if out is not None}
+        self.property_reads.append(tuple(selected))
+        for name, out in selected.items():
+            out.copy_(self.joint_properties[name])
+        return self.property_status
+
+    def fetch_state(
+        self,
+        qpos: torch.Tensor,
+        qvel: torch.Tensor,
+        pose: torch.Tensor,
+        linear: torch.Tensor,
+        angular: torch.Tensor,
+    ) -> int:
+        for out, source in zip(
+            (qpos, qvel, pose, linear, angular),
+            (
+                self.position,
+                self.velocity,
+                self.root_pose,
+                self.root_linear_velocity,
+                self.root_angular_velocity,
+            ),
+            strict=True,
+        ):
+            out.copy_(source)
+        return len(self)
+
+    def apply_state(
+        self,
+        *,
+        rows: torch.Tensor | None = None,
+        dof_ids: torch.Tensor | None = None,
+        clear_dynamics: bool = False,
+        **fields: torch.Tensor,
+    ) -> int:
+        rows = (
+            torch.arange(len(self)) if rows is None else rows.as_subclass(torch.Tensor)
+        )
+        columns = (
+            torch.arange(self.dof_width)
+            if dof_ids is None
+            else dof_ids.as_subclass(torch.Tensor)
+        )
+        self.last_dof_ids = tuple(columns.tolist())
+        selected = _SelectedArticulationBatch(self, rows)
+        if "joint_position" in fields:
+            self.position[rows[:, None], columns] = fields["joint_position"]
+        if clear_dynamics:
+            selected.clear_dynamics()
+        joint_fields = {
+            "joint_position": "position",
+            "joint_target_position": "target_position",
+            "joint_velocity": "velocity",
+            "joint_target_velocity": "target_velocity",
+            "joint_force": "force",
+        }
+        for name, value in fields.items():
+            if name == "joint_position":
+                continue
+            elif name in joint_fields:
+                getattr(self, joint_fields[name])[rows[:, None], columns] = value
+            else:
+                getattr(selected, f"apply_{name}")(value)
+        return len(rows)
 
     def __len__(self) -> int:
         return len(self.force)
@@ -459,6 +553,109 @@ def test_articulation_data_uses_scene_view(backend: str) -> None:
     assert isinstance(data.articulation_view, SceneArticulationView)
     assert data.is_newton_backend is (backend == "newton")
     assert scene.articulation_batch_objects == entities
+
+
+@pytest.mark.parametrize("backend", ["dexsim", "newton"])
+def test_articulation_properties_use_batch_and_preserve_per_env_values(
+    backend: str,
+) -> None:
+    scene = _Scene(backend)
+    scalar = Mock(side_effect=AssertionError("per-articulation property read"))
+    entities = [
+        SimpleNamespace(
+            get_joint_position_limits=scalar,
+            get_joint_velocity_limit=scalar,
+            get_joint_effort_limit=scalar,
+            get_drive=scalar,
+            get_newton_drive=scalar,
+        )
+        for _ in range(2)
+    ]
+    data = ArticulationData(entities, scene, torch.device("cpu"))
+    batch = scene.articulation_batch
+    assert batch.property_reads == [
+        ("position_limits", "velocity_limit", "effort_limit")
+    ]
+    for value, name in (
+        (data.qpos_limits, "position_limits"),
+        (data.qvel_limits, "velocity_limit"),
+        (data.qf_limits, "effort_limit"),
+    ):
+        torch.testing.assert_close(value, batch.joint_properties[name])
+    for name in ("stiffness", "damping", "friction", "armature"):
+        previous = getattr(data, f"joint_{name}")
+        expected = batch.joint_properties[name].clone()
+        batch.joint_properties[name].add_(10.0)
+        current = getattr(data, f"joint_{name}")
+        torch.testing.assert_close(previous, expected)
+        torch.testing.assert_close(current, batch.joint_properties[name])
+    scalar.assert_not_called()
+
+
+def test_articulation_property_reads_do_not_track_model_parameter_gradients() -> None:
+    scene = _Scene("newton")
+    for value in scene.articulation_batch.joint_properties.values():
+        value.requires_grad_()
+
+    data = ArticulationData([_ArticulationEntity()] * 2, scene, torch.device("cpu"))
+    for output, name in (
+        (data.qpos_limits, "position_limits"),
+        (data.qvel_limits, "velocity_limit"),
+        (data.qf_limits, "effort_limit"),
+        *(
+            (getattr(data, f"joint_{name}"), name)
+            for name in ("stiffness", "damping", "friction", "armature")
+        ),
+    ):
+        source = scene.articulation_batch.joint_properties[name]
+        torch.testing.assert_close(output, source)
+        assert not output.requires_grad
+        assert output.grad_fn is None
+        assert source.requires_grad
+
+
+def test_articulation_property_initialization_reports_batch_failure() -> None:
+    scene = _Scene()
+    scene.articulation_batch.property_status = -1
+    with pytest.raises(RuntimeError, match="fetch_joint_properties"):
+        ArticulationData([_ArticulationEntity()] * 2, scene, torch.device("cpu"))
+
+
+@pytest.mark.parametrize("backend", ["dexsim", "newton"])
+def test_articulation_state_read_preserves_layout_and_refreshes_after_write(
+    backend: str,
+) -> None:
+    scene = _Scene(backend)
+    batch = scene.articulation_batch
+    batch.fetch_state = Mock(wraps=batch.fetch_state)
+    data = ArticulationData(
+        [_ArticulationEntity(), _ArticulationEntity()], scene, torch.device("cpu")
+    )
+    first = data.fetch_state()
+    for key, source in (
+        ("root_pose", _embodichain_pose(batch.root_pose)),
+        ("qpos", batch.position),
+        ("qvel", batch.velocity),
+        ("root_lin_vel", batch.root_linear_velocity),
+        ("root_ang_vel", batch.root_angular_velocity),
+    ):
+        torch.testing.assert_close(first[key], source)
+    unchanged = {key: value[0].clone() for key, value in first.items()}
+    batch.apply_state(
+        rows=torch.tensor([1]),
+        root_pose=torch.tensor([[0.0, 0.0, 0.0, 1.0, 7.0, 8.0, 9.0]]),
+        joint_position=torch.tensor([[4.0, 5.0, 6.0]]),
+        clear_dynamics=True,
+    )
+    second = data.fetch_state()
+    for key, value in second.items():
+        torch.testing.assert_close(value[0], unchanged[key])
+    torch.testing.assert_close(second["root_pose"], _embodichain_pose(batch.root_pose))
+    torch.testing.assert_close(second["qpos"], batch.position)
+    torch.testing.assert_close(second["qvel"][1], torch.zeros(3))
+    reads = batch.fetch_state.call_args_list
+    assert len(reads) == 2
+    assert reads[0].args[2].data_ptr() == reads[1].args[2].data_ptr()
 
 
 def test_newton_articulation_geometry_merges_every_render_mesh() -> None:
@@ -694,7 +891,7 @@ def test_articulation_partial_force_preserves_other_rows_and_dofs() -> None:
         torch.tensor([[1.0, 2.0, 3.0], [4.0, 50.0, 6.0]]),
     )
     assert batch.selections == []
-    assert batch.last_dof_ids is None
+    assert batch.last_dof_ids == (0, 1, 2)
 
 
 def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
@@ -710,8 +907,23 @@ def test_articulation_joint_mapping_stays_on_the_view_device() -> None:
     assert torch.equal(columns, torch.tensor([1]))
 
 
-def test_articulation_joint_write_keeps_selections_on_device() -> None:
+def test_articulation_joint_write_keeps_selections_on_device(monkeypatch) -> None:
     batch = _ArticulationBatch()
+    store_state = batch.apply_state
+
+    def native_write(**fields) -> int:
+        return store_state(
+            **{name: value for name, value in fields.items() if value is not None}
+        )
+
+    batch._binding = SimpleNamespace(apply_state=native_write)
+    # Run the published batch entry point: it normalizes rows via select(),
+    # including identity selections, before forwarding to the native binding.
+    monkeypatch.setattr(
+        batch,
+        "apply_state",
+        lambda **fields: ArticulationBatch.apply_state(batch, **fields),
+    )
     view = SceneArticulationView(
         SimpleNamespace(backend="newton"),
         batch,
@@ -726,6 +938,56 @@ def test_articulation_joint_write_keeps_selections_on_device() -> None:
 
     assert batch.force[1, 1] == 50.0
     assert batch.selections == []
+
+
+def test_articulation_static_full_rows_bypass_native_selection(monkeypatch) -> None:
+    batch = _ArticulationBatch()
+    write = Mock(wraps=batch.apply_state)
+    monkeypatch.setattr(batch, "apply_state", write)
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"), batch, torch.device("cpu")
+    )
+
+    view.apply_qf(torch.full((2, 3), 9.0), env_ids=[0, 1], joint_ids=None)
+
+    assert write.call_args.kwargs["rows"] is None
+    torch.testing.assert_close(batch.force, torch.full((2, 3), 9.0))
+
+
+@pytest.mark.parametrize(
+    ("field", "attribute", "native_field"),
+    [
+        ("qpos", "position", "joint_position"),
+        ("target_qpos", "target_position", "joint_target_position"),
+        ("qvel", "velocity", "joint_velocity"),
+        ("target_qvel", "target_velocity", "joint_target_velocity"),
+        ("qf", "force", "joint_force"),
+    ],
+)
+def test_selected_joint_state_preserves_live_unselected_values(
+    field: str, attribute: str, native_field: str, monkeypatch
+) -> None:
+    batch = _ArticulationBatch()
+    current = getattr(batch, attribute)
+
+    def fetch(out: torch.Tensor) -> int:
+        out.copy_(current)
+        return len(batch)
+
+    monkeypatch.setattr(batch, f"fetch_{native_field}", fetch, raising=False)
+    view = SceneArticulationView(
+        SimpleNamespace(backend="newton"), batch, torch.device("cpu")
+    )
+    expected = current.clone()
+    for value in (50.0, 60.0):
+        current[0, 0] = expected[0, 0] = value + 1.0
+        view.apply_state(
+            env_ids=_NoHostTransferTensor([1]),
+            joint_ids=_NoHostTransferTensor([1]),
+            **{field: torch.tensor([[value]])},
+        )
+        expected[1, 1] = value
+        torch.testing.assert_close(current, expected)
 
 
 def test_articulation_clear_dynamics_clears_selected_root_and_joint_motion() -> None:

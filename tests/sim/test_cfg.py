@@ -594,9 +594,7 @@ def test_backend_property_groups_track_dexsim_spawn_descriptors() -> None:
         "collision_filter_parent",
         "is_visible",
         "is_site",
-        # DexSim 0.5.1rc1 native loader/ordering controls remain outside the
-        # backend-neutral EmbodiChain collision configuration.
-        "priority",
+        # Asset-loading adapter option, not a native ShapeConfig parameter.
         "use_native_mesh_loader",
     }
     assert (

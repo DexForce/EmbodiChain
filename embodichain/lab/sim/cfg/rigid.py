@@ -28,6 +28,17 @@ from dexsim.types import PhysicalAttr
 from embodichain.utils import configclass
 from embodichain.utils.math import quat_wxyz_to_xyzw, quat_xyzw_to_wxyz
 
+__all__ = [
+    "MassPropertiesCfg",
+    "DefaultRigidBodyPropertiesCfg",
+    "CollisionPropertiesCfg",
+    "DefaultCollisionPropertiesCfg",
+    "NewtonCollisionPropertiesCfg",
+    "RigidBodyMaterialCfg",
+    "NewtonRigidBodyMaterialCfg",
+    "RigidBodyPhysicsCfg",
+]
+
 
 @configclass
 class MassPropertiesCfg:
@@ -222,6 +233,9 @@ class NewtonCollisionPropertiesCfg(CollisionPropertiesCfg):
     See `Newton Shape Configuration
     <https://newton-physics.github.io/newton/latest/concepts/collisions.html#shape-configuration>`_.
     """
+
+    priority: int | None = None
+    """MuJoCo contact-parameter priority; None preserves the source value."""
 
     condim: int | None = None
     """MuJoCo contact dimension: 1, 3, 4, or 6.

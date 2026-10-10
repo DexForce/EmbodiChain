@@ -30,6 +30,7 @@ import torch
 
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.envs.task_program.bridge import RuntimeCommandFrameEncoder
 from embodichain.lab.task_program.integrations._configured_services import (
     _MoveHeldObjectLowerer,
     _PourLowerer,
@@ -58,6 +59,12 @@ from embodichain.lab.sim.atomic_actions import (
     PlaceOptions,
     PourGoal,
     PourOptions,
+)
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
 )
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.lab.task_program.semantics import (
@@ -414,6 +421,68 @@ def test_embodiment_owns_the_deployed_sensor_suite(
     assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
 
 
+def test_pour_water_commands_preserve_idle_left_arm_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh measured holds for full actions must not retarget the idle arm."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    path = _tableware_config_path("pour_water")
+    cfg = config_to_cfg(_tableware_gym_config("pour_water"), source_path=path)
+    parts = {
+        "left_arm": [0, 2, 4, 6, 8, 10],
+        "left_eef": [12],
+        "right_arm": [1, 3, 5, 7, 9, 11],
+        "right_eef": [13],
+    }
+    measured = torch.zeros(1, 16)
+    targets = measured.clone()
+
+    def set_qpos(*, qpos: torch.Tensor, joint_ids: list[int]) -> None:
+        targets[:, joint_ids] = qpos
+
+    env = object.__new__(EmbodiedEnv)
+    env.cfg = cfg
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.robot = SimpleNamespace(
+        control_parts=parts,
+        get_joint_ids=lambda *, name, remove_mimic: parts[name],
+        build_pk_serial_chain=lambda: None,
+        body_data=SimpleNamespace(qpos_limits=torch.tensor([[[-3.0, 3.0]] * 16])),
+        get_qpos=lambda: measured.clone(),
+        set_qpos=set_qpos,
+    )
+    env._setup_robot()
+    assert len(env.active_joint_ids) == 14
+    encoder = RuntimeCommandFrameEncoder(
+        SimpleNamespace(current_qpos=lambda env_ids: measured.clone())
+    )
+
+    for step in range(6):
+        # Reproduce gravity deflection entering the bridge's observed-qpos base.
+        if step:
+            measured[:, parts["left_arm"]] -= 0.001
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=JointPositionTarget(
+                        control_part="right_arm", joint_ids=tuple(parts["right_arm"])
+                    ),
+                    payload=JointPositionPayload(
+                        positions=torch.full((1, 6), step * 0.1)
+                    ),
+                ),
+            ),
+            active_mask=torch.tensor([True]),
+            env_ids=torch.tensor([0]),
+            hold_duration=torch.tensor([0.04]),
+        )
+        env._apply_controller_action(encoder.encode(frame))
+
+    assert torch.equal(targets[:, parts["left_arm"]], torch.zeros(1, 6))
+    assert torch.equal(targets[:, parts["left_eef"]], torch.zeros(1, 1))
+    assert torch.equal(targets[:, parts["right_arm"]], torch.full((1, 6), 0.5))
+
+
 @pytest.mark.parametrize(
     ("task_name", "expected_scene", "expected_profile", "expected_calls"),
     tuple(
@@ -453,10 +522,12 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     options = preset.action_option_templates
     factories = registration.registered_semantic_lowerer_factories
 
-    assert grasp.internal_axis == pytest.approx((1.0, 0.0, 0.0))
+    grasp_rotation = options["pick"].fixed_object_to_eef[:3, :3]
+    wrist_roll_axis = grasp_rotation[:, 2] / torch.linalg.norm(grasp_rotation[:, 2])
+    assert grasp.internal_axis == pytest.approx(wrist_roll_axis.tolist())
     assert type(options["pick"]) is PickUpOptions
-    assert options["pick"].hand_interp_steps == 11
-    assert options["pick"].grasp_settle_steps == 25
+    assert options["pick"].hand_interp_steps == 44
+    assert options["pick"].grasp_settle_steps == 100
     assert options["pick"].rotate_upright is None
     assert options["pick"].fixed_object_to_eef is not None
     assert options["pick"].fixed_object_to_eef == pytest.approx(
@@ -473,14 +544,93 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     assert type(options["simulation.pour"]) is PourOptions
     assert options["simulation.pour"].rotate_angle == pytest.approx(-torch.pi / 3)
     assert type(options["place"]) is PlaceOptions
-    assert options["place"].hand_interp_steps == 11
-    assert options["place"].release_settle_steps == 15
+    assert options["place"].hand_interp_steps == 44
+    assert options["place"].release_settle_steps == 60
     assert options["place"].preserve_current_object_orientation is True
     assert {factory.call_id for factory in factories} == {
         "simulation.move_held_object",
         "simulation.pour",
     }
     assert "grasp_pose_generators" not in integration_payload["runtime_services"]
+
+
+def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
+    """The tilted mouth clears the cup and a missed grasp stops before pouring."""
+    deployment = _tableware_deployment("pour_water")
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=deployment.integration.registration.catalog,
+    )
+    picking, positioning, pouring, returning = program.program.items
+    checkpoint = positioning.validators[0]
+    assert checkpoint.object == "bottle"
+    assert checkpoint.position_tolerance <= 0.01
+    assert picking.steps.call.kind == "pick"
+    assert positioning.steps.call.call_id == "simulation.move_held_object"
+    assert pouring.steps.call.call_id == "simulation.pour"
+    placement = returning.steps.call
+    release_position = program.targets[placement.at.target].values[0].position
+    rest_position = program.targets["bottle_return_pose"].values[0].position
+    assert release_position[:2] == rest_position[:2]
+    assert 0.006 <= release_position[2] - rest_position[2] <= 0.01
+    cup_check = next(check for check in returning.validators if check.object == "cup")
+    assert cup_check.position_tolerance <= 0.002
+
+    integration = _tableware_integration_payload("pour_water")
+    lowerer = integration["runtime_services"]["registered_semantic_lowerers"][0]
+    relative = torch.tensor(lowerer["relative_pose"], dtype=torch.float64).reshape(4, 4)
+    registration = deployment.integration.registration
+    axis = torch.tensor(
+        registration.scene_binding.antipodal_grasps[0].internal_axis,
+        dtype=torch.float64,
+    )
+    angle = (
+        registration.robot_profile_binding.presets[0]
+        .action_option_templates["simulation.pour"]
+        .rotate_angle
+    )
+    mouth = torch.tensor([0.0, 0.0, 0.069724626839], dtype=torch.float64)
+    theta = mouth.new_tensor(angle)
+    rotated = (
+        mouth * torch.cos(theta)
+        + torch.linalg.cross(axis, mouth) * torch.sin(theta)
+        + axis * torch.dot(axis, mouth) * (1 - torch.cos(theta))
+    )
+    torch.testing.assert_close(
+        (relative[:3, 3] + rotated)[:2],
+        torch.zeros(2, dtype=torch.float64),
+        atol=1e-7,
+        rtol=0,
+    )
+    assert float(relative[2, 3] + rotated[2]) >= 0.21
+    cup_position = torch.tensor(program.targets[cup_check.target].values[0].position)
+    bottle_position = torch.tensor(
+        program.targets[checkpoint.target].values[0].position
+    )
+    torch.testing.assert_close(bottle_position, cup_position + relative[:3, 3].float())
+
+
+def test_pour_water_uses_shared_calibrated_embodiment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pouring reuses the base robot with its qualified force and control cadence."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    path = _tableware_config_path("pour_water")
+    config = _tableware_gym_config("pour_water")
+    cfg = config_to_cfg(config, source_path=path)
+    assert Path(config["embodiment"]["component"]).name == "cobotmagic.yaml"
+    assert cfg.robot.joint_drive_props.max_effort["right_joint[7-8]"] == 40.0
+    assert cfg.robot.joint_drive_props.max_effort["left_joint[7-8]"] == 40.0
+    assert cfg.robot.joint_drive_props.max_velocity["right_joint[7-8]"] == 0.25
+    assert cfg.robot.joint_drive_props.stiffness["right_joint6"] == 4000.0
+    assert cfg.target_control_frequency == 100
+    assert cfg.expert_trajectory.joint_command_mode == "position"
+    preset = _tableware_deployment(
+        "pour_water"
+    ).integration.registration.robot_profile_binding.presets[0]
+    assert preset.motion_policy.sample_count == 480
+    assert preset.effect_assurance.value == "projected"
 
 
 def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
@@ -1311,12 +1461,8 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     }
     assert [segment.name for segment in segments] == expected_names[task_name]
     if task_name == "pour_water":
-        assert all(
-            not segment.post_policies and not segment.validators
-            for segment in segments[:-1]
-        )
-        assert len(segments[-1].post_policies) == 2
-        assert len(segments[-1].validators) == 1
+        assert [len(segment.post_policies) for segment in segments] == [0, 0, 0, 2]
+        assert [len(segment.validators) for segment in segments] == [0, 1, 0, 2]
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall

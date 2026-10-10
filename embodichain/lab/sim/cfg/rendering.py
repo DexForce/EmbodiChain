@@ -389,10 +389,12 @@ class DLSSCfg:
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
+    """Renderer backend to use for the simulation.
 
     Note:
+    - 'no-render' selects DexSim's NoRender backend and requires headless mode.
+        Native camera sensors require 'hybrid', 'fast-rt', or 'rt'.
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
         'hybrid', while datacenter cards (A100/A800, H100/H800/H200/H20) use 'fast-rt'.
         If no CUDA device is available or the GPU is unknown, it falls back to 'hybrid'.
@@ -454,7 +456,9 @@ class RenderCfg:
 
     def to_dexsim_flags(self) -> Renderer:
         """Convert the renderer name to DexSim's renderer enum."""
-        if self.renderer == "hybrid":
+        if self.renderer == "no-render":
+            return Renderer.NORENDER
+        elif self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
@@ -470,7 +474,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'no-render', 'hybrid', 'fast-rt', or 'rt'."
             )
 
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
@@ -485,6 +489,8 @@ class RenderCfg:
         """
         self.__post_init__()
         world_config.renderer = self.to_dexsim_flags()
+        if self.renderer == "no-render":
+            return
         window_mode, offscreen_mode = self.denoising.to_dexsim_modes()
         set_rt_render_modes = getattr(world_config, "set_rt_render_modes", None)
         if callable(set_rt_render_modes):

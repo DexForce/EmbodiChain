@@ -4,6 +4,15 @@ Read this for physics/render synchronization, native-window/offscreen image
 processing and readiness reporting. Return to the
 [simulation overview](simulation-system.md).
 
+## NoRender initialization
+
+`RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires
+headless mode. The manager skips background, light and visual-material setup,
+keeps physical ground, and skips Newton render-state publication. DexSim uses
+its existing package and device-free NoRender engine. Native camera and window
+operations require a native renderer. Checkpoint evaluation with `--viewer`
+defaults to Hybrid when the saved training configuration uses NoRender.
+
 ## Rendering does not advance physics
 
 `SimulationManager.render_frame()` owns a read-only consumption phase after
