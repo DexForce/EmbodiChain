@@ -201,6 +201,22 @@ topics:
     tests/sim/motion/planners/, tests/compute/]
   related_topics: [simulation-system, robot-system, ik-solvers, atomic-actions]
   status: active
+- id: scene-expansion
+  title: Scene Expansion
+  aliases: [scene expansion, scene augmentation, scene variant, 场景扩增, 场景变体]
+  keywords: [SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
+    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant]
+  paths: [topics/scene-expansion/scene-expansion.md]
+  source_of_truth:
+  - embodichain/lab/sim/scene_expansion/
+  - embodichain/lab/task_program/integrations/scene_expansion.py
+  - embodichain/lab/gym/envs/embodied_env.py
+  - embodichain/lab/gym/envs/demo.py
+  watch_paths: [embodichain/lab/sim/scene_expansion/,
+    embodichain/lab/task_program/integrations/scene_expansion.py,
+    tests/sim/scene_expansion/, tests/gym/envs/task_program/test_scene_expansion.py]
+  related_topics: [simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
+  status: active
 - id: rl-learning
   title: RL Learning Pipeline
   aliases: [rl learning, rl config, reinforcement learning, 强化学习, 训练配置]

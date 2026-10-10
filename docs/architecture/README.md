@@ -12,6 +12,7 @@ Local and CI Sphinx builds regenerate their own version-specific assets.
 - [Original Task Program sample](task-program.sample.json): unchanged historical contract example.
 - [Earlier frontend snapshot](preview.snapshot.json): retained as a reference, no longer consumed by the app.
 - [GenSim / TaskSpec design](gen-sim-taskspec-design.md): current implementation status, ownership boundaries, and staged target architecture.
+- [Task Program scene expansion design](task-program-scene-expansion-design.md): workspace integration, shared expert generation workflow, and three-developer implementation plan.
 
 `agent_context/MAP.yaml` remains the sole topic inventory. Groups are presentation
 choices. Neither import declarations nor adjacency establish runtime order. Every
@@ -20,10 +21,10 @@ ownership. This is selected static coverage, not a complete dependency graph.
 The generated text reference lists topics without represented nodes and overview
 nodes without mapped relationships, using MAP at the snapshot revision. Neither
 a represented topic nor a missing edge establishes complete coverage or independence.
-The current snapshot represents all 18 MAP topics and all 10 top-level production
-packages. Frontend data tests enforce these entry-point checks and ensure every
-selected node appears in a view. Specialist modules are included in the searchable
-text reference even when omitted from the overview.
+The current snapshot represents every MAP topic and top-level production package
+at its pinned source revision. Frontend data tests enforce these entry-point
+checks and ensure every selected node appears in a view. Specialist modules are
+included in the searchable text reference even when omitted from the overview.
 
 ## Generate and validate
 
