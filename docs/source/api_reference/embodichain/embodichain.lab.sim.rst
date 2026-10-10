@@ -29,6 +29,7 @@ utilities that wire all of these together.
    robots
    sensors
    motion
+   scene_expansion
    atomic_actions
    types
    utility
@@ -129,6 +130,14 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
+Scene Expansion
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene_expansion
 
 Shared Types
 ------------

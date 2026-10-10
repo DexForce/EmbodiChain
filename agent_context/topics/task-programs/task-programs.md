@@ -91,6 +91,7 @@ not by Task Program or Gym.
 - [Language and semantic integration](configuration.md): strict decoding, scene/profile contracts, component ownership and service allowlists.
 - [Assurance and execution](execution.md): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
 - [Dataset persistence](../data-pipeline/data-pipeline.md): recorder commits, fragments, failures and finalization.
+- [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
 
 ## Reference integrations
 
