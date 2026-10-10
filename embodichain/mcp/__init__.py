@@ -14,22 +14,31 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Cross-domain MCP access layer for EmbodiChain capabilities."""
+
 from __future__ import annotations
 
-from pathlib import Path
+from .adapters import MCPAdapter, MCPAdapterRegistry
+from .backend import (
+    InMemorySimulationBackend,
+    SimulationBackend,
+    SimulationManagerBackend,
+)
+from .server import cli, create_server, serve
+from .service import EmbodiChainMCPService
+from .simulation import SimulationMCPAdapter
+from .urdf import URDFAssemblyAdapter
 
-embodichain_dir = Path(__file__).resolve().parent
-
-
-# Read version from VERSION file
-def _get_version():
-    version_files = (embodichain_dir / "VERSION", embodichain_dir.parent / "VERSION")
-    for version_file in version_files:
-        try:
-            return version_file.read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            continue
-    return "unknown"
-
-
-__version__ = _get_version()
+__all__ = [
+    "MCPAdapter",
+    "MCPAdapterRegistry",
+    "EmbodiChainMCPService",
+    "InMemorySimulationBackend",
+    "SimulationBackend",
+    "SimulationManagerBackend",
+    "SimulationMCPAdapter",
+    "URDFAssemblyAdapter",
+    "cli",
+    "create_server",
+    "serve",
+]

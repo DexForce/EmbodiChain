@@ -14,22 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+"""Tests for EmbodiChain MCP adapters."""
+
 from __future__ import annotations
-
-from pathlib import Path
-
-embodichain_dir = Path(__file__).resolve().parent
-
-
-# Read version from VERSION file
-def _get_version():
-    version_files = (embodichain_dir / "VERSION", embodichain_dir.parent / "VERSION")
-    for version_file in version_files:
-        try:
-            return version_file.read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
-            continue
-    return "unknown"
-
-
-__version__ = _get_version()
