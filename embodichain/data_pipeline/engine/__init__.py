@@ -25,9 +25,12 @@ from .data import (
     OnlineDataWorkerError,
 )
 
+from .language import SharedLanguageRegistry
+
 __all__ = [
     "OnlineDataEngine",
     "OnlineDataEngineCfg",
     "OnlineDataEngineState",
     "OnlineDataWorkerError",
+    "SharedLanguageRegistry",
 ]

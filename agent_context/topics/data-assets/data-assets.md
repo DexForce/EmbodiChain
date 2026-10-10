@@ -55,6 +55,9 @@ and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
+ZIP bundles must include directory entries before nested files for Open3D
+extraction. Validate new bundles through `get_data_path()` with an empty cache.
+
 ## Pretrained policy bundles
 
 `eval-policy --pretrained` reads the official model index at a pinned HF commit,

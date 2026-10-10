@@ -45,6 +45,26 @@ def test_rubiks_cube_asset_is_shared_by_config_and_download_registries() -> None
 
 
 @pytest.mark.no_sim
+def test_pour_water_assets_are_visible_to_configs_and_download_cli(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The task's asset prefix and object CLI select the same dataset class."""
+    objects = dict(download.get_registry()["obj"])
+    cls = get_data_class("PourWaterAssets")
+    assert objects["PourWaterAssets"] is cls
+    download.cmd_list(Namespace(category="obj"))
+    assert "PourWaterAssets" in capsys.readouterr().out
+    calls = []
+    monkeypatch.setattr(
+        download,
+        "download_asset",
+        lambda name, asset_cls: calls.append((name, asset_cls)) or True,
+    )
+    download.cmd_download(Namespace(all=False, category=None, name="pourwaterassets"))
+    assert calls == [("pourwaterassets", cls)]
+
+
+@pytest.mark.no_sim
 def test_robot_asset_listing_includes_locomotion_and_existing_robots(capsys) -> None:
     """Users see all public robot assets without exposing helper classes."""
     registry = download.get_registry()

@@ -560,7 +560,7 @@ class SegmentCfg:
     """Logical transaction with optional segment-specific language instruction.
 
     ``instruction`` describes this segment for dataset annotation. When omitted,
-    Gym demonstrations fall back to the recorder's overall task instruction.
+    Gym demonstrations fall back to the episode's overall task instruction.
     """
 
     name: str = MISSING
@@ -730,16 +730,23 @@ def _validate_program(
 
 @configclass
 class TaskProgramCfg:
-    """Strict, executable-free Task Program configuration."""
+    """Strict, executable-free Task Program configuration.
+
+    ``instruction`` describes the overall task independently of the selected
+    embodiment and recorder. Segment instructions describe individual phases.
+    """
 
     program_id: str = MISSING
     integration: TaskProgramIntegrationCfg = MISSING
     program: ProgramNodeCfg = MISSING
     targets: dict[str, TargetCfg] = field(default_factory=dict)
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the complete static configuration and target graph."""
         _validate_identifier(self.program_id, field_name="program_id")
+        if self.instruction is not None:
+            _validate_identifier(self.instruction, field_name="instruction")
         if type(self.integration) is not TaskProgramIntegrationCfg:
             raise TypeError("integration must be TaskProgramIntegrationCfg.")
         if type(self.targets) is not dict:

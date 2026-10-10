@@ -517,6 +517,11 @@ class JointPositionGymTransportEncoder:
 class RuntimeCommandFrameEncoder:
     """Encode transport-neutral command frames to controller-ready Gym actions.
 
+    Normal joint-position frames retain the last issued targets for unaddressed
+    joints on active rows. This prevents measured gravity deflection from being
+    repeatedly adopted as a new hold target. Inactive rows and explicit safe
+    stops use measured positions; a new encoder starts with no retained targets.
+
     Args:
         qpos_provider: Full-qpos source aligned to a frame's explicit ``env_ids``.
         transports: Optional additional transport encoders.  The built-in
@@ -547,6 +552,11 @@ class RuntimeCommandFrameEncoder:
         self._qpos_provider = qpos_provider
         self._joint_command_mode = joint_command_mode
         self._transports: dict[str, RuntimeTransportActionEncoder] = {}
+        # Sorted stable IDs, owned qpos targets and per-ID validity. Store rows
+        # together to avoid per-environment CUDA scalar reads and allocations.
+        self._joint_hold_targets: (
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None
+        ) = None
         self._frozen = False
         if include_joint_position:
             self.register_transport(JointPositionGymTransportEncoder())
@@ -685,10 +695,12 @@ class RuntimeCommandFrameEncoder:
         return self._action_from_qpos(self._base_qpos(env_ids))
 
     def encode(self, frame: RuntimeCommandFrame) -> EnvAction:
-        """Encode one frame on top of a fresh full-qpos hold action."""
+        """Encode commands while retaining unaddressed active joint targets."""
         if not isinstance(frame, RuntimeCommandFrame):
             raise TypeError("frame must be a RuntimeCommandFrame.")
         action = self._base_action(frame.env_ids)
+        qpos = action if isinstance(action, torch.Tensor) else action["qpos"]
+        self._restore_joint_targets(qpos, frame.env_ids, frame.active_mask)
         by_transport: dict[str, list[EndpointCommand]] = {}
         for command in frame.commands:
             transport = self._transports.get(command.transport_id)
@@ -706,7 +718,79 @@ class RuntimeCommandFrameEncoder:
                     base_action=action,
                     active_mask=frame.active_mask,
                 )
+        self._remember_joint_targets(action, frame.env_ids, frame.active_mask)
         return action
+
+    def _restore_joint_targets(
+        self,
+        qpos: torch.Tensor,
+        env_ids: torch.Tensor,
+        active_mask: torch.Tensor,
+    ) -> None:
+        """Restore active retained rows with one batched gather and selection."""
+        if self._joint_hold_targets is None:
+            return
+        held_ids, held_qpos, held_valid = self._joint_hold_targets
+        held_ids = held_ids.to(env_ids)
+        held_qpos = held_qpos.to(qpos)
+        held_valid = held_valid.to(active_mask.device)
+        if torch.equal(held_ids, env_ids):
+            retained = held_valid & active_mask
+            targets = held_qpos
+        else:
+            indices = torch.searchsorted(held_ids, env_ids)
+            safe_indices = indices.clamp(max=held_ids.numel() - 1)
+            present = (indices < held_ids.numel()) & (held_ids[safe_indices] == env_ids)
+            retained = active_mask & present & held_valid[safe_indices]
+            targets = held_qpos[safe_indices]
+        qpos.copy_(torch.where(retained[:, None], targets, qpos))
+
+    def _remember_joint_targets(
+        self,
+        action: EnvAction,
+        env_ids: torch.Tensor,
+        active_mask: torch.Tensor | None = None,
+    ) -> None:
+        """Retain owned targets by stable row ID after successful encoding."""
+        if JointPositionGymTransportEncoder.transport_id not in self._transports:
+            return
+        qpos = action if isinstance(action, torch.Tensor) else action.get("qpos")
+        if qpos is None or env_ids.numel() == 0:
+            return
+        valid = (
+            torch.ones_like(env_ids, dtype=torch.bool)
+            if active_mask is None
+            else active_mask.detach()
+        )
+        if self._joint_hold_targets is None:
+            ids, order = env_ids.detach().sort()
+            self._joint_hold_targets = (
+                ids,
+                qpos.detach().index_select(0, order),
+                valid.index_select(0, order),
+            )
+            return
+        held_ids, held_qpos, held_valid = self._joint_hold_targets
+        held_ids = held_ids.to(env_ids)
+        held_qpos = held_qpos.to(qpos)
+        held_valid = held_valid.to(valid.device)
+        if torch.equal(held_ids, env_ids):
+            held_qpos.copy_(qpos.detach())
+            held_valid.copy_(valid)
+            self._joint_hold_targets = (held_ids, held_qpos, held_valid)
+            return
+        ids, inverse = torch.unique(
+            torch.cat((held_ids, env_ids)), sorted=True, return_inverse=True
+        )
+        old_rows = inverse[: held_ids.numel()]
+        new_rows = inverse[held_ids.numel() :]
+        targets = qpos.new_empty((ids.numel(), qpos.shape[1]))
+        validity = torch.zeros_like(ids, dtype=torch.bool)
+        targets.index_copy_(0, old_rows, held_qpos)
+        validity.index_copy_(0, old_rows, held_valid)
+        targets.index_copy_(0, new_rows, qpos.detach())
+        validity.index_copy_(0, new_rows, valid)
+        self._joint_hold_targets = (ids, targets, validity)
 
     def encode_hold(
         self,
@@ -739,6 +823,7 @@ class RuntimeCommandFrameEncoder:
                 base_action=action,
                 context=context,
             )
+        self._remember_joint_targets(action, context.env_ids)
         return action
 
     def encode_idle_hold(self, env_ids: torch.Tensor) -> EnvAction:
@@ -1087,7 +1172,11 @@ class TaskProgramDemoBridge:
             yield DemoSegment(
                 actions=self._segment_actions(segment, lifecycle),
                 name=segment.name,
-                instruction=segment.instruction,
+                instruction=segment.instruction
+                or getattr(self._program, "instruction", None),
+                instruction_source=(
+                    "segment" if segment.instruction else "task_fallback"
+                ),
                 metadata=metadata,
                 validator=validator,
                 abort_actions=self._segment_abort_actions(segment, lifecycle),

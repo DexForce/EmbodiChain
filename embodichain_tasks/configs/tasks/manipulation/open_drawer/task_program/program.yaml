@@ -1,4 +1,5 @@
 program_id: slide_open_drawer
+instruction: Open the drawer.
 targets: {}
 program:
   kind: segment

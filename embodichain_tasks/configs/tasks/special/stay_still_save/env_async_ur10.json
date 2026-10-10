@@ -4,6 +4,7 @@
     "max_episodes": 4,
     "num_envs": 4,
     "env": {
+        "task_instruction": "Keep the robot stationary while recording camera observations.",
         "dataset": {
             "lerobot": {
                 "func": "AsyncLeRobotRecorder",
@@ -12,9 +13,6 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10"
-                    },
-                    "instruction": {
-                        "lang": "Hold still while recording"
                     },
                     "extra": {
                         "scene_type": "benchmark",

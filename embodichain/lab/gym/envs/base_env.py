@@ -727,8 +727,18 @@ class BaseEnv(gym.Env):
         """
 
         with self._profiler.section("proprio"):
+            # A Python index list makes each proprioception field upload its
+            # own indices. Reuse the device index until the selection changes.
+            selection = (tuple(self.active_joint_ids), self.device)
+            cached = getattr(self, "_proprio_joint_index_cache", None)
+            if cached is None or cached[0] != selection:
+                cached = (
+                    selection,
+                    torch.tensor(selection[0], dtype=torch.long, device=self.device),
+                )
+                self._proprio_joint_index_cache = cached
             obs = TensorDict(
-                dict(robot=self.robot.get_proprioception()[:, self.active_joint_ids]),
+                dict(robot=self.robot.get_proprioception()[:, cached[1]]),
                 batch_size=[self.num_envs],
                 device=self.device,
             )
@@ -930,7 +940,13 @@ class BaseEnv(gym.Env):
 
             with self._profiler.section("reset_objects_state"):
                 self.sim.reset_objects_state(
-                    env_ids=reset_ids, excluded_uids=self._detached_uids_for_reset
+                    env_ids=reset_ids,
+                    # Environment sensors are reset below, including sensors
+                    # supplied by custom _setup_sensors implementations.
+                    excluded_uids=self._detached_uids_for_reset,
+                    excluded_sensor_uids=[
+                        sensor.uid for sensor in self.sensors.values()
+                    ],
                 )
 
             for sensor in self.sensors.values():
@@ -940,7 +956,10 @@ class BaseEnv(gym.Env):
             with self._profiler.section("initialize_episode"):
                 self._initialize_episode(reset_ids, **options)
             self._reset_physical_objective(reset_ids)
-            self._elapsed_steps[reset_ids] = 0
+            elapsed_ids = torch.as_tensor(reset_ids, dtype=torch.long).to(
+                device=self._elapsed_steps.device, non_blocking=True
+            )
+            self._elapsed_steps.index_fill_(0, elapsed_ids, 0)
 
             with self.sim.render_frame(force_visualization=True):
                 with self._profiler.section("get_obs"):

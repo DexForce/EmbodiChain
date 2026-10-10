@@ -20,6 +20,7 @@ from collections.abc import Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
+import logging
 import os
 import threading
 import copy
@@ -232,6 +233,14 @@ class EmbodiedEnvCfg(EnvCfg):
 
     objective: OrderedPlacementObjectiveCfg | None = None
     """Optional measured physical objective, independent of task success and persistence."""
+
+    task_instruction: str | None = None
+    """Overall task language for handwritten/direct-control demonstrations.
+
+    Task Programs own their instruction in the program configuration. Explicit
+    episode instructions take precedence; recorder instructions are legacy
+    fallbacks and are not required to enable task language.
+    """
 
     expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
     """Source-neutral expert trajectory control and recording settings."""
@@ -907,7 +916,9 @@ class EmbodiedEnv(BaseEnv):
             dtype=torch.bool,
             device=self.episode_success_status.device,
         )
-        self.episode_success_status[update_mask] = success[update_mask]
+        self.episode_success_status.copy_(
+            torch.where(update_mask, success, self.episode_success_status)
+        )
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -995,7 +1006,10 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
+        if logger.logger.isEnabledFor(logging.DEBUG):
+            logger.log_debug(
+                f"Initializing episode for env_ids: {env_ids}", color="blue"
+            )
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
@@ -1095,7 +1109,7 @@ class EmbodiedEnv(BaseEnv):
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
-            _traj_steps[env_ids_to_process] = 0
+            _traj_steps.index_fill_(0, env_ids_to_process, 0)
 
         # Clear episode buffers only after every recorder has consumed them.
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
@@ -1120,7 +1134,7 @@ class EmbodiedEnv(BaseEnv):
             self._demo_active_rollout_start_steps[demo_ids] = 0
             self._demo_steps[demo_ids] = 0
 
-        self.episode_success_status[env_ids_to_process] = False
+        self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
@@ -1220,7 +1234,12 @@ class EmbodiedEnv(BaseEnv):
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
         attempt_id = int(getattr(self, "_demo_attempt_id", 0))
+        from .demo import _episode_instruction
+
+        instruction, instruction_source = _episode_instruction(self)
         metadata = {
+            "instruction": instruction,
+            "instruction_source": instruction_source,
             "schema_version": DEMO_SCHEMA_VERSION,
             "run_uuid": self._recording_run_uuid,
             "episode_uuid": episode_uuid,
@@ -1391,6 +1410,9 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            if result.instruction is not None:
+                metadata["instruction"] = result.instruction
+                metadata["instruction_source"] = result.instruction_source
             collection_stats = getattr(self, "_collection_stats", None)
             if isinstance(collection_stats, Mapping):
                 metadata["collection"] = dict(collection_stats)
@@ -1466,24 +1488,14 @@ class EmbodiedEnv(BaseEnv):
             ).item()
         )
         metadata["length"] = length
+        if metadata.get("instruction") is None:
+            from .demo import resolve_demo_instruction
+
+            metadata["instruction"], metadata["instruction_source"] = (
+                resolve_demo_instruction(self)
+            )
         if length > 0 and not metadata["segments"]:
-            env_metadata = getattr(self, "metadata", {})
-            dataset_metadata = (
-                env_metadata.get("dataset", {})
-                if isinstance(env_metadata, Mapping)
-                else {}
-            )
-            instruction_cfg = (
-                dataset_metadata.get("instruction")
-                if isinstance(dataset_metadata, Mapping)
-                else None
-            )
-            instruction = (
-                instruction_cfg.get("lang")
-                if isinstance(instruction_cfg, Mapping)
-                else instruction_cfg
-            )
-            instruction = str(instruction) if instruction else "unknown_task"
+            instruction = metadata["instruction"]
             success_status = getattr(self, "episode_success_status", None)
             task_success = getattr(self, "_task_success", None)
             success = bool(
@@ -1534,6 +1546,7 @@ class EmbodiedEnv(BaseEnv):
                     ),
                     "target_uid": None,
                     "instruction": instruction,
+                    "instruction_source": "task_fallback",
                     "failure_reason": None if success else terminal_reason,
                     "metadata": {},
                 }
@@ -2821,6 +2834,15 @@ class EmbodiedEnv(BaseEnv):
                     expansion_recipe_indices=expansion_recipe_indices,
                 )
             self._active_task_program_bridge = bridge
+            if getattr(self, "_demo_instruction_snapshot", None) is None:
+                from .demo import resolve_demo_instruction
+
+                text, source = resolve_demo_instruction(
+                    self, task_program=compiled_program
+                )
+                for metadata in getattr(self, "_demo_episode_metadata", []):
+                    metadata["instruction"] = text
+                    metadata["instruction_source"] = source
             return bridge.iter_segments()
 
         if expansion_profile is not None:

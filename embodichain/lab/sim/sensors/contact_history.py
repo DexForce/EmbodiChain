@@ -29,6 +29,7 @@ from embodichain.lab.sim.sensors._warp.contact_history import (
     reduce_contact_batch,
     finish_contact_sample,
 )
+from embodichain.utils.device_utils import current_warp_stream
 
 if TYPE_CHECKING:
     from dexsim.scene import ContactBuffer
@@ -132,11 +133,7 @@ class ContactHistory:
             dim=dim,
             inputs=inputs,
             device=str(self.actor_ids.device),
-            stream=(
-                wp.stream_from_torch(self.actor_ids.device)
-                if self.actor_ids.is_cuda
-                else None
-            ),
+            stream=current_warp_stream(self.actor_ids.device),
         )
 
     def _finish_sample(self, dt: float) -> None:
@@ -214,7 +211,13 @@ class ContactHistory:
         Args:
             env_ids: Rows to clear. None selects every environment.
         """
-        ids = slice(None) if env_ids is None else env_ids
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).to(
+                self.contact.device, non_blocking=True
+            )
+        )
         for value in (
             self.contact,
             self.found,
@@ -227,4 +230,7 @@ class ContactHistory:
             self._hits,
             self._env_hits,
         ):
-            value[ids] = 0
+            if ids is None:
+                value.zero_()
+            else:
+                value.index_fill_(0, ids, 0)

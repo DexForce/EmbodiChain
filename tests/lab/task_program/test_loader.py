@@ -135,6 +135,7 @@ def test_load_task_program_binds_trusted_deployment_into_unbound_source(
     """Configured sources stay robot-independent until deployment loading."""
     data = _program_data()
     data.pop("integration")
+    data["instruction"] = "Pick up the cube."
     serialized = json.dumps(data) if suffix == ".json" else yaml.safe_dump(data)
     path = tmp_path / f"program{suffix}"
     path.write_text(serialized, encoding="utf-8")
@@ -142,6 +143,7 @@ def test_load_task_program_binds_trusted_deployment_into_unbound_source(
     config = load_task_program(path, integration=_deployment_selection())
 
     assert config.integration == _deployment_selection()
+    assert config.instruction == "Pick up the cube."
 
 
 def test_trusted_deployment_rejects_source_owned_integration() -> None:

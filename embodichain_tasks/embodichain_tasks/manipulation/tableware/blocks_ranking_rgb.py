@@ -42,6 +42,7 @@ HAND_INTERP_STEPS = 10
 GRASP_HOLD_STEPS = 45
 FREE_FALL_RELEASE_HEIGHT = 0.08
 SETTLE_MIN_STEPS = 15
+MIN_PICK_LIFT_HEIGHT = 0.05
 SETTLE_MAX_STEPS = 60
 SETTLE_STABLE_STEPS = 5
 LINEAR_VELOCITY_THRESHOLD = 0.03
@@ -130,60 +131,92 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         )
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
-        """Lazily plan one atomic pick/place segment per manipulated block.
+        """Yield a grasp and placement subgoal for each manipulated block.
 
-        The green block is deliberately kept stationary as the ranking reference.
-        Planning is lazy so the blue-block target uses the reference pose measured
-        after the red-block segment has completed.
+        Planning remains lazy across blocks: the blue-block target is measured
+        after the red block has been placed. Each block's two trajectories share
+        the original projected grasp transform.
 
         Args:
-            **kwargs: Reserved for future expert-planning options.
+            **kwargs: Reserved for expert-planning options.
 
         Yields:
-            A red-block segment followed by a blue-block segment.
+            Red grasp, red placement, blue grasp, then blue placement.
         """
         del kwargs
-        for segment_index, plan in enumerate(BLOCK_PLANS):
+        for block_index, plan in enumerate(BLOCK_PLANS):
             uid = str(plan["uid"])
             color = str(plan["color"])
             target_position = self._target_position(float(plan["x_offset"]))
-            plan_success, actions, source_pose = self._plan_block_segment(
+            (
+                pick_success,
+                place_success,
+                pick_trajectory,
+                place_trajectory,
+                source_pose,
+            ) = self._plan_block_segment(
                 uid=uid,
                 arm=str(plan["arm"]),
                 hand=str(plan["hand"]),
                 target_position=target_position,
             )
-            logger.log_info(
-                f"Planned RGB ranking segment {segment_index + 1}/"
-                f"{len(BLOCK_PLANS)} for {uid}."
+            common_metadata = {
+                "segment_count": 2 * len(BLOCK_PLANS),
+                "color": color,
+                "arm": str(plan["arm"]),
+                "hand": str(plan["hand"]),
+                "reference_uid": REFERENCE_BLOCK_UID,
+                "planned_source_poses": source_pose.detach().cpu().tolist(),
+            }
+            yield DemoSegment(
+                actions=self._iter_segment_actions(
+                    self._blocks[uid],
+                    pick_trajectory,
+                    settle=False,
+                ),
+                name=f"pick_{color}_block",
+                target_uid=uid,
+                instruction=f"Grasp and lift the {color} block clear of the table.",
+                progress_total_steps=int(pick_trajectory.shape[1]),
+                metadata={
+                    **common_metadata,
+                    "segment_index": 2 * block_index,
+                    "atomic_actions": ["pick_up"],
+                    "planning_success": pick_success.detach().cpu().tolist(),
+                },
+                validator=partial(
+                    self._validate_block_pick,
+                    uid,
+                    pick_success.detach().clone(),
+                    source_pose.detach().clone(),
+                ),
             )
             yield DemoSegment(
-                actions=actions,
+                actions=self._iter_segment_actions(
+                    self._blocks[uid],
+                    place_trajectory,
+                    clear_grasp_dynamics=False,
+                ),
                 name=f"place_{color}_block",
                 target_uid=uid,
                 instruction=(
-                    f"Pick up the {color} block and place it "
+                    f"Place the {color} block "
                     f"{'left' if float(plan['x_offset']) < 0 else 'right'} "
-                    "of the green block."
+                    "of the green block, release it, and let it settle."
                 ),
                 metadata={
-                    "segment_index": segment_index,
-                    "segment_count": len(BLOCK_PLANS),
-                    "color": color,
-                    "arm": str(plan["arm"]),
-                    "hand": str(plan["hand"]),
-                    "reference_uid": REFERENCE_BLOCK_UID,
-                    "atomic_actions": ["pick_up", "place"],
+                    **common_metadata,
+                    "segment_index": 2 * block_index + 1,
+                    "atomic_actions": ["place"],
+                    "planning_success": place_success.detach().cpu().tolist(),
                     "free_fall_release_height": FREE_FALL_RELEASE_HEIGHT,
                     "free_fall_settle": True,
-                    "planning_success": plan_success.detach().cpu().tolist(),
-                    "planned_source_poses": source_pose.detach().cpu().tolist(),
                     "target_position": target_position.detach().cpu().tolist(),
                 },
                 validator=partial(
                     self._validate_block_placement,
                     uid,
-                    plan_success.detach().clone(),
+                    (pick_success & place_success).detach().clone(),
                     target_position.detach().clone(),
                 ),
             )
@@ -204,7 +237,7 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         arm: str,
         hand: str,
         target_position: torch.Tensor,
-    ) -> tuple[torch.Tensor, Iterable[torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Plan an atomic PickUp followed by Place for one block."""
         from embodichain.lab.sim.atomic_actions import (
             ActionInvocation,
@@ -276,10 +309,13 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         pick_trajectory = self._insert_grasp_hold(pick_trajectory)
         held = picked_context.get_held_object(arm)
         if held is None or not bool(pick_success.all().item()):
-            trajectory = self._ensure_nonempty_trajectory(pick_trajectory)
+            if held is None:
+                pick_success = torch.zeros_like(pick_success, dtype=torch.bool)
             return (
+                pick_success,
                 torch.zeros_like(pick_success, dtype=torch.bool),
-                self._iter_segment_actions(block, trajectory),
+                self._ensure_nonempty_trajectory(pick_trajectory),
+                pick_trajectory[:, :0],
                 source_pose,
             )
 
@@ -304,12 +340,11 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         )
         place_success = place_compiled.plan_success
         place_trajectory = place_compiled.trajectory.positions
-        trajectory = self._ensure_nonempty_trajectory(
-            torch.cat((pick_trajectory, place_trajectory), dim=1)
-        )
         return (
-            pick_success & place_success,
-            self._iter_segment_actions(block, trajectory),
+            pick_success,
+            place_success,
+            self._ensure_nonempty_trajectory(pick_trajectory),
+            self._ensure_nonempty_trajectory(place_trajectory),
             source_pose,
         )
 
@@ -354,9 +389,14 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         return self.robot.get_qpos().clone().unsqueeze(1)
 
     def _iter_segment_actions(
-        self, block: RigidObject, trajectory: torch.Tensor
+        self,
+        block: RigidObject,
+        trajectory: torch.Tensor,
+        *,
+        clear_grasp_dynamics: bool = True,
+        settle: bool = True,
     ) -> Iterable[torch.Tensor]:
-        """Replay one pick/place trajectory and allow the released block to settle."""
+        """Replay one stage with cleanup only at the grasp/release boundary."""
         clear_dynamics_step = (
             round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6)
             + HAND_INTERP_STEPS
@@ -364,9 +404,11 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         )
         for step_index, action in enumerate(trajectory.unbind(dim=1), start=1):
             yield action
-            if step_index == clear_dynamics_step:
+            if clear_grasp_dynamics and step_index == clear_dynamics_step:
                 block.clear_dynamics()
 
+        if not settle:
+            return
         hold_action = trajectory[:, -1].clone()
         stable_steps = 0
         for settle_step in range(SETTLE_MAX_STEPS):
@@ -387,6 +429,21 @@ class BlocksRankingRGBEnv(EmbodiedEnv):
         angular_speed = torch.linalg.vector_norm(block.body_data.ang_vel, dim=-1)
         return (linear_speed <= LINEAR_VELOCITY_THRESHOLD) & (
             angular_speed <= ANGULAR_VELOCITY_THRESHOLD
+        )
+
+    def _validate_block_pick(
+        self,
+        uid: str,
+        plan_success: torch.Tensor,
+        source_pose: torch.Tensor,
+    ) -> torch.Tensor:
+        """Accept only planned rows whose selected block was measurably lifted."""
+        actual_pose = self._blocks[uid].get_local_pose(to_matrix=True)
+        lifted = actual_pose[:, 2, 3] - source_pose[:, 2, 3] >= MIN_PICK_LIFT_HEIGHT
+        return (
+            plan_success.to(device=self.device)
+            & lifted
+            & torch.isfinite(actual_pose).all(dim=(1, 2))
         )
 
     def _validate_block_placement(

@@ -85,6 +85,8 @@ def test_episode_override_program_hash_uses_executed_program() -> None:
         _program=actual, expansion_records=[]
     )
     result = SimpleNamespace(
+        instruction=None,
+        instruction_source="unknown",
         lengths=[3],
         completed_by_env=[True],
         terminal_reasons=["success"],
@@ -147,6 +149,8 @@ def test_executed_expansion_records_preserve_selected_candidate_lineage() -> Non
         _program=None, expansion_records=[record]
     )
     result = SimpleNamespace(
+        instruction=None,
+        instruction_source="unknown",
         lengths=[3],
         completed_by_env=[True],
         terminal_reasons=["success"],

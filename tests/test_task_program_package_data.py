@@ -110,6 +110,7 @@ _RESOURCE_PATHS = frozenset(
         Path("components/execution_policies/motion_gen_verified.yaml"),
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_slow.yaml"),
         Path("components/expansion_policies/task_program_episode.yaml"),
         Path("components/randomization_profiles/cube_initial_pose.yaml"),
         Path("components/randomization_profiles/rgb_visual.yaml"),
@@ -134,6 +135,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }
 )

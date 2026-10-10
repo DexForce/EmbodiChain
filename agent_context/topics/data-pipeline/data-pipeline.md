@@ -28,6 +28,11 @@ validation, and conversion across Python/LeRobot versions.
 
 ## Online worker contract
 
+Online batches also carry engine-local, append-only task/subtask IDs. The shared
+registry and `resolve_language(batch)` expose the frozen texts separately from
+TensorDict data, without tying old samples to reused trajectory rows. See
+[online sampling](online-sampling.md) for capacity and process boundaries.
+
 The creator process owns `start()` / `stop()`. A forkserver worker fills CPU
 shared memory: `CREATED → STARTING → READY`; `FAILED` and `STOPPED` are terminal.
 Startup waits for initial fill with a timeout and demonstration generation has
@@ -71,6 +76,12 @@ match the declared representation and is stored as
 Policy recorders validate EEF finiteness and normalized gripper bounds before
 ActionManager processing, then validate again before persistence. A
 `ControllerAction` cannot be written into this policy schema.
+Recorders consume the task-owned episode instruction snapshot. Program roots,
+handwritten `task_instruction`, and explicit per-episode overrides are resolved
+by `demo.py`; recorder `instruction` is only a legacy fallback. Snapshots and
+segment annotation sources survive async enqueue and fragment export, including
+unannotated dynamic programs whose goal remains explicitly unknown.
+
 Language annotations are independent of the action contract: LeRobot `task` /
 `task_index` retain the overall task and `subtask` / `subtask_index` identify the
 current segment instruction through `meta/subtasks.parquet`. Natural-segment

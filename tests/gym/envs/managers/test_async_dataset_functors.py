@@ -411,6 +411,8 @@ class TestAsyncLeRobotRecorder:
         caller thread so the worker is immune to buffer reuse on reset.
         """
         env = _MockEnv(num_envs=1, steps=3)
+        env.episode_metadata["instruction"] = "Dynamic episode task"
+        env.episode_metadata["instruction_source"] = "episode"
         mock_ds = _MockDataset()
         recorder = _make_recorder(env, mock_ds)
 
@@ -422,6 +424,7 @@ class TestAsyncLeRobotRecorder:
         env.rollout_buffer["actions"][0, :3] = 999.0
         env.rollout_buffer["segment_id"][0, :3] = 999
         env.episode_metadata["segments"][0]["instruction"] = "corrupted"
+        env.episode_metadata["instruction"] = "corrupted task"
 
         recorder.finalize()
 
@@ -430,7 +433,7 @@ class TestAsyncLeRobotRecorder:
             assert (frame[LeRobotKey.OBS_STATE.value] == 0).all()
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
             assert frame["annotation.segment_id"].tolist() == [0]
-            assert frame["task"] == "test"
+            assert frame["task"] == "Dynamic episode task"
             assert frame["subtask_index"].tolist() == [0]
         assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
         assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]

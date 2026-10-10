@@ -138,6 +138,15 @@ containing one or more semantic subtasks. Segment action iterables may be lazy,
 and the common executor records per-environment lengths, terminal status, and
 segment spans.
 
+Overall language belongs to the task: Task Programs declare a root
+``instruction``, and handwritten/direct-control tasks use
+``EmbodiedEnvCfg.task_instruction``. An explicit ``execute_demo_episode``
+instruction overrides these defaults for one episode. The executor freezes the
+resolved text and its source before planning, so disk recorders and online
+language batches consume the same semantics even if configuration later changes.
+Legacy recorder instructions remain a fallback. Segment annotations distinguish
+explicit labels from overall-task fallback through ``instruction_source``.
+
 .. currentmodule:: embodichain.lab.gym.envs.demo
 
 .. autoclass:: DemoExecutionCfg
@@ -159,6 +168,8 @@ segment spans.
 .. autofunction:: execute_demo_episode
 
 .. autofunction:: resolve_demo_segments
+
+.. autofunction:: resolve_demo_instruction
 
 Dynamic Settling
 ----------------

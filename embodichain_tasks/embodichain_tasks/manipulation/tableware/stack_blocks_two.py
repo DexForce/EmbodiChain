@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Stack two blocks with one atomic-action demonstration segment."""
+"""Stack two blocks with separate grasp and placement demonstration segments."""
 
 from __future__ import annotations
 
@@ -47,11 +47,12 @@ PLACE_SAMPLE_INTERVAL = 90
 HAND_INTERP_STEPS = 10
 GRASP_HOLD_STEPS = 45
 SETTLE_STEPS = 30
+MIN_PICK_LIFT_HEIGHT = 0.05
 
 
 @register_env("StackBlocksTwo-v1", max_episode_steps=600)
 class StackBlocksTwoEnv(EmbodiedEnv):
-    """Pick up ``block_2`` and place it on ``block_1`` as one segment."""
+    """Grasp ``block_2`` and stack it on ``block_1`` as two semantic subgoals."""
 
     def __init__(self, cfg: EmbodiedEnvCfg | None = None, **kwargs: Any) -> None:
         super().__init__(cfg, **kwargs)
@@ -106,35 +107,75 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             entity_id=STACK_BLOCK_UID,
         )
 
-    def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
-        """Plan the complete stacking task as exactly one semantic segment."""
+    def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
+        """Yield grasp/lift and placement subgoals from one continuous plan.
+
+        Args:
+            **kwargs: Reserved for expert-planning options.
+
+        Yields:
+            A measured lift followed by a settled stacking placement.
+        """
         del kwargs
-        plan_success, trajectory, source_pose, target_pose = self._plan_stack()
-        return (
-            DemoSegment(
-                actions=self._iter_segment_actions(trajectory),
-                name="stack_block_2_on_block_1",
-                target_uid=STACK_BLOCK_UID,
-                instruction=(
-                    "Pick up block 2, place it on top of block 1, "
-                    "and wait for the stack to settle."
-                ),
-                progress_total_steps=int(trajectory.shape[1]) + SETTLE_STEPS,
-                metadata={
-                    "segment_index": 0,
-                    "segment_count": 1,
-                    "planning_success": plan_success.detach().cpu().tolist(),
-                    "source_pose": source_pose.detach().cpu().tolist(),
-                    "target_pose": target_pose.detach().cpu().tolist(),
-                    "atomic_actions": ["pick_up", "place"],
-                },
-                validator=partial(self._validate_stack, plan_success.detach().clone()),
+        (
+            pick_success,
+            place_success,
+            pick_trajectory,
+            place_trajectory,
+            source_pose,
+            target_pose,
+        ) = self._plan_stack()
+        yield DemoSegment(
+            actions=self._iter_segment_actions(pick_trajectory, settle=False),
+            name="pick_block_2",
+            target_uid=STACK_BLOCK_UID,
+            instruction="Grasp and lift block 2 clear of the table.",
+            progress_total_steps=int(pick_trajectory.shape[1]),
+            metadata={
+                "segment_index": 0,
+                "segment_count": 2,
+                "planning_success": pick_success.detach().cpu().tolist(),
+                "source_pose": source_pose.detach().cpu().tolist(),
+                "atomic_actions": ["pick_up"],
+            },
+            validator=partial(
+                self._validate_pick,
+                pick_success.detach().clone(),
+                source_pose.detach().clone(),
+            ),
+        )
+        yield DemoSegment(
+            actions=self._iter_segment_actions(
+                place_trajectory,
+                clear_grasp_dynamics=False,
+            ),
+            name="place_block_2_on_block_1",
+            target_uid=STACK_BLOCK_UID,
+            instruction="Place block 2 on top of block 1, release it, and let the stack settle.",
+            progress_total_steps=int(place_trajectory.shape[1]) + SETTLE_STEPS,
+            metadata={
+                "segment_index": 1,
+                "segment_count": 2,
+                "planning_success": place_success.detach().cpu().tolist(),
+                "target_pose": target_pose.detach().cpu().tolist(),
+                "atomic_actions": ["place"],
+            },
+            validator=partial(
+                self._validate_stack,
+                (pick_success & place_success).detach().clone(),
             ),
         )
 
     def _plan_stack(
         self,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         """Plan PickUp then Place while threading the held-object state."""
         from embodichain.lab.sim.atomic_actions import (
             ActionInvocation,
@@ -211,9 +252,13 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         target_pose[:, 2, 3] += BLOCK_HEIGHT
         held = picked_context.get_held_object(CONTROL_PART)
         if held is None or not bool(pick_success.all().item()):
+            if held is None:
+                pick_success = torch.zeros_like(pick_success, dtype=torch.bool)
             return (
+                pick_success,
                 torch.zeros_like(pick_success, dtype=torch.bool),
                 self._ensure_nonempty_trajectory(pick_trajectory),
+                pick_trajectory[:, :0],
                 source_pose,
                 target_pose,
             )
@@ -236,10 +281,14 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         )
         place_success = place_compiled.plan_success
         place_trajectory = place_compiled.trajectory.positions
-        trajectory = self._ensure_nonempty_trajectory(
-            torch.cat((pick_trajectory, place_trajectory), dim=1)
+        return (
+            pick_success,
+            place_success,
+            self._ensure_nonempty_trajectory(pick_trajectory),
+            self._ensure_nonempty_trajectory(place_trajectory),
+            source_pose,
+            target_pose,
         )
-        return pick_success & place_success, trajectory, source_pose, target_pose
 
     def _insert_grasp_hold(self, trajectory: torch.Tensor) -> torch.Tensor:
         """Dwell at the closed grasp pose before beginning the lift phase."""
@@ -265,8 +314,14 @@ class StackBlocksTwoEnv(EmbodiedEnv):
             return trajectory
         return self.robot.get_qpos().clone().unsqueeze(1)
 
-    def _iter_segment_actions(self, trajectory: torch.Tensor) -> Iterable[torch.Tensor]:
-        """Replay the atomic trajectory and wait for the released block to settle."""
+    def _iter_segment_actions(
+        self,
+        trajectory: torch.Tensor,
+        *,
+        clear_grasp_dynamics: bool = True,
+        settle: bool = True,
+    ) -> Iterable[torch.Tensor]:
+        """Replay one stage, keeping grasp cleanup and release settling separate."""
         close_end_step = min(
             round((PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS) * 0.6)
             + HAND_INTERP_STEPS
@@ -275,12 +330,28 @@ class StackBlocksTwoEnv(EmbodiedEnv):
         )
         for step_index, action in enumerate(trajectory.unbind(dim=1), start=1):
             yield action
-            if step_index == close_end_step:
+            if clear_grasp_dynamics and step_index == close_end_step:
                 self._stack_block.clear_dynamics()
 
+        if not settle:
+            return
         hold_action = trajectory[:, -1].clone()
         for _ in range(SETTLE_STEPS):
             yield hold_action
+
+    def _validate_pick(
+        self,
+        plan_success: torch.Tensor,
+        source_pose: torch.Tensor,
+    ) -> torch.Tensor:
+        """Accept only planned rows whose block was measurably lifted."""
+        actual_pose = self._stack_block.get_local_pose(to_matrix=True)
+        lifted = actual_pose[:, 2, 3] - source_pose[:, 2, 3] >= MIN_PICK_LIFT_HEIGHT
+        return (
+            plan_success.to(device=self.device)
+            & lifted
+            & torch.isfinite(actual_pose).all(dim=(1, 2))
+        )
 
     def _validate_stack(self, plan_success: torch.Tensor) -> torch.Tensor:
         """Require both a successful atomic plan and a physically valid stack."""

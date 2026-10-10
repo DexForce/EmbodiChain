@@ -9,7 +9,7 @@ path-depth limits, and NRD settings used by
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `hybrid`, `fast-rt`, or `rt`. |
+| `renderer` | `str` | `"auto"` | Renderer backend: `auto`, `no-render`, `hybrid`, `fast-rt`, or `rt`. |
 | `spp` | `int` | `1` | Samples per pixel for ray-traced rendering. Must be at least `1`. |
 | `min_bounces` | `int` | `4` | Path depth at which Russian Roulette may start terminating rays. Must be non-negative. |
 | `max_bounces` | `int` | `8` | Maximum traced path depth, counting the primary segment. Must be positive and at least `min_bounces`. |
@@ -36,6 +36,16 @@ limits across denoising modes does not make their light-transport budgets
 identical.
 
 ## Renderer selection
+
+For state-based RL, use `RenderCfg(renderer="no-render")` with
+`SimulationManagerCfg(headless=True)`. This selects DexSim's `Renderer.NORENDER`
+backend. EmbodiChain skips background, light and visual-material creation,
+retains physical ground, and skips Newton render-state publication.
+Native cameras and windows require `hybrid`, `fast-rt`, or `rt`.
+`headless=True` with a native renderer keeps offscreen rendering available.
+
+Policy evaluation accepts `--renderer no-render`. For visual evaluation of a
+NoRender checkpoint, `--viewer` selects Hybrid by default.
 
 With `renderer="auto"`, EmbodiChain selects a backend from the GPU detected at
 the configured `gpu_id` when the simulation manager is constructed:

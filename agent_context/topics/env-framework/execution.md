@@ -37,6 +37,23 @@ Read this when the request needs these details. [Topic overview](env-framework.m
   and causal-continuity annotations.
 - `extensions` dict entries are set as attributes on both cfg and env instance.
 
+### Task language (`demo.py`, `embodied_env.py`)
+
+`EmbodiedEnvCfg.task_instruction` owns handwritten and direct-control goals;
+Task Programs own the root `instruction` in their program. The common executor
+resolves explicit episode language first, then the selected program, task
+configuration, and legacy recorder configuration. Resolution reads legacy config
+without constructing DatasetManager, so online generation retains compatibility.
+Conflicting legacy recorders need an authoritative task-level description.
+
+The executor freezes `DemoEpisodeResult.instruction` and its source before
+planning and restores outer snapshot state even on hook/planning exceptions.
+Recorded metadata preserves an unknown dynamic-program snapshot rather than
+borrowing the static program's goal. Segment fallback labels use the resolved
+episode goal and record their fallback source; they are not fine-grained labels.
+The [data pipeline](../data-pipeline/data-pipeline.md) owns disk mappings and
+stable online language IDs. Language intent does not establish physical success.
+
 ### Action boundary (`types.py`, `embodied_env.py`)
 
 - Raw policy actions are flat floating tensors. `ActionManager.process_action()`

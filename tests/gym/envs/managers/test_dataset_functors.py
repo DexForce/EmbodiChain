@@ -1947,8 +1947,9 @@ def test_subtask_registry_writes_stable_deduplicated_indices(tmp_path) -> None:
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 @pytest.mark.parametrize("with_contract", [False, True])
 @pytest.mark.parametrize("fragments", [False, True])
+@pytest.mark.parametrize("episode_snapshot", [False, True])
 def test_multisegment_episode_round_trips_task_and_subtasks(
-    tmp_path, with_contract: bool, fragments: bool
+    tmp_path, with_contract: bool, fragments: bool, episode_snapshot: bool
 ) -> None:
     """LeRobot reloads both language levels for full episodes and fragments."""
     env = MockEnvForDataset(num_joints=2, has_sensors=False)
@@ -1966,6 +1967,8 @@ def test_multisegment_episode_round_trips_task_and_subtasks(
             "version": 1,
             "representation": "joint_position",
         }
+    if episode_snapshot:
+        cfg.params["instruction"] = {"lang": "Outdated recorder task"}
     recorder = LeRobotRecorder(cfg, env)
     obs_list = [
         TensorDict(
@@ -2003,6 +2006,10 @@ def test_multisegment_episode_round_trips_task_and_subtasks(
             },
         ]
     }
+
+    if episode_snapshot:
+        episode_metadata["instruction"] = "Move the cube between two targets."
+        episode_metadata["instruction_source"] = "task_program"
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -2069,6 +2076,13 @@ def test_multisegment_episode_round_trips_task_and_subtasks(
     assert [
         segment["instruction"] for record in records for segment in record["segments"]
     ] == ["Pick up the cube.", "Place the cube at the next target."]
+
+    assert {record["instruction_source"] for record in records} == {
+        "task_program" if episode_snapshot else "legacy_recorder"
+    }
+    from embodichain.data_pipeline.recording import inspect_recording
+
+    assert inspect_recording(recorder.dataset_full_path)["ok"]
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -2428,3 +2442,50 @@ class TestDatasetFunctorCfg:
         # Should be able to instantiate
         cfg = DatasetFunctorCfg()
         assert cfg is not None
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_unknown_dynamic_snapshot_is_not_replaced_by_static_recorder_language(
+    tmp_path,
+) -> None:
+    env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    env.cfg = SimpleNamespace(
+        task_program=SimpleNamespace(instruction="Static program goal")
+    )
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "instruction": {"lang": "Static recorder goal"},
+            }
+        ),
+        env,
+    )
+    obs = TensorDict(
+        {
+            "robot": {
+                "qpos": torch.zeros(2),
+                "qvel": torch.zeros(2),
+                "qf": torch.zeros(2),
+            }
+        },
+        batch_size=[],
+    )
+    assert recorder._save_single_episode(
+        0,
+        [obs],
+        [torch.zeros(2)],
+        episode_metadata={
+            "instruction": "unknown_task",
+            "instruction_source": "unknown",
+        },
+    )
+    recorder.finalize()
+    dataset = LeRobotDataset(
+        repo_id=recorder.dataset_full_path.name, root=recorder.dataset_full_path
+    )
+    assert dataset[0]["task"] == dataset[0]["subtask"] == "unknown_task"
+    record = json.loads(
+        (recorder.dataset_full_path / "meta/embodichain_episodes.jsonl").read_text()
+    )
+    assert record["instruction_source"] == "unknown"

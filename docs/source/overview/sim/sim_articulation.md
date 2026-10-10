@@ -26,6 +26,34 @@ Articulations are configured using the {class}`~cfg.ArticulationCfg` dataclass.
 At runtime, call `articulation.set_gravity(...)` to change gravity for every
 environment or for a selected set of environment indices.
 
+### Combined state writes
+
+Use `Articulation.set_state` (also inherited by `Robot`) to reset selected
+articulations in one Scene batch operation:
+
+```python
+robot.set_state(
+    env_ids=env_ids,
+    joint_ids=policy_joint_ids,
+    root_pose=pose,             # (N, 7): environment-local xyz + xyzw
+    qpos=joint_position,        # (N, J), clipped to the selected joint limits
+    target_qpos=joint_position,
+    clear_dynamics=True,
+)
+```
+
+All supplied joint fields share the selected row and joint order. Optional
+`qvel`, `target_qvel`, `qf`, and `root_velocity` fields override reset defaults.
+`clear_dynamics=True` clears velocities, forces, external wrenches and solver
+history, and holds the final joint positions where no target is supplied.
+Newton/MJWarp requires all articulations in each affected solver world when
+clearing solver history. Other environments retain their state.
+
+The Scene batch validates shapes and selections before writes, then propagates
+final joint kinematics once. Native execution errors are reported to the caller.
+Single-field joint setters use this same writer; target-only writes do not
+recompute kinematics. State changes follow the existing render-frame publication lifecycle.
+
 ### Root velocity writes
 
 `Articulation.set_root_velocity(velocity, env_ids=None)` writes root-link velocities
@@ -141,6 +169,14 @@ solver-dependent; storing a value is not proof that the solver enforces it.
 Inspect the resolved properties and test the response after changing solvers.
 
 ### Joint Position Limits
+
+When binding a finalized Scene, `ArticulationData` initializes position,
+velocity and effort limits through one DexSim `ArticulationBatch` property
+read. Each environment retains its own values in public DOF order. The
+`joint_stiffness`, `joint_damping`, `joint_friction` and `joint_armature`
+properties also use this batch interface and return independent snapshots of
+the current model. Retained descriptor edits that require a Scene rebuild
+become visible after that rebuild.
 
 Use `qpos_limits` to override the limits defined in the asset file. This is the
 articulation's effective physical limit in simulation, so it is also the range
