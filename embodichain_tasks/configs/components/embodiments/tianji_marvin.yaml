@@ -1,0 +1,56 @@
+embodiment_id: tianji_marvin
+
+simulation:
+  class_type: TianjiMarvin
+  uid: TianjiMarvin
+  with_gripper: true
+
+sensor: []
+
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: tianji_marvin
+  resources:
+    - resource_id: left
+      endpoints:
+        - endpoint_id: motion
+          control_part: left_arm
+          capabilities:
+            - kinematics.batch_inverse
+            - motion.cartesian_pose
+            - kinematics.forward
+        - endpoint_id: grasp
+          control_part: left_hand
+          capabilities: [interaction.grasp]
+          command_preset: left_parallel_gripper
+    - resource_id: right
+      endpoints:
+        - endpoint_id: motion
+          control_part: right_arm
+          capabilities:
+            - kinematics.batch_inverse
+            - motion.cartesian_pose
+            - kinematics.forward
+        - endpoint_id: grasp
+          control_part: right_hand
+          capabilities: [interaction.grasp]
+          command_preset: right_parallel_gripper
+  command_presets:
+    - preset_id: left_parallel_gripper
+      control_part: left_hand
+      commands:
+        open: [0.0, 0.0]
+        grasp: [-0.05, -0.05]
+    - preset_id: right_parallel_gripper
+      control_part: right_hand
+      commands:
+        open: [0.0, 0.0]
+        grasp: [-0.05, -0.05]
+  runtime_services:
+    grasp_pose_generators:
+      left_hand:
+        kind: antipodal_parallel_jaw
+        model: tianji_marvin_gripper
+      right_hand:
+        kind: antipodal_parallel_jaw
+        model: tianji_marvin_gripper

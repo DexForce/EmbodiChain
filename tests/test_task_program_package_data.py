@@ -117,6 +117,7 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/cobotmagic.yaml"),
         Path("components/embodiments/dual_ur5_dh_pgi_140_80.yaml"),
         Path("components/embodiments/franka_panda.yaml"),
+        Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
         Path("tasks/manipulation/hand_over/env.yaml"),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
