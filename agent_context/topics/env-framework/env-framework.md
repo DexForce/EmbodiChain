@@ -45,6 +45,9 @@ image acquisition.
 
 Environment construction predicts native render demand before creating the
 World, so auto can use NoRender for headless tasks without visual consumers.
+BaseEnv owns a copy of the configuration; filtering and renderer resolution do
+not change the caller's reusable configuration. Filters run before the demand
+hook, including when a subclass replaces that hook without calling super.
 Custom camera/visual code selects an explicit native renderer or reserves
 rendering through `BaseEnv._requires_native_renderer()`.
 See [render selection](../simulation-system/rendering.md#norender-initialization)

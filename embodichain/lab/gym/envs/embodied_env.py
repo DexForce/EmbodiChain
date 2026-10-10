@@ -875,15 +875,19 @@ class EmbodiedEnv(BaseEnv):
         func = term["func"] if isinstance(term, dict) else term.func
         return string_to_callable(func) if isinstance(func, str) else func
 
+    def _setup_scene(self, **kwargs) -> None:
+        """Filter configuration independently of the overridable demand hook."""
+        self._apply_functor_filter()
+        super()._setup_scene(**kwargs)
+
     def _requires_native_renderer(self) -> bool:
-        """Predict configured cameras after filtering disabled manager terms."""
+        """Predict cameras from the already-filtered manager configuration."""
         from embodichain.lab.gym.envs.managers.record import (
             record_camera_data,
             validation_cameras,
         )
         from embodichain.lab.sim import SimulationManager
 
-        self._apply_functor_filter()
         if super()._requires_native_renderer():
             return True
         if self.cfg.enable_sensor:

@@ -19,6 +19,7 @@ from __future__ import annotations
 import zlib
 
 import math
+from copy import deepcopy
 from collections.abc import Mapping
 from numbers import Integral, Real
 
@@ -141,7 +142,9 @@ class BaseEnv(gym.Env):
         cfg: EnvCfg,
         **kwargs,
     ):
-        self.cfg = cfg
+        # Renderer resolution and manager filtering belong to this instance.
+        # Reusing the authored configuration must still start from auto.
+        self.cfg = deepcopy(cfg)
         self._initialization_summary_logged = False
 
         # the number of envs to be simulated in parallel.

@@ -106,6 +106,13 @@ def test_custom_demand_hook_reserves_renderer_before_world_creation(
 
     env = CustomEnv.__new__(CustomEnv)
     env.cfg = EmbodiedEnvCfg(sim_cfg=SimulationManagerCfg(headless=True))
+    env.cfg.enable_sensor = False
+    env.cfg.sensor = [CameraCfg(uid="camera")]
+    env.cfg.observations = {
+        "camera": ObservationCfg(func=record_camera_data, name="sensor/camera/color")
+    }
+    env.cfg.filter_visual_rand = True
+    env.cfg.events = {"material": EventCfg(func=randomize_visual_material)}
     env.sim_cfg = env.cfg.sim_cfg
     env._num_envs = env.cfg.num_envs
     create_sim = Mock(return_value=SimpleNamespace())
@@ -113,9 +120,34 @@ def test_custom_demand_hook_reserves_renderer_before_world_creation(
     monkeypatch.setattr(env, "_declare_robot", lambda **kwargs: None)
     monkeypatch.setattr(env, "_prepare_scene", lambda **kwargs: None)
 
-    BaseEnv._setup_scene(env)
+    env._setup_scene()
 
     assert create_sim.call_args.kwargs["requires_native_renderer"] is True
+    assert env.cfg.observations["camera"] is None
+    assert env.cfg.events["material"] is None
+
+
+def test_reusing_authored_configuration_can_enable_cameras(monkeypatch) -> None:
+    config = EmbodiedEnvCfg(sim_cfg=SimulationManagerCfg(headless=True))
+
+    def create_sim(cfg, *, requires_native_renderer, **kwargs):
+        cfg.render_cfg.renderer = "hybrid" if requires_native_renderer else "no-render"
+        return SimpleNamespace(
+            profiler=Mock(),
+            prepare=Mock(side_effect=RuntimeError("stop after world construction")),
+            destroy=Mock(),
+        )
+
+    monkeypatch.setattr(base_module, "SimulationManager", create_sim)
+    monkeypatch.setattr(EmbodiedEnv, "_declare_robot", lambda self, **kwargs: None)
+    monkeypatch.setattr(EmbodiedEnv, "_prepare_scene", lambda self, **kwargs: None)
+    for expected in ("no-render", "hybrid"):
+        env = EmbodiedEnv.__new__(EmbodiedEnv)
+        with pytest.raises(RuntimeError, match="stop after world construction"):
+            BaseEnv.__init__(env, config)
+        assert env.sim_cfg.render_cfg.renderer == expected
+        assert config.sim_cfg.render_cfg.renderer == "auto"
+        config.sensor = [CameraCfg(uid="camera")]
 
 
 @pytest.mark.parametrize("manager", ["events", "observations", "rewards", "dataset"])
@@ -165,6 +197,7 @@ def test_disabled_sensor_terms_are_filtered_before_preflight() -> None:
             )
         },
     )
+    env._apply_functor_filter()
     assert not env._requires_native_renderer()
     assert env.cfg.observations["disabled"] is None
 
@@ -229,6 +262,7 @@ def test_visual_randomization_filter_runs_before_scene_setup(as_dict) -> None:
     terms = {"visual": EventCfg(func=randomize_visual_material)}
     collection = terms if as_dict else SimpleNamespace(**terms)
     env = _env(events=collection, filter_visual_rand=True)
+    env._apply_functor_filter()
     assert not env._requires_native_renderer()
     collection = env.cfg.events
     assert (collection if as_dict else vars(collection))["visual"] is None
