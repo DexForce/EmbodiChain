@@ -242,7 +242,7 @@ def _raw_rows(root: Path) -> dict[str, dict[str, Any]]:
 
 def _binding_records(
     root: Path, row: dict[str, Any], quality_rows: list[dict[str, Any]]
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     matches = [
         record for record in quality_rows if record.get("run_id") == row["run_id"]
     ]
@@ -269,7 +269,7 @@ def _binding_records(
     bindings = read_json(path)
     if not isinstance(bindings, list):
         raise ValueError("reference_bindings.json must contain a list")
-    return bindings, _artifact(root, path, "target_reference_bindings")
+    return bindings, _artifact(root, path, "target_reference_bindings"), record
 
 
 def _same(left: Any, right: Any) -> bool:
@@ -305,6 +305,7 @@ def _reference(
             alias.get("status") != "completed"
             or alias.get("frame_id") != metadata["frame_id"]
             or alias.get("time_s") != metadata["time_s"]
+            or stable_hash(alias.get("history")) != stable_hash(metadata.get("history"))
         ):
             continue
         artifact = alias.get("binding_artifact")
@@ -379,6 +380,8 @@ def _reference(
         )
     ref_metadata["frame_id"] = ref_metadata["frame_index"] = metadata["frame_id"]
     ref_metadata["time_s"] = metadata["time_s"]
+    if "history" in metadata:
+        ref_metadata["history"] = deepcopy(metadata["history"])
     return reference, {
         "alias": alias,
         "frame": _artifact(root, frame, "target_reference_frame"),
@@ -386,6 +389,8 @@ def _reference(
 
 
 def _policy(run: dict[str, Any]) -> dict[str, Any]:
+    if run.get("history_quality_protocol") is not None:
+        return validate_protocol(run["history_quality_protocol"])
     declared = run["config"].get("quality_protocol")
     if declared is not None:
         return validate_protocol(declared)
@@ -421,7 +426,7 @@ def bind_calibration_receipt(
         Rejected receipts and failed scopes emit no calibration claim. This
         function does not change raw/runs/quality files or certify target images.
     """
-    from .evaluate import _load_run
+    from .evaluate import _load_history, _load_run
 
     root = Path(target_root).resolve()
     if not root.is_dir():
@@ -495,7 +500,27 @@ def bind_calibration_receipt(
                         "Only completed raw runs can receive calibration bindings"
                     )
                 run = _load_run(root, row)
-                aliases, alias_evidence = _binding_records(root, row, quality_rows)
+                aliases, alias_evidence, evaluated = _binding_records(
+                    root, row, quality_rows
+                )
+                history = evaluated.get("timed_history")
+                if history is not None:
+                    run = _load_history(root, run, _verify(root, history))
+                    if any(
+                        history.get(key) != run["timed_history"].get(key)
+                        for key in (
+                            "schedule_sha256",
+                            "measured_frames",
+                            "sequence_frames",
+                        )
+                    ):
+                        raise ValueError(
+                            "Evaluated history identity differs from its verified manifest"
+                        )
+                elif any(alias.get("history") is not None for alias in aliases):
+                    raise ValueError(
+                        "History reference aliases require the evaluated timed-history proof"
+                    )
                 policy = _policy(run)
                 if not run["descriptors"]:
                     raise ValueError("Target run has no actual captured frames")
@@ -516,6 +541,11 @@ def bind_calibration_receipt(
                         ),
                         "reference_bindings": alias_evidence,
                     }
+                    if history is not None:
+                        frame_check.update(
+                            history=deepcopy(metadata["history"]),
+                            timed_history=deepcopy(run["timed_history"]),
+                        )
                     report["frames"].append(frame_check)
                     try:
                         reference, binding = _reference(
@@ -584,8 +614,10 @@ def bind_calibration_receipt(
                                     "env_id",
                                     "camera_name",
                                     "frame_id",
+                                    "history",
                                     "reason",
                                 )
+                                if key in frame_check
                             }
                         )
             except (

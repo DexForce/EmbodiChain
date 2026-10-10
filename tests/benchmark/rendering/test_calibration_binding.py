@@ -359,6 +359,27 @@ def test_missing_initial_evaluation_is_explicit_and_import_can_be_reused(
     assert second["report_path"] != first["report_path"]
 
 
+def test_measured_receipt_retains_its_proof_under_history_rgb_policy(
+    source: Path,
+) -> None:
+    from scripts.benchmark.rendering.calibration_binding import (
+        _claim,
+        verify_calibration,
+    )
+
+    receipt = read_json_object(source)
+    pair = receipt["heldout"][0]
+    captured = source.parent / pair["capture"]["path"]
+    metadata = read_json_object(captured)["metadata"]
+    renderer = read_json_object(captured.parent.parent / "result.json")["renderer"]
+    for key in ("effective_lighting_controls", "postprocess_evidence"):
+        metadata[key] = deepcopy(renderer[key])
+    ref = reference.load_reference_frame(source.parent / pair["reference"]["path"])
+    policy = protocol_for_modalities(("rgb",), timed_history=True, temporal_dt_s=1 / 30)
+    check = verify_calibration(_claim(source, metadata, ref), metadata, ref, policy)
+    assert check["status"] == "passed", check
+
+
 def test_reference_alias_outside_target_is_rejected(
     source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
