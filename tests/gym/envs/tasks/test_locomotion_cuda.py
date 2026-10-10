@@ -39,6 +39,10 @@ from embodichain.learning.rl.evaluation import (
     infer_policy_action,
 )
 from embodichain.learning.rl.runtime import build_gym_policy_runtime
+from embodichain.learning.rl.utils import (
+    dict_to_tensordict,
+    flatten_observation_groups,
+)
 from scripts.benchmark.rl.locomotion_ppo import (
     _load_config,
     _build_trainer,
@@ -250,10 +254,27 @@ def _resume_checkpoint(backend: str, output: Path) -> None:
                 )
                 assert _finite((observation, reward))
         runtime.policy.train()
+        current_observation = dict_to_tensordict(observation, device)
+        trainer.collector.obs_td = current_observation
+        expected_actor_obs = flatten_observation_groups(
+            current_observation, runtime.policy.actor_obs_groups
+        ).clone()
+        expected_critic_obs = flatten_observation_groups(
+            current_observation, runtime.policy.critic_obs_groups
+        ).clone()
         trainer.global_step = saved["global_step"]
         trainer.num_updates = saved["num_updates"]
         trainer.best_eval_value = saved["best_eval_value"]
         summary = trainer.train(trainer.global_step + 8 * 24)
+        torch.testing.assert_close(
+            trainer.buffer.buffer["obs"][:, 0], expected_actor_obs, rtol=0, atol=0
+        )
+        torch.testing.assert_close(
+            trainer.buffer.buffer["critic_obs"][:, 0],
+            expected_critic_obs,
+            rtol=0,
+            atol=0,
+        )
         losses = [
             value
             for key, value in summary["last_train_metrics"].items()

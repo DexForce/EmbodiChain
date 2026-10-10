@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ import pytest
 import torch
 
 from scripts.benchmark.rl import locomotion_ppo as benchmark
+from scripts.benchmark.rl import resource_usage
 from scripts.benchmark.rl.locomotion_ppo import (
     TASK_DIR,
     _load_config,
@@ -133,9 +135,10 @@ def test_report_does_not_rank_training_as_task_success(tmp_path, status: str) ->
 
 def test_memory_sample_matches_device_and_process() -> None:
     output = "11, 100, GPU-a\n11, 900, GPU-b\n12, 700, GPU-a\n"
-    assert _process_gpu_mib(output, {11}, "a") == 100
-    assert _process_gpu_mib(output, {13}, "a") is None
-    assert _process_gpu_mib("11, N/A, GPU-a", {11}, "a") is None
+    assert _process_gpu_mib(output, 11, "a") == 100
+    assert _process_gpu_mib(output, 13, "a") is None
+    assert _process_gpu_mib(output, None, "a") is None
+    assert _process_gpu_mib("11, N/A, GPU-a", 11, "a") is None
 
 
 def test_resource_output_omits_process_and_device_identifiers() -> None:
@@ -143,6 +146,77 @@ def test_resource_output_omits_process_and_device_identifiers() -> None:
     assert "gpu_uuid" not in result
     assert "pid_candidates" not in result
     assert "local-device-id" not in str(result)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "proc_namespace,expected",
+    [
+        ("native", 1000),
+        ("host", 1000),
+        ("private", None),
+        ("unreadable", None),
+        ("malformed", None),
+    ],
+)
+def test_resource_sample_resolves_one_provider_pid(
+    monkeypatch: pytest.MonkeyPatch, proc_namespace: str, expected: float | None
+) -> None:
+    """Exclude a colliding container PID and retain unknown namespace samples."""
+    import psutil
+
+    original_stat = Path.stat
+    original_read_text = Path.read_text
+
+    def stat(path: Path, *args, **kwargs):
+        if str(path) == "/proc/self/ns/pid":
+            return SimpleNamespace(
+                st_ino=0xEFFFFFFC if proc_namespace == "native" else 0xF0000002
+            )
+        if str(path) == "/proc/1/ns/pid":
+            if proc_namespace == "unreadable":
+                raise PermissionError("namespace unavailable")
+            return SimpleNamespace(
+                st_ino=0xEFFFFFFC if proc_namespace != "private" else 0xF0000001
+            )
+        return original_stat(path, *args, **kwargs)
+
+    def read_text(path: Path, *args, **kwargs):
+        if str(path) == "/proc/self/status":
+            return "NSpid:\t4300\t73\n"
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(
+        Path,
+        "readlink",
+        lambda path: Path("unknown" if proc_namespace == "malformed" else "4300"),
+    )
+    monkeypatch.setattr(
+        os, "getpid", lambda: 4300 if proc_namespace == "native" else 73
+    )
+    monkeypatch.setattr(
+        psutil,
+        "Process",
+        lambda: SimpleNamespace(
+            memory_info=lambda: SimpleNamespace(rss=0),
+            memory_full_info=lambda: SimpleNamespace(pss=0),
+        ),
+    )
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda: None)
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda: 0)
+    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda: 0)
+    monkeypatch.setattr(
+        resource_usage.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="4300, 1000, GPU-a\n73, 7000, GPU-a\n4300, 9000, GPU-b\n"
+        ),
+    )
+    sample = ProcessResources("a").sample("test")
+    assert sample["gpu_process_mib"] == expected
+    assert (sample["gpu_error"] is None) == (expected is not None)
 
 
 @pytest.mark.no_sim

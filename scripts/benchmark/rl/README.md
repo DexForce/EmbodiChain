@@ -30,6 +30,9 @@ per-update coefficient of variation (CV), process RAM/VRAM peaks, and GPU alloca
 memory. CV is the population standard deviation divided by the mean of per-update
 SPS. Process VRAM is sampled at phase boundaries; allocator peaks are measured
 inside each timed phase.
+Process VRAM matches one worker PID in NVIDIA's host PID namespace. A worker in
+a nested PID namespace requires readable host procfs to resolve that PID;
+private or inaccessible procfs keeps the sample unknown and reports `n/a`.
 
 Run G1/Go2 reset and inference checks, then G1 training/checkpoint tests on both backends:
 

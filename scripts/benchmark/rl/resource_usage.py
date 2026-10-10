@@ -24,19 +24,36 @@ from typing import Any
 
 __all__ = ["ProcessResources"]
 
+# Linux PID_NS_INIT_INO identifies the initial PID namespace.
+_INITIAL_PID_NS_INODE = 0xEFFFFFFC
 
-def _process_gpu_mib(output: str, pids: set[int], gpu_uuid: str) -> float | None:
+
+def _nvidia_smi_pid() -> int | None:
+    """Resolve the worker PID only when procfs exposes NVIDIA's host namespace."""
+    try:
+        if Path("/proc/self/ns/pid").stat().st_ino == _INITIAL_PID_NS_INODE:
+            return os.getpid()
+        if Path("/proc/1/ns/pid").stat().st_ino != _INITIAL_PID_NS_INODE:
+            return None
+        return int(Path("/proc/self").readlink().name)
+    except (OSError, ValueError):
+        return None
+
+
+def _process_gpu_mib(output: str, pid: int | None, gpu_uuid: str) -> float | None:
     """Use an exact GPU/PID match; missing or unavailable values stay unknown."""
+    if pid is None:
+        return None
     values = []
     for line in output.splitlines():
         parts = [part.strip() for part in line.split(",")]
         if len(parts) != 3:
             continue
-        pid, memory, uuid = parts
+        process_pid, memory, uuid = parts
         if uuid.lower().removeprefix("gpu-") != gpu_uuid.lower().removeprefix("gpu-"):
             continue
         try:
-            if int(pid) in pids:
+            if int(process_pid) == pid:
                 value = float(memory)
                 if value >= 0 and value < float("inf"):
                     values.append(value)
@@ -50,12 +67,7 @@ class ProcessResources:
 
     def __init__(self, gpu_uuid: str) -> None:
         self.gpu_uuid = gpu_uuid
-        self.pids = {os.getpid()}
-        status = Path("/proc/self/status")
-        if status.is_file():
-            for line in status.read_text().splitlines():
-                if line.startswith("NSpid:"):
-                    self.pids.update(int(value) for value in line.split()[1:])
+        self.gpu_pid = _nvidia_smi_pid()
         self.samples: list[dict[str, Any]] = []
 
     def sample(self, label: str) -> dict[str, Any]:
@@ -96,11 +108,13 @@ class ProcessResources:
                 timeout=5,
             )
             item["gpu_process_mib"] = _process_gpu_mib(
-                query.stdout, self.pids, self.gpu_uuid
+                query.stdout, self.gpu_pid, self.gpu_uuid
             )
             if item["gpu_process_mib"] is None:
                 item["gpu_error"] = (
-                    "No exact GPU/PID memory sample; not interpreted as zero"
+                    "Worker host PID is unresolved; not interpreted as zero"
+                    if self.gpu_pid is None
+                    else "No exact GPU/PID memory sample; not interpreted as zero"
                 )
         except (OSError, subprocess.SubprocessError) as error:
             item["gpu_error"] = str(error)
