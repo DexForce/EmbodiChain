@@ -48,6 +48,7 @@ Online Data Engine
 
 .. automodule:: embodichain.data_pipeline.engine
    :members:
+   :exclude-members: SharedLanguageRegistry
    :undoc-members:
    :show-inheritance:
 

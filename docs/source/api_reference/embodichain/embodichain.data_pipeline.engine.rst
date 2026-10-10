@@ -17,6 +17,7 @@ Online data streaming engine: a process-safe shared buffer for trajectory data.
 
 .. automodule:: embodichain.data_pipeline.engine
    :members:
+   :exclude-members: SharedLanguageRegistry
    :undoc-members:
    :show-inheritance:
 
@@ -38,6 +39,12 @@ The registry uses a bounded shared UTF-8 buffer instead of mutable strings in
 TensorDict storage. ``language_buffer_bytes`` limits its lifetime capacity;
 overflow fails the producer before publishing that rollout. Consumers use the
 same immutable indices and never depend on the current contents of reused rows.
+
+The package-level alias is available for convenience; the canonical class and
+its methods are indexed under the language module.
+
+.. autoclass:: embodichain.data_pipeline.engine.SharedLanguageRegistry
+   :no-index:
 
 .. automodule:: embodichain.data_pipeline.engine.language
    :members:
