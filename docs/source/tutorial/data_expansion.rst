@@ -18,6 +18,11 @@ lazy :class:`~embodichain.lab.gym.envs.DemoSegment` objects, and both use the
 same Gym executor, ``env.step()`` path, validation rules, dataset manager, and
 transactional commit boundary.
 
+Both paradigms retain an overall task instruction and a finer instruction for
+each semantic segment. See :doc:`/guides/expert_task_language` for task/program
+configuration, per-episode overrides, LeRobot readback, online training, and
+migration from recorder-owned language.
+
 Choose an Expert-Authoring Paradigm
 -----------------------------------
 
@@ -136,7 +141,7 @@ The two-block stacking task demonstrates the recommended Atomic Skills setup:
    .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
       :language: python
       :start-at:     def _initialize_atomic_actions(self) -> None:
-      :end-before:     def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
+      :end-before:     def create_demo_segments(
       :linenos:
 
 The task constructs the motion generator once, declares command profiles for
@@ -150,16 +155,16 @@ Return semantic demonstration segments
 
 .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
    :language: python
-   :start-at:     def create_demo_segments(self, **kwargs: Any) -> tuple[DemoSegment]:
+   :start-at:     def create_demo_segments(
    :end-before:     def _plan_stack(
    :linenos:
 
-This segment keeps three outcomes separate:
+The two segments keep three outcomes separate:
 
 * ``actions`` is the controller-command stream consumed by the common runner;
 * ``planning_success`` records whether PickUp and Place were planned; and
-* ``validator`` checks both planning success and the physical stack after all
-  commands and settling actions have executed.
+* ``validator`` checks measured lift after the grasp, then planning success and
+  the physical stack after placement and settling.
 
 The task creates typed PickUp and Place requests and threads the projected
 held-object state from the first plan into the second:
@@ -175,9 +180,9 @@ held-object state from the first plan into the second:
 
 For a multi-object episode, yield segments lazily. The
 ``BlocksRankingRGBEnv.create_demo_segments()`` example yields the red-block
-segment first, then queries the updated reference-block pose before planning
-the blue-block segment. This avoids planning later subtasks against stale
-scene state.
+grasp and placement first, then queries the updated reference-block pose before
+planning the blue-block grasp and placement. This avoids planning later
+subtasks against stale scene state.
 
 Legacy tasks implementing ``create_demo_action_list()`` remain supported and
 are wrapped as one segment named ``legacy``. New tasks should implement
@@ -187,9 +192,8 @@ validators remain explicit.
 Try the handwritten expert
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The shipped stacking config currently defines the scene and rollout but does
-not configure a dataset recorder. First smoke-test the expert without writing
-data:
+The shipped stacking config includes a dataset recorder. First smoke-test the
+expert while suppressing dataset writes:
 
 .. code-block:: bash
 
@@ -199,14 +203,13 @@ data:
        --filter_dataset_saving \
        --max_episodes 1
 
-To collect it, copy that config, add the recorder from
-`Configure Dataset Recording`_, and run the copied config without
-``--filter_dataset_saving``:
+To collect it, run the same config without ``--filter_dataset_saving``. Customize
+the recorder using `Configure Dataset Recording`_:
 
 .. code-block:: bash
 
    embodichain run-env \
-       --gym_config path/to/stack_blocks_two_recording.json \
+       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
        --headless \
        --max_episodes 5
 
@@ -306,7 +309,9 @@ Configure Dataset Recording
 
 The expert paradigm and recorder configuration are independent. Add a dataset
 functor under ``env.dataset`` in an inline Gym config or in a reusable
-``env.yaml`` environment component:
+``env.yaml`` environment component. The example below also declares a
+handwritten task's overall goal; a Task Program declares that goal on its
+program root instead:
 
 .. code-block:: yaml
 
@@ -314,6 +319,7 @@ functor under ``env.dataset`` in an inline Gym config or in a reusable
    max_episode_steps: 600
 
    env:
+     task_instruction: Pick and place the object.
      dataset:
        lerobot:
          func: LeRobotRecorder
@@ -323,8 +329,6 @@ functor under ``env.dataset`` in an inline Gym config or in a reusable
            save_path: outputs/lerobot/expert_demos
            robot_meta:
              robot_type: CobotMagic
-           instruction:
-             lang: Pick and place the object
            extra:
              scene_type: tabletop
              task_description: pick_and_place
@@ -333,6 +337,10 @@ functor under ``env.dataset`` in an inline Gym config or in a reusable
 
 Important fields are:
 
+* ``env.task_instruction`` owns a handwritten task's overall goal. Task Programs
+  use root ``instruction`` in ``program.yaml``. Segment instructions belong to
+  the task's ``DemoSegment`` values or program segments. Recorder ``instruction``
+  is a legacy fallback; see :doc:`/guides/expert_task_language`.
 * ``collection.target_episodes`` is the exact number of persisted environment
   rows, not the number of vector batches. The legacy ``max_episodes`` setting
   and ``--max_episodes`` option map to this target.
@@ -477,7 +485,10 @@ Recorded Data
 The primary fields include ``observation.state``, ``action``, and
 ``observation.images.{sensor_name}``. Segment-aware episodes additionally
 record ``subtask_index`` and ``annotation.segment_*`` boundaries, plus terminal
-and truncation annotations. Depth and segmentation observations have their own
+and truncation annotations. The overall goal resolves as ``sample["task"]``;
+the current segment instruction resolves as ``sample["subtask"]`` through
+``meta/subtasks.parquet``. Both levels remain present in segment fragments.
+Depth and segmentation observations have their own
 numeric or configured sidecar representation; see
 :doc:`/overview/gym/dataset_functors` for the complete schema.
 
@@ -504,7 +515,7 @@ For Pour Water without an explicit ``save_path``, use the default parent:
        ~/.cache/embodichain_datasets \
        --latest \
        --episode 0 \
-       --expect-segments 1
+       --expect-segments 4
 
 The command validates frame and timestamp continuity, one episode-level task,
 subtask mappings, contiguous segment ranges, terminal annotations, and the

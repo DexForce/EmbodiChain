@@ -321,21 +321,25 @@ episode count.
   "mode": "save",
   "save_failed_episodes": true,
   "params": {
-    "robot_meta": {"robot_type": "UR5"},
-    "instruction": {"lang": "Pick and place the cube"}
+    "robot_meta": {"robot_type": "UR5"}
   }
 }
 ```
+
+Declare the overall goal as `env.task_instruction` for a handwritten task or
+root `instruction` in `program.yaml` for a Task Program. Declare finer
+instructions on `DemoSegment` values or program segment nodes. Recorder
+`instruction` remains a legacy fallback. See {doc}`expert_task_language` for
+complete examples, resolution rules, and reading both levels in training.
 
 #### Run the built-in three-cycle example
 
 The shipped
 `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml`
-deployment combines the reusable `env.yaml` with a UR5 parallel-gripper
-embodiment to pick up and freely place the same cube three times. Each cycle is
-a separate lazy segment. The next pickup is planned only after the previous
-placement has fallen and become stable, so the planner starts from the cube's
-measured pose rather than its requested release pose.
+deployment combines a reusable physical environment with a UR5 parallel-gripper
+embodiment to pick up and place the same cube three times. Each cycle has a
+grasp segment and a placement segment, giving six lazy segments. Later calls
+are grounded against the scene state left by earlier calls.
 
 ```bash
 embodichain run-env \
@@ -345,10 +349,10 @@ embodichain run-env \
     --max_episodes 1
 ```
 
-The reference environment leaves `env.dataset` empty, so this command is a
-rollout smoke test and does not persist a dataset. Add a `LeRobotRecorder` to
-the reusable `env.yaml` (or a copied inline deployment) to record one overall
-task plus three per-frame subtask/segment annotations. See
+The Default physical component (`envs/default.yaml`) already enables
+`LeRobotRecorder` under `/tmp/repeated-pick-place/datasets`. The command records
+one overall task with six semantic segment occurrences and two subtask
+descriptions. Add `--filter_dataset_saving` for an execution-only smoke test. See
 {ref}`Expert Data Expansion <tutorial_data_expansion>` for recorder setup and
 {ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>` for
 validation and preview.
@@ -426,6 +430,8 @@ LeRobot exports also contain per-frame `annotation.segment_*` fields and a
 The overall episode instruction stays in LeRobot's `task` field; each semantic
 segment is exposed through a per-frame `subtask_index` resolved by
 `meta/subtasks.parquet`.
+The task/program owns these instructions before recording begins; configuration,
+fallback, and readback examples are in {doc}`expert_task_language`.
 The final directory is also printed when the run finishes.
 
 ## Replay a trajectory

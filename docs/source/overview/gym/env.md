@@ -305,7 +305,6 @@ class MyDatasetCfg:
         params={
             "save_path": "./outputs/datasets/my_task",
             "robot_meta": {"robot_type": "my_robot"},
-            "instruction": {"lang": "move the cube to the goal"},
             "use_videos": False,
         },
     )
@@ -313,6 +312,8 @@ class MyDatasetCfg:
 
 @configclass
 class MyTaskEnvCfg(EmbodiedEnvCfg):
+    task_instruction: str = "Move the cube to the goal."
+
     # Scene assets are task-specific and usually come from existing robot/object cfgs.
     robot = ...
     sensor = [...]
@@ -412,7 +413,8 @@ The manager operates in a single mode ``"save"`` which handles both recording an
 **Configuration options include:**
  * ``save_path``: Root directory for saving datasets.
  * ``robot_meta``: Robot metadata dictionary (required for LeRobot format).
- * ``instruction``: Task instruction dictionary.
+ * ``instruction``: Legacy overall-task fallback on the recorder. Prefer the
+   program's root ``instruction`` or ``EmbodiedEnvCfg.task_instruction``.
  * ``use_videos``: Whether to save video recordings of episodes.
 
 ```{note}
@@ -550,6 +552,12 @@ metadata, and validator, and its action iterable may be generated lazily from
 the scene state left by the previous segment. Existing tasks that implement
 ``create_demo_action_list()`` remain compatible and are represented as one
 ``legacy`` segment.
+
+The overall handwritten task goal belongs to ``EmbodiedEnvCfg.task_instruction``
+(``env.task_instruction`` in JSON/YAML). Each segment's ``instruction`` describes
+its finer subgoal. Task Programs use their program root for the overall goal.
+See {doc}`/guides/expert_task_language` for complete examples, per-episode
+overrides, language fallbacks, and dataset readback.
 
 The common executor checks termination after every action. A task should
 override ``is_task_success()`` with a meaningful per-environment result so
