@@ -120,6 +120,9 @@ class GenSimPickUp(PickUp):
     binding_contract = PickUp.binding_contract
     adaptive_unconstrained = False
     pick_purposes: dict[str, str] | None = None
+    continuation_previews: dict | None = None
+    path_simulation: object | None = None
+    path_excluded_invocations: frozenset[str] = frozenset()
 
     def _select_feasible_grasp_variants(
         self,
@@ -207,6 +210,20 @@ class GenSimPickUp(PickUp):
         try:
             with robot_collision_scope():
                 first = super()._plan(request, context)
+                preview = (self.continuation_previews or {}).get(
+                    getattr(request, "invocation_id", None)
+                )
+                if preview is not None:
+                    from .pick_continuation import eligible, recover
+
+                    if eligible(self, request, context, selection, preview):
+                        first = recover(
+                            self, request, context, first, selection, preview
+                        )
+                from .pick_path import eligible as owns_path, rebuild
+
+                if owns_path(self, request, context, selection):
+                    return rebuild(self, request, context, first, selection)
                 return (
                     self._recover_constrained_pick_roll(request, context, first)
                     if selection.constrained
@@ -572,6 +589,13 @@ class GenSimPickUp(PickUp):
         full, lengths = None, None
         attempts = []
         for index, choice in enumerate(choices):
+            observe = {}
+            if (self.continuation_previews or {}).get(
+                getattr(request, "invocation_id", None)
+            ) is not None:
+                observe["candidate_observer"] = lambda pool: setattr(
+                    selection, "candidates", pool
+                )
             sample, direction = select_grasp(
                 affordance,
                 generator,
@@ -587,6 +611,7 @@ class GenSimPickUp(PickUp):
                     options,
                     approach[:, None, None, :],
                 ),
+                **observe,
             )
             viable = sample.success & ~success
             attempt = {"strategy": index, "grasp_feasible": sample.success.tolist()}
@@ -969,6 +994,7 @@ class GenSimPlace(Place):
     GoalType = Place.GoalType
     OptionsType = Place.OptionsType
     binding_contract = Place.binding_contract
+    recovery_scene_vertices: dict | None = None
 
     @staticmethod
     def _with_contact_monitor_boundary(plan: ActionPlan) -> ActionPlan:
@@ -996,6 +1022,18 @@ class GenSimPlace(Place):
 
         with place_ik_recovery() as recovery:
             plan = super()._plan(request, context)
+        if not plan.plan_success.any() and self.recovery_scene_vertices:
+            from .place_recovery import recover
+
+            plan = recover(
+                self,
+                request,
+                context,
+                plan,
+                lambda selected, current: super(GenSimPlace, self)._plan(
+                    selected, current
+                ),
+            )
         if recovery.used and plan.plan_success.any():
             trajectory = plan.joint_trajectory
             limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)

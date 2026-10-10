@@ -91,6 +91,9 @@ milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported
 observers, incomplete `all` selector universes and sparse temporal/invariant
 windows remain unavailable, not certified. Historical reports are not rewritten.
+Supported E1 placement allows up to 50 mm positive floor clearance while retaining
+the 10 mm penetration limit. Full-footprint coverage, exact released-state receipts
+and the other physical gates remain required; execution evidence records both limits.
 Rigid-reference E1 `inside`/`on` observations qualify the full projected object
 footprint against actual planar-floor triangles (including holes), resting height,
 and exact measured terminal release receipts. Milestones read the recorder's
@@ -130,6 +133,39 @@ the existing runtime alignment and upright checks still execute without goal-bas
 E2 checks its final yaw-free alignment at release height before Place preserves
 that heading. Alignment staging never descends below the current height before
 the planner can choose the final orientation.
+Ordinary GenSim Place retains its qualified Cartesian result. Only after its
+existing density/local-IK recovery exhausts, an unowned-Cartesian, single-row
+preserve-orientation call may reuse shared waypoint IK/joint interpolation.
+Every required waypoint and the exact release pose remain unchanged. Acceptance
+checks final emitted velocity/joint limits, discrete robot meshes, and the held
+object's conservative scene envelopes through approach. Explicit Cartesian
+routes, dynamic collision policies, drawer routes and E2 z caps are not overridden.
+Missing bound rigid geometry or bound articulation obstacles disable this fallback.
+Successful paths and failed-search random streams remain unchanged. This is not
+continuous collision/contact qualification or a remedy for unreachable waypoints.
+Ordinary, factory-marked single-environment GenSim Pick qualifies every contact
+sample against its declared approach direction and selected grasp pose. A curved
+contact leg is rebuilt backward from the original grasp joints through shared
+Cartesian IK. Free-space entry targets that exact pre-contact joint branch, using
+checked joint interpolation first and a fresh-world cuRobo plan if necessary.
+The selected grasp, close/lift suffix, passive joints and shared executor remain
+unchanged; emitted limits, robot meshes and all approach scene samples are checked.
+Failed or unavailable qualification stops dispatch, not a fallback to the unsafe
+original. Extra searches restore caller RNG. Explicit, constrained, upright, pour,
+drawer and multi-environment calls retain their prior routes and bundle fingerprints.
+Ordinary adjacent typed Pick/inside-Place calls with verified canonical monitors
+may qualify the complete continuation before dispatching Pick. A qualified
+original remains unchanged. Only a failed required-waypoint IK result permits
+contact reselection; velocity-only rejection or unavailable evidence preserves
+the original acquisition. Up to twelve existing legal grasp
+contacts are considered, with full Pick/Place planning, emitted limits and mesh
+checks; the semantic landing pose and resource bindings are never changed.
+The preview projects the emitted Pick endpoint FK in private state and is not
+measured acquisition evidence. Actual Place still observes and replans through
+the canonical executor. This runtime-only binding adds no bundle fingerprint
+fields and does not apply to upright, fixed, explicit, constrained or pour/ends
+grasps. Collision evidence covers discrete robot self meshes and bound rigid
+held-object envelopes, not whole-scene continuous or contact qualification.
 Only yaw-free alignment calls enable alternative final headings; exact-pose
 transport retains its orientation contract. All candidates use the same motion
 and velocity checks.

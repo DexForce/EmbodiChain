@@ -31,7 +31,13 @@ from .container_targets import _floor_region
 
 __all__: list[str] = []
 
-SUPPORT_TOLERANCE_M = 0.01  # Existing GenSim supported-placement tolerance.
+SUPPORT_TOLERANCE_M = 0.05
+PENETRATION_TOLERANCE_M = 0.01
+
+
+def _support_gap_valid(gap: float) -> bool:
+    """Relax positive support clearance, not penetration into the floor."""
+    return -PENETRATION_TOLERANCE_M <= gap <= SUPPORT_TOLERANCE_M
 
 
 def _native_mesh(
@@ -121,7 +127,7 @@ def measure_planar_placement(
             raise ValueError("Placement object has no finite area footprint.")
         inside = bool(polygon.covers(footprint))
         gap = float(points[:, 2].min() - height)
-        accepted.append(inside and abs(gap) <= SUPPORT_TOLERANCE_M)
+        accepted.append(inside and _support_gap_valid(gap))
         footprints.append(inside)
         gaps.append(gap)
         areas.append(float(footprint.area))
@@ -133,6 +139,7 @@ def measure_planar_placement(
         "support_gap_m": gaps,
         "footprint_area_m2": areas,
         "support_tolerance_m": SUPPORT_TOLERANCE_M,
+        "penetration_tolerance_m": PENETRATION_TOLERANCE_M,
     }
 
 

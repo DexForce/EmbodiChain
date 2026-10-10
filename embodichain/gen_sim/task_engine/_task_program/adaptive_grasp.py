@@ -162,6 +162,7 @@ def select_grasp(
     feasible: (
         Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
     ) = None,
+    candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
 ) -> tuple[Any, torch.Tensor]:
     """Keep the first feasible strategy per row and the normal branch sampler."""
     covered = torch.zeros(pose.shape[0], dtype=torch.bool, device=pose.device)
@@ -197,6 +198,8 @@ def select_grasp(
         costs=torch.cat([p.costs for p in pools], 1),
         valid=torch.cat([p.valid for p in pools], 1),
     )
+    if candidate_observer is not None:
+        candidate_observer(combined)
     sample = affordance.sample_candidates(
         combined,
         sampling=context.affordance_sampling,

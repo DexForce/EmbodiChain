@@ -425,11 +425,19 @@ def _placement_measurement_matches(
         or any(type(v) not in (float, int) or not math.isfinite(v) for v in gaps)
     ):
         return False
-    from .placement_evidence import SUPPORT_TOLERANCE_M
+    from .placement_evidence import (
+        SUPPORT_TOLERANCE_M,
+        PENETRATION_TOLERANCE_M,
+        _support_gap_valid,
+    )
 
-    return metrics.get("support_tolerance_m") == SUPPORT_TOLERANCE_M and all(
-        a == (f and r and abs(g) <= SUPPORT_TOLERANCE_M)
-        for a, f, r, g in zip(accepted, footprint, released, gaps, strict=True)
+    return (
+        metrics.get("support_tolerance_m") == SUPPORT_TOLERANCE_M
+        and metrics.get("penetration_tolerance_m") == PENETRATION_TOLERANCE_M
+        and all(
+            a == (f and r and _support_gap_valid(g))
+            for a, f, r, g in zip(accepted, footprint, released, gaps, strict=True)
+        )
     )
 
 

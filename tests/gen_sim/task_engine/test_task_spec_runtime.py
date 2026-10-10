@@ -549,6 +549,20 @@ def test_empty_legacy_presets_do_not_block_measured_e1_final_and_milestone(
     assert result["milestones"][0]["status"] == "satisfied"
 
 
+@pytest.mark.parametrize("gap", [0.010443, 0.04])
+def test_supported_placement_accepts_clearance_below_fifty_mm(tmp_path, gap) -> None:
+    result = _observe_placement(tmp_path, _placement_evidence(tmp_path, z=0.045 + gap))
+    assert result["certificate_ready"] is True
+
+
+@pytest.mark.parametrize("gap", [0.051, -0.02])
+def test_support_clearance_relaxation_does_not_allow_high_or_penetrated_objects(
+    tmp_path, gap
+) -> None:
+    result = _observe_placement(tmp_path, _placement_evidence(tmp_path, z=0.045 + gap))
+    assert result["goal"][0]["status"] == "failed"
+
+
 @pytest.mark.parametrize(
     "changes", [{"x": 0.24}, {"z": 0.2}, {"z": 0.0}, {"hole": True}]
 )

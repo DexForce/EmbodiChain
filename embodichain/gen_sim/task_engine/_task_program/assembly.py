@@ -89,6 +89,8 @@ def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
 class _TaskFactory(SimulationTaskProgramFactory):
     """Select task-owned observation services, not a different executor."""
 
+    _pick_continuations: tuple = ()
+
     def __init__(
         self,
         *args: Any,
@@ -108,6 +110,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         staging_retention_sources: tuple[tuple[str, str, str, str], ...] = (),
         runtime_preset: str | None = None,
         press_routes: tuple = (),
+        pick_continuations: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -128,6 +131,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         )
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
+        self._pick_continuations = pick_continuations
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -219,6 +223,9 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
         pick.pick_purposes = dict(self._pick_purposes)
+        if not self._drawers:
+            pick.path_simulation = getattr(self, "_simulation", None)
+            pick.path_excluded_invocations = frozenset(self._cartesian_calls)
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
         transport = GenSimMoveHeldObject()
@@ -237,7 +244,15 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 transport._staging_retention_sources
             )
         engine.register(transport, replace=True)
-        engine.register(GenSimPlace(), replace=True)
+        place = GenSimPlace()
+        if not self._drawers:
+            from .place_recovery import scene_vertices
+
+            place.recovery_scene_vertices = scene_vertices(
+                getattr(self, "_simulation", None),
+                getattr(self.task_program_registration, "scene_binding", None),
+            )
+        engine.register(place, replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         if self._coordinated_motion:
             engine.register(GenSimCoordinatedPickment(), replace=True)
@@ -246,7 +261,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
             engine.register(GenSimPress(), replace=True)
         self.task_program_registration.validate_engine(engine)
-        if self._clearance_routes or self._alignment_continuation_routes:
+        if (
+            self._clearance_routes
+            or self._alignment_continuation_routes
+            or self._pick_continuations
+        ):
             engine._clearance_profile = profile
         return engine
 
@@ -255,13 +274,21 @@ class _TaskFactory(SimulationTaskProgramFactory):
     ) -> tuple[Any, ...]:
         """Bind preview calls through canonical assembly, without another executor."""
         profile = None
-        if self._clearance_routes or self._alignment_continuation_routes:
+        if (
+            self._clearance_routes
+            or self._alignment_continuation_routes
+            or self._pick_continuations
+        ):
             profile = engine._clearance_profile
             del engine._clearance_profile
         lowerers = super().create_registered_semantic_lowerers(
             scene_registry=scene_registry, engine=engine
         )
-        if self._clearance_routes or self._alignment_continuation_routes:
+        if (
+            self._clearance_routes
+            or self._alignment_continuation_routes
+            or self._pick_continuations
+        ):
             from embodichain.lab.task_program.language import TaskProgramIntegrationCfg
             from embodichain.lab.task_program.runtime.assembly import (
                 assemble_semantic_executor_components,
@@ -296,6 +323,12 @@ class _TaskFactory(SimulationTaskProgramFactory):
                     bind_previews(
                         semantic.compiler, self._alignment_continuation_routes
                     )
+                )
+            if self._pick_continuations:
+                from .pick_continuation import bind_previews
+
+                engine.actions["pick_up"].continuation_previews = bind_previews(
+                    semantic.compiler, self._pick_continuations
                 )
         return lowerers
 
@@ -445,6 +478,24 @@ class TaskAdapterFactory:
                     environment.sim.get_rigid_object("table"),
                 ),
             )
+        pick_continuations = ()
+        if self.adaptive_pick and not self.drawer_routes:
+            from embodichain.lab.task_program.language import TaskProgramCfg
+            from .pick_continuation import bind_calls
+
+            program = getattr(getattr(environment, "cfg", None), "task_program", None)
+            if type(program) is TaskProgramCfg:
+                preset = next(
+                    (
+                        p
+                        for p in self.registration.robot_profile_binding.presets
+                        if p.preset_id == self.runtime_preset
+                    ),
+                    None,
+                )
+                pick_continuations = bind_calls(
+                    self.registration.catalog.preflight(program), preset
+                )
         factory = _TaskFactory(
             environment.sim,
             environment.robot,
@@ -468,6 +519,7 @@ class TaskAdapterFactory:
             staging_retention_sources=self.staging_retention_sources,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
+            pick_continuations=pick_continuations,
         )
         return factory.create_adapter()
 

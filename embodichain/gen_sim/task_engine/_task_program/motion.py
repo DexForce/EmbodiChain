@@ -58,6 +58,9 @@ _PLACE_IK_RECOVERY: ContextVar[_PlaceIKRecovery | None] = ContextVar(
 _CARTESIAN_APPROACH: ContextVar[bool] = ContextVar(
     "gen_sim_cartesian_approach", default=False
 )
+_WAYPOINT_KINEMATICS: ContextVar[list[torch.Tensor] | None] = ContextVar(
+    "gen_sim_place_waypoint_kinematics", default=None
+)
 
 
 @contextmanager
@@ -238,6 +241,11 @@ class CheckedMotionGenerator(MotionGenerator):
     ) -> PlanResult:
         """Run the shared backend without re-entering task-scoped dispatch."""
         result = super().generate(target_states, options=options)
+        evidence = _WAYPOINT_KINEMATICS.get()
+        if evidence is not None and all(
+            state.move_type is MoveType.EEF_MOVE for state in target_states
+        ):
+            evidence.append(torch.as_tensor(result.success).detach().clone())
         if (
             result.positions is not None
             and options is not None
