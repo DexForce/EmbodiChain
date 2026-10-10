@@ -313,23 +313,49 @@ def test_builtin_pick_keeps_downstream_contract_and_explicit_grasp(
 
 
 @pytest.mark.parametrize("axis", [(0.0, 0.0, 1.0), (1.0, 0.0, 0.0)])
-@pytest.mark.parametrize("purpose", ["ordinary", "handover_source"])
-def test_pick_purpose_prefers_down_before_diagonal(axis, purpose):
+def test_ordinary_pick_prefers_down_before_diagonal(axis):
     pose = torch.eye(4)[None]
     tcp = pose.clone()
     tcp[:, :3, 3] = torch.tensor([[-1.0, 0.0, 1.0]])
-    ends = purpose == "handover_source"
     choices = grasp_strategies(
-        torch.tensor([axis]), pose, tcp, ends=ends, purpose=purpose
+        torch.tensor([axis]), pose, tcp, ends=False, purpose="ordinary"
     )
-    width = 2 if ends else 1
-    for choice in choices[:width]:
-        torch.testing.assert_close(choice.direction, torch.tensor([[0.0, 0.0, -1.0]]))
-    for choice in choices[width:]:
-        assert choice.direction[0, 2].item() == -0.5
-    if ends:
-        assert torch.equal(choices[0].positive, choices[2].positive)
-        assert torch.equal(choices[1].positive, ~choices[0].positive)
+    torch.testing.assert_close(choices[0].direction, torch.tensor([[0.0, 0.0, -1.0]]))
+    assert choices[1].direction[0, 2].item() == -0.5
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [
+        (1.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0),
+        (0.0, 0.0, -1.0),
+    ],
+)
+def test_handover_source_exhausts_near_end_before_crossing(axis):
+    axis = torch.tensor([axis]).repeat(2, 1)
+    pose = torch.eye(4).repeat(2, 1, 1)
+    tcp = pose.clone()
+    tcp[:, :3, 3] = axis * torch.tensor([[-1.0], [1.0]]) + torch.tensor(
+        [[0.2, 0.3, 0.4]]
+    )
+    choices = grasp_strategies(axis, pose, tcp, ends=True, purpose="handover_source")
+
+    assert len(choices) == 4
+    assert [choice.positive.tolist() for choice in choices] == [
+        [False, True],
+        [False, True],
+        [True, False],
+        [True, False],
+    ]
+    for index in (0, 2):
+        torch.testing.assert_close(
+            choices[index].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
+        )
+        assert (choices[index + 1].direction[:, 2] == -0.5).all()
 
 
 @pytest.mark.parametrize("purpose", ["pour", "handover_receive"])

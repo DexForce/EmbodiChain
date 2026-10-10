@@ -31,7 +31,7 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
 __all__: list[str] = []
 
 ADAPTIVE_GRASP = "gen_sim.adaptive_grasp"
-ADAPTIVE_GRASP_REVISION = 2
+ADAPTIVE_GRASP_REVISION = 3
 
 
 def bind_pick_purposes(
@@ -145,6 +145,13 @@ def grasp_strategies(
         if positive is not None
         else ((nearest, ~nearest) if ends else (nearest,))
     )
+    if purpose == "handover_source":
+        # Preserve the source-side end before trying a crossed handover layout.
+        return tuple(
+            GraspStrategy(direction, axis if ends else None, part)
+            for part in parts
+            for direction in directions
+        )
     return tuple(
         GraspStrategy(direction, axis if ends else None, part)
         for direction in directions

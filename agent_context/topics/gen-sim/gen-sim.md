@@ -407,8 +407,9 @@ generated Pick segment, bound to the compiled runtime invocation identity;
 missing or stale declarations reject loading. Built-in Pick identity and
 compiler-owned downstream reachability remain unchanged. Ordinary pickup tries
 top-down before arm-relative diagonal approaches. Pour pickup retains its
-axis-dependent ordering. E4 source lowerers reserve an object end and try both
-ends top-down before either end diagonally. The wrapper marks only an owned goal
+axis-dependent ordering. E4 source lowerers try the arm-near end top-down and
+diagonally before considering the far end, leaving the other end for reception.
+The wrapper marks only an owned goal
 snapshot; upright and stack constraints take precedence over ordinary policy.
 `GenSimPickUp` screens each
 candidate strategy through the shared full pickup planner and retains the exact
@@ -430,9 +431,13 @@ Vertical receiving grasps try diagonal then top-down; horizontal ones reverse
 that order. Candidate, IK or path failure triggers one alternate-direction
 attempt through the complete shared HandOver planner before execution. Successful
 rows retain their first trajectories and attachment candidates. Exhaustion
-fails normally; no source regrasp or cross-call recovery is added. Transfer,
-release, retreat and state effects remain owned by shared HandOver. Generated
-profiles select `source_hold_mode=grasp_command` to retain the bound closing
+fails normally; this planning retry adds no source regrasp or cross-call recovery.
+Transfer, release, retreat and state effects remain owned by shared HandOver.
+Generated E4 integrations include the curated Pick monitor needed by the existing bounded
+workflow recovery, even when source acquisition uses a registered alias.
+This does not change recovery budgets or qualify initial grasp stability;
+regenerate bundles to acquire the declaration rather than resealing old files.
+Generated profiles select `source_hold_mode=grasp_command` to retain the bound closing
 drive during existing-hold transfers. GenSim composition applies that default
 when the field is absent and preserves explicit modes. Missing retreat budgets
 also retain v38's default; shared composition keeps its own defaults. The mode's

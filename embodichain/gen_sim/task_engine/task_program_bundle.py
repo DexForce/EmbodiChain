@@ -1863,6 +1863,8 @@ def _integration_payload(
             # planner only selects the canonical built-in monitor for the
             # curated effectful calls; it never computes a held relation or
             # synthesizes a successful postcondition itself.
+            # HandOver recovery derives a curated Pick even when the original
+            # acquisition uses a registered GenSim alias outside the Pick graph.
             "effect_monitors": {
                 semantic_id: {
                     "monitor_id": "builtin.composite_effect",
@@ -1912,6 +1914,10 @@ def _integration_payload(
                 if any(
                     node["call"].get("kind") == semantic_id
                     or node["call"].get("call_id") == semantic_id
+                    or (
+                        semantic_id == "pick"
+                        and node["call"].get("kind") == "hand_over"
+                    )
                     for node in graph["nodes"]
                 )
             },

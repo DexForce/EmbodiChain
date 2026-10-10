@@ -2134,6 +2134,175 @@ def test_handover_source_region_follows_measured_axis(
         assert final["motion_parts"] == ["right_arm"]
 
 
+@pytest.mark.parametrize("horizontal", [False, True])
+@pytest.mark.parametrize("remove_monitor", [False, True])
+def test_generated_handover_binds_verified_reacquisition_pick(
+    tmp_path: Path, horizontal: bool, remove_monitor: bool
+) -> None:
+    from unittest.mock import Mock
+    import torch
+
+    from embodichain.gen_sim.task_engine._task_program.assembly import (
+        compose_deployment,
+    )
+    from embodichain.lab.sim.atomic_actions import (
+        AntipodalAffordance,
+        AtomicActionEngine,
+        EntityState,
+        PlanningContext,
+        RobotObservation,
+        TaskState,
+    )
+    from embodichain.lab.task_program.compiler.lowering import SemanticCallCompiler
+    from embodichain.lab.task_program.semantics import (
+        GRASP_AFFORDANCE_CAPABILITY,
+        HandOver,
+        Pick,
+        SceneAffordanceRef,
+        SceneEntityRegistration,
+        SceneManifest,
+        SceneObjectRef,
+        SceneRegistry,
+        SemanticEffectKind,
+        SemanticIntegrationManifest,
+        SemanticValidationError,
+    )
+
+    scene = _prepared_axis_scene(tmp_path)
+    scene.planner_objects[0]["init_rot"][:] = (
+        [90.0, 0.0, 0.0] if horizontal else [0.0, 0.0, 0.0]
+    )
+    graph = _fresh_handover_graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"]["object"] = "bottle"
+    generated, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    assert all(node["call"]["kind"] != "pick" for node in generated["nodes"])
+    if remove_monitor:
+        integration = load_config(paths.integration)
+        integration["profile"]["effect_monitors"].pop("pick", None)
+        save_config(paths.integration, integration)
+    deployment = load_config(paths.deployment)
+    composed = compose_deployment(
+        task_program=deployment["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    registration = composed.integration.registration
+    profile = registration.robot_profile_binding.declare()
+    preset = profile.presets["trajectory_verified"]
+    assert preset.workflow_recovery_policy.max_recovery_attempts == 1
+    parts = {
+        "left_arm": list(range(7)),
+        "right_arm": list(range(7, 14)),
+        "left_eef": list(range(14, 20)),
+        "right_eef": list(range(20, 26)),
+    }
+    robot = Mock(device=torch.device("cpu"), dof=26, control_parts=parts)
+    robot.get_qpos.return_value = torch.zeros(1, 26)
+    robot.get_qvel.return_value = torch.zeros(1, 26)
+    robot.get_joint_ids.side_effect = lambda name: parts[name]
+    robot.get_solver.return_value = object()
+    generator = Mock(robot=robot, device=torch.device("cpu"))
+    generator.planner.cfg.planner_type = "test"
+    engine = AtomicActionEngine(
+        generator, control_profiles=profile.action_control_profiles()
+    )
+    object_ref, grasp_ref = SceneObjectRef("bottle"), SceneAffordanceRef("bottle_grasp")
+    registry = SceneRegistry(
+        (
+            SceneEntityRegistration(
+                ref=object_ref,
+                state_provider=Mock(
+                    observe=Mock(return_value=EntityState(torch.eye(4)[None]))
+                ),
+                default_affordances={GRASP_AFFORDANCE_CAPABILITY: grasp_ref},
+            ),
+            SceneEntityRegistration(
+                ref=grasp_ref,
+                parent=object_ref,
+                native_name="grasp",
+                affordance=AntipodalAffordance(),
+                affordance_capabilities=frozenset({GRASP_AFFORDANCE_CAPABILITY}),
+                affordance_revision="1",
+                relative_pose=torch.eye(4),
+            ),
+        )
+    )
+    manifest = SemanticIntegrationManifest(
+        scene=SceneManifest.from_registry(registry),
+        robot_profile=profile,
+        call_catalog=registration.call_catalog,
+        runtime_preset=preset.preset_id,
+    )
+    compiler = SemanticCallCompiler(
+        manifest.bind(registry, engine),
+        handover_pose_providers=registration.handover_pose_providers,
+    )
+    # This is the real dynamic recovery window, not a synthetic compiler stub.
+    calls = (
+        Pick(object_ref, resources={"primary": "left"}),
+        HandOver(object_ref, resources={"source": "left", "destination": "right"}),
+    )
+    if remove_monitor:
+        with pytest.raises(SemanticValidationError) as error:
+            compiler.analyze(calls, workflow_id="recovery")
+        assert error.value.diagnostic.code == "missing_effect_monitor"
+        return
+    workflow = compiler.analyze(calls, workflow_id="recovery")
+    context = PlanningContext(
+        robot=RobotObservation(
+            timestamp=0.0, qpos=torch.zeros(1, 26), qvel=torch.zeros(1, 26)
+        ),
+        task=TaskState.empty(1, "cpu"),
+        env_ids=torch.tensor([0]),
+        scene=registry.make_scene_provider().snapshot(
+            timestamp=0.0, env_ids=torch.tensor([0])
+        ),
+    )
+    grounded = compiler.ground(workflow, 0, context)
+    assert grounded.effect_monitor is not None
+    assert grounded.effect_spec.effect_kind is SemanticEffectKind.ATTACH
+    assert grounded.effect_spec.state_expectations[0].resource_id == "left"
+    assert (
+        grounded.invocation.binding.endpoint("primary", "grasp").resource_id == "left"
+    )
+    assert (
+        workflow.calls[0].effect_monitor_ref.params["attached_translation_threshold"]
+        == 0.06
+    )
+
+
+def test_reacquisition_monitor_is_not_added_to_unrelated_generated_calls(
+    tmp_path: Path,
+) -> None:
+    scene = _prepared_axis_scene(tmp_path)
+    graph = _graph()
+    graph["nodes"] = [
+        {
+            "id": "place",
+            "task_instance_id": "place",
+            "task_type": "E1",
+            "call": {
+                "kind": "place",
+                "object": "bottle",
+                "at": {"kind": "target_ref", "target": "landing"},
+                "resources": {"primary": "left"},
+            },
+        }
+    ]
+    payload = _integration_payload(
+        graph, scene, program_id="place", scene_contract="scene"
+    )
+    assert set(payload["profile"]["effect_monitors"]) == {"place"}
+    assert payload["profile"]["action_options"]["pick"]["pick_object_part"] == "center"
+
+
 @pytest.mark.parametrize("prior_upright", [False, True])
 def test_handover_hold_retains_v38_tolerance_and_uses_preceding_upright_axis(
     tmp_path: Path, prior_upright: bool
