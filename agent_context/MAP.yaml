@@ -45,6 +45,7 @@ topics:
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -342,10 +343,12 @@ topics:
   aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
     深度视频]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
-    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice]
+    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
+    SharedLanguageRegistry, resolve_language]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
+  - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
   - embodichain/lab/gym/envs/managers/datasets.py

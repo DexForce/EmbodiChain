@@ -288,6 +288,10 @@ jobs:
       - name: Build docs
         shell: bash
         run: |
+          # The private index redirects public packages to a mirror with missing
+          # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            'msgspec>=0.18.6,<1.0.0'
           pip install -e ".[gensim]" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \
@@ -358,6 +362,10 @@ jobs:
           else
             package='.'
           fi
+          # The private index redirects public packages to a mirror with missing
+          # msgspec wheel metadata. Resolve viser's dependency from PyPI first.
+          python -m pip --isolated install --index-url https://pypi.org/simple \
+            'msgspec>=0.18.6,<1.0.0'
           pip install -e "${package}" \
             --extra-index-url http://pyp.open3dv.site:2345/simple/ \
             --trusted-host pyp.open3dv.site \

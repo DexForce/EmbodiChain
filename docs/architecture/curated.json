@@ -3213,9 +3213,9 @@
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "TaskProgramCompiler.compile",
-          "start_line": 1701,
-          "end_line": 1705,
-          "excerpt": "        if type(config) is not TaskProgramCfg:\n            raise TypeError(\"config must be exactly TaskProgramCfg.\")\n        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
+          "start_line": 1738,
+          "end_line": 1740,
+          "excerpt": "        targets = self._compile_targets(config.targets)\n        root = self._compile_node(\n            config.program,"
         }
       ]
     },
@@ -3231,16 +3231,16 @@
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "TaskProgramCompiler.compile",
-          "start_line": 1716,
-          "end_line": 1720,
-          "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            integration=integration,\n            targets=targets,\n            root=root,"
+          "start_line": 1751,
+          "end_line": 1756,
+          "excerpt": "        return _materialize_program(\n            program_id=config.program_id,\n            instruction=config.instruction,\n            integration=integration,\n            targets=targets,\n            root=root,"
         },
         {
           "path": "embodichain/lab/task_program/compiler/program.py",
           "symbol": "_materialize_program",
-          "start_line": 1172,
-          "end_line": 1176,
-          "excerpt": "    return CompiledTaskProgram._create(\n        program_id=program_id,\n        integration=integration,\n        segments=tuple(segments),\n    )"
+          "start_line": 1195,
+          "end_line": 1200,
+          "excerpt": "    return CompiledTaskProgram._create(\n        program_id=program_id,\n        instruction=instruction,\n        integration=integration,\n        segments=tuple(segments),\n    )"
         }
       ]
     },

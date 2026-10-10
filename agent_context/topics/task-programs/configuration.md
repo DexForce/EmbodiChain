@@ -8,13 +8,31 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 
 - one `program_id`;
 - exact `TaskProgramIntegrationCfg` IDs;
-- optional named targets; and
+- optional overall language ``instruction`` and named targets; and
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
 `ParallelCfg` with an owned `BarrierCfg`. Built-in call configs are `PickCfg`,
 `PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
 extension form.
+
+The program's root `instruction` owns its overall task language; each explicit
+segment may declare a finer `instruction`. The compiler freezes both levels,
+including repeated/parallel segments. The Gym bridge and common demo executor
+bind them to the actual episode-selected program; omitted segment labels are
+marked as overall-task fallbacks. See `resolve_demo_instruction` in `demo.py`
+for task/direct-call/legacy precedence, shared with handwritten demonstrations. See
+the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
+for the independent task/subtask language mapping.
+
+Choose segment boundaries around independently describable subgoals under their
+required incoming task state. A segment may own one or several Semantic Calls;
+sequential splitting retains task state and downstream planning look-ahead.
+Keep release settling and final-state validators on the subgoal that establishes
+those outcomes. Atomic trajectory phase names or arbitrary waypoint counts do
+not establish semantic boundaries for an unannotated recorded demonstration.
+Language instructions express intent; physical acceptance still depends on the
+selected effect authority and validators, not on the presence of a label.
 
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and

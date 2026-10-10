@@ -1,8 +1,10 @@
 program_id: slide_open_drawer
+instruction: Open the drawer.
 targets: {}
 program:
   kind: segment
   name: open_drawer
+  instruction: Grasp the drawer handle and pull the drawer open.
   steps:
     kind: invoke
     call:

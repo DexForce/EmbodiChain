@@ -43,7 +43,11 @@ from embodichain.data_pipeline.depth_video import (
     detect_depth_encoder,
 )
 from embodichain.lab.sim.sensors import Camera, ContactSensor
-from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
+from embodichain.lab.gym.envs.demo import (
+    DEMO_ANNOTATION_KEYS,
+    DEMO_SCHEMA_VERSION,
+    resolve_demo_instruction,
+)
 from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .action_types import ActionDescriptor
 from .manager_base import Functor
@@ -140,6 +144,8 @@ class LeRobotRecorder(Functor):
     Without an ``action_contract`` parameter, the recorder preserves the
     existing joint-action schema. An optional versioned action contract can
     select a joint or EEF representation and its auxiliary fields explicitly.
+    All representations retain the overall instruction as LeRobot's ``task``
+    and the current segment instruction as ``subtask``, including fragments.
     """
 
     def __init__(self, cfg: DatasetFunctorCfg, env: EmbodiedEnv):
@@ -149,7 +155,7 @@ class LeRobotRecorder(Functor):
             cfg: Functor configuration containing params:
                 - save_path: Root directory for saving datasets
                 - robot_meta: Robot metadata for dataset
-                - instruction: Optional task instruction
+                - instruction: Optional legacy fallback; task/episode language takes precedence
                 - extra: Optional extra metadata
                 - use_videos: Whether to save videos
                 - image_writer_threads: Number of threads for image writing
@@ -201,7 +207,6 @@ class LeRobotRecorder(Functor):
             and self._action_contract_cfg["record_eef_observation"]
         )
         self._eef_observation_terms: tuple[Any, Any] | None = None
-        self.use_official_task_index = self._action_contract_cfg is not None
         self._validate_action_contract_environment()
 
         # Experimental parameters for extra episode info saving.
@@ -970,17 +975,15 @@ class LeRobotRecorder(Functor):
         Returns:
             True if the episode was saved successfully, False otherwise.
         """
-        task = (
-            self.instruction.get("lang", "unknown_task")
-            if self.instruction
-            else "unknown_task"
+        snapshot_instruction = (episode_metadata or {}).get("instruction")
+        snapshot_source = (episode_metadata or {}).get("instruction_source")
+        task, instruction_source = resolve_demo_instruction(
+            self._env,
+            instruction=snapshot_instruction,
+            legacy_instruction=self.instruction,
         )
-        if episode_metadata is not None and episode_metadata.get("fragment"):
-            segments = episode_metadata.get("segments", [])
-            if segments and isinstance(segments[0], Mapping):
-                task = self._normalize_subtask_description(
-                    segments[0].get("instruction") or task
-                )
+        if snapshot_instruction is not None:
+            instruction_source = snapshot_source or "episode"
 
         if len(obs_list) == 0:
             logger.log_warning(f"No episode data to save for env {env_id}")
@@ -1022,16 +1025,11 @@ class LeRobotRecorder(Functor):
         episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
         episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
         try:
-            use_official_task_index = getattr(self, "use_official_task_index", False)
             frame_subtasks = [
                 self._subtask_for_frame(task, episode_metadata, frame_index)
                 for frame_index in range(episode_length)
             ]
-            subtask_indices = (
-                None
-                if use_official_task_index
-                else self._register_subtasks(frame_subtasks)
-            )
+            subtask_indices = self._register_subtasks(frame_subtasks)
             if self._depth_manager is not None:
                 self._depth_manager.start_episode(
                     episode_index, list(self._depth_sensor_specs.keys())
@@ -1084,14 +1082,10 @@ class LeRobotRecorder(Functor):
                 frame = self._convert_frame_to_lerobot(
                     obs,
                     action,
-                    frame_subtask if use_official_task_index else task,
+                    task,
                     env_id=env_id,
                     annotations=frame_annotations,
-                    subtask_index=(
-                        None
-                        if subtask_indices is None
-                        else subtask_indices[frame_subtask]
-                    ),
+                    subtask_index=subtask_indices[frame_subtask],
                 )
                 # Offload depth to the sidecar writer and drop it from the frame
                 # so LeRobot's RGB-only image/video path never sees it. With
@@ -1126,6 +1120,7 @@ class LeRobotRecorder(Functor):
                         "success": True,
                         "target_uid": None,
                         "instruction": task,
+                        "instruction_source": "task_fallback",
                         "failure_reason": None,
                         "metadata": {},
                     }
@@ -1138,6 +1133,7 @@ class LeRobotRecorder(Functor):
                     "env_id": env_id,
                     "length": len(obs_list),
                     "instruction": task,
+                    "instruction_source": instruction_source,
                 }
             )
             self._write_episode_metadata(sidecar_metadata)
@@ -1619,12 +1615,11 @@ class LeRobotRecorder(Functor):
                     descriptor.to_dict()
                     for descriptor in self._policy_action_descriptors
                 ]
-        if not self.use_official_task_index:
-            features[LEROBOT_SUBTASK_INDEX_KEY] = {
-                "dtype": "int64",
-                "shape": (1,),
-                "names": None,
-            }
+        features[LEROBOT_SUBTASK_INDEX_KEY] = {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
 
         for feature_key in DEMO_FRAME_FEATURES.values():
             features[feature_key] = {
@@ -1959,17 +1954,15 @@ class LeRobotRecorder(Functor):
             task: Episode-level task description.
             env_id: Source vector-environment row for FK-sensitive features.
             annotations: Optional segment and terminal fields for this frame.
-            subtask_index: Optional legacy dataset-global subtask index.
+            subtask_index: Optional dataset-global subtask index.
 
         Returns:
             Frame dict in LeRobot format with numpy arrays
         """
         frame = {"task": task}
-        if not self.use_official_task_index:
-            legacy_subtask_index = 0 if subtask_index is None else subtask_index
-            frame[LEROBOT_SUBTASK_INDEX_KEY] = torch.tensor(
-                [legacy_subtask_index], dtype=torch.int64
-            )
+        frame[LEROBOT_SUBTASK_INDEX_KEY] = torch.tensor(
+            [0 if subtask_index is None else subtask_index], dtype=torch.int64
+        )
 
         if self._env.has_sensors:
             sensor_obs_space: dict = self._env.single_observation_space["sensor"]

@@ -562,21 +562,19 @@ def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
         integration=deployment.selection,
         validation_context=deployment.integration.registration.catalog,
     )
-    positioning, pouring = program.program.items
+    picking, positioning, pouring, returning = program.program.items
     checkpoint = positioning.validators[0]
     assert checkpoint.object == "bottle"
     assert checkpoint.position_tolerance <= 0.01
-    assert [item.call.kind for item in positioning.steps.items] == [
-        "pick",
-        "registered",
-    ]
-    assert pouring.steps.items[0].call.call_id == "simulation.pour"
-    placement = pouring.steps.items[1].call
+    assert picking.steps.call.kind == "pick"
+    assert positioning.steps.call.call_id == "simulation.move_held_object"
+    assert pouring.steps.call.call_id == "simulation.pour"
+    placement = returning.steps.call
     release_position = program.targets[placement.at.target].values[0].position
     rest_position = program.targets["bottle_return_pose"].values[0].position
     assert release_position[:2] == rest_position[:2]
     assert 0.006 <= release_position[2] - rest_position[2] <= 0.01
-    cup_check = next(check for check in pouring.validators if check.object == "cup")
+    cup_check = next(check for check in returning.validators if check.object == "cup")
     assert cup_check.position_tolerance <= 0.002
 
     integration = _tableware_integration_payload("pour_water")
@@ -1397,3 +1395,74 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         _decode_motion_policy(
             {"sample_count": 40, "velocity_targets": mode}, path="motion"
         )
+
+
+@pytest.mark.parametrize(
+    ("task_name", "backend"),
+    [
+        ("rubiks_cube_pick_place", "default"),
+        ("repeated_pick_place", "default"),
+        ("repeated_pick_place", "newton"),
+        ("open_drawer", "default"),
+        ("open_drawer", "newton"),
+        ("hand_over", "default"),
+        ("pour_water", "default"),
+    ],
+)
+def test_segmented_examples_preserve_overall_and_segment_instructions(
+    task_name: str,
+    backend: str,
+    registered_test_ids: list[str],
+) -> None:
+    """Production composition retains both language levels for every backend."""
+    path = (
+        _tableware_config_path(task_name)
+        if task_name in _TABLEWARE_TASKS
+        else _config_path(task_name)
+    )
+    config = load_config(path)
+    if backend == "newton":
+        config["environment"] = {"component": config["environment"][backend]}
+    config["id"] = _TEST_ENV_ID
+    registered_test_ids.append(_TEST_ENV_ID)
+    cfg = config_to_cfg(config, source_path=path)
+    assert cfg.task_program is not None
+    overall = cfg.task_program.instruction
+    assert "instruction" not in cfg.dataset.lerobot.params
+    assert isinstance(overall, str) and overall.strip()
+    assert overall != "unknown_task"
+
+    physical = _physical_components(path, config)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    catalog = deployment.integration.registration.catalog
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=catalog,
+    )
+    compiled = catalog.preflight(program)
+    assert compiled.instruction == overall
+    segments = tuple(compiled.iter_segments())
+    expected_names = {
+        "rubiks_cube_pick_place": ["pick_rubiks_cube", "place_rubiks_cube"] * 3,
+        "repeated_pick_place": ["pick_cube", "place_cube"] * 3,
+        "open_drawer": ["open_drawer"],
+        "hand_over": ["hand_over_can"],
+        "pour_water": [
+            "pick_bottle",
+            "move_bottle_above_cup",
+            "pour_water",
+            "return_bottle",
+        ],
+    }
+    assert [segment.name for segment in segments] == expected_names[task_name]
+    if task_name == "pour_water":
+        assert [len(segment.post_policies) for segment in segments] == [0, 0, 0, 2]
+        assert [len(segment.validators) for segment in segments] == [0, 1, 0, 2]
+    for segment in segments:
+        assert isinstance(segment.instruction, str) and segment.instruction.strip()
+        assert segment.instruction != overall

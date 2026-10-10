@@ -5,6 +5,9 @@ Program. The scene uses a RoboCasa open-neck bottle and red cup, a wood tabletop
 with a Poly Haven material, and fixed area lights. Materials survive resets and
 illumination stays constant throughout an episode.
 
+The program has an overall task instruction and four annotated segments:
+pick the bottle, move it above the cup, pour, and return it to the table.
+
 The program commands `right_arm` and `right_eef`, while the environment retains
 its full dual-arm action layout. The bridge preserves issued joint-position
 targets for uncommanded joints on active rows, so the idle left arm does not
@@ -111,7 +114,7 @@ at the 60-degree tilt, placing the opening over the cup while keeping both
 the bottle body and robot clear.
 
 The program first picks and positions the bottle, then checks its actual pose
-within 10 mm of the pre-pour target before executing the pour/return segment.
+within 10 mm of the pre-pour target before executing the pour segment.
 A missed grasp stops the episode at that checkpoint. Final validators require
 the bottle to return and the cup to remain within 2 mm of its rest target.
 The placement release target is 7 mm above the final rest target, leaving
@@ -123,8 +126,10 @@ verification during every call.
 
 The corrected deployment was qualified locally on an RTX 5090 using the Default
 physics backend, seeds 0, 1 and 2, and bottle masses 10 g, 100 g and 250 g.
-All nine combinations completed two segments and four calls in 2108 control
-steps (21.08 s). Focused tests include asset conversion, packaged resources,
+All nine combinations completed four calls in two combined segments in 2108
+control steps (21.08 s). Those runs preceded the four-segment dataset annotations;
+the call order, placement targets and validation checkpoints are retained.
+Focused tests include asset conversion, packaged resources,
 grasp/collision metrics, calibrated mouth alignment and component isolation:
 
 ```bash

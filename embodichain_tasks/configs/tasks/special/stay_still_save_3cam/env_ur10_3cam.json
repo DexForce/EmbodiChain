@@ -3,6 +3,7 @@
     "physics": "default",
     "max_episodes": 1,
     "env": {
+        "task_instruction": "Hold still for 300 steps while recording three RGB cameras",
         "dataset": {
             "lerobot": {
                 "func": "AsyncLeRobotRecorder",
@@ -10,9 +11,6 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10"
-                    },
-                    "instruction": {
-                        "lang": "Hold still for 300 steps while recording three RGB cameras"
                     },
                     "extra": {
                         "scene_type": "benchmark",

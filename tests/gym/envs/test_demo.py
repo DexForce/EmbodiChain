@@ -536,23 +536,34 @@ def test_execute_demo_episode_exposes_declared_progress_total_for_lazy_actions(
     assert result.all_success
 
 
-def test_handwritten_motion_generator_segment_declares_exact_progress_total() -> None:
-    """A fixed trajectory and fixed settle phase share the tqdm total contract."""
-
-    trajectory = torch.zeros(
-        1, HANDWRITTEN_TRAJECTORY_STEPS, HANDWRITTEN_TRAJECTORY_DOF
-    )
+def test_handwritten_motion_generator_segments_preserve_exact_progress_totals() -> None:
+    """Grasp and placement totals include settling only after release."""
+    pick_steps = 3
+    place_steps = HANDWRITTEN_TRAJECTORY_STEPS - pick_steps
+    pick_trajectory = torch.zeros(1, pick_steps, HANDWRITTEN_TRAJECTORY_DOF)
+    place_trajectory = torch.ones(1, place_steps, HANDWRITTEN_TRAJECTORY_DOF)
     pose = torch.eye(4).unsqueeze(0)
     env = Mock(spec=StackBlocksTwoEnv)
     env._stack_block = Mock()
-    env._plan_stack.return_value = torch.tensor([True]), trajectory, pose, pose
-    env._iter_segment_actions.side_effect = (
-        lambda value: StackBlocksTwoEnv._iter_segment_actions(env, value)
+    env._plan_stack.return_value = (
+        torch.tensor([True]),
+        torch.tensor([True]),
+        pick_trajectory,
+        place_trajectory,
+        pose,
+        pose,
     )
-    segment = StackBlocksTwoEnv.create_demo_segments(env)[0]
+    env._iter_segment_actions.side_effect = (
+        lambda value, **kwargs: StackBlocksTwoEnv._iter_segment_actions(
+            env, value, **kwargs
+        )
+    )
+    pick, place = tuple(StackBlocksTwoEnv.create_demo_segments(env))
 
-    assert segment.progress_total_steps == HANDWRITTEN_TRAJECTORY_STEPS + SETTLE_STEPS
-    assert len(tuple(segment.actions)) == segment.progress_total_steps
+    assert pick.progress_total_steps == pick_steps
+    assert place.progress_total_steps == place_steps + SETTLE_STEPS
+    assert len(tuple(pick.actions)) == pick.progress_total_steps
+    assert len(tuple(place.actions)) == place.progress_total_steps
     env._stack_block.clear_dynamics.assert_called_once()
 
 
@@ -1667,3 +1678,180 @@ def test_close_propagates_durability_failure_before_process_exit() -> None:
     assert env.destroy.calls == [((), {"exit_process": False})]
     assert len(env.discard.calls) == 1
     assert len(env.finalize.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("override", "dynamic", "task", "expected", "source"),
+    [
+        ("Episode goal", "Dynamic goal", "Handwritten goal", "Episode goal", "episode"),
+        (None, "Dynamic goal", "Handwritten goal", "Dynamic goal", "task_program"),
+        (None, None, "Handwritten goal", "Handwritten goal", "task"),
+    ],
+)
+def test_demo_instruction_uses_task_sources_without_a_recorder(
+    override, dynamic, task, expected, source
+) -> None:
+    from embodichain.lab.gym.envs.demo import resolve_demo_instruction
+
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(
+            task_instruction=task, task_program=None, filter_dataset_saving=True
+        )
+    )
+    program = SimpleNamespace(instruction=dynamic) if dynamic is not None else None
+    assert resolve_demo_instruction(
+        env, instruction=override, task_program=program
+    ) == (expected, source)
+
+
+def test_dynamic_program_without_language_never_uses_static_program_goal() -> None:
+    from embodichain.lab.gym.envs.demo import resolve_demo_instruction
+
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(task_program=SimpleNamespace(instruction="Static goal"))
+    )
+    assert resolve_demo_instruction(
+        env, task_program=SimpleNamespace(instruction=None)
+    ) == ("unknown_task", "unknown")
+    assert resolve_demo_instruction(env) == ("Static goal", "task_program")
+
+
+def test_legacy_instruction_is_available_with_dataset_manager_disabled() -> None:
+    from embodichain.lab.gym.envs.demo import resolve_demo_instruction
+
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(
+            dataset={"lerobot": {"params": {"instruction": {"lang": "Legacy goal"}}}},
+            filter_dataset_saving=True,
+        )
+    )
+    assert resolve_demo_instruction(env) == ("Legacy goal", "legacy_recorder")
+
+
+def test_conflicting_legacy_recorders_require_one_task_owned_goal() -> None:
+    from embodichain.lab.gym.envs.demo import resolve_demo_instruction
+
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(
+            dataset={
+                "first": {"params": {"instruction": {"lang": "First goal"}}},
+                "second": {"params": {"instruction": {"lang": "Second goal"}}},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="disagree"):
+        resolve_demo_instruction(env)
+    env.cfg.task_instruction = "Authoritative goal"
+    assert resolve_demo_instruction(env) == ("Authoritative goal", "task")
+
+
+@pytest.mark.parametrize(
+    "instruction", ["", "  ", True, 7, {"lang": "Not a canonical string"}]
+)
+def test_explicit_episode_instruction_rejects_invalid_language(instruction) -> None:
+    from embodichain.lab.gym.envs.demo import resolve_demo_instruction
+
+    with pytest.raises(ValueError, match="non-empty"):
+        resolve_demo_instruction(SimpleNamespace(), instruction=instruction)
+
+
+class _LanguageSnapshotEnv(_SegmentedEnv):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cfg = SimpleNamespace(task_instruction="Original task", task_program=None)
+        self.begin_snapshot = None
+
+    def _begin_demo_episode_recording(self, **kwargs):
+        self.begin_snapshot = self._demo_instruction_snapshot
+
+    def create_demo_segments(self, **kwargs):
+        yield DemoSegment(actions=(1, 2), name="unannotated")
+        yield DemoSegment(actions=(3,), name="place", instruction="Place the object")
+
+    def step(self, action):
+        self.cfg.task_instruction = "Changed after execution began"
+        return super().step(action)
+
+
+def test_execution_freezes_language_and_marks_segment_fallbacks() -> None:
+    env = _LanguageSnapshotEnv()
+    result = execute_demo_episode(env)
+    assert result.instruction == "Original task"
+    assert result.instruction_source == "task"
+    assert env.begin_snapshot == ("Original task", "task")
+    assert result.segments[0].instruction == "Original task"
+    assert result.segments[0].instruction_source == "task_fallback"
+    assert result.segments[1].instruction_source == "segment"
+    assert result.to_metadata()["instruction"] == "Original task"
+    assert result.to_metadata()["segments"][0]["instruction_source"] == "task_fallback"
+    assert env._demo_instruction_snapshot is None
+
+
+def test_dynamic_episode_instruction_and_online_batch_share_one_snapshot() -> None:
+    from embodichain.data_pipeline.engine.data import _populate_language_indices
+    from embodichain.data_pipeline.engine.language import SharedLanguageRegistry
+
+    env = _LanguageSnapshotEnv()
+    selected = SimpleNamespace(instruction="Selected dynamic task")
+    result = execute_demo_episode(env, task_program=selected)
+    assert result.instruction == "Selected dynamic task"
+    registry = SharedLanguageRegistry()
+    batch = TensorDict(
+        {
+            "task_index": torch.full((1, 3), -1),
+            "subtask_index": torch.full((1, 3), -1),
+            "valid": torch.ones(1, 3, dtype=torch.bool),
+        },
+        batch_size=[1, 3],
+    )
+    _populate_language_indices(batch, result, registry)
+    assert registry.resolve(batch["task_index"]) == [["Selected dynamic task"] * 3]
+    assert registry.resolve(batch["subtask_index"], kind="subtask") == [
+        ["Selected dynamic task", "Selected dynamic task", "Place the object"]
+    ]
+
+
+def test_begin_hook_failure_restores_outer_language_snapshot() -> None:
+    env = _LanguageSnapshotEnv()
+    previous = ("Outer task", "episode")
+    env._demo_instruction_snapshot = previous
+    env._begin_demo_episode_recording = Mock(side_effect=RuntimeError("begin failed"))
+    with pytest.raises(RuntimeError, match="begin failed"):
+        execute_demo_episode(env, instruction="Inner task")
+    assert env._demo_instruction_snapshot == previous
+    assert not env._demo_no_auto_reset
+
+
+class _ProgramFallbackEnv(_LanguageSnapshotEnv):
+    def create_demo_segments(self, **kwargs):
+        yield DemoSegment(
+            actions=(1, 2, 3),
+            instruction="Program default",
+            instruction_source="task_fallback",
+        )
+
+
+def test_explicit_episode_goal_replaces_program_fallback_segment_language() -> None:
+    env = _ProgramFallbackEnv()
+    result = execute_demo_episode(env, instruction="Explicit episode goal")
+    assert result.instruction == "Explicit episode goal"
+    assert result.segments[0].instruction == "Explicit episode goal"
+    assert result.segments[0].instruction_source == "task_fallback"
+
+
+def test_unknown_dynamic_snapshot_is_not_relabeled_by_metadata_retrieval() -> None:
+    env = SimpleNamespace(
+        cfg=SimpleNamespace(task_program=SimpleNamespace(instruction="Static goal")),
+        _demo_episode_metadata=[
+            {
+                "instruction": "unknown_task",
+                "instruction_source": "unknown",
+                "segments": [],
+            }
+        ],
+        _demo_steps=torch.tensor([0]),
+        rollout_buffer=None,
+    )
+    metadata = EmbodiedEnv.get_demo_episode_metadata(env, 0)
+    assert metadata["instruction"] == "unknown_task"
+    assert metadata["instruction_source"] == "unknown"

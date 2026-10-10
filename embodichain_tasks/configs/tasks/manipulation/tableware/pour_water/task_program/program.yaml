@@ -1,4 +1,5 @@
 program_id: pour_water_with_right_arm
+instruction: Pour water from the bottle into the cup and return the bottle to the table.
 targets:
   bottle_return_pose:
     kind: cyclic_pose
@@ -25,21 +26,24 @@ program:
   kind: sequence
   items:
     - kind: segment
-      name: grasp_and_position_bottle
+      name: pick_bottle
+      instruction: Grasp and lift the bottle.
       steps:
-        kind: sequence
-        items:
-          - kind: invoke
-            call:
-              kind: pick
-              object: bottle
-              grasp: bottle_grasp
-          - kind: invoke
-            call:
-              kind: registered
-              call_id: simulation.move_held_object
-              arguments:
-                target: cup_pour_pose
+        kind: invoke
+        call:
+          kind: pick
+          object: bottle
+          grasp: bottle_grasp
+    - kind: segment
+      name: move_bottle_above_cup
+      instruction: Move the held bottle above the cup.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_held_object
+          arguments:
+            target: cup_pour_pose
       # Read the physical bottle pose before allowing the pour segment.
       validators:
         - kind: object_near_target
@@ -47,23 +51,26 @@ program:
           target: bottle_pour_pose
           position_tolerance: 0.01
     - kind: segment
-      name: pour_and_return_bottle
+      name: pour_water
+      instruction: Tilt the bottle to pour water into the cup and return it upright.
       steps:
-        kind: sequence
-        items:
-          - kind: invoke
-            call:
-              kind: registered
-              call_id: simulation.pour
-              arguments:
-                object: bottle
-          - kind: invoke
-            call:
-              kind: place
-              object: bottle
-              at:
-                kind: target_ref
-                target: bottle_release_pose
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.pour
+          arguments:
+            object: bottle
+    - kind: segment
+      name: return_bottle
+      instruction: Place the bottle back on the table and release it.
+      steps:
+        kind: invoke
+        call:
+          kind: place
+          object: bottle
+          at:
+            kind: target_ref
+            target: bottle_release_pose
       post:
         - kind: wait_stable
           entity: bottle
