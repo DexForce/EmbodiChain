@@ -1,4 +1,5 @@
 program_id: repeated_cube_pick_place
+instruction: Move the cube between the two target positions three times.
 targets:
   drop_pose:
     kind: cyclic_pose

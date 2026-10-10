@@ -8,7 +8,7 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 
 - one `program_id`;
 - exact `TaskProgramIntegrationCfg` IDs;
-- optional named targets; and
+- optional overall language ``instruction`` and named targets; and
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
@@ -16,9 +16,12 @@ Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
 `PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
 extension form.
 
-Explicit segments may declare a natural-language `instruction`. The compiler
-preserves it through repeated/parallel segments and the Gym bridge passes it to
-`DemoSegment`; omission retains the overall dataset-instruction fallback. See
+The program's root `instruction` owns its overall task language; each explicit
+segment may declare a finer `instruction`. The compiler freezes both levels,
+including repeated/parallel segments. The Gym bridge and common demo executor
+bind them to the actual episode-selected program; omitted segment labels are
+marked as overall-task fallbacks. See `resolve_demo_instruction` in `demo.py`
+for task/direct-call/legacy precedence, shared with handwritten demonstrations. See
 the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
 for the independent task/subtask language mapping.
 

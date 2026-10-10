@@ -2283,3 +2283,11 @@ def test_bridge_preserves_segment_instruction(instruction: str | None) -> None:
     )
     demo_segment = next(bridge.iter_segments())
     assert demo_segment.instruction == instruction
+
+
+def test_bridge_uses_program_instruction_for_unannotated_segment() -> None:
+    bridge, _, _ = _bridge(duration=STEP_DT, segment=_FakeSegment(instruction=None))
+    bridge._program.instruction = "Program task"
+    segment = next(bridge.iter_segments())
+    assert segment.instruction == "Program task"
+    assert segment.instruction_source == "task_fallback"

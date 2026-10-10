@@ -43,7 +43,11 @@ from embodichain.data_pipeline.depth_video import (
     detect_depth_encoder,
 )
 from embodichain.lab.sim.sensors import Camera, ContactSensor
-from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
+from embodichain.lab.gym.envs.demo import (
+    DEMO_ANNOTATION_KEYS,
+    DEMO_SCHEMA_VERSION,
+    resolve_demo_instruction,
+)
 from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .action_types import ActionDescriptor
 from .manager_base import Functor
@@ -151,7 +155,7 @@ class LeRobotRecorder(Functor):
             cfg: Functor configuration containing params:
                 - save_path: Root directory for saving datasets
                 - robot_meta: Robot metadata for dataset
-                - instruction: Optional task instruction
+                - instruction: Optional legacy fallback; task/episode language takes precedence
                 - extra: Optional extra metadata
                 - use_videos: Whether to save videos
                 - image_writer_threads: Number of threads for image writing
@@ -971,11 +975,15 @@ class LeRobotRecorder(Functor):
         Returns:
             True if the episode was saved successfully, False otherwise.
         """
-        task = (
-            self.instruction.get("lang", "unknown_task")
-            if self.instruction
-            else "unknown_task"
+        snapshot_instruction = (episode_metadata or {}).get("instruction")
+        snapshot_source = (episode_metadata or {}).get("instruction_source")
+        task, instruction_source = resolve_demo_instruction(
+            self._env,
+            instruction=snapshot_instruction,
+            legacy_instruction=self.instruction,
         )
+        if snapshot_instruction is not None:
+            instruction_source = snapshot_source or "episode"
 
         if len(obs_list) == 0:
             logger.log_warning(f"No episode data to save for env {env_id}")
@@ -1112,6 +1120,7 @@ class LeRobotRecorder(Functor):
                         "success": True,
                         "target_uid": None,
                         "instruction": task,
+                        "instruction_source": "task_fallback",
                         "failure_reason": None,
                         "metadata": {},
                     }
@@ -1124,6 +1133,7 @@ class LeRobotRecorder(Functor):
                     "env_id": env_id,
                     "length": len(obs_list),
                     "instruction": task,
+                    "instruction_source": instruction_source,
                 }
             )
             self._write_episode_metadata(sidecar_metadata)

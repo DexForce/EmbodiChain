@@ -250,9 +250,19 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
 def test_handwritten_segmented_tasks_configure_overall_instructions(
     config_relative_path: str,
 ) -> None:
-    """Handwritten demonstrations provide a recorder-level task instruction."""
+    """Handwritten tasks own overall language independently of recording."""
     path = TASK_CONFIG_ROOT / config_relative_path
     cfg = config_to_cfg(load_config(path), source_path=path)
-    instruction = cfg.dataset.lerobot.params["instruction"]["lang"]
+    instruction = cfg.task_instruction
+    assert "instruction" not in cfg.dataset.lerobot.params
     assert isinstance(instruction, str) and instruction.strip()
     assert instruction != "unknown_task"
+
+
+@pytest.mark.parametrize("instruction", ["", "  ", " padded ", True, 7])
+def test_task_instruction_rejects_invalid_configuration(instruction) -> None:
+    path = TASK_CONFIG_ROOT / "special/simple_task/env_ur10.json"
+    payload = load_config(path)
+    payload["env"]["task_instruction"] = instruction
+    with pytest.raises(ValueError, match="env.task_instruction"):
+        config_to_cfg(payload, source_path=path)

@@ -1083,8 +1083,11 @@ def test_example_gym_configs_keep_minimal_recording_configuration(
     recorder = environment["env"]["dataset"]["lerobot"]
     assert recorder["func"] == "LeRobotRecorder"
     assert recorder["mode"] == "save"
-    instruction = recorder["params"]["instruction"]["lang"]
+    instruction = _read_payload(relative_path.parent / "task_program/program.yaml")[
+        "instruction"
+    ]
     assert isinstance(instruction, str) and instruction.strip()
+    assert "instruction" not in recorder["params"]
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
 

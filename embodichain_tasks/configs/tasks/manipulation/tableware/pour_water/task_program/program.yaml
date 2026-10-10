@@ -1,4 +1,5 @@
 program_id: pour_water_with_right_arm
+instruction: Pour water from the bottle into the cup and return the bottle to the table.
 targets:
   bottle_return_pose:
     kind: cyclic_pose

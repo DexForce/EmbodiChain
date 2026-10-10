@@ -566,3 +566,24 @@ def test_decoder_rejects_invalid_segment_instruction(instruction: object) -> Non
     with pytest.raises(TaskProgramDecodeError) as error:
         decode_task_program(data)
     assert error.value.path == ("program", "body", "instruction")
+
+
+@pytest.mark.parametrize("instruction", [None, "Move the cube between the targets."])
+def test_decoder_accepts_optional_overall_instruction(instruction: str | None) -> None:
+    data = _program_data()
+    data["instruction"] = instruction
+    config = decode_task_program(data)
+    assert config.instruction == instruction
+
+
+def test_decoder_preserves_legacy_program_without_overall_instruction() -> None:
+    assert decode_task_program(_program_data()).instruction is None
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_decoder_rejects_invalid_overall_instruction(instruction: object) -> None:
+    data = _program_data()
+    data["instruction"] = instruction
+    with pytest.raises(TaskProgramDecodeError) as error:
+        decode_task_program(data)
+    assert error.value.path == ("instruction",)

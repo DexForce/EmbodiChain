@@ -164,3 +164,33 @@ def test_dynamic_task_program_success_does_not_require_static_config() -> None:
     )
 
     assert env.is_task_success().tolist() == [False, True]
+
+
+def test_direct_dynamic_program_planning_binds_current_episode_language() -> None:
+    env = _uninitialized_env(
+        _DeclarativeEnv, SimpleNamespace(instruction="Static task")
+    )
+    env.compiled_program = SimpleNamespace(instruction="Selected task")
+    env.bridge = _FakeBridge(DemoSegment(actions=(), name="dynamic"))
+    env._demo_episode_metadata = [{}, {}]
+    tuple(
+        env.create_demo_segments(
+            task_program=SimpleNamespace(instruction="Selected task")
+        )
+    )
+    assert [item["instruction"] for item in env._demo_episode_metadata] == [
+        "Selected task"
+    ] * 2
+    assert [item["instruction_source"] for item in env._demo_episode_metadata] == [
+        "task_program"
+    ] * 2
+
+
+def test_direct_planning_keeps_an_explicit_executor_language_snapshot() -> None:
+    env = _uninitialized_env(_DeclarativeEnv, None)
+    env.compiled_program = SimpleNamespace(instruction="Program default")
+    env.bridge = _FakeBridge(DemoSegment(actions=(), name="dynamic"))
+    env._demo_instruction_snapshot = ("Explicit task", "episode")
+    env._demo_episode_metadata = [{"instruction": "Explicit task"}]
+    tuple(env.create_demo_segments(task_program=object()))
+    assert env._demo_episode_metadata[0]["instruction"] == "Explicit task"

@@ -3,6 +3,7 @@
     "physics": "default",
     "max_episodes": 24,
     "env": {
+        "task_instruction": "Move the robot through a joint oscillation cycle.",
         "events": {
             "random_light": {
                 "func": "randomize_light",
@@ -33,9 +34,6 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10"
-                    },
-                    "instruction": {
-                        "lang": "Move the robot through a joint oscillation cycle."
                     },
                     "extra": {
                         "scene_type": "commercial",

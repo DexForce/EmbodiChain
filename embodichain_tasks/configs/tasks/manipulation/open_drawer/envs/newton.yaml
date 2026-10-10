@@ -71,8 +71,6 @@ env:
       func: LeRobotRecorder
       mode: save
       params:
-        instruction:
-          lang: Open the drawer.
         extra:
           scene_type: cabinet
           task_description: open_drawer_generation

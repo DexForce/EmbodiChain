@@ -1087,7 +1087,11 @@ class TaskProgramDemoBridge:
             yield DemoSegment(
                 actions=self._segment_actions(segment, lifecycle),
                 name=segment.name,
-                instruction=segment.instruction,
+                instruction=segment.instruction
+                or getattr(self._program, "instruction", None),
+                instruction_source=(
+                    "segment" if segment.instruction else "task_fallback"
+                ),
                 metadata=metadata,
                 validator=validator,
                 abort_actions=self._segment_abort_actions(segment, lifecycle),

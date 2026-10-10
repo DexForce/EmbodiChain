@@ -1276,7 +1276,9 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     config["id"] = _TEST_ENV_ID
     registered_test_ids.append(_TEST_ENV_ID)
     cfg = config_to_cfg(config, source_path=path)
-    overall = cfg.dataset.lerobot.params["instruction"]["lang"]
+    assert cfg.task_program is not None
+    overall = cfg.task_program.instruction
+    assert "instruction" not in cfg.dataset.lerobot.params
     assert isinstance(overall, str) and overall.strip()
     assert overall != "unknown_task"
 
@@ -1292,7 +1294,9 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
         integration=deployment.selection,
         validation_context=catalog,
     )
-    segments = tuple(catalog.preflight(program).iter_segments())
+    compiled = catalog.preflight(program)
+    assert compiled.instruction == overall
+    segments = tuple(compiled.iter_segments())
     expected_names = {
         "rubiks_cube_pick_place": ["pick_rubiks_cube", "place_rubiks_cube"] * 3,
         "repeated_pick_place": ["pick_cube", "place_cube"] * 3,

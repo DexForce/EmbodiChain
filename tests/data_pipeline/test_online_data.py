@@ -58,7 +58,9 @@ from embodichain.data_pipeline.engine.data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,
     _apply_worker_simulation_overrides,
+    _populate_language_indices,
 )
+from embodichain.data_pipeline.engine.language import SharedLanguageRegistry
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -165,6 +167,10 @@ def _make_fake_engine(
             "continuity_id": torch.zeros(
                 buffer_size, max_episode_steps, dtype=torch.long
             ),
+            "task_index": torch.zeros(buffer_size, max_episode_steps, dtype=torch.long),
+            "subtask_index": torch.zeros(
+                buffer_size, max_episode_steps, dtype=torch.long
+            ),
         },
         batch_size=[buffer_size, max_episode_steps],
     )
@@ -174,6 +180,9 @@ def _make_fake_engine(
 
     # Interprocess primitives — use the same mp context consistently to avoid
     engine._mp_ctx = mp.get_context("forkserver")
+    engine._language_registry = SharedLanguageRegistry(context=engine._mp_ctx)
+    engine._language_registry.intern("unknown_task", kind="task")
+    engine._language_registry.intern("unknown_task", kind="subtask")
     engine._lock_index = engine._mp_ctx.Array("i", [lock_start, lock_end])
     engine._fill_signal = engine._mp_ctx.Event()
     engine._init_signal = engine._mp_ctx.Event()
@@ -243,6 +252,21 @@ def _sample_engine_in_subprocess(
         result_queue.put(("ok", tuple(sample.shape), LAB_PACKAGE_NAME in sys.modules))
     except BaseException as error:
         result_queue.put(("error", type(error).__name__, str(error)))
+
+
+class _LanguageLengthTransform:
+    """Exercise text decoding and numeric tokenization in a spawned loader."""
+
+    def __init__(self, engine: OnlineDataEngine) -> None:
+        self.engine = engine
+
+    def __call__(self, sample: TensorDict) -> TensorDict:
+        texts = self.engine.resolve_language(sample)
+        sample["task_text_length"] = torch.tensor([len(text) for text in texts["task"]])
+        sample["subtask_text_length"] = torch.tensor(
+            [len(text) for text in texts["subtask"]]
+        )
+        return sample
 
 
 # ===========================================================================
@@ -359,6 +383,97 @@ class TestOnlineDataEngine:
             [False],
         )
 
+        env.close.assert_called_once_with()
+
+    def test_worker_publishes_language_with_successful_rows_before_readiness(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import gymnasium as gym
+
+        from embodichain.lab.gym.envs import demo
+        from embodichain.lab.gym.utils import gym_utils, registration
+
+        env = MagicMock()
+        env_cfg = SimpleNamespace(
+            filter_dataset_saving=False,
+            init_rollout_buffer=True,
+            max_episode_steps=None,
+            num_envs=1,
+            sim_cfg=SimpleNamespace(
+                headless=False,
+                render_cfg=SimpleNamespace(renderer=None),
+                gpu_id=0,
+                device=None,
+            ),
+        )
+        monkeypatch.setattr(registration, "discover_task_packages", lambda: [])
+        monkeypatch.setattr(
+            gym_utils, "config_to_cfg", lambda *_args, **_kwargs: env_cfg
+        )
+        monkeypatch.setattr(gym_utils, "get_manager_modules", lambda: [])
+        monkeypatch.setattr(gym, "make", lambda **_kwargs: env)
+        result = SimpleNamespace(
+            completed=True,
+            all_success=True,
+            instruction="Overall",
+            length=3,
+            segments=(
+                SimpleNamespace(start_step=0, end_step=1, instruction="Pick"),
+                SimpleNamespace(start_step=1, end_step=3, instruction="Place"),
+            ),
+        )
+        monkeypatch.setattr(
+            demo, "execute_demo_episode", lambda *_args, **_kwargs: result
+        )
+        context = mp.get_context("forkserver")
+        registry = SharedLanguageRegistry(context=context)
+        buffer = TensorDict(
+            {
+                "task_index": torch.full((1, 3), -1, dtype=torch.long),
+                "subtask_index": torch.full((1, 3), -1, dtype=torch.long),
+                "valid": torch.ones(1, 3, dtype=torch.bool),
+            },
+            batch_size=[1, 3],
+        )
+        lock = context.Array("i", [0, 1])
+        fill, close = context.Event(), context.Event()
+        fill.set()
+        initialized = MagicMock()
+        initialized.is_set.return_value = False
+        published = []
+
+        def publish_ready() -> None:
+            assert list(lock[:]) == [-1, -1]
+            published.append(registry.resolve(buffer["subtask_index"], kind="subtask"))
+            close.set()
+            fill.set()
+
+        initialized.set.side_effect = publish_ready
+        original_intern = registry.intern
+
+        def register_while_locked(description: str, **kwargs: object) -> int:
+            assert list(lock[:]) == [0, 1]
+            return original_intern(description, **kwargs)
+
+        monkeypatch.setattr(registry, "intern", register_while_locked)
+        engine_module._run_sim_worker(
+            OnlineDataEngineCfg(gym_config={"id": "Fake-v1", "num_envs": 1}),
+            buffer,
+            lock,
+            fill,
+            initialized,
+            close,
+            context.Array("B", engine_module._ERROR_BUFFER_SIZE),
+            context.Value("i", 0),
+            context.Event(),
+            context.Value(
+                "i", engine_module._STATE_TO_CODE[OnlineDataEngineState.STARTING]
+            ),
+            [False],
+            registry,
+        )
+        assert published == [[["Pick", "Place", "Place"]]]
+        assert registry.resolve(buffer["task_index"]) == [["Overall"] * 3]
         env.close.assert_called_once_with()
 
     def test_start_transitions_through_starting_to_ready(self) -> None:
@@ -771,6 +886,70 @@ class TestOnlineDataEngine:
         for key in ("obs", "actions", "rewards"):
             assert key in result, f"Missing key '{key}' in sample_batch result"
 
+    def test_sample_language_snapshot_survives_refill_and_resolves_from_dataset(
+        self,
+    ) -> None:
+        engine = self.engine
+        result = SimpleNamespace(
+            instruction="Overall task",
+            length=MAX_EPISODE_STEPS,
+            segments=(
+                SimpleNamespace(
+                    start_step=0,
+                    end_step=MAX_EPISODE_STEPS,
+                    instruction="Original segment",
+                ),
+            ),
+        )
+        _populate_language_indices(
+            engine.shared_buffer, result, engine._language_registry
+        )
+        snapshot = engine.sample_batch(batch_size=2, chunk_size=3)
+        result.instruction = "New overall task"
+        result.segments[0].instruction = "New segment"
+        _populate_language_indices(
+            engine.shared_buffer, result, engine._language_registry
+        )
+        dataset = OnlineDataset(engine, chunk_size=3)
+        assert dataset.resolve_language(snapshot) == {
+            "task": [["Overall task"] * 3] * 2,
+            "subtask": [["Original segment"] * 3] * 2,
+        }
+        item = next(iter(dataset))
+        assert dataset.resolve_language(item) == {
+            "task": ["New overall task"] * 3,
+            "subtask": ["New segment"] * 3,
+        }
+
+    def test_language_registry_overflow_is_broadcast_as_worker_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = SharedLanguageRegistry(
+            capacity_bytes=16, context=self.engine._mp_ctx
+        )
+
+        def exhaust_registry(*args: object) -> None:
+            registry.intern("The shared dictionary cannot fit this instruction")
+
+        monkeypatch.setattr(engine_module, "_run_sim_worker", exhaust_registry)
+        with pytest.raises(OverflowError, match="language_buffer_bytes"):
+            engine_module._sim_worker_fn(
+                self.engine.cfg,
+                self.engine.shared_buffer,
+                self.engine._lock_index,
+                self.engine._fill_signal,
+                self.engine._init_signal,
+                self.engine._close_signal,
+                self.engine._worker_error_buffer,
+                self.engine._worker_error_length,
+                self.engine._worker_failed_signal,
+                self.engine._state_value,
+                registry,
+            )
+        assert self.engine.state is OnlineDataEngineState.FAILED
+        with pytest.raises(OverflowError, match="language_buffer_bytes"):
+            self.engine.sample_batch(batch_size=1, chunk_size=1)
+
     def test_sample_batch_locks_respected(self) -> None:
         """Rows in [lock_start, lock_end) never appear in sampled data."""
         LOCK_START, LOCK_END = 2, 5
@@ -1053,6 +1232,44 @@ class TestOnlineDataset:
         assert (
             batch[first_key].shape[1] == self.CHUNK_SIZE
         ), f"Expected chunk size {self.CHUNK_SIZE}, got {batch[first_key].shape[1]}"
+
+    def test_spawned_dataloader_can_decode_language_in_a_transform(self) -> None:
+        result = SimpleNamespace(
+            instruction="Overall",
+            length=MAX_EPISODE_STEPS,
+            segments=(
+                SimpleNamespace(
+                    start_step=0, end_step=MAX_EPISODE_STEPS, instruction="Segment"
+                ),
+            ),
+        )
+        _populate_language_indices(
+            self.engine.shared_buffer, result, self.engine._language_registry
+        )
+        dataset = OnlineDataset(
+            self.engine,
+            chunk_size=self.CHUNK_SIZE,
+            transform=_LanguageLengthTransform(self.engine),
+        )
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=1,
+            multiprocessing_context="spawn",
+            collate_fn=OnlineDataset.collate_fn,
+        )
+        iterator = iter(loader)
+        try:
+            batch = next(iterator)
+            assert batch.batch_size == torch.Size([2, self.CHUNK_SIZE])
+            assert (batch["task_text_length"] == len("Overall")).all()
+            assert (batch["subtask_text_length"] == len("Segment")).all()
+            assert (
+                dataset.resolve_language(batch)["task"]
+                == [["Overall"] * self.CHUNK_SIZE] * 2
+            )
+        finally:
+            iterator._shutdown_workers()
 
     def test_dataloader_batch_mode(self) -> None:
         """DataLoader with batch_size=None passes through [4, chunk_size] batches."""
