@@ -143,13 +143,6 @@ The idle-arm regression is covered by
 config and the full 14-joint controller layout. Left-arm TCP displacement stayed
 below 0.22 mm over all nine trajectories with the per-axis PD defaults.
 
-Context impact review: scene tuning preserves component ownership and asset
-resolution. The Task Program execution context documents retained active-row
-joint targets and the separate measured safe-stop/inactive-row holds. Robot
-context points to measured grasp/contact qualification and the distinction
-between drive budgets and hardware grip-force ratings. Existing simulation, Gym, RL and workspace guidance
-remains accurate; no ownership or backend contracts change.
-
 ## Drive and load verification
 
 CobotMagic retains the asset URDF's `100 Nm` arm effort cap. Arm speed uses

@@ -103,21 +103,3 @@ backend binding rather than adding robot-specific post-bind fixes. For missing
 IK, inspect configured solver coverage; a gripper control part need not have a
 solver. For asset changes, validate round-trip and chain DOF/frame agreement
 before using executable robot smoke programs.
-
-CobotMagic retains the asset URDF's arm effort limits. Its arm speed caps use
-the stricter of the asset and standard PiPER manual references; its coupled
-gripper owns qualified simulation force and speed budgets in `cobotmagic.py`.
-Its decoder removes defaults selected by caller drive rules before the shared
-merge, preserving legacy whole-arm patterns, control-part overrides and
-per-joint overrides without overlapping default rules.
-Distinguish that generalized drive force from per-joint URDF limits, firmware
-control values and product clamping-force ratings. Validate actuator changes with
-`scripts/benchmark/robotics/cobotmagic_drives.py`: it compares gravity holds,
-per-joint steps and smooth tracking, and `--task-config` qualifies loaded Task
-Program execution with measured lift, tilt, return, idle-arm displacement,
-bottle-to-gripper drift and cup contact/clearance checks.
-These are simulation validations; standard PiPER references do not establish
-V100 hardware ratings, and selected gains are not measured device calibration.
-Qualification reads effective native speed caps in final joint order rather
-than assuming the asset defaults. Generalized `qf` on Default is not a drive
-torque sensor; the benchmark labels its PD-demand estimate accordingly.
