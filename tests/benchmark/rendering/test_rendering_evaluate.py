@@ -487,7 +487,7 @@ def test_full_modality_moving_singleton_keeps_missing_hundred_frame_population(
 
 
 @pytest.mark.parametrize("modalities", [("rgb",), ("rgb", "depth", "seg")])
-def test_moving_performance_can_bind_its_own_complete_quality_sequence(
+def test_post100_cannot_certify_moving_performance_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     offline: dict[str, Any],
@@ -512,7 +512,9 @@ def test_moving_performance_can_bind_its_own_complete_quality_sequence(
     assert record["evaluation_kind"] == "sequence"
     assert record["coverage"]["complete"] is True
     assert record["coverage"]["expected_samples"] == 100
-    assert record["checks"]["temporal_evidence"]["status"] == "passed"
+    assert record["checks"]["temporal_evidence"]["status"] == "missing"
+    assert "timed renderer history" in record["checks"]["temporal_evidence"]["reason"]
+    assert record["quality_status"] == "not_qualified"
     assert offline["sequence_calls"][0][0] == 100
     assert (tmp_path / "raw.jsonl").read_bytes() == raw
     assert (

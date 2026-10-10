@@ -50,6 +50,11 @@ _MODALITY_POLICIES = {
     "pure-render-quality/rgb-normals-unassessed-v1": ["rgb", "normals"],
 }
 
+_HISTORY_POLICIES = {
+    "pure-render-quality/timed-history30-v1": ["rgb", "depth", "seg"],
+    "pure-render-quality/rgb-timed-history30-v1": ["rgb"],
+}
+
 
 def default_protocol() -> dict[str, Any]:
     """Return the unchanged full RGB/depth/segmentation v1 policy.
@@ -115,7 +120,20 @@ def protocol_by_id(protocol_id: str) -> dict[str, Any]:
     if protocol_id == policy["id"]:
         return policy
     policy["id"] = protocol_id
-    if protocol_id == "pure-render-quality/temporal30-v1":
+    if protocol_id in _HISTORY_POLICIES:
+        requested = _HISTORY_POLICIES[protocol_id]
+        policy.update(
+            sequence_dt_s=1 / 30,
+            sequence_frames=None,
+            sequence_population="original_measured_frames_plus_last_warmup_guard",
+            history_contract="timed_render_history/v1",
+            requested_modalities=list(requested),
+            assessed_modalities=list(requested),
+            unassessed_modalities=[],
+        )
+        if requested == ["rgb"]:
+            policy["temporal_geometry_source"] = "independent_reference_only"
+    elif protocol_id == "pure-render-quality/temporal30-v1":
         policy["sequence_dt_s"] = 1 / 30
     elif protocol_id == "pure-render-quality/rgb-temporal30-v1":
         policy.update(
@@ -140,7 +158,10 @@ def protocol_by_id(protocol_id: str) -> dict[str, Any]:
 
 
 def protocol_for_modalities(
-    modalities: tuple[str, ...], *, temporal_dt_s: float | None = None
+    modalities: tuple[str, ...],
+    *,
+    temporal_dt_s: float | None = None,
+    timed_history: bool = False,
 ) -> dict[str, Any]:
     """Select an explicit modality contract and optional full-sequence cadence.
 
@@ -151,6 +172,9 @@ def protocol_for_modalities(
             exactly ``1/60`` or ``1/30``. RGB-only sequences support ``1/30``
             using independent reference geometry for visibility and motion.
             Captured timestamps are never converted.
+        timed_history: Select the distinct policy requiring every original timed
+            exposure plus the final warmup guard. The original schedule supplies
+            the population; a fixed 100-frame post-capture is not equivalent.
 
     Returns:
         Frozen policy with unchanged numeric thresholds for all required metrics.
@@ -158,6 +182,13 @@ def protocol_for_modalities(
     selected = set(modalities)
     if len(selected) != len(modalities):
         raise ValueError("Duplicate requested modalities")
+    if timed_history:
+        if temporal_dt_s != 1 / 30:
+            raise ValueError("Timed-history quality requires an explicit 30 Hz cadence")
+        for protocol_id, requested in _HISTORY_POLICIES.items():
+            if selected == set(requested):
+                return protocol_by_id(protocol_id)
+        raise ValueError("Timed-history quality supports RGB or full modalities")
     if selected == {"rgb", "depth", "seg"}:
         if temporal_dt_s in (None, 1 / 60):
             return default_protocol()
@@ -215,6 +246,7 @@ def protocol_requirements(protocol_id: str, kind: str = "frame") -> dict[str, An
     elif kind == "sequence" and (
         set(requested) == {"rgb", "depth", "seg"}
         or protocol_id == "pure-render-quality/rgb-temporal30-v1"
+        or protocol_id in _HISTORY_POLICIES
     ):
         metrics = (
             list(policy["temporal_thresholds"])
@@ -231,6 +263,15 @@ def protocol_requirements(protocol_id: str, kind: str = "frame") -> dict[str, An
             "reference_frame_order",
             "all_frame_quality",
         ]
+        if protocol_id in _HISTORY_POLICIES:
+            checks.extend(
+                [
+                    "timed_history",
+                    "history_schedule",
+                    "history_population",
+                    "history_aliases",
+                ]
+            )
     else:
         raise ValueError(
             "Unknown evaluation kind or unsupported temporal modality scope"

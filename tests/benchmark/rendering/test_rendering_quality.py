@@ -248,6 +248,29 @@ def test_original_full_protocol_hash_stays_frozen() -> None:
         assert policy["lpips"] == default_protocol()["lpips"]
 
 
+@pytest.mark.parametrize("modalities", [("rgb",), ("rgb", "depth", "seg")])
+def test_timed_history_policy_binds_population_without_changing_thresholds(
+    modalities: tuple[str, ...],
+) -> None:
+    ordinary = protocol_for_modalities(modalities, temporal_dt_s=1 / 30)
+    history = protocol_for_modalities(
+        modalities, temporal_dt_s=1 / 30, timed_history=True
+    )
+    assert ordinary["sequence_frames"] == 100
+    assert history["sequence_frames"] is None
+    assert (
+        history["sequence_population"]
+        == "original_measured_frames_plus_last_warmup_guard"
+    )
+    assert history["history_contract"] == "timed_render_history/v1"
+    assert history["frame_thresholds"] == ordinary["frame_thresholds"]
+    assert history["temporal_thresholds"] == ordinary["temporal_thresholds"]
+    assert (
+        "timed_history"
+        in protocol_requirements(history["id"], "sequence")["required_checks"]
+    )
+
+
 def test_rgb_policy_explicitly_excludes_unrequested_geometry(tmp_path: Path) -> None:
     frame = _frame()
     del frame["depth"], frame["seg"]
@@ -428,6 +451,95 @@ def test_rgb_sequence_uses_reference_geometry_and_exports_error_curves(
     # A frame-only policy cannot be relabelled as a temporal proof.
     with pytest.raises(ValueError, match="temporal modality scope"):
         evaluate_sequence(candidates, references, protocol_for_modalities(("rgb",)))
+
+
+def _history_frames(measured: int = 300) -> list[dict[str, Any]]:
+    """Analytical plane with immutable cyclic replay IDs and exposure aliases."""
+    frames = []
+    for scoring, replay_id in enumerate(
+        [29, *(index % 100 for index in range(measured))]
+    ):
+        frame = _frame(index=replay_id)
+        frame["metadata"].update(
+            time_s=replay_id / 30,
+            history={
+                "phase": "guard" if scoring == 0 else "measured",
+                "exposure_index": scoring - 1,
+                "measured_index": scoring - 1 if scoring else None,
+                "cycle": (scoring - 1) // 100 if scoring else None,
+                "schedule_sha256": "synthetic-math-fixture",
+                "scoring_index": scoring,
+                "scoring_time_s": scoring / 30,
+            },
+        )
+        frames.append(frame)
+    return frames
+
+
+@pytest.mark.parametrize("glitch", [1, 101, 201])
+def test_timed_history_scores_entry_and_both_wraps_without_rewriting_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    glitch: int,
+) -> None:
+    # Isolate actual correspondence/error math from acquisition verification.
+    # The analytical reference cannot qualify as independent render evidence.
+    monkeypatch.setattr(
+        quality,
+        "_timed_history_context",
+        lambda *args: (
+            {
+                name: {"status": "passed"}
+                for name in (
+                    "timed_history",
+                    "history_schedule",
+                    "history_population",
+                    "history_aliases",
+                )
+            },
+            {"sequence_frames": 301, "measured_frames": 300},
+            None,
+            [],
+        ),
+    )
+    references = _history_frames()
+    candidates = copy.deepcopy(references)
+    original = [
+        (frame["metadata"]["frame_id"], frame["metadata"]["time_s"])
+        for frame in candidates
+    ]
+    candidates[glitch]["rgb"] += 0.2
+    policy = protocol_for_modalities(
+        ("rgb", "depth", "seg"), temporal_dt_s=1 / 30, timed_history=True
+    )
+    result = evaluate_sequence(candidates, references, policy)
+    assert len(result["frames"]) == 301 and len(result["pairs"]) == 300
+    assert result["checks"]["frame_order"]["status"] == "passed"
+    assert result["checks"]["fixed_cadence"]["status"] == "passed"
+    assert result["checks"]["sequence_length"]["status"] == "passed"
+    assert result["pairs"][glitch - 1]["transition"] == (
+        "warmup_entry" if glitch == 1 else "replay_wrap"
+    )
+    assert result["pairs"][glitch - 1]["current_replay_frame_id"] == 0
+    assert result["metrics"]["static_region_flicker"]["value"] == pytest.approx(0.2)
+    assert result["metrics"]["static_region_flicker"]["status"] == "failed"
+    assert [
+        (frame["metadata"]["frame_id"], frame["metadata"]["time_s"])
+        for frame in candidates
+    ] == original
+    assert result["quality_status"] == "not_qualified"
+    trimmed = evaluate_sequence(candidates[:101], references[:101], policy)
+    assert trimmed["checks"]["sequence_length"]["status"] == "failed"
+
+
+def test_timed_history_policy_cannot_infer_population_from_aliases_alone() -> None:
+    frames = _history_frames(measured=3)
+    policy = protocol_for_modalities(
+        ("rgb", "depth", "seg"), temporal_dt_s=1 / 30, timed_history=True
+    )
+    result = evaluate_sequence(frames, frames, policy)
+    assert result["checks"]["timed_history"]["status"] == "missing"
+    assert result["checks"]["sequence_length"]["status"] == "missing"
+    assert result["quality_status"] == "not_qualified"
 
 
 def test_static_sequence_rejects_one_brightness_and_depth_glitch() -> None:

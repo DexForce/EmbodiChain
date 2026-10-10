@@ -372,15 +372,59 @@ thresholds for requested metrics; unrequested rows are explicitly `not_requested
 The original full policy's 60 Hz sequence and `temporal30-v1` are distinct contracts;
 formal 30 Hz timestamps are never rescaled to fit the former. Every required frame,
 view and sequence group must be represented. A moving performance singleton cannot
-prove 100-frame temporal quality. New moving performance runs freeze
-`post_measurement_quality_capture=frozen_sequence_100`: after timing and resource
-sampling finish, the same worker replays and saves all 100 states with the same
-resolution, cameras and requested outputs. A warmup at state zero matches R-02;
-quality readbacks and video encoding never enter the throughput denominator.
-Historical final-frame samples remain insufficient. `rgb-temporal30-v1` evaluates
+prove 100-frame temporal quality. The existing
+`post_measurement_quality_capture=frozen_sequence_100` output remains diagnostic:
+its fixed-state rewarmup and one replay do not cover the timed moving warmup or
+the repeated sequence's endpoint-to-start transitions. Moving performance cannot
+qualify from that capture, even if its numerical checks pass.
+`rgb-temporal30-v1` evaluates
 RGB flicker/reprojection using independent reference geometry for correspondence;
 it makes no claim about unrequested candidate depth or segmentation. RGB+normals checks storage shape/type/finite values,
 but normal-specific quality remains unassessed and cannot support equal-quality ratios.
+
+For moving performance, acquire exact history in a fresh process from the original
+frozen adapter/core source. This reproduces construction, the four-render freshness
+prefix, every original warmup and all K measured exposures, retaining the last
+warmup frame as a guard. The K+1 quality population covers entry and loop seams.
+Raw replay IDs/times stay unchanged; separate verified exposure ordinals define
+the scoring timeline. Extra quality readback/persistence is explicit and has no
+throughput claim. Ordinary R-02 keeps its original 100-frame protocol.
+
+```bash
+python -S -m scripts.benchmark.rendering.history_acquisition \
+  --source-worktree /path/to/frozen-source --source-commit COMMIT \
+  --experiment-root "$EXPERIMENT_ROOT" --run-id RUN_ID \
+  --output /path/to/new-history-captures --gpu-id 0
+python -S -m scripts.benchmark.rendering.history_binding \
+  --history /path/to/capture/history.json --experiment-root "$EXPERIMENT_ROOT"
+"$REFERENCE_PYTHON" -m scripts.benchmark.rendering.evaluate \
+  --experiment-root "$EXPERIMENT_ROOT" \
+  --history-evidence history_imports/MANIFEST_SHA/history.json \
+  --spp 4096 --threads 8
+```
+
+The import command returns the exact `--history-evidence` path. It verifies and
+copies the original run/source/configuration and complete capture closure without
+changing timing files. Evaluation/report reconstruction rechecks the history
+binding and all source bytes before considering qualification; calibration and
+each required image/temporal metric must still pass. Use acquisition `--dry-run`
+to validate a command without starting a simulator.
+
+For an independent routing check outside timing:
+
+```bash
+python -S -m scripts.benchmark.rendering.routing_diagnostic \
+  --source-worktree /path/to/frozen-source --source-commit COMMIT \
+  --experiment-root "$EXPERIMENT_ROOT" --run-id RUN_ID \
+  --output /path/to/new-routing-proof --gpu-id 0
+```
+
+The probe perturbs each camera at representative environments 0/middle/last and
+checks all unaffected exposures/modalities against stationary noise. Indexed
+restoration and sample hashes are recorded, including failures or inconclusive
+outcomes. This tests sampled routing/isolation; it does not prove indirect-light
+isolation or every untested environment permutation. `--prepare-only` emits a
+reviewable launch request without GPU execution.
 
 R-01 additionally exports scene-defined shadow-fixture, reflective-material and
 reference-instance-edge crops. Selection uses frozen geometry/materials and

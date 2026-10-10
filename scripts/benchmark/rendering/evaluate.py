@@ -454,6 +454,124 @@ def _candidate(descriptor: dict[str, Any]) -> dict[str, Any]:
     return {**values, "metadata": deepcopy(descriptor["metadata"])}
 
 
+def _load_history(root: Path, run: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Bind fresh acquisition evidence to an immutable original performance run."""
+    import numpy as np
+    from .history_contract import validate_history_proof
+
+    row, case = run["row"], run["case"]
+    if case.temporal_mode != "moving" or case.experiment_id == "R-02":
+        raise ValueError(
+            "Timed-history evidence applies only to moving performance runs"
+        )
+    proof = validate_history_proof(root, path, expected_original=row)
+    if proof.get("valid") is not True:
+        raise ValueError(
+            "Invalid timed-history proof: " + "; ".join(proof.get("reasons", []))
+        )
+    scene = load_scene(run["scene_path"])
+    replay = load_replay(_inside(root, run["config"]["replay_path"]), run["scene_path"])
+    names = (
+        ("external_front",)
+        if case.cameras_per_env == 1
+        else ("external_front", "external_side", "wrist")
+    )
+    envs = sorted({0, case.num_envs // 2, case.num_envs - 1})
+    descriptors = []
+    for frame in proof["frames"]:
+        metadata = deepcopy(frame["metadata"])
+        for field, expected in (
+            ("backend", row["backend"]),
+            ("scene_sha256", row["scene_sha256"]),
+            ("profile_sha256", row["profile_sha256"]),
+            ("workload_view_sha256", row["view_sha256"]),
+        ):
+            if metadata.get(field) != expected:
+                raise ValueError(f"History capture binding mismatch: {field}")
+        frame_id = metadata.get("frame_id")
+        if (
+            metadata.get("camera_name") not in names
+            or metadata.get("env_id") not in envs
+        ):
+            raise ValueError(
+                "History camera/environment is outside the original population"
+            )
+        camera_index = names.index(metadata["camera_name"])
+        if (
+            metadata.get("camera_index") != camera_index
+            or metadata.get("batch_index")
+            != metadata["env_id"] * case.cameras_per_env + camera_index
+        ):
+            raise ValueError("History frame changed the original batch identity")
+        if type(frame_id) is not int or not 0 <= frame_id < replay["frame_count"]:
+            raise ValueError("History capture is outside the frozen replay")
+        state = replay["frames"][frame_id]
+        if (
+            metadata.get("time_s") != state["time_s"]
+            or metadata.get("world_from_objects") != state["objects"]
+        ):
+            raise ValueError("History capture changed raw replay time or object state")
+        view = state["cameras"][metadata["camera_name"]]
+        canonical = reference.camera_metadata(scene, view, case.width, case.height)
+        if metadata.get("view_sha256") != stable_hash(metadata["camera"]) or any(
+            not np.allclose(metadata["camera"][key], canonical[key], atol=1e-8, rtol=0)
+            for key in ("intrinsics", "world_from_camera")
+        ):
+            raise ValueError("History camera differs from the original frozen replay")
+        if metadata.get("instance_ids") != [
+            obj["instance_id"] for obj in scene["objects"]
+        ] or metadata.get("world_from_instances") != {
+            str(obj["instance_id"]): state["objects"][obj["uid"]]
+            for obj in scene["objects"]
+        }:
+            raise ValueError("History instance geometry differs from the frozen replay")
+        descriptors.append(
+            {
+                "metadata": metadata,
+                "arrays_path": Path(frame["arrays_path"]),
+                "metadata_path": Path(frame["metadata_path"]),
+                "canonical_camera": canonical,
+            }
+        )
+    schedule = proof["schedule"]
+    count = schedule["measured_frames"] + 1
+    expected = len(envs) * case.cameras_per_env * count
+    evidence = _artifact(root, path, "timed_renderer_history")
+    result = {
+        **run,
+        "descriptors": descriptors,
+        "renderer": deepcopy(proof["renderer"]),
+        "manifest_path": proof["frames_manifest_path"],
+        "input_artifacts": [
+            *run["input_artifacts"],
+            *(root / item["path"] for item in proof["artifacts"]),
+        ],
+        "history_evidence": {**evidence, "root": str(root), "expected_original": row},
+        "timed_history": {
+            **evidence,
+            "schedule_sha256": proof["manifest"]["schedule_sha256"],
+            "measured_frames": schedule["measured_frames"],
+            "sequence_frames": count,
+        },
+        "history_quality_protocol": proof["manifest"]["history_quality_protocol"],
+        "history_quality_requirements": proof["manifest"][
+            "history_quality_requirements"
+        ],
+        "coverage": {
+            **run["coverage"],
+            "expected_samples": expected,
+            "evaluated_samples": len(descriptors),
+            "sequence_frames": count,
+            "sequence_groups": len(envs) * case.cameras_per_env,
+            "complete": len(descriptors) == expected,
+            "history_measured_frames": schedule["measured_frames"],
+            "history_guard_frames": 1,
+            "schedule_sha256": proof["manifest"]["schedule_sha256"],
+        },
+    }
+    return result
+
+
 def _reference_spec(metadata: dict[str, Any]) -> dict[str, Any]:
     import numpy as np
 
@@ -570,6 +688,9 @@ def _independent_reference(
         "frame_id"
     ]
     loaded["metadata"]["time_s"] = metadata["time_s"]
+    if "history" in metadata:
+        loaded["metadata"]["history"] = deepcopy(metadata["history"])
+        alias["history"] = deepcopy(metadata["history"])
     loaded["artifacts"].append(
         {**alias["binding_artifact"], "path": str(descriptor_path)}
     )
@@ -754,27 +875,77 @@ def _evaluate_run(
     from scripts.benchmark.rendering.quality import evaluate_frame, evaluate_sequence
 
     row, case = run["row"], run["case"]
-    temporal = case.temporal_mode == "moving" and (
-        set(case.modalities) == {"rgb", "depth", "seg"}
-        or (
-            set(case.modalities) == {"rgb"}
-            and run["config"].get("post_measurement_quality_capture")
-            == "frozen_sequence_100"
+    history = run.get("timed_history")
+    temporal = (
+        bool(history)
+        or case.temporal_mode == "moving"
+        and (
+            set(case.modalities) == {"rgb", "depth", "seg"}
+            or (
+                set(case.modalities) == {"rgb"}
+                and run["config"].get("post_measurement_quality_capture")
+                == "frozen_sequence_100"
+            )
         )
     )
     policy = protocol_for_modalities(
-        case.modalities, temporal_dt_s=1 / 30 if temporal else None
+        case.modalities,
+        temporal_dt_s=1 / 30 if temporal else None,
+        timed_history=bool(history),
     )
     contract = protocol_requirements(policy["id"], "sequence" if temporal else "frame")
     declared_policy = run["config"].get("quality_protocol")
-    if declared_policy is not None and validate_protocol(declared_policy) != policy:
-        raise ValueError("Evaluation policy differs from the frozen worker policy")
     declared = run["config"].get("quality_requirements", {})
-    if declared and any(declared.get(key) != value for key, value in contract.items()):
-        raise ValueError(
-            "Evaluation requirements differ from the frozen worker contract"
+    original_contract = None
+    if history:
+        if not isinstance(declared_policy, dict) or not declared:
+            raise ValueError("Original frozen quality contract is unavailable")
+        original_policy = validate_protocol(declared_policy)
+        original_contract = protocol_requirements(
+            original_policy["id"], declared["evaluation_kind"]
         )
-    if temporal and case.experiment_id != "R-02":
+        if (
+            any(declared.get(key) != value for key, value in original_contract.items())
+            or set(declared) - set(original_contract) - {"temporal_quality"}
+            or (
+                "temporal_quality" in declared
+                and declared["temporal_quality"]
+                not in {"unassessed", "assessed_by_declared_policy"}
+            )
+        ):
+            raise ValueError(
+                "Original quality requirements differ from their frozen policy"
+            )
+        original_contract = deepcopy(declared)
+        extension = protocol_for_modalities(
+            tuple(original_contract["requested_modalities"]),
+            temporal_dt_s=1 / 30,
+            timed_history=True,
+        )
+        if extension != policy or (
+            original_contract["evaluation_kind"] == "sequence"
+            and original_policy["sequence_dt_s"] != policy["sequence_dt_s"]
+        ):
+            raise ValueError(
+                "History policy is not an unchanged-threshold extension of the original contract"
+            )
+        if (
+            validate_protocol(run["history_quality_protocol"]) != policy
+            or run["history_quality_requirements"] != contract
+        ):
+            raise ValueError(
+                "Acquired history used a different frozen scoring contract"
+            )
+    else:
+        if declared_policy is not None and validate_protocol(declared_policy) != policy:
+            raise ValueError("Evaluation policy differs from the frozen worker policy")
+        if declared and any(
+            declared.get(key) != value for key, value in contract.items()
+        ):
+            raise ValueError(
+                "Evaluation requirements differ from the frozen worker contract"
+            )
+    if temporal and case.experiment_id != "R-02" and not history:
         run["coverage"]["capture_expected_samples"] = run["coverage"][
             "expected_samples"
         ]
@@ -817,7 +988,14 @@ def _evaluate_run(
                 (item["metadata"]["env_id"], item["metadata"]["camera_name"])
             ].append(item)
         for index, (identity, items) in enumerate(sorted(groups.items())):
-            ordered = sorted(items, key=lambda item: item["metadata"]["frame_id"])
+            ordered = sorted(
+                items,
+                key=lambda item: (
+                    item["metadata"]["history"]["scoring_index"]
+                    if history
+                    else item["metadata"]["frame_id"]
+                ),
+            )
             pairs = [inputs(item) for item in ordered]
             candidates, refs = [pair[0] for pair in pairs], [pair[1] for pair in pairs]
             report = evaluate_sequence(
@@ -825,6 +1003,7 @@ def _evaluate_run(
                 refs if all(ref is not None for ref in refs) else None,
                 policy,
                 output_dir=directory / f"sequence_{index:03d}",
+                **({"history_evidence": run["history_evidence"]} if history else {}),
             )
             report["env_id"], report["camera_name"] = identity
             reports.append(report)
@@ -869,13 +1048,14 @@ def _evaluate_run(
         "evidence": deepcopy(run["coverage"]),
     }
     if case.temporal_mode == "moving" and case.experiment_id != "R-02":
-        has_sequence = temporal and run["coverage"]["complete"]
         checks["temporal_evidence"] = {
-            "status": "passed" if has_sequence else "missing",
+            "status": (
+                "passed" if history and run["coverage"]["complete"] else "missing"
+            ),
             "reason": (
-                "Same worker/configuration captured every frozen replay state outside measurement"
-                if has_sequence
-                else "Only final-frame performance samples exist; no matching hundred-frame temporal proof"
+                "Verified original prelude/warmup and every measured exposure, including entry/wrap transitions"
+                if history and run["coverage"]["complete"]
+                else "No verified timed renderer history: post-captured replay states do not establish the original setup, freshness prelude, moving warmup, entry transition, or every measured replay wrap"
             ),
         }
     if contract["unassessed_modalities"]:
@@ -932,6 +1112,9 @@ def _evaluate_run(
         "aggregation": "every required sample must pass; ge=min, le=max; no cross-sample means",
         "sequences" if temporal else "samples": _relative_artifacts(root, reports),
     }
+    if history:
+        result["timed_history"] = history
+        result["original_quality_contract"] = original_contract
     proof_path = write_json(directory / "aggregate.json", result)
     result["artifacts"].append(_artifact(root, proof_path, "aggregate_quality_proof"))
     return result
@@ -945,6 +1128,7 @@ def evaluate_experiment(
     seed: int = 0,
     run_ids: list[str] | None = None,
     calibration_evidence: Path | None = None,
+    history_evidence: list[Path] | None = None,
 ) -> Path:
     """Evaluate selected completed runs, append evidence, and rebuild the report.
 
@@ -959,6 +1143,9 @@ def evaluate_experiment(
             ``photometric_calibration_receipt``. Its heldout sources and observed
             renderer controls are verified before attachment; a status flag and
             file hash alone cannot qualify calibration.
+        history_evidence: Checksummed fresh-worker history manifests under the
+            experiment root, one per selected original moving performance run.
+            They replace only quality inputs; original raw timing is preserved.
 
     Returns:
         Path of the rebuilt Markdown report. Timing fields and raw.jsonl bytes
@@ -998,6 +1185,22 @@ def evaluate_experiment(
         for row in rows
         if row["run_id"] in selected and row["status"] == "completed"
     ]
+    history_records = []
+    if history_evidence:
+        by_run = {run["row"]["run_id"]: index for index, run in enumerate(runs)}
+        seen = set()
+        for value in history_evidence:
+            path = _inside(root, value)
+            manifest = read_json_object(path)
+            run_id = manifest.get("original", {}).get("run_id")
+            if run_id not in by_run or run_id in seen:
+                raise ValueError(
+                    "History evidence must uniquely target a selected completed run"
+                )
+            seen.add(run_id)
+            index = by_run[run_id]
+            runs[index] = _load_history(root, runs[index], path)
+            history_records.append(_artifact(root, path, "explicit_history_input"))
     calibration = None
     calibration_record = None
     if calibration_evidence is not None:
@@ -1036,6 +1239,7 @@ def evaluate_experiment(
             "settings": settings,
             "run_ids": sorted(selected),
             "calibration_evidence": calibration_record,
+            "history_evidence": history_records,
             "source_sha256": {
                 name: _sha256(Path(__file__).with_name(name))
                 for name in (
@@ -1046,6 +1250,11 @@ def evaluate_experiment(
                     "_publication_figures.py",
                     "reference.py",
                     "calibration.py",
+                    *(
+                        ("history_contract.py", "frozen_source.py")
+                        if history_records
+                        else ()
+                    ),
                 )
             },
         },
@@ -1140,6 +1349,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-id", action="append", dest="run_ids")
     parser.add_argument("--calibration-evidence", type=Path)
+    parser.add_argument("--history-evidence", type=Path, action="append")
     args = parser.parse_args(argv)
     print(
         evaluate_experiment(
@@ -1149,6 +1359,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             run_ids=args.run_ids,
             calibration_evidence=args.calibration_evidence,
+            history_evidence=args.history_evidence,
         )
     )
     return 0

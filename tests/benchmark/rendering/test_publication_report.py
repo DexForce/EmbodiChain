@@ -616,11 +616,18 @@ def test_unassessed_modality_or_temporal_scope_prohibits_equal_quality_ratio(
     assert reason in comparison["reasons"]
 
 
+@pytest.mark.parametrize("experiment", ["R-02", "R-03", "R-03-as-R-02"])
 def test_three_camera_sequence_proof_requires_every_frame_contract(
     tmp_path: Path,
+    experiment: str,
 ) -> None:
-    rows = _rows(experiment="R-02", cameras=3)
+    rows = _rows(
+        experiment="R-03" if experiment == "R-03-as-R-02" else experiment, cameras=3
+    )
     for row in rows:
+        if experiment == "R-03-as-R-02":
+            row["experiment_id"] = "R-02"
+            row["config"]["experiment_id"] = "R-03"
         row["config"].update(modalities=["rgb", "depth", "seg"], temporal_mode="moving")
         row["config_sha256"] = stable_hash(row["config"])
     quality = _freeze(tmp_path, rows)
@@ -663,9 +670,18 @@ def test_three_camera_sequence_proof_requires_every_frame_contract(
                 "sequence_groups": 3,
             },
         )
+        if experiment != "R-02":
+            record["checks"]["temporal_evidence"] = {"status": "passed"}
     _write(tmp_path / "quality.json", {"schema_version": 1, "runs": quality})
 
-    assert _comparison(_summary(tmp_path))["eligible"]
+    comparison = _comparison(_summary(tmp_path))
+    if experiment != "R-02":
+        assert comparison["eligible"] is False
+        assert "quality_timed_history" in comparison["reasons"]
+        if experiment == "R-03-as-R-02":
+            assert "quality_experiment_binding" in comparison["reasons"]
+        return
+    assert comparison["eligible"]
     quality[0]["sequences"][2]["frames"][99]["metrics"]["lpips"]["value"] = 1.0
     _write(tmp_path / "quality.json", {"schema_version": 1, "runs": quality})
     comparison = _comparison(_summary(tmp_path))

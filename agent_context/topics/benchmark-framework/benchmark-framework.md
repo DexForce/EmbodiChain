@@ -29,6 +29,8 @@ Commands, matrices and runtime requirements are in the
 | Scene-defined shadow/reflection/edge diagnostic crops | `scripts/benchmark/rendering/quality_regions.py` |
 | Measured photometric calibration and held-out verification | `scripts/benchmark/rendering/calibration.py` |
 | Verified calibration import and per-frame target binding | `scripts/benchmark/rendering/calibration_binding.py` |
+| Fresh-process history acquisition, import and portable proof | `scripts/benchmark/rendering/history_acquisition.py`, `history_worker.py`, `history_binding.py`, `history_contract.py` |
+| Frozen runtime/source launch and targeted camera routing | `scripts/benchmark/rendering/frozen_source.py`, `routing_diagnostic.py`, `routing_worker.py`, `routing_proof.py` |
 | Append-only offline evaluation events | `scripts/benchmark/rendering/evaluate.py` |
 | Formal offline Markdown, CSV, SVG and PDF | `scripts/benchmark/rendering/publication_report.py`, `_publication_figures.py` |
 | Within-backend R-05/C3 versus R-04/C1 increments | `scripts/benchmark/rendering/camera_scaling_report.py` |
@@ -125,10 +127,17 @@ policies bind requested modalities, thresholds, frame/sequence coverage and
 checksummed evidence. The original full policy and the explicit 30 Hz temporal
 policy remain distinct. Unrequested metrics are explicit; missing requested
 metrics, calibration, reference noise evidence or temporal coverage cannot pass.
-Moving performance workers may freeze a full 100-frame quality replay after the
-timing/resource window; old final-frame samples remain insufficient. RGB temporal
-quality uses reference geometry for visibility without claiming candidate geometry
-quality. Semantic crops are geometry/material-selected diagnostics, and temporal
+Moving performance requires a fresh worker reproducing the original source,
+construction/freshness prefix, all warmup calls and all K measured exposures,
+plus the final warmup guard. The old post100 replay is diagnostic only: its
+rewarmup and missing loop seams cannot certify timed history. Separate scoring
+ordinals preserve raw replay IDs/times; import and offline reporting revalidate
+source bindings and all K+1 samples. Ordinary R-02 remains 100 frames. RGB temporal
+quality uses reference geometry without claiming candidate geometry quality.
+Targeted indexed-camera probes check representative environments and all unaffected
+outputs, retaining noise/inconclusive/restoration evidence without claiming native
+light isolation. They do not alter primary timing or replace image-quality proof.
+Semantic crops are geometry/material-selected diagnostics, and temporal
 curves retain missing pairs. Neither changes metric thresholds or qualification.
 Calibration receipts bind real training and disjoint held-out artifacts; a manual
 qualified status plus an arbitrary file is insufficient. Normal-specific quality

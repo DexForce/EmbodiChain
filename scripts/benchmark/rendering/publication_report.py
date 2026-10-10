@@ -40,7 +40,11 @@ from scripts.benchmark.reporting.figures import write_metric_csv
 from scripts.benchmark.reporting.tables import render_markdown_table
 
 from ._publication_figures import write_chart
-from .quality_protocol import protocol_by_id, protocol_requirements
+from .quality_protocol import (
+    protocol_by_id,
+    protocol_for_modalities,
+    protocol_requirements,
+)
 
 __all__ = ["rebuild_report"]
 
@@ -303,7 +307,14 @@ def _quality_policy_reasons(record: dict[str, Any]) -> list[str]:
             child_kind = "sequence"
         else:
             children = record.get("frames", [])
+            history = record.get("timed_history")
             expected_count = policy["sequence_frames"]
+            if policy.get("history_contract"):
+                expected_count = (
+                    history.get("sequence_frames")
+                    if isinstance(history, dict)
+                    else None
+                )
             child_kind = "frame"
         if (
             not isinstance(children, list)
@@ -321,7 +332,233 @@ def _quality_policy_reasons(record: dict[str, Any]) -> list[str]:
             for child in children
         ):
             reasons.append("quality_sequence_frame_contract")
+        if policy.get("history_contract") and child_kind == "frame":
+            pairs = record.get("pairs", [])
+            if (
+                type(expected_count) is not int
+                or not isinstance(pairs, list)
+                or len(pairs) != expected_count - 1
+                or any(
+                    not isinstance(pair, dict)
+                    or pair.get("previous_frame") != index
+                    or pair.get("current_frame") != index + 1
+                    or pair.get("status") != "passed"
+                    for index, pair in enumerate(pairs)
+                )
+            ):
+                reasons.append("quality_history_pairs")
+            for name in expected["required_metrics"]:
+                denominator = (
+                    expected_count
+                    if name == "temporal_silhouette_iou"
+                    else expected_count - 1 if type(expected_count) is int else None
+                )
+                if metrics.get(name, {}).get("denominator") != denominator:
+                    reasons.append("quality_history_metric_population")
     return reasons
+
+
+def _timed_history_reasons(
+    root: Path, row: dict[str, Any], record: dict[str, Any], checksums: dict[Path, str]
+) -> list[str]:
+    """Independently bind a claimed schedule and aliases to the original run."""
+
+    def checked(artifact: dict[str, Any]) -> Path:
+        path = Path(artifact["path"])
+        resolved = (root / path).resolve()
+        if (
+            path.is_absolute()
+            or not resolved.is_relative_to(root.resolve())
+            or not resolved.is_file()
+        ):
+            raise ValueError("History artifact is missing or outside the experiment")
+        if resolved not in checksums:
+            checksums[resolved] = _sha256(resolved)
+        if checksums[resolved] != artifact["sha256"]:
+            raise ValueError("History artifact checksum mismatch")
+        return resolved
+
+    def same_numbers(first: Any, second: Any) -> bool:
+        if isinstance(first, list) and isinstance(second, list):
+            return len(first) == len(second) and all(
+                same_numbers(a, b) for a, b in zip(first, second)
+            )
+        if isinstance(first, dict) and isinstance(second, dict):
+            return first.keys() == second.keys() and all(
+                same_numbers(first[key], second[key]) for key in first
+            )
+        if _number(first) and _number(second):
+            return math.isclose(first, second, rel_tol=0, abs_tol=1e-5)
+        return first == second
+
+    try:
+        descriptor = record.get("timed_history")
+        if not isinstance(descriptor, dict):
+            return ["quality_timed_history"]
+        from .history_contract import validate_history_proof
+
+        path = checked(descriptor)
+        proof = validate_history_proof(root, path, expected_original=row)
+        if proof.get("valid") is not True:
+            return [
+                "quality_timed_history",
+                *[
+                    "quality_history:" + str(reason)
+                    for reason in proof.get("reasons", [])
+                ],
+            ]
+        policy = protocol_by_id(record.get("protocol_id", ""))
+        if (
+            policy.get("history_contract") != "timed_render_history/v1"
+            or record.get("evaluation_kind") != "sequence"
+        ):
+            raise ValueError("Timed history requires its frozen sequence policy")
+        count = proof["schedule"]["measured_frames"]
+        schedule_hash = proof["manifest"]["schedule_sha256"]
+        if (
+            descriptor.get("measured_frames") != count
+            or descriptor.get("sequence_frames") != count + 1
+            or descriptor.get("schedule_sha256") != schedule_hash
+        ):
+            raise ValueError(
+                "History population/schedule differs from the acquired original"
+            )
+        evidence = {
+            (item.get("path"), item.get("sha256"))
+            for item in record.get("artifacts", [])
+        }
+        required = [*proof["artifacts"], descriptor]
+        if any((item["path"], item["sha256"]) not in evidence for item in required):
+            raise ValueError("Quality record omits source history evidence")
+        groups: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+        for frame in proof["frames"]:
+            meta = frame["metadata"]
+            groups[(meta["env_id"], meta["camera_name"])].append(frame)
+        children = record.get("sequences", [])
+        identities = [
+            (child.get("env_id"), child.get("camera_name")) for child in children
+        ]
+        coverage = record.get("coverage", {})
+        if (
+            len(identities) != len(groups)
+            or set(identities) != set(groups)
+            or coverage.get("expected_samples") != len(proof["frames"])
+            or coverage.get("sequence_frames") != count + 1
+        ):
+            raise ValueError(
+                "History quality population does not cover the acquired streams"
+            )
+        for child, identity in zip(children, identities):
+            if child.get("timed_history") != descriptor:
+                raise ValueError("Sequence history binding differs from its parent")
+            timeline_artifact = child["exposure_timeline"]
+            timeline = read_json(checked(timeline_artifact))
+            if (timeline_artifact["path"], timeline_artifact["sha256"]) not in evidence:
+                raise ValueError(
+                    "Exposure timeline is not retained as quality evidence"
+                )
+            if (
+                timeline.get("kind") != "scoring_exposure_timeline/v1"
+                or timeline.get("history") != descriptor
+            ):
+                raise ValueError("Exposure timeline has a different history binding")
+            if (timeline.get("env_id"), timeline.get("camera_name")) != identity:
+                raise ValueError("Exposure timeline relabels its environment/camera")
+            aliases = timeline["aliases"]
+            source = sorted(
+                groups[identity],
+                key=lambda item: item["metadata"]["history"]["scoring_index"],
+            )
+            if len(aliases) != count + 1:
+                raise ValueError("Exposure timeline is incomplete")
+            for index, (alias, frame) in enumerate(zip(aliases, source)):
+                meta = frame["metadata"]
+                if (
+                    alias.get("history") != meta["history"]
+                    or alias.get("replay_frame_id") != meta["frame_id"]
+                    or alias.get("replay_time_s") != meta["time_s"]
+                ):
+                    raise ValueError(
+                        "Scoring alias changed the immutable raw replay identity"
+                    )
+                if (
+                    checked(alias["candidate_metadata"]) != frame["metadata_path"]
+                    or checked(alias["candidate_arrays"]) != frame["arrays_path"]
+                ):
+                    raise ValueError("Scoring alias points to a different candidate")
+                sources = alias["reference_sources"]
+                ref_path = checked(sources["reference_metadata"])
+                arrays = checked(sources["reference_arrays"])
+                ref = read_json(ref_path)
+                refmeta = ref["metadata"]
+                if (ref_path.parent / ref["arrays"]["path"]).resolve() != arrays or ref[
+                    "arrays"
+                ]["sha256"] != sources["reference_arrays"]["sha256"]:
+                    raise ValueError(
+                        "Reference alias arrays are not bound to their metadata"
+                    )
+                if (
+                    refmeta.get("scene_sha256") != meta["scene_sha256"]
+                    or not same_numbers(
+                        refmeta.get("world_from_instances"),
+                        meta.get("world_from_instances"),
+                    )
+                    or any(
+                        not same_numbers(refmeta["camera"][key], meta["camera"][key])
+                        for key in ("intrinsics", "world_from_camera")
+                    )
+                ):
+                    raise ValueError(
+                        "Reference alias does not represent the captured replay geometry"
+                    )
+                for artifact in (
+                    alias["candidate_metadata"],
+                    alias["candidate_arrays"],
+                    *sources.values(),
+                ):
+                    if (artifact["path"], artifact["sha256"]) not in evidence:
+                        raise ValueError(
+                            "Scoring alias source is not retained in quality evidence"
+                        )
+                if index:
+                    pair = child["pairs"][index - 1]
+                    previous = source[index - 1]["metadata"]
+                    transition = (
+                        "warmup_entry"
+                        if index == 1
+                        else (
+                            "replay_wrap"
+                            if meta["history"]["cycle"] != previous["history"]["cycle"]
+                            else "continuous"
+                        )
+                    )
+                    if (
+                        pair.get("previous_replay_frame_id") != previous["frame_id"]
+                        or pair.get("current_replay_frame_id") != meta["frame_id"]
+                        or pair.get("transition") != transition
+                    ):
+                        raise ValueError(
+                            "Temporal pairs omit or relabel an entry/wrap transition"
+                        )
+        return []
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        IndexError,
+        AttributeError,
+    ) as error:
+        return ["quality_timed_history", "quality_history:" + str(error)]
+
+
+def _moving_performance(row: dict[str, Any]) -> bool:
+    """Exclude only an unambiguously declared ordinary R-02 sequence."""
+    experiment = row.get("experiment_id")
+    configured = row["config"].get("experiment_id", experiment)
+    return row["config"].get("temporal_mode") == "moving" and not (
+        experiment == configured == "R-02"
+    )
 
 
 def _quality_evidence(
@@ -329,6 +566,10 @@ def _quality_evidence(
 ) -> list[str]:
     """Reject unbound, missing, damaged or unqualified quality certificates."""
     reasons = []
+    if row["config"].get("experiment_id", row.get("experiment_id")) != row.get(
+        "experiment_id"
+    ):
+        reasons.append("quality_experiment_binding")
     if row.get("quality_status") not in {"qualified", "passed"}:
         reasons.append("run_quality_status")
     if record.get("quality_status") not in {"qualified", "passed"}:
@@ -352,6 +593,14 @@ def _quality_evidence(
     ):
         reasons.append("quality_checks")
     reasons.extend(_quality_policy_reasons(record))
+    try:
+        history_policy = protocol_by_id(record.get("protocol_id", "")).get(
+            "history_contract"
+        )
+    except (TypeError, ValueError):
+        history_policy = None
+    if history_policy and not _moving_performance(row):
+        reasons.append("quality_history_scope")
     requested = record.get("requested_modalities")
     workload_modalities = row["config"].get("modalities")
     if (
@@ -368,6 +617,8 @@ def _quality_evidence(
         and record.get("evaluation_kind") != "sequence"
     ):
         reasons.append("quality_temporal_coverage")
+    if _moving_performance(row):
+        reasons.extend(_timed_history_reasons(root, row, record, checksums))
     if "coverage" in record:
         coverage = record["coverage"]
         if (
@@ -443,8 +694,48 @@ def _attach_quality(
         ):
             row["quality_reasons"].append("frozen_quality_assignment:protocol_id")
         if assignment:
+            original = record.get("original_quality_contract")
+            extension = False
+            if (
+                _moving_performance(row)
+                and isinstance(record.get("timed_history"), dict)
+                and "quality_timed_history" not in row["quality_reasons"]
+                and isinstance(original, dict)
+            ):
+                try:
+                    known_original = protocol_requirements(
+                        original["protocol_id"], original["evaluation_kind"]
+                    )
+                    proposed = protocol_for_modalities(
+                        tuple(known_original["requested_modalities"]),
+                        temporal_dt_s=1 / 30,
+                        timed_history=True,
+                    )
+                    extension = (
+                        original == assignment
+                        and all(
+                            original.get(key) == value
+                            for key, value in known_original.items()
+                        )
+                        and not (
+                            set(original) - set(known_original) - {"temporal_quality"}
+                        )
+                        and original.get(
+                            "temporal_quality", "assessed_by_declared_policy"
+                        )
+                        in {"unassessed", "assessed_by_declared_policy"}
+                        and record.get("protocol_id") == proposed["id"]
+                        and record.get("protocol_sha256") == stable_hash(proposed)
+                        and (
+                            original["evaluation_kind"] == "frame"
+                            or protocol_by_id(original["protocol_id"])["sequence_dt_s"]
+                            == proposed["sequence_dt_s"]
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    extension = False
             for key in ("protocol_id", "protocol_sha256", "evaluation_kind"):
-                if record.get(key) != assignment.get(key):
+                if not extension and record.get(key) != assignment.get(key):
                     row["quality_reasons"].append(f"frozen_quality_assignment:{key}")
             policy = frozen_quality.get("policies", {}).get(
                 assignment.get("protocol_id")

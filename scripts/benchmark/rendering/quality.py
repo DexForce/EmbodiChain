@@ -20,9 +20,11 @@ The frozen v1 thresholds are benchmark acceptance policy, not empirical claims:
 SSIM >= .95, LPIPS-Squeeze v0.1 <= .05, optical-depth RMSE <= .01 m,
 valid-depth coverage >= .99, macro instance IoU >= .98 and silhouette IoU
 >= .99. The background ID is zero and is excluded from macro instance IoU.
-Temporal gates use all 99 pairs of a fixed 100-frame sequence: worst-pair
+Ordinary temporal gates use all 99 pairs of a fixed 100-frame sequence: worst-pair
 static-region residual flicker <= .02, reprojection RGB MAE <= .03, depth
 consistency RMSE <= .01 m, and worst-frame silhouette IoU >= .99.
+The distinct timed-history policies retain these thresholds and require the
+original K measured exposures plus a final-warmup guard, including every seam.
 
 SSIM and LPIPS consume display-sRGB in [0,1]. Scene-linear inputs receive the
 standard sRGB transfer after fixed [0,1] clipping; there is no fitted exposure,
@@ -847,18 +849,201 @@ def _correspondences(
     )
 
 
+def _timed_history_context(
+    candidates: list[dict[str, Any]],
+    references: list[dict[str, Any]] | None,
+    evidence: dict[str, Any] | None,
+) -> tuple[
+    dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, list[dict[str, Any]]
+]:
+    """Verify the acquisition proof and bind scoring aliases to immutable frames."""
+    names = (
+        "timed_history",
+        "history_schedule",
+        "history_population",
+        "history_aliases",
+    )
+    checks = {
+        name: _check(None, "Verified original timed-history evidence is absent")
+        for name in names
+    }
+    if not isinstance(evidence, dict):
+        return checks, None, None, []
+    try:
+        from .history_contract import validate_history_proof
+
+        root = Path(evidence["root"]).resolve()
+        path = (root / evidence["path"]).resolve()
+        if (
+            not path.is_relative_to(root)
+            or _artifact(path, "history")["sha256"] != evidence["sha256"]
+        ):
+            raise ValueError(
+                "Timed-history manifest is outside its root or checksum-mismatched"
+            )
+        proof = validate_history_proof(
+            root, path, expected_original=evidence.get("expected_original")
+        )
+        if proof.get("valid") is not True:
+            raise ValueError(
+                "; ".join(proof.get("reasons", [])) or "Invalid timed-history proof"
+            )
+        schedule = proof["schedule"]
+        count = schedule["measured_frames"]
+        if type(count) is not int or count < 1 or schedule["fps"] != 30:
+            raise ValueError(
+                "Timed-history policy requires the original positive K at 30 Hz"
+            )
+        descriptor = {
+            "path": path.relative_to(root).as_posix(),
+            "sha256": evidence["sha256"],
+            "kind": "timed_renderer_history",
+            "schedule_sha256": proof["manifest"]["schedule_sha256"],
+            "measured_frames": count,
+            "sequence_frames": count + 1,
+        }
+        checks["timed_history"] = _check(True)
+        checks["history_schedule"] = _check(
+            True, schedule_sha256=descriptor["schedule_sha256"], measured_frames=count
+        )
+        metadata = [frame.get("metadata", {}) for frame in candidates]
+        identity = (
+            (metadata[0].get("env_id"), metadata[0].get("camera_name"))
+            if metadata
+            else None
+        )
+        source = sorted(
+            (
+                frame
+                for frame in proof["frames"]
+                if (
+                    frame["metadata"].get("env_id"),
+                    frame["metadata"].get("camera_name"),
+                )
+                == identity
+            ),
+            key=lambda frame: frame["metadata"]["history"]["scoring_index"],
+        )
+        population = (
+            len(source) == len(candidates) == count + 1
+            and all(
+                (meta.get("env_id"), meta.get("camera_name")) == identity
+                for meta in metadata
+            )
+            and all(isinstance(meta.get("history"), dict) for meta in metadata)
+            and [meta.get("history", {}).get("exposure_index") for meta in metadata]
+            == list(range(-1, count))
+        )
+        checks["history_population"] = _check(
+            population,
+            "Every original measured exposure and its warmup guard must be present exactly once",
+            expected=count + 1,
+            observed=len(candidates),
+        )
+        aliases, aliases_valid = [], bool(
+            population and references is not None and len(references) == count + 1
+        )
+        for index, (meta, original) in enumerate(zip(metadata, source)):
+            raw = original["metadata"]
+            history = meta.get("history", {})
+            aliases_valid = aliases_valid and all(
+                meta.get(key) == raw.get(key)
+                for key in (
+                    "frame_id",
+                    "time_s",
+                    "history",
+                    "camera",
+                    "env_id",
+                    "camera_name",
+                )
+            )
+            reference = (
+                references[index]
+                if references is not None and index < len(references)
+                else None
+            )
+            refmeta = (reference or {}).get("metadata", {})
+            aliases_valid = aliases_valid and all(
+                refmeta.get(key) == meta.get(key)
+                for key in ("frame_id", "time_s", "history")
+            )
+            ref_sources = {
+                artifact["kind"]: {
+                    **artifact,
+                    "path": Path(artifact["path"])
+                    .resolve()
+                    .relative_to(root)
+                    .as_posix(),
+                }
+                for artifact in (reference or {}).get("artifacts", [])
+                if artifact.get("kind") in {"reference_metadata", "reference_arrays"}
+            }
+            aliases_valid = aliases_valid and len(ref_sources) == 2
+            aliases.append(
+                {
+                    "history": history,
+                    "replay_frame_id": meta.get("frame_id"),
+                    "replay_time_s": meta.get("time_s"),
+                    "candidate_metadata": {
+                        **_artifact(
+                            Path(original["metadata_path"]), "candidate_metadata"
+                        ),
+                        "path": Path(original["metadata_path"])
+                        .relative_to(root)
+                        .as_posix(),
+                    },
+                    "candidate_arrays": {
+                        **_artifact(Path(original["arrays_path"]), "candidate_arrays"),
+                        "path": Path(original["arrays_path"])
+                        .relative_to(root)
+                        .as_posix(),
+                    },
+                    "reference_sources": ref_sources,
+                }
+            )
+        checks["history_aliases"] = _check(
+            bool(aliases_valid),
+            "Scoring aliases must retain source replay IDs/times and bind every candidate/reference file",
+        )
+        timeline = {
+            "schema_version": 1,
+            "kind": "scoring_exposure_timeline/v1",
+            "history": descriptor,
+            "env_id": identity[0] if identity else None,
+            "camera_name": identity[1] if identity else None,
+            "aliases": aliases,
+        }
+        artifacts = [
+            {**item, "path": str((root / item["path"]).resolve())}
+            for item in proof["artifacts"]
+        ]
+        return checks, descriptor, timeline, artifacts
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        ImportError,
+        AttributeError,
+    ) as error:
+        checks["timed_history"] = _check(False, str(error))
+        return checks, None, None, []
+
+
 def evaluate_sequence(
     candidates: list[dict[str, Any]],
     references: list[dict[str, Any]] | None,
     protocol: dict[str, Any] | None = None,
     *,
     output_dir: Path | None = None,
+    history_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate fixed-length temporal quality using reference-based visibility.
 
     Args:
-        candidates: Exactly 100 ordered frame dictionaries with ``frame_id``
-            (0..99), camera matrices, and optional moving-instance transforms.
+        candidates: Ordinary policies require 100 ordered frames. Timed-history
+            policies require the verified original K exposures plus a guard,
+            with immutable replay IDs/times and separate exposure aliases.
         references: Corresponding independent frames, or ``None`` for explicitly
             unqualified consistency diagnostics using candidate visibility.
         protocol: Frozen full or RGB-only temporal policy selected before
@@ -866,6 +1051,10 @@ def evaluate_sequence(
             for correspondence; no candidate geometry quality is inferred.
             Timestamps are preserved.
         output_dir: Optional directory for pair evidence and the aggregate JSON.
+        history_evidence: For the distinct timed-history policy, a checksummed
+            ``history.json`` descriptor with ``root``, ``path``, ``sha256`` and
+            optional ``expected_original`` run. Raw replay IDs/times remain
+            unchanged; verified exposure aliases supply the scoring timeline.
 
     Returns:
         Worst-pair temporal metrics, every pair's denominator, frame quality
@@ -874,6 +1063,9 @@ def evaluate_sequence(
         reference colour differences remove legitimate view-dependent shading.
     """
     policy = _protocol(protocol)
+    timed_history = policy.get("history_contract") == "timed_render_history/v1"
+    if history_evidence is not None and not timed_history:
+        raise ValueError("Timed-history evidence requires the distinct history policy")
     requirements = protocol_requirements(policy["id"], kind="sequence")
     result = {
         "schema_version": 1,
@@ -888,6 +1080,10 @@ def evaluate_sequence(
     }
     result.update(requirements)
     metadata = [frame.get("metadata", {}) for frame in candidates]
+    history_aliases = [
+        meta.get("history") if isinstance(meta.get("history"), dict) else {}
+        for meta in metadata
+    ]
     reference_ids = sorted(
         {
             frame.get("reference_provenance", {}).get("reference_id")
@@ -911,6 +1107,16 @@ def evaluate_sequence(
         reference_ids=reference_ids,
     )
     checks = result["checks"]
+    timeline = None
+    history_artifacts = []
+    if timed_history:
+        history_checks, history, timeline, history_artifacts = _timed_history_context(
+            candidates, references, history_evidence
+        )
+        checks.update(history_checks)
+        result["timed_history"] = history
+    else:
+        history = None
     fixed_profile = (
         bool(metadata)
         and bool(result["profile_sha256"])
@@ -928,10 +1134,14 @@ def evaluate_sequence(
             else ""
         ),
     )
+    expected_frames = (
+        history["sequence_frames"] if history is not None else policy["sequence_frames"]
+    )
     checks["sequence_length"] = _check(
-        len(candidates) == policy["sequence_frames"],
-        "Exactly 100 frames are required" if len(candidates) != 100 else "",
+        len(candidates) == expected_frames if expected_frames is not None else None,
+        "Every frame in the frozen sequence population is required",
         observed=len(candidates),
+        expected=expected_frames,
     )
     ids = [
         frame.get("metadata", {}).get(
@@ -939,15 +1149,27 @@ def evaluate_sequence(
         )
         for frame in candidates
     ]
+    order = (
+        [alias.get("scoring_index") for alias in history_aliases]
+        if timed_history
+        else ids
+    )
     checks["frame_order"] = _check(
-        ids == list(range(len(candidates))),
+        order == list(range(len(candidates))),
         (
             "Frame IDs must be consecutive starting at zero"
-            if ids != list(range(len(candidates)))
+            if order != list(range(len(candidates)))
             else ""
         ),
     )
-    timestamps = [frame.get("metadata", {}).get("time_s") for frame in candidates]
+    timestamps = [
+        (
+            history_aliases[index].get("scoring_time_s")
+            if timed_history
+            else meta.get("time_s")
+        )
+        for index, meta in enumerate(metadata)
+    ]
     valid_times = (
         all(
             isinstance(value, (float, int)) and np.isfinite(value)
@@ -1003,7 +1225,7 @@ def evaluate_sequence(
     for frame in result["frames"]:
         for artifact in frame["artifacts"]:
             artifacts[(artifact["path"], artifact["sha256"])] = artifact
-    result["artifacts"] = list(artifacts.values())
+    result["artifacts"] = list(artifacts.values()) + history_artifacts
     checks["all_frame_quality"] = _check(
         (
             all(frame["quality_status"] == "qualified" for frame in result["frames"])
@@ -1021,6 +1243,21 @@ def evaluate_sequence(
     }
     for index in range(1, len(candidates)):
         pair = {"previous_frame": index - 1, "current_frame": index}
+        if timed_history:
+            pair.update(
+                previous_replay_frame_id=ids[index - 1],
+                current_replay_frame_id=ids[index],
+                transition=(
+                    "warmup_entry"
+                    if index == 1
+                    else (
+                        "replay_wrap"
+                        if history_aliases[index].get("cycle")
+                        != history_aliases[index - 1].get("cycle")
+                        else "continuous"
+                    )
+                ),
+            )
         try:
             rows, cols, ys, xs, static, projected_depth, depth_scale = _correspondences(
                 geometry_frames[index - 1], geometry_frames[index], policy
@@ -1128,11 +1365,20 @@ def evaluate_sequence(
     if output_dir is not None:
         destination = Path(output_dir)
         destination.mkdir(parents=True, exist_ok=True)
+        if timeline is not None:
+            timeline_path = destination / "exposure_timeline.json"
+            write_json(timeline_path, timeline)
+            result["exposure_timeline"] = _artifact(
+                timeline_path, "scoring_exposure_timeline"
+            )
+            result["artifacts"].append(result["exposure_timeline"])
         pairs_path = destination / "temporal_pairs.json"
         write_json(pairs_path, result["pairs"])
         result["artifacts"].append(_artifact(pairs_path, "temporal_pairs"))
         result["artifacts"].extend(_save_temporal_plots(destination, result, metadata))
         write_json(destination / "quality_evidence.json", result)
+    elif timeline is not None:
+        result["exposure_timeline_inline"] = timeline
     return result
 
 
@@ -1150,12 +1396,19 @@ def _save_temporal_plots(
     rows = []
     for pair in result["pairs"]:
         frame = pair["current_frame"]
+        history = metadata[frame].get("history", {})
+        if not isinstance(history, dict):
+            history = {}
         rows.append(
             {
                 "run_id": metadata[0].get("run_id") if metadata else None,
                 "previous_frame": pair["previous_frame"],
                 "current_frame": frame,
-                "time_s": metadata[frame].get("time_s"),
+                "time_s": history.get("scoring_time_s", metadata[frame].get("time_s")),
+                "replay_frame_id": metadata[frame].get("frame_id"),
+                "replay_time_s": metadata[frame].get("time_s"),
+                "exposure_index": history.get("exposure_index"),
+                "transition": pair.get("transition"),
                 "status": pair["status"],
                 "reason": pair.get("reason"),
                 "visible_correspondences": pair.get("visible_correspondences"),
@@ -1171,6 +1424,10 @@ def _save_temporal_plots(
                 "previous_frame",
                 "current_frame",
                 "time_s",
+                "replay_frame_id",
+                "replay_time_s",
+                "exposure_index",
+                "transition",
                 "status",
                 "reason",
                 "visible_correspondences",
