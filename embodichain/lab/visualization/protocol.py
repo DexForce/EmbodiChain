@@ -39,6 +39,7 @@ __all__ = [
     "JointControlSpec",
     "JointControlState",
     "MeshGeometry",
+    "MeshMarkerOverlay",
     "PickCommand",
     "PointCloudOverlay",
     "SceneFrame",
@@ -53,7 +54,7 @@ __all__ = [
     "pose_to_position_wxyz",
 ]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 Color = tuple[int, int, int]
 
 
@@ -638,6 +639,81 @@ class PointCloudOverlay:
 
 
 @dataclass(frozen=True)
+class MeshMarkerOverlay:
+    """Detached triangle mesh marker attached to a dynamic frame."""
+
+    overlay_id: str
+    vertices: np.ndarray
+    faces: np.ndarray
+    position: np.ndarray
+    wxyz: np.ndarray
+    scale: np.ndarray = field(default_factory=lambda: np.ones((3,), dtype=np.float32))
+    color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0)
+    visible: bool = True
+    env_id: int | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.overlay_id, str) or not self.overlay_id:
+            raise ValueError("Mesh marker overlay_id must be a non-empty string.")
+        vertices = _array(self.vertices, np.float32)
+        face_values = _array(self.faces, np.float64)
+        position, wxyz = _normalize_position_wxyz(self.position, self.wxyz)
+        scale = _array(self.scale, np.float32)
+        color = tuple(float(component) for component in self.color)
+        if vertices.ndim != 2 or vertices.shape[1] != 3:
+            raise ValueError(
+                f"vertices must have shape (V, 3), received {vertices.shape}."
+            )
+        if face_values.size == 0:
+            raise ValueError("Mesh marker geometry must contain at least one triangle.")
+        if face_values.ndim != 2 or face_values.shape[1] != 3:
+            raise ValueError(
+                f"faces must have shape (F, 3), received {face_values.shape}."
+            )
+        if not np.all(np.isfinite(vertices)):
+            raise ValueError("Mesh marker vertices must be finite.")
+        if (
+            not np.all(np.isfinite(face_values))
+            or np.any(face_values < 0.0)
+            or np.any(face_values > np.iinfo(np.uint32).max)
+            or np.any(face_values != np.floor(face_values))
+        ):
+            raise ValueError(
+                "Mesh marker faces must contain finite non-negative integers "
+                "representable as uint32."
+            )
+        faces = np.ascontiguousarray(face_values, dtype=np.uint32)
+        if faces.size and (vertices.shape[0] == 0 or np.max(faces) >= len(vertices)):
+            raise ValueError("Mesh marker faces contain out-of-bounds vertex indices.")
+        if not np.all(np.isfinite(position)) or not np.all(np.isfinite(wxyz)):
+            raise ValueError("Mesh marker pose arrays must be finite.")
+        if scale.shape != (3,):
+            raise ValueError(f"scale must have shape (3,), got {scale.shape}.")
+        if not np.all(np.isfinite(scale)) or np.any(scale <= 0.0):
+            raise ValueError("Mesh marker scale values must be finite and positive.")
+        if len(color) != 4 or not all(
+            np.isfinite(component) and 0.0 <= component <= 1.0 for component in color
+        ):
+            raise ValueError(
+                "Mesh marker color must be an RGBA tuple with values in [0, 1]."
+            )
+        if self.env_id is not None and (
+            isinstance(self.env_id, (bool, np.bool_))
+            or not isinstance(self.env_id, (int, np.integer))
+            or self.env_id < 0
+        ):
+            raise ValueError(
+                "Mesh marker env_id must be a non-negative integer or None."
+            )
+        object.__setattr__(self, "vertices", vertices)
+        object.__setattr__(self, "faces", faces)
+        object.__setattr__(self, "position", position)
+        object.__setattr__(self, "wxyz", wxyz)
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "color", color)
+
+
+@dataclass(frozen=True)
 class SceneOverlays:
     """All optional overlays attached to a dynamic frame."""
 
@@ -645,6 +721,12 @@ class SceneOverlays:
     trajectories: tuple[TrajectoryOverlay, ...] = field(default_factory=tuple)
     targets: tuple[TargetOverlay, ...] = field(default_factory=tuple)
     point_clouds: tuple[PointCloudOverlay, ...] = field(default_factory=tuple)
+    meshes: tuple[MeshMarkerOverlay, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        mesh_ids = [mesh.overlay_id for mesh in self.meshes]
+        if len(mesh_ids) != len(set(mesh_ids)):
+            raise ValueError("SceneOverlays contains duplicate mesh overlay IDs.")
 
 
 @dataclass(frozen=True)
@@ -755,6 +837,14 @@ def estimate_frame_bytes(frame: SceneFrame) -> int:
         total += overlay.points.nbytes
     for overlay in frame.overlays.point_clouds:
         total += overlay.points.nbytes + overlay.colors.nbytes
+    for overlay in frame.overlays.meshes:
+        total += (
+            overlay.vertices.nbytes
+            + overlay.faces.nbytes
+            + overlay.position.nbytes
+            + overlay.wxyz.nbytes
+            + overlay.scale.nbytes
+        )
     for overlay in (*frame.overlays.frames, *frame.overlays.targets):
         total += overlay.position.nbytes + overlay.wxyz.nbytes
     for gizmo in frame.gizmos:

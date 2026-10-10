@@ -15,11 +15,43 @@ Read this when the request needs these details. [Topic overview](sim-visualizati
 | `destroy()` | Stops visualization before queuing deferred simulation cleanup |
 
 During explicit `SimulationManager.update()`, each physics step increments the
-visualization step/time counters and attempts a rate-limited capture. A topology
-revision mismatch publishes a fresh manifest before its first matching frame.
+visualization step/time counters and refreshes marker attachments after the
+optional `after_substep` observer. `render_frame()` shares state publication
+across camera observations, recording and rate-limited Viser capture. With
+`render_final_step=False`, the final capture waits for that frame; state writes
+between the last substep and the frame are included when render state is
+published, including refreshed marker poses. A topology revision mismatch
+publishes a fresh manifest before its first matching frame.
 `BaseEnv.reset()` also requests a forced capture after resetting scene state.
 Drawing markers and capturing visualization do not advance physics; interactive
 loops call `SimulationManager.update(step=1)` to process Gizmos and step the world.
+
+Marker groups default to `scope="env"` and inherit `SimulationManager.num_envs`.
+`scope="world"` creates one global batch. The new group config has no
+`arena_index`. Updates use `(E,M,3)` positions/scales, `(E,M,4)` xyzw/RGBA,
+and `(E,M)` type/visibility arrays; `env_ids` selects and orders the E dimension.
+One selected environment accepts the `(M,...)` shorthand. Counts may differ
+between environments after selected updates; `count` is the total and `counts`
+contains one value per environment. Selected clear/hide/update preserves others.
+
+`attach(parent_uid, link_name=..., env_ids=...)` resolves prepared registered
+rigid roots or articulation/robot links through public pose APIs. Stored marker
+poses become parent-relative offsets. The manager refreshes these transforms
+on host steps and explicit render-state synchronization; snapshots stay detached
+and do not read physics. `detach(keep_world_pose=True)` preserves the displayed
+pose by default. World-scope attachment is rejected rather than guessing a
+source environment. Parent resolution must not retain borrowed native nodes.
+
+Marker groups publish a complete detached snapshot after `update()`,
+`set_visibility()`, `clear()`, or `remove()`. Native groups update DexSim debug
+meshes immediately. Browser groups are included as mesh overlays and may force
+a frame only when the currently published manifest matches the manager's
+topology revision. Marker publication never calls `prepare()` or synchronizes
+physics. An unpublished host substep defers browser marker capture to
+`render_frame()`, after the observer and all attachment refreshes. Paused edits
+still publish immediately when no frame is pending. A dirty topology defers
+the browser marker update until the next explicit host capture or simulation
+update.
 
 Manager add methods mark topology dirty for rigid objects, rigid-object groups,
 volume/surface deformables, robots, articulations, and `Camera` sensors. Supported
@@ -61,10 +93,11 @@ Deformable vertices are stored relative to the corresponding arena node.
 | `SurfaceDeformableObject` | Live Newton render-surface vertices and triangles |
 | `Camera` | Frustum plus optional low-frequency RGB preview |
 | Default ground | 1000 m × 1000 m XY grid, 1 m cells, 10 m sections |
-| `SceneOverlays` | Frames, targets, trajectories, and point clouds |
+| `SceneOverlays` | Frames, targets, trajectories, point clouds, and marker meshes |
 
 Lights, rigid constraints, markers/gizmos, contact sensors, and stereo cameras
-are not exported as scene nodes by the current `SceneExporter`. Visual
+are not exported as scene nodes by the current `SceneExporter`. Marker groups
+instead travel as `MeshMarkerOverlay` entries. Visual
 materials and textures are not mirrored; meshes use category colors from
 `SceneExporter._COLORS`.
 
@@ -151,7 +184,13 @@ GUI callbacks enqueue events; the visualization worker applies them, preserving
 the single-threaded Viser-handle invariant. Environment visibility affects
 static batches, deformables, and camera frustums.
 
-Overlays are backend-neutral protocol objects. Point clouds larger than
+Overlays are backend-neutral protocol objects. Marker groups use triangle-mesh
+overlays with per-instance RGBA, pose, scale, and visibility. Built-in
+prototypes are box, sphere, cylinder, capsule, cone, arrow, and frame; custom
+triangle meshes are also supported. This does not add GPU instancing, and the
+existing point-cloud and polyline overlay paths remain independent.
+
+Point clouds larger than
 `point_cloud_max_points` are deterministically subsampled. The ordinary
 `SimulationManager.capture_visualization()` helper currently supplies no
 overlay argument; callers needing overlays must use the active

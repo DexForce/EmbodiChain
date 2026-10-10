@@ -261,6 +261,7 @@ def test_newton_warp_log_suppression_covers_world_update() -> None:
         _visualization_sim_step=0,
         _visualization_sim_time=0.0,
         _pending_record_dt=0.0,
+        _refresh_marker_attachments=lambda: None,
         _window_record_state=None,
         render_frame=lambda **_kwargs: nullcontext(),
         _log_scene_summary=lambda: None,
