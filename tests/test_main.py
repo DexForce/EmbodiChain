@@ -36,6 +36,7 @@ EXPECTED_COMMANDS = {
     "annotate-grasp",
     "benchmark",
     "data",
+    "dataset",
     "decompose-urdf",
     "eval-policy",
     "list-task",

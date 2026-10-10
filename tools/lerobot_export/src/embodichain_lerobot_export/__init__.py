@@ -14,31 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Online streaming, recording, and offline dataset tools.
-
-Subpackages load on first access so offline inspection does not initialize the
-simulation, PyTorch, or video-encoding stacks.
-"""
+"""Independent Python 3.12 converter; importing EmbodiChain is unnecessary."""
 
 from __future__ import annotations
 
-from importlib import import_module
-from types import ModuleType
-from typing import TYPE_CHECKING
+from .exporter import export_dataset
 
-if TYPE_CHECKING:
-    from . import datasets, depth_video, engine, recording
-
-__all__ = ["datasets", "depth_video", "engine", "recording"]
-
-
-def __getattr__(name: str) -> ModuleType:
-    if name not in __all__:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = import_module(f"{__name__}.{name}")
-    globals()[name] = value
-    return value
-
-
-def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+__all__ = ["export_dataset"]

@@ -24,6 +24,9 @@ import logging
 import os
 import threading
 import copy
+from pathlib import Path
+import tempfile
+from uuid import uuid4
 import torch
 import numpy as np
 import gymnasium as gym
@@ -86,6 +89,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
+from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
@@ -292,7 +296,8 @@ class EmbodiedEnvCfg(EnvCfg):
 
     trajectory_auto_save: bool = True
     """If True (and record_trajectory is True), auto-save each env's trajectory to
-    ``trajectory_save_dir`` at episode end and on close()."""
+    ``trajectory_save_dir`` before an explicitly committed episode reset.
+    Closing discards trajectories that were never committed."""
 
     task_program: TaskProgramCfg | None = None
     """Optional declarative Task Program used to generate demo segments.
@@ -1042,6 +1047,19 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
+        # Persist replay state before the dataset recorder snapshots metadata
+        # (including asynchronous snapshots). The existing state buffer retains
+        # the source episode's initial state even when training exports fragments.
+        _traj_buffer = getattr(self, "_traj_buffer", None)
+        if (
+            save_data
+            and _traj_buffer is not None
+            and getattr(self.cfg, "trajectory_auto_save", False)
+        ):
+            with self._profiler.section("trajectory_save"):
+                for env_id in env_ids_to_process.tolist():
+                    self._save_trajectory_for_env(env_id)
+
         # Save dataset before clearing buffers for environments that are being reset
         if env_ids_to_commit.numel() > 0 and self.dataset_manager:
             if "save" in self.dataset_manager.available_modes:
@@ -1088,19 +1106,6 @@ class EmbodiedEnv(BaseEnv):
                                 functor_cfg.func.discard_and_clear(
                                     env_ids=env_ids_to_process
                                 )
-
-        # Auto-save + reset the per-env trajectory buffer for environments being
-        # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
-        # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
-        _traj_buffer = getattr(self, "_traj_buffer", None)
-        if (
-            save_data
-            and _traj_buffer is not None
-            and getattr(self.cfg, "trajectory_auto_save", False)
-        ):
-            with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
-                    self._save_trajectory_for_env(env_id)
 
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
@@ -1220,6 +1225,11 @@ class EmbodiedEnv(BaseEnv):
 
     def _new_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Create an empty metadata record for one environment row."""
+        if getattr(self, "_recording_run_uuid", None) is None:
+            self._recording_run_uuid = str(uuid4())
+        if getattr(self, "_recording_provenance", None) is None:
+            self._recording_provenance = build_recording_provenance(self)
+        episode_uuid = str(uuid4())
         execution_cfg = getattr(self, "_demo_execution_cfg", None)
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
@@ -1231,6 +1241,9 @@ class EmbodiedEnv(BaseEnv):
             "instruction": instruction,
             "instruction_source": instruction_source,
             "schema_version": DEMO_SCHEMA_VERSION,
+            "run_uuid": self._recording_run_uuid,
+            "episode_uuid": episode_uuid,
+            "source_episode_uuid": episode_uuid,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
             "seed": getattr(getattr(self, "cfg", None), "seed", None),
             "output_mode": execution_cfg.mode,
@@ -1253,6 +1266,7 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
+        metadata.update(copy.deepcopy(self._recording_provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -1281,6 +1295,14 @@ class EmbodiedEnv(BaseEnv):
         self._demo_episode_metadata = [
             self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
         ]
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
+            for metadata in self._demo_episode_metadata:
+                metadata["program_hash"] = program_hash
 
     def _begin_demo_segment_recording(
         self, segment_id: int, segment: DemoSegment
@@ -1353,6 +1375,13 @@ class EmbodiedEnv(BaseEnv):
 
     def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
         """Finalize per-environment metadata after demonstration execution."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        program_hash = None
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
         for env_id in range(self.num_envs):
             metadata = self._demo_episode_metadata[env_id]
             length = (
@@ -1387,14 +1416,51 @@ class EmbodiedEnv(BaseEnv):
             collection_stats = getattr(self, "_collection_stats", None)
             if isinstance(collection_stats, Mapping):
                 metadata["collection"] = dict(collection_stats)
-            bridge = getattr(self, "_active_task_program_bridge", None)
             if bridge is not None:
+                metadata["program_hash"] = program_hash
                 records = bridge.expansion_records
-                metadata["expansion"] = [
-                    record.to_metadata()
-                    for record in records
-                    if getattr(record, "env_id", None) in (None, env_id)
-                ]
+                metadata["expansion"] = []
+                for record in records:
+                    if getattr(record, "env_id", None) not in (None, env_id):
+                        continue
+                    expansion_metadata = dict(record.to_metadata())
+                    selected_identity = next(
+                        (
+                            candidate.identity
+                            for candidate in getattr(record, "candidates", ())
+                            if candidate.identity.candidate_id
+                            == record.selected_candidate_id
+                        ),
+                        None,
+                    )
+                    if selected_identity is not None:
+                        # Keep the actual source/case identity. Some adapters
+                        # put a recipe candidate in template_id, so downstream
+                        # grouping must not assume it names a shared reference.
+                        expansion_metadata["selected_candidate_lineage"] = {
+                            name: getattr(selected_identity, name)
+                            for name in (
+                                "scene_case_id",
+                                "initial_state_id",
+                                "candidate_id",
+                                "geometry_family_id",
+                                "source_id",
+                                "source_revision",
+                                "template_id",
+                                "attempt_id",
+                                "parent_id",
+                            )
+                        }
+                    metadata["expansion"].append(expansion_metadata)
+                source_uuids = {
+                    record["source_episode_uuid"]
+                    for record in metadata["expansion"]
+                    if isinstance(record.get("source_episode_uuid"), str)
+                }
+                if len(source_uuids) == 1:
+                    metadata["source_episode_uuid"] = next(iter(source_uuids))
+                elif source_uuids:
+                    metadata["source_episode_uuids"] = sorted(source_uuids)
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -2850,7 +2916,55 @@ class EmbodiedEnv(BaseEnv):
             ],
         }
         meta.update(self._trajectory_action_metadata())
-        torch.save({"states": states, "actions": actions, "meta": meta}, path)
+        meta["run_uuid"] = meta["demo_episodes"][0].get("run_uuid")
+        meta["episode_uuids"] = [
+            episode.get("episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["source_episode_uuids"] = [
+            episode.get("source_episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["config_hash"] = meta["demo_episodes"][0].get("config_hash")
+        meta["provenance"] = copy.deepcopy(
+            meta["demo_episodes"][0].get("provenance", {})
+        )
+        meta["initial_state_step"] = 0
+        if len(env_ids) == 1:
+            meta["episode_uuid"] = meta["episode_uuids"][0]
+            meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
+            meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        replay_path = str(Path(path).resolve())
+        for episode in meta["demo_episodes"]:
+            episode["trajectory_path"] = replay_path
+            episode["replay_artifact"] = {
+                "path": replay_path,
+                "source_episode_uuid": episode.get("episode_uuid"),
+                "env_id": episode["env_id"],
+                "initial_state_step": 0,
+                "length": episode["length"],
+                "state_alignment": "source_episode",
+                "external": True,
+            }
+        destination = Path(path)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{destination.name}.", dir=destination.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                torch.save({"states": states, "actions": actions, "meta": meta}, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+            directory = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        for env_id, episode in zip(env_ids, meta["demo_episodes"]):
+            live_metadata = self._demo_episode_metadata[env_id]
+            live_metadata["trajectory_path"] = replay_path
+            live_metadata["replay_artifact"] = copy.deepcopy(episode["replay_artifact"])
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:
@@ -2864,6 +2978,15 @@ class EmbodiedEnv(BaseEnv):
             return None
         if int(self._traj_steps[env_id].item()) == 0:
             return None
+        metadata = self._demo_episode_metadata[env_id]
+        existing_path = metadata.get("trajectory_path")
+        replay = metadata.get("replay_artifact", {})
+        if (
+            existing_path is not None
+            and Path(existing_path).is_file()
+            and replay.get("length") == int(self._traj_steps[env_id].item())
+        ):
+            return existing_path
         base = self.cfg.trajectory_save_dir
         if base is None:
             base = os.path.join(

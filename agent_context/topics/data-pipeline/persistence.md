@@ -35,8 +35,12 @@
 6. Failure before the LeRobot commit rolls back recorder time and aborts depth temp files.
    Failure after commit cannot roll back the episode: it retains the episode, surfaces the
    error, and a fragment records sticky partial-commit state so retry cannot duplicate it.
-7. Fragment IDs provide deterministic same-process deduplication. They are not a cross-process
-   recovery journal.
+7. Fragment UUIDs preserve their source episode and identify the segment span,
+   attempt, and continuity region. The recorder also writes an atomic, fsynced
+   journal before submitting frames and advances it around the SDK/depth/sidecar
+   boundaries. Offline recovery verifies disk evidence and repairs only missing
+   sidecar metadata; an unknown SDK outcome remains explicit. See
+   [offline tools](offline-datasets.md) for recovery and lineage decisions.
 8. Async enqueue clones all tensor payloads to CPU and deep-copies metadata in the caller
    before reset reuses the buffer. One FIFO worker is the sole LeRobot accessor and assigns
    deterministic episode order.
@@ -64,7 +68,7 @@
 12. `meta/embodichain_episodes.jsonl` is appended under the recorder's metadata lock after the
     LeRobot and depth commits; unlike subtask parquet and `depth_meta.json`, it is not
     replaced as one atomic file. A JSONL append failure is therefore a surfaced post-commit
-    failure, not a rollback point.
+    failure, not a rollback point. Journal completion follows the sidecar append.
 
 ### Common failures and recommended change sites
 

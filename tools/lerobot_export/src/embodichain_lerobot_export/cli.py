@@ -14,31 +14,26 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Online streaming, recording, and offline dataset tools.
-
-Subpackages load on first access so offline inspection does not initialize the
-simulation, PyTorch, or video-encoding stacks.
-"""
+"""CLI for the standalone export environment."""
 
 from __future__ import annotations
 
-from importlib import import_module
-from types import ModuleType
-from typing import TYPE_CHECKING
+import argparse
+import json
 
-if TYPE_CHECKING:
-    from . import datasets, depth_video, engine, recording
+from .exporter import export_dataset
 
-__all__ = ["datasets", "depth_video", "engine", "recording"]
+__all__ = ["main"]
 
 
-def __getattr__(name: str) -> ModuleType:
-    if name not in __all__:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = import_module(f"{__name__}.{name}")
-    globals()[name] = value
-    return value
-
-
-def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(__all__))
+def main() -> None:
+    """Convert a finalized local dataset and print its conversion manifest."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", help="Finalized EmbodiChain LeRobot v3.0 dataset")
+    parser.add_argument("destination", help="New dataset directory outside the source")
+    args = parser.parse_args()
+    try:
+        manifest = export_dataset(args.source, args.destination)
+    except (ValueError, RuntimeError, OSError, KeyError) as error:
+        parser.exit(1, f"Export failed: {error}\n")
+    print(json.dumps(manifest, indent=2, sort_keys=True))

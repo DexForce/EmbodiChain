@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "embodichain-lerobot-export"
+version = "0.1.0"
+description = "Offline export of EmbodiChain recordings for LeRobot 0.6.1"
+requires-python = ">=3.12"
+dependencies = ["lerobot[dataset]==0.6.1"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+embodichain-lerobot-export = "embodichain_lerobot_export.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/embodichain_lerobot_export"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.black]
+target-version = ["py312"]

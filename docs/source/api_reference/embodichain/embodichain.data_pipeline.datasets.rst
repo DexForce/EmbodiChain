@@ -35,3 +35,14 @@ Datasets and samplers for online streaming training from live simulation.
    :members:
    :undoc-members:
    :show-inheritance:
+
+Offline dataset inspection
+--------------------------
+
+Validate saved episode/frame metadata, feature values, segment boundaries,
+and optional media evidence without constructing a simulator. Quality-aware
+split manifests group source episodes and their derived fragments so one
+lineage cannot cross train, validation, and test partitions.
+
+.. automodule:: embodichain.data_pipeline.datasets.inspection
+   :members:
