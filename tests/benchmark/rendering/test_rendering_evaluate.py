@@ -39,6 +39,27 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_final_batch_registration_preserves_kind_and_rejects_unbound_evidence(
+    tmp_path: Path,
+) -> None:
+    from scripts.benchmark.core.artifacts import ArtifactStore
+
+    path = tmp_path / "source.json"
+    path.write_text("immutable source")
+    store = ArtifactStore(tmp_path)
+    original = store.register_artifact(path, kind="original_source")
+    descriptor = {"path": path.name, "sha256": sha(path), "kind": "quality_detail"}
+    evaluate._register_batch(store, [descriptor])
+    assert read_json_object(tmp_path / "artifact_index.json")["artifacts"] == [original]
+    before = (tmp_path / "artifact_index.json").read_bytes()
+    with pytest.raises(ValueError, match="SHA-256"):
+        evaluate._register_batch(store, [{"path": path.name, "kind": "unbound"}])
+    path.write_text("changed")
+    with pytest.raises(ValueError):
+        evaluate._register_batch(store, [descriptor])
+    assert (tmp_path / "artifact_index.json").read_bytes() == before
+
+
 @pytest.fixture
 def offline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     state: dict[str, Any] = {

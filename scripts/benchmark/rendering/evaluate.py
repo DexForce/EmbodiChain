@@ -107,6 +107,13 @@ def _register(store: ArtifactStore, path: Path, kind: str) -> None:
     store.register_artifact(path, kind=kind)
 
 
+def _register_batch(store: ArtifactStore, artifacts: list[dict[str, Any]]) -> None:
+    """Verify final evidence in one index update, retaining prior classifications."""
+    if any(not isinstance(item.get("sha256"), str) for item in artifacts):
+        raise ValueError("Final evaluation artifacts require frozen SHA-256 evidence")
+    store.register_artifacts(artifacts, preserve_existing_kind=True)
+
+
 def _immutable_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -1352,9 +1359,7 @@ def evaluate_experiment(
                 root, path, "quality_evaluation_event"
             )
     store = ArtifactStore(root)
-    for artifact in event_artifacts.values():
-        _verify(root, artifact)
-        _register(store, root / artifact["path"], artifact["kind"])
+    _register_batch(store, list(event_artifacts.values()))
     for row in rows:
         if row["run_id"] in evaluated:
             row["quality_status"] = evaluated[row["run_id"]]["quality_status"]

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import hashlib
 import json
 import math
@@ -216,6 +216,112 @@ class ArtifactStore:
         artifacts.append(record)
         write_json(index_path, index)
         return record
+
+    def register_artifacts(
+        self,
+        entries: Iterable[Mapping[str, Any]],
+        *,
+        preserve_existing_kind: bool = False,
+    ) -> list[dict[str, object]]:
+        """Validate a batch before publishing one updated artifact index.
+
+        Args:
+            entries: Descriptors containing ``path`` and ``kind``. Relative paths
+                are relative to the experiment root. Optional ``sha256`` and
+                ``bytes`` fields must match the actual file.
+            preserve_existing_kind: Reuse a registered path's classification,
+                while still requiring identical bytes. Defaults to strict kind
+                matching, like :meth:`register_artifact`.
+
+        Returns:
+            Unique records in request order. Identical repeats are idempotent;
+            a wholly registered batch performs no write. Missing files, invalid
+            descriptors or conflicts leave the existing index unchanged.
+
+        .. note::
+            This batches a single writer's work; it does not coordinate concurrent
+            writers or freeze files against mutation by another process.
+        """
+        root = self.root.resolve()
+        index_path = self.root / "artifact_index.json"
+        index = (
+            read_json_object(index_path) if index_path.exists() else {"artifacts": []}
+        )
+        artifacts = index.setdefault("artifacts", [])
+        if not isinstance(artifacts, list):
+            raise ValueError("artifact_index.json artifacts must be a list")
+        existing_by_path = {}
+        for existing in artifacts:
+            if (
+                not isinstance(existing, dict)
+                or not isinstance(existing.get("path"), str)
+                or not isinstance(existing.get("kind"), str)
+                or type(existing.get("bytes")) is not int
+                or existing["bytes"] < 0
+                or not isinstance(existing.get("sha256"), str)
+                or len(existing["sha256"]) != 64
+            ):
+                raise ValueError("Invalid registered artifact descriptor")
+            relative = existing["path"]
+            if Path(relative).is_absolute() or not (
+                root / relative
+            ).resolve().is_relative_to(root):
+                raise ValueError("artifact must be inside the experiment directory")
+            if relative in existing_by_path and existing_by_path[relative] != existing:
+                raise ValueError(f"Conflicting registered artifact path: {relative}")
+            existing_by_path[relative] = existing
+        requested = {}
+        additions = []
+        for entry in entries:
+            if (
+                not isinstance(entry, Mapping)
+                or not isinstance(entry.get("path"), (str, Path))
+                or not isinstance(entry.get("kind"), str)
+            ):
+                raise ValueError("Artifact entries require path and kind")
+            path = (root / entry["path"]).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError("artifact must be inside the experiment directory")
+            if not path.is_file():
+                raise FileNotFoundError(path)
+            relative = path.relative_to(root).as_posix()
+            digest = hashlib.sha256()
+            size = 0
+            with path.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+                    size += len(block)
+            previous = existing_by_path.get(relative)
+            record = {
+                "path": relative,
+                "kind": (
+                    previous["kind"]
+                    if previous and preserve_existing_kind
+                    else entry["kind"]
+                ),
+                "bytes": size,
+                "sha256": digest.hexdigest(),
+            }
+            if any(
+                key in entry and entry[key] != record[key]
+                for key in ("sha256", "bytes")
+            ):
+                raise ValueError(f"Artifact evidence does not match file: {relative}")
+            if previous is not None and previous != record:
+                raise ValueError(
+                    f"artifact path already registered with different content: {relative}"
+                )
+            if relative in requested:
+                if requested[relative] != record:
+                    raise ValueError(f"Conflicting artifact batch entry: {relative}")
+                continue
+            requested[relative] = record
+            if previous is None:
+                additions.append(record)
+        if additions:
+            artifacts.extend(additions)
+            write_json(index_path, index)
+        return list(requested.values())
 
 
 def stable_hash(value: object) -> str:
