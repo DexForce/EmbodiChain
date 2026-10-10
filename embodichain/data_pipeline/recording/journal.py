@@ -27,6 +27,7 @@ from collections.abc import Mapping
 import copy
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -190,8 +191,48 @@ def _episode_evidence(
     return counts, episodes, info, errors
 
 
+def _decoded_video(
+    path: Path, cache: dict[Path, tuple[int, float] | str]
+) -> tuple[int, float]:
+    """Decode each shard once, retaining only count/FPS or its failure."""
+    cached = cache.get(path)
+    if isinstance(cached, str):
+        raise ValueError(cached)
+    if cached is not None:
+        return cached
+    try:
+        import av
+
+        with av.open(str(path)) as container:
+            stream = next(iter(container.streams.video), None)
+            if stream is None or stream.average_rate is None:
+                raise ValueError("Missing video stream or FPS")
+            fps = float(stream.average_rate)
+            if not math.isfinite(fps) or fps <= 0:
+                raise ValueError("Invalid video FPS")
+            count = 0
+            for frame in container.decode(stream):
+                if frame.time is None or not math.isclose(
+                    frame.time, count / fps, rel_tol=0, abs_tol=1e-4
+                ):
+                    raise ValueError(
+                        "Video presentation timestamps are not contiguous from zero"
+                    )
+                count += 1
+            if count == 0:
+                raise ValueError("Video contains no decodable frames")
+    except (ImportError, OSError, ValueError, RuntimeError) as error:
+        cache[path] = f"{type(error).__name__}: {error}"
+        raise ValueError(cache[path]) from error
+    cache[path] = count, fps
+    return count, fps
+
+
 def _rgb_evidence(
-    root: Path, episode: Mapping[str, Any], info: Mapping[str, Any]
+    root: Path,
+    episode: Mapping[str, Any],
+    info: Mapping[str, Any],
+    video_cache: dict[Path, tuple[int, float] | str],
 ) -> list[str]:
     issues: list[str] = []
     for name, feature in info.get("features", {}).items():
@@ -209,12 +250,38 @@ def _rgb_evidence(
             path = _local_file(root, relative)
             if not path.is_file() or path.stat().st_size == 0:
                 raise ValueError("missing/empty video")
+            fps = float(info["fps"])
+            length = int(episode["length"])
+            begin = float(episode[f"videos/{name}/from_timestamp"])
+            end = float(episode[f"videos/{name}/to_timestamp"])
+            if (
+                not math.isfinite(fps)
+                or fps <= 0
+                or not math.isfinite(begin)
+                or not math.isfinite(end)
+                or begin < 0
+                or end <= begin
+                or not math.isclose(end - begin, length / fps, rel_tol=0, abs_tol=1e-4)
+                or not math.isclose(
+                    begin, round(begin * fps) / fps, rel_tol=0, abs_tol=1e-4
+                )
+            ):
+                raise ValueError("Video span does not match episode cadence/length")
+            count, rate = _decoded_video(path, video_cache)
+            if not math.isclose(rate, fps, rel_tol=1e-6) or count < round(end * fps):
+                raise ValueError(
+                    "Decoded video does not cover the episode span at its FPS"
+                )
         except (OSError, ValueError, KeyError, TypeError) as error:
             issues.append(f"RGB artifact {name!r} incomplete: {error}")
     return issues
 
 
-def _depth_evidence(root: Path, record: Mapping[str, Any]) -> list[str]:
+def _depth_evidence(
+    root: Path,
+    record: Mapping[str, Any],
+    video_cache: dict[Path, tuple[int, float] | str],
+) -> list[str]:
     sensors = record.get("depth_sensors", [])
     if not sensors:
         return []
@@ -229,6 +296,13 @@ def _depth_evidence(root: Path, record: Mapping[str, Any]) -> list[str]:
                 raise ValueError(f"missing depth video for sensor {sensor!r}")
             if int(episode["frame_count"]) != expected_length:
                 raise ValueError(f"depth frame count mismatch for sensor {sensor!r}")
+            count, rate = _decoded_video(path, video_cache)
+            if count != expected_length or not math.isclose(
+                rate, float(metadata["fps"]), rel_tol=1e-6
+            ):
+                raise ValueError(
+                    f"decoded depth frame count/FPS mismatch for sensor {sensor!r}"
+                )
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [f"Depth artifacts incomplete: {error}"]
     return []
@@ -383,7 +457,8 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
         without frames is safely retryable; ``lerobot_committing`` without
         matching frames remains unknown. Even ``complete`` records must have
         matching frame identities and contiguous SDK ranges on disk: SDK
-        buffering is not crash durability.
+        buffering is not crash durability. Referenced videos are decoded with
+        PyAV; unreadable or incomplete media stays unresolved.
     """
     root = Path(root)
     try:
@@ -397,6 +472,7 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
     counts, episodes, info, parquet_errors = _episode_evidence(root)
     errors.extend(parquet_errors)
     commits: list[dict[str, Any]] = []
+    video_cache: dict[Path, tuple[int, float] | str] = {}
     journal = RecordingJournal(root)
     for path in sorted((root / _JOURNAL_PATH).glob("*.json")):
         try:
@@ -408,7 +484,7 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
             expected = int(sidecar["length"])
             frame_count = counts.get(index, 0)
             identity = record["episode_uuid"]
-            issues = _depth_evidence(root, record)
+            issues = _depth_evidence(root, record, video_cache)
             issues.extend(_replay_evidence(root, record))
             sdk_episode = episodes.get(index, {})
             if int(sdk_episode.get("length", -1)) != expected:
@@ -417,7 +493,7 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
                 )
             if index >= int(info.get("total_episodes", 0)):
                 issues.append("SDK info.json does not include this episode.")
-            issues.extend(_rgb_evidence(root, sdk_episode, info))
+            issues.extend(_rgb_evidence(root, sdk_episode, info, video_cache))
             matching_frames = expected > 0 and frame_count == expected
             if frame_count != expected:
                 issues.append(f"Expected {expected} frames; found {frame_count}.")
@@ -467,7 +543,7 @@ def recover_recording(root: str | Path, *, repair: bool = False) -> dict[str, An
 
     Returns:
         Inspection report with ``repaired`` UUIDs. Incomplete or conflicting
-        frames/depth, malformed JSONL and unknown SDK writes stay unresolved.
+        frames/media, malformed JSONL and unknown SDK writes stay unresolved.
         No Parquet, video, replay artifact, or SDK metadata is rewritten.
     """
     root = Path(root)

@@ -40,6 +40,9 @@ during the initial snapshot cause conversion to fail.
   fingerprint so splitters conservatively group those episodes together.
 - Existing actions, action contracts and RGB encoding are preserved. Changing
   timestamps adjusts the RGB video offset to retain the same source frames.
+- Source cadence validation accounts for the timestamp feature's floating-point
+  precision, including large crop origins. Exported frame and language times use
+  the local frame grid; the original stored origin remains in the episode sidecar.
 - `meta/task_subtask_recipe.json` is a ready-to-use official `TrainingRecipe`
   (JSON is also valid YAML). It renders the overall task as a user message and
   the active segment as an assistant training target.

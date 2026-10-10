@@ -72,6 +72,11 @@ videos, and conflicting metadata remain unresolved; the tool does not replay
 frames, truncate data, or resume an unfinished video writer. Keep the report
 with the recording when manual investigation is required.
 
+Media evidence is checked by decoding referenced RGB/depth videos with PyAV,
+including frame counts, FPS, timestamps, and episode spans. A nonempty file
+alone is insufficient. Shared video shards are decoded once per inspection;
+unreadable or incomplete videos block metadata repair.
+
 ## Recording throughput
 
 `metadata_buffer_size` controls LeRobot episode-metadata batching and defaults

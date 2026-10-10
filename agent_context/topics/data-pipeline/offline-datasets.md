@@ -56,9 +56,12 @@ replacement and fsync; LeRobot, videos, and JSONL are still separate resources.
 Stop the writer before diagnosis or repair. `recover_recording` is read-only
 unless `repair=True`; it can restore missing sidecars from verified committed
 artifacts and never replays frames or guesses an unfinished SDK write succeeded.
-Malformed sidecars, inconsistent frame/media evidence, and unknown outcomes
-remain actionable errors. This is metadata recovery, not automatic collection
-resume or a cross-process multi-file transaction.
+Inspection uses PyAV to decode referenced RGB/depth videos and verify cadence,
+frame counts, and episode coverage before treating media as committed evidence.
+Each file is decoded once per inspection; only probe results are cached.
+Missing PyAV, unreadable/truncated media, malformed sidecars, inconsistent
+evidence, and unknown outcomes remain unresolved. This is metadata recovery,
+not automatic collection resume or a cross-process multi-file transaction.
 
 ## Focused validation
 

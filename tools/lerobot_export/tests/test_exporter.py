@@ -309,6 +309,73 @@ def test_fragment_preserves_lineage_and_rebases_annotation_time(
     assert fragment["lerobot_export"]["timestamp_origin"] == pytest.approx(1.2)
 
 
+@pytest.mark.parametrize("origin", [4096.0, 4096.3])
+def test_large_origin_float32_crop_exports_exact_local_cadence(
+    source: Path, tmp_path: Path, origin: float
+) -> None:
+    for path in (source / "data").rglob("*.parquet"):
+        table = pq.read_table(path)
+        values = np.asarray(table["timestamp"]).copy()
+        indices = np.asarray(table["episode_index"])
+        values[indices == 1] += np.float32(origin)
+        table = table.set_column(
+            table.column_names.index("timestamp"), "timestamp", pa.array(values)
+        )
+        pq.write_table(table, path)
+    before = _hashes(source)
+    destination = tmp_path / "converted"
+
+    export_dataset(source, destination)
+
+    dataset = LeRobotDataset("local/output", root=destination)
+    recipe = TrainingRecipe.from_yaml(destination / "meta/task_subtask_recipe.json")
+    expected_times = np.arange(EPISODE_LENGTH, dtype=np.float32) / FPS
+    for step, expected_time in enumerate(expected_times):
+        index = EPISODE_LENGTH + step
+        sample = dataset[index]
+        assert float(sample["timestamp"]) == float(expected_time)
+        rendered = render_sample(
+            recipe=recipe,
+            persistent=sample["language_persistent"],
+            events=None,
+            t=float(sample["timestamp"]),
+            sample_idx=index,
+            task=sample["task"],
+        )
+        assert rendered["messages"][-1]["content"] == SUBTASKS[step // 2]
+    records = [
+        json.loads(line)
+        for line in (destination / "meta/embodichain_episodes.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert records[1]["lerobot_export"]["timestamp_origin"] == float(np.float32(origin))
+    assert _hashes(source) == before
+
+
+def test_large_origin_crop_still_rejects_invalid_cadence(
+    source: Path, tmp_path: Path
+) -> None:
+    for path in (source / "data").rglob("*.parquet"):
+        table = pq.read_table(path)
+        values = np.asarray(table["timestamp"]).copy()
+        values += np.float32(4096.0)
+        values[2] += np.float32(0.01)  # Far larger than the stored float32 spacing.
+        table = table.set_column(
+            table.column_names.index("timestamp"), "timestamp", pa.array(values)
+        )
+        pq.write_table(table, path)
+    before = _hashes(source)
+    destination = tmp_path / "converted"
+
+    with pytest.raises(ValueError, match="timestamps do not match"):
+        export_dataset(source, destination)
+
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".converted.staging-*"))
+    assert _hashes(source) == before
+
+
 def test_legacy_missing_ids_get_reproducible_identity(
     source: Path, tmp_path: Path
 ) -> None:

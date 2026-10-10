@@ -233,14 +233,23 @@ def _annotations(
     tasks: dict[int, str],
     subtasks: dict[int, str],
     fps: int,
+    *,
+    timestamp_dtype: str,
 ) -> tuple[str, list[dict[str, Any]], float]:
     count = len(frames["timestamp"])
     if not count or frames["frame_index"] != list(range(count)):
         raise ValueError("Episode frame_index must be contiguous from zero")
     timestamps = np.asarray(frames["timestamp"], dtype=np.float64)
     origin = float(timestamps[0])
-    if not np.isfinite(timestamps).all() or not np.allclose(
-        timestamps - origin, np.arange(count) / fps, atol=1e-4, rtol=0
+    dtype = np.dtype(timestamp_dtype)
+    if dtype.kind != "f" or not np.isfinite(timestamps).all():
+        raise ValueError("Episode timestamps must be finite floating-point values")
+    spacing = np.abs(np.spacing(timestamps.astype(dtype))).astype(np.float64)
+    # Both the stored sample and the stored origin may have rounded. Their
+    # difference can therefore deviate by up to one source-precision spacing.
+    tolerance = np.maximum(1e-4, np.maximum(spacing, spacing[0]) * 1.1)
+    if not np.allclose(
+        timestamps - origin, np.arange(count) / fps, atol=tolerance, rtol=0
     ):
         raise ValueError("Episode timestamps do not match the dataset FPS")
     task = metadata.get("instruction")
@@ -284,7 +293,7 @@ def _annotations(
                     "role": "assistant",
                     "content": label,
                     "style": "subtask",
-                    "timestamp": float(np.float32(timestamps[step] - origin)),
+                    "timestamp": float(np.float32(step / fps)),
                     "camera": None,
                     "tool_calls": None,
                 }
@@ -347,6 +356,7 @@ def _rewrite_frames(
     annotations: dict[int, tuple[str, list[dict[str, Any]], float]],
     task_indices: dict[str, int],
     depth_keys: set[str],
+    fps: int,
 ) -> None:
     for path in sorted((stage / "data").rglob("*.parquet")):
         table = pq.read_table(path)
@@ -374,9 +384,17 @@ def _rewrite_frames(
                 [task_indices[annotations[index][0]] for index in indices], pa.int64()
             ),
         )
-        timestamps = np.asarray(table["timestamp"])
-        timestamps = timestamps - np.asarray(
-            [annotations[index][2] for index in indices]
+        # Source cadence is already validated. Emit the local frame grid so
+        # subtracting a large float32 origin cannot skew video/language queries.
+        timestamps = (
+            np.asarray(
+                [
+                    value[0] if isinstance(value, list) else value
+                    for value in table["frame_index"].to_pylist()
+                ],
+                dtype=np.float64,
+            )
+            / fps
         )
         table = table.set_column(
             table.column_names.index("timestamp"),
@@ -665,7 +683,14 @@ def export_dataset(source: str | Path, destination: str | Path) -> dict[str, Any
                 )
         source_commits = _archive_journals(stage, sidecars, episodes, fingerprint)
         annotations = {
-            index: _annotations(data, sidecars.get(index, {}), tasks, subtasks, fps)
+            index: _annotations(
+                data,
+                sidecars.get(index, {}),
+                tasks,
+                subtasks,
+                fps,
+                timestamp_dtype=info["features"]["timestamp"]["dtype"],
+            )
             for index, data in frames.items()
         }
         task_indices = {text: index for index, text in tasks.items()}
@@ -679,7 +704,7 @@ def export_dataset(source: str | Path, destination: str | Path) -> dict[str, Any
         depth_keys = {
             f"observation.depth.{sensor}" for sensor in depth.get("sensors", {})
         }
-        _rewrite_frames(stage, annotations, task_indices, depth_keys)
+        _rewrite_frames(stage, annotations, task_indices, depth_keys, fps)
         changed_stats = _migrate_depth(stage, info, episodes, depth)
         for episode in episodes:
             index = int(episode["episode_index"])

@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 from uuid import uuid4
 
+import numpy as np
 import pyarrow as arrow
 import pyarrow.parquet as parquet
 import pytest
@@ -31,6 +33,32 @@ from embodichain.data_pipeline.recording import (
     inspect_recording,
     recover_recording,
 )
+
+FPS = 10
+VIDEO_SIZE = 16
+
+
+def write_video(path: Path, count: int, *, depth: bool = False, fps: int = FPS) -> None:
+    av = pytest.importorskip("av")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if depth:
+        # Fixed lossless HEVC gray12le, 16x16, 10 FPS, code value 1024. Decoder
+        # tests must not depend on the host's optional 12-bit encoder build.
+        shutil.copyfile(
+            Path(__file__).with_name("assets") / f"depth_{count}_frames.mp4", path
+        )
+        return
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("mpeg4", rate=fps)
+        stream.width = stream.height = VIDEO_SIZE
+        stream.pix_fmt = "yuv420p"
+        for _ in range(count):
+            values = np.zeros((VIDEO_SIZE, VIDEO_SIZE, 3), dtype=np.uint8)
+            frame = av.VideoFrame.from_ndarray(values, format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
 
 
 def make_recording(tmp_path: Path, *, frames: int = 2) -> tuple[RecordingJournal, dict]:
@@ -86,6 +114,206 @@ def advance_to(journal: RecordingJournal, identity: str, phase: str) -> None:
         journal.advance(identity, next_phase)
         if next_phase == phase:
             return
+
+
+def make_media_recording(
+    tmp_path: Path, kind: str
+) -> tuple[RecordingJournal, dict, Path]:
+    journal, sidecar = make_recording(tmp_path)
+    root = journal.root
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["fps"] = FPS
+    if kind == "rgb":
+        key = "observation.images.camera"
+        info["features"][key] = {"dtype": "video", "shape": [VIDEO_SIZE, VIDEO_SIZE, 3]}
+        info["video_path"] = "videos/camera.mp4"
+        path = root / info["video_path"]
+        episode_path = root / "meta/episodes/chunk-000/file-000.parquet"
+        episodes = parquet.read_table(episode_path).to_pylist()
+        episodes[0].update(
+            {
+                f"videos/{key}/chunk_index": 0,
+                f"videos/{key}/file_index": 0,
+                f"videos/{key}/from_timestamp": 0.0,
+                f"videos/{key}/to_timestamp": sidecar["length"] / FPS,
+            }
+        )
+        parquet.write_table(arrow.Table.from_pylist(episodes), episode_path)
+    else:
+        path = root / "depth_videos/camera.mp4"
+        (root / "depth_meta.json").write_text(
+            json.dumps(
+                {
+                    "fps": FPS,
+                    "sensors": {
+                        "camera": {
+                            "shape": [VIDEO_SIZE, VIDEO_SIZE, 1],
+                            "video.pix_fmt": "gray12le",
+                            "video.depth_min": 0.01,
+                            "video.depth_max": 10.0,
+                            "video.shift": 3.5,
+                            "video.use_log": True,
+                            "video.input_unit": "auto",
+                            "video.output_unit": "m",
+                            "episodes": {
+                                "0": {
+                                    "file": str(path.relative_to(root)),
+                                    "frame_count": sidecar["length"],
+                                }
+                            },
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    info_path.write_text(json.dumps(info), encoding="utf-8")
+    write_video(path, sidecar["length"], depth=kind == "depth")
+    journal.prepare(sidecar, ["camera"] if kind == "depth" else [])
+    advance_to(journal, sidecar["episode_uuid"], "depth_committed")
+    return journal, sidecar, path
+
+
+@pytest.mark.parametrize("kind", ["rgb", "depth"])
+@pytest.mark.parametrize("corruption", ["unreadable", "short"])
+def test_recovery_rejects_unusable_video_evidence(
+    tmp_path: Path, kind: str, corruption: str
+) -> None:
+    journal, sidecar, video = make_media_recording(tmp_path, kind)
+    assert inspect_recording(journal.root)["commits"][0]["status"] == "repairable"
+    if corruption == "unreadable":
+        video.write_bytes(b"nonempty but not a usable MP4")
+    else:
+        write_video(video, sidecar["length"] - 1, depth=kind == "depth")
+    before = video.read_bytes()
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["commits"][0]["status"] == "unresolved"
+    assert report["commits"][0]["issues"]
+    assert report["repaired"] == []
+    assert journal.get(sidecar["episode_uuid"])["phase"] == "depth_committed"
+    assert not (journal.root / "meta/embodichain_episodes.jsonl").exists()
+    assert video.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["rgb", "depth"])
+def test_complete_journal_still_requires_readable_video(
+    tmp_path: Path, kind: str
+) -> None:
+    journal, _, video = make_media_recording(tmp_path, kind)
+    assert recover_recording(journal.root, repair=True)["ok"]
+    sidecar_path = journal.root / "meta/embodichain_episodes.jsonl"
+    before = sidecar_path.read_bytes()
+    video.write_bytes(b"broken after a completed commit")
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["commits"][0]["status"] == "unresolved"
+    assert report["repaired"] == []
+    assert sidecar_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["rgb", "depth"])
+def test_readable_media_allows_sidecar_recovery(tmp_path: Path, kind: str) -> None:
+    journal, sidecar, video = make_media_recording(tmp_path, kind)
+    before = video.read_bytes()
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert report["ok"]
+    assert report["repaired"] == [sidecar["episode_uuid"]]
+    assert video.read_bytes() == before
+
+
+def test_depth_recovery_rejects_extra_decoded_frames(tmp_path: Path) -> None:
+    journal, sidecar, video = make_media_recording(tmp_path, "depth")
+    write_video(video, sidecar["length"] + 1, depth=True)
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["repaired"] == []
+    assert not (journal.root / "meta/embodichain_episodes.jsonl").exists()
+
+
+@pytest.mark.parametrize("corruption", ["fps", "offset"])
+def test_rgb_recovery_checks_media_timing(tmp_path: Path, corruption: str) -> None:
+    journal, sidecar, video = make_media_recording(tmp_path, "rgb")
+    if corruption == "fps":
+        write_video(video, sidecar["length"], fps=2 * FPS)
+    else:
+        episode_path = journal.root / "meta/episodes/chunk-000/file-000.parquet"
+        episodes = parquet.read_table(episode_path).to_pylist()
+        key = "observation.images.camera"
+        # Shift by half a frame while retaining the expected interval length.
+        episodes[0][f"videos/{key}/from_timestamp"] = 0.5 / FPS
+        episodes[0][f"videos/{key}/to_timestamp"] += 0.5 / FPS
+        parquet.write_table(arrow.Table.from_pylist(episodes), episode_path)
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["repaired"] == []
+
+
+def test_shared_rgb_shard_is_decoded_once_per_inspection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    av = pytest.importorskip("av")
+    journal, sidecar, video = make_media_recording(tmp_path, "rgb")
+    info_path = journal.root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["total_episodes"] = 2
+    info_path.write_text(json.dumps(info))
+    parquet.write_table(
+        arrow.table(
+            {
+                "episode_index": [0, 0, 1, 1],
+                "frame_index": [0, 1, 0, 1],
+                "index": [0, 1, 2, 3],
+            }
+        ),
+        journal.root / "data/chunk-000/file-000.parquet",
+    )
+    episode_path = journal.root / "meta/episodes/chunk-000/file-000.parquet"
+    first = parquet.read_table(episode_path).to_pylist()[0]
+    second = dict(first, episode_index=1, dataset_from_index=2, dataset_to_index=4)
+    key = "observation.images.camera"
+    second[f"videos/{key}/from_timestamp"] = 2 / FPS
+    second[f"videos/{key}/to_timestamp"] = 4 / FPS
+    parquet.write_table(arrow.Table.from_pylist([first, second]), episode_path)
+    identity = str(uuid4())
+    journal.prepare(
+        dict(
+            sidecar,
+            episode_uuid=identity,
+            source_episode_uuid=identity,
+            lerobot_episode_index=1,
+        )
+    )
+    advance_to(journal, identity, "depth_committed")
+    write_video(video, 4)
+    opened = []
+    original_open = av.open
+
+    def recording_open(*args, **kwargs):
+        opened.append(args[0])
+        return original_open(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(av, "open", recording_open)
+        report = inspect_recording(journal.root)
+
+    assert [item["status"] for item in report["commits"]] == [
+        "repairable",
+        "repairable",
+    ]
+    assert len(opened) == 1
+    assert recover_recording(journal.root, repair=True)["ok"]
 
 
 def test_restart_repairs_missing_sidecar_once(tmp_path: Path) -> None:
