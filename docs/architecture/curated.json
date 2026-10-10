@@ -1212,6 +1212,70 @@
       ]
     },
     {
+      "id": "scene-expansion",
+      "label": "Scene expansion contracts",
+      "kind": "package",
+      "topic_ids": [
+        "scene-expansion"
+      ],
+      "summary": "Defines immutable arena-local scene proposals and bounded authored candidate sources.",
+      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities.",
+      "boundaries": [
+        "The core does not import Task Program, GenSim or Gym and does not reset, step or validate task success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene_expansion/__init__.py",
+          "symbol": "<module>",
+          "start_line": 25,
+          "end_line": 27,
+          "excerpt": "from .cfg import SceneExpansionCfg\nfrom .contracts import ScenePoseChange, SceneVariant\nfrom .source import FixedSceneCandidateSource"
+        },
+        {
+          "path": "embodichain/lab/sim/scene_expansion/source.py",
+          "symbol": "FixedSceneCandidateSource",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "class FixedSceneCandidateSource:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.scene_expansion",
+          "label": "Scene expansion contracts and fixed candidates"
+        }
+      ]
+    },
+    {
+      "id": "scene-expansion-integration",
+      "label": "Scene expansion attempt",
+      "kind": "function",
+      "topic_ids": [
+        "scene-expansion",
+        "task-programs"
+      ],
+      "summary": "Prepares one scene candidate and executes a Task Program with separate measured acceptance.",
+      "details": "execute_scene_variant connects a scene proposal to injected preparation and measurement callbacks. For a valid initial state it creates the canonical Task Program segments and uses the existing Gym demo executor, recording separate initial-state, program, and measured-outcome evidence.",
+      "boundaries": [
+        "One B=1 attempt; the caller supplies physical preparation, measured task evidence, retry policy, and the reset-time persistence transaction."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 195,
+          "end_line": 195,
+          "excerpt": "def execute_scene_variant("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations.scene_expansion",
+          "label": "Task Program scene preparation and measured acceptance"
+        }
+      ]
+    },
+    {
       "id": "differentiable-env",
       "label": "DifferentiableEnv",
       "kind": "class",
@@ -2513,7 +2577,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -5346,6 +5410,42 @@
           "excerpt": "    generate_urdf_collision_convexes("
         }
       ]
+    },
+    {
+      "id": "scene-attempt-imports-scene-contracts",
+      "source": "scene-expansion-integration",
+      "target": "scene-expansion",
+      "relation": "imports",
+      "description": "Consumes the shared SceneVariant proposal contract.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit module import; does not move task or execution ownership into the scene proposal core.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "<module>",
+          "start_line": 33,
+          "end_line": 33,
+          "excerpt": "from embodichain.lab.sim.scene_expansion import SceneVariant"
+        }
+      ]
+    },
+    {
+      "id": "scene-attempt-calls-task-program-segments",
+      "source": "scene-expansion-integration",
+      "target": "embodied-env",
+      "relation": "calls",
+      "description": "Creates canonical Task Program segments for the selected program.",
+      "provenance": "source-reviewed",
+      "scope": "After injected scene preparation and initial validation pass; the existing demo executor consumes the resulting segments.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 294,
+          "end_line": 296,
+          "excerpt": "        segments = EmbodiedEnv.create_demo_segments(\n            target, task_program=selected_program\n        )"
+        }
+      ]
     }
   ],
   "views": [
@@ -5372,6 +5472,7 @@
         "semantic-executor",
         "environment-adapter",
         "gym-bridge",
+        "scene-expansion-integration",
         "mllm",
         "atomic-engine",
         "motion-generator",
@@ -5380,6 +5481,7 @@
         "workspace",
         "augmentation",
         "simulation-manager",
+        "scene-expansion",
         "robot",
         "sensors",
         "physics",
@@ -5511,7 +5613,9 @@
         "differentiable-trainer-constructs-observation-normalizer",
         "rl-algorithms-holds-ppo",
         "rl-algorithms-holds-grpo",
-        "rl-algorithms-holds-apg"
+        "rl-algorithms-holds-apg",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments"
       ],
       "groups": [
         {
@@ -5542,6 +5646,7 @@
             "semantic-executor",
             "environment-adapter",
             "gym-bridge",
+            "scene-expansion-integration",
             "mllm"
           ]
         },
@@ -5562,6 +5667,7 @@
           "label": "Simulation world",
           "node_ids": [
             "simulation-manager",
+            "scene-expansion",
             "robot",
             "sensors",
             "physics",
@@ -5666,6 +5772,7 @@
         "mllm",
         "program-input",
         "scene-registry",
+        "scene-expansion",
         "skill-profile",
         "integration-catalog",
         "task-program-config",
@@ -5681,6 +5788,7 @@
         "parallel-execution",
         "effect-evidence",
         "gym-bridge",
+        "scene-expansion-integration",
         "command-sink",
         "step-clock",
         "embodied-env",
@@ -5715,7 +5823,9 @@
         "base-constructs-simulation",
         "env-calls-add-robot",
         "mllm-imports-program-input",
-        "mllm-calls-environment-adapter"
+        "mllm-calls-environment-adapter",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments"
       ],
       "groups": [
         {
@@ -5725,6 +5835,7 @@
             "mllm",
             "program-input",
             "scene-registry",
+            "scene-expansion",
             "skill-profile",
             "integration-catalog"
           ]
@@ -5770,6 +5881,7 @@
           "label": "Gym integration & simulation",
           "node_ids": [
             "gym-bridge",
+            "scene-expansion-integration",
             "command-sink",
             "step-clock",
             "embodied-env",
@@ -5791,6 +5903,7 @@
         "robot",
         "articulations",
         "rigid-objects",
+        "scene-expansion",
         "rigid-object-groups",
         "deformables",
         "surface-deformables",
@@ -5813,6 +5926,7 @@
         "differentiable-env",
         "autograd-bridge",
         "configuration",
+        "scene-expansion-integration",
         "data-assets",
         "event-manager",
         "randomization",
@@ -5848,7 +5962,8 @@
         "rigid-object-groups-inherits-batch-entity",
         "articulations-inherits-batch-entity",
         "deformables-inherits-batch-entity",
-        "lights-inherits-batch-entity"
+        "lights-inherits-batch-entity",
+        "scene-attempt-imports-scene-contracts"
       ],
       "groups": [
         {
@@ -5868,6 +5983,7 @@
             "robot",
             "articulations",
             "rigid-objects",
+            "scene-expansion",
             "rigid-object-groups",
             "deformables",
             "surface-deformables",
@@ -5914,6 +6030,7 @@
           "label": "Configuration & control",
           "node_ids": [
             "configuration",
+            "scene-expansion-integration",
             "data-assets",
             "event-manager",
             "randomization",
