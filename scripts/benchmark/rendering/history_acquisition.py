@@ -210,19 +210,8 @@ def acquire_history(
                 **deepcopy(row),
                 "_history_artifact_hashes": original["input_hashes"],
             }
-            checked = validate_history_proof(root, history_path, expected)
-            write_json(
-                root / "history_validation.json",
-                {
-                    "valid": checked["valid"],
-                    "reasons": checked["reasons"],
-                    "original_run_id": run_id,
-                    "history_sha256": sha256(history_path),
-                    "schedule_sha256": plan["schedule_sha256"],
-                },
-            )
-            if not checked["valid"]:
-                status = "failed"
+            # The validator follows registered auxiliary evidence as well as
+            # direct manifest descriptors, so freeze those hashes first.
             store = ArtifactStore(root)
             indexed = {
                 item["path"]: item
@@ -244,6 +233,20 @@ def acquire_history(
                             raise ValueError("Registered history artifact changed")
                     else:
                         store.register_artifact(path, kind="history_proof_evidence")
+            checked = validate_history_proof(root, history_path, expected)
+            validation_path = write_json(
+                root / "history_validation.json",
+                {
+                    "valid": checked["valid"],
+                    "reasons": checked["reasons"],
+                    "original_run_id": run_id,
+                    "history_sha256": sha256(history_path),
+                    "schedule_sha256": plan["schedule_sha256"],
+                },
+            )
+            store.register_artifact(validation_path, kind="history_proof_evidence")
+            if not checked["valid"]:
+                status = "failed"
     return {
         "root": str(root),
         "history": str(root / "history.json"),

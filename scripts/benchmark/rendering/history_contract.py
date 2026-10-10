@@ -24,6 +24,7 @@ post-measurement hundred-frame replay cannot satisfy this contract.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -255,8 +256,11 @@ def _proof(
         evidence = _inside(proof_root, record["path"])
         if sha256(evidence) != record["sha256"]:
             raise ValueError("History artifact checksum mismatch: " + record["path"])
-        artifacts[evidence.relative_to(root).as_posix()] = artifact(
-            root, evidence, record.get("kind", "timed_history_evidence")
+        # Keep the original semantic kind when the standard index later repeats
+        # an already-bound frame/source file with a generic registration kind.
+        artifacts.setdefault(
+            evidence.relative_to(root).as_posix(),
+            artifact(root, evidence, record.get("kind", "timed_history_evidence")),
         )
         return evidence
 
@@ -393,7 +397,8 @@ def _proof(
             "History scoring policy differs from the immutable history protocol"
         )
     acquisition = manifest["acquisition"]
-    acquisition_result = read_json(verify(manifest["acquisition_result"]))
+    acquisition_result_path = verify(manifest["acquisition_result"])
+    acquisition_result = read_json(acquisition_result_path)
     if (
         acquisition_result.get("status") != "completed"
         or acquisition_result.get("performance_claim") is not False
@@ -440,7 +445,9 @@ def _proof(
         renderer, original["backend"]
     ) != renderer_control_signature(result["renderer"], original["backend"]):
         raise ValueError("Fresh actual shader/light controls differ from the timed run")
-    if read_json(verify(manifest["freshness"])).get("passed") is not True:
+    freshness_path = verify(manifest["freshness"])
+    freshness = read_json(freshness_path)
+    if freshness.get("passed") is not True:
         raise ValueError("Replayed original freshness prefix did not pass")
     events = read_json(verify(manifest["capture_events"]))
     fresh, warm, measured = (
@@ -604,6 +611,79 @@ def _proof(
     ):
         if request.get(key) != manifest.get(key):
             raise ValueError("Producer request differs from completed history: " + key)
+
+    # Older manifests already have these files in their standard artifact index,
+    # but omitted them from the direct descriptor graph. Verify the index and
+    # retain its whole registered closure without rewriting the old manifest.
+    index_path = _inside(proof_root, "artifact_index.json")
+    index = read_json(index_path)
+    if index.get("schema_version") != 1 or not isinstance(index.get("artifacts"), list):
+        raise ValueError("History acquisition artifact index is missing or invalid")
+    indexed = {}
+    for evidence in index["artifacts"]:
+        indexed_path = _inside(proof_root, evidence["path"])
+        if indexed_path == index_path or indexed_path in indexed:
+            raise ValueError("Duplicate or self-referential history index entry")
+        if evidence.get("bytes") != indexed_path.stat().st_size:
+            raise ValueError("History indexed evidence byte count differs")
+        indexed[indexed_path] = evidence
+        verify(evidence)
+    artifacts[index_path.relative_to(root).as_posix()] = artifact(
+        root, index_path, "history_acquisition_artifact_index"
+    )
+
+    worker_root = acquisition_result_path.parent
+    resource_path = _inside(worker_root, "resources.json")
+    validation_path = _inside(worker_root, "renderer_validation.json")
+    log_path = _inside(worker_root, "worker.log")
+    samples = freshness.get("sampled_arrays", {})
+    sample_path = _inside(freshness_path.parent, samples["path"])
+    required_auxiliary = {resource_path, validation_path, log_path, sample_path}
+    if not required_auxiliary <= indexed.keys():
+        raise ValueError(
+            "History auxiliary evidence is not checksum-bound in its index"
+        )
+    if indexed[sample_path]["sha256"] != samples.get("sha256"):
+        raise ValueError("Freshness sample checksum differs from its declared proof")
+    if not {"resources.json", "renderer_validation.json"} <= set(
+        acquisition_result.get("evidence", [])
+    ):
+        raise ValueError(
+            "History worker result does not reference its auxiliary evidence"
+        )
+    resources = read_json(resource_path)
+    if (
+        resources.get("schema_version") != 1
+        or type(resources.get("pid")) is not int
+        or resources["pid"] != acquisition_result.get("pid")
+        or resources["pid"] != acquisition.get("pid")
+        or resources.get("gpu", {}).get("uuid") != acquisition.get("hardware_id")
+        or resources.get("gpu", {}).get("driver") != acquisition.get("gpu_driver")
+    ):
+        raise ValueError(
+            "History resource evidence differs from its worker/GPU binding"
+        )
+    validation = read_json(validation_path)
+    if (
+        validation != acquisition_result.get("renderer_validation")
+        or validation.get("status") != "no_known_capacity_errors"
+        or validation.get("checkpoint") != "before_native_close"
+        or validation.get("log_path") != "worker.log"
+    ):
+        raise ValueError(
+            "History renderer validation differs from its completed result"
+        )
+    log = log_path.read_bytes()
+    length = validation.get("scanned_bytes")
+    if (
+        type(length) is not int
+        or not 0 <= length <= len(log)
+        or hashlib.sha256(log[:length]).hexdigest()
+        != validation.get("scanned_prefix_sha256")
+    ):
+        raise ValueError(
+            "History renderer validation does not bind the scanned log bytes"
+        )
     return {
         "valid": True,
         "reasons": [],
@@ -641,6 +721,8 @@ def validate_history_proof(
         ``valid``, explicit reasons, parsed frames with absolute paths, verified
         fresh renderer metadata and an artifact list relative to root. No NumPy,
         Torch, simulator import or status-bit promotion is performed.
+        The closure includes every registered acquisition artifact, plus linked
+        freshness samples, resources and renderer-validation log evidence.
     """
     root = Path(root).resolve()
     try:

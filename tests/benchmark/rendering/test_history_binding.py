@@ -25,7 +25,12 @@ from typing import Any
 
 import pytest
 
-from scripts.benchmark.rendering.frozen_source import load_original_run, sha256
+from scripts.benchmark.rendering.frozen_source import (
+    load_original_run,
+    read_json,
+    sha256,
+    write_json,
+)
 from scripts.benchmark.rendering.history_binding import import_history_proof
 from scripts.benchmark.rendering.history_contract import validate_history_proof
 
@@ -67,6 +72,16 @@ def test_import_copies_verified_closure_without_touching_originals(
     checked = validate_history_proof(target, proof_path, original["row"])
     assert checked["valid"], checked["reasons"]
     assert len(checked["frames"]) == 7
+    for relative in (
+        "artifact_index.json",
+        "capture/resources.json",
+        "capture/renderer_validation.json",
+        "capture/worker.log",
+        "capture/freshness_probe.npz",
+    ):
+        assert sha256(proof_path.parent / relative) == sha256(
+            fixture["root"] / relative
+        )
     assert {name: sha256(path) for name, path in original["paths"].items()} == original[
         "input_hashes"
     ]
@@ -96,3 +111,127 @@ def test_import_rejects_tampering_or_unsafe_destination(
     with pytest.raises(ValueError):
         import_history_proof(fixture["path"], target)
     assert not (tmp_path / "elsewhere").exists()
+
+
+def test_legacy_import_repair_is_append_only_and_idempotent(tmp_path: Path) -> None:
+    builder = runpy.run_path(str(Path(__file__).with_name("test_history_contract.py")))[
+        "build_valid_history_fixture"
+    ]
+    fixture = builder(tmp_path / "proof")
+    target = tmp_path / "target"
+    original_experiment(fixture, target)
+    complete = import_history_proof(fixture["path"], target)
+    destination = (target / complete["history_evidence"]["path"]).parent
+    omitted = {
+        "artifact_index.json",
+        "capture/resources.json",
+        "capture/renderer_validation.json",
+        "capture/worker.log",
+        "capture/freshness_probe.npz",
+    }
+    # Recreate the exact old importer behavior: its receipt and copied files
+    # contain the direct descriptor graph, without the auxiliary closure.
+    legacy = {
+        **complete,
+        "artifacts": [
+            item
+            for item in complete["artifacts"]
+            if (target / item["path"]).relative_to(destination).as_posix()
+            not in omitted
+        ],
+    }
+    for name in omitted:
+        (destination / name).unlink()
+    write_json(destination / "import_receipt.json", legacy)
+    preserved = {
+        path: sha256(path) for path in destination.rglob("*") if path.is_file()
+    }
+    source = {
+        path: sha256(path) for path in fixture["root"].rglob("*") if path.is_file()
+    }
+    repaired = import_history_proof(fixture["path"], target)
+    assert (
+        repaired["previous_import_receipt"]["sha256"]
+        == preserved[destination / "import_receipt.json"]
+    )
+    assert {path: sha256(path) for path in preserved} == preserved
+    assert {path: sha256(path) for path in source} == source
+    assert all((destination / name).is_file() for name in omitted)
+    assert len(list((destination / "closure_receipts").glob("*.json"))) == 1
+    assert import_history_proof(fixture["path"], target) == repaired
+    assert len(list((destination / "closure_receipts").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["resources.json", "renderer_validation.json", "worker.log", "freshness_probe.npz"],
+)
+@pytest.mark.parametrize("damage", ["missing", "changed", "unindexed"])
+def test_auxiliary_missing_or_damaged_bytes_block_import(
+    tmp_path: Path, filename: str, damage: str
+) -> None:
+    builder = runpy.run_path(str(Path(__file__).with_name("test_history_contract.py")))[
+        "build_valid_history_fixture"
+    ]
+    fixture = builder(tmp_path / "proof")
+    target = tmp_path / "target"
+    original_experiment(fixture, target)
+    path = fixture["root"] / "capture" / filename
+    if damage == "missing":
+        path.unlink()
+    elif damage == "changed":
+        path.write_bytes(path.read_bytes() + b"changed")
+    else:
+        index = read_json(fixture["root"] / "artifact_index.json")
+        index["artifacts"] = [
+            entry
+            for entry in index["artifacts"]
+            if entry["path"] != "capture/" + filename
+        ]
+        write_json(fixture["root"] / "artifact_index.json", index)
+    with pytest.raises(ValueError, match="Cannot import invalid history"):
+        import_history_proof(fixture["path"], target)
+    assert not (target / "history_imports").exists()
+
+
+@pytest.mark.parametrize(
+    "changed", ["gpu", "pid", "renderer", "log_prefix", "freshness"]
+)
+def test_resealed_index_does_not_replace_semantic_evidence_bindings(
+    tmp_path: Path, changed: str
+) -> None:
+    builder = runpy.run_path(str(Path(__file__).with_name("test_history_contract.py")))[
+        "build_valid_history_fixture"
+    ]
+    fixture = builder(tmp_path)
+    filename = {
+        "gpu": "resources.json",
+        "pid": "resources.json",
+        "renderer": "renderer_validation.json",
+        "log_prefix": "worker.log",
+        "freshness": "freshness_probe.npz",
+    }[changed]
+    path = tmp_path / "capture" / filename
+    if changed in {"gpu", "pid", "renderer"}:
+        data = read_json(path)
+        if changed == "gpu":
+            data["gpu"]["uuid"] = "GPU-other"
+        elif changed == "pid":
+            data["pid"] += 1
+        else:
+            data["checkpoint"] = "after_native_close"
+        write_json(path, data)
+    else:
+        path.write_bytes(b"modified evidence\n")
+    index = read_json(tmp_path / "artifact_index.json")
+    for entry in index["artifacts"]:
+        if entry["path"] == path.relative_to(tmp_path).as_posix():
+            entry.update(sha256=sha256(path), bytes=path.stat().st_size)
+    write_json(tmp_path / "artifact_index.json", index)
+    checked = validate_history_proof(
+        tmp_path, fixture["path"], fixture["expected_original"]
+    )
+    assert not checked["valid"]
+    assert any(
+        word in checked["reasons"][0] for word in ("resource", "renderer", "Freshness")
+    )

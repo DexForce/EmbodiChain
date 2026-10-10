@@ -21,6 +21,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import runpy
+import shutil
 from types import SimpleNamespace
 from typing import Any
 
@@ -301,3 +302,58 @@ def test_complete_checkpoint_survives_native_close_terminating_process(
         producer.run_worker(request_path, output, 0)
     assert caught.value.code == 0
     assert adapter.counter == 12
+
+
+def test_launcher_registers_auxiliaries_before_final_proof_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.benchmark.rendering import history_acquisition as launcher
+    from scripts.benchmark.rendering.frozen_source import artifact, write_json
+
+    builder = runpy.run_path(str(Path(__file__).with_name("test_history_contract.py")))[
+        "build_valid_history_fixture"
+    ]
+    original_builder = runpy.run_path(
+        str(Path(__file__).with_name("test_history_binding.py"))
+    )["original_experiment"]
+    fixture = builder(tmp_path / "proof")
+    original = original_builder(fixture, tmp_path / "original")
+    source = {
+        "worktree": str(fixture["root"] / "original/source"),
+        "commit": "a" * 40,
+        "source_files": fixture["manifest"]["original"]["source_files"],
+    }
+    monkeypatch.setattr(launcher, "verify_source_worktree", lambda *args: source)
+    monkeypatch.setattr(launcher, "original_environment", lambda *args: {})
+
+    def fake_worker(root: Path, specs: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        assert len(specs) == 1
+        shutil.copytree(fixture["root"] / "capture", root / "capture")
+        request = read_json(root / "request.json")
+        history = deepcopy(fixture["manifest"])
+        for key in (
+            "original",
+            "schedule",
+            "schedule_sha256",
+            "history_quality_protocol",
+            "history_quality_requirements",
+        ):
+            history[key] = request[key]
+        history["producer_artifacts"] = [
+            *request["producer_artifacts"],
+            artifact(root, root / "request.json", "history_request", role="request"),
+        ]
+        write_json(root / "history.json", history)
+        return [{"status": "completed"}]
+
+    monkeypatch.setattr(launcher, "run_experiment", fake_worker)
+    result = launcher.acquire_history(
+        original["root"],
+        original["row"]["run_id"],
+        source_worktree=Path(source["worktree"]),
+        source_commit=source["commit"],
+        output=tmp_path / "acquisition",
+    )
+    assert result["status"] == "completed"
+    checked = read_json(Path(result["root"]) / "history_validation.json")
+    assert checked["valid"], checked["reasons"]

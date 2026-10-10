@@ -392,6 +392,42 @@ def build_valid_history_fixture(
             for index, value in enumerate(capture["raw"])
         ],
     }
+    sampled = root / "capture/freshness_probe.npz"
+    sampled.write_bytes(b"opaque freshness fixture; no image quality claimed")
+    log = root / "capture/worker.log"
+    log.write_bytes(b"file-only completed acquisition fixture\n")
+    renderer_validation = {
+        "schema_version": 1,
+        "status": "no_known_capacity_errors",
+        "checkpoint": "before_native_close",
+        "log_path": "worker.log",
+        "scanned_bytes": log.stat().st_size,
+        "scanned_prefix_sha256": sha256(log),
+    }
+    resource_path = write_json(
+        root / "capture/resources.json",
+        {
+            "schema_version": 1,
+            "pid": 321,
+            "gpu": {"uuid": "GPU-fixture", "driver": "fixture-driver"},
+        },
+    )
+    validation_path = write_json(
+        root / "capture/renderer_validation.json", renderer_validation
+    )
+    write_json(
+        root / "artifact_index.json",
+        {
+            "schema_version": 1,
+            "artifacts": [
+                {
+                    **artifact(root, path, "history_proof_evidence"),
+                    "bytes": path.stat().st_size,
+                }
+                for path in (sampled, log, resource_path, validation_path)
+            ],
+        },
+    )
     history = {
         "schema_version": 1,
         "kind": "timed_render_history/v1",
@@ -400,6 +436,7 @@ def build_valid_history_fixture(
         **request,
         "producer_artifacts": producer,
         "acquisition": {
+            "pid": 321,
             "fresh_process": True,
             "source_commit": software["benchmark_commit"],
             "hardware_id": "GPU-fixture",
@@ -418,7 +455,13 @@ def build_valid_history_fixture(
         ),
         "freshness": artifact(
             root,
-            write_json(root / "capture/freshness_probe.json", {"passed": True}),
+            write_json(
+                root / "capture/freshness_probe.json",
+                {
+                    "passed": True,
+                    "sampled_arrays": {"path": sampled.name, "sha256": sha256(sampled)},
+                },
+            ),
             "history_freshness",
         ),
         "capture_events": artifact(
@@ -435,6 +478,9 @@ def build_valid_history_fixture(
                 "status": "completed",
                 "performance_claim": False,
                 "metrics": {},
+                "pid": 321,
+                "evidence": ["resources.json", "renderer_validation.json"],
+                "renderer_validation": renderer_validation,
                 "original_run_id": result["run_id"],
             },
         ),

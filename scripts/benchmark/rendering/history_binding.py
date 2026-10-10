@@ -29,7 +29,14 @@ from pathlib import Path
 import shutil
 from typing import Any, Sequence
 
-from .frozen_source import artifact, load_original_run, read_json, sha256, write_json
+from .frozen_source import (
+    artifact,
+    load_original_run,
+    read_json,
+    sha256,
+    stable_hash,
+    write_json,
+)
 from .history_contract import validate_history_proof
 
 __all__ = ["import_history_proof", "main"]
@@ -46,6 +53,8 @@ def import_history_proof(manifest_path: Path, experiment_root: Path) -> dict[str
     Returns:
         Import receipt and root-relative history path for offline evaluation.
         Proof validity establishes acquisition provenance, not image quality.
+        Repairing an older incomplete import adds a content-addressed closure
+        receipt and missing verified files; existing files/receipts are preserved.
     """
     manifest_path = Path(manifest_path).resolve()
     source_root, target = manifest_path.parent, Path(experiment_root).resolve()
@@ -108,8 +117,30 @@ def import_history_proof(manifest_path: Path, experiment_root: Path) -> dict[str
         "performance_claim": False,
     }
     receipt_path = destination / "import_receipt.json"
-    if receipt_path.exists() and read_json(receipt_path) != receipt:
-        raise ValueError("Existing history import receipt differs")
+    if receipt_path.resolve() != receipt_path:
+        raise ValueError("History import receipt must not contain symlinks")
+    if receipt_path.exists():
+        previous = read_json(receipt_path)
+        if previous != receipt:
+            without_artifacts = lambda value: {
+                key: item for key, item in value.items() if key != "artifacts"
+            }
+            current_artifacts = {item["path"]: item for item in receipt["artifacts"]}
+            if without_artifacts(previous) != without_artifacts(receipt) or any(
+                current_artifacts.get(item["path"]) != item
+                for item in previous.get("artifacts", [])
+            ):
+                raise ValueError("Existing history import receipt differs")
+            receipt["previous_import_receipt"] = artifact(
+                target, receipt_path, "original_history_import_receipt"
+            )
+            receipt_path = (
+                destination / "closure_receipts" / (stable_hash(receipt) + ".json")
+            )
+            if receipt_path.resolve() != receipt_path:
+                raise ValueError("History closure receipt must not contain symlinks")
+            if receipt_path.exists() and read_json(receipt_path) != receipt:
+                raise ValueError("Existing history closure receipt differs")
     if not receipt_path.exists():
         write_json(receipt_path, receipt)
     return receipt
