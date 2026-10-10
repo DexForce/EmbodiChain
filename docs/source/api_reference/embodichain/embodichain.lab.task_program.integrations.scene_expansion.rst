@@ -27,6 +27,9 @@ recording observations and affected bindings. It returns a
 ``ValidationResult`` checks. Rejecting that initial state prevents execution.
 Physical preparation and workspace screening are supplied by the caller at
 this layer; the fixed-candidate API does not instantiate a simulation host.
+For existing-rigid-object layouts, use
+:class:`~embodichain.lab.task_program.integrations.simulation.scene_expansion.SimulationSceneExpansionHost`
+with task-specific initial checks and measured acceptance.
 
 For valid initial states, ``execute_scene_variant`` creates a fresh bridge using
 the canonical ``EmbodiedEnv.create_demo_segments(task_program=...)`` path and

@@ -205,16 +205,26 @@ topics:
   title: Scene Expansion
   aliases: [scene expansion, scene augmentation, scene variant, 场景扩增, 场景变体]
   keywords: [SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
-    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant]
+    ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
+    SimulationSceneExpansionHost, SimulationSceneInitialState, RobotSceneWorkspace,
+    SceneWorkspaceCandidate, scene_expansion_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
   - embodichain/lab/sim/scene_expansion/
   - embodichain/lab/task_program/integrations/scene_expansion.py
+  - embodichain/lab/task_program/integrations/simulation/scene_expansion.py
+  - embodichain/lab/task_program/integrations/simulation/workspace.py
+  - embodichain/lab/gym/envs/base_env.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/demo.py
   watch_paths: [embodichain/lab/sim/scene_expansion/,
     embodichain/lab/task_program/integrations/scene_expansion.py,
-    tests/sim/scene_expansion/, tests/gym/envs/task_program/test_scene_expansion.py]
+    embodichain/lab/task_program/integrations/simulation/scene_expansion.py,
+    embodichain/lab/task_program/integrations/simulation/workspace.py,
+    tests/sim/scene_expansion/, tests/gym/envs/task_program/test_scene_expansion.py,
+    tests/gym/envs/task_program/test_scene_workspace.py,
+    tests/gym/envs/task_program/test_simulation_scene_expansion.py,
+    tests/gym/envs/task_program/test_simulation_environment.py]
   related_topics: [simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
   status: active
 - id: rl-learning

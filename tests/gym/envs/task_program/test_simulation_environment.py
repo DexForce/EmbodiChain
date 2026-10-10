@@ -35,6 +35,7 @@ from embodichain.lab.task_program import (
     TaskProgramIntegrationCfg,
     HandOverCfg,
     InvokeCfg,
+    PickCfg,
     decode_task_program,
 )
 from embodichain.lab.task_program.integrations import (
@@ -1352,6 +1353,41 @@ def test_simulation_observation_owns_gym_control_cadence() -> None:
     context = observation.observe(TaskState.empty(_BATCH_SIZE, robot.device))
 
     assert context.control_dt == pytest.approx(_STEP_DT)
+
+
+def test_fresh_bridges_observe_new_scene_at_the_same_initial_clock() -> None:
+    """Reusing a compiled program must not reuse a previous scene's tick cache."""
+    adapter, _, robot, cube = _evidence_adapter_runtime()
+    compiled = adapter.compile(
+        TaskProgramCfg(
+            program_id="fresh_scene_bridges",
+            integration=_evidence_integration(),
+            program=InvokeCfg(call=PickCfg(object="cube")),
+        )
+    )
+    first_bridge = adapter.create_bridge(compiled)
+    first_runtime = first_bridge._runtime
+    first_provider = first_runtime.observation_provider
+    initial = first_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+    initial_pose = initial.scene.entities["cube"].pose.clone()
+
+    cube.pose[:, 0, 3] = 0.35  # Layout changes between episodes, before stepping.
+    second_bridge = adapter.create_bridge(compiled)
+    second_runtime = second_bridge._runtime
+    second_provider = second_runtime.observation_provider
+    refreshed = second_provider.observe(TaskState.empty(_BATCH_SIZE, robot.device))
+
+    assert first_bridge.clock.now() == second_bridge.clock.now() == 0.0
+    assert initial.scene.timestamp == refreshed.scene.timestamp == 0.0
+    assert first_provider is not second_provider
+    assert first_provider.scene_provider is not second_provider.scene_provider
+    assert (
+        first_runtime.engine.motion_generator
+        is not second_runtime.engine.motion_generator
+    )
+    torch.testing.assert_close(refreshed.scene.entities["cube"].pose, cube.pose)
+    torch.testing.assert_close(initial.scene.entities["cube"].pose, initial_pose)
+    assert not torch.equal(initial_pose, refreshed.scene.entities["cube"].pose)
 
 
 def test_mllm_and_config_share_invocations_and_verified_results(
