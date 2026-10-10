@@ -1021,6 +1021,10 @@ def test_visual_gate_blocks_execution_and_preserves_audit(
     assert code == (0 if visual_accepted else 2)
     assert len(calls) == int(visual_accepted)
     payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload["elapsed_seconds"], float)
+    assert payload["elapsed_seconds"] >= 0
+    keys = list(payload)
+    assert keys[keys.index("failure_class") + 1] == "elapsed_seconds"
     audit = json.loads(
         (Path(payload["output_dir"]) / "visual_consistency.json").read_text()
     )
@@ -1075,6 +1079,96 @@ def test_prepare_cli_stops_before_simulator_execution(
     assert json.loads(output.out)["video_paths"] == []
     assert json.loads(output.out)["semantic_graph_html"] is None
     assert output.err == ""
+
+
+@pytest.mark.parametrize(
+    "status", ["succeeded", "failed", "input_conflict", "prepared"]
+)
+def test_cli_total_elapsed_includes_setup_publication_and_artifact_reporting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    now = [100.0]
+    monkeypatch.setattr(cli, "perf_counter", lambda: now[0], raising=False)
+    original_parser = cli.build_parser
+
+    def parser():
+        now[0] += 2.0
+        return original_parser()
+
+    def adapter(**_kwargs):
+        now[0] += 3.0
+        return object()
+
+    class Workflow:
+        def __init__(self, **_kwargs):
+            pass
+
+        def run(self, request, **_kwargs):
+            now[0] += 10.1234
+            output = Path(request["output_dir"])
+            return SimpleNamespace(
+                status=status,
+                succeeded=status == "succeeded",
+                failure_class=None if status in {"succeeded", "prepared"} else status,
+                output_dir=output,
+                manifest_path=output / "run_manifest.json",
+                final_bundle=None,
+            )
+
+    def videos(_output):
+        now[0] += 4.0
+        return []
+
+    def html(_output, **_kwargs):
+        now[0] += 5.0
+        return None
+
+    monkeypatch.setattr(cli, "build_parser", parser)
+    monkeypatch.setattr(cli, "SceneAdapter", adapter)
+    monkeypatch.setattr(cli, "TaskEngineWorkflow", Workflow)
+    monkeypatch.setattr(cli, "_report_saved_videos", videos)
+    monkeypatch.setattr(cli, "_report_semantic_graph_html", html)
+    command = "prepare" if status == "prepared" else "run-all"
+    exit_code = cli.main(
+        [
+            command,
+            "--mode",
+            "image",
+            "--task-id",
+            "task",
+            "--instruction",
+            "lift tray",
+            "--image",
+            str(tmp_path / "input.png"),
+            "--output-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+    assert exit_code == (0 if status in {"succeeded", "prepared"} else 2)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["elapsed_seconds"] == (20.123 if status == "prepared" else 24.123)
+    keys = list(payload)
+    assert keys[keys.index("failure_class") + 1] == "elapsed_seconds"
+
+
+def test_module_cli_forwards_bootstrap_timer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import runpy
+    from embodichain.gen_sim import task_engine
+
+    captured = {}
+
+    def main(*args, **kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "main", main)
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_module("embodichain.gen_sim.task_engine", run_name="__main__")
+    assert exit_info.value.code == 0
+    assert captured["started_at"] == task_engine._CLI_STARTED_AT
 
 
 @pytest.mark.parametrize("succeeded", [True, False])
@@ -1234,6 +1328,8 @@ def test_run_cli_executes_an_existing_bundle(
         video_line = "[Task Engine] No video files generated for this run.\n"
     html_path = (Path(payload["output_dir"]) / "semantic_graph.html").as_posix()
     assert payload["semantic_graph_html"] == (html_path if has_html else None)
+    assert isinstance(payload["elapsed_seconds"], float)
+    assert payload["elapsed_seconds"] >= 0
     assert output.err == video_line + (
         f"[Task Engine] Semantic graph HTML: {html_path}\n"
         if has_html

@@ -18,10 +18,11 @@
 
 from __future__ import annotations
 
+from . import _CLI_STARTED_AT
 from .cli import main
 
 __all__ = ["main"]
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(started_at=_CLI_STARTED_AT))

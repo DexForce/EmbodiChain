@@ -18,7 +18,11 @@
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
+
+# Include dependency loading in module-command timing.
+_CLI_STARTED_AT = perf_counter()
 
 from .agent import (
     TaskAgent,

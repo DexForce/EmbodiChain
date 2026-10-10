@@ -348,7 +348,8 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     monkeypatch.setattr(
         _bundle_runner, "_preserve_failed_execution_recording", lambda *a, **kw: None
     )
-    monkeypatch.setattr(_bundle_runner, "_print_json", lambda *a: None)
+    print_json = Mock()
+    monkeypatch.setattr(_bundle_runner, "_print_json", print_json)
 
     def probe(*args):
         plan = engine._plan_request(request)
@@ -388,6 +389,7 @@ def test_bundle_plans_initial_call_once(tmp_path, monkeypatch, probe_only, outco
     assert planning.call_count == 1
     assert probe_call.call_count == int(probe_only)
     assert execute_call.call_count == int(not probe_only)
+    assert print_json.call_count == int(probe_only)
     report = json.loads((tmp_path / "execution/planning_probe.json").read_text())
     assert report["plan_success"] == (
         [] if outcome == "exception" else [outcome == "success"]

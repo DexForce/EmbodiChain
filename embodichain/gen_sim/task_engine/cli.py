@@ -23,6 +23,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import sys
+from time import perf_counter
 from typing import Any, Final, Sequence
 
 from .config import load_task_engine_config
@@ -157,8 +158,17 @@ def _add_open_window_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch one Task Engine workflow command."""
+def main(argv: Sequence[str] | None = None, *, started_at: float | None = None) -> int:
+    """Dispatch one Task Engine workflow command.
+
+    Args:
+        argv: Arguments, or the current process arguments when omitted.
+        started_at: Optional monotonic bootstrap timestamp supplied by the module entry point.
+
+    Returns:
+        Command exit status.
+    """
+    started_at = perf_counter() if started_at is None else started_at
     parser = build_parser()
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] not in {
@@ -180,11 +190,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "validate-graph":
         return _run_validate_graph(args, parser)
     if args.command == "run":
-        return _run_prepared_bundle(args)
+        return _run_prepared_bundle(args, started_at=started_at)
     return _run_workflow(
         args,
         execute=args.command == "run-all",
         parser=parser,
+        started_at=started_at,
     )
 
 
@@ -291,6 +302,7 @@ def _run_workflow(
     *,
     execute: bool,
     parser: argparse.ArgumentParser,
+    started_at: float,
 ) -> int:
     try:
         image, scene, edit = _mode_inputs(args)
@@ -323,13 +335,13 @@ def _run_workflow(
                 (allocation.path / "visual_consistency.json").write_text(
                     json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
-                _print_json(
-                    {
-                        "status": "input_conflict",
-                        "failure_class": "visual_consistency",
-                        "output_dir": str(allocation.path),
-                    }
-                )
+                payload = {
+                    "status": "input_conflict",
+                    "failure_class": "visual_consistency",
+                    "elapsed_seconds": round(perf_counter() - started_at, 3),
+                    "output_dir": str(allocation.path),
+                }
+                _print_json(payload)
                 return 2
         result = workflow.run(
             {
@@ -358,22 +370,23 @@ def _run_workflow(
             (allocation.path / "visual_consistency.json").write_text(
                 json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-    _print_json(
-        {
-            "run_id": allocation.run_id,
-            "status": result.status,
-            "failure_class": result.failure_class,
-            "output_dir": result.output_dir.as_posix(),
-            "manifest": result.manifest_path.as_posix(),
-            "final_bundle": (
-                None if result.final_bundle is None else result.final_bundle.as_posix()
-            ),
-            "video_paths": _report_saved_videos(result.output_dir) if execute else [],
-            "semantic_graph_html": _report_semantic_graph_html(
-                result.output_dir, bundle=result.final_bundle, announce=execute
-            ),
-        }
-    )
+    payload = {
+        "run_id": allocation.run_id,
+        "status": result.status,
+        "failure_class": result.failure_class,
+        "elapsed_seconds": None,
+        "output_dir": result.output_dir.as_posix(),
+        "manifest": result.manifest_path.as_posix(),
+        "final_bundle": (
+            None if result.final_bundle is None else result.final_bundle.as_posix()
+        ),
+        "video_paths": _report_saved_videos(result.output_dir) if execute else [],
+        "semantic_graph_html": _report_semantic_graph_html(
+            result.output_dir, bundle=result.final_bundle, announce=execute
+        ),
+    }
+    payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
+    _print_json(payload)
     accepted = result.succeeded if execute else result.status == "prepared"
     return 0 if accepted else 2
 
@@ -397,7 +410,7 @@ def _run_endpoint_annotations(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_prepared_bundle(args: argparse.Namespace) -> int:
+def _run_prepared_bundle(args: argparse.Namespace, *, started_at: float) -> int:
     _, _, execution_cfg = load_task_engine_config(args.config)
     num_envs = execution_cfg.num_envs if args.num_envs is None else int(args.num_envs)
     if num_envs < 1:
@@ -430,18 +443,19 @@ def _run_prepared_bundle(args: argparse.Namespace) -> int:
         and len(successes) == num_envs
         and sum(successes) >= execution_cfg.required_successes
     )
-    _print_json(
-        {
-            "run_id": allocation.run_id,
-            "status": "succeeded" if accepted else "failed",
-            "output_dir": allocation.path.as_posix(),
-            "execution_report": report,
-            "video_paths": _report_saved_videos(allocation.path),
-            "semantic_graph_html": _report_semantic_graph_html(
-                allocation.path, bundle=Path(args.bundle).expanduser()
-            ),
-        }
-    )
+    payload = {
+        "run_id": allocation.run_id,
+        "status": "succeeded" if accepted else "failed",
+        "elapsed_seconds": None,
+        "output_dir": allocation.path.as_posix(),
+        "execution_report": report,
+        "video_paths": _report_saved_videos(allocation.path),
+        "semantic_graph_html": _report_semantic_graph_html(
+            allocation.path, bundle=Path(args.bundle).expanduser()
+        ),
+    }
+    payload["elapsed_seconds"] = round(perf_counter() - started_at, 3)
+    _print_json(payload)
     return 0 if accepted else 2
 
 
