@@ -96,10 +96,19 @@ def test_packaged_deployment_and_agent_config_agree(
     "task", [task for task in _TASKS if task.startswith("locomotion/")]
 )
 @pytest.mark.parametrize("backend", ("default", "newton"))
-def test_locomotion_runtime_uses_native_no_render(task: str, backend: str) -> None:
+def test_locomotion_runtime_uses_native_no_render(
+    task: str, backend: str, tmp_path: Path
+) -> None:
     """Packaged PPO runtime reaches the real NoRender engine without overrides."""
+    report_path = tmp_path / "no-render.json"
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), task, backend],
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            task,
+            backend,
+            str(report_path),
+        ],
         cwd=Path(__file__).resolve().parents[4],
         env={**os.environ, "EMBODICHAIN_SIM_EXIT_PROCESS": "0"},
         text=True,
@@ -107,15 +116,58 @@ def test_locomotion_runtime_uses_native_no_render(task: str, backend: str) -> No
         timeout=180,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    report = next(
-        line
-        for line in result.stdout.splitlines()
-        if line.startswith("NORENDER_CHECK ")
+    assert report_path.is_file(), (
+        f"{task}/{backend}: worker returned without a verification report.\n"
+        + result.stdout
+        + result.stderr
     )
-    print(report)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["task"] == task
+    assert report["physics"] == backend
+    assert report["native_renderer"] == "NORENDER"
+    print("NORENDER_CHECK " + json.dumps(report))
 
 
-def _verify_native_no_render(task: str, backend: str) -> None:
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "native_stdout", ["", "\x1b[37mNative log\x00NORENDER_CHECK hidden\x00"]
+)
+def test_no_render_report_is_independent_of_native_stdout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, native_stdout: str
+) -> None:
+    task = "locomotion/velocity/g1_flat"
+
+    def run_worker(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+        Path(args[-1]).write_text(
+            json.dumps(
+                {"task": task, "physics": "default", "native_renderer": "NORENDER"}
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0, stdout=native_stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run_worker)
+    test_locomotion_runtime_uses_native_no_render(task, "default", tmp_path)
+
+
+@pytest.mark.no_sim
+def test_no_render_worker_must_produce_a_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args, 0, "native output", "native error"
+        ),
+    )
+    with pytest.raises(AssertionError, match="native outputnative error"):
+        test_locomotion_runtime_uses_native_no_render(
+            "locomotion/velocity/g1_flat", "default", tmp_path
+        )
+
+
+def _verify_native_no_render(task: str, backend: str, report_path: Path) -> None:
     import torch
     from dexsim.types import Renderer
     from embodichain.lab.sim import SimulationManager
@@ -161,9 +213,8 @@ def _verify_native_no_render(task: str, backend: str) -> None:
             assert torch.isfinite(reward).all()
             assert torch.isfinite(observation["policy"]).all()
         env.reset()
-        print(
-            "NORENDER_CHECK "
-            + json.dumps(
+        report_path.write_text(
+            json.dumps(
                 {
                     "task": task,
                     "physics": sim.physics.name,
@@ -174,7 +225,7 @@ def _verify_native_no_render(task: str, backend: str) -> None:
                     "reset": "passed",
                 }
             ),
-            flush=True,
+            encoding="utf-8",
         )
     finally:
         if env is not None:
@@ -187,4 +238,4 @@ def _verify_native_no_render(task: str, backend: str) -> None:
 if __name__ == "__main__":
     faulthandler.enable()
     faulthandler.dump_traceback_later(150)
-    _verify_native_no_render(sys.argv[1], sys.argv[2])
+    _verify_native_no_render(sys.argv[1], sys.argv[2], Path(sys.argv[3]))
