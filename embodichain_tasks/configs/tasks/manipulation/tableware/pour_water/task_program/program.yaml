@@ -5,43 +5,76 @@ targets:
     values:
       - position: [0.75, -0.1, 0.962]
         quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  bottle_release_pose:
+    kind: cyclic_pose
+    values:
+      # Open above the support instead of driving a held bottle into the table.
+      - position: [0.75, -0.1, 0.969]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  bottle_pour_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.7776451358490485, 0.04643509710227371, 1.101]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  cup_rest_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.75, 0.1, 0.921]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
 program:
-  kind: segment
-  name: pour_and_return_bottle
-  steps:
-    kind: sequence
-    items:
-      - kind: invoke
-        call:
-          kind: pick
+  kind: sequence
+  items:
+    - kind: segment
+      name: grasp_and_position_bottle
+      steps:
+        kind: sequence
+        items:
+          - kind: invoke
+            call:
+              kind: pick
+              object: bottle
+              grasp: bottle_grasp
+          - kind: invoke
+            call:
+              kind: registered
+              call_id: simulation.move_held_object
+              arguments:
+                target: cup_pour_pose
+      # Read the physical bottle pose before allowing the pour segment.
+      validators:
+        - kind: object_near_target
           object: bottle
-          grasp: bottle_grasp
-      - kind: invoke
-        call:
-          kind: registered
-          call_id: simulation.move_held_object
-          arguments:
-            target: cup_pour_pose
-      - kind: invoke
-        call:
-          kind: registered
-          call_id: simulation.pour
-          arguments:
-            object: bottle
-      - kind: invoke
-        call:
-          kind: place
+          target: bottle_pour_pose
+          position_tolerance: 0.01
+    - kind: segment
+      name: pour_and_return_bottle
+      steps:
+        kind: sequence
+        items:
+          - kind: invoke
+            call:
+              kind: registered
+              call_id: simulation.pour
+              arguments:
+                object: bottle
+          - kind: invoke
+            call:
+              kind: place
+              object: bottle
+              at:
+                kind: target_ref
+                target: bottle_release_pose
+      post:
+        - kind: wait_stable
+          entity: bottle
+        - kind: wait_stable
+          entity: cup
+      validators:
+        - kind: object_near_target
           object: bottle
-          at:
-            kind: target_ref
-            target: bottle_return_pose
-  post:
-    - kind: wait_stable
-      entity: bottle
-    - kind: wait_stable
-      entity: cup
-  validators:
-    - kind: object_near_target
-      object: bottle
-      target: bottle_return_pose
-      position_tolerance: 0.05
+          target: bottle_return_pose
+          position_tolerance: 0.05
+        - kind: object_near_target
+          object: cup
+          target: cup_rest_pose
+          position_tolerance: 0.002

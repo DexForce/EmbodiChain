@@ -7,8 +7,9 @@ requires:
 motion:
   strategy: ik_interp
   velocity_targets: auto
-  # Allow velocity-limited articulated objects to follow before releasing.
-  sample_count: 80
+  # At the pour environment's 100 Hz cadence, arm moves keep their 4.8 s
+  # duration while position targets advance smoothly at every physics step.
+  sample_count: 480
   dynamic_collision_mode: "off"
 
 tracking:
@@ -17,6 +18,7 @@ tracking:
 recovery:
   max_replans: 0
   max_action_retries: 0
+  goal_rotation_threshold: 3.141592653589793
 
 workflow_recovery:
   max_recovery_attempts: 0

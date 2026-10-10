@@ -35,6 +35,7 @@ embodiment component combines one robot with its sensors:
 ```yaml
 # env.yaml: reusable and not directly runnable
 environment_id: repeated_pick_place
+physics: default
 simulation:
   rigid_object:
     - uid: cube
@@ -63,7 +64,14 @@ components, while a configuration-defined Task Program adds
 deployment. The pure `env.yaml` has `environment_id` but no runnable `id` or
 Task Program fields.
 
-Component references resolve relative to the runnable config. A deployment
+Ordinary component references resolve relative to the runnable config.
+References beginning with `embodichain_tasks/configs/` select the imported SDK's
+packaged configurations, so deployments in another repository can reuse the
+same physical environment, embodiment or Task Program components. An existing
+same-named file in the working directory does not override a packaged selection.
+The public `resolve_config_path(path, *, base_dir=...)` helper uses that owner
+directory for nested references; omitting `base_dir` preserves its existing
+filesystem and working-directory behavior. A deployment
 must not declare component-owned fields inline at the same time. The original
 fully inline Gym format remains supported; a standalone physical
 `scene.component` also remains available when `environment.component` is not

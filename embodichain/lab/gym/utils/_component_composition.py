@@ -23,6 +23,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 __all__: list[str] = []
@@ -107,12 +108,9 @@ def _component_path(
     base_dir: Path,
     path: str,
 ) -> Path:
-    """Resolve one YAML component path relative to its owner."""
+    """Resolve one packaged or owner-relative YAML component path."""
     selected = _identifier(value, path=path)
-    component_path = Path(selected).expanduser()
-    if not component_path.is_absolute():
-        component_path = base_dir / component_path
-    component_path = component_path.resolve()
+    component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
     if component_path.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError(f"{path} must be a YAML file: {component_path}.")
     if not component_path.is_file():

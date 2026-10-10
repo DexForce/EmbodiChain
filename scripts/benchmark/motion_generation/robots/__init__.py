@@ -20,5 +20,12 @@ from __future__ import annotations
 
 from .base import RobotProvider
 from .franka import FrankaPandaProvider, FrankaPgiProvider
+from .ur5 import UR5PgiProvider, UR5Provider
 
-__all__ = ["FrankaPandaProvider", "FrankaPgiProvider", "RobotProvider"]
+__all__ = [
+    "FrankaPandaProvider",
+    "FrankaPgiProvider",
+    "RobotProvider",
+    "UR5PgiProvider",
+    "UR5Provider",
+]

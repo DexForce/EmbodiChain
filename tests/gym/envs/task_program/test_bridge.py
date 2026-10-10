@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Any
 from unittest.mock import Mock
@@ -1054,6 +1054,134 @@ def test_joint_encoder_emits_full_qpos_qvel_and_zeros_inactive_rows() -> None:
     assert torch.equal(action["qpos"][1], qpos[1])
     assert torch.equal(action["qvel"][0], torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0]))
     assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+
+@pytest.mark.parametrize("mode", ["position", "position_velocity"])
+def test_joint_encoder_retains_targets_through_observed_drift_and_row_reordering(
+    mode: str,
+) -> None:
+    """Idle joints retain intent by stable env ID while inactive rows stay fresh."""
+    provider = _QposProvider(
+        torch.arange(BATCH_SIZE * ROBOT_DOF, dtype=torch.float32).reshape(
+            BATCH_SIZE, ROBOT_DOF
+        )
+    )
+    encoder = RuntimeCommandFrameEncoder(provider, joint_command_mode=mode)
+    frame = _joint_frame(duration=STEP_DT, velocities=torch.ones(BATCH_SIZE, 2))
+    first_action = encoder.encode(frame)
+    first = (
+        first_action if isinstance(first_action, torch.Tensor) else first_action["qpos"]
+    )
+    retained = first.clone()
+    first.zero_()  # Caller mutation must not change the encoder's retained targets.
+    provider.qpos = provider.qpos.flip(0) + 0.01
+    reordered = replace(
+        frame,
+        env_ids=frame.env_ids.flip(0),
+        active_mask=torch.tensor([True, False]),
+    )
+
+    action = encoder.encode(reordered)
+    qpos = action if isinstance(action, torch.Tensor) else action["qpos"]
+
+    assert torch.equal(qpos[0, [0, 2, 4]], retained[1, [0, 2, 4]])
+    assert torch.equal(qpos[1], provider.qpos[1])
+    if mode == "position_velocity":
+        assert torch.equal(action["qvel"][0, [0, 2, 4]], torch.zeros(3))
+        assert torch.equal(action["qvel"][1], torch.zeros(ROBOT_DOF))
+
+    # Reactivating the previously inactive row must not restore stale targets.
+    provider.qpos += 0.02
+    reactivated = encoder.encode(
+        replace(reordered, active_mask=torch.tensor([True, True]))
+    )
+    reactivated_qpos = (
+        reactivated if isinstance(reactivated, torch.Tensor) else reactivated["qpos"]
+    )
+    assert torch.equal(reactivated_qpos[1, [0, 2, 4]], provider.qpos[1, [0, 2, 4]])
+
+
+def test_joint_encoder_preserves_previous_endpoint_targets_and_rebases_safe_holds() -> (
+    None
+):
+    provider = _QposProvider(torch.zeros(BATCH_SIZE, ROBOT_DOF))
+    encoder = RuntimeCommandFrameEncoder(provider)
+    first = _joint_frame(duration=STEP_DT)
+    encoder.encode(first)
+    provider.qpos += 0.01
+    second = replace(
+        first,
+        commands=(
+            EndpointCommand(
+                target=JointPositionTarget(control_part="other", joint_ids=(0, 2)),
+                payload=JointPositionPayload(
+                    positions=torch.full((BATCH_SIZE, 2), 5.0)
+                ),
+            ),
+        ),
+    )
+
+    action = encoder.encode(second)
+    assert torch.equal(action[:, [1, 3]], first.commands[0].payload.positions)
+    assert torch.equal(action[:, 4], torch.zeros(BATCH_SIZE))
+
+    observed = torch.full((BATCH_SIZE, ROBOT_DOF), 0.5)
+    held = encoder.encode_hold(
+        first.targets, _context(qpos=observed, env_ids=first.env_ids)
+    )
+    assert torch.equal(held, observed)
+    provider.qpos += 0.01
+    resumed = encoder.encode(second)
+    assert torch.equal(resumed[:, [1, 3, 4]], observed[:, [1, 3, 4]])
+
+    # A fresh episode/bridge owns a fresh encoder, rather than old hold targets.
+    fresh = RuntimeCommandFrameEncoder(provider).encode(second)
+    assert torch.equal(fresh[:, [1, 3, 4]], provider.qpos[:, [1, 3, 4]])
+
+
+def test_joint_encoder_retains_omitted_rows_when_new_ids_join() -> None:
+    provider = _QposProvider(
+        torch.arange(BATCH_SIZE * ROBOT_DOF).float().reshape(BATCH_SIZE, ROBOT_DOF)
+    )
+    encoder = RuntimeCommandFrameEncoder(provider)
+    first = _joint_frame(duration=STEP_DT)
+    original = encoder.encode(first).clone()
+    provider.qpos += 0.01
+    joined = encoder.encode(replace(first, env_ids=torch.tensor([3, 1001])))
+    assert torch.equal(joined[0, [0, 2, 4]], original[1, [0, 2, 4]])
+    assert torch.equal(joined[1, [0, 2, 4]], provider.qpos[1, [0, 2, 4]])
+    provider.qpos += 0.01
+    resumed = encoder.encode(first)
+    assert torch.equal(resumed[0, [0, 2, 4]], original[0, [0, 2, 4]])
+    assert torch.equal(resumed[1, [0, 2, 4]], original[1, [0, 2, 4]])
+
+
+def test_joint_encoder_cache_does_not_read_one_host_scalar_per_row() -> None:
+    """Host scalar extraction must stay bounded as the vector batch grows."""
+    batch = 64
+    provider = _QposProvider(torch.zeros(batch, ROBOT_DOF))
+    encoder = RuntimeCommandFrameEncoder(provider)
+    command = EndpointCommand(
+        target=JointPositionTarget(control_part="arm", joint_ids=(1, 3)),
+        payload=JointPositionPayload(positions=torch.ones(batch, 2)),
+    )
+    frame = RuntimeCommandFrame(
+        commands=(command,),
+        active_mask=torch.ones(batch, dtype=torch.bool),
+        env_ids=torch.arange(batch),
+        hold_duration=torch.full((batch,), STEP_DT),
+    )
+    encoder.encode(frame)
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU]
+    ) as profile:
+        encoder.encode(frame)
+    scalar_reads = sum(
+        event.count
+        for event in profile.key_averages()
+        if event.key == "aten::_local_scalar_dense"
+    )
+    assert scalar_reads <= 4
 
 
 def test_position_velocity_joint_encoder_rejects_missing_velocity() -> None:

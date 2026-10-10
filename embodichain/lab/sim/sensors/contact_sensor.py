@@ -29,6 +29,7 @@ from embodichain.lab.sim.sensors import BaseSensor, SensorCfg
 from embodichain.lab.sim.sensors._warp.contact import scatter_contact_rows
 from embodichain.lab.sim.sensors.contact_history import ContactHistory
 from embodichain.utils import configclass, logger
+from embodichain.utils.device_utils import current_warp_stream
 
 if TYPE_CHECKING:
     from dexsim.scene import (
@@ -163,6 +164,10 @@ class ContactSensor(BaseSensor):
             self._scatter_dropped_count
         )
         self._histories: dict[str, ContactHistory] = {}
+        self._sample_graph = None
+        self._sample_graph_key = None
+        self._sample_stream = None
+        self._sample_torch_stream = None
         self._num_contacts_per_env: torch.Tensor | None = None
         """Number of contacts per environment."""
 
@@ -336,10 +341,12 @@ class ContactSensor(BaseSensor):
             self._scatter_dropped_count.copy_(self._sample_scatter_dropped_count)
 
     def _fetch_contacts(self) -> ContactBuffer:
-        assert self._query is not None and self._num_contacts_per_env is not None
-        self._num_contacts_per_env.zero_()
-        self._data_buffer["is_valid"].zero_()
-        self._sample_scatter_dropped_count.zero_()
+        buffer = self._read_contacts()
+        self._scatter_contacts(buffer)
+        return buffer
+
+    def _read_contacts(self) -> ContactBuffer:
+        assert self._query is not None
         if self.device.type == "cuda":
             buffer = self._query.fetch_async()
         else:
@@ -347,6 +354,13 @@ class ContactSensor(BaseSensor):
             buffer.device_counts[0] = buffer.count
             buffer.device_counts[1] = buffer.dropped_count
         self._sync_filter_actor_metadata()
+        return buffer
+
+    def _scatter_contacts(self, buffer: ContactBuffer) -> None:
+        assert self._num_contacts_per_env is not None
+        self._num_contacts_per_env.zero_()
+        self._data_buffer["is_valid"].zero_()
+        self._sample_scatter_dropped_count.zero_()
         wp.launch(
             kernel=scatter_contact_rows,
             dim=buffer.capacity,
@@ -372,13 +386,8 @@ class ContactSensor(BaseSensor):
                 wp.from_torch(self._sample_scatter_dropped_count),
             ],
             device=str(self.device),
-            stream=(
-                wp.stream_from_torch(self.device)
-                if self.device.type == "cuda"
-                else None
-            ),
+            stream=current_warp_stream(self.device),
         )
-        return buffer
 
     @property
     def dropped_contacts(self) -> int:
@@ -531,7 +540,54 @@ class ContactSensor(BaseSensor):
         Args:
             dt: Elapsed physics time in seconds.
         """
-        buffer = self._fetch_contacts()
+        if dt <= 0:
+            raise ValueError("Contact sampling dt must be positive.")
+        buffer = self._read_contacts()
+        if self.device.type != "cuda" or torch.cuda.is_current_stream_capturing():
+            self._sample_contacts(buffer, dt)
+            return
+        key = (
+            id(buffer),
+            dt,
+            self.cfg.max_contacts_per_env,
+            tuple(
+                (
+                    id(h),
+                    h.force_threshold,
+                    h.include_unknown_counterpart,
+                    h.counterpart_ids is None,
+                )
+                for h in self._histories.values()
+            ),
+        )
+        if self._sample_stream is None:
+            self._sample_stream = wp.get_stream(str(self.device))
+            self._sample_torch_stream = wp.stream_to_torch(self._sample_stream)
+        caller = torch.cuda.current_stream(self.device)
+        same_stream = caller.cuda_stream == self._sample_torch_stream.cuda_stream
+        if not same_stream:
+            self._sample_torch_stream.wait_stream(caller)
+        with (
+            wp.ScopedStream(self._sample_stream),
+            torch.cuda.stream(self._sample_torch_stream),
+        ):
+            if key != self._sample_graph_key:
+                self._sample_graph = None
+                self._sample_graph_key = key
+                # This real sample also compiles/warms every kernel. Do not
+                # execute history updates twice while preparing capture.
+                self._sample_contacts(buffer, dt)
+            else:
+                if self._sample_graph is None:
+                    with wp.ScopedCapture(stream=self._sample_stream) as capture:
+                        self._sample_contacts(buffer, dt)
+                    self._sample_graph = capture.graph
+                wp.capture_launch(self._sample_graph, stream=self._sample_stream)
+        if not same_stream:
+            caller.wait_stream(self._sample_torch_stream)
+
+    def _sample_contacts(self, buffer: ContactBuffer, dt: float) -> None:
+        self._scatter_contacts(buffer)
         self._query_dropped_count.add_(buffer.dropped_count_device)
         self._scatter_dropped_count.add_(self._sample_scatter_dropped_count)
         for history in self._histories.values():
@@ -543,15 +599,27 @@ class ContactSensor(BaseSensor):
         Args:
             env_ids: Rows to reset. None selects every row.
         """
-        ids = slice(None) if env_ids is None else env_ids
-        self._data_buffer["is_valid"][ids] = False
-        self._num_contacts_per_env[ids] = 0
-        self._scatter_dropped_count[ids] = 0
-        self._sample_scatter_dropped_count[ids] = 0
+        ids = (
+            None
+            if env_ids is None
+            else torch.as_tensor(env_ids, dtype=torch.long).to(
+                self.device, non_blocking=True
+            )
+        )
+        for value in (
+            self._data_buffer["is_valid"],
+            self._num_contacts_per_env,
+            self._scatter_dropped_count,
+            self._sample_scatter_dropped_count,
+        ):
+            if ids is None:
+                value.zero_()
+            else:
+                value.index_fill_(0, ids, 0)
         if env_ids is None:
             self._query_dropped_count.zero_()
         for history in self._histories.values():
-            history.reset(env_ids)
+            history.reset(ids)
 
     def filter_by_user_ids(
         self, item_user_ids: torch.Tensor, env_ids: Sequence[int] | None = None

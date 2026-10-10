@@ -1,0 +1,49 @@
+schema_version: 1
+name: motion_generation
+suite_version: free_space_ur5_coverage_v1
+profile: coverage
+
+robot:
+  id: ur5
+  provider: ur5
+  config: {}
+
+planners:
+  - id: nmg
+    adapter: nmg_onnx
+    role: candidate
+    enabled: true
+    config:
+      # Supply the external UR5 policy with --nmg-onnx-path; otherwise NMG is skipped.
+      onnx_model_path: null
+      num_waypoints: 5
+      steps_per_waypoint: 30
+      max_steps: 150
+      action_scale: 0.2
+      num_arm_joints: 6
+      joint_periodic_features: true
+      use_relative_obs: true
+      intermediate_orientation: true
+      pos_eps: 0.01
+      rot_eps: 0.1
+      joint_eps: 0.01
+
+protocol:
+  warmup_trials: 0
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 256
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: free-space-common
+    scenario: free_space
+    enabled: true
+    config:
+      batch_sizes: [8]
+      waypoint_counts: [1, 3, 5]
+      path_shapes: [direct, l_turn, s_curve, orientation_only, combined]
+      start_state_bins: [nominal, random_reachable, near_limit, near_singularity]
+      seeds: [11, 23, 37]

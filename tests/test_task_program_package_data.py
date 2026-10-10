@@ -135,6 +135,7 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
     }
 )

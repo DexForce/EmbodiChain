@@ -1555,6 +1555,21 @@ def test_legacy_metadata_reports_consistent_episode_success() -> None:
     assert metadata["segments"][0]["instruction"] == task_instruction
 
 
+@pytest.mark.parametrize("seed", (None, 0, 4101))
+def test_demo_metadata_exposes_the_effective_environment_seed(seed: int | None) -> None:
+    """Recorded metadata carries the effective environment seed for provenance."""
+    env = _RolloutWriterStub()
+    env.cfg = SimpleNamespace(seed=seed)
+    env._demo_episode_metadata = [
+        EmbodiedEnv._new_demo_episode_metadata(env, row) for row in range(env.num_envs)
+    ]
+
+    metadata = EmbodiedEnv.get_demo_episode_metadata(env, 1)
+
+    assert metadata["seed"] == seed
+    assert metadata["env_id"] == 1
+
+
 def test_explicit_segment_instructions_are_preserved() -> None:
     """Dataset-level fallback never overwrites explicit segment instructions."""
     env = _RolloutWriterStub()

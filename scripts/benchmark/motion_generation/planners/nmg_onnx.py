@@ -120,6 +120,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             max_steps=int(values.get("max_steps", 150)),
             action_scale=float(values.get("action_scale", 0.2)),
             num_arm_joints=int(values.get("num_arm_joints", 7)),
+            joint_periodic_features=bool(values.get("joint_periodic_features", False)),
             num_waypoints=int(values.get("num_waypoints", 5)),
             use_relative_obs=bool(values.get("use_relative_obs", True)),
             canonicalize_quat_obs=bool(values.get("canonicalize_quat_obs", True)),

@@ -79,7 +79,7 @@ from .urdf import URDFCfg
 from .viewer import MarkerCfg, WindowCameraPoseCfg, WindowRecordCfg
 
 # The renderer selection code intentionally mutates this package-level value.
-DEFAULT_RENDERER: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
+DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
 
 # Robot imports are kept last because SolverCfg discovery imports simulation
 # modules that themselves rely on the public facade above.

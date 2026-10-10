@@ -49,7 +49,11 @@ class _FakeRenderBody:
         return self._triangles[mesh_id]
 
     def set_uv_mapping(self, uvs: np.ndarray, mesh_id: int) -> None:
-        self.uv_mappings[mesh_id] = uvs
+        # Model the pinned DexSim binding's Eigen column-major conversion and
+        # subsequent reinterpretation as an array of interleaved float pairs.
+        self.uv_mappings[mesh_id] = (
+            np.asarray(uvs, dtype=np.float32).ravel(order="F").reshape(-1, 2)
+        )
 
 
 def test_projective_uv_offsets_faces_for_multiple_meshes(
@@ -69,7 +73,5 @@ def test_projective_uv_offsets_faces_for_multiple_meshes(
 
     set_projective_uv(render_body, project_direction)
 
-    expected_first = generated_uv[:3].ravel(order="C").reshape((3, 2), order="F")
-    expected_second = generated_uv[3:].ravel(order="C").reshape((3, 2), order="F")
-    np.testing.assert_array_equal(render_body.uv_mappings[0], expected_first)
-    np.testing.assert_array_equal(render_body.uv_mappings[1], expected_second)
+    np.testing.assert_array_equal(render_body.uv_mappings[0], generated_uv[:3])
+    np.testing.assert_array_equal(render_body.uv_mappings[1], generated_uv[3:])

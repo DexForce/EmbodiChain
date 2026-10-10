@@ -231,9 +231,10 @@ control-part adapter resolves current joint-backed endpoints through
 `Robot.control_parts`; custom adapters may instead return mobile, whole-body, or
 other runtime targets.
 
-`MoveJoints` is intentionally `agent_visible=False`: it is useful for home,
-recovery, calibration, and scripted postures, but is not exposed to an Action
-Agent by default.
+`MoveJoints` is also the canonical implementation for home, recovery,
+calibration, and other embodiment-named postures. Semantic callers should
+constrain those uses through a registered call and keep the named target in the
+robot profile.
 
 ## Shared goal and configuration rules
 
@@ -253,7 +254,11 @@ Explicit pose tensors use `(4, 4)` or `(B, 4, 4)`. Waypoint-capable fields in
 `EndEffectorPoseGoal` and `PlaceGoal` also accept `(B, N, 4, 4)`.
 `SceneEntityPose` resolves to the latest `(B, 4, 4)` pose from each
 `SceneSnapshot`, checks optional perception confidence, and registers that
-entity as a recovery dependency.
+entity as a recovery dependency. `world_displacement` keeps a translation in
+the world frame after local composition. `world_orientation` replaces the
+tracked entity's rotation before applying `relative_pose`, allowing a target to
+track a moving reference position while retaining a grounded world-frame
+orientation.
 
 | Skill / field | `SceneEntityPose` accepted | Automatic scene-motion replan |
 |---|---:|---:|
@@ -379,7 +384,7 @@ than an EEF pose.
 | Motion | joint planning/interpolation from observed qpos; supports joint waypoints |
 | Completion | `JOINT_GOAL_REACHED` |
 | Effect | none |
-| Agent visibility | hidden by default (`agent_visible=False`) |
+| Agent visibility | visible |
 
 `target` accepts an explicit qpos tensor with shape `(control_dof,)`,
 `(B, control_dof)`, or `(B, N, control_dof)`, or a non-empty string resolved
@@ -453,12 +458,17 @@ Important `PickUpOptions` fields:
 | `pre_grasp_distance`, `approach_direction` | Pre-grasp offset and world-frame approach direction |
 | `lift_height`, `hand_interp_steps` | Lift distance and close-segment discretization |
 | `grasp_settle_steps` | Closed-hand hold frames before lifting |
+| `grasp_variant` | Default `closest` preserves the nearest feasible symmetric TCP roll; `original` or `mirrored` requires that side to pass screening without falling back to the other side |
 | `grasp_frame_to_eef` | Fixed SE(3) calibration from canonical grasp frames to the robot TCP |
 | `fixed_object_to_eef` | Optional task/robot-calibrated SE(3) grasp that bypasses affordance sampling when the goal has no explicit grasp |
 | `pick_object_part` | Affordance region: currently `center`, `top`, or `bottom` |
 | `approach_alignment_max_angle` | Optional TCP approach-alignment filter |
 | `downstream_object_target_poses` | Optional future reachability constraints used in grasp selection |
 | `obj_upright_direction`, `rotate_upright` | Optional orientation-selection behavior |
+
+`grasp_variant` controls the symmetric branch of sampled grasps, not candidate
+generation or trajectory determinism. Explicit goal grasps and
+`fixed_object_to_eef` bypass this selection.
 
 `ObjectSemantics.entity` without an ID is a deprecated compatibility path. Its
 live pose does not create an automatic scene dependency.
@@ -1020,6 +1030,7 @@ Both bound grasp endpoints must provide `open` and `grasp`. Important
 
 - `pre_grasp_distance` and `lift_height`;
 - `object_motion_keyframes`, `hand_interp_steps`, and `hold_steps`;
+- `release`, `release_steps`, `retreat_distance`, and `retreat_steps`;
 - `approach_direction`, `left_to_right_arm_direction`, and `middle_empty_ratio`
   for affordance-based left/right grasp sampling.
 
@@ -1112,7 +1123,9 @@ through middle transfer, and from the receiving grasp through final lowering,
 EEF waypoint rotations remain fixed; only translations change. The final
 object translation comes from `HandOverGoal.target_pose`, while its execution
 orientation stays consistent with the handover grasp. `HandOverOptions` owns
-only the approach/lift distances and gripper interpolation count. The first
+the approach/lift distances, gripper interpolation, hold, and retreat phases.
+With `release_at_target=False`, the source hand opens and retreats while the
+destination remains the verified holder for a later placement action. The first
 placement waypoint changes only horizontal coordinates and preserves the
 handover height exactly; the second waypoint lowers to the final target.
 

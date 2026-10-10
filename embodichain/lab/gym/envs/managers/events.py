@@ -550,16 +550,35 @@ def register_info_to_env(
     env_ids: torch.Tensor | None,
     registry: List[Dict],
     registration: str = "affordance_datas",
-    sim_update: bool = True,
-):
+    sim_update: bool = False,
+) -> None:
+    """Register entity information without advancing physics by default.
+
+    Args:
+        env: Environment receiving the registered information.
+        env_ids: Environment indices to read. None selects all environments.
+        registry: Entity information declarations.
+        registration: Name of the environment's destination mapping.
+        sim_update: Explicitly run the legacy 100-step settle before reading.
+            This requires all environments because physics advances the World.
+    """
     if env_ids is None:
         env_ids = torch.arange(env.num_envs, device=env.device)
     if sim_update:
+        selected = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+        all_ids = torch.arange(env.num_envs, device=env.device)
+        if not torch.equal(selected.sort().values, all_ids):
+            raise ValueError(
+                "sim_update=True requires all environments because settling "
+                "advances the entire physics World."
+            )
         logger.log_info(
             "Calling env.sim.update(100) for after-physics-applied object attributes..",
             color="green",
         )
         env.sim.update(step=100)
+    else:
+        env.sim.sync_render_state()
     for entity_registry in registry:
         entity_cfg = SceneEntityCfg(**entity_registry["entity_cfg"])
         logger.log_info(f"Registering {entity_cfg.uid}..", color="green")
