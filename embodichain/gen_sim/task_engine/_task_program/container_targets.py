@@ -23,6 +23,7 @@ from collections.abc import Sequence
 import numpy as np
 from shapely.affinity import translate
 from shapely.geometry import MultiPoint, Point, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
 import trimesh
 
@@ -43,17 +44,10 @@ def select_container_landing(
     facet is required; curved or unmeasured floors retain the caller's policy.
     This geometric preference does not replace downstream IK or execution gates.
     """
-    if not len(mesh.facets):
+    measured = _floor_region(mesh)
+    if measured is None:
         return None
-    eligible = np.flatnonzero(mesh.facets_normal[:, 2] > 0.95)
-    if not len(eligible):
-        return None
-    facet = eligible[np.argmax(mesh.facets_area[eligible])]
-    if mesh.facets_area[facet] < 0.25 * np.prod(mesh.extents[:2]):
-        return None
-    triangles = mesh.triangles[mesh.facets[facet]]
-    # Union the actual triangles, not their convex hull: holes remain unsupported.
-    floor = unary_union([Polygon(triangle[:, :2]) for triangle in triangles])
+    floor, floor_height = measured
     margin = 0.035
     safe = floor.buffer(-margin)
     footprint = MultiPoint(child_vertices[:, :2]).convex_hull
@@ -81,5 +75,21 @@ def select_container_landing(
     if allowed.is_empty or allowed.area <= 1e-8:
         raise ValueError("Container floor has no remaining landing space.")
     point = nearest_points(allowed, Point(arm_root[:2]))[0]
-    height = float(triangles[:, :, 2].max() - child_vertices[:, 2].min() + 0.001)
+    height = float(floor_height - child_vertices[:, 2].min() + 0.001)
     return float(point.x), float(point.y), height
+
+
+def _floor_region(mesh: trimesh.Trimesh) -> tuple[BaseGeometry, float] | None:
+    """Share measured planar-floor geometry without changing landing policy."""
+    if not len(mesh.facets):
+        return None
+    eligible = np.flatnonzero(mesh.facets_normal[:, 2] > 0.95)
+    if not len(eligible):
+        return None
+    facet = eligible[np.argmax(mesh.facets_area[eligible])]
+    if mesh.facets_area[facet] < 0.25 * np.prod(mesh.extents[:2]):
+        return None
+    triangles = mesh.triangles[mesh.facets[facet]]
+    # Union the actual triangles, not their convex hull: holes remain unsupported.
+    floor = unary_union([Polygon(triangle[:, :2]) for triangle in triangles])
+    return floor, float(triangles[:, :, 2].max())

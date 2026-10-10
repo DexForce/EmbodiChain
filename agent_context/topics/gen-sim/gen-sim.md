@@ -91,6 +91,15 @@ milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported
 observers, incomplete `all` selector universes and sparse temporal/invariant
 windows remain unavailable, not certified. Historical reports are not rewritten.
+Rigid-reference E1 `inside`/`on` observations qualify the full projected object
+footprint against actual planar-floor triangles (including holes), resting height,
+and exact measured terminal release receipts. Milestones read the recorder's
+post-segment `end_steps` slots, independently of fresh final poses; later motion
+cannot erase or falsely establish an earlier milestone. This uses the existing
+runner and unchanged bundle declarations/fingerprints, not a second executor.
+Curved/unmeasured floors and articulated reference parts remain unavailable;
+the planar landing-region certificate is not contact-force or arbitrary 3D-cavity
+qualification. Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote

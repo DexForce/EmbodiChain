@@ -320,3 +320,507 @@ def test_new_normative_verdict_gates_success_but_legacy_stays_unchanged(
         [False],
         ["execution_failed"],
     )
+
+
+def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="inside"):
+    import numpy as np
+    import trimesh
+    from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
+    from .test_task_spec_generation import candidate, selector, step
+
+    source = candidate(
+        step(
+            "E1",
+            "cube",
+            target=selector("region"),
+            relation=relation,
+            required_arm="left_arm",
+        )
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": source["draft"]["task_id"],
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["cube"],
+            "step_01.target": ["region"],
+        },
+        "role_bindings": {},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {"runtime_uid": uid, "init_pos": [0.0, 0.0, 0.7], "init_rot": [0.0] * 3}
+            for uid in ("cube", "region")
+        ],
+    )
+    coverage = _coverage(plan)
+    nodes = plan.graph["nodes"]
+    placement = next(
+        n
+        for n in nodes
+        if n["call"]["kind"] == "place"
+        or n["call"].get("call_id") == "simulation.place_relative"
+    )
+    program = {"program": {"items": [{"name": n["id"], "post": []} for n in nodes]}}
+    constraints = {"presets": {}}
+    contract = {
+        "task_spec_digest": canonical_hash(plan.task_spec.to_dict()),
+        "graph_digest": canonical_hash(plan.graph),
+        "program_digest": canonical_hash(program),
+        "constraints_digest": canonical_hash(constraints),
+        "coverage": coverage,
+    }
+    invocation = "program/place:0"
+    proof = {
+        "boundary": {"kind": "terminal"},
+        "timestamp": 0.08,
+        "observation_revision": 2,
+        "effect_spec": {
+            "effect_kind": "release",
+            "invocation_id": invocation,
+            "invocation_revision": 0,
+            "env_ids": [0],
+            "state_expectations": [
+                {
+                    "expectation_id": "source",
+                    "relation": "detached",
+                    "object_id": "cube",
+                    "resource_id": "left",
+                }
+            ],
+            "clauses": [
+                {
+                    "clause_id": "source.constraint",
+                    "expectation_id": "source",
+                    "expected": False,
+                    "evidence_kind": "constraint",
+                },
+                {
+                    "clause_id": "source.pose",
+                    "expectation_id": "source",
+                    "expectation": "separated",
+                },
+            ],
+        },
+        "decision": {"success_mask": [True]},
+        "evidence": {
+            "source.constraint": {
+                "values": [False],
+                "valid_mask": [True],
+                "env_ids": [0],
+                "timestamp": 0.08,
+                "observation_revision": 2,
+            },
+            "source.pose": {
+                "object_to_endpoint": torch.eye(4)[None].tolist(),
+                "valid_mask": [True],
+                "env_ids": [0],
+                "timestamp": 0.08,
+                "observation_revision": 2,
+            },
+        },
+    }
+    runtime = {
+        "segments": [
+            {
+                "name": n["id"],
+                "active": [True],
+                "successes": [True],
+                "start_steps": [i],
+                "end_steps": [i + 1],
+                "start_step": i,
+                "end_step": i + 1,
+                "metadata": {
+                    "runtime": {
+                        "env_ids": [0],
+                        "task_state": {
+                            "batch_size": 1,
+                            "held_objects": [],
+                            "coordinated_held_objects": [],
+                        },
+                        "calls": (
+                            [
+                                {
+                                    "invocation_id": invocation,
+                                    "invocation_revision": 0,
+                                    "status": "completed",
+                                    "effects": [proof],
+                                }
+                            ]
+                            if n == placement
+                            else []
+                        ),
+                    }
+                },
+            }
+            for i, n in enumerate(nodes)
+        ]
+    }
+    child = trimesh.creation.box(extents=[0.08] * 3)
+    reference = (
+        trimesh.creation.annulus(r_min=0.07, r_max=0.25, height=0.01)
+        if hole
+        else trimesh.creation.box(extents=[0.5, 0.3, 0.01])
+    )
+    pose = torch.eye(4)[None]
+    pose[:, :3, 3] = torch.tensor([x, 0.0, z])
+    reference_pose = torch.eye(4)[None]
+
+    def native(mesh, value):
+        return SimpleNamespace(
+            get_local_pose=lambda **_kw: value,
+            get_vertices=lambda **_kw: torch.tensor(
+                np.asarray(mesh.vertices), dtype=torch.float32
+            )[None],
+            get_triangles=lambda **_kw: torch.tensor(
+                np.asarray(mesh.faces), dtype=torch.int64
+            )[None],
+        )
+
+    objects = {"cube": native(child, pose), "region": native(reference, reference_pose)}
+    records = {uid: {"pose": torch.zeros(1, len(nodes) + 1, 7)} for uid in objects}
+    for uid, value in (("cube", pose), ("region", reference_pose)):
+        records[uid]["pose"][..., :3] = value[:, None, :3, 3]
+        records[uid]["pose"][..., 6] = 1.0
+    env = SimpleNamespace(
+        sim=SimpleNamespace(get_rigid_object=objects.get),
+        _traj_buffer={"states": {"rigid_objects": records}},
+        _traj_steps=torch.tensor([len(nodes)]),
+    )
+    registration = SimpleNamespace(
+        scene_binding=SimpleNamespace(
+            rigid_objects=tuple(
+                SimpleNamespace(entity_id=uid, simulation_uid=uid) for uid in objects
+            ),
+            containers=(
+                (
+                    SimpleNamespace(
+                        entity_id=placement["call"]["inside"], parent_id="region"
+                    ),
+                )
+                if relation == "inside"
+                else ()
+            ),
+            support_surfaces=(),
+        )
+    )
+    deployment = SimpleNamespace(integration=SimpleNamespace(registration=registration))
+    save_config(tmp_path / "task_spec.json", plan.task_spec.to_dict())
+    path = tmp_path / "task_program/constraints.json"
+    path.parent.mkdir(exist_ok=True)
+    save_config(path, constraints)
+    return plan, contract, runtime, program, constraints, env, deployment
+
+
+def _observe_placement(tmp_path, data):
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        capture_final_goals,
+        capture_placement_milestones,
+    )
+
+    plan, contract, runtime, program, constraints, env, deployment = data
+    final = capture_final_goals(
+        env, deployment, tmp_path, plan.graph, contract, 1, runtime=runtime
+    )
+    milestones = capture_placement_milestones(
+        env, deployment, plan.graph, contract, runtime, 1, spec=plan.task_spec
+    )
+    return evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=1,
+        run_id="placement-test",
+        program=program,
+        constraints=constraints,
+        placement_milestones=milestones,
+    )["environments"][0]
+
+
+def test_empty_legacy_presets_do_not_block_measured_e1_final_and_milestone(
+    tmp_path,
+) -> None:
+    result = _observe_placement(tmp_path, _placement_evidence(tmp_path))
+    assert result["certificate_ready"] is True
+    assert result["milestones"][0]["status"] == "satisfied"
+
+
+@pytest.mark.parametrize(
+    "changes", [{"x": 0.24}, {"z": 0.2}, {"z": 0.0}, {"hole": True}]
+)
+def test_full_footprint_height_and_actual_floor_holes_reject_bad_placement(
+    tmp_path, changes
+) -> None:
+    result = _observe_placement(tmp_path, _placement_evidence(tmp_path, **changes))
+    assert result["certificate_ready"] is False
+    assert result["goal"][0]["status"] == "failed"
+    assert result["milestones"][0]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing",
+        "wrong_object",
+        "wrong_env",
+        "stale",
+        "guard_only",
+        "constraint_present",
+    ],
+)
+def test_release_receipts_must_be_measured_current_and_exactly_bound(
+    tmp_path, damage
+) -> None:
+    data = _placement_evidence(tmp_path)
+    call = next(
+        s["metadata"]["runtime"]["calls"][0]
+        for s in data[2]["segments"]
+        if s["metadata"]["runtime"]["calls"]
+    )
+    proof = call["effects"][0]
+    if damage == "missing":
+        call["effects"] = []
+    elif damage == "wrong_object":
+        proof["effect_spec"]["state_expectations"][0]["object_id"] = "other"
+    elif damage == "wrong_env":
+        proof["effect_spec"]["env_ids"] = [7]
+    elif damage == "stale":
+        proof["evidence"]["source.constraint"]["timestamp"] = 0.04
+    elif damage == "guard_only":
+        proof["boundary"]["kind"] = "phase_gate"
+    else:
+        proof["evidence"]["source.constraint"]["values"] = [True]
+    assert _observe_placement(tmp_path, data)["certificate_ready"] is False
+
+
+def test_past_placement_milestone_does_not_certify_changed_final_native_pose(
+    tmp_path,
+) -> None:
+    data = _placement_evidence(tmp_path)
+    native = data[5].sim.get_rigid_object("cube")
+    moved = torch.eye(4)[None]
+    moved[:, :3, 3] = torch.tensor([0.5, 0.0, 0.045])
+    native.get_local_pose = lambda **_kwargs: moved
+    result = _observe_placement(tmp_path, data)
+    assert result["goal"][0]["status"] == "failed"
+    assert result["milestones"][0]["status"] == "satisfied"
+
+
+def test_missing_boundary_record_does_not_borrow_final_pose_for_milestone(
+    tmp_path,
+) -> None:
+    data = _placement_evidence(tmp_path)
+    data[5]._traj_steps = torch.tensor([0])
+    result = _observe_placement(tmp_path, data)
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["milestones"][0]["status"] == "unavailable"
+
+
+def test_scaled_native_geometry_is_batch_local_and_world_yaw_invariant(
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.placement_evidence import (
+        measure_planar_placement,
+    )
+
+    data = _placement_evidence(tmp_path)
+    sim = data[5].sim
+    for uid in ("cube", "region"):
+        native = sim.get_rigid_object(uid)
+        vertices, faces = native.get_vertices(), native.get_triangles()
+        native.get_vertices = lambda vertices=vertices, **_kwargs: vertices.expand(
+            2, -1, -1
+        )
+        native.get_triangles = lambda faces=faces, **_kwargs: faces.expand(2, -1, -1)
+    reference = torch.eye(4, dtype=torch.float64)[None].repeat(2, 1, 1)
+    reference[:, :3, :3] = reference.new_tensor(
+        [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    reference[:, :3, 3] = reference.new_tensor([1.0, 2.0, 0.5])
+    relative = torch.eye(4, dtype=torch.float64)[None].repeat(2, 1, 1)
+    relative[:, 2, 3] = 0.045
+    relative[1, 0, 3] = 0.24
+    accepted, _ = measure_planar_placement(
+        sim,
+        SimpleNamespace(simulation_uid="cube"),
+        SimpleNamespace(simulation_uid="region"),
+        reference @ relative,
+        reference,
+    )
+    assert accepted == [True, False]
+
+
+@pytest.mark.parametrize("damage", ["uid", "reference", "frame", "released", "summary"])
+def test_milestone_measurement_cannot_be_misattributed_or_summary_only(
+    tmp_path, damage
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        capture_final_goals,
+        capture_placement_milestones,
+    )
+
+    data = _placement_evidence(tmp_path)
+    plan, contract, runtime, program, constraints, env, deployment = data
+    final = capture_final_goals(
+        env, deployment, tmp_path, plan.graph, contract, 1, runtime=runtime
+    )
+    milestones = capture_placement_milestones(
+        env, deployment, plan.graph, contract, runtime, 1, spec=plan.task_spec
+    )
+    record = next(iter(milestones.values()))
+    if damage == "uid":
+        record["uid"] = "other"
+    elif damage == "summary":
+        record["measurements"] = {"success": True}
+    else:
+        key = {
+            "reference": "reference_uid",
+            "frame": "boundary_frames",
+            "released": "released",
+        }[damage]
+        record["measurements"][key] = {
+            "reference": "other",
+            "frame": [0],
+            "released": [False],
+        }[damage]
+    result = evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=1,
+        run_id="invalid-proof",
+        program=program,
+        constraints=constraints,
+        placement_milestones=milestones,
+    )["environments"][0]
+    assert result["certificate_ready"] is False
+
+
+def test_registered_e1_on_uses_same_measured_geometry_not_only_stability(
+    tmp_path,
+) -> None:
+    assert (
+        _observe_placement(tmp_path, _placement_evidence(tmp_path, relation="on"))[
+            "certificate_ready"
+        ]
+        is True
+    )
+
+
+def test_later_holding_same_object_contradicts_final_release(tmp_path) -> None:
+    data = _placement_evidence(tmp_path)
+    data[2]["segments"][-1]["metadata"]["runtime"]["task_state"]["held_objects"] = [
+        {"object_id": "cube", "active_mask": [True]}
+    ]
+    result = _observe_placement(tmp_path, data)
+    assert result["goal"][0]["status"] == "failed"
+
+
+def test_superseded_placement_is_measured_at_its_own_milestone_reference(
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
+    from .test_task_spec_generation import candidate, selector, step
+
+    data = list(_placement_evidence(tmp_path))
+    source = candidate(
+        step(
+            "E1",
+            "cube",
+            target=selector("first"),
+            relation="inside",
+            required_arm="left_arm",
+        ),
+        step(
+            "E1",
+            "cube",
+            target=selector("second"),
+            relation="inside",
+            required_arm="left_arm",
+        ),
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": source["draft"]["task_id"],
+        "candidate_id": source["candidate_id"],
+        "role_bindings": {},
+        "reference_bindings": {
+            "step_01.object": ["cube"],
+            "step_01.target": ["region"],
+            "step_02.object": ["cube"],
+            "step_02.target": ["second"],
+        },
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {"runtime_uid": uid, "init_pos": [0.0, 0.0, 0.7], "init_rot": [0.0] * 3}
+            for uid in ("cube", "region", "second")
+        ],
+    )
+    original = deepcopy(data[2]["segments"])
+    nodes = plan.graph["nodes"]
+    segments = []
+    for i, node in enumerate(nodes):
+        segment = deepcopy(original[i % 3])
+        segment.update(
+            name=node["id"],
+            start_step=i,
+            end_step=i + 1,
+            start_steps=[i],
+            end_steps=[i + 1],
+        )
+        segments.append(segment)
+    program = {"program": {"items": [{"name": n["id"], "post": []} for n in nodes]}}
+    data[0], data[2], data[3] = plan, {"segments": segments}, program
+    data[1] = {
+        "coverage": _coverage(plan),
+        "task_spec_digest": canonical_hash(plan.task_spec.to_dict()),
+        "graph_digest": canonical_hash(plan.graph),
+        "program_digest": canonical_hash(program),
+        "constraints_digest": canonical_hash(data[4]),
+    }
+    env, registration = data[5], data[6].integration.registration
+    first = env.sim.get_rigid_object("region")
+    second_pose = torch.eye(4)[None]
+    second_pose[:, 0, 3] = 1.0
+    second = SimpleNamespace(
+        get_local_pose=lambda **_kw: second_pose,
+        get_vertices=first.get_vertices,
+        get_triangles=first.get_triangles,
+    )
+    objects = {uid: env.sim.get_rigid_object(uid) for uid in ("cube", "region")}
+    objects["second"] = second
+    env.sim.get_rigid_object = objects.get
+    final_pose = torch.eye(4)[None]
+    final_pose[:, :3, 3] = torch.tensor([1.0, 0.0, 0.045])
+    objects["cube"].get_local_pose = lambda **_kw: final_pose
+    records = {uid: {"pose": torch.zeros(1, 7, 7)} for uid in objects}
+    for value in records.values():
+        value["pose"][..., 6] = 1.0
+    records["cube"]["pose"][..., 2] = 0.045
+    records["cube"]["pose"][:, 4:, 0] = 1.0
+    records["second"]["pose"][..., 0] = 1.0
+    env._traj_buffer = {"states": {"rigid_objects": records}}
+    env._traj_steps = torch.tensor([6])
+    registration.scene_binding.rigid_objects += (
+        SimpleNamespace(entity_id="second", simulation_uid="second"),
+    )
+    registration.scene_binding.containers = tuple(
+        SimpleNamespace(
+            entity_id=n["call"]["inside"], parent_id="region" if i == 1 else "second"
+        )
+        for i, n in enumerate(nodes)
+        if n["call"]["kind"] == "place"
+    )
+    save_config(tmp_path / "task_spec.json", plan.task_spec.to_dict())
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is True
+    assert [v["status"] for v in result["milestones"]] == ["satisfied", "satisfied"]

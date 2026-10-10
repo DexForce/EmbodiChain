@@ -197,6 +197,7 @@ def execute_bundle(
                 from embodichain.gen_sim.task_spec import TaskSpec
                 from ._task_program.task_spec_runtime import (
                     capture_final_goals,
+                    capture_placement_milestones,
                     evaluate_runtime_evidence,
                 )
 
@@ -209,9 +210,19 @@ def execute_bundle(
                         graph,
                         task_spec_contract,
                         len(result.success),
+                        runtime=result_metadata,
                     )
                 except (AttributeError, TypeError, ValueError, KeyError) as error:
                     final_goals = {p.id: {"unavailable": str(error)} for p in spec.goal}
+                placement_milestones = capture_placement_milestones(
+                    env,
+                    deployment,
+                    graph,
+                    task_spec_contract,
+                    result_metadata,
+                    len(result.success),
+                    spec=spec,
+                )
                 evaluation = evaluate_runtime_evidence(
                     spec,
                     task_spec_contract,
@@ -222,6 +233,7 @@ def execute_bundle(
                     run_id=output.as_posix(),
                     program=load_config(program_path),
                     constraints=load_config(root / "task_program/constraints.json"),
+                    placement_milestones=placement_milestones,
                 )
                 result_metadata["task_spec_evaluation"] = evaluation
                 (output / "task_spec_evaluation.json").write_text(
