@@ -55,6 +55,12 @@ and exits nonzero if any requested asset failed.
 `_ensure_extract()` copies non-ZIP downloads into the extract tree
 when needed. Solver/planner checkpoint download helpers can have separate paths.
 
+Archive authors must emit explicit directory entries before nested files:
+Open3D's ZIP extractor does not create missing parent directories. The
+`_write_archive()` helper in `scripts/tools/prepare_pour_water_assets.py` is a
+tested reference. Qualify new bundles through `get_data_path()` with an empty
+cache, rather than relying only on Python's ZIP extraction or existing files.
+
 ## Pretrained policy bundles
 
 `eval-policy --pretrained` reads the official model index at a pinned HF commit,

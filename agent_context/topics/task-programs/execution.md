@@ -32,6 +32,16 @@ qvel targets, requires velocity-bearing joint payloads, and assigns zero qvel to
 idle, wait, inactive-row, and abort-safe holds. This changes neither Task Program
 language nor the policy action space.
 
+During normal joint-position frames, the bridge retains the last issued qpos
+targets for unaddressed joints on active rows, keyed by stable environment ID.
+The first frame initializes them from measured qpos; new episode encoders start
+fresh. Inactive rows use measured holds and discard retained targets. Explicit
+safe-stop holds also use measured qpos and rebase subsequent targets. Do not
+replace normal active holds with fresh observations on every frame: gravity
+deflection would repeatedly become a new position target.
+Retained targets use batched tensor storage indexed by stable IDs; do not
+introduce per-environment host scalar reads in this control-frame path.
+
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner
 holds, feedback settling, post-policies, or parallel execution. It links only

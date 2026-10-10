@@ -2449,3 +2449,9 @@ kernel policy; callers log and apply that seed to their own generators.
 .. autofunction:: add_seed_arg_to_parser
 
 .. autofunction:: resolve_seed
+
+
+.. toctree::
+   :hidden:
+
+   object_asset_bundles
