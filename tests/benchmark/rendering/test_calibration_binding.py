@@ -43,7 +43,10 @@ from scripts.benchmark.core.artifacts import (
 )
 from scripts.benchmark.rendering import evaluate, quality, reference
 from scripts.benchmark.rendering.calibration import create_calibration_receipt
-from scripts.benchmark.rendering.calibration_binding import bind_calibration_receipt
+from scripts.benchmark.rendering.calibration_binding import (
+    _binding_records,
+    bind_calibration_receipt,
+)
 from scripts.benchmark.rendering.formal import (
     RenderCase,
     render_profile,
@@ -57,6 +60,72 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _duplicate_binding_fixture(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = write_json(root / "proof/reference_bindings.json", [{"fixture": "binding"}])
+    row = {
+        key: key + "-fixture"
+        for key in (
+            "run_id",
+            "backend",
+            "case_id",
+            "config_sha256",
+            "scene_sha256",
+            "view_sha256",
+            "profile_sha256",
+        )
+    }
+    artifact = {
+        "path": path.relative_to(root).as_posix(),
+        "sha256": _sha(path),
+        "kind": "quality_detail",
+    }
+    record = {
+        **row,
+        "artifacts": [artifact, {**artifact, "kind": "reference_precision_bindings"}],
+    }
+    return row, record
+
+
+@pytest.mark.parametrize("resolved_alias", [False, True])
+def test_identical_quality_and_precision_roles_resolve_to_one_binding_file(
+    tmp_path: Path, resolved_alias: bool
+) -> None:
+    row, record = _duplicate_binding_fixture(tmp_path)
+    if resolved_alias:
+        record["artifacts"][1]["path"] = "proof/../proof/reference_bindings.json"
+    before = deepcopy(record)
+    bindings, artifact, retained = _binding_records(tmp_path, row, [record])
+    assert bindings == [{"fixture": "binding"}]
+    assert artifact["path"] == "proof/reference_bindings.json"
+    assert retained == before == record
+
+
+@pytest.mark.parametrize("bad_index", [0, 1])
+def test_every_duplicate_binding_descriptor_must_verify_its_bytes(
+    tmp_path: Path, bad_index: int
+) -> None:
+    row, record = _duplicate_binding_fixture(tmp_path)
+    record["artifacts"][bad_index]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        _binding_records(tmp_path, row, [record])
+
+
+@pytest.mark.parametrize("same_bytes", [False, True])
+def test_distinct_binding_files_remain_ambiguous_even_when_bytes_match(
+    tmp_path: Path, same_bytes: bool
+) -> None:
+    row, record = _duplicate_binding_fixture(tmp_path)
+    other = write_json(
+        tmp_path / "other/reference_bindings.json",
+        [{"fixture": "binding" if same_bytes else "different"}],
+    )
+    record["artifacts"][1].update(
+        path=other.relative_to(tmp_path).as_posix(), sha256=_sha(other)
+    )
+    with pytest.raises(ValueError, match="Expected one checksummed"):
+        _binding_records(tmp_path, row, [record])
 
 
 @pytest.fixture(scope="module")
@@ -221,11 +290,17 @@ def _target(
     return {"row": row, "run": run, "references": refs, "aliases": aliases}
 
 
+@pytest.mark.parametrize("precision_role", [False, True])
 def test_import_is_byte_preserving_cross_scene_and_does_not_qualify_target_images(
-    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, precision_role: bool
 ) -> None:
     target = tmp_path / "target"
     fixture = _target(target, monkeypatch)
+    if precision_role:
+        document = read_json_object(target / "quality.json")
+        artifacts = document["runs"][0]["artifacts"]
+        artifacts.append({**artifacts[0], "kind": "reference_precision_bindings"})
+        write_json(target / "quality.json", document)
     source_receipt = read_json_object(source)
     source_files = {
         item["path"]: (source.parent / item["path"]).read_bytes()

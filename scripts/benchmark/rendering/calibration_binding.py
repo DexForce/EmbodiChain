@@ -261,11 +261,16 @@ def _binding_records(
         for artifact in record.get("artifacts", [])
         if Path(artifact.get("path", "")).name == "reference_bindings.json"
     ]
-    if len(artifacts) != 1:
+    # One file may carry both a general quality role and a precision-selection
+    # role. Verify every descriptor before collapsing only identical identities.
+    identities = {
+        (_verify(root, artifact), artifact["sha256"]) for artifact in artifacts
+    }
+    if len(identities) != 1:
         raise ValueError(
             "Expected one checksummed reference_bindings.json for the target run"
         )
-    path = _verify(root, artifacts[0])
+    path, _ = next(iter(identities))
     bindings = read_json(path)
     if not isinstance(bindings, list):
         raise ValueError("reference_bindings.json must contain a list")
