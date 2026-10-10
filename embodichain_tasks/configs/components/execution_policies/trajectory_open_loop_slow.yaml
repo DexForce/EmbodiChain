@@ -5,6 +5,8 @@ requires:
   embodiment_contract: single_arm_parallel_gripper
 
 motion:
+  strategy: ik_interp
+  velocity_targets: auto
   # At the pour environment's 100 Hz cadence, arm moves keep their 4.8 s
   # duration while position targets advance smoothly at every physics step.
   sample_count: 480

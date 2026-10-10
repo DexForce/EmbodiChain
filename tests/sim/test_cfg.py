@@ -1004,6 +1004,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,
+        "newton_gravity_compensation": None,
     }
     assert type(restored_root) is ArticulationRootPropertiesCfg
 
@@ -1078,6 +1079,7 @@ def test_newton_physics_inherits_common_gravity_and_collision_config(
     contact_distance: float,
 ) -> None:
     cfg = NewtonPhysicsCfg(
+        solver_cfg=None,
         gravity=[0.0, 0.0, -1.5],
         collision_cfg=NewtonCollisionPipelineCfg(
             broad_phase="sap",

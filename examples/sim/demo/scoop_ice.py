@@ -79,9 +79,12 @@ def initialize_simulation(args):
     """
     physics_cfg = physics_cfg_for_backend(args.physics)
     if args.physics == "newton":
-        # Hundreds of free bodies make dense Newton Hessian factorization
-        # expensive. CG avoids that factorization while retaining contacts.
-        physics_cfg.solver_cfg = {"solver_type": "mujoco_warp", "solver": "cg"}
+        physics_cfg.solver_cfg = {
+            "solver_type": "dexuni",
+            "mujoco_options": {"solver": "cg"},
+            # Dense ice contacts exceed VBD's default per-body capacity of 64.
+            "vbd_options": {"rigid_body_contact_buffer_size": 256},
+        }
     config = SimulationManagerCfg(
         headless=True,
         device=args.device,

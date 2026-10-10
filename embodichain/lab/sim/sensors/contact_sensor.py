@@ -111,7 +111,9 @@ class ContactSensor(BaseSensor):
 
     The sensor preserves every backend-emitted contact row that passes the
     backend's positive-impulse filter. Geometry-only Newton solvers retain all
-    candidate contact rows.
+    candidate rigid-contact rows. Inspect :attr:`contact_capabilities` before
+    interpreting ``impulse`` or ``friction``: DexUni paths other than
+    ``pure_mujoco`` do not report either quantity.
     """
 
     SUPPORTED_DATA_TYPES = [

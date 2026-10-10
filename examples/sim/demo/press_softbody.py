@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
 import numpy as np
 import torch
-from dexsim.utility.path import get_resources_data_path
+from embodichain.data import get_data_path
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
@@ -98,22 +98,26 @@ def initialize_simulation(args: argparse.Namespace) -> SimulationManager:
             num_substeps=NUM_SUBSTEPS,
             solver_cfg={
                 "solver_type": "dexuni",
-                "iterations": SOLVER_ITERATIONS,
-                "particle_enable_self_contact": False,
-                "particle_self_contact_radius": 0.005,
-                "particle_self_contact_margin": 0.005,
-                "particle_topological_contact_filter_threshold": 3,
-                "particle_enable_tile_solve": True,
-                "rigid_body_particle_contact_buffer_size": 512,
-                "rigid_contact_k_start": SOFT_CONTACT_KE,
-                "rigid_contact_max": 0,
-                "soft_contact_margin": SOFT_CONTACT_MARGIN,
+                # DexUni keeps solver-specific expert options in namespaced
+                # mappings.  The kinematic trajectory owns the robot joints.
+                "joint_mode": "kinematic",
+                "contact_mode": "soft",
+                "vbd_options": {
+                    "iterations": SOLVER_ITERATIONS,
+                    "particle_enable_self_contact": False,
+                    "particle_self_contact_radius": 0.005,
+                    "particle_self_contact_margin": 0.005,
+                    "particle_topological_contact_filter_threshold": 3,
+                    "particle_enable_tile_solve": True,
+                    "rigid_body_particle_contact_buffer_size": 512,
+                    "rigid_contact_k_start": SOFT_CONTACT_KE,
+                },
+                "collision_options": {
+                    "soft_contact_margin": SOFT_CONTACT_MARGIN,
+                },
                 "soft_contact_ke": SOFT_CONTACT_KE,
                 "soft_contact_kd": SOFT_CONTACT_KD,
                 "soft_contact_mu": SOFT_CONTACT_MU,
-                # The registered trajectory updates the robot kinematically at
-                # every Newton substep; DexUni only needs to solve the soft body.
-                "step_rigid_bodies": False,
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,

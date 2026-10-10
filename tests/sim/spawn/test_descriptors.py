@@ -1138,6 +1138,143 @@ def test_articulation_constructor_defers_newton_properties_until_configure() -> 
     assert contact.ke is None
 
 
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_articulation_newton_gravity_compensation_is_creation_intent(mode) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.urdf",
+            "asset_physics_mode": mode,
+            "root_props": {"newton_gravity_compensation": 1.0},
+        }
+    )
+    descriptor = articulation_desc_from_cfg(cfg, newton_solver_type="dexuni")
+    assert descriptor.newton_gravity_compensation == 1.0
+
+    resolved = _resolved_articulation_desc()
+    configure_articulation_desc(resolved, cfg, newton_solver_type="dexuni")
+    assert resolved.newton_gravity_compensation == 1.0
+
+
+def test_articulation_unconfigured_gravity_compensation_preserves_source() -> None:
+    descriptor = _resolved_articulation_desc()
+    descriptor.newton_gravity_compensation = 0.5
+    configure_articulation_desc(
+        descriptor, ArticulationCfg(), newton_solver_type="dexuni"
+    )
+    assert descriptor.newton_gravity_compensation == 0.5
+
+
+@pytest.mark.parametrize("mode", ["preserve", "overlay"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_usd_articulation_forwards_gravity_compensation(monkeypatch, mode) -> None:
+    source = _resolved_articulation_desc()
+    monkeypatch.setattr(
+        "embodichain.lab.sim.spawn.usd._parse_singleton",
+        lambda *_args: (SimpleNamespace(materials={}), source),
+    )
+    cfg = ArticulationCfg.from_dict(
+        {
+            "uid": "robot",
+            "fpath": "robot.usd",
+            "asset_physics_mode": mode,
+            "root_props": {"newton_gravity_compensation": 0.5},
+        }
+    )
+    descriptor, _ = articulation_desc_from_usd(cfg, newton_solver_type="dexuni")
+    assert descriptor.newton_gravity_compensation == 0.5
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf")])
+def test_articulation_gravity_compensation_rejects_invalid_values(value) -> None:
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = value
+    with pytest.raises(ValueError, match="newton_gravity_compensation"):
+        articulation_desc_from_cfg(
+            cfg, source_path="robot.urdf", newton_solver_type="dexuni"
+        )
+
+
+def test_articulation_gravity_compensation_rejects_default_backend() -> None:
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = 1.0
+    with pytest.raises(ValueError, match="Newton backend"):
+        articulation_desc_from_cfg(cfg, source_path="robot.urdf")
+
+
+def test_gravity_compensation_requires_native_descriptor_support(monkeypatch) -> None:
+    monkeypatch.delattr(ArticulationDesc, "newton_gravity_compensation", raising=False)
+    cfg = ArticulationCfg()
+    cfg.root_props.newton_gravity_compensation = 1.0
+    with pytest.raises(RuntimeError, match="requires DexSim dev"):
+        articulation_desc_from_cfg(
+            cfg, source_path="robot.urdf", newton_solver_type="dexuni"
+        )
+
+
+@pytest.mark.parametrize("target_mode", ["position_velocity", "none"])
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_newton_passive_damping_is_independent_of_drive_gains(target_mode) -> None:
+    cfg = ArticulationCfg.from_dict(
+        {
+            "asset_physics_mode": "overlay",
+            "joint_drive_props": {
+                "backend": "newton",
+                "target_mode": target_mode,
+                "stiffness": 12.0,
+                "damping": 4.0,
+                "passive_damping": {"arm_.*": 50.0},
+            },
+        }
+    )
+    descriptor = _resolved_articulation_desc()
+    configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
+    joint = descriptor.get_joint_desc("arm_joint")
+    assert joint.newton.damping == 50.0
+    expected_kd = 0.0 if target_mode == "none" else 4.0
+    assert joint.newton.target_kd == expected_kd
+    assert joint.dexsim.damping == expected_kd
+    round_trip = JointDrivePropertiesCfg.from_dict(cfg.joint_drive_props.to_dict())
+    assert round_trip.passive_damping == {"arm_.*": 50.0}
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+def test_newton_passive_damping_rejects_invalid_values(value) -> None:
+    cfg = ArticulationCfg(asset_physics_mode="overlay")
+    cfg.joint_drive_props = NewtonJointDrivePropertiesCfg()
+    cfg.joint_drive_props.passive_damping = value
+    with pytest.raises(ValueError, match="passive_damping"):
+        configure_articulation_desc(
+            _resolved_articulation_desc(), cfg, newton_solver_type="dexuni"
+        )
+
+
+def test_newton_passive_damping_rejects_default_backend() -> None:
+    cfg = ArticulationCfg(asset_physics_mode="overlay")
+    cfg.joint_drive_props = NewtonJointDrivePropertiesCfg()
+    cfg.joint_drive_props.passive_damping = 50.0
+    with pytest.raises(ValueError, match="Newton backend"):
+        configure_articulation_desc(_resolved_articulation_desc(), cfg)
+
+
+def test_passive_damping_rejects_native_merges_that_discard_it(monkeypatch) -> None:
+    cfg = ArticulationCfg(
+        asset_physics_mode="overlay",
+        joint_drive_props=NewtonJointDrivePropertiesCfg(passive_damping=50.0),
+    )
+    descriptor = _resolved_articulation_desc()
+    set_properties = descriptor.set_joint_properties
+
+    def discard_damping(*args, **kwargs):
+        set_properties(*args, **kwargs)
+        descriptor.get_joint_desc("arm_joint").newton.damping = None
+
+    monkeypatch.setattr(descriptor, "set_joint_properties", discard_damping)
+    with pytest.raises(RuntimeError, match="did not retain passive_damping"):
+        configure_articulation_desc(descriptor, cfg, newton_solver_type="dexuni")
+
+
 @pytest.mark.parametrize("solver_type", [None, "auto", "mujoco_warp"])
 @pytest.mark.parametrize("mode", ["preserve", "overlay"])
 @pytest.mark.parametrize("source_gap", [None, 0.0, 0.025])
