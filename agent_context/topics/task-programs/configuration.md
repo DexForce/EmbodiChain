@@ -81,6 +81,14 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+Grasp generators select toolkit-owned geometry with a string `model` ID;
+an inline mapping is a custom calibration and its `model_id` does not trigger
+catalog lookup. The catalog is owned by
+`embodichain/toolkits/graspkit/pose_generator.py`, with source provenance in
+`embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
+collision fields to use GraspKit defaults; task-specific tuning belongs in
+the allowlisted `grasp_pose_generator_overrides` mapping.
+
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are
 separate identity domains and do not imply a skill-profile version.

@@ -43,9 +43,4 @@ skill_profile:
     grasp_pose_generators:
       hand:
         kind: antipodal_parallel_jaw
-        sample_count: 1000
-        opening_margin: 0.002
-        point_sample_density: 0.012
-        filter_ground_collision: false
-        model:
-          model_id: franka_panda_hand
+        model: franka_panda_hand
