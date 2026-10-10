@@ -198,6 +198,53 @@ def test_validate_reads_real_parquet_in_small_batches(tmp_path: Path) -> None:
     }
 
 
+@pytest.mark.parametrize("shape", [["3"], [True], [0], [], None, 3])
+def test_malformed_action_shape_returns_diagnostics(tmp_path: Path, shape: Any) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["action"]["shape"] = shape
+    _write_json(info_path, info)
+
+    report = validate_dataset(root)
+
+    assert not report.ok
+    assert "feature_shape" in {issue.code for issue in report.issues}
+
+
+def test_malformed_action_shape_cli_writes_report(tmp_path: Path) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    info_path = root / "meta/info.json"
+    info = json.loads(info_path.read_text())
+    info["features"]["action"]["shape"] = ["3"]
+    _write_json(info_path, info)
+    output = tmp_path / "report.json"
+
+    assert main(["validate", str(root), "--output", str(output)]) == 1
+    report = json.loads(output.read_text())
+    assert not report["ok"]
+    assert any(issue["code"] == "feature_shape" for issue in report["issues"])
+
+
+def test_interleaved_episode_frames_are_rejected(tmp_path: Path) -> None:
+    root, frames, _ = _dataset(tmp_path / "dataset")
+    frames = [frames[index] for index in (0, 3, 1, 4, 2, 5)]
+    for index, frame in enumerate(frames):
+        frame["index"] = index
+    _write_frames(root, frames)
+    episode_path = root / "meta/episodes/chunk-000/file-000.parquet"
+    episodes = pq.read_table(episode_path).to_pylist()
+    for index, episode in enumerate(episodes):
+        episode["dataset_from_index"] = index
+        episode["dataset_to_index"] = index + 5
+    pq.write_table(pa.Table.from_pylist(episodes), episode_path)
+
+    report = validate_dataset(root, batch_size=2)
+
+    assert not report.ok
+    assert "episode_range" in {issue.code for issue in report.issues}
+
+
 @pytest.mark.parametrize(
     ("column", "value", "code"),
     [
@@ -287,6 +334,9 @@ def _depth_metadata(root: Path) -> dict[str, Any]:
                 "video.output_unit": "m",
                 "video.depth_min": 0.01,
                 "video.depth_max": 10.0,
+                "video.shift": 3.5,
+                "video.use_log": True,
+                "video.pix_fmt": "gray12le",
                 "episodes": {
                     str(index): {
                         "frame_count": EPISODE_LENGTH,
@@ -310,6 +360,40 @@ def test_depth_metadata_and_optional_media_presence(tmp_path: Path) -> None:
     depth["sensors"]["camera"]["episodes"]["0"]["frame_count"] = 1
     _write_json(root / "depth_meta.json", depth)
     assert {"depth_unit", "depth_length"} <= _codes(root)
+
+
+@pytest.mark.parametrize("field", ["video.shift", "video.use_log", "video.pix_fmt"])
+def test_depth_requires_decoder_parameters(tmp_path: Path, field: str) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    depth = _depth_metadata(root)
+    del depth["sensors"]["camera"][field]
+    _write_json(root / "depth_meta.json", depth)
+
+    report = validate_dataset(root)
+
+    assert not report.ok
+    assert "depth_quantization" in {issue.code for issue in report.issues}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("video.shift", float("nan")),
+        ("video.shift", True),
+        ("video.shift", -0.01),  # log(depth_min + shift) is undefined.
+        ("video.use_log", "true"),
+        ("video.pix_fmt", "rgb24"),
+    ],
+)
+def test_depth_rejects_invalid_decoder_parameters(
+    tmp_path: Path, field: str, value: Any
+) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    depth = _depth_metadata(root)
+    depth["sensors"]["camera"][field] = value
+    _write_json(root / "depth_meta.json", depth)
+
+    assert "depth_quantization" in _codes(root)
 
 
 @pytest.mark.parametrize(
@@ -359,8 +443,7 @@ def _video(path: Path, count: int) -> None:
             container.mux(packet)
 
 
-def test_media_decode_validates_shared_v3_video_frame_ranges(tmp_path: Path) -> None:
-    root, _, _ = _dataset(tmp_path / "dataset")
+def _rgb_video(root: Path) -> tuple[Path, Path]:
     info_path = root / "meta/info.json"
     info = json.loads(info_path.read_text())
     key = "observation.images.camera"
@@ -380,9 +463,35 @@ def test_media_decode_validates_shared_v3_video_frame_ranges(tmp_path: Path) -> 
     pq.write_table(pa.Table.from_pylist(episodes), episode_path)
     video = root / f"videos/{key}/chunk-000/file-000.mp4"
     _video(video, 2 * EPISODE_LENGTH)
+    return video, episode_path
+
+
+def test_media_decode_validates_shared_v3_video_frame_ranges(tmp_path: Path) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    video, _ = _rgb_video(root)
     assert validate_dataset(root, media_frame_counts=True).ok
     _video(video, 2 * EPISODE_LENGTH - 1)
     assert "video_length" in _codes(root, media_frame_counts=True)
+
+
+@pytest.mark.parametrize(
+    ("offset", "valid"), [(0.0, True), (5e-6, True), (0.05, False)]
+)
+def test_media_offsets_must_match_decoded_timestamps(
+    tmp_path: Path, offset: float, valid: bool
+) -> None:
+    root, _, _ = _dataset(tmp_path / "dataset")
+    _, episode_path = _rgb_video(root)
+    episodes = pq.read_table(episode_path).to_pylist()
+    key = "observation.images.camera"
+    episodes[0][f"videos/{key}/from_timestamp"] = offset
+    episodes[0][f"videos/{key}/to_timestamp"] = EPISODE_LENGTH / FPS + offset
+    pq.write_table(pa.Table.from_pylist(episodes), episode_path)
+
+    report = validate_dataset(root, media_frame_counts=True)
+
+    assert report.ok is valid
+    assert ("video_timestamp" in {issue.code for issue in report.issues}) is not valid
 
 
 def _split_for(manifest: dict[str, Any], episode: int) -> str:

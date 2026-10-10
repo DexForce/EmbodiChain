@@ -195,6 +195,54 @@ def test_official_reader_and_recipe_preserve_both_instruction_levels(
     )
 
 
+def test_long_episode_language_transition_uses_stored_timestamp(tmp_path: Path) -> None:
+    # At 30 FPS, frame 1002's float32 timestamp exceeds 1002 / 30 by >1 us.
+    fps, length, transition = 30, 1005, 1002
+    root = tmp_path / "source"
+    source = LeRobotDataset.create(
+        "local/source",
+        fps=fps,
+        root=root,
+        features={"action": {"dtype": "float32", "shape": (2,), "names": ["a", "b"]}},
+        use_videos=False,
+    )
+    for frame in range(length):
+        source.add_frame(
+            {"action": np.array([frame, 0], dtype=np.float32), "task": OVERALL_TASK}
+        )
+    source.save_episode()
+    source.finalize()
+    record = {
+        "lerobot_episode_index": 0,
+        "instruction": OVERALL_TASK,
+        "length": length,
+        "segments": [
+            {"start_step": 0, "end_step": transition, "instruction": SUBTASKS[0]},
+            {"start_step": transition, "end_step": length, "instruction": SUBTASKS[1]},
+        ],
+    }
+    (root / "meta/embodichain_episodes.jsonl").write_text(
+        json.dumps(record) + "\n", encoding="utf-8"
+    )
+    destination = tmp_path / "converted"
+
+    export_dataset(root, destination)
+
+    dataset = LeRobotDataset("local/output", root=destination)
+    recipe = TrainingRecipe.from_yaml(destination / "meta/task_subtask_recipe.json")
+    for offset, expected in ((transition - 1, SUBTASKS[0]), (transition, SUBTASKS[1])):
+        sample = dataset[offset]
+        rendered = render_sample(
+            recipe=recipe,
+            persistent=sample["language_persistent"],
+            events=None,
+            t=float(sample["timestamp"]),
+            sample_idx=offset,
+            task=sample["task"],
+        )
+        assert rendered["messages"][-1]["content"] == expected
+
+
 @pytest.mark.parametrize("use_log", [True, False])
 def test_depth_reads_in_metres_and_millimetres_with_official_stats(
     source: Path, tmp_path: Path, use_log: bool

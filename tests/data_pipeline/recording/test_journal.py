@@ -52,12 +52,25 @@ def make_recording(tmp_path: Path, *, frames: int = 2) -> tuple[RecordingJournal
     if frames:
         (root / "data/chunk-000").mkdir(parents=True)
         parquet.write_table(
-            arrow.table({"episode_index": [0] * frames}),
+            arrow.table(
+                {
+                    "episode_index": [0] * frames,
+                    "frame_index": list(range(frames)),
+                    "index": list(range(frames)),
+                }
+            ),
             root / "data/chunk-000/file-000.parquet",
         )
         (root / "meta/episodes/chunk-000").mkdir(parents=True)
         parquet.write_table(
-            arrow.table({"episode_index": [0], "length": [frames]}),
+            arrow.table(
+                {
+                    "episode_index": [0],
+                    "length": [frames],
+                    "dataset_from_index": [0],
+                    "dataset_to_index": [frames],
+                }
+            ),
             root / "meta/episodes/chunk-000/file-000.parquet",
         )
     return RecordingJournal(root), sidecar
@@ -205,6 +218,99 @@ def test_conflicting_metadata_is_not_overwritten(tmp_path: Path) -> None:
 
     assert report["commits"][0]["status"] == "unresolved"
     assert json.loads(path.read_text()) == conflicting
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_recovery_rejects_sidecar_index_owned_by_another_identity(
+    tmp_path: Path, legacy: bool
+) -> None:
+    journal, sidecar = make_recording(tmp_path)
+    identity = sidecar["episode_uuid"]
+    journal.prepare(sidecar)
+    advance_to(journal, identity, "depth_committed")
+    conflicting = dict(sidecar, episode_uuid=str(uuid4()))
+    if legacy:
+        conflicting.pop("episode_uuid")
+    path = journal.root / "meta/embodichain_episodes.jsonl"
+    path.write_text(json.dumps(conflicting) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["commits"][0]["status"] == "unresolved"
+    assert report["repaired"] == []
+    assert path.read_bytes() == before
+    assert journal.get(identity)["phase"] == "depth_committed"
+
+
+def test_recovery_rejects_duplicate_sidecar_indices(tmp_path: Path) -> None:
+    journal, sidecar = make_recording(tmp_path)
+    journal.prepare(sidecar)
+    advance_to(journal, sidecar["episode_uuid"], "complete")
+    path = journal.root / "meta/embodichain_episodes.jsonl"
+    path.write_text(
+        json.dumps(sidecar)
+        + "\n"
+        + json.dumps(dict(sidecar, episode_uuid=str(uuid4())))
+        + "\n",
+        encoding="utf-8",
+    )
+    before = path.read_bytes()
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["errors"]
+    assert report["repaired"] == []
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("column", ["frame_index", "index"])
+def test_recovery_rejects_corrupt_frame_indices(tmp_path: Path, column: str) -> None:
+    journal, sidecar = make_recording(tmp_path)
+    identity = sidecar["episode_uuid"]
+    journal.prepare(sidecar)
+    advance_to(journal, identity, "depth_committed")
+    path = journal.root / "data/chunk-000/file-000.parquet"
+    table = parquet.read_table(path)
+    table = table.set_column(
+        table.schema.get_field_index(column), column, arrow.array([0, 0])
+    )
+    parquet.write_table(table, path)
+    before = path.read_bytes()
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["commits"][0]["status"] == "unresolved"
+    assert report["repaired"] == []
+    assert not (journal.root / "meta/embodichain_episodes.jsonl").exists()
+    assert journal.get(identity)["phase"] == "depth_committed"
+    assert path.read_bytes() == before
+
+
+def test_recovery_rejects_inconsistent_sdk_frame_range(tmp_path: Path) -> None:
+    journal, sidecar = make_recording(tmp_path)
+    identity = sidecar["episode_uuid"]
+    journal.prepare(sidecar)
+    advance_to(journal, identity, "depth_committed")
+    path = journal.root / "meta/episodes/chunk-000/file-000.parquet"
+    table = parquet.read_table(path)
+    table = table.set_column(
+        table.schema.get_field_index("dataset_to_index"),
+        "dataset_to_index",
+        arrow.array([3]),
+    )
+    parquet.write_table(table, path)
+
+    report = recover_recording(journal.root, repair=True)
+
+    assert not report["ok"]
+    assert report["commits"][0]["status"] == "unresolved"
+    assert report["repaired"] == []
+    assert not (journal.root / "meta/embodichain_episodes.jsonl").exists()
+    assert journal.get(identity)["phase"] == "depth_committed"
 
 
 def test_journal_identity_and_phase_cannot_be_used_as_paths(tmp_path: Path) -> None:

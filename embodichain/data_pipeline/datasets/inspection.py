@@ -378,6 +378,8 @@ def _segments(
 def _action_slices(
     features: Mapping[str, Any], report: DatasetValidationReport
 ) -> list[tuple[int, int]]:
+    if "action" not in features:
+        return []
     action = features.get("action", {})
     info = action.get("info", {})
     if not isinstance(info, dict):
@@ -399,7 +401,19 @@ def _action_slices(
         return []
     terms = info.get("embodichain.action_terms", contract.get("action_terms", []))
     shape = action.get("shape", [])
-    width = shape[0] if isinstance(shape, (list, tuple)) and len(shape) == 1 else None
+    if (
+        not isinstance(shape, (list, tuple))
+        or not shape
+        or any(type(dimension) is not int or dimension <= 0 for dimension in shape)
+    ):
+        _issue(
+            report,
+            "feature_shape",
+            "meta/info.json/action",
+            "Action shape must contain positive integer dimensions",
+        )
+        return []
+    width = shape[0] if len(shape) == 1 else None
     slices: list[tuple[int, int]] = []
     previous_stop = 0
     if not isinstance(terms, list):
@@ -567,7 +581,10 @@ def _media_path(
 
 
 def _video_count(
-    path: Path, report: DatasetValidationReport
+    path: Path,
+    report: DatasetValidationReport,
+    *,
+    timestamps: Sequence[tuple[float, str]] = (),
 ) -> tuple[int, float] | None:
     try:
         import av
@@ -576,7 +593,41 @@ def _video_count(
             stream = next(iter(container.streams.video), None)
             if stream is None:
                 raise ValueError("No video stream")
-            frames = sum(1 for _ in container.decode(stream))
+            pending = iter(sorted(timestamps))
+            query = next(pending, None)
+            previous: float | None = None
+            frames = 0
+            for frame in container.decode(stream):
+                frames += 1
+                if query is None:
+                    continue
+                timestamp = frame.time
+                if timestamp is None or not math.isfinite(timestamp):
+                    raise ValueError("Video frame has no finite presentation timestamp")
+                while query is not None and query[0] <= timestamp:
+                    distance = min(
+                        abs(query[0] - timestamp),
+                        abs(query[0] - previous) if previous is not None else math.inf,
+                    )
+                    # Match the official LeRobot decoder's tolerance in seconds.
+                    if distance > 1e-4:
+                        _issue(
+                            report,
+                            "video_timestamp",
+                            query[1],
+                            f"No decoded frame within 0.0001 seconds of {query[0]}",
+                        )
+                    query = next(pending, None)
+                previous = timestamp
+            while query is not None:
+                if previous is None or abs(query[0] - previous) > 1e-4:
+                    _issue(
+                        report,
+                        "video_timestamp",
+                        query[1],
+                        f"No decoded frame within 0.0001 seconds of {query[0]}",
+                    )
+                query = next(pending, None)
             rate = (
                 float(stream.average_rate) if stream.average_rate is not None else 0.0
             )
@@ -624,14 +675,32 @@ def _check_depth(
                     f"{unit} must be one of {sorted(accepted)}",
                 )
         minimum, maximum = sensor.get("video.depth_min"), sensor.get("video.depth_max")
-        if not (
-            isinstance(minimum, (int, float))
-            and isinstance(maximum, (int, float))
+        valid_range = (
+            type(minimum) in (int, float)
+            and type(maximum) in (int, float)
             and math.isfinite(minimum)
             and math.isfinite(maximum)
             and 0 <= minimum < maximum
-        ):
+        )
+        if not valid_range:
             _issue(report, "depth_range", location, "Invalid depth quantization range")
+        shift, use_log = sensor.get("video.shift"), sensor.get("video.use_log")
+        valid_quantization = (
+            type(shift) in (int, float)
+            and math.isfinite(shift)
+            and type(use_log) is bool
+            and sensor.get("video.pix_fmt") == "gray12le"
+        )
+        if valid_quantization and valid_range and use_log:
+            valid_quantization = minimum + shift > 0
+        if not valid_quantization:
+            _issue(
+                report,
+                "depth_quantization",
+                location,
+                "Depth requires finite video.shift, boolean video.use_log, "
+                "gray12le video.pix_fmt, and positive depth_min + shift in log mode",
+            )
         shape = sensor.get("shape")
         if (
             not isinstance(shape, list)
@@ -692,7 +761,7 @@ def _check_videos(
     *,
     media_frame_counts: bool,
 ) -> None:
-    spans: dict[Path, list[tuple[int, int, str]]] = defaultdict(list)
+    spans: dict[Path, list[tuple[float, float, str]]] = defaultdict(list)
     fps = info.get("fps", 0)
     for key, feature in info.get("features", {}).items():
         if feature.get("dtype") != "video":
@@ -731,7 +800,7 @@ def _check_videos(
                     )
                 path = _media_path(root, filename, report, location)
                 if path is not None:
-                    spans[path].append((round(begin * fps), round(end * fps), location))
+                    spans[path].append((begin, end, location))
             except (
                 AttributeError,
                 KeyError,
@@ -743,7 +812,15 @@ def _check_videos(
     if not media_frame_counts:
         return
     for path, ranges in spans.items():
-        measured = _video_count(path, report)
+        measured = _video_count(
+            path,
+            report,
+            timestamps=[
+                (timestamp, location)
+                for begin, end, location in ranges
+                for timestamp in (begin, end - 1 / fps)
+            ],
+        )
         if measured is None:
             continue
         count, rate = measured
@@ -751,12 +828,13 @@ def _check_videos(
             _issue(
                 report, "video_fps", str(path), f"Video FPS {rate} differs from {fps}"
             )
-        if count != max(end for _, end, _ in ranges):
+        expected_end = max(round(end * fps) for _, end, _ in ranges)
+        if count != expected_end:
             _issue(
                 report,
                 "video_length",
                 str(path),
-                f"Decoded {count} frames, expected final span end {max(end for _, end, _ in ranges)}",
+                f"Decoded {count} frames, expected final span end {expected_end}",
             )
 
 
@@ -1020,6 +1098,14 @@ def validate_dataset(
                 f"Expected episode frame {expected_frame}, got {frame}",
             )
         counts[index] += 1
+        previous_index = final_indices.get(index)
+        if previous_index is not None and global_index != previous_index + 1:
+            _issue(
+                report,
+                "episode_range",
+                location,
+                f"Episode {index} frames must form one contiguous global range",
+            )
         first_indices.setdefault(index, global_index)
         final_indices[index] = global_index
         timestamp = _scalar(row.get("timestamp"))
@@ -1133,6 +1219,15 @@ def validate_dataset(
                 "episode_length",
                 f"episode[{index}]",
                 f"Scanned {counts[index]} frames, declared {episode.get('length')}",
+            )
+        begin = _integer(episode.get("dataset_from_index"))
+        end = _integer(episode.get("dataset_to_index"))
+        if begin is not None and end is not None and end - begin != counts[index]:
+            _issue(
+                report,
+                "episode_range",
+                f"episode[{index}]",
+                "Episode global range width differs from its frame count",
             )
         for key, actual in (
             ("dataset_from_index", first_indices.get(index)),

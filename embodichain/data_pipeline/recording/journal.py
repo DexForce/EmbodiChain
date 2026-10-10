@@ -75,12 +75,15 @@ def _local_file(root: Path, name: str) -> Path:
     return resolved
 
 
-def _sidecars(root: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
+def _sidecars(
+    root: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[int, dict[str, Any]], list[str]]:
     records: dict[str, dict[str, Any]] = {}
+    indices: dict[int, dict[str, Any]] = {}
     errors: list[str] = []
     path = _local_file(root, _SIDECAR_PATH.as_posix())
     if not path.exists():
-        return records, errors
+        return records, indices, errors
     contents = path.read_text(encoding="utf-8")
     if contents and not contents.endswith("\n"):
         errors.append("Episode sidecar has an unterminated final record.")
@@ -89,6 +92,12 @@ def _sidecars(root: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
             record = json.loads(line)
             if not isinstance(record, dict):
                 raise ValueError("record is not a mapping")
+            index = record.get("lerobot_episode_index", record.get("episode_index"))
+            if type(index) is not int or index < 0:
+                raise ValueError("episode index must be a non-negative integer")
+            if index in indices:
+                errors.append(f"Duplicate sidecar episode index {index}.")
+            indices[index] = record
             identity = record.get("episode_uuid")
             if isinstance(identity, str):
                 if identity in records:
@@ -96,23 +105,49 @@ def _sidecars(root: Path) -> tuple[dict[str, dict[str, Any]], list[str]]:
                 records[identity] = record
         except (ValueError, TypeError) as error:
             errors.append(f"Sidecar line {number}: {error}")
-    return records, errors
+    return records, indices, errors
 
 
 def _episode_evidence(
     root: Path,
 ) -> tuple[dict[int, int], dict[int, dict[str, Any]], dict[str, Any], list[str]]:
-    import pyarrow.compute as compute
     import pyarrow.parquet as parquet
 
     counts: dict[int, int] = {}
+    first_indices: dict[int, int] = {}
+    final_indices: dict[int, int] = {}
+    global_index = 0
     errors: list[str] = []
     for path in sorted((root / "data").rglob("*.parquet")):
         try:
-            table = parquet.read_table(path, columns=["episode_index"])
-            for item in compute.value_counts(table.column("episode_index")).to_pylist():
-                index = int(item["values"])
-                counts[index] = counts.get(index, 0) + int(item["counts"])
+            for batch in parquet.ParquetFile(path).iter_batches(
+                batch_size=4096, columns=["episode_index", "frame_index", "index"]
+            ):
+                for row in batch.to_pylist():
+                    index = row.get("episode_index")
+                    if type(index) is not int or index < 0:
+                        raise ValueError("Invalid frame episode_index")
+                    frame_index = row.get("frame_index")
+                    if type(frame_index) is not int or frame_index != counts.get(
+                        index, 0
+                    ):
+                        raise ValueError(
+                            f"Episode {index} has non-contiguous frame_index."
+                        )
+                    actual_index = row.get("index")
+                    if type(actual_index) is not int or actual_index != global_index:
+                        raise ValueError(
+                            f"Expected global frame index {global_index}, got {actual_index!r}."
+                        )
+                    previous = final_indices.get(index)
+                    if previous is not None and previous + 1 != global_index:
+                        raise ValueError(
+                            f"Episode {index} does not occupy a contiguous global frame range."
+                        )
+                    counts[index] = counts.get(index, 0) + 1
+                    first_indices.setdefault(index, global_index)
+                    final_indices[index] = global_index
+                    global_index += 1
         except Exception as error:
             errors.append(f"Unreadable frame parquet {path.relative_to(root)}: {error}")
     episodes: dict[int, dict[str, Any]] = {}
@@ -123,6 +158,20 @@ def _episode_evidence(
                 if index in episodes:
                     errors.append(f"Duplicate SDK episode metadata for index {index}.")
                 episodes[index] = row
+                if counts.get(index, 0):
+                    begin, end = row.get("dataset_from_index"), row.get(
+                        "dataset_to_index"
+                    )
+                    if (
+                        type(begin) is not int
+                        or type(end) is not int
+                        or begin != first_indices[index]
+                        or end != final_indices[index] + 1
+                        or end - begin != counts[index]
+                    ):
+                        errors.append(
+                            f"SDK episode {index} range conflicts with its frame data."
+                        )
         except Exception as error:
             errors.append(
                 f"Unreadable episode parquet {path.relative_to(root)}: {error}"
@@ -333,13 +382,18 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
         ``ok``, global ``errors``, and per-episode ``commits``. ``prepared``
         without frames is safely retryable; ``lerobot_committing`` without
         matching frames remains unknown. Even ``complete`` records must have
-        matching frame counts on disk: SDK buffering is not crash durability.
+        matching frame identities and contiguous SDK ranges on disk: SDK
+        buffering is not crash durability.
     """
     root = Path(root)
     try:
-        sidecars, errors = _sidecars(root)
+        sidecars, sidecar_indices, errors = _sidecars(root)
     except (OSError, ValueError) as error:
-        sidecars, errors = {}, [f"Invalid episode sidecar: {error}"]
+        sidecars, sidecar_indices, errors = (
+            {},
+            {},
+            [f"Invalid episode sidecar: {error}"],
+        )
     counts, episodes, info, parquet_errors = _episode_evidence(root)
     errors.extend(parquet_errors)
     commits: list[dict[str, Any]] = []
@@ -370,10 +424,13 @@ def inspect_recording(root: str | Path) -> dict[str, Any]:
             sidecar_exists = identity in sidecars
             if sidecar_exists and sidecars[identity] != sidecar:
                 issues.append("Episode sidecar conflicts with journal metadata.")
+            existing = sidecar_indices.get(index)
+            if existing is not None and existing.get("episode_uuid") != identity:
+                issues.append("Episode sidecar index is owned by a different identity.")
             phase = record["phase"]
             if phase == "prepared" and frame_count == 0 and not parquet_errors:
                 status = "retryable"
-            elif phase == "prepared" or not matching_frames or issues:
+            elif phase == "prepared" or not matching_frames or issues or parquet_errors:
                 status = "unresolved"
             elif sidecar_exists:
                 status = "complete"

@@ -559,19 +559,18 @@ def _check_official(
                 raise ValueError(
                     f"Official reader changed overall task in episode {index}"
                 )
+            timestamp = float(sample["timestamp"])
             rendered = render_sample(
                 recipe=recipe,
                 persistent=sample[LANGUAGE_PERSISTENT],
                 events=None,
-                t=float(sample["timestamp"]),
+                t=timestamp,
                 sample_idx=sample_index,
                 task=sample["task"],
             )
             expected = language[
                 max(
-                    i
-                    for i, row in enumerate(language)
-                    if row["timestamp"] <= offset / dataset.fps + 1e-6
+                    i for i, row in enumerate(language) if row["timestamp"] <= timestamp
                 )
             ]["content"]
             if rendered is None or rendered["messages"][-1]["content"] != expected:
