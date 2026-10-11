@@ -459,6 +459,106 @@ def _placement_measurement_matches(
     )
 
 
+def _articulation_milestone_matches(
+    item: Mapping[str, Any],
+    segment: Mapping[str, Any],
+    *,
+    uid: str,
+    preset: str,
+    item_index: int,
+    env_id: int,
+) -> bool:
+    """Use the group's own measured joint/stability receipts, never final poses."""
+    try:
+        validators, posts = item.get("validators", []), item.get("post", [])
+        if len(validators) != 1 or len(posts) != 1:
+            return False
+        declared, post = validators[0], posts[0]
+        if (
+            declared.get("kind") != "articulation_joint_position"
+            or declared.get("articulation") != uid
+            or post.get("kind") != "wait_stable"
+            or post.get("entity") != uid
+            or post.get("preset") != preset
+        ):
+            return False
+        metadata = segment["metadata"]
+        identities = metadata["runtime"]["env_ids"]
+        row = identities.index(env_id)
+        validation = metadata["validation"]
+        if validation.get("env_ids") != identities:
+            return False
+        traces, policies = validation["validators"], metadata["post_policies"]
+        if len(traces) != 1 or len(policies) != 1:
+            return False
+        trace, policy = traces[0], policies[0]
+        result, stable = trace["result"], policy["result"]
+        path = ["program", "items", item_index]
+        if (
+            trace.get("validator_index") != 0
+            or trace.get("kind") != declared["kind"]
+            or trace.get("source_path") != path + ["validators", 0]
+            or result.get("source_path") != trace["source_path"]
+            or result.get("kind") != declared["kind"]
+            or result.get("articulation_id") != uid
+            or result.get("joint") != declared["joint"]
+            or result.get("env_ids") != identities
+            or policy.get("policy_index") != 0
+            or policy.get("kind") != "wait_stable"
+            or policy.get("source_path") != path + ["post", 0]
+            or stable.get("joint") != declared["joint"]
+            or stable.get("evidence") != "joint_position_and_stability"
+            or stable.get("stable_seconds") != 1.0
+        ):
+            return False
+
+        def accepted(values: Any) -> bool:
+            return (
+                isinstance(values, list)
+                and len(values) == len(identities)
+                and all(type(value) is bool for value in values)
+                and values[row] is True
+            )
+
+        if not all(
+            accepted(values)
+            for values in (
+                validation.get("accepted_mask"),
+                trace.get("result_mask"),
+                result.get("accepted_mask"),
+                policy.get("result_mask"),
+                stable.get("accepted"),
+            )
+        ):
+            return False
+        positions, observed = result["joint_position"], stable["observed"]
+        if len(positions) != len(identities) or len(observed) != len(identities):
+            return False
+        minimum, maximum = declared["minimum_position"], declared["maximum_position"]
+        target, tolerance = stable["target"], stable["tolerance"]
+        if not all(
+            type(value) in (int, float) and math.isfinite(value)
+            for value in (
+                minimum,
+                maximum,
+                target,
+                tolerance,
+                positions[row],
+                observed[row],
+            )
+        ):
+            return False
+        return (
+            tolerance >= 0
+            and minimum == result.get("minimum_position") == target - tolerance
+            and maximum == result.get("maximum_position") == target + tolerance
+            and minimum <= positions[row] <= maximum
+            and abs(observed[row] - target) <= tolerance
+        )
+    except (KeyError, ValueError, TypeError, AttributeError, IndexError):
+        return False
+
+
 def evaluate_runtime_evidence(
     spec: TaskSpec,
     contract: Mapping[str, Any],
@@ -483,6 +583,10 @@ def evaluate_runtime_evidence(
     if canonical_hash(constraints) != contract["constraints_digest"]:
         raise ValueError("TaskSpec runtime constraints identity mismatch.")
     program_items = {v["name"]: v for v in program["program"]["items"]}
+    program_indices = {
+        v["name"]: index for index, v in enumerate(program["program"]["items"])
+    }
+    nodes = {v["id"]: v for v in graph["nodes"]}
     members = {
         v["group_id"]: v
         for entries in contract["coverage"]["lineage"].values()
@@ -653,6 +757,45 @@ def evaluate_runtime_evidence(
                 if record and record["groups"]:
                     for predicate in milestone.achieve:
                         if _needs_universe(spec, predicate):
+                            continue
+                        if (
+                            predicate.name == "articulation_joint_near"
+                            and predicate.arguments.get("task_type") == "E6"
+                        ):
+                            verified = []
+                            for group_id in record["groups"]:
+                                articulation_group = groups[group_id]
+                                member = members[group_id]
+                                call = nodes[articulation_group["node_ids"][0]]["call"]
+                                arguments = call.get("arguments", {})
+                                uid, part = (
+                                    member["object_uid"],
+                                    member["object_part_id"],
+                                )
+                                state = predicate.arguments["target_state"]
+                                suffix = f".{part}" if part else ""
+                                terminal = articulation_group["node_ids"][-1]
+                                verified.append(
+                                    articulation_group["task_type"] == "E6"
+                                    and set(articulation_group["node_ids"]).issubset(
+                                        successful_nodes
+                                    )
+                                    and call.get("call_id")
+                                    == "gen_sim.articulation_slide"
+                                    and arguments.get("object") == uid
+                                    and arguments.get("part") == part
+                                    and arguments.get("state") == state
+                                    and _articulation_milestone_matches(
+                                        program_items[terminal],
+                                        segments[terminal],
+                                        uid=uid,
+                                        preset=f"gen_sim.articulation.{uid}{suffix}.{state}",
+                                        item_index=program_indices[terminal],
+                                        env_id=env_id,
+                                    )
+                                )
+                            if verified and all(verified):
+                                snapshot[predicate.observation or predicate.id] = True
                             continue
                         if predicate.arguments.get("task_type") in {"E8", "E9"}:
                             records = [

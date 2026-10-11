@@ -322,6 +322,261 @@ def test_new_normative_verdict_gates_success_but_legacy_stays_unchanged(
     )
 
 
+def _articulation_evidence(states=("open",), *, num_envs=1):
+    from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
+    from .test_task_spec_generation import candidate, step
+
+    source = candidate(*(step("E6", "drawer", target_state=state) for state in states))
+    references = [f"{item['id']}.object" for item in source["draft"]["steps"]]
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": source["draft"]["task_id"],
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {key: ["drawer"] for key in references},
+        "role_bindings": {key: "part_test" for key in references},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [{"runtime_uid": "drawer", "init_pos": [0.1, -0.2, 0.85]}],
+    )
+    coverage = _coverage(plan)
+    groups = {group["id"]: group for group in plan.graph["task_groups"]}
+    program = {"program": {"items": []}}
+    segments = []
+    env_ids, accepted = list(range(num_envs)), [True] * num_envs
+    targets = {"open": -0.08, "closed": 0.0}
+    for index, node in enumerate(plan.graph["nodes"]):
+        group = groups[node["task_instance_id"]]
+        state = next(
+            item["target_state"]
+            for item in source["draft"]["steps"]
+            if item["id"] == group["id"]
+        )
+        target, tolerance = targets[state], 0.03
+        declaration = {
+            "kind": "articulation_joint_position",
+            "articulation": "drawer",
+            "joint": "slide",
+            "minimum_position": target - tolerance,
+            "maximum_position": target + tolerance,
+        }
+        program["program"]["items"].append(
+            {
+                "name": node["id"],
+                "post": [
+                    {
+                        "kind": "wait_stable",
+                        "entity": "drawer",
+                        "preset": f"gen_sim.articulation.drawer.part_test.{state}",
+                    }
+                ],
+                "validators": [declaration],
+            }
+        )
+        path = ["program", "items", index, "validators", 0]
+        segments.append(
+            {
+                "name": node["id"],
+                "active": accepted.copy(),
+                "successes": accepted.copy(),
+                "end_steps": [index + 1] * num_envs,
+                "metadata": {
+                    "runtime": {"env_ids": env_ids.copy()},
+                    "validation": {
+                        "env_ids": env_ids.copy(),
+                        "runtime_success_mask": accepted.copy(),
+                        "eligible_mask_before_validation": accepted.copy(),
+                        "post_policy_success_mask": accepted.copy(),
+                        "accepted_mask": accepted.copy(),
+                        "validators": [
+                            {
+                                "validator_index": 0,
+                                "kind": "articulation_joint_position",
+                                "source_path": path,
+                                "result_mask": accepted.copy(),
+                                "result": {
+                                    "kind": "articulation_joint_position",
+                                    "articulation_id": "drawer",
+                                    "joint": "slide",
+                                    "source_path": path.copy(),
+                                    "minimum_position": target - tolerance,
+                                    "maximum_position": target + tolerance,
+                                    "env_ids": env_ids.copy(),
+                                    "joint_position": [target] * num_envs,
+                                    "accepted_mask": accepted.copy(),
+                                },
+                            }
+                        ],
+                    },
+                    "post_policies": [
+                        {
+                            "policy_index": 0,
+                            "kind": "wait_stable",
+                            "source_path": ["program", "items", index, "post", 0],
+                            "result_mask": accepted.copy(),
+                            "result": {
+                                "joint": "slide",
+                                "target": target,
+                                "observed": [target] * num_envs,
+                                "tolerance": tolerance,
+                                "stable_seconds": 1.0,
+                                "accepted": accepted.copy(),
+                                "evidence": "joint_position_and_stability",
+                                "contact_qualification": "not_provided",
+                            },
+                        }
+                    ],
+                },
+            }
+        )
+    constraints = {"presets": {}}
+    contract = {
+        "task_spec_digest": canonical_hash(plan.task_spec.to_dict()),
+        "graph_digest": canonical_hash(plan.graph),
+        "program_digest": canonical_hash(program),
+        "constraints_digest": canonical_hash(constraints),
+        "coverage": coverage,
+    }
+    final = {
+        predicate.id: {
+            "members": [
+                {
+                    "group_id": coverage["goals"][0]["groups"][0],
+                    "uid": "drawer",
+                    "part_id": "part_test",
+                    "accepted": accepted.copy(),
+                    "measurements": {
+                        "joint_position": [targets[states[-1]]] * num_envs,
+                        "joint_target": targets[states[-1]],
+                    },
+                }
+            ]
+        }
+        for predicate in plan.task_spec.goal
+    }
+    return plan, contract, {"segments": segments}, final, program, constraints
+
+
+def _evaluate_articulation(data, *, num_envs=1):
+    plan, contract, runtime, final, program, constraints = data
+    return evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=num_envs,
+        run_id="articulation-test",
+        program=program,
+        constraints=constraints,
+    )["environments"]
+
+
+@pytest.mark.parametrize("states", [("open",), ("open", "closed")])
+def test_e6_measured_boundaries_certify_ordered_achievements(states) -> None:
+    data = _articulation_evidence(states)
+    result = _evaluate_articulation(data)[0]
+    assert result["certificate_ready"] is True
+    assert [item["status"] for item in result["milestones"]] == ["satisfied"] * len(
+        states
+    )
+    assert [item.arguments["target_state"] for item in data[0].task_spec.goal] == [
+        states[-1]
+    ]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_validator",
+        "missing_post",
+        "failed_validator",
+        "failed_post",
+        "wrong_uid",
+        "wrong_joint",
+        "wrong_validator_path",
+        "wrong_post_path",
+        "wrong_state",
+        "wrong_part",
+        "wrong_call_state",
+        "wrong_call_uid",
+        "wrong_env_ids",
+        "short_mask",
+        "nonfinite_position",
+        "out_of_range_position",
+    ],
+)
+def test_e6_final_success_never_fills_missing_or_foreign_history(damage) -> None:
+    data = _articulation_evidence(("open", "closed"))
+    first_group = data[0].graph["task_groups"][0]
+    boundary = next(
+        segment
+        for segment in data[2]["segments"]
+        if segment["name"] == first_group["node_ids"][-1]
+    )
+    metadata = boundary["metadata"]
+    validation = metadata["validation"]
+    validator = validation["validators"][0]
+    post = metadata["post_policies"][0]
+    if damage == "missing_validator":
+        validation["validators"] = []
+    elif damage == "missing_post":
+        metadata["post_policies"] = []
+    elif damage == "failed_validator":
+        validator["result_mask"] = validator["result"]["accepted_mask"] = [False]
+    elif damage == "failed_post":
+        post["result_mask"] = post["result"]["accepted"] = [False]
+    elif damage == "wrong_uid":
+        validator["result"]["articulation_id"] = "another_drawer"
+    elif damage == "wrong_joint":
+        validator["result"]["joint"] = "another_joint"
+    elif damage == "wrong_validator_path":
+        validator["result"]["source_path"] = ["program", "items", 99, "validators", 0]
+    elif damage == "wrong_post_path":
+        post["source_path"] = ["program", "items", 99, "post", 0]
+    elif damage == "wrong_state":
+        post["result"]["target"] = 0.0
+    elif damage in {"wrong_part", "wrong_call_state", "wrong_call_uid"}:
+        node = data[0].graph["nodes"][0]
+        key, value = {
+            "wrong_part": ("part", "part_other"),
+            "wrong_call_state": ("state", "closed"),
+            "wrong_call_uid": ("object", "another_drawer"),
+        }[damage]
+        node["call"]["arguments"][key] = value
+        data[1]["graph_digest"] = canonical_hash(data[0].graph)
+    elif damage == "wrong_env_ids":
+        validator["result"]["env_ids"] = [7]
+    elif damage == "short_mask":
+        validator["result"]["accepted_mask"] = []
+    elif damage == "nonfinite_position":
+        validator["result"]["joint_position"] = [float("nan")]
+    else:
+        validator["result"]["joint_position"] = [0.0]
+    result = _evaluate_articulation(data)[0]
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["certificate_ready"] is False
+    assert result["milestones"][0]["status"] != "satisfied"
+
+
+@pytest.mark.parametrize("identities", [[0, 1], [1, 0]])
+def test_e6_receipt_masks_are_evaluated_per_environment(identities) -> None:
+    data = _articulation_evidence(num_envs=2)
+    metadata = data[2]["segments"][-1]["metadata"]
+    validator = metadata["validation"]["validators"][0]
+    metadata["runtime"]["env_ids"] = identities
+    metadata["validation"]["env_ids"] = validator["result"]["env_ids"] = identities
+    mask = [identity == 0 for identity in identities]
+    metadata["validation"]["accepted_mask"] = mask
+    validator["result_mask"] = validator["result"]["accepted_mask"] = mask
+    post = metadata["post_policies"][0]
+    post["result_mask"] = post["result"]["accepted"] = mask
+    rows = _evaluate_articulation(data, num_envs=2)
+    assert rows[0]["certificate_ready"] is True
+    assert rows[1]["certificate_ready"] is False
+
+
 def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="inside"):
     import numpy as np
     import trimesh
