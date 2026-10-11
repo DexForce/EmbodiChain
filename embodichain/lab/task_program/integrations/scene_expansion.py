@@ -32,7 +32,7 @@ from embodichain.lab.gym.envs.demo import (
     execute_demo_episode,
 )
 from embodichain.lab.sim.motion.expansion import ValidationResult
-from embodichain.lab.sim.scene_expansion import SceneVariant
+from embodichain.lab.sim.scene.expansion import SceneVariant
 from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
 
 if TYPE_CHECKING:

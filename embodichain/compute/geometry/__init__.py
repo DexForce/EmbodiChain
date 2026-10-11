@@ -14,8 +14,42 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Geometric queries independent of simulation scene ownership."""
+"""Lazy geometry facade; existing Warp consumers need no scene dependencies."""
 
 from __future__ import annotations
 
-__all__ = []
+from importlib import import_module
+from typing import Any
+
+__all__ = [
+    "SupportSurfaceConfig",
+    "DetectedSupportSurface",
+    "SupportSurfaceDetector",
+    "SupportGeometry",
+    "GroupSupportClampConfig",
+    "GroupSupportClamp",
+    "group_height_offset",
+    "AABBLayoutConfig",
+    "AABBLayoutOptimizer",
+]
+
+_EXPORT_MODULES = {
+    "SupportSurfaceConfig": "support",
+    "DetectedSupportSurface": "support",
+    "SupportSurfaceDetector": "support",
+    "SupportGeometry": "placement",
+    "GroupSupportClampConfig": "placement",
+    "GroupSupportClamp": "placement",
+    "group_height_offset": "placement",
+    "AABBLayoutConfig": "aabb",
+    "AABBLayoutOptimizer": "aabb",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORT_MODULES.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{module}"), name)
+    globals()[name] = value
+    return value

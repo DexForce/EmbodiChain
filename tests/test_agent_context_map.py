@@ -70,6 +70,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "data-pipeline",
         "robot-workspace",
         "scene-expansion",
+        "scene-services",
         "differentiable-env",
     }
 
@@ -80,6 +81,7 @@ def test_new_topics_cover_their_owning_packages() -> None:
     topics = _topics_by_id()
     expected_source_prefixes = {
         "gen-sim": "embodichain/gen_sim/",
+        "scene-services": "embodichain/lab/sim/scene/",
         "data-assets": "embodichain/data/",
         "data-pipeline": "embodichain/data_pipeline/",
         "robot-workspace": "embodichain/lab/sim/motion/workspace/",
@@ -113,6 +115,10 @@ def test_representative_queries_route_against_the_repository_map() -> None:
         "get_data_path 如何解析资产路径？": ["data-assets"],
         "Newton physics backend config 在哪里？": ["simulation-system"],
         "可微环境 APG 如何重置？": ["differentiable-env"],
+        "sim.scene 的场景布局服务在哪里？": ["scene-services"],
+        "程序化场景如何生成？": ["scene-services"],
+        "SceneState 如何恢复？": ["scene-services"],
+        "scene expansion 候选身份在哪里？": ["scene-expansion"],
     }
 
     assert {

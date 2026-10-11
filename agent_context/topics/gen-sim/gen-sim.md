@@ -50,6 +50,21 @@ root.
 - The internal Scene Engine SimReady processor and general asset-ingest CLI
   are separate flows; change the selected owner rather than assuming one pipeline.
 
+## Shared scene services
+
+Geometric support detection, group translation/alignment and AABB separation
+use `compute.geometry`; tabletop and parent-surface optimization adapt
+`sim.scene.layout`. Existing adapters keep Y-up conversion and debug output;
+`SceneLayoutConstructor` retains hierarchy traversal and edit-specific pose
+propagation. `GravitySettler` owns its temporary simulator and fixed-step default;
+optional convergence checks use shared scene validation. See
+[scene services](../scene-services/scene-services.md) for frames, supported
+geometry and physical-state boundaries.
+
+GenSim owns scene understanding, asset generation, VLM orientation, its editable
+scene graph and file formats. General services consume explicit UID/geometry
+inputs rather than `SceneObject`, image masks or generation output directories.
+
 ## Runtime and extension boundaries
 
 Keep parser capabilities idempotent so recorded stages support resume.

@@ -2,15 +2,19 @@
 
 Scene expansion proposes changes before a new Task Program execution. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
-actual scene preparation and measured task evidence.
+actual scene preparation and measured task evidence. General composition,
+layout and physical state services are owned by
+[scene services](../scene-services/scene-services.md); legacy
+`sim.scene_expansion` imports re-export the canonical `sim.scene.expansion`
+contracts.
 
 ## Entry points
 
 | Request | Owner |
 |---|---|
-| Shared proposal contracts and fixed source | `embodichain/lab/sim/scene_expansion/` |
-| Candidate limits and movable entity permissions | `scene_expansion/cfg.py` in that package |
-| Arena poses and proposal identity | `scene_expansion/contracts.py` in that package |
+| Shared proposal contracts and fixed source | `embodichain/lab/sim/scene/expansion/` |
+| Candidate limits and movable entity permissions | `cfg.py` in that package |
+| Arena poses and proposal identity | `contracts.py` in that package |
 | One Task Program attempt and result metadata | `embodichain/lab/task_program/integrations/scene_expansion.py` |
 | Reset-time persistence eligibility | `embodichain/lab/gym/envs/embodied_env.py` |
 | Action consumption and recording lifecycle | `embodichain/lab/gym/envs/demo.py` |
@@ -35,7 +39,10 @@ legacy segment overrides from changing the selected source.
 The preparation callback is responsible for restore/application, physical
 settling, actual initial-state checks, saved-state identity, binding refresh and
 recording observation refresh. Generic execution does not provide those
-physical operations. The measured callback supplies task-specific state and
+physical operations. Callbacks can use the shared scene state, operations and
+validation services. The concrete Gym reset host and robot-workspace adapter
+are supplied separately by [PR #750](https://github.com/DexForce/EmbodiChain/pull/750).
+The measured callback supplies task-specific state and
 event evidence. Gym remains the owner of reset, stepping and recording; no new
 generation session or persistence writer is introduced.
 
@@ -73,11 +80,11 @@ not by themselves provide scene restoration or certify a new layout.
 
 ## Change sites and validation
 
-Keep layout/proposal algorithms under `lab/sim/scene_expansion`; put
-task-specific adaptation under Task Program integrations. Keep GenSim scene
-materialization in its own backend instead of introducing imports into the
-core. Extend the host boundary when adding physical preparation, and
-preserve Gym lifecycle ownership.
+Keep bounded candidate contracts under `lab/sim/scene/expansion`; shared
+layout and physical services belong to its parent scene package, with numerical
+algorithms under `compute`. Keep task-specific adaptation in Task Program
+integrations and GenSim asset/model dependencies in GenSim. Extend the host
+boundary when adding physical preparation, preserving Gym lifecycle ownership.
 
 ```bash
 pytest -q tests/sim/scene_expansion

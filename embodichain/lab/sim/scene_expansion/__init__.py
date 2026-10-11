@@ -14,17 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Scene proposal contracts and candidate sources shared by simulation hosts.
-
-Candidates describe arena-local changes. Task semantics, scene materialization,
-reset, execution, task acceptance, and persistence belong to host integrations.
-"""
+"""Compatibility imports for :mod:`embodichain.lab.sim.scene.expansion`."""
 
 from __future__ import annotations
 
-from .cfg import SceneExpansionCfg
-from .contracts import ScenePoseChange, SceneVariant
-from .source import FixedSceneCandidateSource
+from embodichain.lab.sim.scene.expansion import (
+    SceneExpansionCfg,
+    ScenePoseChange,
+    SceneVariant,
+    FixedSceneCandidateSource,
+)
 
 __all__ = [
     "SceneExpansionCfg",

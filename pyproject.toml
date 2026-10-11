@@ -55,6 +55,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+scene = ["scipy", "shapely", "trimesh"]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
@@ -67,6 +68,8 @@ gensim = [
   "Pillow",
   "scipy",
   "matplotlib",
+  "shapely",
+  "trimesh",
 ]
 
 [project.scripts]
