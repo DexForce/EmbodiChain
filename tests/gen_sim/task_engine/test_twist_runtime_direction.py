@@ -146,6 +146,89 @@ def test_depth_candidate_tcp_compensation_produces_the_requested_tip_depth():
         assert 0 < final_tip_depth <= bite + 1e-12
 
 
+def test_twist_keeps_first_choice_and_retains_only_qualified_other_axes(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import twist_runtime
+    from embodichain.lab.sim.atomic_actions import (
+        Twist,
+        PlannerDiagnostics,
+        TimedTrajectory,
+    )
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    request_type = make_dataclass(
+        "PoolRequest", [("goal", object), ("skill_options", object)]
+    )
+    plan_type = make_dataclass(
+        "PoolPlan",
+        [
+            ("plan_success", object),
+            ("diagnostics", object),
+            ("joint_trajectory", object),
+            ("scene_dependencies", object),
+        ],
+    )
+    geometry = {
+        "gen_sim_twist_angle": 0.1,
+        "gen_sim_twist_measured_qpos": 0.0,
+        "gen_sim_twist_target_qpos": 1.0,
+        "gen_sim_twist_axis_sign": 1.0,
+        "gen_sim_twist_chunk_angle": 0.1,
+        "gen_sim_twist_bite_depth": 0.005,
+        "gen_sim_twist_settle_steps": 0,
+    }
+    request = request_type(
+        SimpleNamespace(semantics=SimpleNamespace(geometry=geometry)), TwistOptions()
+    )
+    calls = []
+
+    def public_plan(self, request, context):
+        index = len(calls)
+        calls.append(index)
+        return plan_type(
+            torch.tensor([index != 3]),
+            PlannerDiagnostics(backend="test"),
+            TimedTrajectory.from_uniform_step(
+                torch.zeros(1, 2, 1), env_ids=torch.tensor([0]), step_dt=0.04
+            ),
+            (),
+        )
+
+    monkeypatch.setattr(Twist, "_plan", public_plan)
+    monkeypatch.setattr(
+        GenSimTwist,
+        "_candidate_request",
+        staticmethod(lambda request, roll, shift: request),
+    )
+    monkeypatch.setattr(
+        GenSimTwist,
+        "_candidate_geometry_score",
+        lambda self, plan, *_: (
+            0.0,
+            0.0,
+            float(plan.diagnostics.metadata["gen_sim_twist_roll_candidate"]),
+            0.0,
+        ),
+    )
+    action = object.__new__(GenSimTwist)
+    action._planning_services = SimpleNamespace(robot=SimpleNamespace())
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *_: torch.ones(1, 1))
+    state = _TwistCandidateState()
+    token = twist_runtime._CANDIDATE_STATE.set(state)
+    try:
+        action._plan(request, SimpleNamespace())
+        assert state.selected_index == 0
+        assert state.order == (0, 4, 8)
+        assert len(state.candidates) == 11
+        assert 3 not in [item[0] for item in state.candidates]
+        state.forced_index = 1
+        action._plan(request, SimpleNamespace())
+        assert state.selected_index == 1
+        assert state.order == (1, 5, 9)
+        assert len(state.candidates) == 11
+    finally:
+        twist_runtime._CANDIDATE_STATE.reset(token)
+
+
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_twist_boundary_roundoff_matches_native_joint_dtype(dtype):
     limit = -math.pi / 2
@@ -429,8 +512,15 @@ def test_twist_chunk_stall_recovery_requires_measured_release_and_stability(
     port.robot = SimpleNamespace(get_qpos=lambda: torch.zeros(1, 2))
     port._chunk_cursor = 0
     port._candidate_state = _TwistCandidateState(
-        order=(0, 4, 8), selected_index=0, locked=True
+        order=(0, 4, 8), selected_index=0, selected_roll=0.0, locked=True
     )
+    port._candidate_state.candidates = (
+        (0, 0.0, -0.004),
+        (2, -math.pi / 2, -0.004),
+        (4, 0.0, -0.002),
+        (8, 0.0, 0.0),
+    )
+    sensor._feedback_state = SimpleNamespace(invalidate_grasp=Mock())
     # One preceding no-progress chunk, not an isolated short contact window.
     port._candidate_state.stalled_chunks = 1
     port.results, port.metadata = {}, {}
@@ -448,7 +538,12 @@ def test_twist_chunk_stall_recovery_requires_measured_release_and_stability(
     assert port._candidate_state.fallback_count == int(fallback)
     assert port._candidate_state.goal_complete is False
     if fallback:
-        assert port._candidate_state.forced_index == 4
+        assert port._candidate_state.forced_index == 2
+        sensor._feedback_state.invalidate_grasp.assert_called_once_with(
+            previous_index=0, next_index=2
+        )
+    else:
+        sensor._feedback_state.invalidate_grasp.assert_not_called()
 
 
 @pytest.mark.parametrize("direction", [-1.0, 1.0])

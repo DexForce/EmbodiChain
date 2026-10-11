@@ -70,6 +70,37 @@ class _Plan(NS):
         return next(segment for segment in self.segments if segment.name == name)
 
 
+def test_candidate_change_invalidates_grasp_bias_without_reopening_budgets(case):
+    state = case.state
+    state.bias[:] = [0.003, 0.001, 0.0]
+    state.episode_corrections = 7
+    chunk = NS(first_wall=4.0, original_timeout=9.0, corrections=2, path_length=0.027)
+    state.chunks["old"] = chunk
+    state.samples.append({"timestamp": 1.0})
+    state.audit.append({"kind": "previous"})
+    state.invalidate_grasp(previous_index=0, next_index=2)
+    assert np.array_equal(state.bias, np.zeros(3))
+    assert not state.samples
+    assert state.episode_corrections == 7
+    assert state.chunks["old"] is chunk
+    assert vars(chunk) == dict(
+        first_wall=4.0, original_timeout=9.0, corrections=2, path_length=0.027
+    )
+    assert state.audit[0] == {"kind": "previous"}
+    assert state.audit[-1]["kind"] == "candidate_grasp_invalidated"
+
+
+def test_candidate_change_rejects_pending_revision_without_clearing_it(case):
+    state = case.state
+    state.bias[:] = [0.003, 0.0, 0.0]
+    pending = object()
+    state.pending["old"] = pending
+    with pytest.raises(ValueError, match="pending"):
+        state.invalidate_grasp(previous_index=0, next_index=2)
+    assert state.pending["old"] is pending
+    assert state.bias[0] == 0.003
+
+
 @pytest.fixture
 def case() -> NS:
     binding = ActionBinding(

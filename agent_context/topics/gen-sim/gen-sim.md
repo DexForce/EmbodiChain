@@ -543,7 +543,7 @@ E8 is owned by `_task_program/twist_binding.py` and `twist_runtime.py`: a source
 revolute knob lowers to prepare/bounded Twist chunks/Park through the public `Twist` skill and
 ordinary Gym runtime. Each chunk is capped at 5 degrees and the next semantic segment reads
 the measured qpos again. Nonzero targets reserve 32 feedback calls; nominal 5-degree coverage
-plus three contact retries must fit that bound. Verified coarse contact travel permits
+plus the bounded candidate recovery must fit that bound. Verified coarse contact travel permits
 unused calls to become one-frame holds; Park still checks release and clearance. The printed setting uses
 pointer/label geometry and an asset hash; ordinal settings and joint-limit guesses are rejected.
 `twist_semantics.py` resolves asset-owned joint/grip/pointer/label roles through the
@@ -605,12 +605,15 @@ these proxies do not certify backend cooked shapes or continuous collision clear
 Candidates use final tip bites
 B/3, 2B/3 and B, where B=min(grasp_depth, grip_depth/2). Their TCP shifts are outward-only,
 so no extra inward offset can exceed the requested bite. Depth takes precedence over closed-hand,
-arena-frame geometry scores. The shallowest feasible layer selects a roll, which stays fixed
-for the ordered depth fallbacks. Contact retains a candidate provisionally; two consecutive
-contact chunks without new debounced travel permit the next existing depth candidate only
-after measured release and control-tick joint stability. This consumes the unchanged finite
-fallback budget, never changes roll, and terminates as `contact_without_progress` when
-the depth order is exhausted. Progress and completed goals retain their candidate. Failed IK cannot
+arena-frame geometry scores. The shallowest feasible layer selects the original first roll.
+Zero-contact recovery retains the same-roll depth order and its dimensional-retry receipt.
+Two consecutive contact chunks without new debounced travel may instead choose a shallow
+qualified candidate on another parallel-gripper axis, only after measured release and
+control-tick joint stability. Axes are equivalent modulo pi, and an explicit fixed roll
+never permits other directions. First grasp plus both recovery kinds share three attempts
+total; no candidate is reserved twice. Each new candidate is replanned and screened from
+fresh observations. Progress and completed goals retain their candidate. Exhaustion is an
+explicit failure, not more sampling or relaxed acceptance. Failed IK cannot
 silently fall back to an undeclared base pose. The lowerer measures matching jaw aperture and uses invocation-owned typed grasp
 overrides; public `Twist` and non-E8 routes remain unchanged.
 Reaching the coarse contact threshold makes remaining Twist calls stationary holds; it does
@@ -649,7 +652,10 @@ the holds consume the original deadline and undergo the final velocity/geometry 
 Closure uses one paired aperture/tip-offset calculation; no native
 pose or physical-property setter supplies success. Adaptive closure and convex-cooking
 experiments remain unintegrated; this opt-in does not certify dual-pad grasp or printed-setting
-convergence. The adapter remains on the v38 contract; only E8/E9 lowerer declarations
+convergence. Grasp-axis recovery discards only the old grasp bias and recent correction
+samples; pending revisions prohibit switching. Episode counters, per-call deadlines and
+audit history remain intact rather than using the episode reset method.
+The adapter remains on the v38 contract; only E8/E9 lowerer declarations
 change identity. Non-control routes retain their behavior. E8/E9 support multiple serial
 occurrences, including repeat operations on one object and interleaved E1-E6 steps.
 Each occurrence owns its call alias, sensor, post-policy presets, candidate/feedback state

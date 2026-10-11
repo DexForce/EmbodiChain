@@ -238,6 +238,23 @@ class TwistFeedbackState:
         self.sample_error = None
         self.last_parent_contact_at = -1.0
 
+    def invalidate_grasp(self, *, previous_index: int, next_index: int) -> None:
+        """Discard grasp-specific bias while retaining deadlines and repair history."""
+        if not self.enabled:
+            return
+        if self.pending:
+            raise ValueError("E8 grasp change has a pending feedback revision.")
+        self.bias[:] = 0
+        self.samples.clear()
+        self.audit.append(
+            {
+                "kind": "candidate_grasp_invalidated",
+                "previous_index": previous_index,
+                "next_index": next_index,
+                "episode_corrections": self.episode_corrections,
+            }
+        )
+
     def capture_native(self) -> None:
         """Read after the existing sensor capture; never fetch/update the sensor."""
         if not self.enabled:

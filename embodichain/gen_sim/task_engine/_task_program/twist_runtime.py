@@ -98,7 +98,7 @@ _ROLL_CANDIDATES = (
     -math.pi / 4,
 )
 _BITE_FRACTIONS = (1.0 / 3.0, 2.0 / 3.0, 1.0)
-TWIST_CANDIDATE_FALLBACKS = 3
+TWIST_CANDIDATE_FALLBACKS = 2
 _STALLED_CHUNK_LIMIT = 2
 
 
@@ -159,6 +159,8 @@ class _TwistCandidateState:
 
     forced_index: int | None = None
     order: tuple[int, ...] = ()
+    candidates: tuple[tuple[int, float, float], ...] = ()
+    reserved_indices: tuple[int, ...] = ()
     selected_index: int | None = None
     selected_bite_depth: float | None = None
     selected_roll: float | None = None
@@ -214,6 +216,10 @@ def _candidate_order(
     return tuple(index for index, roll, _ in feasible if roll == selected_roll)
 
 
+def _same_grip_axis(first: float, second: float) -> bool:
+    return math.isclose(math.remainder(first - second, math.pi), 0.0, abs_tol=1e-6)
+
+
 def _candidate_contact_decision(
     state: _TwistCandidateState,
     *,
@@ -223,6 +229,11 @@ def _candidate_contact_decision(
     recovery_safe: bool,
 ) -> tuple[bool, bool]:
     """Return ``(post_policy_success, fallback_used)`` for one E8 chunk."""
+    if (
+        state.selected_index is not None
+        and state.selected_index not in state.reserved_indices
+    ):
+        state.reserved_indices += (state.selected_index,)
     if already_reached or target_contact:
         state.locked = True
         state.forced_index = state.selected_index
@@ -237,16 +248,34 @@ def _candidate_contact_decision(
         # Contact alone must not lock an ineffective grasp for every chunk.
         state.locked = False
     if (
-        not state.locked
-        and recovery_safe
-        and state.fallback_count < TWIST_CANDIDATE_FALLBACKS
-        and len(state.order) > state.fallback_count + 1
+        state.locked
+        or not recovery_safe
+        or state.fallback_count >= TWIST_CANDIDATE_FALLBACKS
     ):
-        state.fallback_count += 1
-        state.forced_index = state.order[state.fallback_count]
-        state.stalled_chunks = 0
-        return True, True
-    return False, False
+        return False, False
+    next_index = None
+    if target_contact and state.selected_roll is not None:
+        next_index = next(
+            (
+                index
+                for index, roll, _ in state.candidates
+                if index not in state.reserved_indices
+                and not _same_grip_axis(roll, state.selected_roll)
+            ),
+            None,
+        )
+    if next_index is None:
+        next_index = next(
+            (index for index in state.order if index not in state.reserved_indices),
+            None,
+        )
+    if next_index is None:
+        return False, False
+    state.fallback_count += 1
+    state.forced_index = next_index
+    state.reserved_indices += (next_index,)
+    state.stalled_chunks = 0
+    return True, True
 
 
 class GenSimTwist(Twist):
@@ -561,6 +590,19 @@ class GenSimTwist(Twist):
             selected_score, selected, plan, planned_request = by_index[order[0]]
             if state.forced_index is None:
                 state.order = order
+                state.candidates = tuple(
+                    sorted(
+                        (item for item in table if item[0] in by_index),
+                        key=lambda item: (item[2], by_index[item[0]][0], item[0]),
+                    )
+                )
+            elif state.candidates:
+                selected_roll = table_by_index[selected][0]
+                state.order = tuple(
+                    index
+                    for index, roll, _ in state.candidates
+                    if roll == selected_roll
+                )
             selected_roll, selected_shift = table_by_index[selected]
             plan = replace(
                 plan,
@@ -1483,6 +1525,8 @@ class TwistAcceptancePort:
         if ready:
             self._candidate_state.forced_index = None
             self._candidate_state.order = ()
+            self._candidate_state.candidates = ()
+            self._candidate_state.reserved_indices = ()
             self._candidate_state.selected_index = None
             self._candidate_state.selected_bite_depth = None
             self._candidate_state.selected_roll = None
@@ -1549,6 +1593,7 @@ class TwistAcceptancePort:
                 "unstable_initial_state",
             }
             good, fallback = False, False
+            axis_switch = False
             if valid_chunk:
                 good, fallback = _candidate_contact_decision(
                     self._candidate_state,
@@ -1558,6 +1603,28 @@ class TwistAcceptancePort:
                     progress=chunk_progress > 1e-9,
                     recovery_safe=recovery_safe,
                 )
+                next_roll = next(
+                    (
+                        roll
+                        for index, roll, _ in self._candidate_state.candidates
+                        if index == self._candidate_state.forced_index
+                    ),
+                    self._candidate_state.selected_roll,
+                )
+                axis_switch = bool(
+                    fallback
+                    and next_roll is not None
+                    and self._candidate_state.selected_roll is not None
+                    and not _same_grip_axis(
+                        next_roll, self._candidate_state.selected_roll
+                    )
+                )
+                feedback = getattr(s, "_feedback_state", None)
+                if axis_switch and feedback is not None:
+                    feedback.invalidate_grasp(
+                        previous_index=self._candidate_state.selected_index,
+                        next_index=self._candidate_state.forced_index,
+                    )
             self._candidate_state.contact_path = contact_path
             self._candidate_state.goal_complete = goal_check["accepted"]
             result = {
@@ -1597,6 +1664,13 @@ class TwistAcceptancePort:
                 "candidate_bite_depth": self._candidate_state.selected_bite_depth,
                 "candidate_roll": self._candidate_state.selected_roll,
                 "candidate_fallback": fallback,
+                "candidate_axis_switch": axis_switch,
+                "candidate_next": (
+                    self._candidate_state.forced_index if fallback else None
+                ),
+                "candidate_reserved_indices": list(
+                    self._candidate_state.reserved_indices
+                ),
                 "candidate_fallback_count": self._candidate_state.fallback_count,
                 "candidate_fallback_limit": TWIST_CANDIDATE_FALLBACKS,
                 "candidate_order": list(self._candidate_state.order),
@@ -1612,11 +1686,7 @@ class TwistAcceptancePort:
                     and not good
                     and not self._candidate_state.locked
                     and self._candidate_state.order
-                    and self._candidate_state.fallback_count
-                    >= min(
-                        TWIST_CANDIDATE_FALLBACKS,
-                        len(self._candidate_state.order) - 1,
-                    )
+                    and recovery_safe
                 ),
                 "coarse_turn_threshold": COARSE_TURN_THRESHOLD,
                 "cumulative_contact_path": self._candidate_state.contact_path,

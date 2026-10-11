@@ -205,7 +205,7 @@ def test_twist_candidate_table_is_bounded_and_distinct():
     assert len(table) == 12
     assert [item[0] for item in table] == list(range(len(table)))
     assert len({(item[1], item[2]) for item in table}) == len(table)
-    assert TWIST_CANDIDATE_FALLBACKS == 3
+    assert TWIST_CANDIDATE_FALLBACKS == 2
     assert twist_binding.TWIST_CHUNK_ANGLE == pytest.approx(math.radians(5.0))
     assert COARSE_TURN_THRESHOLD == pytest.approx(math.radians(15.0))
     assert QPOS_PATH_DEADBAND == pytest.approx(math.radians(0.5))
@@ -287,9 +287,9 @@ def test_twist_candidate_fallback_is_bounded_until_progress_locks_pose():
         )
         for _ in range(4)
     ]
-    assert decisions == [(True, True), (True, True), (True, True), (False, False)]
+    assert decisions == [(True, True), (True, True), (False, False), (False, False)]
     assert state.fallback_count == TWIST_CANDIDATE_FALLBACKS
-    assert state.forced_index == 5
+    assert state.forced_index == 11
     state.locked = False
     assert _candidate_contact_decision(
         state,
@@ -326,6 +326,122 @@ def test_twist_stalled_contact_uses_existing_depth_budget_after_two_chunks():
         )
     assert state.fallback_count == 2
     assert state.forced_index == 8
+
+
+@pytest.mark.parametrize(
+    "roll,opposite,new_axis",
+    [
+        (0.0, math.pi, -math.pi / 2),
+        (math.pi / 2, -math.pi / 2, 0.0),
+    ],
+)
+def test_twist_stalled_contact_prefers_another_axis_over_depth_or_flipped_roll(
+    roll, opposite, new_axis
+):
+    state = _TwistCandidateState(order=(0, 4, 8), selected_index=0, selected_roll=roll)
+    state.candidates = (
+        (0, roll, -0.004),
+        (3, opposite, -0.004),
+        (2, new_axis, -0.004),
+        (4, roll, -0.002),
+        (8, roll, 0.0),
+    )
+    for expected in ((True, False), (True, True)):
+        assert (
+            _candidate_contact_decision(
+                state,
+                target_contact=True,
+                already_reached=False,
+                progress=False,
+                recovery_safe=True,
+            )
+            == expected
+        )
+    assert state.forced_index == 2
+    assert state.fallback_count == 1
+
+
+def test_twist_zero_contact_keeps_original_depth_order_even_with_other_axes():
+    state = _TwistCandidateState(order=(0, 4, 8), selected_index=0, selected_roll=0.0)
+    state.candidates = (
+        (0, 0.0, -0.004),
+        (2, -math.pi / 2, -0.004),
+        (4, 0.0, -0.002),
+        (8, 0.0, 0.0),
+    )
+    for selected, next_index in ((0, 4), (4, 8)):
+        state.selected_index = selected
+        assert _candidate_contact_decision(
+            state,
+            target_contact=False,
+            already_reached=False,
+            progress=False,
+            recovery_safe=True,
+        ) == (True, True)
+        assert state.forced_index == next_index
+    state.selected_index = 8
+    assert _candidate_contact_decision(
+        state,
+        target_contact=False,
+        already_reached=False,
+        progress=False,
+        recovery_safe=True,
+    ) == (False, False)
+
+
+def test_twist_fixed_roll_stall_cannot_switch_outside_its_depth_table():
+    roll = 0.3
+    state = _TwistCandidateState(order=(0, 1, 2), selected_index=0, selected_roll=roll)
+    state.candidates = _candidate_table(fixed_roll=roll)
+    for _ in range(2):
+        _candidate_contact_decision(
+            state,
+            target_contact=True,
+            already_reached=False,
+            progress=False,
+            recovery_safe=True,
+        )
+    assert state.forced_index == 1
+    assert state.reserved_indices == (0, 1)
+
+
+def test_twist_cross_axis_and_depth_recovery_share_two_fallbacks():
+    state = _TwistCandidateState(order=(0, 4, 8), selected_index=0, selected_roll=0.0)
+    state.candidates = (
+        (0, 0.0, -0.004),
+        (1, math.pi / 2, -0.004),
+        (3, math.pi, -0.004),
+        (5, math.pi / 2, -0.002),
+        (4, 0.0, -0.002),
+        (8, 0.0, 0.0),
+    )
+    for _ in range(2):
+        _candidate_contact_decision(
+            state,
+            target_contact=True,
+            already_reached=False,
+            progress=False,
+            recovery_safe=True,
+        )
+    assert state.forced_index == 1
+    state.selected_index, state.selected_roll, state.order = 1, math.pi / 2, (1, 5)
+    assert _candidate_contact_decision(
+        state,
+        target_contact=False,
+        already_reached=False,
+        progress=False,
+        recovery_safe=True,
+    ) == (True, True)
+    assert state.forced_index == 5
+    state.selected_index = 5
+    assert _candidate_contact_decision(
+        state,
+        target_contact=False,
+        already_reached=False,
+        progress=False,
+        recovery_safe=True,
+    ) == (False, False)
+    assert state.fallback_count == 2
 
 
 def test_twist_progress_resets_consecutive_stalls_without_switching_pose():
