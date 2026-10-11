@@ -363,6 +363,39 @@ contract and a comparison with LeRobot's official Rerun visualization, see
 
 ---
 
+(cli-dataset-tools)=
+## Offline Dataset Tools
+
+Use an exact finalized dataset root containing `meta/info.json`:
+
+```bash
+embodichain dataset validate /absolute/path/to/dataset \
+    --media-frame-counts --output /tmp/validation.json
+embodichain dataset split /absolute/path/to/dataset /tmp/split.json \
+    --fractions 0.8 0.1 0.1 --seed 42 --success-only
+embodichain dataset recover /absolute/path/to/dataset
+embodichain dataset recover /absolute/path/to/dataset --repair
+```
+
+| Command | Purpose |
+| --- | --- |
+| `dataset validate` | Check frames, timing, action/language references, segments, provenance and optional media |
+| `dataset split` | Write a quality-filtered manifest that keeps source episodes and derivatives together |
+| `dataset recover` | Diagnose commit evidence; `--repair` can restore missing sidecars after disk verification |
+
+These commands operate without simulation. Stop writers before inspection or
+repair. They use an exact root and do not support preview's `--latest` option.
+Validation/recovery returns `1` for errors or unresolved evidence; successful
+operations return `0`, and invalid requests return `2`. Run each subcommand
+with `--help` for arguments. See {doc}`offline_expert_datasets` for complete
+parameters, report fields, quality/grouping rules, and recovery boundaries.
+
+The separate `embodichain-lerobot-export SOURCE DESTINATION` command runs in a
+Python 3.12 environment pinned to LeRobot 0.6.1. Installation, official language
+recipes, and depth units are covered in {doc}`lerobot_export`.
+
+---
+
 ## Train RL
 
 Launch reinforcement learning training from a JSON or YAML config file.

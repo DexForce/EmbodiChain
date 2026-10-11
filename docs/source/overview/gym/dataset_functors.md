@@ -106,6 +106,10 @@ their outputs stay aligned.
   - Number of background threads for per-frame PNG writing (lerobot ``AsyncImageWriter``). When > 0, ``add_frame`` no longer blocks on ``PIL.Image.save``. Applies to both recorders. Try 4 threads per camera as a starting point.
 * - ``image_writer_processes``
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
+* - ``metadata_buffer_size``
+  - Positive LeRobot episode-metadata batch size, default ``1``. Supported by both recorders; larger values can delay visibility of recent metadata. The commit journal still requires on-disk evidence during recovery.
+* - ``async_queue_maxsize``
+  - ``AsyncLeRobotRecorder`` only: maximum pending payload count. Default ``0`` is unbounded; positive values apply producer backpressure. This is a payload count, not a byte limit.
 * - ``depth_video``
   - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See {ref}`compressed-depth-sidecar`.
 ```
@@ -169,6 +173,21 @@ episode-local and is therefore not required to have the same numeric value.
 Episode-level completion, success, terminal reason, per-segment status and
 segment metadata are additionally written to
 ``meta/embodichain_episodes.jsonl``.
+
+### Recording identity, validation, and recovery
+
+New episode sidecars carry run/episode/source UUIDs, available configuration
+and program fingerprints, runtime timing/version provenance, and optional
+expansion/replay links. A natural fragment retains its source identity and
+source frame offsets. The recorder prepares a durable journal before frame
+submission and advances it around SDK, depth, and sidecar commits.
+
+Use {doc}`/guides/offline_expert_datasets` to inspect reports, create grouped
+quality partitions, and diagnose interrupted commits. Repair restores missing
+sidecars only when committed artifacts verify; it does not reconstruct videos
+or resume collection. Finalize before normal validation/splitting and stop all
+writers before recovery. For Python 3.12/LeRobot 0.6.1 conversion, language
+recipes and native depth, see {doc}`/guides/lerobot_export`.
 
 ### Previewing Recorded Episodes
 

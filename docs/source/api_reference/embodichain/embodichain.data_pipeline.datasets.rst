@@ -44,5 +44,8 @@ and optional media evidence without constructing a simulator. Quality-aware
 split manifests group source episodes and their derived fragments so one
 lineage cannot cross train, validation, and test partitions.
 
+See :doc:`/guides/offline_expert_datasets` for CLI and Python examples,
+diagnostic reports, quality evidence and split-manifest consumption.
+
 .. automodule:: embodichain.data_pipeline.datasets.inspection
    :members:

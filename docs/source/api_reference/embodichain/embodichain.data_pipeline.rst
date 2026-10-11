@@ -64,6 +64,10 @@ The offline recording utilities import without the simulator or training
 stack. They maintain stable episode identities, configuration fingerprints,
 and durable evidence for conservative metadata repair.
 
+The usage guide :doc:`/guides/offline_expert_datasets` covers validation,
+quality splits and interrupted commits. :doc:`/guides/lerobot_export` describes
+the independent Python 3.12 converter for official LeRobot 0.6.1 language/depth.
+
 .. toctree::
    :maxdepth: 1
 
