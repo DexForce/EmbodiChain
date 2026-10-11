@@ -566,6 +566,34 @@ def test_compiled_program_owns_source_and_each_emitted_mutable_config() -> None:
     assert second_pass[0].validators[0].cfg.position_tolerance == pytest.approx(0.03)
 
 
+def test_compiled_acceptance_and_post_policy_values_are_frozen() -> None:
+    registry, _ = _scene_registry()
+    config = _program(
+        SegmentCfg(
+            name="checked",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            post=(WaitStablePostCfg(entity="cube"),),
+            validators=(
+                ObjectNearTargetValidatorCfg(object="cube", target="drop"),
+                ArticulationJointPositionValidatorCfg(
+                    articulation="arm", joint="joint", minimum_position=0.0
+                ),
+            ),
+        ),
+        targets={"drop": CyclicPoseTargetCfg(values=(_pose(0.4),))},
+    )
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    segment = next(iter(compiled))
+    for values, field_name, replacement in (
+        (segment.post_policies[0].cfg, "preset", "changed"),
+        (segment.validators[0].cfg, "position_tolerance", float("inf")),
+        (segment.validators[1].cfg, "minimum_position", None),
+    ):
+        with pytest.raises(FrozenInstanceError):
+            setattr(values, field_name, replacement)
+    assert next(iter(compiled)).validators[0].cfg.position_tolerance == 0.03
+
+
 def test_compiler_rejects_nested_segment_at_exact_path() -> None:
     registry, _ = _scene_registry()
     config = _program(

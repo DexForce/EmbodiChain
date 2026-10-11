@@ -745,7 +745,7 @@ class CombinedTaskProgramExpansionFactory:
                     trajectory_requested=int(record["trajectory_requested"]),
                     trajectory_selected=int(record["trajectory_selected"]),
                     fallback_count=int(record["fallback_count"]),
-                    env_id=row,
+                    env_id=int(context.env_ids[row].item()),
                 )
             )
         return rebuilt
@@ -948,7 +948,7 @@ class CombinedTaskProgramExpansionFactory:
                     trajectory_requested=int(record["trajectory_requested"]),
                     trajectory_selected=int(record["trajectory_selected"]),
                     fallback_count=int(record["fallback_count"]),
-                    env_id=row,
+                    env_id=int(context.env_ids[row].item()),
                 )
             )
         return rebuilt

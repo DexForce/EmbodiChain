@@ -208,29 +208,54 @@ class CompiledTaskProgramCall:
 
 
 @dataclass(frozen=True, slots=True)
+class _WaitStableValues:
+    """Immutable execution values, independent of mutable authoring config."""
+
+    entity: str
+    preset: str
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ObjectNearTargetValues:
+    """Immutable object-position acceptance parameters."""
+
+    object: str
+    target: str
+    position_tolerance: float
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ArticulationJointPositionValues:
+    """Immutable articulation-position acceptance parameters."""
+
+    articulation: str
+    joint: str
+    minimum_position: float | None
+    maximum_position: float | None
+    kind: str
+
+
+@dataclass(frozen=True, slots=True)
 class CompiledPostPolicy:
     """Owned post-policy config plus its canonical scene entity and source path."""
 
-    cfg: WaitStablePostCfg
+    cfg: WaitStablePostCfg | _WaitStableValues
     entity: SceneEntityRef
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not WaitStablePostCfg:
+        if type(self.cfg) not in (WaitStablePostCfg, _WaitStableValues):
             raise TypeError("cfg must be exactly WaitStablePostCfg.")
         if type(self.entity) not in _SCENE_REF_TYPES:
             raise TypeError("entity must be an exact SceneEntityRef value.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
-        object.__setattr__(
-            self,
-            "cfg",
-            WaitStablePostCfg(
-                entity=self.cfg.entity,
-                preset=self.cfg.preset,
-                kind=self.cfg.kind,
-            ),
+        validated = WaitStablePostCfg(
+            entity=self.cfg.entity, preset=self.cfg.preset, kind=self.cfg.kind
         )
+        object.__setattr__(self, "cfg", _WaitStableValues(**validated.to_dict()))
         object.__setattr__(self, "entity", _copy_scene_ref(self.entity))
 
 
@@ -238,14 +263,17 @@ class CompiledPostPolicy:
 class CompiledObjectNearTargetValidator:
     """Owned validator config with canonical object and resolved target pose."""
 
-    cfg: ObjectNearTargetValidatorCfg
+    cfg: ObjectNearTargetValidatorCfg | _ObjectNearTargetValues
     object: SceneObjectRef
     target_pose: SemanticPose
     target_selection: CompiledTargetSelection
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not ObjectNearTargetValidatorCfg:
+        if type(self.cfg) not in (
+            ObjectNearTargetValidatorCfg,
+            _ObjectNearTargetValues,
+        ):
             raise TypeError("cfg must be exactly ObjectNearTargetValidatorCfg.")
         if type(self.object) is not SceneObjectRef:
             raise TypeError("object must be exactly SceneObjectRef.")
@@ -255,16 +283,13 @@ class CompiledObjectNearTargetValidator:
             raise TypeError("target_selection must be exactly CompiledTargetSelection.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
-        object.__setattr__(
-            self,
-            "cfg",
-            ObjectNearTargetValidatorCfg(
-                object=self.cfg.object,
-                target=self.cfg.target,
-                position_tolerance=self.cfg.position_tolerance,
-                kind=self.cfg.kind,
-            ),
+        validated = ObjectNearTargetValidatorCfg(
+            object=self.cfg.object,
+            target=self.cfg.target,
+            position_tolerance=self.cfg.position_tolerance,
+            kind=self.cfg.kind,
         )
+        object.__setattr__(self, "cfg", _ObjectNearTargetValues(**validated.to_dict()))
         object.__setattr__(self, "object", _copy_scene_ref(self.object))
         object.__setattr__(self, "target_pose", self.target_pose.snapshot())
 
@@ -273,12 +298,15 @@ class CompiledObjectNearTargetValidator:
 class CompiledArticulationJointPositionValidator:
     """Owned joint-position validator with its canonical articulation."""
 
-    cfg: ArticulationJointPositionValidatorCfg
+    cfg: ArticulationJointPositionValidatorCfg | _ArticulationJointPositionValues
     articulation: SceneArticulationRef
     source_path: ConfigPath
 
     def __post_init__(self) -> None:
-        if type(self.cfg) is not ArticulationJointPositionValidatorCfg:
+        if type(self.cfg) not in (
+            ArticulationJointPositionValidatorCfg,
+            _ArticulationJointPositionValues,
+        ):
             raise TypeError(
                 "cfg must be exactly ArticulationJointPositionValidatorCfg."
             )
@@ -286,16 +314,15 @@ class CompiledArticulationJointPositionValidator:
             raise TypeError("articulation must be exactly SceneArticulationRef.")
         if type(self.source_path) is not tuple:
             raise TypeError("source_path must be a ConfigPath tuple.")
+        validated = ArticulationJointPositionValidatorCfg(
+            articulation=self.cfg.articulation,
+            joint=self.cfg.joint,
+            minimum_position=self.cfg.minimum_position,
+            maximum_position=self.cfg.maximum_position,
+            kind=self.cfg.kind,
+        )
         object.__setattr__(
-            self,
-            "cfg",
-            ArticulationJointPositionValidatorCfg(
-                articulation=self.cfg.articulation,
-                joint=self.cfg.joint,
-                minimum_position=self.cfg.minimum_position,
-                maximum_position=self.cfg.maximum_position,
-                kind=self.cfg.kind,
-            ),
+            self, "cfg", _ArticulationJointPositionValues(**validated.to_dict())
         )
         object.__setattr__(
             self,
