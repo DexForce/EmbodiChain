@@ -14,4 +14,28 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .cfg import DexforceW1Cfg
+"""Dexforce W1 robot configuration, imported on first access."""
+
+from __future__ import annotations
+
+from importlib import import_module
+from typing import Any
+
+__all__ = ["DexforceW1Cfg"]
+_MODULES = ("cfg", "types", "specs", "hand_specs", "params", "utils")
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MODULES:
+        value = import_module(f".{name}", __name__)
+        globals()[name] = value
+        return value
+    if name != "DexforceW1Cfg":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = import_module("embodichain_robots.dexforce_w1", __name__).DexforceW1Cfg
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__) | set(_MODULES))

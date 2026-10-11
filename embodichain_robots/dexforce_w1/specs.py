@@ -1,0 +1,245 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Single source of truth for released Dexforce W1 hardware revisions."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+from .types import (
+    DexforceW1ArmSide,
+    DexforceW1Type,
+    DexforceW1Version,
+)
+
+__all__ = [
+    "W1VersionSpec",
+    "get_w1_version_spec",
+]
+
+
+_LEFT_TCP = (
+    (-1.0, 0.0, 0.0, 0.012),
+    (0.0, 0.0, 1.0, 0.0675),
+    (0.0, 1.0, 0.0, 0.127),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_RIGHT_TCP = (
+    (1.0, 0.0, 0.0, 0.012),
+    (0.0, 0.0, -1.0, -0.0675),
+    (0.0, 1.0, 0.0, 0.127),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_DEFAULT_TCP = {
+    DexforceW1ArmSide.LEFT: _LEFT_TCP,
+    DexforceW1ArmSide.RIGHT: _RIGHT_TCP,
+}
+
+
+@dataclass(frozen=True)
+class W1VersionSpec:
+    """Asset layout and calibrated defaults belonging to one W1 revision."""
+
+    version: DexforceW1Version
+    component_urdfs: Mapping[DexforceW1Type, str]
+    full_robot_urdf_path: str
+    arm_d_list: tuple[float, ...]
+    arm_base_z: float
+    default_eef_attach_xpos: Mapping[DexforceW1ArmSide, tuple]
+    solver_tcp: Mapping[DexforceW1ArmSide, tuple]
+    eyes_attach_xpos: tuple[tuple[float, ...], ...]
+    wrist_camera_rpy: tuple[float, float, float]
+    wrist_camera_xyz: tuple[float, float, float]
+    head_contains_eyes: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "component_urdfs", MappingProxyType(dict(self.component_urdfs))
+        )
+        object.__setattr__(
+            self,
+            "default_eef_attach_xpos",
+            MappingProxyType(dict(self.default_eef_attach_xpos)),
+        )
+        object.__setattr__(self, "solver_tcp", MappingProxyType(dict(self.solver_tcp)))
+
+    @property
+    def assembly_name(self) -> str:
+        return f"DexforceW1V{self.version.value.removeprefix('v')}"
+
+    def component_urdf(self, component_type: DexforceW1Type) -> str:
+        try:
+            return self.component_urdfs[component_type]
+        except KeyError as exc:
+            raise ValueError(
+                f"W1 {self.version.value} has no registered "
+                f"{component_type.value} component asset."
+            ) from exc
+
+    def full_robot_urdf(self) -> str:
+        return self.full_robot_urdf_path
+
+    def eef_attach_xpos(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        """Return the version-owned transform applied before every EEF."""
+        return np.asarray(self.default_eef_attach_xpos[arm_side], dtype=float).copy()
+
+    def compose_eef_attach_xpos(
+        self,
+        arm_side: DexforceW1ArmSide,
+        eef_xpos: np.ndarray,
+    ) -> np.ndarray:
+        """Compose the W1 revision offset with an EEF-specific transform."""
+        eef_xpos = np.asarray(eef_xpos, dtype=float)
+        if eef_xpos.shape != (4, 4):
+            raise ValueError(
+                f"EEF transform must have shape (4, 4), got {eef_xpos.shape}."
+            )
+        return self.eef_attach_xpos(arm_side) @ eef_xpos
+
+    def tcp(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        """Return the final EE-to-TCP transform for this W1 revision."""
+        return self.compose_eef_attach_xpos(
+            arm_side,
+            np.asarray(self.solver_tcp[arm_side], dtype=float),
+        )
+
+    def eyes_xpos(self) -> np.ndarray:
+        return np.asarray(self.eyes_attach_xpos, dtype=float).copy()
+
+    def wrist_camera_xpos(self, arm_side: DexforceW1ArmSide) -> np.ndarray:
+        attach_xpos = np.eye(4)
+        attach_xpos[:3, :3] = R.from_euler("xyz", self.wrist_camera_rpy).as_matrix()
+        attach_xpos[:3, 3] = self.wrist_camera_xyz
+
+        frame_xpos = np.eye(4)
+        yaw = -90 if arm_side == DexforceW1ArmSide.LEFT else 90
+        frame_xpos[:3, :3] = R.from_rotvec([0, 0, yaw], degrees=True).as_matrix()
+        return frame_xpos @ attach_xpos
+
+
+_V021_COMPONENT_URDFS = {
+    DexforceW1Type.CHASSIS: "DexforceW1ChassisV021/chassis.urdf",
+    DexforceW1Type.TORSO: "DexforceW1TorsoV021/torso.urdf",
+    DexforceW1Type.EYES: "DexforceW1EyesV021/eyes.urdf",
+    DexforceW1Type.HEAD: "DexforceW1HeadV021/head.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1LeftArmV021/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1RightArmV021/right_arm.urdf",
+}
+_V022_COMPONENT_URDFS = {
+    DexforceW1Type.CHASSIS: "DexforceW1V022/w1/chassis.urdf",
+    DexforceW1Type.TORSO: "DexforceW1V022/w1/torso.urdf",
+    DexforceW1Type.HEAD: "DexforceW1V022/w1/head.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1V022/w1/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1V022/w1/right_arm.urdf",
+}
+_V025_COMPONENT_URDFS = {
+    DexforceW1Type.CHASSIS: "DexforceW1V025/w1/chassis.urdf",
+    DexforceW1Type.TORSO: "DexforceW1V025/w1/torso.urdf",
+    DexforceW1Type.HEAD: "DexforceW1V025/w1/head.urdf",
+    DexforceW1Type.LEFT_ARM: "DexforceW1V025/w1/left_arm.urdf",
+    DexforceW1Type.RIGHT_ARM: "DexforceW1V025/w1/right_arm.urdf",
+}
+# Verified against the released V022 and V025 left/right arm URDF joint origins.
+_SHARED_D_LIST = (0.0, 0.0, 0.260, 0.0, 0.166, 0.098, 0.0)
+_EYES_ATTACH_XPOS = (
+    (-0.0, 0.25959, -0.96572, 0.091),
+    (0.0, -0.96572, -0.25959, -0.051),
+    (-1.0, -0.0, 0.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_WRIST_CAMERA_RPY = (2.79252648, 0.0, 1.57079633)
+_WRIST_CAMERA_XYZ = (0.08, 0.0, 0.06)
+_IDENTITY_XPOS = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.0),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_V021_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _IDENTITY_XPOS,
+    DexforceW1ArmSide.RIGHT: _IDENTITY_XPOS,
+}
+# Provisional V022 baseline. Replace this with the measured arm-flange
+# transform before declaring the release calibrated.
+_V022_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _IDENTITY_XPOS,
+    DexforceW1ArmSide.RIGHT: _IDENTITY_XPOS,
+}
+# Calibrated outward flange offset shared by every V025 end effector.
+_V025_EEF_ATTACH_XPOS = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.012),
+    (0.0, 0.0, 0.0, 1.0),
+)
+_V025_DEFAULT_EEF_ATTACH_XPOS = {
+    DexforceW1ArmSide.LEFT: _V025_EEF_ATTACH_XPOS,
+    DexforceW1ArmSide.RIGHT: _V025_EEF_ATTACH_XPOS,
+}
+
+_W1_VERSION_SPECS = {
+    DexforceW1Version.V021: W1VersionSpec(
+        version=DexforceW1Version.V021,
+        component_urdfs=_V021_COMPONENT_URDFS,
+        full_robot_urdf_path="DexforceW1V021/DexforceW1_v02_1.urdf",
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
+        default_eef_attach_xpos=_V021_DEFAULT_EEF_ATTACH_XPOS,
+        solver_tcp=_DEFAULT_TCP,
+        eyes_attach_xpos=_EYES_ATTACH_XPOS,
+        wrist_camera_rpy=_WRIST_CAMERA_RPY,
+        wrist_camera_xyz=_WRIST_CAMERA_XYZ,
+    ),
+    DexforceW1Version.V022: W1VersionSpec(
+        version=DexforceW1Version.V022,
+        component_urdfs=_V022_COMPONENT_URDFS,
+        full_robot_urdf_path="DexforceW1V022/w1/robot.urdf",
+        # Verified from the V022 left/right arm URDF joint origins.
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
+        default_eef_attach_xpos=_V022_DEFAULT_EEF_ATTACH_XPOS,
+        solver_tcp=_DEFAULT_TCP,
+        eyes_attach_xpos=_EYES_ATTACH_XPOS,
+        wrist_camera_rpy=_WRIST_CAMERA_RPY,
+        wrist_camera_xyz=_WRIST_CAMERA_XYZ,
+        # Verified from V022 head.urdf: it contains the eyes link and EYES joint.
+        head_contains_eyes=True,
+    ),
+    DexforceW1Version.V025: W1VersionSpec(
+        version=DexforceW1Version.V025,
+        component_urdfs=_V025_COMPONENT_URDFS,
+        full_robot_urdf_path="DexforceW1V025/w1/robot.urdf",
+        # Verified against left_arm.urdf/right_arm.urdf in the V025 release.
+        arm_d_list=_SHARED_D_LIST,
+        arm_base_z=0.1025,
+        default_eef_attach_xpos=_V025_DEFAULT_EEF_ATTACH_XPOS,
+        solver_tcp=_DEFAULT_TCP,
+        eyes_attach_xpos=_EYES_ATTACH_XPOS,
+        wrist_camera_rpy=_WRIST_CAMERA_RPY,
+        wrist_camera_xyz=_WRIST_CAMERA_XYZ,
+        head_contains_eyes=True,
+    ),
+}
+
+
+def get_w1_version_spec(version: DexforceW1Version | str) -> W1VersionSpec:
+    return _W1_VERSION_SPECS[DexforceW1Version.parse(version)]

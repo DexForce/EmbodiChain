@@ -6,8 +6,9 @@
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs | `embodichain/lab/sim/robots/__init__.py` |
-| W1 variants and serialization | `embodichain/lab/sim/robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Available robot configs and aliases | `embodichain_robots/_catalog.py`; `embodichain_robots/__init__.py` owns lazy exports |
+| Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
+| W1 variants and serialization | `embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -16,6 +17,21 @@ runtime workspace access. Robot configs own asset/kinematic assembly; the
 manager owns creation and backend binding. For a new config use
 [add-robot](../../../.agents/skills/add-robot/SKILL.md); for reusable robot/sensor
 suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
+
+Concrete robot definitions live in the separate `embodichain_robots` import
+package, bundled in the main wheel with the core version. Generic `Robot`,
+`RobotCfg`, `RobotPresetCfg`, and dual-arm composition remain in the core.
+Legacy leaf imports under `embodichain.lab.sim.robots` alias their canonical
+modules so class/enum identity and module patches agree across import paths.
+
+The `embodichain.robots` entry points provide lightweight catalog mappings from
+IDs to `class_path: module:Class` and optional `defaults`. Catalogs/package
+initializers defer robot implementation imports. Listing reads only catalogs;
+resolution imports the selected `RobotCfg` subclass and calls `from_dict()`
+with isolated defaults/overrides. Duplicate IDs fail explicitly. Gym
+`robot.class_type`, workspace `--robot`, and dual-arm `base_robot` share this
+resolver; existing selectors and variant aliases remain valid. After changing
+entry-point metadata, refresh the editable install and restart the process.
 
 ## Configuration resolution
 
@@ -92,6 +108,9 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 
 | Changed boundary | Existing coverage |
 |---|---|
+| Robot catalogs, third-party selection across consumers | `tests/test_robot_registry.py` |
+| Legacy module identity and lazy robot imports | `tests/sim/robots/test_compatibility.py` |
+| Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |

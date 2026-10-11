@@ -91,9 +91,6 @@ __all__ = [
 # Mapping from ``--solver`` choice to solver config class (resolved lazily).
 _SOLVER_CHOICES = ("pytorch", "pinocchio", "pink")
 
-# Predefined EmbodiChain robots selectable via ``--robot``.
-_ROBOT_CHOICES = ("franka_panda", "cobotmagic", "dexforce_w1", "ur")
-
 
 def _viser_enabled(args: argparse.Namespace) -> bool:
     """Whether the Viser browser backend was requested."""
@@ -103,30 +100,6 @@ def _viser_enabled(args: argparse.Namespace) -> bool:
 def _visualization_enabled(args: argparse.Namespace) -> bool:
     """Whether workspace visualization has an active display backend."""
     return bool(args.visualize and (_viser_enabled(args) or not args.headless))
-
-
-def _robot_cfg_cls(name: str):
-    """Resolve a ``--robot`` choice to its RobotCfg subclass (lazy import).
-
-    Args:
-        name: One of :data:`_ROBOT_CHOICES`.
-
-    Returns:
-        The RobotCfg subclass for the preset.
-    """
-    from embodichain.lab.sim.robots import (
-        CobotMagicCfg,
-        DexforceW1Cfg,
-        FrankaPandaCfg,
-        URRobotCfg,
-    )
-
-    return {
-        "franka_panda": FrankaPandaCfg,
-        "cobotmagic": CobotMagicCfg,
-        "dexforce_w1": DexforceW1Cfg,
-        "ur": URRobotCfg,
-    }[name]
 
 
 def _resolve_control_part(robot, requested: str | None) -> str | None:
@@ -262,9 +235,10 @@ def build_preset_robot_cfg(
     """
     import json
 
-    cfg_cls = _robot_cfg_cls(args.robot)
+    from embodichain.robot_registry import resolve_robot_cfg
+
     params = json.loads(args.robot_params) if args.robot_params else {}
-    cfg = cfg_cls.from_dict(params)
+    cfg = resolve_robot_cfg(args.robot, params)
     if args.uid:
         cfg.uid = args.uid
 
@@ -766,6 +740,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
+    from embodichain.robot_registry import list_robot_cfgs
+
     # --- Source (choose one) ------------------------------------------------
     robot = parser.add_argument_group("Source (choose one)")
     source = robot.add_mutually_exclusive_group(required=True)
@@ -779,12 +755,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     source.add_argument(
         "--robot",
         type=str,
-        choices=_ROBOT_CHOICES,
+        choices=list_robot_cfgs(),
         default=None,
         help="Use a predefined EmbodiChain robot. The control parts and "
         "kinematics solver come from the preset, so --ee-link/--joints are not "
-        "needed -- only --control-part (optional). Choices: franka_panda, "
-        "cobotmagic, dexforce_w1, ur.",
+        "needed -- only --control-part (optional). Installed robot catalogs "
+        "supply the available choices.",
     )
     robot.add_argument(
         "--robot-params",

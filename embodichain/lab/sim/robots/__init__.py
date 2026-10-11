@@ -14,17 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Robot-specific configuration presets (``RobotCfg`` subclasses) ready to drop into a simulation scene, plus the ``build_dual_arm_cfg`` dual-arm assembly helper."""
+"""Legacy robot exports and the generic dual-arm composition API."""
 
 from __future__ import annotations
 
-from .aloha_mini import AlohaMiniCfg
-from .tianji_marvin import TianjiMarvinCfg
-from .dexforce_w1 import *
-from .cobotmagic import CobotMagicCfg
-from .franka_panda import FrankaPandaCfg
-from .ur_robot import URRobotCfg
-from .dual_arm import DualArmRobotCfg, build_dual_arm_cfg
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "AlohaMiniCfg",
@@ -36,3 +31,39 @@ __all__ = [
     "DualArmRobotCfg",
     "build_dual_arm_cfg",
 ]
+
+_EXPORTS = {
+    "AlohaMiniCfg": "embodichain_robots",
+    "TianjiMarvinCfg": "embodichain_robots",
+    "DexforceW1Cfg": "embodichain_robots",
+    "CobotMagicCfg": "embodichain_robots",
+    "FrankaPandaCfg": "embodichain_robots",
+    "URRobotCfg": "embodichain_robots",
+    "DualArmRobotCfg": ".dual_arm",
+    "build_dual_arm_cfg": ".dual_arm",
+}
+_MODULES = (
+    "aloha_mini",
+    "tianji_marvin",
+    "dexforce_w1",
+    "cobotmagic",
+    "franka_panda",
+    "ur_robot",
+    "dual_arm",
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MODULES:
+        value = import_module(f".{name}", __name__)
+        globals()[name] = value
+        return value
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_EXPORTS[name], __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__) | set(_MODULES))

@@ -27,6 +27,11 @@ plane sampling → FK/IK → metrics → result cache. Runtime: `workspace_cfg`
 → lazy per-part cache load → cached qpos selection → current-base batch FK
 → bounded-position filtering.
 
+The CLI's `--robot` choices and preset construction use the shared
+[robot catalog](../robot-system/robot-system.md). Installed provider IDs and
+historical CLI aliases are supported without a separate CLI class map;
+`--robot-params` overrides the selected catalog defaults.
+
 `Robot.get_workspace()` loads `RobotWorkspace.from_cache(cache_path, ...)` on
 first use. `cache_path` may be a cache-entry directory (selecting `results.npz`)
 or a direct archive path. Runtime loading uses `allow_pickle=False`; its

@@ -33,6 +33,10 @@ return merge_robot_cfg(cfg, init_dict)
 
 ## Two Layouts
 
+Concrete configs live in the `embodichain_robots/` import package, bundled
+with the core distribution/version. Generic robot runtime, configuration,
+solvers, and composition stay in `embodichain/lab/sim/`.
+
 | Layout | When | Files |
 |--------|------|-------|
 | Single-file | Variant-less robot | `my_robot.py` |
@@ -98,12 +102,19 @@ must match the matching `control_parts` entry (the test stub asserts this).
    ```
 
 5. **Keep `from_dict` as the 3-line template** — do not reimplement it.
-6. **Add `__all__` and register** in `embodichain/lab/sim/robots/__init__.py`:
+6. **Add `__all__` and register** the class in
+   `embodichain_robots/_catalog.py`, then add its lazy export to
+   `embodichain_robots/__init__.py` (`_EXPORTS` and `__all__`):
 
    ```python
-   from .my_robot import MyRobotCfg
-   __all__ = ["MyRobotCfg"]
+   # Catalog entry; importing the catalog must not import the robot module.
+   "MyRobot": {"class_path": "embodichain_robots.my_robot:MyRobotCfg"}
    ```
+
+   The main wheel already advertises this catalog through `embodichain.robots`.
+   Gym, workspace CLI, and dual-arm composition use its shared resolver.
+   Optional aliases/defaults belong in the catalog. New robots do not need
+   entries in the legacy import compatibility package or a CLI class map.
 
 7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
    it to `docs/source/resources/robot/index.rst`.
@@ -156,8 +167,9 @@ Do not copy those semantic declarations into the robot class.
 
 **File locations:**
 
-- Config: `embodichain/lab/sim/robots/<name>.py` or `embodichain/lab/sim/robots/<name>/`
-- Registry: `embodichain/lab/sim/robots/__init__.py`
+- Config: `embodichain_robots/<name>.py` or `embodichain_robots/<name>/`
+- Catalog / lazy exports: `embodichain_robots/_catalog.py`, `embodichain_robots/__init__.py`
+- Shared resolver: `embodichain/robot_registry.py`
 - Docs: `docs/source/resources/robot/<name>.md`
 - Tests: `tests/sim/objects/test_robot_cfg.py`
 - Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)
