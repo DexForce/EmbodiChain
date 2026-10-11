@@ -94,16 +94,21 @@ The component boundary is implemented in
 is consumed only by a configured Task Program deployment. Scene components are
 always physical-only; semantic entity mappings and affordances live in the
 task integration's nested `scene_binding`. The shared
-`cobotmagic.yaml` component owns a top-view RGB camera, two wrist
-RGB cameras, and an optional right-arm skill profile. Tableware handwritten and
-configured Task Program deployments reuse that same embodiment.
+`cobotmagic.yaml` component owns a top-view RGB camera and an optional right-arm
+skill profile. Its selected `CobotMagicCfg` owns the two mounted wrist cameras.
+Tableware handwritten and configured Task Program deployments reuse the combined
+suite. Gym copies the selected robot configuration and overrides its
+`enable_sensor` with the environment-wide switch. `cfg.sensor` retains
+independent declarations; effective sensors combine those with
+`cfg.robot.sensors` and reject duplicate UIDs before resource creation.
 The runnable Gym config may set `enable_sensor: false` while selecting an
-embodiment with cameras. The component still owns the sensor declarations, but
+embodiment with cameras. Both declaration sources remain available, but
 `EmbodiedEnv` skips their creation and sensor observations; the run launcher
 provides `--disable_sensor` / `--disable-sensor` as a one-run override. The
 shared online-data rollout buffer also omits image allocation for a disabled
-inline sensor suite. Sensor-dependent event and observation functors are
-removed before their managers are constructed, including nested
+sensor suite. Online buffer allocation uses the same robot decoder and combined
+declarations, including default mounted cameras. Sensor-dependent event and
+observation functors are removed before their managers are constructed, including nested
 `SceneEntityCfg` references, `all_sensors` selectors, sensor output paths and
 camera-keyed observation descriptors.
 

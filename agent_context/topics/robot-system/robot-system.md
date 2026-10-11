@@ -12,8 +12,9 @@
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
 `Robot` extends `Articulation` with named control parts, per-part solvers and
-runtime workspace access. Robot configs own asset/kinematic assembly; the
-manager owns creation and backend binding. For a new config use
+runtime workspace access. Robot configs own asset/kinematic assembly and
+optional mounted camera declarations; the manager owns creation and backend
+binding. For a new config use
 [add-robot](../../../.agents/skills/add-robot/SKILL.md); for reusable robot/sensor
 suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
 
@@ -73,6 +74,14 @@ are owned by [simulation](../simulation-system/simulation-system.md); external
 library adapters own conversions.
 
 ## Physics and motion integration
+
+`RobotCfg.sensors` owns robot-local camera calibration; `enable_sensor`
+opts into initialization in standalone simulation. Gym overrides that switch
+on an isolated robot configuration using its environment acquisition setting.
+The manager qualifies parent links with the final robot UID without changing
+the declaration. Independent cameras remain deployment/embodiment-owned.
+Creation, attachment and rebuild behavior belong to
+[sensors](../sensor-system/sensor-system.md).
 
 Keep portable intent in an ordinary `RobotCfg`; joint-property and root/body
 physics ownership is defined in [simulation](../simulation-system/simulation-system.md).

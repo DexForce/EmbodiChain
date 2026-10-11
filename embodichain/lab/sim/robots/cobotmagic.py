@@ -108,7 +108,29 @@ class CobotMagicCfg(RobotCfg):
 
     def _build_defaults(self, init_dict: dict | None = None) -> None:
         """Populate default urdf/control/solver/physics for CobotMagic."""
+        from embodichain.lab.sim.sensors import CameraCfg
+
         init_dict = init_dict or {}
+        self.sensors = [
+            CameraCfg(
+                uid=f"cam_{side}_wrist",
+                width=640,
+                height=480,
+                enable_mask=True,
+                intrinsics=(
+                    488.1665344238281,
+                    488.1665344238281,
+                    322.7323303222656,
+                    213.17434692382812,
+                ),
+                extrinsics=CameraCfg.ExtrinsicsCfg(
+                    parent=f"{side}_link6",
+                    pos=(-0.08, 0.0, 0.04),
+                    quat=(0.69034543, -0.69034543, -0.15304635, 0.15304635),
+                ),
+            )
+            for side in ("right", "left")
+        ]
         arm_urdf = get_data_path("CobotMagicArm/CobotMagicWithGripperV100.urdf")
         left_arm_xpos = np.array(
             [

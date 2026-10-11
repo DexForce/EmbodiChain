@@ -28,7 +28,7 @@ import torch
 import numpy as np
 import gymnasium as gym
 
-from dataclasses import MISSING
+from dataclasses import MISSING, fields
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -82,6 +82,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.lab.gym.utils.gym_utils import (
+    _collect_sensor_cfgs,
     build_trajectory_buffer,
     init_rollout_buffer_from_gym_space,
 )
@@ -128,8 +129,8 @@ class EmbodiedEnvCfg(EnvCfg):
         `None`, all controllable joints are used.
     - **active_joint_ids**: List[int] — explicit joint indices to use for
         control (alternative to `control_parts`).
-    - **sensor**: List[`SensorCfg`] — sensors attached to the robot or scene
-        (cameras, depth, segmentation, force sensors, ...).
+    - **sensor**: List[`SensorCfg`] — independent sensors. Mounted cameras
+        declared by `robot.sensors` are included in the effective sensor suite.
     - **light**: `EnvLightCfg` — lighting configuration (direct lights now,
         indirect/IBL planned for future releases).
     - **background**, **rigid_object**, **rigid_object_group**, **articulation**:
@@ -174,11 +175,12 @@ class EmbodiedEnvCfg(EnvCfg):
     """
 
     sensor: List[SensorCfg] = []
+    """Independent sensors, combined with the robot's mounted sensor suite."""
     enable_sensor: bool = True
     """Whether configured sensors are instantiated and sampled.
 
-    Embodiment components may declare a reusable sensor suite even when a
-    deployment only needs proprioception. Set this to ``False`` to skip
+    Independent declarations and robot-mounted defaults remain available when
+    a deployment only needs proprioception. Set this to ``False`` to skip all
     sensor creation, including camera-group allocation and image fetching.
     """
 
@@ -772,9 +774,7 @@ class EmbodiedEnv(BaseEnv):
         )
 
         sensor_enabled = getattr(self.cfg, "enable_sensor", True)
-        sensor_uids = {
-            cfg.uid for cfg in getattr(self.cfg, "sensor", []) if cfg.uid is not None
-        }
+        sensor_uids = {cfg.uid for cfg in self._sensor_configs() if cfg.uid is not None}
 
         def uses_disabled_sensor(value: object, field_name: str | None = None) -> bool:
             """Return whether nested functor params reference a disabled sensor."""
@@ -2390,7 +2390,22 @@ class EmbodiedEnv(BaseEnv):
         del kwargs
         if self.cfg.robot is None:
             logger.log_error("Robot configuration is not provided.")
-        return self.sim.add_robot(self.cfg.robot)
+        robot_cfg = copy.deepcopy(self.cfg.robot)
+        if isinstance(robot_cfg, RobotPresetCfg):
+            for item in fields(robot_cfg):
+                candidate = getattr(robot_cfg, item.name)
+                if isinstance(candidate, RobotCfg):
+                    candidate.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg.resolve(
+                self.sim.sim_config.physics_cfg,
+                newton_solver_type=self.sim._active_newton_solver_type,
+            )
+        else:
+            robot_cfg.enable_sensor = self.cfg.enable_sensor
+            selected_cfg = robot_cfg
+        _collect_sensor_cfgs(selected_cfg, self.cfg.sensor)
+        self._robot_sensor_cfgs = selected_cfg.sensors
+        return self.sim.add_robot(robot_cfg)
 
     def _setup_robot(self, **kwargs) -> Robot:
         """Configure the finalized robot interface for the environment.
@@ -2447,6 +2462,13 @@ class EmbodiedEnv(BaseEnv):
         )
         return robot
 
+    def _sensor_configs(self) -> list[SensorCfg]:
+        """Return independent and selected robot sensor declarations."""
+        robot_cfg = getattr(self.cfg, "robot", None)
+        mounted = getattr(self, "_robot_sensor_cfgs", getattr(robot_cfg, "sensors", []))
+        # The selected preset's declarations are retained even when disabled.
+        return _collect_sensor_cfgs(None, [*getattr(self.cfg, "sensor", []), *mounted])
+
     def _setup_sensors(self, **kwargs) -> Dict[str, BaseSensor]:
         """Setup the sensors in the environment.
 
@@ -2454,7 +2476,6 @@ class EmbodiedEnv(BaseEnv):
             Dict[str, BaseSensor]: A dictionary mapping sensor UIDs to sensor instances.
         """
 
-        # TODO: support sensor attachment to the robot.
         if not self.cfg.enable_sensor:
             logger.log_info(
                 "Sensor acquisition is disabled; configured sensors will not be instantiated."
@@ -2464,6 +2485,11 @@ class EmbodiedEnv(BaseEnv):
         sensors = {}
         for cfg in self.cfg.sensor:
             sensor = self.sim.add_sensor(cfg)
+            sensors[cfg.uid] = sensor
+        for cfg in getattr(self, "_robot_sensor_cfgs", []):
+            sensor = self.sim.get_sensor(cfg.uid)
+            if sensor is None:
+                raise RuntimeError(f"Mounted sensor {cfg.uid!r} was not initialized.")
             sensors[cfg.uid] = sensor
         return sensors
 
