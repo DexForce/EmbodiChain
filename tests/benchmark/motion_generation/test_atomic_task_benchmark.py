@@ -246,7 +246,7 @@ def test_atomic_suite_is_franka_pgi_and_curobo_only():
     }
     gripper = suite.enabled_tracks()[0].config["gripper"]
     assert gripper == {
-        "control_part": "hand",
+        "control_part": "eef",
         "open_qpos": [0.0],
         "grasp_qpos": [0.040],
     }
@@ -364,7 +364,7 @@ def test_ur5_pgi_robot_provider_exposes_six_joint_arm_and_hand():
 
     assert cfg.uid == "benchmark_ur5_pgi"
     assert cfg.control_parts["arm"] == [f"joint{index}" for index in range(1, 7)]
-    assert cfg.control_parts["hand"] == ["gripper_finger1_joint_1"]
+    assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].end_link_name == "ee_link"
     assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.17)
     assert len(cfg.init_qpos) == 8
@@ -432,7 +432,7 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
 
     assert cfg.uid == "benchmark_franka_pgi"
     assert len(cfg.control_parts["arm"]) == 7
-    assert cfg.control_parts["hand"] == ["gripper_finger1_joint_1"]
+    assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
     assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
     assert len(cfg.init_qpos) == 9

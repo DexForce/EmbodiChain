@@ -29,19 +29,19 @@ skill_profile:
             - motion.cartesian_pose
             - kinematics.forward
         - endpoint_id: grasp
-          control_part: hand
+          control_part: eef
           capabilities:
             - interaction.grasp
           command_preset: parallel_jaw_commands
   command_presets:
     - preset_id: parallel_jaw_commands
-      control_part: hand
+      control_part: eef
       commands:
         open: [0.04, 0.04]
         grasp: [0.0, 0.0]
   runtime_services:
     grasp_pose_generators:
-      hand:
+      eef:
         kind: antipodal_parallel_jaw
         sample_count: 1000
         opening_margin: 0.002

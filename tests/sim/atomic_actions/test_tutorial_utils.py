@@ -547,9 +547,9 @@ def test_ur5_and_franka_configs_share_place_binding_contract() -> None:
         create_franka_panda_robot_cfg(),
     )
 
-    assert all(set(cfg.control_parts) == {"arm", "hand"} for cfg in configs)
+    assert all(set(cfg.control_parts) == {"arm", "eef"} for cfg in configs)
     assert all(set(cfg.solver_cfg) == {"arm"} for cfg in configs)
-    assert configs[0].control_parts["hand"] == configs[1].control_parts["hand"]
+    assert configs[0].control_parts["eef"] == configs[1].control_parts["eef"]
     assert all(
         torch.allclose(torch.as_tensor(cfg.solver_cfg["arm"].tcp), PGI_TUTORIAL_TCP)
         for cfg in configs
@@ -565,7 +565,7 @@ def test_ur10_robotiq_config_matches_six_active_hand_joints_and_tcp() -> None:
         if joint.attrib.get("type") != "fixed"
     ]
 
-    assert cfg.control_parts["hand"] == [ROBOTIQ_HAND_JOINT_PATTERN]
+    assert cfg.control_parts["eef"] == [ROBOTIQ_HAND_JOINT_PATTERN]
     assert len(active_hand_joints) == 6
     assert all(
         re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
@@ -657,7 +657,7 @@ def test_dual_tutorial_configs_share_hand_binding_contract(
     assert dual_cfg.init_qpos[1 : 2 * arm_dof : 2] == expected_arm_home
     for side in ("left", "right"):
         assert len(dual_cfg.control_parts[f"{side}_arm"]) == arm_dof
-        assert dual_cfg.control_parts[f"{side}_hand"] == [f"{side}_{hand_pattern}"]
+        assert dual_cfg.control_parts[f"{side}_eef"] == [f"{side}_{hand_pattern}"]
         assert dual_cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"] == (
             single_cfg.urdf_cfg.components["hand"]["urdf_path"]
         )
@@ -714,7 +714,7 @@ def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> N
     robot = MagicMock()
     robot.device = torch.device("cpu")
     robot.cfg.control_parts = {
-        "left_hand": [
+        "left_eef": [
             "left_finger_joint",
             "left_left_inner_knuckle_joint",
             "left_left_inner_finger_joint",
@@ -738,7 +738,7 @@ def test_hand_commands_cover_all_six_robotiq_joints_with_mimic_directions() -> N
 
     hand_open, hand_close = get_hand_open_close_qpos(
         robot,
-        hand_control_part="left_hand",
+        hand_control_part="left_eef",
         close_qpos=0.4,
     )
 
@@ -1350,8 +1350,8 @@ def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> Non
     sim.is_newton_backend = True
     sim.sim_config.physics_dt = 0.1
     robot = MagicMock()
-    robot.control_parts = {"arm": ["joint1"], "hand": ["finger_joint"]}
-    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "hand" else [0, 1]
+    robot.control_parts = {"arm": ["joint1"], "eef": ["finger_joint"]}
+    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "eef" else [0, 1]
     trajectory = TimedTrajectory.from_positions(
         torch.tensor([[[0.0, 0.0, 0.0], [0.1, 0.0, 0.02], [0.2, 0.0, 0.02]]]),
         env_ids=torch.tensor([0], dtype=torch.long),
@@ -1369,7 +1369,7 @@ def test_replay_timed_trajectory_settles_once_after_newton_native_grasp() -> Non
         )
 
     assert sim.update.call_args_list == [call(step=1), call(step=4), call(step=1)]
-    robot.get_joint_ids.assert_called_once_with(name="hand")
+    robot.get_joint_ids.assert_called_once_with(name="eef")
 
 
 def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
@@ -1377,8 +1377,8 @@ def test_replay_timed_trajectory_settles_after_each_native_hand_phase() -> None:
     sim.is_newton_backend = True
     sim.sim_config.physics_dt = 0.1
     robot = MagicMock()
-    robot.control_parts = {"arm": ["joint1"], "hand": ["finger_joint"]}
-    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "hand" else [0, 1]
+    robot.control_parts = {"arm": ["joint1"], "eef": ["finger_joint"]}
+    robot.get_joint_ids.side_effect = lambda *, name: [2] if name == "eef" else [0, 1]
     trajectory = TimedTrajectory.from_positions(
         torch.tensor(
             [

@@ -49,6 +49,12 @@ A cfg's `_build_defaults` must populate:
 - `joint_drive_props` (JointDrivePropertiesCfg)
 - `attrs` (RigidBodyPhysicsCfg)
 
+Use `arm` / `eef` for default single-arm control groups and `left_arm`,
+`right_arm`, `left_eef`, `right_eef` for dual-arm defaults. Add an EEF group
+only when the robot has controllable end-effector joints. These names are a
+convention: user-defined names remain valid, without automatic aliases or a
+reserved-name validator. Keep asset component, link and joint identifiers intact.
+
 `build_pk_serial_chain` must read from `_pk_urdf_path` (a property for
 constant-path robots, a method for variant-dependent paths). The PK chain's DOF
 must match the matching `control_parts` entry (the test stub asserts this).

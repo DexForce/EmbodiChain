@@ -1788,7 +1788,7 @@ class LeRobotRecorder(Functor):
         yaw = torch.where(singular, torch.zeros_like(yaw), yaw)
 
         if binding is None:
-            hand_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
+            hand_ids = self._env.robot.get_joint_ids("eef", remove_mimic=True)
             hand_qpos = qpos[:, _active_columns(hand_ids)].mean(dim=-1)
             limits = self._env.robot.body_data.qpos_limits[0, hand_ids]
             gripper = (

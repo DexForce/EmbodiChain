@@ -344,8 +344,8 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     repeated = _integration_payload("repeated_pick_place")
     drawer = _integration_payload("open_drawer")
 
-    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["hand"]
-    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["hand"]
+    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["eef"]
+    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["eef"]
 
     repeated_embodiment = repeated_config["embodiment"]
     drawer_embodiment = drawer_config["embodiment"]

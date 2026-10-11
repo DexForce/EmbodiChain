@@ -204,8 +204,8 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.robot.uid == "DualUR5"
     assert cfg.robot.control_parts["left_arm"] == ["left_joint[0-9]"]
     assert cfg.robot.control_parts["right_arm"] == ["right_joint[0-9]"]
-    assert cfg.robot.control_parts["left_hand"] == ["left_gripper_finger1_joint_1"]
-    assert cfg.robot.control_parts["right_hand"] == ["right_gripper_finger1_joint_1"]
+    assert cfg.robot.control_parts["left_eef"] == ["left_gripper_finger1_joint_1"]
+    assert cfg.robot.control_parts["right_eef"] == ["right_gripper_finger1_joint_1"]
     assert set(cfg.robot.urdf_cfg.components) == {
         "left_arm",
         "right_arm",
@@ -350,7 +350,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
     class FakeRobot:
         @staticmethod
         def get_qpos(*, name: str) -> torch.Tensor:
-            assert name == "left_hand"
+            assert name == "left_eef"
             return torch.tensor(
                 [
                     [_OPEN_QPOS],
@@ -376,7 +376,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
                 CONTROL_PART_EVIDENCE_PROVIDER_ID,
                 CONTROL_PART_EVIDENCE_PROVIDER_REVISION,
                 ControlPartEvidenceAddress(
-                    "left_hand",
+                    "left_eef",
                     CONSTRAINT_EFFECT_CHANNEL,
                 ),
             ),
@@ -392,7 +392,7 @@ def test_hand_over_joint_position_evidence_uses_measured_aperture() -> None:
     )
     observer = _JointPositionConstraintObserver(
         FakeRobot(),
-        control_parts=("left_hand", "right_hand"),
+        control_parts=("left_eef", "right_eef"),
         object_ids=(_CAN_ID,),
         open_qpos=(_OPEN_QPOS,),
         minimum_displacement=_CONSTRAINT_QPOS_THRESHOLD,
@@ -418,7 +418,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
         endpoint.control_part
         for resource in binding.resources
         for endpoint in resource.endpoints
-    ] == ["left_arm", "left_hand", "right_arm", "right_hand"]
+    ] == ["left_arm", "left_eef", "right_arm", "right_eef"]
     assert dict(binding.defaults["hand_over"]) == {
         "source": "left",
         "destination": "right",
@@ -446,7 +446,7 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
     }
     for side, command_preset in zip(("left", "right"), binding.command_presets):
-        assert command_preset.control_part == f"{side}_hand"
+        assert command_preset.control_part == f"{side}_eef"
         assert tuple(command_preset.commands["open"]) == (_OPEN_QPOS,)
         assert tuple(command_preset.commands["grasp"]) == (_GRASP_QPOS,)
 

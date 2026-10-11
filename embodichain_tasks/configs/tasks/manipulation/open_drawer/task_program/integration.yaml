@@ -35,7 +35,7 @@ profile:
 
 runtime_services:
   grasp_pose_generator_overrides:
-    hand:
+    eef:
       opening_margin: 0.03
   registered_semantic_lowerers:
     - kind: articulation_link_slide

@@ -447,6 +447,59 @@ from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
+@pytest.mark.parametrize("part_name", ["eef", "hand", "custom_claw"])
+def test_control_part_naming_convention_does_not_rewrite_user_names(
+    part_name: str,
+) -> None:
+    """Control-group names remain user-defined through config round trips."""
+    parts = {"motion_group": ["joint1"], part_name: ["finger_joint"]}
+    cfg = RobotCfg.from_dict({"control_parts": parts})
+
+    assert cfg.control_parts == parts
+    restored = RobotCfg.from_dict(cfg.to_dict())
+    assert restored.control_parts == parts
+
+
+@pytest.mark.parametrize(
+    ("robot_class", "module_path", "expected_eef_parts"),
+    [
+        (FrankaPandaCfg, "franka_panda", {"eef"}),
+        (AlohaMiniCfg, "aloha_mini", {"left_eef", "right_eef"}),
+        (TianjiMarvinCfg, "tianji_marvin", {"left_eef", "right_eef"}),
+    ],
+)
+def test_specified_robot_defaults_use_eef_control_part_names(
+    robot_class: type[RobotCfg],
+    module_path: str,
+    expected_eef_parts: set[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Renaming the default groups preserves their source joint identifiers."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    monkeypatch.setattr(
+        f"embodichain.lab.sim.robots.{module_path}.get_data_path", lambda value: value
+    )
+    cfg = robot_class.from_dict({})
+
+    assert expected_eef_parts.issubset(cfg.control_parts)
+    assert {"hand", "left_hand", "right_hand"}.isdisjoint(cfg.control_parts)
+    if robot_class is FrankaPandaCfg:
+        assert cfg.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
+    elif robot_class is AlohaMiniCfg:
+        assert cfg.control_parts["left_eef"] == ["left_gripper"]
+    else:
+        assert cfg.control_parts["left_eef"] == [
+            "LEFT_HAND_FINGER_1",
+            "LEFT_HAND_FINGER_2",
+        ]
+    if robot_class in (AlohaMiniCfg, TianjiMarvinCfg):
+        # Existing gripper gains and effort budgets must survive the rename.
+        for part in expected_eef_parts:
+            assert cfg.joint_drive_props.stiffness[part] == 3e2
+            assert cfg.joint_drive_props.damping[part] == 3e1
+            assert cfg.joint_drive_props.max_effort[part] == 3e3
+
+
 def test_aloha_mini_control_parts_match_source_joints():
     cfg = AlohaMiniCfg.from_dict({})
     assert cfg.uid == "AlohaMini"
@@ -455,13 +508,13 @@ def test_aloha_mini_control_parts_match_source_joints():
     assert {part: len(joints) for part, joints in cfg.control_parts.items()} == {
         "left_arm": 6,
         "right_arm": 6,
-        "left_hand": 1,
-        "right_hand": 1,
+        "left_eef": 1,
+        "right_eef": 1,
         "torso": 1,
     }
     assert cfg.control_parts["torso"] == ["vertical_move"]
-    assert cfg.control_parts["left_hand"] == ["left_gripper"]
-    assert cfg.control_parts["right_hand"] == ["right_gripper"]
+    assert cfg.control_parts["left_eef"] == ["left_gripper"]
+    assert cfg.control_parts["right_eef"] == ["right_gripper"]
     source = ET.parse(cfg.fpath).getroot()
     movable_joints = {
         joint.get("name")
@@ -558,7 +611,7 @@ def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
     assert cfg.urdf_cfg is None
     expected_dofs = {"left_arm": 7, "right_arm": 7}
     if with_gripper:
-        expected_dofs.update(left_hand=2, right_hand=2)
+        expected_dofs.update(left_eef=2, right_eef=2)
     assert {
         part: len(joints) for part, joints in cfg.control_parts.items()
     } == expected_dofs
@@ -573,7 +626,7 @@ def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
     assert set(controlled) == movable_joints
     for side in ("left", "right"):
         if with_gripper:
-            leader, follower = cfg.control_parts[f"{side}_hand"]
+            leader, follower = cfg.control_parts[f"{side}_eef"]
             mimic = source.find(f"joint[@name='{follower}']/mimic")
             assert mimic.get("joint") == leader
             assert float(mimic.get("multiplier")) == 1.0
@@ -693,10 +746,10 @@ def test_tianji_marvin_grippers_follow_position_targets():
         # Move both ways within the URDF's [-0.05, 0] metre finger range.
         for position in (-0.025, -0.01):
             target = torch.full((1, 2), position)
-            for part in ("left_hand", "right_hand"):
+            for part in ("left_eef", "right_eef"):
                 robot.set_qpos(target, name=part, target=True)
             sim.update(step=100)
-            for part in ("left_hand", "right_hand"):
+            for part in ("left_eef", "right_eef"):
                 torch.testing.assert_close(
                     robot.get_qpos(name=part), target, atol=1e-3, rtol=0
                 )

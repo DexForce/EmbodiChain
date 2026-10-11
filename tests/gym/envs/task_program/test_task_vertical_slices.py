@@ -1032,7 +1032,7 @@ def test_cube_policy_and_skill_parameters_have_single_component_owners() -> None
     assert "grasp_pose_generators" not in integration.get("runtime_services", {})
     assert policy["motion"]["sample_count"] == _EXPECTED_TRAJECTORY_SAMPLE_COUNT
     services = embodiment["skill_profile"]["runtime_services"]
-    assert services["grasp_pose_generators"]["hand"]["sample_count"] == (
+    assert services["grasp_pose_generators"]["eef"]["sample_count"] == (
         _EXPECTED_GRASP_SAMPLES
     )
 
