@@ -36,6 +36,8 @@ Gym executor owns ``env.step()``. Automatic resets are suspended throughout
 preparation, execution, and measurement. Explicit resets during either callback
 discard recording buffers while the attempt remains in progress; the attempt's
 persistence guard survives replacement of episode metadata by those resets.
+Episode language is resolved from the actually selected config or compiled
+program, including per-attempt overrides, through ``resolve_demo_instruction``.
 
 Measured acceptance and persistence
 -----------------------------------

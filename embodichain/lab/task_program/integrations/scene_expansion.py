@@ -346,6 +346,7 @@ def execute_scene_variant(
             attempt_id=attempt_id,
             execution_cfg=execution_cfg,
             segments=() if segments is None else segments,
+            task_program=selected_program,
         )
         program_completed = bridge.program_completed
         if type(program_completed) is not bool:

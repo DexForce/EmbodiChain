@@ -64,6 +64,7 @@ from embodichain.lab.task_program import (
     InvokeCfg,
     PickCfg,
     TaskProgramCfg,
+    TaskProgramCompiler,
     TaskProgramIntegrationCfg,
 )
 from embodichain.lab.task_program.integrations.scene_expansion import (
@@ -75,6 +76,11 @@ from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
 )
+from embodichain.lab.task_program.semantics.integration import (
+    SceneEntityManifest,
+    SceneManifest,
+)
+from embodichain.lab.task_program.semantics.scene import SceneObjectRef
 
 _GOAL_X = 0.5
 _START_X = 0.2
@@ -603,6 +609,55 @@ def test_scene_execution_cannot_be_replaced_by_a_legacy_segment_override() -> No
     assert result.execution.segments[0].name == "move-cube"
 
 
+@pytest.mark.parametrize(
+    "selection,instruction,expected,source",
+    (
+        ("static", None, "Static cube goal", "task_program"),
+        ("config", "Dynamic cube goal", "Dynamic cube goal", "task_program"),
+        ("compiled", "Dynamic cube goal", "Dynamic cube goal", "task_program"),
+        ("config", None, "Task fallback goal", "task"),
+        ("compiled", None, "Task fallback goal", "task"),
+    ),
+)
+def test_scene_execution_binds_language_to_the_selected_program(
+    selection: str, instruction: str | None, expected: str, source: str
+) -> None:
+    env = _LegacySegmentOverrideEnv()
+    env.cfg.task_program.instruction = "Static cube goal"
+    env.cfg.task_instruction = "Task fallback goal"
+    selected: TaskProgramCfg | CompiledTaskProgram | None = None
+    if selection != "static":
+        config = _program()
+        config.instruction = instruction
+        selected = config
+        if selection == "compiled":
+            manifest = SceneManifest((SceneEntityManifest(SceneObjectRef("cube")),))
+            selected = TaskProgramCompiler(manifest).compile(config)
+            config.instruction = "Changed after compilation"
+
+    result = execute_scene_variant(
+        env,
+        _variant(),
+        prepare_scene=env.prepare,
+        measured_validator=env.measure,
+        task_program=selected,
+    )
+
+    assert result.accepted
+    assert env.legacy_calls == 0
+    assert (result.execution.instruction, result.execution.instruction_source) == (
+        expected,
+        source,
+    )
+    assert result.execution.segments[0].instruction == expected
+    assert result.execution.segments[0].instruction_source == "task_fallback"
+    env.persist_via_reset()
+    saved = env.dataset_manager.saved[0]
+    assert (saved["instruction"], saved["instruction_source"]) == (expected, source)
+    assert saved["segments"][0]["instruction"] == expected
+    assert saved["segments"][0]["instruction_source"] == "task_fallback"
+
+
 def test_explicit_demo_segments_keep_instruction_fallback_without_replanning() -> None:
     env = _LegacySegmentOverrideEnv()
     env.metadata = {"dataset": {"instruction": {"lang": "Move the cube"}}}
@@ -775,6 +830,7 @@ class _RealBridgeEnv(_CandidateEnv):
             segment_id="segment-0",
             segment_index=0,
             name="move-cube",
+            instruction=None,
             source_path=("program",),
             implicit=False,
             calls=(call,),
