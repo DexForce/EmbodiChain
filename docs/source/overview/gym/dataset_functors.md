@@ -15,6 +15,10 @@ This page covers structured dataset export. If you only need human-viewable debu
 
 ## Recording Functors
 
+Declare overall language on the task/program, and finer language on its
+segments. These recorder blocks configure persistence; see
+{doc}`/guides/expert_task_language` for complete configuration examples.
+
 ```{list-table} Dataset Recording Functors
 :header-rows: 1
 :widths: 25 75
@@ -28,7 +32,6 @@ This page covers structured dataset export. If you only need human-viewable debu
     {"func": "LeRobotRecorder", "mode": "save",
      "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
-                "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
                           "data_type": "sim"},
@@ -41,7 +44,6 @@ This page covers structured dataset export. If you only need human-viewable debu
     {"func": "AsyncLeRobotRecorder", "mode": "save",
      "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
-                "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
                           "data_type": "sim"},
@@ -95,7 +97,7 @@ their outputs stay aligned.
 * - ``robot_meta``
   - Robot identity metadata for the dataset (for example, ``robot_type``). Timing is derived from the environment and must not be configured here.
 * - ``instruction``
-  - Optional task instruction (e.g., {"lang": "pick the cube"})
+  - Legacy overall-task fallback, as a string or {"lang": "pick the cube"}. Prefer the program's root ``instruction`` or ``env.task_instruction``. An explicit episode instruction takes precedence over these defaults.
 * - ``extra``
   - Optional extra metadata (scene_type, task_description, episode_info)
 * - ``use_videos``
@@ -116,13 +118,30 @@ an integer FPS, so the recorder rejects a non-integer derived control frequency
 rather than writing inaccurate metadata.
 ```
 
+### Task and segment language
+
+The recorder consumes the overall instruction frozen for the actual episode.
+Task Programs own it at the program root; handwritten/direct-control experts
+use ``env.task_instruction``. ``DemoSegment.instruction`` or a Task Program
+segment's ``instruction`` describes the finer subgoal. Missing segment labels
+fall back to the episode goal and carry ``instruction_source="task_fallback"``
+in sidecar metadata.
+
+Both synchronous and asynchronous recorders preserve both levels for full
+episodes and segment fragments. LeRobot ``sample["task"]`` returns the overall
+goal, and ``sample["subtask"]`` returns the segment text. Consumers that used
+``task`` for segment conditioning in older action-contract recordings must use
+``subtask`` for new recordings. See {doc}`/guides/expert_task_language` for
+resolution order, provenance, readback examples, and migration.
+
 ### Recorded Data
 
 The LeRobotRecorder saves the following data for each frame:
 
-- ``task``: The episode-level task instruction, constant across its frames
+- ``task_index``: Vocabulary index of the episode-level instruction;
+  the LeRobot reader exposes its text as ``task``, constant across episode frames
 - ``subtask_index``: Dataset-global index of the active segment instruction;
-  descriptions are stored in ``meta/subtasks.parquet``
+  descriptions are stored in ``meta/subtasks.parquet`` and resolved as ``subtask``
 - ``observation.state``: Joint positions (proprioceptive state)
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
