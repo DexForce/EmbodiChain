@@ -207,7 +207,8 @@ def validate_graph_coverage(
                 "E3": {"simulation.pour"},
                 "E4": {"hand_over"},
                 "E6": {"gen_sim.articulation_slide"},
-                "E9": {"gen_sim.press"},
+                "E8": {f"gen_sim.twist.{group_id}"},
+                "E9": {f"gen_sim.press.{group_id}"},
                 "E5": {
                     (
                         "simulation.coordinated_transport"
@@ -218,6 +219,12 @@ def validate_graph_coverage(
             }.get(step["task_type"])
             if required is not None and not kinds.intersection(required):
                 issue("missing_semantic_producer", group_id)
+            if step["task_type"] == "E8" and not any(
+                c.get("call_id") == f"gen_sim.twist.{group_id}"
+                and c["arguments"].get("setting") == step["target_setting"]
+                for c in subject_calls
+            ):
+                issue("wrong_control_setting", group_id)
             if step["task_type"] == "E6" and not any(
                 c.get("call_id") == "gen_sim.articulation_slide"
                 and c["arguments"].get("part") == entry["object_part_id"]

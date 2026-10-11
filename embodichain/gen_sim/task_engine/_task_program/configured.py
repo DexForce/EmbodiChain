@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Task Engine-owned E1-E6/E9 service decoding and deployment composition."""
+"""Task Engine-owned E1-E6/E8/E9 service decoding and deployment composition."""
 
 from __future__ import annotations
 
@@ -138,17 +138,30 @@ def _decode_goal_pose(
 
 
 def decode_task_lowerer(value: object, *, path: str) -> Any:
-    """Decode only the E1-E6/E9 task-owned routes or established shared services."""
+    """Decode only the E1-E6/E8/E9 task-owned routes or shared services."""
     if type(value) is not dict:
         raise TypeError(f"{path} must be a mapping.")
     kind = _identifier(value.get("kind"), path=f"{path}.kind")
+    if kind in {"twist", "twist_prepare"}:
+        from .twist_binding import TwistRoute
+        from .twist_runtime import TwistFactory, TwistPrepareFactory
+
+        config = _mapping(value, path=path, required=frozenset({"kind", "route"}))
+        from .control_factory import make_control_factory
+
+        return make_control_factory(
+            TwistFactory if kind == "twist" else TwistPrepareFactory,
+            TwistRoute.decode(config["route"]),
+        )
     if kind in {"press", "press_prepare"}:
         from .press_binding import PressRoute
         from .press_runtime import PressFactory, PressPrepareFactory
 
         config = _mapping(value, path=path, required=frozenset({"kind", "route"}))
         factory = PressFactory if kind == "press" else PressPrepareFactory
-        return factory(PressRoute.decode(config["route"]))
+        from .control_factory import make_control_factory
+
+        return make_control_factory(factory, PressRoute.decode(config["route"]))
     if kind == "pick":
         config = _mapping(
             value,
@@ -503,10 +516,14 @@ def compose_deployment(
         )
     from .press_runtime import PressFactory, with_press_options
 
-    press_routes = tuple(f.route for f in lowerers if type(f) is PressFactory)
+    press_routes = tuple(f.route for f in lowerers if isinstance(f, PressFactory))
     robot_profile = with_press_options(
         _decode_robot_profile(payload["robot_profile"]), press_routes
     )
+    from .twist_runtime import TwistFactory, with_twist_options
+
+    twist_routes = tuple(f.route for f in lowerers if isinstance(f, TwistFactory))
+    robot_profile = with_twist_options(robot_profile, twist_routes)
     registration = SimulationTaskProgramRegistration(
         scene_binding=_decode_scene(payload["scene"]),
         robot_profile_binding=robot_profile,

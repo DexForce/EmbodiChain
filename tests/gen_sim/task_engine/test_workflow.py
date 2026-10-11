@@ -26,6 +26,7 @@ from embodichain.gen_sim.task_engine.config import (
     TaskEngineWorkflowCfg,
     load_task_engine_config,
 )
+from embodichain.gen_sim.task_engine.workflow import _headless_renderer_for_bundle
 from embodichain.gen_sim.task_engine.state_machine import (
     StageStatus,
     WorkflowStage,
@@ -104,6 +105,30 @@ def test_run_request_rejects_output_containing_explicit_gym_config(
 
     with pytest.raises(ValueError, match="must not overlap"):
         validate_task_run_request(request)
+
+
+def test_e8_bundle_uses_hybrid_headless_renderer(tmp_path: Path) -> None:
+    program_dir = tmp_path / "task_program"
+    program_dir.mkdir()
+    (program_dir / "program.yaml").write_text(
+        "program:\n  items:\n"
+        "    - steps:\n        call:\n"
+        "          call_id: gen_sim.twist\n",
+        encoding="utf-8",
+    )
+    assert _headless_renderer_for_bundle(tmp_path) == "hybrid"
+
+
+def test_non_e8_bundle_keeps_fast_rt_renderer(tmp_path: Path) -> None:
+    program_dir = tmp_path / "task_program"
+    program_dir.mkdir()
+    (program_dir / "program.yaml").write_text(
+        "program:\n  items:\n"
+        "    - steps:\n        call:\n"
+        "          call_id: simulation.pick\n",
+        encoding="utf-8",
+    )
+    assert _headless_renderer_for_bundle(tmp_path) == "fast-rt"
 
 
 def test_scene_history_root_allows_a_source_from_a_prior_run(
@@ -276,6 +301,7 @@ def test_packaged_workflow_configuration_uses_recovery_defaults() -> None:
     assert planning.max_episodes == 1
     assert planning.max_episode_steps == 1000000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is False
     assert TaskEnginePlanningCfg().max_episode_steps == 10000
     assert execution.num_envs == 1
     assert execution.required_successes == 1
@@ -296,6 +322,7 @@ planning:
   max_episodes: 2
   max_episode_steps: 5000
   fit_grasp_assets: true
+  twist_mass_source: true
 execution:
   num_envs: 6
   success_policy: at_least
@@ -313,6 +340,7 @@ execution:
     assert planning.max_episodes == 2
     assert planning.max_episode_steps == 5000
     assert planning.fit_grasp_assets is True
+    assert planning.twist_mass_source is True
     assert execution.num_envs == 6
     assert execution.required_successes == 2
 
@@ -342,6 +370,8 @@ def test_planning_configuration_rejects_invalid_values() -> None:
         TaskEnginePlanningCfg(planning_mode="unsupported")
     with pytest.raises(TypeError, match="fit_grasp_assets"):
         TaskEnginePlanningCfg(fit_grasp_assets="true")
+    with pytest.raises(TypeError, match="twist_mass_source"):
+        TaskEnginePlanningCfg(twist_mass_source="true")
     with pytest.raises(TypeError):
         TaskEnginePlanningCfg(gripper_model="unsupported")
     with pytest.raises(TypeError):

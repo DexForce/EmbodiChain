@@ -164,8 +164,8 @@ Focused provider-free checks:
 PYTHONPATH=. python -m pytest -q --noconftest "tests/gen_sim/task_engine/test_bundle_identity.py" "tests/gen_sim/task_engine/test_semantic_graph.py" "tests/gym/envs/task_program/test_catalog.py"
 ```
 
-E1-E6 and standalone E9 are the Task Engine execution scope. E7/E8 routing is rejected before
-semantic graph generation and bundle asset writing. Initial E6 support requires
+Serial compositions of E1-E6 and calibrated E8/E9 are the Task Engine execution scope. E7
+routing is rejected before semantic graph generation and bundle asset writing. Initial E6 support requires
 one environment and a fixed-base, single-prismatic, self-contained metre-authored
 USD with uniform scale, a zero closed endpoint, and one identifiable collision
 handle. Opening and closing select absolute native joint endpoints, not a fixed
@@ -176,6 +176,74 @@ Park. Withdrawal also requires measured hand-open posture. This proves neither
 contact-supported sliding nor geometric hand separation or in-flight safety.
 Arbitrary scenes and robots are not physically qualified by these checks.
 
+### E8 正式接入
+
+正常入口是 `python -m embodichain.gen_sim.task_engine run-all`。E8 使用公共
+`Twist` 的 prepare/ bounded-Twist-chunks / Park 轨迹，不创建第二执行器。每个
+bounded chunk 默认不超过 5 度，并在下一个 semantic segment 编译前重新读取旋钮
+qpos 与接触证据。绑定要求 fixed-base、
+直接拥有旋钮 link 的 revolute joint、米制自包含 USD，以及源哈希命中的刻度校准。
+`target_setting` 是打印标签编号，不是角度；标签到关节角由旋钮指针和标签几何测量，
+未校准或多解资产直接拒绝。
+
+首次 Twist 规划先计算基础咬合 B = min(grasp_depth, grip_depth / 2)，生成 B/3、2B/3、B
+三个最终指尖咬合深度。TCP 仍使用闭合指垫的几何补偿；候选相对基础抓点只向外移动，
+不再额外加深。候选优先按浅到深排序，同一深度再比较 parent 接近惩罚、双指垫距离和
+关节运动量；从最浅可达层选定一个 roll，后续无接触 fallback 只沿该 roll 的可达深度
+序列向深处尝试，不切换 roll 或偷偷回到未声明的基础抓点。出现有效 target contact 后
+维持该候选继续转动；最终成功仍需累计 15 度、释放稳定和 Park。
+资格实验可在 fingerprinted route 中声明 fixed_roll（弧度），只生成该 roll 的三个深度；
+默认不固定，公共 Twist 的姿态与控制默认值不变。
+评分使用闭合后的手指姿态，
+完整 FK 的 root-local 结果先转换到 arena 坐标。闭合命令按实际两指间距测量，
+通过单次 invocation 的 typed control override 应用，不改共享 profile 的默认命令。
+`twist_geometry.py` 将源 USD CollisionAPI 网格转换到各自所属 link 的局部坐标后，
+只应用一次部署尺度；native 刚体位姿的平移不再次缩放。接触评分仅使用标定抓持面，
+不合并 cap、shaft、pointer 等完整渲染网格；指垫和手指使用 URDF collision 输入。
+parent 筛选与 Park 使用完整所属碰撞输入，包括非目标刚体，不再读取渲染顶点。
+这些是源碰撞输入代理，不是 native cooked 凸分解或连续碰撞安全证书。
+非零目标预留 32 次反馈调用；校准角度按每段 5 度覆盖并加 3 次无接触重试，必须能放入
+该预算。接触期间去抖累计绝对转动达到 15 度后，剩余调用变为单帧静止 hold，进入 Park
+重新检查释放和稳定性；不再继续拧转以追求目标刻度。
+完成后的 hold 与等待保持已经发出的关节目标，不将重力下的实测偏差不断写回新目标。
+动态目标、速度和最终释放/分离检查不放宽。
+
+E8 正式部署由 `twist_adaptation.py` 按当前夹爪和已校准旋钮几何筛选尺寸。正常尺寸保留；
+深度不足或开口不匹配时，优先计算可夹持深度 10 mm 的均匀总成缩放候选，不能按 task ID
+写死 scale。canonical Robotiq 的最低深度筛选值 7.5 mm 来自物理资格实验，开口轴向的
+`finger_thickness` 不是旋钮轴向尺寸要求。源 USD、物理参数和共享机器人默认值不改；
+尺寸筛选不等于物理成功。若适配后的
+目标与源图明确 `on(table)` 的未引用刚体相交，bundle 可审计最小有效 XY 分离；支撑体、
+父节点和任务引用对象不参与移动。仅复用 Scene Engine 的 20 mm 目标分离裕量，在四个
+轴向候选中检查桌界和其他物体 AABB，不是完整布局优化；无有效候选时 fail closed。
+固定底座 E8 总成先保持缩放前的支撑底部高度，再以总额外抬升 1 mm 为候选；完整关节
+扫掠穿桌时，或真实启动发生桌面接触/异常运动时，正式流程依次尝试 2、3、4 mm，仍不安全
+则拒绝。每次从原 PreparedScene 重新生成，不累计抬升，也不通过改高度重试目标角失败。
+`twist_adaptation.json.support_clearance` 区分实际几何间隙与 contact envelope 保守参考。
+初态证据覆盖本次 prepare 至 ready 的物理子步，验证 qpos、角速度、桌面和机器人接触；无效或
+溢出的观测拒绝。直接调用旧支撑 helper 的默认保守策略保持不变。
+正式粗粒度验收要求真实 target contact 期间累计绝对转动至少 15 度；不要求单调转动、
+净方向或最终刻度收敛。累计路径使用 0.5 度锚点 deadband，接触中断后重置锚点，
+小幅往返抖动和无接触自转不计分。释放稳定性和至少 40 mm 源碰撞输入保守包围盒间距仍保留，
+Park 重新核验；接触路径足够的早停不等于最终撤离安全验收通过。
+目标误差、是否位于目标 5 度内、有符号转动与无接触反向回退仅作诊断，粗粒度成功
+不代表精准到档。E8 revision 8 需要重新生成 bundle，其他任务路径不变。
+本次几何修正不默认启用实验中的局部续规划或自适应夹紧闭环。
+`twist_evidence.json` 保存接触、关节、目标误差和撤离证据；视频、规划成功和返回码
+不能单独证明 E8 成功。`no_twist`、`centroid` 等仅用于消融，不是默认部署策略。
+E8/E9 支持与 E1-E6 任意串行组合及同对象重复操作。每次操作具有独立的调用别名、
+传感器、策略预设、候选/反馈状态和采样窗口；不重置真实关节位置来制造合法初态。
+自动布局只改变允许对象的位姿，不改变动态刚体身份、质量/接触属性或可抓取绑定。
+粗转动作为 E8 正式任务成功标准，但真实目标误差和到档布尔值保持原值。
+TaskSpec 使用语义事件而非伪造 joint-near 证据；milestone 从精确 terminal post-policy
+回执认证，缺失、错位或失败撤离均不能认证。未来严格刻度标准由 route 的
+`success_criterion` 明确选择。候选重建保留原 TaskSpec/source/lineage，重新生成身份校验。
+
+独立 E8 部署最大步数上限为 15000，混合程序使用 v38 的整段程序预算；调用方更小的预算保留。普通执行器
+只对 E8 使用跨线程/进程串行门禁和可用内存保护；资源中断在新目录以相同 seed 有界重试，
+不能归为物理失败或选为成功。E8 两机位使用 `twist_recording.py` 流式编码，保持原采样、
+20 fps 和画质；完整编码关闭并核验帧数后才提交，失败文件不冒充正式视频。
+
 ### E9 正式接入
 
 正常入口是 `python -m embodichain.gen_sim.task_engine prepare/run-all/run`。
@@ -184,7 +252,7 @@ Task Program/Gym 执行，不创建第二执行器。部署必须保留释放初
 事件检查及 Park 后的撤离检查；缺少其中任何一个都不能加载。
 
 绑定仅支持 fixed-base、直接连接根刚体的 prismatic button、米制自包含 USD
-和均匀缩放；当前只支持一个环境、一个独立 E9 任务，不隐式扩展混合配方。
+和均匀缩放；当前支持一个环境，多次 E9 与 E1-E6/E8 的串行混合配方。
 `press_calibration.json` 记录生成部署的缩放限位、运动部件质量/惯量校准及释放偏置。
 这是显式实验物理校准，不冒充源资产原有的弹簧或自锁机构。源 USD 和共享物理默认值不变。
 不根据 STOP/emergency 名称生成自锁驱动；接触传感器仅观察，不驱动按钮。
@@ -205,6 +273,10 @@ E9 物理配置指纹使用资源内容而非绝对存放路径，事务发布�
 成功必须包含释放初态、press 阶段连续真实接触支持的至少 0.05 mm 位移，
 不能由 Runner 完成、被动下沉、已有按下状态或空接触替代。
 不要求按到完整机械端点；按压事件在回弹和撤离后保留，不要求最终持续按下。
+Press 撤离仍要求沿按压轴退出至少 40 mm，并保存本回合通过的撤离检查。
+Park 回位后不再要求停在按钮正前方；要求已有撤离证明、按钮及机壳近期无接触，
+且各手指与目标 articulation 各 link 的世界坐标网格包围盒间距至少 40 mm。
+该间距是保守的几何分离检查，不是精确碰撞网格距离；轴向投影仍记录但不再用于 Park 放行。
 普通 Task Program 报告与 `press_evidence.json` 分别记录调用结果及物理子步证据；
 记录按钮特写与全景视频。成功含义仅为 `contact_press_0.05mm`，不宣称功能激活或自锁。
 旧独立 probe 入口已移除，所有运行验收使用正常 Task Engine。

@@ -95,6 +95,24 @@ def capture_final_goals(
             )
             uid = member["object_uid"]
             try:
+                if predicate.arguments.get("task_type") in {"E8", "E9"}:
+                    from .control_evidence import measure_control_operation
+
+                    if runtime is None:
+                        raise ValueError(
+                            "Control goal requires measured operation receipts."
+                        )
+                    observations.append(
+                        measure_control_operation(
+                            deployment,
+                            graph,
+                            groups[group_id],
+                            runtime,
+                            load_config(bundle / "task_program/program.yaml"),
+                            num_envs,
+                        )
+                    )
+                    continue
                 if predicate.name == "articulation_joint_near":
                     factory = next(
                         v
@@ -453,6 +471,7 @@ def evaluate_runtime_evidence(
     program: Mapping[str, Any],
     constraints: Mapping[str, Any],
     placement_milestones: Mapping[str, Any] | None = None,
+    control_milestones: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only newly collected final measurements and exact segment evidence."""
     if contract["task_spec_digest"] != canonical_hash(spec.to_dict()) or contract[
@@ -529,6 +548,7 @@ def evaluate_runtime_evidence(
         measured_groups: dict[str, set[str]] = {}
         successful_nodes: set[str] = set()
         measured_placements: dict[str, Any] = {}
+        measured_controls: dict[str, Any] = {}
         for node in graph["nodes"]:
             segment = segments.get(node["id"])
             if segment is None:
@@ -583,6 +603,19 @@ def evaluate_runtime_evidence(
             ):
                 successful_nodes.add(node["id"])
                 measured_groups.setdefault(group["id"], set()).update(measured)
+                if (
+                    group["task_type"] in {"E8", "E9"}
+                    and node["id"] == group["node_ids"][-1]
+                ):
+                    for record in (control_milestones or {}).values():
+                        metrics = record.get("measurements", {})
+                        if (
+                            record.get("group_id") == group["id"]
+                            and metrics.get("scope") == "measured_control_operation"
+                            and metrics.get("boundary_frames")
+                            == segment.get("end_steps")
+                        ):
+                            measured_controls[group["id"]] = record
                 if placement_milestones is not None:
                     record = placement_milestones.get(group["id"], {})
                     accepted = record.get("accepted", [])
@@ -620,6 +653,20 @@ def evaluate_runtime_evidence(
                 if record and record["groups"]:
                     for predicate in milestone.achieve:
                         if _needs_universe(spec, predicate):
+                            continue
+                        if predicate.arguments.get("task_type") in {"E8", "E9"}:
+                            records = [
+                                measured_controls.get(id, {}) for id in record["groups"]
+                            ]
+                            if all(
+                                set(groups[id]["node_ids"]).issubset(successful_nodes)
+                                and value.get("uid") == members[id]["object_uid"]
+                                and value.get("accepted") == [True] * num_envs
+                                for id, value in zip(
+                                    record["groups"], records, strict=True
+                                )
+                            ):
+                                snapshot[predicate.observation or predicate.id] = True
                             continue
                         if (
                             predicate.name == "semantic_goal"
@@ -689,4 +736,9 @@ def evaluate_runtime_evidence(
         "constraints_digest": contract["constraints_digest"],
         "environments": rows,
         "placement_milestone_measurements": dict(placement_milestones or {}),
+        **(
+            {"control_operation_measurements": dict(control_milestones)}
+            if control_milestones is not None
+            else {}
+        ),
     }

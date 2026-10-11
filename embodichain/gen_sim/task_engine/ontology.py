@@ -251,7 +251,7 @@ TASK_CONTRACTS: Mapping[str, TaskContract] = MappingProxyType(
             frozenset({"required_arm", "target_setting"}),
             "articulation",
             frozenset({"turnable"}),
-            "articulation_joint_near",
+            "semantic_goal",
         ),
         "E9": _contract(
             "E9",

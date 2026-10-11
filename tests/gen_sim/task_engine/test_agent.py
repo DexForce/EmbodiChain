@@ -1776,7 +1776,7 @@ def test_semantic_planner_keeps_articulation_execution_gated(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "drawer_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="E1-E6 and E9"):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="E1-E6 and E8-E9"):
         SemanticTaskPlanner().plan(
             candidate,
             {
@@ -1793,10 +1793,10 @@ def test_semantic_planner_keeps_articulation_execution_gated(
 @pytest.mark.parametrize(
     ("task_type", "call_id", "argument_key", "argument_value"),
     [
-        ("E8", "simulation.articulation_link_twist", "target_setting", 2),
+        ("E8", "gen_sim.twist", "target_setting", 2),
     ],
 )
-def test_semantic_planner_rejects_out_of_scope_calibrated_articulation_call(
+def test_semantic_planner_emits_task_owned_calibrated_twist_call(
     task_type: str,
     call_id: str,
     argument_key: str,
@@ -1815,15 +1815,27 @@ def test_semantic_planner_rejects_out_of_scope_calibrated_articulation_call(
     candidate = TaskAgent(interpreter=interpreter).generate(
         "control_task", _TEST_INSTRUCTION, candidate_count=1
     )["candidates"][0]
-    with pytest.raises(UnsupportedSemanticCapabilityError, match="E1-E6 and E9"):
-        SemanticTaskPlanner().plan(
-            candidate,
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "control_task",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {"step_01.object": ["control"]},
+            "role_bindings": {},
+        },
+        [
             {
-                "schema_version": ROLE_BINDINGS_SCHEMA,
-                "task_id": "control_task",
-                "candidate_id": candidate["candidate_id"],
-                "reference_bindings": {"step_01.object": ["control"]},
-                "role_bindings": {},
-            },
-            [{"runtime_uid": "control", "role": "articulation", "init_pos": [0, 0, 0]}],
-        )
+                "runtime_uid": "control",
+                "role": "articulation",
+                "init_pos": [0, 0, 0],
+                "attributes": {"twist_setting_labels": {"2": 1.5707963267948966}},
+            }
+        ],
+    )
+    assert graph["nodes"][1]["call"]["call_id"] == f"{call_id}.step_01"
+    assert graph["nodes"][1]["call"]["arguments"] == {
+        "object": "control",
+        "setting": argument_value,
+    }
+    assert len(graph["nodes"]) == 34

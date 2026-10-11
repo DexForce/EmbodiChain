@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from collections.abc import Iterable
 from typing import Any
 
 import torch
@@ -199,6 +200,8 @@ class GenSimActionEngine(AtomicActionEngine):
         **kwargs: Any,
     ) -> None:
         self._motion_samples = dict(motion_samples)
+        self._twist_session_controller = None
+        self._twist_session_controllers: dict[str, Any] = {}
         if any(type(value) is not str or not value for value in cartesian_calls):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
@@ -270,7 +273,106 @@ class GenSimActionEngine(AtomicActionEngine):
             )
         self._alignment_continuations = dict(previews)
 
+    def configure_twist_feedback(self, controller: Any) -> None:
+        """Bind one E8 policy to this engine's public-session extension."""
+        from .twist_feedback import TwistFeedbackState
+        from .twist_runtime import GenSimTwist
+
+        operation = getattr(getattr(controller, "route", None), "operation_id", "")
+        action = self.actions.get("twist")
+        if (
+            not isinstance(controller, TwistFeedbackState)
+            or not controller.enabled
+            or controller.robot is not self.robot
+            or not isinstance(action, GenSimTwist)
+            or (
+                getattr(action, "_operation_feedback", {}).get(operation)
+                is not controller
+                and action._feedback_state is not controller
+            )
+            or operation in self._twist_session_controllers
+        ):
+            raise ValueError("E8 session feedback must own the exact action and robot.")
+        self._twist_session_controllers[operation] = controller
+        if not operation:
+            self._twist_session_controller = controller
+
+    def start(
+        self,
+        invocations: Iterable[ActionInvocation],
+        context: Any = None,
+        *,
+        eligible_mask: Any = None,
+        plan_transform: PlanTransform | None = None,
+    ) -> Any:
+        """Retain the public runner while extending effectless E8 sessions only."""
+        selected = tuple(invocations)
+        controller = self._twist_session_controller
+        if (
+            self._twist_session_controllers
+            and len(selected) == 1
+            and selected[0].skill_id == "twist"
+        ):
+            operation = getattr(
+                getattr(selected[0].goal, "semantics", None), "geometry", {}
+            ).get("gen_sim_twist_operation_id", "")
+            controller = self._twist_session_controllers.get(operation, controller)
+        if (
+            controller is None
+            or not any(item.skill_id == "twist" for item in selected)
+            or (eligible_mask is not None and not bool(eligible_mask.any()))
+        ):
+            return super().start(
+                selected,
+                context,
+                eligible_mask=eligible_mask,
+                plan_transform=plan_transform,
+            )
+        from .twist_session import TwistFeedbackSession
+
+        initial = self.initial_context() if context is None else context
+        return TwistFeedbackSession(
+            self,
+            selected,
+            initial,
+            revision_controller=controller,
+            eligible_mask=eligible_mask,
+            plan_transform=plan_transform,
+        )
+
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
+        if getattr(
+            invocation, "skill_id", None
+        ) == "twist" and "gen_sim_twist_operation_id" in getattr(
+            getattr(invocation.goal, "semantics", None), "geometry", {}
+        ):
+            invocation = replace(
+                invocation,
+                motion_policy=replace(
+                    invocation.motion_policy,
+                    strategy="ik_interp",
+                    sample_count=max(320, invocation.motion_policy.sample_count or 0),
+                ),
+                recovery_policy=replace(
+                    invocation.recovery_policy, max_replans=0, max_action_retries=0
+                ),
+            )
+        if getattr(
+            invocation, "skill_id", None
+        ) == "press" and "gen_sim_press_operation_id" in getattr(
+            getattr(invocation.goal, "semantics", None), "geometry", {}
+        ):
+            invocation = replace(
+                invocation,
+                motion_policy=replace(
+                    invocation.motion_policy,
+                    strategy="ik_interp",
+                    sample_count=max(260, invocation.motion_policy.sample_count or 0),
+                ),
+                recovery_policy=replace(
+                    invocation.recovery_policy, max_replans=0, max_action_retries=0
+                ),
+            )
         if self._motion_samples:
             try:
                 minimum = self._motion_samples[invocation.invocation_id]

@@ -110,6 +110,7 @@ class TaskEnginePlanningCfg:
     max_episodes: int = 1
     max_episode_steps: int = 10000
     fit_grasp_assets: bool = False
+    twist_mass_source: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -124,6 +125,8 @@ class TaskEnginePlanningCfg:
             raise ValueError("planning_mode must be offline or ab.")
         if type(self.fit_grasp_assets) is not bool:
             raise TypeError("fit_grasp_assets must be a boolean.")
+        if type(self.twist_mass_source) is not bool:
+            raise TypeError("twist_mass_source must be a boolean.")
 
 
 def load_task_engine_config(
@@ -176,7 +179,7 @@ def load_task_engine_config(
     if (
         not required_planning
         <= set(planning)
-        <= required_planning | {"fit_grasp_assets"}
+        <= required_planning | {"fit_grasp_assets", "twist_mass_source"}
     ):
         raise ValueError("Task Engine planning configuration fields are invalid.")
     if set(execution) != {

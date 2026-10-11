@@ -111,6 +111,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         pick_continuations: tuple = (),
+        twist_routes: tuple = (),
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -132,6 +133,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
+        self._twist_routes = twist_routes
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -164,16 +166,29 @@ class _TaskFactory(SimulationTaskProgramFactory):
             self._drawers = tuple(
                 DrawerObservation(route, self._simulation) for route in drawer_routes
             )
-        if press_routes:
+        self._twist_ports: dict[str, Any] = {}
+        for route in press_routes:
             from .press_runtime import PressAcceptancePort
 
             self._task_post_port = PressAcceptancePort(
                 self._task_post_port,
                 self._simulation,
                 self._robot,
-                press_routes[0],
+                route,
                 self.step_dt,
             )
+
+        for route in twist_routes:
+            from .twist_runtime import TwistAcceptancePort
+
+            self._task_post_port = TwistAcceptancePort(
+                self._task_post_port,
+                self._simulation,
+                self._robot,
+                route,
+                self.step_dt,
+            )
+            self._twist_ports[route.operation_id] = self._task_post_port
 
     def create_atomic_action_engine(self, profile: Any) -> Any:
         """Keep drawer-owned transport separate from ordinary GenSim wrappers."""
@@ -260,6 +275,34 @@ class _TaskFactory(SimulationTaskProgramFactory):
             from .press_runtime import GenSimPress
 
             engine.register(GenSimPress(), replace=True)
+        if self._twist_routes:
+            from .twist_runtime import GenSimTwist
+            from .twist_geometry_guard import E8GeometryGuard
+
+            action = GenSimTwist()
+            for route in self._twist_routes:
+                operation = getattr(route, "operation_id", "")
+                port = getattr(self, "_twist_ports", {}).get(
+                    operation, self._task_post_port
+                )
+                guard = E8GeometryGuard(
+                    route, self._simulation, self._robot, port.sensor
+                )
+                action._operation_guards[operation] = guard
+                action._operation_states[operation] = getattr(
+                    port, "_candidate_state", None
+                )
+                if getattr(route, "feedback_enabled", False):
+                    from .twist_feedback import TwistFeedbackState
+
+                    feedback = TwistFeedbackState(
+                        route, self._simulation, self._robot, port.sensor, guard
+                    )
+                    port.sensor._feedback_state = feedback
+                    action._operation_feedback[operation] = feedback
+            engine.register(action, replace=True)
+            for feedback in action._operation_feedback.values():
+                engine.configure_twist_feedback(feedback)
         self.task_program_registration.validate_engine(engine)
         if (
             self._clearance_routes
@@ -359,15 +402,25 @@ class TaskAdapterFactory:
     staging_retention_sources: tuple[tuple[str, str, str, str], ...] = ()
     runtime_preset: str | None = None
     press_routes: tuple = ()
+    twist_routes: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
         self.registration.assert_unchanged()
-        if self.press_routes:
+        for route in self.twist_routes:
+            from .twist_runtime import (
+                SENSOR_UID as TWIST_SENSOR_UID,
+                ensure_sensor as ensure_twist_sensor,
+            )
+
+            environment.sensors[route.sensor_uid] = ensure_twist_sensor(
+                environment.sim, environment.robot, route
+            )
+        for route in self.press_routes:
             from .press_runtime import SENSOR_UID, ensure_sensor
 
-            environment.sensors[SENSOR_UID] = ensure_sensor(
-                environment.sim, environment.robot, self.press_routes[0]
+            environment.sensors[route.sensor_uid] = ensure_sensor(
+                environment.sim, environment.robot, route
             )
         motion_factory = None
         if any(
@@ -520,6 +573,7 @@ class TaskAdapterFactory:
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
+            twist_routes=self.twist_routes,
         )
         return factory.create_adapter()
 
@@ -605,34 +659,62 @@ def load_deployment(
         if type(f) is ArticulationWithdrawFactory
     ]
     articulation_bindings = ()
+    from .twist_runtime import TwistFactory, TwistPrepareFactory
+
+    turns = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if isinstance(f, TwistFactory)
+    ]
+    turn_preparations = [
+        f
+        for f in base.integration.registration.registered_semantic_lowerer_factories
+        if isinstance(f, TwistPrepareFactory) and not isinstance(f, TwistFactory)
+    ]
+    twist_routes = ()
+    if turns or turn_preparations:
+        if [f.route for f in turns] != [f.route for f in turn_preparations] or len(
+            {f.route.operation_id for f in turns}
+        ) != len(turns):
+            raise ValueError(
+                "E8 prepare and Twist must share one exact calibrated route."
+            )
+        twist_routes = tuple(f.route for f in turns)
+        for route in twist_routes:
+            for phase in ("ready", "chunk", "turned"):
+                name = route.preset(phase)
+                if name in settle_presets:
+                    raise ValueError("E8 policies cannot replace existing presets.")
+                settle_presets[name] = settle_presets["rigid_object"].snapshot()
     from .press_runtime import PressFactory, PressPrepareFactory
 
     presses = [
         f
         for f in base.integration.registration.registered_semantic_lowerer_factories
-        if type(f) is PressFactory
+        if isinstance(f, PressFactory)
     ]
     preparations = [
         f
         for f in base.integration.registration.registered_semantic_lowerer_factories
-        if type(f) is PressPrepareFactory
+        if isinstance(f, PressPrepareFactory) and not isinstance(f, PressFactory)
     ]
     press_routes = ()
     if presses or preparations:
-        if (
-            len(presses) != 1
-            or len(preparations) != 1
-            or presses[0].route != preparations[0].route
-        ):
+        if [f.route for f in presses] != [f.route for f in preparations] or len(
+            {f.route.operation_id for f in presses}
+        ) != len(presses):
             raise ValueError(
                 "E9 prepare and Press must share exactly one source-qualified route."
             )
-        press_routes = (presses[0].route,)
-        for phase in ("ready", "pressed"):
-            name = press_routes[0].preset(phase)
-            if name in settle_presets:
-                raise ValueError("E9 post-policies cannot replace existing presets.")
-            settle_presets[name] = settle_presets["rigid_object"].snapshot()
+        press_routes = tuple(f.route for f in presses)
+        for route in press_routes:
+            for phase in ("ready", "pressed"):
+                name = route.preset(phase)
+                if name in settle_presets:
+                    raise ValueError(
+                        "E9 post-policies cannot replace existing presets."
+                    )
+                settle_presets[name] = settle_presets["rigid_object"].snapshot()
     if slides or withdrawals:
         if (
             len(slides) != 1
@@ -680,7 +762,13 @@ def load_deployment(
     if press_routes:
         from .press_binding import validate_program
 
-        validate_program(program, press_routes[0])
+        for route in press_routes:
+            validate_program(program, route)
+    if twist_routes:
+        from .twist_binding import validate_program as validate_twist_program
+
+        for route in twist_routes:
+            validate_twist_program(program, route)
     from .align_held import _AlignHeldFactory, with_held_alignment
 
     registration = with_held_alignment(
@@ -839,6 +927,14 @@ def load_deployment(
                 else {}
             ),
             "adapter_contract": ADAPTER_CONTRACT,
+            **(
+                {
+                    "twist_runtime_revision": 1,
+                    "twist_scene_configuration": _press_scene_identity(base_dir),
+                }
+                if twist_routes
+                else {}
+            ),
             **({"press_runtime_revision": 2} if press_routes else {}),
             **(
                 {"press_scene_configuration": _press_scene_identity(base_dir)}
@@ -878,6 +974,7 @@ def load_deployment(
         staging_retention_sources=staging_retention_sources,
         runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
+        twist_routes=twist_routes,
     )
     integration = replace(
         base.integration,

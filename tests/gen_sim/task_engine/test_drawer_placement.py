@@ -73,6 +73,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._press_routes = ()
     factory._clearance_routes = ()
     factory._alignment_continuation_routes = ()
+    factory._twist_routes = ()
     factory._grasp_pose_generators = {}
     factory._registration = registration
     profile = Mock(spec=RobotSkillProfile, profile_id="profile")

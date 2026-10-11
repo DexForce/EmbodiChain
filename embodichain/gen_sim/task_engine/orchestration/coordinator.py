@@ -116,6 +116,7 @@ class TaskEngineCoordinator:
         max_episodes: int | None = None,
         max_episode_steps: int | None = None,
         fit_grasp_assets: bool = False,
+        twist_mass_source: bool = False,
         planner_policy: Mapping[str, Any] | None = None,
         randomize_scene: bool = False,
         randomize_table_material: bool = False,
@@ -212,19 +213,46 @@ class TaskEngineCoordinator:
                     planner_route=planning_mode,
                 )
                 graph = plan.graph
-                graph, generated = generate_task_program_bundle(
-                    graph,
-                    adaptation.prepared_scene,
-                    staging,
-                    robot_profile=str(adaptation.scene_manifest["robot_profile"]),
-                    max_episodes=max_episodes,
-                    max_episode_steps=max_episode_steps,
-                    fit_grasp_assets=fit_grasp_assets,
-                    task_spec=plan.task_spec,
-                    task_candidate=plan.candidate,
-                    role_bindings=plan.role_bindings,
-                    step_lineage=plan.lineage,
+                from .._task_program.twist_support import TwistSupportPenetrationError
+
+                is_twist = any(node["task_type"] == "E8" for node in graph["nodes"])
+                height_candidates = (
+                    (0.001, 0.002, 0.003, 0.004) if is_twist else (None,)
                 )
+                for height in height_candidates:
+                    try:
+                        extra = {"twist_support_lift_m": height} if is_twist else {}
+                        if twist_mass_source:
+                            extra["twist_mass_source"] = True
+                        graph, generated = generate_task_program_bundle(
+                            graph,
+                            adaptation.prepared_scene,
+                            staging,
+                            robot_profile=str(
+                                adaptation.scene_manifest["robot_profile"]
+                            ),
+                            max_episodes=max_episodes,
+                            max_episode_steps=max_episode_steps,
+                            fit_grasp_assets=fit_grasp_assets,
+                            task_spec=plan.task_spec,
+                            task_candidate=plan.candidate,
+                            role_bindings=plan.role_bindings,
+                            step_lineage=plan.lineage,
+                            **extra,
+                        )
+                        break
+                    except TwistSupportPenetrationError as error:
+                        planning_attempt.setdefault(
+                            "support_preflight_attempts", []
+                        ).append(
+                            {
+                                "height_m": height,
+                                "status": "geometric_penetration",
+                                "error": str(error),
+                            }
+                        )
+                        if height == height_candidates[-1]:
+                            raise
             except (TypeError, ValueError, UnsupportedSemanticCapabilityError) as exc:
                 planning_attempt["status"] = "failed"
                 planning_attempt["error"] = _error_record(exc)

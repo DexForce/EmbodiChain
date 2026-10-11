@@ -412,7 +412,10 @@ def _terminal_goals(
             }:
                 slots.pop((subject, "placement"), None)
         for predicate in predicates:
-            if predicate.name in {"poured", "pressed"}:
+            if predicate.name in {"poured", "pressed"} or (
+                predicate.name == "semantic_goal"
+                and predicate.arguments.get("task_type") == "E8"
+            ):
                 events[canonical_hash(predicate.to_dict())] = (predicate, step_id)
             elif predicate.name in {"object_upright", "orientation"}:
                 slot = (

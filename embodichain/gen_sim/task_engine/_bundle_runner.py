@@ -104,6 +104,8 @@ def execute_bundle(
     row_success = [False] * int(args.num_envs)
     terminal_reasons = ["runtime_not_started"] * int(args.num_envs)
     failure: dict[str, Any] | None = None
+    feedback_evidence: dict[str, Any] = {}
+    control_evidence: list[dict[str, Any]] = []
     env: Any = None
     probe: dict[str, Any] | None = None
     try:
@@ -131,6 +133,8 @@ def execute_bundle(
         def configure_environment(value: dict[str, Any]) -> None:
             _configure_recording(value, output)
             routes = deployment.integration.adapter_factory.press_routes
+            twists = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+            routes = twists or routes
             if routes:
                 source = load_config(root / "components/scene.yaml")["simulation"]
                 art = next(
@@ -140,9 +144,15 @@ def execute_bundle(
                 )
                 position = np.asarray(art["init_local_pose"], dtype=float)[:3, 3]
                 target = position + np.array([0.0, 0.0, 0.05])
+                if twists:
+                    pose = np.asarray(art["init_local_pose"], dtype=float)
+                    target = (
+                        pose[:3, :3] @ np.asarray(twists[0].binding.outer_point)
+                        + position
+                    )
                 camera = deepcopy(value["env"]["events"]["record_camera"])
                 camera["params"].update(
-                    name="e9_button_view",
+                    name="e8_knob_view" if twists else "e9_button_view",
                     resolution=[960, 540],
                     intrinsics=[800.0, 800.0, 480.0, 270.0],
                     eye=(target + np.array([0.30, -0.25, 0.20])).tolist(),
@@ -155,6 +165,10 @@ def execute_bundle(
         env_cfg, gym_config, action_config = build_env_cfg_from_args(
             args,
             gym_config_modifier=configure_environment,
+        )
+        _configure_twist_recorders(
+            env_cfg,
+            bool(getattr(deployment.integration.adapter_factory, "twist_routes", ())),
         )
         env_cfg.task_program = load_task_program(
             program_path,
@@ -200,6 +214,7 @@ def execute_bundle(
                     capture_placement_milestones,
                     evaluate_runtime_evidence,
                 )
+                from ._task_program.control_evidence import capture_control_operations
 
                 spec = TaskSpec.from_dict(_read_json(root / "task_spec.json"))
                 try:
@@ -234,6 +249,14 @@ def execute_bundle(
                     program=load_config(program_path),
                     constraints=load_config(root / "task_program/constraints.json"),
                     placement_milestones=placement_milestones,
+                    control_milestones=capture_control_operations(
+                        deployment,
+                        graph,
+                        result_metadata,
+                        load_config(program_path),
+                        len(result.success),
+                    )
+                    or None,
                 )
                 result_metadata["task_spec_evaluation"] = evaluation
                 (output / "task_spec_evaluation.json").write_text(
@@ -276,6 +299,8 @@ def execute_bundle(
                     if not accepted and row_success[index]:
                         row_success[index] = False
                         terminal_reasons[index] = "cargo_envelope_failed"
+            feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
+            control_evidence = _snapshot_control_evidence(env, deployment)
             if result.completed and all(row_success):
                 env.reset()
             else:
@@ -286,6 +311,13 @@ def execute_bundle(
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            if not feedback_evidence:
+                feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
+            try:
+                if not control_evidence:
+                    control_evidence = _snapshot_control_evidence(env, deployment)
+            except Exception as error:
+                failure["control_evidence_error"] = _exception_metadata(error)
             _write_terminal_robot_state(env, output)
             try:
                 _preserve_failed_execution_recording(
@@ -302,43 +334,21 @@ def execute_bundle(
     finally:
         if env is not None:
             try:
-                from ._task_program.press_runtime import SENSOR_UID, PressContactSensor
-
-                sensor = (
-                    getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
-                    if getattr(
-                        deployment.integration.adapter_factory, "press_routes", ()
+                if control_evidence:
+                    (output / "control_operations.json").write_text(
+                        json.dumps(control_evidence, indent=2), encoding="utf-8"
                     )
-                    else None
-                )
-                if isinstance(sensor, PressContactSensor):
-                    (output / "press_evidence.json").write_text(
-                        json.dumps(
-                            {
-                                "route": sensor.route.payload(),
-                                "acceptance": sensor.acceptance,
-                                "target_actor_id": sensor.target_actor,
-                                "parent_actor_id": sensor.parent_actor,
-                                "contact_envelopes": sensor.contact_envelopes,
-                                "finger_actor_ids": sorted(sensor.finger_actors),
-                                "runtime_mass": sensor.art.get_mass(
-                                    sensor.route.binding.link
-                                ).tolist(),
-                                "runtime_limits": sensor.art.get_qpos_limits()[
-                                    0, sensor.joint_index
-                                ].tolist(),
-                                "runtime_drive": [
-                                    v.tolist()
-                                    for v in sensor.art.get_joint_drive(
-                                        joint_ids=[sensor.joint_index]
-                                    )
-                                ],
-                                "trace": sensor.trace,
-                            },
-                            indent=2,
-                        ),
-                        encoding="utf-8",
-                    )
+                    for family in ("twist", "press"):
+                        records = [r for r in control_evidence if r["family"] == family]
+                        if records:
+                            payload = (
+                                records[0]
+                                if len(records) == 1
+                                else {"operations": records}
+                            )
+                            (output / f"{family}_evidence.json").write_text(
+                                json.dumps(payload, indent=2), encoding="utf-8"
+                            )
             except Exception as evidence_error:
                 evidence_failure = {
                     "type": type(evidence_error).__name__,
@@ -570,6 +580,81 @@ def _apply_task_spec_verdict(
                 else "task_spec_unverified"
             )
     return success, reasons
+
+
+def _snapshot_control_evidence(env: Any, deployment: Any) -> list[dict[str, Any]]:
+    """Own all operation evidence before episode reset changes native state."""
+    from ._task_program.press_runtime import PressContactSensor
+
+    records = []
+    adapter = deployment.integration.adapter_factory
+    for family in ("twist", "press"):
+        for route in getattr(adapter, family + "_routes", ()):
+            sensor = getattr(env, "unwrapped", env).sim.get_sensor(route.sensor_uid)
+            if not isinstance(sensor, PressContactSensor):
+                continue
+            record = {
+                "family": family,
+                "operation_id": route.operation_id,
+                "route": route.payload(),
+                "acceptance": deepcopy(sensor.acceptance),
+                "target_actor_id": sensor.target_actor,
+                "parent_actor_id": sensor.parent_actor,
+                "contact_envelopes": deepcopy(sensor.contact_envelopes),
+                "finger_actor_ids": sorted(sensor.finger_actors),
+                "runtime_mass": sensor.art.get_mass(route.binding.link).tolist(),
+                "runtime_limits": sensor.art.get_qpos_limits()[
+                    0, sensor.joint_index
+                ].tolist(),
+                "runtime_drive": [
+                    v.tolist()
+                    for v in sensor.art.get_joint_drive(joint_ids=[sensor.joint_index])
+                ],
+                "trace": deepcopy(sensor.trace),
+            }
+            if family == "twist":
+                record.update(
+                    table_actor_id=sensor.table_actor,
+                    startup_evidence=sensor.startup_evidence(),
+                    geometry_evidence=sensor.geometry_evidence(),
+                )
+                feedback = getattr(sensor, "_feedback_state", None)
+                if feedback is not None:
+                    try:
+                        record["feedback_audit"] = deepcopy(list(feedback.audit))
+                    except Exception as error:
+                        record["feedback_audit_error"] = {
+                            "type": type(error).__name__,
+                            "message": str(error),
+                        }
+            records.append(record)
+    return records
+
+
+def _snapshot_twist_feedback_audit(env: Any, deployment: Any) -> dict[str, Any]:
+    """Own optional diagnostics before reset clears the episode ledger."""
+    try:
+        routes = getattr(deployment.integration.adapter_factory, "twist_routes", ())
+        audits = {}
+        for route in routes:
+            if getattr(route, "feedback_enabled", False) is not True:
+                continue
+            sensor = getattr(env, "unwrapped", env).sim.get_sensor(route.sensor_uid)
+            feedback = getattr(sensor, "_feedback_state", None)
+            if feedback is not None:
+                audits[route.operation_id] = deepcopy(list(feedback.audit))
+        return (
+            {"feedback_audit": next(iter(audits.values()))}
+            if len(audits) == 1
+            else {"feedback_audits": audits} if audits else {}
+        )
+    except Exception as error:
+        return {
+            "feedback_audit_error": {
+                "type": type(error).__name__,
+                "message": str(error),
+            }
+        }
 
 
 def _exception_metadata(exc: BaseException) -> dict[str, Any]:
@@ -848,6 +933,21 @@ def _configure_recording(config: dict[str, Any], output: Path) -> None:
             "save_path": (output / "videos").as_posix(),
         },
     }
+
+
+def _configure_twist_recorders(env_cfg: Any, enabled: bool) -> None:
+    """Select the private E8 recorder after the legacy short-name parser.
+
+    The Gym YAML parser resolves only names in manager modules. Keep its normal
+    recorder declaration and replace the already decoded callable locally,
+    without modifying the shared manager registry or other task recorders.
+    """
+    if not enabled:
+        return
+    from ._task_program.twist_recording import E8CameraRecorder
+
+    for name in ("record_camera", "record_press_camera"):
+        getattr(env_cfg.events, name).func = E8CameraRecorder
 
 
 def _verify_source(bundle: Path) -> None:
