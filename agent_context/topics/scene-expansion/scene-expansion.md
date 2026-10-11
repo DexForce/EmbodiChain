@@ -39,6 +39,12 @@ physical operations. The measured callback supplies task-specific state and
 event evidence. Gym remains the owner of reset, stepping and recording; no new
 generation session or persistence writer is introduced.
 
+The attempt guard spans preparation, execution and measurement. It suppresses
+automatic reset and blocks persistence during explicit callback resets, even
+when those resets replace episode annotations. Rejected recording buffers must
+be discarded by reset before retrying; beginning another demo or replacing its
+metadata does not create a clean recording boundary.
+
 ## Invariants
 
 - A changed pose is a proper 4x4 entity-to-local-arena Z-up transform, excluding
@@ -50,11 +56,14 @@ generation session or persistence writer is introduced.
   containers are owned; duplicate entity IDs and invalid configuration fail
   explicitly rather than becoming ordinary geometric rejections.
 - Initial checks, program completion and measured acceptance remain separate.
-  Empty or unavailable required checks cannot accept data; projected effects
-  do not replace physical evidence.
-- Failed/unverified scene metadata blocks reset-time dataset, camera and
-  trajectory saves, including explicit commit rows. Reset consumes that
-  metadata. Acceptance is not a receipt proving persistence.
+  Program success requires normal completion and the acceptance mask of the
+  selected canonical bridge, alongside successful demo execution. Generic Gym
+  success cannot replace that evidence. Empty or unavailable required checks
+  cannot accept data; projected effects do not replace physical evidence.
+- Failed or unverified recordings block reset-time dataset, camera and
+  trajectory saves, including explicit commit rows. Rejection stays attached
+  to the buffers until reset discards them; a successful retry without reset
+  cannot make those buffers eligible. Acceptance is not a persistence receipt.
 
 Use [robot workspace](../robot-workspace/robot-workspace.md) for reachability
 cache and frame contracts, [motion planning](../motion-planning/motion-planning.md)
