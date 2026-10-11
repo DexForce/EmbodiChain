@@ -100,6 +100,12 @@ Rigid Object Group
 Articulation
 ------------
 
+``robot.body_data.fetch_state()`` reads joint position, joint velocity, root
+pose and root velocities together through DexSim's batch state interface.
+Each call refreshes the values after stepping or state writes. The returned
+tensors reuse the data object's buffers; clone tensors when keeping a past
+snapshot. Individual data properties remain available for single-field reads.
+
 .. autoclass:: Articulation
     :members:
     :inherited-members:

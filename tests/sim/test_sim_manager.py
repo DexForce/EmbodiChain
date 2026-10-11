@@ -2030,7 +2030,9 @@ def test_add_camera_uses_owning_manager_render_context(
     arenas = [object(), object()]
 
     sim = object.__new__(SimulationManager)
-    sim.sim_config = SimpleNamespace(num_envs=len(arenas))
+    sim.sim_config = SimpleNamespace(
+        num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
+    )
     sim.device = torch.device("cpu")
     sim._world = world
     sim._arenas = arenas

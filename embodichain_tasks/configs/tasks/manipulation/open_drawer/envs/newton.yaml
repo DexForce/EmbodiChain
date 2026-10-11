@@ -66,4 +66,13 @@ simulation:
 env:
   sim_steps_per_control: 4
   events: {}
-  dataset: {}
+  dataset:
+    lerobot:
+      func: LeRobotRecorder
+      mode: save
+      params:
+        extra:
+          scene_type: cabinet
+          task_description: open_drawer_generation
+          data_type: sim
+        use_videos: true

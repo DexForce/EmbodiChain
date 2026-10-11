@@ -20,7 +20,8 @@ scene_binding:
       affordances:
         - entity_id: bottle_grasp
           kind: antipodal_grasp
-          internal_axis: [1.0, 0.0, 0.0]
+          # Wrist roll axis expressed in the bottle's grasp frame.
+          internal_axis: [0.8665034216893454, 0.49392778336146054, 0.07216068891225036]
 
 profile:
   defaults:
@@ -35,8 +36,8 @@ profile:
   action_options:
     pick:
       kind: pick_up
-      hand_interp_steps: 11
-      grasp_settle_steps: 25
+      hand_interp_steps: 44
+      grasp_settle_steps: 100
       fixed_object_to_eef:
         - -0.0530918874
         - 0.4963395894
@@ -61,8 +62,8 @@ profile:
       rotate_angle: -1.0471975511965976
     place:
       kind: place
-      hand_interp_steps: 11
-      release_settle_steps: 15
+      hand_interp_steps: 44
+      release_settle_steps: 60
       preserve_current_object_orientation: true
   effect_monitors: {}
 
@@ -75,15 +76,15 @@ runtime_services:
         - 1.0
         - 0.0
         - 0.0
-        - 0.05
+        - 0.027645135849048517
         - 0.0
         - 1.0
         - 0.0
-        - -0.1
+        - -0.053564902897726294
         - 0.0
         - 0.0
         - 1.0
-        - 0.125
+        - 0.18
         - 0.0
         - 0.0
         - 0.0

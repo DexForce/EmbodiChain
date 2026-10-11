@@ -172,3 +172,25 @@ to the split modules.
    physics_cfg_for_backend
    physics_backend_from_cfg
    validate_physics_cfg
+
+Rigid-body property module
+--------------------------
+
+The rigid-body configuration types are also available from
+``embodichain.lab.sim.cfg.rigid``. They describe mass, collision properties,
+materials, and backend-specific overrides. ``NewtonCollisionPropertiesCfg``
+accepts an optional ``priority`` for MuJoCo contact-parameter selection;
+``None`` preserves the source value.
+
+.. currentmodule:: embodichain.lab.sim.cfg.rigid
+
+.. autosummary::
+
+   MassPropertiesCfg
+   DefaultRigidBodyPropertiesCfg
+   CollisionPropertiesCfg
+   DefaultCollisionPropertiesCfg
+   NewtonCollisionPropertiesCfg
+   RigidBodyMaterialCfg
+   NewtonRigidBodyMaterialCfg
+   RigidBodyPhysicsCfg

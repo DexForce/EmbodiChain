@@ -156,7 +156,7 @@ performance conclusion follows from implementation coverage or short smoke runs.
 
 G-03 acceptance still requires completed execution, measured validation, task
 success and a confirmed persistence receipt. `session_adapter.py` translates the
-production session lifecycle; benchmark code does not create another generation
+production `ExpansionSession` lifecycle; benchmark code does not create another generation
 coordinator, physics controller or dataset sink.
 
 ## Validation

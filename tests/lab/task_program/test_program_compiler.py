@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 from itertools import islice
+from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 import torch
@@ -43,6 +45,7 @@ from embodichain.lab.task_program import (
     SequenceCfg,
     TargetRefCfg,
     WaitStablePostCfg,
+    load_task_program,
 )
 from embodichain.lab.sim.atomic_actions import Affordance, EntityState
 from embodichain.lab.task_program.semantics.calls import (
@@ -159,6 +162,50 @@ def _assert_pose_equal(actual: SemanticPose, expected: SemanticPose) -> None:
     assert torch.allclose(actual.quaternion_xyzw, expected.quaternion_xyzw)
 
 
+@pytest.mark.parametrize("instruction", [None, "Pick up the cube."])
+def test_compiled_program_owns_immutable_overall_instruction(
+    instruction: str | None,
+) -> None:
+    registry, _ = _scene_registry()
+    config = _program(InvokeCfg(call=PickCfg(object="cube")))
+    config.instruction = instruction
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    config.instruction = "Changed after compilation."
+    assert compiled.instruction == instruction
+    with pytest.raises(FrozenInstanceError):
+        compiled.instruction = "Change the compiled snapshot."
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_compiler_rejects_mutated_invalid_overall_instruction(
+    instruction: object,
+) -> None:
+    registry, _ = _scene_registry()
+    config = _program(InvokeCfg(call=PickCfg(object="cube")))
+    config.instruction = instruction
+    with pytest.raises(TaskProgramCompileError) as error:
+        TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    assert error.value.path == ("instruction",)
+
+
+def test_loaded_program_compilation_snapshots_overall_instruction(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "program.yaml"
+    path.write_text(
+        "program_id: pick_cube\n"
+        "instruction: Pick up the cube.\n"
+        "targets: {}\n"
+        "program: {kind: invoke, call: {kind: pick, object: cube}}\n"
+    )
+    config = load_task_program(path, integration=_integration())
+    registry, _ = _scene_registry()
+    compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    config.instruction = "Changed after compilation."
+    path.write_text("invalid replacement after compilation")
+    assert compiled.instruction == "Pick up the cube."
+
+
 def _assert_semantic_call_equal(
     actual: SemanticCallSpec,
     expected: SemanticCallSpec,
@@ -267,6 +314,7 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     poses = (_pose(0.45, -0.2), _pose(0.45, 0.0), _pose(0.45, 0.2))
     body = SegmentCfg(
         name="move_cube",
+        instruction="Pick up the cube and move it to the next target.",
         steps=SequenceCfg(
             items=(
                 InvokeCfg(call=PickCfg(object="cube")),
@@ -288,7 +336,11 @@ def test_repeat_expands_independent_segments_with_cyclic_targets() -> None:
     )
 
     compiled = TaskProgramCompiler.from_scene_registry(registry).compile(config)
+    body.instruction = "Changed after compilation."
     segments = list(compiled)
+    assert {segment.instruction for segment in segments} == {
+        "Pick up the cube and move it to the next target."
+    }
     second_pass = list(compiled)
 
     assert [segment.segment_id for segment in segments] == [

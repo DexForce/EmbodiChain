@@ -389,10 +389,12 @@ class DLSSCfg:
 
 @configclass
 class RenderCfg:
-    renderer: Literal["auto", "hybrid", "fast-rt", "rt"] = "auto"
-    """Renderer backend to use for the simulation. Options are 'auto', 'hybrid', 'fast-rt', and 'rt'.
+    renderer: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "auto"
+    """Renderer backend to use for the simulation.
 
     Note:
+    - 'no-render' selects DexSim's NoRender backend and requires headless mode.
+        Native camera sensors require 'hybrid', 'fast-rt', or 'rt'.
     - 'auto' selects a default renderer based on the detected GPU: RTX-series cards use
         'hybrid', while datacenter cards (A100/A800, H100/H800/H200/H20) use 'fast-rt'.
         If no CUDA device is available or the GPU is unknown, it falls back to 'hybrid'.
@@ -420,6 +422,21 @@ class RenderCfg:
     tone_mapping_exposure: float = 1.0
     """Fixed linear exposure multiplier applied before tone mapping."""
 
+    min_bounces: int = 4
+    """Path depth at which Russian Roulette termination may begin.
+
+    Rays can still terminate earlier on a miss or absorption. The primary
+    segment has depth zero; this value does not guarantee a minimum path length.
+    """
+
+    max_bounces: int = 8
+    """Maximum traced path depth, counting the primary segment.
+
+    This bounds ordinary ray-tracing paths and NRD transparent continuations.
+    NRD's indirect-lighting budget is controlled separately by
+    :attr:`NRDCfg.max_indirect_bounces`.
+    """
+
     def __post_init__(self) -> None:
         """Validate rendering parameters."""
         if self.spp < 1:
@@ -428,10 +445,20 @@ class RenderCfg:
             logger.log_error(
                 "RenderCfg.tone_mapping_exposure must be non-negative.", ValueError
             )
+        if type(self.min_bounces) is not int or self.min_bounces < 0:
+            raise ValueError("RenderCfg.min_bounces must be a non-negative integer.")
+        if type(self.max_bounces) is not int or self.max_bounces < 1:
+            raise ValueError("RenderCfg.max_bounces must be a positive integer.")
+        if self.min_bounces > self.max_bounces:
+            raise ValueError(
+                "RenderCfg.min_bounces must not exceed RenderCfg.max_bounces."
+            )
 
     def to_dexsim_flags(self) -> Renderer:
         """Convert the renderer name to DexSim's renderer enum."""
-        if self.renderer == "hybrid":
+        if self.renderer == "no-render":
+            return Renderer.NORENDER
+        elif self.renderer == "hybrid":
             return Renderer.HYBRID
         elif self.renderer == "fast-rt":
             return Renderer.FASTRT
@@ -447,7 +474,7 @@ class RenderCfg:
             return Renderer.HYBRID
         else:
             logger.log_error(
-                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'hybrid', 'fast-rt', or 'rt'."
+                f"Invalid renderer type '{self.renderer}' specified. Must be one of 'auto', 'no-render', 'hybrid', 'fast-rt', or 'rt'."
             )
 
     def apply_to_dexsim_config(self, world_config: dexsim.WorldConfig) -> None:
@@ -455,8 +482,15 @@ class RenderCfg:
 
         Args:
             world_config: DexSim world configuration to update in place.
+
+        Raises:
+            ValueError: If rendering settings contain invalid values, including
+                bounce limits changed after construction.
         """
+        self.__post_init__()
         world_config.renderer = self.to_dexsim_flags()
+        if self.renderer == "no-render":
+            return
         window_mode, offscreen_mode = self.denoising.to_dexsim_modes()
         set_rt_render_modes = getattr(world_config, "set_rt_render_modes", None)
         if callable(set_rt_render_modes):
@@ -475,6 +509,8 @@ class RenderCfg:
         )
         world_config.nrd_config = self.nrd.to_dexsim_cfg()
         world_config.raytrace_config.render_iterations_per_frame = self.spp
+        world_config.raytrace_config.min_bounces = self.min_bounces
+        world_config.raytrace_config.max_bounces = self.max_bounces
         world_config.postprocess_config.tone_mapping_enabled = self.tone_mapping_enabled
         world_config.postprocess_config.tone_mapping_type = (
             ToneMappingType.MODIFIED_REINHARD

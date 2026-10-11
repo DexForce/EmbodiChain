@@ -511,8 +511,8 @@ def _drawer_compiler() -> TaskProgramCompiler:
     return TaskProgramCompiler.from_scene_registry(registry)
 
 
-def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
-    """The packaged cube task expands to three independently scoped cycles."""
+def test_repeated_cube_program_is_six_grasp_and_placement_segments() -> None:
+    """The packaged task preserves three cycles with two semantic subgoals each."""
     config = _decode_deployed_program(
         _read_payload(_REPEATED_CUBE_PROGRAM),
         deployment_path=_REPEATED_CUBE_GYM_CONFIG,
@@ -530,20 +530,20 @@ def test_repeated_cube_program_is_three_lazy_semantic_segments() -> None:
 
     segments = tuple(_cube_compiler().compile(config))
 
-    assert [segment.name for segment in segments] == ["move_cube"] * 3
-    assert [segment.segment_index for segment in segments] == [0, 1, 2]
-    assert [len(segment.calls) for segment in segments] == [2, 2, 2]
-    assert all(type(segment.calls[0].call) is Pick for segment in segments)
-    assert all(type(segment.calls[1].call) is Place for segment in segments)
+    assert [segment.name for segment in segments] == ["pick_cube", "place_cube"] * 3
+    assert [segment.segment_index for segment in segments] == list(range(6))
+    assert [len(segment.calls) for segment in segments] == [1] * 6
+    assert all(type(segment.calls[0].call) is Pick for segment in segments[::2])
+    assert all(type(segment.calls[0].call) is Place for segment in segments[1::2])
     assert [
-        segment.calls[1].target_selections[0].value_index for segment in segments
+        segment.calls[0].target_selections[0].value_index for segment in segments[1::2]
     ] == [0, 1, 0]
     assert all(segment.post_policies == () for segment in segments)
     assert all(segment.validators == () for segment in segments)
 
 
-def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
-    """The real packaged program owns three ordered observable lifecycles."""
+def test_packaged_repeated_cube_runs_six_lazy_bridge_lifecycles() -> None:
+    """Every grasp and placement owns an observable boundary with downstream look-ahead."""
     config = _decode_deployed_program(
         _read_payload(_REPEATED_CUBE_PROGRAM),
         deployment_path=_REPEATED_CUBE_GYM_CONFIG,
@@ -568,7 +568,7 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     segment_names: list[str | None] = []
     segment_metadata: list[dict[str, object]] = []
     accepted_masks: list[list[bool]] = []
-    for segment_index in range(3):
+    for segment_index in range(6):
         observation_count = len(observation.generations)
         demo_segment = next(iterator)
         segment_names.append(demo_segment.name)
@@ -586,26 +586,20 @@ def test_packaged_repeated_cube_runs_three_lazy_bridge_lifecycles() -> None:
     with pytest.raises(StopIteration):
         next(iterator)
 
-    assert segment_names == ["move_cube"] * 3
-    assert runtime.analysis_window_lengths == [6, 4, 2]
+    assert segment_names == ["pick_cube", "place_cube"] * 3
+    assert runtime.analysis_window_lengths == [6, 5, 4, 3, 2, 1]
     assert runtime.executed_semantic_ids == ["pick", "place"] * 3
-    assert observation.generations == [1, 2, 3]
-    assert lifecycle_events == [("observe", 1), ("observe", 2), ("observe", 3)]
+    assert observation.generations == [1, 2, 3, 4, 5, 6]
+    assert lifecycle_events == [("observe", index) for index in range(1, 7)]
     assert runtime.eligible_masks[0] is None
-    assert [mask.tolist() for mask in runtime.eligible_masks[1:]] == [
-        [True, True],
-        [True, True],
-    ]
-    assert accepted_masks == [[True, True]] * 3
+    assert [mask.tolist() for mask in runtime.eligible_masks[1:]] == [[True, True]] * 5
+    assert accepted_masks == [[True, True]] * 6
 
     for segment_index, metadata in enumerate(segment_metadata):
         assert metadata["task_program_id"] == compiled.program_id
         assert metadata["program_segment_index"] == segment_index
-        assert metadata["segment_count"] == 3
-        assert metadata["semantic_call_indices"] == [
-            2 * segment_index,
-            2 * segment_index + 1,
-        ]
+        assert metadata["segment_count"] == 6
+        assert metadata["semantic_call_indices"] == [segment_index]
         assert metadata["post_policy_count"] == 0
         assert metadata["validator_count"] == 0
         runtime_metadata = metadata["runtime"]
@@ -646,7 +640,7 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
     )
     segments = tuple(_cube_compiler().compile(config))
 
-    assert len(segments) == 4
+    assert len(segments) == 8
     last_place = segments[-1].calls[-1].call
     assert type(last_place) is Place
     assert last_place.at is not None
@@ -1059,10 +1053,10 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
         Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
     ),
 )
-def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
+def test_example_gym_configs_keep_minimal_recording_configuration(
     relative_path: Path,
 ) -> None:
-    """Runnable examples keep only deterministic simulation and motion inputs."""
+    """Runnable examples retain deterministic physics and LeRobot recording."""
     payload = _read_payload(relative_path)
     if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
         environment = _read_payload(relative_path.parent / "envs/default.yaml")
@@ -1085,10 +1079,15 @@ def test_example_gym_configs_omit_auxiliary_environment_mechanisms(
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
     assert environment["env"]["events"] == {}
-    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
-        assert set(environment["env"]["dataset"]) == {"lerobot"}
-    else:
-        assert environment["env"]["dataset"] == {}
+    assert set(environment["env"]["dataset"]) == {"lerobot"}
+    recorder = environment["env"]["dataset"]["lerobot"]
+    assert recorder["func"] == "LeRobotRecorder"
+    assert recorder["mode"] == "save"
+    instruction = _read_payload(relative_path.parent / "task_program/program.yaml")[
+        "instruction"
+    ]
+    assert isinstance(instruction, str) and instruction.strip()
+    assert "instruction" not in recorder["params"]
     assert environment["physics"] == "default"
     assert "physics_config" not in environment
 

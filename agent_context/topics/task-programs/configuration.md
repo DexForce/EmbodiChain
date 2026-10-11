@@ -8,13 +8,31 @@ Read this when the request needs these details. [Topic overview](task-programs.m
 
 - one `program_id`;
 - exact `TaskProgramIntegrationCfg` IDs;
-- optional named targets; and
+- optional overall language ``instruction`` and named targets; and
 - one bounded program tree.
 
 Supported nodes are `SequenceCfg`, `RepeatCfg`, `SegmentCfg`, `InvokeCfg`, and
 `ParallelCfg` with an owned `BarrierCfg`. Built-in call configs are `PickCfg`,
 `PlaceCfg`, and `HandOverCfg`; `RegisteredSemanticCallCfg` is the allowlisted
 extension form.
+
+The program's root `instruction` owns its overall task language; each explicit
+segment may declare a finer `instruction`. The compiler freezes both levels,
+including repeated/parallel segments. The Gym bridge and common demo executor
+bind them to the actual episode-selected program; omitted segment labels are
+marked as overall-task fallbacks. See `resolve_demo_instruction` in `demo.py`
+for task/direct-call/legacy precedence, shared with handwritten demonstrations. See
+the [persistence contract](../data-pipeline/data-pipeline.md#persistence-contract)
+for the independent task/subtask language mapping.
+
+Choose segment boundaries around independently describable subgoals under their
+required incoming task state. A segment may own one or several Semantic Calls;
+sequential splitting retains task state and downstream planning look-ahead.
+Keep release settling and final-state validators on the subgoal that establishes
+those outcomes. Atomic trajectory phase names or arbitrary waypoint counts do
+not establish semantic boundaries for an unannotated recorded demonstration.
+Language instructions express intent; physical acceptance still depends on the
+selected effect authority and validators, not on the presence of a label.
 
 Unknown fields, duplicate keys, non-finite values, invalid exact types,
 excessive depth/nodes/repeats, cyclic or executable registered payloads, and
@@ -52,7 +70,11 @@ three typed selections: `environment.component`,
 `task_program.{program,integration,execution_policy}`, and
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
-deployment component paths resolve from `task.<embodiment>.yaml`.
+ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
+Official `embodichain_tasks/configs/` references for program, integration and
+execution policy use the imported SDK's packaged configs. The shared
+[Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
+defines the owner-directory and CWD-shadow behavior.
 `config_to_cfg()` checks that semantic binding targets exist in the physical
 scene, validates the task's required scene/embodiment contracts, composes the
 immutable integration catalog, injects its trusted profile/scene/preset
@@ -76,6 +98,14 @@ Ownership is explicit rather than a generic deep merge:
   selection/configuration, motion, tracking, recovery, runner, and
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
+
+Grasp generators select toolkit-owned geometry with a string `model` ID;
+an inline mapping is a custom calibration and its `model_id` does not trigger
+catalog lookup. The catalog is owned by
+`embodichain/toolkits/graspkit/pose_generator.py`, with source provenance in
+`embodichain/toolkits/graspkit/README.md`. Embodiments may omit algorithm and
+collision fields to use GraspKit defaults; task-specific tuning belongs in
+the allowlisted `grasp_pose_generator_overrides` mapping.
 
 The reference embodiment `skill_profile.contract_id` and `profile_id` values
 are unversioned. Versioned Gym, task-integration, or scene-registry IDs are

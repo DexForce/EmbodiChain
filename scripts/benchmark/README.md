@@ -181,7 +181,7 @@ receipt 失败和确认写入四类结果。只有 `execution=completed`、
 进入 accepted yield。重复 `commit_id` 不增加 accepted 数量，预算耗尽的
 attempt 保留为 `not_run`。
 
-`session_adapter.py` 已把 #670 的 `GenerationSession` 生命周期接到同一
+`session_adapter.py` 已把生产 `ExpansionSession` 生命周期接到同一
 executor 边界：proposal、rollout evidence、`accept_episode` 和最终 receipt
 都会经过生产 session。真实 host 仍需提供 Candidate Coordinator、Physical
 Executor、Measured Validator 和 EpisodeSink；fixture 不创建第二套候选或

@@ -95,6 +95,7 @@ class Trainer:
 
         self.device = self.algorithm.device
         self.global_step = 0
+        self._training_start_step = 0
         self.num_updates = 0
         self.start_time = time.time()
         self.ret_window = deque(maxlen=100)
@@ -178,6 +179,8 @@ class Trainer:
         return out
 
     def train(self, total_timesteps: int) -> dict[str, Any]:
+        self._training_start_step = self.global_step
+        self.start_time = time.time()
         if self.rank == 0:
             print(f"Start training, total steps: {total_timesteps}")
         num_envs = int(self.env.num_envs)
@@ -238,11 +241,12 @@ class Trainer:
                 metrics_dict = info.get("metrics")
                 self._log_scalar_dict("rewards", rewards_dict)
                 self._log_scalar_dict("metrics", metrics_dict)
-                log_dict = {}
-                log_dict.update(self._pack_log_dict("rewards", rewards_dict))
-                log_dict.update(self._pack_log_dict("metrics", metrics_dict))
-                if log_dict and self.use_wandb:
-                    wandb.log(log_dict, step=self.global_step)
+                if self.use_wandb:
+                    log_dict = {}
+                    log_dict.update(self._pack_log_dict("rewards", rewards_dict))
+                    log_dict.update(self._pack_log_dict("metrics", metrics_dict))
+                    if log_dict:
+                        wandb.log(log_dict, step=self.global_step)
 
         rollout = self.buffer.start_rollout()
         rollout = self.collector.collect(
@@ -326,7 +330,7 @@ class Trainer:
 
     def _log_train(self, losses: dict[str, float]):
         elapsed = max(1e-6, time.time() - self.start_time)
-        sps = self.global_step / elapsed
+        sps = (self.global_step - self._training_start_step) / elapsed
         avgR = np.mean(self.ret_window) if len(self.ret_window) > 0 else float("nan")
         avgL = np.mean(self.len_window) if len(self.len_window) > 0 else float("nan")
         history_entry = {
@@ -463,12 +467,15 @@ class Trainer:
         return path
 
     def get_summary(self) -> dict[str, Any]:
+        """Return persistent counters and throughput for the current train call."""
         elapsed = max(1e-6, time.time() - self.start_time)
         return {
             "global_step": int(self.global_step),
             "num_updates": int(self.num_updates),
             "elapsed_time_sec": float(elapsed),
-            "training_fps": float(self.global_step / elapsed),
+            "training_fps": float(
+                (self.global_step - self._training_start_step) / elapsed
+            ),
             "last_train_metrics": dict(self.last_train_metrics),
             "last_eval_metrics": dict(self.last_eval_metrics),
             "train_history": list(self.train_history),

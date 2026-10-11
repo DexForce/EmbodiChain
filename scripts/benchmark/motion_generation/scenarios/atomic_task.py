@@ -1376,15 +1376,19 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             raw_offsets, (str, bytes)
         ):
             raise TypeError("target_offsets_rad must be a non-empty list.")
+        start_qpos, full_start_qpos = _snapshot_case_qpos(
+            scenario.robot, scenario.control_part
+        )
         base_offsets = [
-            _float_vector(value, name="target_offsets_rad", length=7)
+            _float_vector(
+                value,
+                name="target_offsets_rad",
+                length=start_qpos.shape[-1],
+            )
             for value in raw_offsets
         ]
         if not base_offsets:
             raise ValueError("target_offsets_rad must not be empty.")
-        start_qpos, full_start_qpos = _snapshot_case_qpos(
-            scenario.robot, scenario.control_part
-        )
         offset_tensor = torch.stack(
             [
                 _randomized_vector_batch(

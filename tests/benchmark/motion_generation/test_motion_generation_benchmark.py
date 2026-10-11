@@ -1332,6 +1332,34 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
     assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
 
 
+class _Ur5LimitRobot(_MetricRobot):
+    """FK stub with six bounded UR5 joints for free-space case generation."""
+
+    def get_qpos_limits(self, name: str):  # noqa: ARG002
+        return torch.tensor([[[-6.28, 6.28]] * 6])
+
+
+def test_ur5_free_space_suite_generates_six_joint_cases():
+    suite = load_suite("ur5_free_space")
+    assert suite.robot.id == "ur5"
+    assert suite.free_space.batch_sizes == [8]
+    suite.free_space.seeds = [11]
+    suite.free_space.path_shapes = ["direct"]
+    suite.free_space.waypoint_counts = [1]
+    track = suite.enabled_tracks()[0]
+    cases = create_scenario_provider("free_space").generate_cases(
+        suite, track, _Ur5LimitRobot(), "arm", batch_size=8
+    )
+    assert {case.start_state_bin for case in cases} == {
+        "nominal",
+        "random_reachable",
+        "near_limit",
+        "near_singularity",
+    }
+    assert all(case.start_qpos.shape == (8, 6) for case in cases)
+    assert all(case.reference_qpos.shape == (8, 1, 6) for case in cases)
+
+
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():
     suite = load_suite("smoke")
     robot = _FrankaLimitRobot()

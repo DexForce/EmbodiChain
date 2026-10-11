@@ -83,7 +83,9 @@ class PPO(BaseAlgorithm[TensorDict]):
 
     def update(self, rollout: TensorDict) -> Dict[str, float]:
         """Update the policy using a collected rollout."""
-        rollout = rollout.clone()
+        # GAE adds fields but does not mutate the collected tensors. A shallow
+        # clone isolates those fields without copying the entire GPU rollout.
+        rollout = rollout.clone(recurse=False)
         compute_gae(rollout, gamma=self.cfg.gamma, gae_lambda=self.cfg.gae_lambda)
         flat_rollout = transition_view(rollout, flatten=True)
 

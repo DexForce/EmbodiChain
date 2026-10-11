@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""The G-03 adapter exercises the existing #670 GenerationSession contract."""
+"""The G-03 adapter exercises the production ExpansionSession contract."""
 
 from __future__ import annotations
 
@@ -24,15 +24,15 @@ import torch
 
 
 def _session_and_case():
-    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryGenerationJobCfg
+    from embodichain.lab.sim.motion.expansion.cfg import TrajectoryExpansionJobCfg
     from embodichain.lab.sim.motion.expansion.contracts import (
         SceneCase,
         ValidationCheck,
         ValidationResult,
     )
-    from embodichain.lab.sim.motion.expansion.session import GenerationSession
+    from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 
-    session = GenerationSession(TrajectoryGenerationJobCfg())
+    session = ExpansionSession(TrajectoryExpansionJobCfg())
     scene = SceneCase("scene-0", "initial-0", "scene-v1", "lift", "robot")
     session.register_case(
         scene,

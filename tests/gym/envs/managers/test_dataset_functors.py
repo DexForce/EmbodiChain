@@ -689,7 +689,7 @@ class TestLeRobotRecorderFeatures:
             ],
         }
         assert not any("controller_qpos" in key for key in features)
-        assert "subtask_index" not in features
+        assert features["subtask_index"]["dtype"] == "int64"
 
         obs = TensorDict(
             {
@@ -708,7 +708,7 @@ class TestLeRobotRecorderFeatures:
         )
         torch.testing.assert_close(frame[LeRobotKey.ACTION.value], requested)
         assert not any("controller_qpos" in key for key in frame)
-        assert "subtask_index" not in frame
+        assert frame["subtask_index"].tolist() == [0]
 
     @patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset")
     def test_eef_action_contract_declares_explicit_action_and_observation(
@@ -1944,8 +1944,13 @@ def test_subtask_registry_writes_stable_deduplicated_indices(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
-def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
-    """LeRobot 0.4.4 reloads one overall task and per-frame subtasks."""
+@pytest.mark.parametrize("with_contract", [False, True])
+@pytest.mark.parametrize("fragments", [False, True])
+@pytest.mark.parametrize("episode_snapshot", [False, True])
+def test_multisegment_episode_round_trips_task_and_subtasks(
+    tmp_path, with_contract: bool, fragments: bool, episode_snapshot: bool
+) -> None:
+    """LeRobot reloads both language levels for full episodes and fragments."""
     env = MockEnvForDataset(num_joints=2, has_sensors=False)
     cfg = MockFunctorCfg(
         params={
@@ -1956,6 +1961,13 @@ def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
             "use_videos": False,
         }
     )
+    if with_contract:
+        cfg.params["action_contract"] = {
+            "version": 1,
+            "representation": "joint_position",
+        }
+    if episode_snapshot:
+        cfg.params["instruction"] = {"lang": "Outdated recorder task"}
     recorder = LeRobotRecorder(cfg, env)
     obs_list = [
         TensorDict(
@@ -1994,19 +2006,37 @@ def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
         ]
     }
 
+    if episode_snapshot:
+        episode_metadata["instruction"] = "Move the cube between two targets."
+        episode_metadata["instruction_source"] = "task_program"
+
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "error",
             message=("Conversion of an array with ndim > 0 to a scalar is deprecated"),
             category=DeprecationWarning,
         )
-        assert recorder._save_single_episode(
-            0,
-            obs_list,
-            action_list,
-            annotations=annotations,
-            episode_metadata=episode_metadata,
-        )
+        if fragments:
+            episode_metadata["output_mode"] = "segment_fragments"
+            for segment in episode_metadata["segments"]:
+                segment["success"] = True
+            payloads = recorder._episode_payloads(
+                0,
+                torch.stack(obs_list),
+                torch.stack(action_list),
+                annotations,
+                episode_metadata,
+            )
+            for payload in payloads:
+                assert recorder._save_single_episode(*payload)
+        else:
+            assert recorder._save_single_episode(
+                0,
+                obs_list,
+                action_list,
+                annotations=annotations,
+                episode_metadata=episode_metadata,
+            )
     recorder.finalize()
 
     loaded = LeRobotDataset(
@@ -2032,11 +2062,36 @@ def test_multisegment_episode_round_trips_task_and_subtasks(tmp_path) -> None:
         1,
     ]
 
+    records = [
+        json.loads(line)
+        for line in (recorder.dataset_full_path / "meta/embodichain_episodes.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert len(records) == (2 if fragments else 1)
+    assert {record["instruction"] for record in records} == {
+        "Move the cube between two targets."
+    }
+    assert [
+        segment["instruction"] for record in records for segment in record["segments"]
+    ] == ["Pick up the cube.", "Place the cube at the next target."]
+
+    assert {record["instruction_source"] for record in records} == {
+        "task_program" if episode_snapshot else "legacy_recorder"
+    }
+
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
-def test_action_contract_uses_official_per_frame_tasks(tmp_path) -> None:
-    """Contract datasets encode segment instructions through task_index."""
+@pytest.mark.parametrize(
+    "representation", ["joint_position", "eef_pose_parallel_gripper"]
+)
+def test_action_contract_preserves_task_and_subtask(
+    tmp_path, representation: str
+) -> None:
+    """An action contract does not change the two language levels."""
     env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    if representation == "eef_pose_parallel_gripper":
+        attach_eef_action_manager(env)
     recorder = LeRobotRecorder(
         MockFunctorCfg(
             params={
@@ -2046,7 +2101,8 @@ def test_action_contract_uses_official_per_frame_tasks(tmp_path) -> None:
                 "extra": {"task_description": "official_tasks"},
                 "action_contract": {
                     "version": 1,
-                    "representation": "joint_position",
+                    "representation": representation,
+                    "record_eef_observation": False,
                 },
             }
         ),
@@ -2077,15 +2133,16 @@ def test_action_contract_uses_official_per_frame_tasks(tmp_path) -> None:
                 "segment_id": 1,
                 "start_step": 1,
                 "end_step": 2,
-                "instruction": "Place the cube.",
+                "instruction": None,
             },
         ]
     }
 
+    action_dim = 7 if representation == "eef_pose_parallel_gripper" else 2
     assert recorder._save_single_episode(
         0,
         obs_list,
-        [torch.zeros(2), torch.zeros(2)],
+        [torch.zeros(action_dim), torch.zeros(action_dim)],
         episode_metadata=episode_metadata,
     )
     recorder.finalize()
@@ -2096,12 +2153,13 @@ def test_action_contract_uses_official_per_frame_tasks(tmp_path) -> None:
     )
     samples = [loaded[index] for index in range(2)]
 
-    assert [sample["task"] for sample in samples] == [
+    assert [sample["task"] for sample in samples] == ["Move the cube."] * 2
+    assert [sample["subtask"] for sample in samples] == [
         "Pick up the cube.",
-        "Place the cube.",
+        "Move the cube.",
     ]
-    assert "subtask_index" not in samples[0]
-    assert not (recorder.dataset_full_path / "meta" / "subtasks.parquet").exists()
+    assert [sample["subtask_index"].item() for sample in samples] == [0, 1]
+    assert (recorder.dataset_full_path / "meta" / "subtasks.parquet").exists()
 
 
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
@@ -2110,7 +2168,6 @@ def test_legacy_episode_metadata_omits_action_contract() -> None:
     recorder = LeRobotRecorder.__new__(LeRobotRecorder)
     recorder._env = MockEnvForDataset(has_sensors=False)
     recorder._action_contract_cfg = None
-    recorder.use_official_task_index = False
     recorder.instruction = None
     recorder.extra = {}
     recorder.total_time = 0.0
@@ -2141,7 +2198,6 @@ def test_policy_episode_sidecar_contains_action_terms() -> None:
     }
     recorder._policy_action_descriptors = policy_descriptors()
     recorder.record_eef_observation = False
-    recorder.use_official_task_index = True
     recorder.instruction = None
     recorder.extra = {}
     recorder.total_time = 0.0
@@ -2300,3 +2356,50 @@ class TestDatasetFunctorCfg:
         # Should be able to instantiate
         cfg = DatasetFunctorCfg()
         assert cfg is not None
+
+
+@pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
+def test_unknown_dynamic_snapshot_is_not_replaced_by_static_recorder_language(
+    tmp_path,
+) -> None:
+    env = MockEnvForDataset(num_joints=2, has_sensors=False)
+    env.cfg = SimpleNamespace(
+        task_program=SimpleNamespace(instruction="Static program goal")
+    )
+    recorder = LeRobotRecorder(
+        MockFunctorCfg(
+            params={
+                "save_path": str(tmp_path),
+                "instruction": {"lang": "Static recorder goal"},
+            }
+        ),
+        env,
+    )
+    obs = TensorDict(
+        {
+            "robot": {
+                "qpos": torch.zeros(2),
+                "qvel": torch.zeros(2),
+                "qf": torch.zeros(2),
+            }
+        },
+        batch_size=[],
+    )
+    assert recorder._save_single_episode(
+        0,
+        [obs],
+        [torch.zeros(2)],
+        episode_metadata={
+            "instruction": "unknown_task",
+            "instruction_source": "unknown",
+        },
+    )
+    recorder.finalize()
+    dataset = LeRobotDataset(
+        repo_id=recorder.dataset_full_path.name, root=recorder.dataset_full_path
+    )
+    assert dataset[0]["task"] == dataset[0]["subtask"] == "unknown_task"
+    record = json.loads(
+        (recorder.dataset_full_path / "meta/embodichain_episodes.jsonl").read_text()
+    )
+    assert record["instruction_source"] == "unknown"

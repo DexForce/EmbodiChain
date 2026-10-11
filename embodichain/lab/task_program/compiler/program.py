@@ -393,6 +393,7 @@ class CompiledTaskProgramSegment:
     validators: tuple[CompiledTaskProgramValidator, ...] = ()
     parallel_block: CompiledParallelBlock | None = None
     implicit: bool = False
+    instruction: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.segment_index) is not int or self.segment_index < 0:
@@ -401,6 +402,14 @@ class CompiledTaskProgramSegment:
             value = getattr(self, field_name)
             if type(value) is not str or not value:
                 raise ValueError(f"{field_name} must be a non-empty string.")
+        if self.instruction is not None and (
+            type(self.instruction) is not str
+            or not self.instruction
+            or self.instruction.strip() != self.instruction
+        ):
+            raise ValueError(
+                "instruction must be a non-empty string without outer whitespace or None."
+            )
         calls = tuple(self.calls)
         if not calls or not all(
             type(call) is CompiledTaskProgramCall for call in calls
@@ -571,6 +580,7 @@ _ValidatorTemplate: TypeAlias = (
 @dataclass(frozen=True, slots=True)
 class _SegmentTemplate:
     name: str
+    instruction: str | None
     steps: _NodeTemplate
     post: tuple[_PostTemplate, ...]
     validators: tuple[_ValidatorTemplate, ...]
@@ -946,6 +956,7 @@ def _iter_segments(
             implicit=False,
         ),
         name=template.name,
+        instruction=template.instruction,
         calls=tuple(calls),
         source_path=template.source_path,
         repeat_frames=repeat_frames,
@@ -960,9 +971,10 @@ def _iter_segments(
 
 @dataclass(frozen=True, slots=True, init=False)
 class CompiledTaskProgram:
-    """Bounded provider-free segment snapshot used by preflight and execution."""
+    """Immutable overall instruction and bounded segments for task execution."""
 
     program_id: str
+    instruction: str | None
     _integration: TaskProgramIntegrationCfg = field(repr=False, compare=False)
     _segments: tuple[CompiledTaskProgramSegment, ...] = field(
         repr=False,
@@ -981,12 +993,21 @@ class CompiledTaskProgram:
         cls,
         *,
         program_id: str,
+        instruction: str | None,
         integration: TaskProgramIntegrationCfg,
         segments: tuple[CompiledTaskProgramSegment, ...],
     ) -> CompiledTaskProgram:
         """Create one compiler-owned materialized program."""
         if type(program_id) is not str or not program_id:
             raise ValueError("program_id must be a non-empty string.")
+        if instruction is not None and (
+            type(instruction) is not str
+            or not instruction
+            or instruction.strip() != instruction
+        ):
+            raise ValueError(
+                "instruction must be a non-empty string without outer whitespace or None."
+            )
         if type(integration) is not TaskProgramIntegrationCfg:
             raise TypeError("integration must be TaskProgramIntegrationCfg.")
         values = tuple(segments)
@@ -1012,6 +1033,7 @@ class CompiledTaskProgram:
 
         instance = object.__new__(cls)
         object.__setattr__(instance, "program_id", program_id)
+        object.__setattr__(instance, "instruction", instruction)
         object.__setattr__(
             instance,
             "_integration",
@@ -1146,6 +1168,7 @@ class CompiledTaskProgram:
 def _materialize_program(
     *,
     program_id: str,
+    instruction: str | None,
     integration: TaskProgramIntegrationCfg,
     targets: Mapping[str, tuple[SemanticPose, ...]],
     root: _NodeTemplate,
@@ -1171,6 +1194,7 @@ def _materialize_program(
         segments.append(segment)
     return CompiledTaskProgram._create(
         program_id=program_id,
+        instruction=instruction,
         integration=integration,
         segments=tuple(segments),
     )
@@ -1578,6 +1602,7 @@ class TaskProgramCompiler:
                 )
             return _SegmentTemplate(
                 name=node.name,
+                instruction=node.instruction,
                 steps=steps,
                 post=tuple(post),
                 validators=tuple(validators),
@@ -1700,6 +1725,16 @@ class TaskProgramCompiler:
         """
         if type(config) is not TaskProgramCfg:
             raise TypeError("config must be exactly TaskProgramCfg.")
+        if config.instruction is not None and (
+            type(config.instruction) is not str
+            or not config.instruction
+            or config.instruction.strip() != config.instruction
+        ):
+            raise TaskProgramCompileError(
+                "invalid_instruction",
+                ("instruction",),
+                "instruction must be a non-empty string without outer whitespace or None.",
+            )
         targets = self._compile_targets(config.targets)
         root = self._compile_node(
             config.program,
@@ -1715,6 +1750,7 @@ class TaskProgramCompiler:
         )
         return _materialize_program(
             program_id=config.program_id,
+            instruction=config.instruction,
             integration=integration,
             targets=targets,
             root=root,

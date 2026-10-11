@@ -32,6 +32,11 @@ qvel targets, requires velocity-bearing joint payloads, and assigns zero qvel to
 idle, wait, inactive-row, and abort-safe holds. This changes neither Task Program
 language nor the policy action space.
 
+On active rows, normal joint-position frames retain unaddressed qpos targets
+by stable environment ID. Inactive rows use measured holds and invalidate
+retained targets; explicit safe stops rebase them to measured qpos. A new
+episode creates a fresh encoder.
+
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner
 holds, feedback settling, post-policies, or parallel execution. It links only

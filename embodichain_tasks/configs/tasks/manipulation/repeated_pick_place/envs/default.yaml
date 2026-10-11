@@ -51,8 +51,6 @@ env:
       params:
         # Structured dataset output; robot_type comes from the selected embodiment.
         save_path: /tmp/repeated-pick-place/datasets
-        instruction:
-          lang: Move the cube through the repeated pick and place program.
         extra:
           scene_type: tabletop
           task_description: repeated_pick_place_combined

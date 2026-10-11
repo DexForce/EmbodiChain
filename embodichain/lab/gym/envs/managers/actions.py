@@ -429,7 +429,25 @@ class DefaultJointPositionAction(_JointAction):
         )
 
     def reset(self, env_ids: list[int] | torch.Tensor | None = None) -> None:
-        super().reset(env_ids)
+        """Clear selected action history and commands without changing bias.
+
+        Args:
+            env_ids: Rows to reset. None selects all rows.
+        """
+        buffers = (
+            self._raw_actions,
+            self._previous_raw_actions,
+            self._processed_actions,
+        )
+        if env_ids is None:
+            for buffer in buffers:
+                buffer.zero_()
+        else:
+            ids = torch.as_tensor(env_ids, dtype=torch.long).to(
+                device=self.device, non_blocking=True
+            )
+            for buffer in buffers:
+                buffer.index_fill_(0, ids, 0)
 
 
 class EefPoseAction(ActionTerm):

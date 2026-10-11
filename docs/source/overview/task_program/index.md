@@ -74,9 +74,10 @@ program payload, owns the corresponding lowerer. See {doc}`scene_registry` and
 ## Program schema
 
 An in-memory {class}`TaskProgramCfg` contains one `program_id`, an exact trusted
-{class}`TaskProgramIntegrationCfg` selection, optional named targets, and one
-bounded program tree. A program authored for a componentized deployment omits
-the integration selection from its serialized YAML. The deployment injects
+{class}`TaskProgramIntegrationCfg` selection, an optional overall `instruction`,
+optional named targets, and one bounded program tree. A program authored for a
+componentized deployment omits the integration selection from its serialized
+YAML. The deployment injects
 the selected scene-registry, robot-profile, and policy-preset IDs before strict
 decoding, which keeps the source program portable across compatible
 embodiments.
@@ -91,6 +92,7 @@ Example:
 
 ```yaml
 program_id: repeated_cube_pick_place
+instruction: Move the cube between the two target positions three times.
 targets:
   drop_pose:
     kind: cyclic_pose
@@ -103,21 +105,33 @@ program:
   kind: repeat
   count: 3
   body:
-    kind: segment
-    name: move_cube
-    steps:
-      kind: sequence
-      items:
-        - kind: invoke
+    kind: sequence
+    items:
+      - kind: segment
+        name: pick_cube
+        instruction: Grasp and lift the cube.
+        steps:
+          kind: invoke
           call:
             kind: pick
             object: cube
-        - kind: invoke
+      - kind: segment
+        name: place_cube
+        instruction: Place the cube at the next target position and release it.
+        steps:
+          kind: invoke
           call:
             kind: place
             object: cube
             at: {kind: target_ref, target: drop_pose}
 ```
+
+The root instruction describes the complete episode; each segment instruction
+describes its own subgoal. This example expands into six segment occurrences
+with two reusable subtask descriptions. The compiler preserves both language
+levels, while post-policies and validators independently determine acceptance.
+See {doc}`/guides/expert_task_language` for overrides, fallback, handwritten
+experts, recording, and training examples.
 
 Serialized input is strict: unknown fields, duplicate keys, non-finite values,
 invalid discriminators, excessive depth or expansion, executable values, and

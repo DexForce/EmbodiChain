@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from embodichain.lab.task_program.language.schema import TaskProgramIntegrationCfg
+from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
 
 from .configured import (
@@ -79,11 +80,9 @@ def _component_path(
     path: str,
     suffixes: frozenset[str],
 ) -> Path:
-    """Resolve one exact component path relative to the Gym config."""
+    """Resolve one packaged or owner-relative Task Program component path."""
     selected = _identifier(value, path=path)
-    component_path = Path(selected).expanduser()
-    if not component_path.is_absolute():
-        component_path = base_dir / component_path
+    component_path = resolve_config_path(selected, base_dir=base_dir).resolve()
     if component_path.suffix.lower() not in suffixes:
         rendered = sorted(suffixes)
         raise ValueError(f"{path} must use one of {rendered}: {component_path}.")

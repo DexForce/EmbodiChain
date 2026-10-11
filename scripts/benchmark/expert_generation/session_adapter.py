@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Adapter from #670 GenerationSession lifecycle to the G-03 runner.
+"""Adapter from the production ExpansionSession lifecycle to the G-03 runner.
 
 The host supplies proposal, physical rollout and persistence operations. This
 module owns only the translation of measured episode/receipt outcomes into the
@@ -31,7 +31,7 @@ from embodichain.lab.sim.motion.expansion.contracts import (
     ExpertEpisode,
     ValidationResult,
 )
-from embodichain.lab.sim.motion.expansion.session import GenerationSession
+from embodichain.lab.sim.motion.expansion.session import ExpansionSession
 
 from .contracts import GenerationAttempt, GenerationCase, PersistenceReceipt
 
@@ -72,7 +72,7 @@ def _task_status(result: ValidationResult) -> str:
 class GenerationSessionExecutor:
     """Translate a production host's session lifecycle into one benchmark attempt."""
 
-    def __init__(self, session: GenerationSession, host: GenerationSessionHost) -> None:
+    def __init__(self, session: ExpansionSession, host: GenerationSessionHost) -> None:
         self.session = session
         self.host = host
 

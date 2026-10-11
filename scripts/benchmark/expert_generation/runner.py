@@ -17,7 +17,7 @@
 """Budgeted source-neutral G-03 attempt runner.
 
 The executor callback is the integration boundary for #670. It may call the
-production CandidateCoordinator/GenerationSession/PhysicalExecutor stack, but
+production CandidateCoordinator/ExpansionSession/PhysicalExecutor stack, but
 the benchmark runner owns no simulator, candidate or persistence state machine.
 """
 

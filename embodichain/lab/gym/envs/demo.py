@@ -40,6 +40,7 @@ __all__ = [
     "DemoSegmentResult",
     "execute_demo_episode",
     "resolve_demo_segments",
+    "resolve_demo_instruction",
 ]
 
 DEMO_SCHEMA_VERSION = 3
@@ -181,6 +182,8 @@ class DemoSegment:
         name: Stable human-readable segment name.
         target_uid: Optional scene entity manipulated by this segment.
         instruction: Optional language instruction specific to this segment.
+        instruction_source: Annotation origin; the executor distinguishes an
+            explicit segment label from a fallback to the overall task.
         metadata: Additional JSON-compatible task metadata.
         validator: Optional zero-argument callback that validates this segment
             after its actions are exhausted. It must return one boolean per
@@ -216,6 +219,7 @@ class DemoSegment:
     )
     failure_policy: Literal["batch_abort", "row_independent"] = "batch_abort"
     progress_total_steps: int | None = None
+    instruction_source: str | None = None
 
     def __post_init__(self) -> None:
         if self.abort_actions is not None and not callable(self.abort_actions):
@@ -245,6 +249,7 @@ class DemoSegmentResult:
         success: Whether every participating row completed the segment.
         target_uid: Optional manipulated scene entity.
         instruction: Optional language instruction.
+        instruction_source: Explicit segment label or overall-task fallback.
         failure_reason: First aggregate failure reason, if any.
         metadata: Additional JSON-compatible task metadata.
         active: Participation mask captured at segment start.
@@ -276,6 +281,8 @@ class DemoSegmentResult:
     continuity_id: int = 0
     outcome_kind: DemoSegmentOutcomeKind | None = None
     outcome_kinds: tuple[DemoSegmentOutcomeKind, ...] = ()
+
+    instruction_source: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.metadata, Mapping):
@@ -354,6 +361,7 @@ class DemoSegmentResult:
             "name": self.name,
             "target_uid": self.target_uid,
             "instruction": self.instruction,
+            "instruction_source": self.instruction_source,
             "attempt_id": self.attempt_id,
             "continuity_id": self.continuity_id,
             "metadata": _json_safe_copy(
@@ -430,6 +438,8 @@ class DemoEpisodeResult:
         terminal_reasons: Independent terminal reasons.
         execution_mode: Persistence layout selected for this execution.
         attempt_id: Zero-based collection attempt identifier.
+        instruction: Overall task language frozen before execution.
+        instruction_source: Origin of the overall task language.
     """
 
     episode_index: int
@@ -445,6 +455,9 @@ class DemoEpisodeResult:
     terminal_reasons: tuple[str, ...] = ()
     execution_mode: DemoOutputMode = "continuous"
     attempt_id: int = 0
+
+    instruction: str | None = None
+    instruction_source: str | None = None
 
     @property
     def all_success(self) -> bool:
@@ -493,6 +506,8 @@ class DemoEpisodeResult:
     def to_metadata(self) -> dict[str, Any]:
         """Return a JSON-compatible representation."""
         metadata = {
+            "instruction": self.instruction,
+            "instruction_source": self.instruction_source,
             "schema_version": DEMO_SCHEMA_VERSION,
             "episode_index": self.episode_index,
             "execution_mode": self.execution_mode,
@@ -595,23 +610,123 @@ def _has_terminal_runtime_failure_trace(segment: DemoSegment) -> bool:
     )
 
 
-def _dataset_instruction(env: Any) -> str:
-    """Return the dataset-level instruction used for legacy demo segments."""
-    metadata = getattr(_env_target(env), "metadata", {})
-    dataset_metadata = (
-        metadata.get("dataset", {}) if isinstance(metadata, Mapping) else {}
+def _instruction_text(
+    value: Any, *, field_name: str, legacy: bool = False
+) -> str | None:
+    if legacy and isinstance(value, Mapping):
+        value = value.get("lang")
+    if value is None:
+        return None
+    if type(value) is not str or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty instruction string.")
+    return value.strip()
+
+
+def _config_value(config: Any, key: str) -> Any:
+    return (
+        config.get(key) if isinstance(config, Mapping) else getattr(config, key, None)
     )
-    instruction_cfg = (
-        dataset_metadata.get("instruction")
-        if isinstance(dataset_metadata, Mapping)
-        else None
+
+
+def resolve_demo_instruction(
+    env: Any,
+    *,
+    instruction: str | None = None,
+    task_program: Any | None = None,
+    legacy_instruction: Any | None = None,
+) -> tuple[str, str]:
+    """Resolve task-owned language independently of recorder construction.
+
+    Args:
+        env: Environment or wrapper exposing task configuration.
+        instruction: Explicit instruction for this episode.
+        task_program: Actually selected program. Omission uses the static one.
+        legacy_instruction: Recorder fallback for legacy/external callers.
+
+    Returns:
+        Overall instruction and its source: ``episode``, ``task_program``,
+        ``task``, ``legacy_recorder``, or ``unknown``. A selected dynamic program
+        never borrows the static program's instruction.
+
+    Raises:
+        ValueError: If a provided instruction is invalid or legacy recorders
+            disagree without an authoritative task instruction.
+    """
+    text = _instruction_text(instruction, field_name="episode instruction")
+    if text is not None:
+        return text, "episode"
+    target = _env_target(env)
+    config = getattr(target, "cfg", None)
+    selected = (
+        task_program
+        if task_program is not None
+        else _config_value(config, "task_program")
     )
-    instruction = (
-        instruction_cfg.get("lang")
-        if isinstance(instruction_cfg, Mapping)
-        else instruction_cfg
+    text = _instruction_text(
+        _config_value(selected, "instruction"), field_name="Task Program instruction"
     )
-    return str(instruction) if instruction else "unknown_task"
+    if text is not None:
+        return text, "task_program"
+    text = _instruction_text(
+        _config_value(config, "task_instruction"), field_name="task_instruction"
+    )
+    if text is not None:
+        return text, "task"
+
+    # Read legacy config even when online generation disables DatasetManager.
+    descriptions: set[str] = set()
+    dataset = _config_value(config, "dataset")
+    if dataset is not None:
+        fields = (
+            dataset.values()
+            if isinstance(dataset, Mapping)
+            else vars(dataset).values() if hasattr(dataset, "__dict__") else ()
+        )
+        for functor in fields:
+            params = _config_value(functor, "params")
+            if isinstance(params, Mapping):
+                text = _instruction_text(
+                    params.get("instruction"),
+                    field_name="legacy recorder instruction",
+                    legacy=True,
+                )
+                if text is not None:
+                    descriptions.add(text)
+    text = _instruction_text(
+        legacy_instruction, field_name="legacy recorder instruction", legacy=True
+    )
+    if text is not None:
+        descriptions.add(text)
+    if not descriptions:
+        metadata = getattr(target, "metadata", {})
+        dataset_metadata = (
+            metadata.get("dataset", {}) if isinstance(metadata, Mapping) else {}
+        )
+        text = _instruction_text(
+            (
+                dataset_metadata.get("instruction")
+                if isinstance(dataset_metadata, Mapping)
+                else None
+            ),
+            field_name="legacy dataset instruction",
+            legacy=True,
+        )
+        if text is not None:
+            descriptions.add(text)
+    if len(descriptions) > 1:
+        raise ValueError(
+            "Legacy recorders disagree on task language; configure task_instruction or the program instruction."
+        )
+    return (
+        (next(iter(descriptions)), "legacy_recorder")
+        if descriptions
+        else ("unknown_task", "unknown")
+    )
+
+
+def _episode_instruction(env: Any, **kwargs: Any) -> tuple[str, str]:
+    snapshot = getattr(_env_target(env), "_demo_instruction_snapshot", None)
+    return snapshot if snapshot is not None else resolve_demo_instruction(env, **kwargs)
 
 
 def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
@@ -654,7 +769,9 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
     if isinstance(segments, DemoSegment):
         segments = (segments,)
 
-    fallback_instruction = _dataset_instruction(env)
+    fallback_instruction, _ = _episode_instruction(
+        env, task_program=kwargs.get("task_program")
+    )
 
     def _validate() -> Iterable[DemoSegment]:
         for segment in segments:
@@ -663,8 +780,17 @@ def resolve_demo_segments(env: Any, **kwargs: Any) -> Iterable[DemoSegment]:
                     "create_demo_segments() must yield DemoSegment objects, "
                     f"got {type(segment).__name__}."
                 )
-            if segment.instruction is None:
-                segment = replace(segment, instruction=fallback_instruction)
+            if (
+                segment.instruction is None
+                or segment.instruction_source == "task_fallback"
+            ):
+                segment = replace(
+                    segment,
+                    instruction=fallback_instruction,
+                    instruction_source="task_fallback",
+                )
+            elif segment.instruction_source is None:
+                segment = replace(segment, instruction_source="segment")
             yield segment
 
     return _validate()
@@ -676,6 +802,7 @@ def execute_demo_episode(
     episode_index: int = 0,
     execution_cfg: DemoExecutionCfg | None = None,
     attempt_id: int = 0,
+    instruction: str | None = None,
     should_stop: StopPredicate | None = None,
     progress: ProgressWrapper | None = None,
     **plan_kwargs: Any,
@@ -693,6 +820,7 @@ def execute_demo_episode(
         execution_cfg: Collector-owned output settings. Defaults to continuous
             episode persistence.
         attempt_id: Zero-based identifier for this collection attempt.
+        instruction: Optional overall language override bound to this episode.
         should_stop: Optional callback checked before every action.
         progress: Optional wrapper such as ``tqdm`` for action iterables.
         **plan_kwargs: Arguments forwarded to the task's planning method.
@@ -709,6 +837,9 @@ def execute_demo_episode(
         raise ValueError("attempt_id must be non-negative.")
 
     target = _env_target(env)
+    task_instruction, instruction_source = resolve_demo_instruction(
+        env, instruction=instruction, task_program=plan_kwargs.get("task_program")
+    )
     num_envs = int(getattr(target, "num_envs", 1))
     begin_episode = _get_env_callable(env, "_begin_demo_episode_recording")
     begin_segment = _get_env_callable(env, "_begin_demo_segment_recording")
@@ -734,14 +865,10 @@ def execute_demo_episode(
             torch.tensor(active, dtype=torch.bool, device=device),
         )
 
-    if begin_episode is not None:
-        begin_episode(
-            episode_index=episode_index,
-            execution_cfg=execution_cfg,
-            attempt_id=attempt_id,
-        )
-    publish_active_mask()
-
+    previous_instruction_snapshot = getattr(target, "_demo_instruction_snapshot", None)
+    setattr(
+        target, "_demo_instruction_snapshot", (task_instruction, instruction_source)
+    )
     previous_no_auto_reset = bool(getattr(target, "_demo_no_auto_reset", False))
     setattr(target, "_demo_no_auto_reset", True)
 
@@ -756,6 +883,13 @@ def execute_demo_episode(
     fatal_reason: str | None = None
 
     try:
+        if begin_episode is not None:
+            begin_episode(
+                episode_index=episode_index,
+                execution_cfg=execution_cfg,
+                attempt_id=attempt_id,
+            )
+        publish_active_mask()
         segment_count = 0
         segments = iter(resolve_demo_segments(env, **plan_kwargs))
         while any(active):
@@ -1090,6 +1224,7 @@ def execute_demo_episode(
                 success=segment_ok,
                 target_uid=segment.target_uid,
                 instruction=segment.instruction,
+                instruction_source=segment.instruction_source,
                 failure_reason=aggregate_failure,
                 metadata=segment.metadata,
                 active=participants,
@@ -1160,9 +1295,12 @@ def execute_demo_episode(
             terminal_reasons=tuple(terminal_reasons),
             execution_mode=execution_cfg.mode,
             attempt_id=attempt_id,
+            instruction=task_instruction,
+            instruction_source=instruction_source,
         )
         if end_episode is not None:
             end_episode(result=result)
         return result
     finally:
+        setattr(target, "_demo_instruction_snapshot", previous_instruction_snapshot)
         setattr(target, "_demo_no_auto_reset", previous_no_auto_reset)
