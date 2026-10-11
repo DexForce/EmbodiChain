@@ -4,6 +4,10 @@ Workspace analysis caches kinematic reachability; runtime sampling reuses cached
 joint configurations with the current robot base. This does not establish
 collision-free motion, grasp validity or task success.
 
+[Scene expansion](../scene-expansion/scene-expansion.md) owns scene proposals
+and the Task Program attempt boundary. Workspace results alone do not supply
+physical preparation or acceptance of those proposals.
+
 ## Entry points
 
 Paths below are relative to `embodichain/lab/sim/` unless qualified.

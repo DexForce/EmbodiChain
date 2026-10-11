@@ -69,6 +69,7 @@ def test_map_registers_the_supported_context_domains() -> None:
         "data-assets",
         "data-pipeline",
         "robot-workspace",
+        "scene-expansion",
         "differentiable-env",
     }
 
