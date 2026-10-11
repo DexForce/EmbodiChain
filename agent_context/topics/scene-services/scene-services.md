@@ -119,11 +119,9 @@ existing support/group optimizers adapt the shared geometry algorithms; the
 tabletop and parent-surface optimizers adapt shared `solve_layout`. Its layout
 constructor retains hierarchy traversal and pose propagation.
 
-[Task Program expansion](../scene-expansion/scene-expansion.md) accepts host-owned
-physical preparation callbacks. The concrete Gym host and workspace adaptation
-are provided separately by [PR #750](https://github.com/DexForce/EmbodiChain/pull/750);
-that layer retains reset order, observation refresh, bridge recreation and
-initial-state provenance while using these physical services. General
+[Task Program expansion](../scene-expansion/scene-expansion.md) delegates
+physical state and changes here while keeping Gym reset order, observations,
+bridge recreation, initial-state identity and persistence eligibility. General
 [simulation lifecycle](../simulation-system/simulation-system.md) remains owned
 by Spawn and SimulationManager.
 
@@ -143,7 +141,6 @@ end-to-end layout or simulator throughput.
 
 Use `tests/compute/geometry/` and `tests/sim/scene/` for
 geometry, constraints, recipes and runtime contracts. GenSim adapter regressions
-live in `tests/gen_sim/scene_engine/`; generic Task Program expansion regressions
-live in `tests/gym/envs/task_program/test_scene_expansion.py`. Concrete Gym-host
-qualification belongs to the separate PR #750 integration. Native settling and
-restoration need an explicit supported simulator run beyond CPU port tests.
+live in `tests/gen_sim/scene_engine/`; Task Program host regressions live in
+`tests/gym/envs/task_program/test_simulation_scene_expansion.py`. Native settling
+and restoration need an explicit supported simulator run beyond CPU port tests.

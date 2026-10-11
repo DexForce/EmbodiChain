@@ -15,6 +15,9 @@ provided by `sim.scene.expansion`.
 | Candidate limits and movable entity permissions | `cfg.py` in that package |
 | Arena poses and proposal identity | `contracts.py` in that package |
 | One Task Program attempt and result metadata | `embodichain/lab/task_program/integrations/scene_expansion.py` |
+| Physical preparation and owned state restore | `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` |
+| Object affordance/workspace sampling and pose IK | `embodichain/lab/task_program/integrations/simulation/workspace.py` |
+| Preparation hook before final observations | `embodichain/lab/gym/envs/base_env.py` |
 | Reset-time persistence eligibility | `embodichain/lab/gym/envs/embodied_env.py` |
 | Action consumption and recording lifecycle | `embodichain/lab/gym/envs/demo.py` |
 
@@ -35,15 +38,37 @@ entities, not a replacement SceneGraph or runtime registry. Current execution
 is B=1 and requires a Task Program; explicit canonical bridge creation prevents
 legacy segment overrides from changing the selected source.
 
-The preparation callback is responsible for restore/application, physical
-settling, actual initial-state checks, saved-state identity, binding refresh and
-recording observation refresh. Generic execution does not provide those
-physical operations. Callbacks can use the shared scene state, operations and
-validation services. The concrete Gym reset host and robot-workspace adapter
-are supplied separately by [PR #750](https://github.com/DexForce/EmbodiChain/pull/750).
-The measured callback supplies task-specific state and
-event evidence. Gym remains the owner of reset, stepping and recording; no new
-generation session or persistence writer is introduced.
+`SimulationSceneExpansionHost` implements the preparation callback for a fixed
+B=1 scene: preflight topology and capture, apply existing-rigid-object changes,
+settle, reset sensor/observation history, capture the actual state and run explicit
+initial checks. Its trusted reset hook runs after ordinary reset events and
+before physical objectives, final observations and recording seeding. A new
+Task Program bridge creates fresh providers and motion generators, preventing
+reuse of the old episode's same-clock scene cache or collision bindings.
+
+The measured callback supplies task-specific state and event evidence. Gym
+remains the owner of reset, stepping and recording; no new generation session or
+persistence writer is introduced.
+
+## Physical restore and workspace boundary
+
+`SimulationSceneInitialState` retains host provenance and the Gym control
+period around the shared scene physical-state representation. Numeric capture,
+restore, rigid-pose application and state comparison delegate to
+[scene services](../scene-services/scene-services.md). Restoration requires the owning host, unchanged bindings,
+topology, assets/physical parameters, backend and control period. It restores
+without settling again, reruns initial validation and records a mandatory
+numeric round-trip check with quaternion-sign equivalence. Actual hashes can
+differ within tolerance. Solver history/external forces are cleared; this is
+episode restoration, not a complete backend checkpoint. Rigid groups,
+deformables and explicit rigid constraints are rejected.
+
+`RobotSceneWorkspace` selects one control part explicitly, consumes valid-only
+current-arena TCP samples, and derives object poses by inverting the object-local
+grasp transform. Optional bounds apply to object origins. Sampling supplies
+joint seeds and scores; actual pose IK also checks targets absent from the
+cache. Recheck settled or modified poses. Support, collision planning between
+phases and measured success remain separate gates.
 
 The attempt guard spans preparation, execution and measurement. It suppresses
 automatic reset and blocks persistence during explicit callback resets, even
@@ -91,9 +116,12 @@ boundary when adding physical preparation, preserving Gym lifecycle ownership.
 ```bash
 pytest -q tests/sim/scene/expansion
 pytest -q tests/gym/envs/task_program/test_scene_expansion.py
+pytest -q tests/gym/envs/task_program/test_scene_workspace.py tests/gym/envs/task_program/test_simulation_scene_expansion.py
+pytest -q tests/gym/envs/task_program/test_simulation_environment.py
 python docs/scripts/check_api_docs.py
 ```
 
 The focused tests exercise immutable geometry and identities, bounded source
-consumption, real demo dispatch and reset-time recording gates using CPU ports.
+consumption, real demo dispatch, reset ordering, full state restoration, workspace
+frames/masks/IK, fresh bridge observations and recording gates using CPU ports.
 They do not establish physical success across robot models or scene layouts.
