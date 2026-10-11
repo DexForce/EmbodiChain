@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+import torch
+
 from embodichain.lab.gym.envs._json import json_safe_copy
 from embodichain.lab.gym.envs.demo import (
     DemoEpisodeResult,
@@ -113,12 +115,18 @@ class SceneVariantEpisodeResult:
             scene. Program completion alone does not imply acceptance.
         measured_validation: Required measured task checks after execution,
             absent when initial-state validation prevented execution.
+        program_completed: Whether the selected canonical bridge completed all
+            segment lifecycles normally. Generic Gym success is insufficient.
+        program_completion_mask: Owned single-row bridge acceptance snapshot,
+            available only after normal program completion.
     """
 
     variant: SceneVariant
     preparation: ScenePreparationResult
     execution: DemoEpisodeResult | None
     measured_validation: ValidationResult | None
+    program_completed: bool = False
+    program_completion_mask: tuple[bool, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.variant, SceneVariant):
@@ -133,6 +141,32 @@ class SceneVariantEpisodeResult:
             self.measured_validation, ValidationResult
         ):
             raise TypeError("measured_validation must be a ValidationResult or None")
+        if type(self.program_completed) is not bool:
+            raise TypeError("program_completed must be a bool")
+        try:
+            completion_mask = tuple(self.program_completion_mask)
+        except TypeError as exc:
+            raise TypeError("program_completion_mask must contain bool values") from exc
+        if any(type(value) is not bool for value in completion_mask):
+            raise TypeError("program_completion_mask must contain bool values")
+        if self.program_completed and len(completion_mask) != 1:
+            raise ValueError("program_completion_mask must contain one environment row")
+        object.__setattr__(self, "program_completion_mask", completion_mask)
+
+    @property
+    def program_success(self) -> bool:
+        """Return whether the canonical program and demo execution succeeded.
+
+        Returns:
+            Success only with normal bridge completion and its acceptance mask.
+        """
+        return (
+            self.program_completed
+            and self.program_completion_mask == (True,)
+            and self.execution is not None
+            and self.execution.completed
+            and self.execution.all_success
+        )
 
     @property
     def accepted(self) -> bool:
@@ -144,9 +178,7 @@ class SceneVariantEpisodeResult:
         """
         return (
             self.preparation.validation.accepted
-            and self.execution is not None
-            and self.execution.completed
-            and self.execution.all_success
+            and self.program_success
             and self.measured_validation is not None
             and self.measured_validation.accepted
         )
@@ -165,11 +197,9 @@ class SceneVariantEpisodeResult:
                 self.preparation.metadata, field_name="preparation.metadata"
             ),
             "initial_validation": _validation_metadata(self.preparation.validation),
-            "program_success": (
-                self.execution is not None
-                and self.execution.completed
-                and self.execution.all_success
-            ),
+            "program_completed": self.program_completed,
+            "program_completion_mask": list(self.program_completion_mask),
+            "program_success": self.program_success,
             "measured_validation": _validation_metadata(self.measured_validation),
             "accepted": self.accepted,
         }
@@ -216,6 +246,9 @@ def execute_scene_variant(
     the existing transaction boundary: reset to commit an accepted episode or
     reset with ``save_data=False`` to discard it. Failed or unverified scene
     acceptance also blocks a later ordinary reset from saving this recording.
+    Automatic resets and persistence remain suspended throughout preparation,
+    execution, and measurement. A rejected recording stays ineligible until
+    the host resets its buffers, including before a later accepted attempt.
 
     Args:
         env: Initialized single-row EmbodiedEnv or a wrapper around one.
@@ -239,6 +272,7 @@ def execute_scene_variant(
     Raises:
         TypeError: For invalid contracts, callbacks, or program types.
         ValueError: For unsupported batching or invalid attempt identifiers.
+        RuntimeError: If another scene expansion attempt is already active.
         Exception: Host, planning, execution, and measurement errors propagate
             after the episode is marked ineligible for persistence.
     """
@@ -265,6 +299,12 @@ def execute_scene_variant(
             raise ValueError(f"{name} must be a nonnegative integer")
     if execution_cfg is not None and not isinstance(execution_cfg, DemoExecutionCfg):
         raise TypeError("execution_cfg must be a DemoExecutionCfg or None")
+    previous_attempt_active = bool(
+        getattr(target, "_scene_expansion_attempt_active", False)
+    )
+    if previous_attempt_active:
+        raise RuntimeError("a scene expansion attempt is already active")
+    previous_no_auto_reset = bool(getattr(target, "_demo_no_auto_reset", False))
 
     pending: dict[str, object] = {
         "schema_version": 1,
@@ -278,13 +318,16 @@ def execute_scene_variant(
             metadata, field_name="scene_expansion"
         )
 
-    publish(pending)
+    target._scene_expansion_attempt_active = True
+    target._demo_no_auto_reset = True
     try:
+        publish(pending)
         preparation = prepare_scene(variant)
         if not isinstance(preparation, ScenePreparationResult):
             raise TypeError("prepare_scene must return a ScenePreparationResult")
         if not preparation.validation.accepted:
             result = SceneVariantEpisodeResult(variant, preparation, None, None)
+            target._scene_expansion_recording_rejected = True
             publish(result.to_metadata())
             return result
 
@@ -294,6 +337,9 @@ def execute_scene_variant(
         segments = EmbodiedEnv.create_demo_segments(
             target, task_program=selected_program
         )
+        bridge = target._active_task_program_bridge
+        if bridge is None:
+            raise RuntimeError("canonical Task Program bridge was not created")
         execution = execute_demo_episode(
             env,
             episode_index=episode_index,
@@ -301,14 +347,40 @@ def execute_scene_variant(
             execution_cfg=execution_cfg,
             segments=() if segments is None else segments,
         )
+        program_completed = bridge.program_completed
+        if type(program_completed) is not bool:
+            raise TypeError("Task Program bridge program_completed must be a bool")
+        program_completion_mask: tuple[bool, ...] = ()
+        if program_completed:
+            completion_mask = bridge.completion_mask
+            if not isinstance(completion_mask, torch.Tensor):
+                raise TypeError("Task Program completion mask must be a tensor")
+            if completion_mask.dtype != torch.bool or completion_mask.shape != (1,):
+                raise ValueError(
+                    "Task Program completion mask must be bool with one environment row"
+                )
+            program_completion_mask = tuple(completion_mask.detach().cpu().tolist())
         measured = measured_validator()
         if not isinstance(measured, ValidationResult):
             raise TypeError("measured_validator must return a ValidationResult")
-        result = SceneVariantEpisodeResult(variant, preparation, execution, measured)
+        result = SceneVariantEpisodeResult(
+            variant,
+            preparation,
+            execution,
+            measured,
+            program_completed=program_completed,
+            program_completion_mask=program_completion_mask,
+        )
+        if not result.accepted:
+            target._scene_expansion_recording_rejected = True
         publish(result.to_metadata())
         return result
     except BaseException as error:
+        target._scene_expansion_recording_rejected = True
         pending["status"] = "error"
         pending["error_type"] = type(error).__name__
         publish(pending)
         raise
+    finally:
+        target._demo_no_auto_reset = previous_no_auto_reset
+        target._scene_expansion_attempt_active = previous_attempt_active

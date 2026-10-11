@@ -32,23 +32,40 @@ For valid initial states, ``execute_scene_variant`` creates a fresh bridge using
 the canonical ``EmbodiedEnv.create_demo_segments(task_program=...)`` path and
 passes the resulting segments through ``execute_demo_episode``. Handwritten
 segment-planner overrides do not replace the selected Task Program. The normal
-Gym executor owns ``env.step()`` and suspends automatic reset during execution.
+Gym executor owns ``env.step()``. Automatic resets are suspended throughout
+preparation, execution, and measurement. Explicit resets during either callback
+discard recording buffers while the attempt remains in progress; the attempt's
+persistence guard survives replacement of episode metadata by those resets.
 
 Measured acceptance and persistence
 -----------------------------------
 
 ``SceneVariantEpisodeResult`` preserves initial checks, program execution, and
-measured task checks independently. Acceptance requires all three to pass.
-Empty checks, unavailable evidence, a failed program, or failed measured goals
-cannot accept the scene. A completed program with projected effects still
-needs physical evidence from the measured validator.
+measured task checks independently. ``program_completed`` records normal
+completion of the selected canonical bridge, and ``program_completion_mask``
+owns its single-row acceptance snapshot. The execution entry point leaves the
+mask empty when the bridge did not complete. ``program_success`` requires that
+bridge evidence and a successful demo execution. Generic Gym success from a
+legacy task override or early termination does not establish program completion.
+Acceptance requires valid initial checks, ``program_success``, and passing
+measured task checks. Empty checks, unavailable evidence, a failed program, or
+failed measured goals cannot accept the scene. A completed program with
+projected effects still needs physical evidence from the measured validator.
 
 The attempt's proposal, actual initial-state identity, and validation evidence
 are published under ``scene_expansion`` in the existing episode metadata.
 Preparation provenance is owned and recursively immutable; ``to_metadata()``
-returns JSON-compatible values. Failed or interrupted attempts remain
-ineligible for reset-time dataset, camera, and trajectory persistence, including
-explicit commit-row requests and failed-episode recording.
+returns JSON-compatible values, including the canonical bridge completion
+evidence. While an attempt is active, reset cannot persist dataset, camera, or
+trajectory buffers, even after a preparation or measurement reset replaces the
+pending metadata. Failed or interrupted recordings remain ineligible for these
+writes, including explicit commit-row requests and failed-episode recording.
+
+Rejection belongs to the recording buffers until reset actually discards them.
+Replacing episode annotations or starting another demo does not clear it. A
+later successful attempt without that reset can return ``accepted=True`` but
+cannot make the earlier rejected recording eligible to save. Discard the
+recording before retrying, using ``env.reset(options={"save_data": False})``.
 
 The integration performs one attempt, propagates configuration and host errors,
 and creates no retry scheduler or persistence session. The caller closes the
@@ -101,11 +118,12 @@ not substitute a constant passing check for physical evidence:
 
 The environment must already have its Task Program integration configured.
 ``prepare_scene`` begins each candidate from a clean recording boundary using
-reset with ``save_data=False`` when needed. It captures state and reseeds
-observations only after settling and refreshing bindings. The measured callback
-reads terminal state and any required intermediate-event evidence; it returns
-``ValidationResult`` rather than an arbitrary truthy value. Applications retain
-their own bounded retry policy and exceptional-attempt cleanup.
+reset with ``save_data=False`` when needed, including after any rejected or
+interrupted attempt. It captures state and reseeds observations only after
+settling and refreshing bindings. The measured callback reads terminal state
+and any required intermediate-event evidence; it returns ``ValidationResult``
+rather than an arbitrary truthy value. Applications retain their own bounded
+retry policy and exceptional-attempt cleanup.
 
 Public interfaces
 -----------------
