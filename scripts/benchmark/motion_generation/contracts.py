@@ -185,6 +185,8 @@ class ExecutionObservation:
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
     articulation_joint_peak_signed_delta: torch.Tensor | None = None
+    articulation_joint_effect_end: torch.Tensor | None = None
+    object_rotation_peak_signed_rad: torch.Tensor | None = None
 
 
 class PhysicalStageEvaluator(Protocol):

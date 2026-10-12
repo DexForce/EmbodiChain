@@ -23,6 +23,8 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_curobo_pose_batch --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_door_pour_align_push --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
@@ -57,7 +59,16 @@ in that run's `videos/` directory.
   `articulation_position_jitter_m` bounds translate the actual Microwave/Drawer
   roots for `Press`, `Slide`, and `Twist`. `Slide` samples one PGI grasp in
   target-local coordinates and screens the translated batch together.
-- Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
+- `atomic_franka_pgi_door_pour_align_push_v1` adds `OpenDoor`, `Pour`,
+  `AxisAlign`, and `PushObject` on the same embodiment, replayed at 16 physics
+  steps per waypoint. Each case freezes its grasp and skill poses; success is
+  read from the replayed scene: the hinge angle at the end of the opening
+  segment, the held object's peak rotation about its own axis while pouring,
+  the held object's axis after alignment, and the pushed object's final pose.
+- Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics.
+  TOPPRA also serves Atomic Skills and joint-space cases; Atomic Skill calls
+  that leave planner options unset receive the suite's TOPPRA limits and
+  sample count.
 - Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm
 - Distinct planning, motion-valid, execution, task-success, and physical-effect
@@ -84,7 +95,13 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 - Object: add another `objects` entry for built-in `cube`/`mesh`, or register a
   new object-kind factory.
 - Atomic skill: implement and register an `AtomicSkillCaseProvider`; the runner,
-  artifact schema, aggregation, and report stay unchanged.
+  artifact schema, aggregation, and report stay unchanged. Optional provider
+  hooks cover skills with a precondition or their own sampling:
+  `prefix_invocations()` compiles actions such as the PickUp that a Pour needs,
+  `initial_scene()` supplies observations such as an OpenDoor hinge angle,
+  `frozen_grasp()` makes a skill that samples its own grasp use the manifest
+  grasp, and `object_rotation_segment()` names the window in which the replay
+  measures the held object's peak rotation.
 
 ## Current limits
 
@@ -182,7 +199,9 @@ def evaluate(
 The evaluator receives frozen task inputs, measured replay observations, and
 motion-validation results. It receives neither the scenario/engine nor a
 `CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
-contains the existing measured replay summary. Missing optional measurements
+contains the existing measured replay summary, plus the target joint at the end
+of the declared articulation segment and the held object's peak signed rotation
+in a provider-declared window. Missing optional measurements
 mean unavailable evidence; the follow-up evaluation work must extend observation
 collection before claiming grasp/release/retention or intermediate-stage success.
 

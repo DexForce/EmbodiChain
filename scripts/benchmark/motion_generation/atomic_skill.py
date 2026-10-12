@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import torch
-    from embodichain.lab.sim.atomic_actions import ActionInvocation, TaskState
+    from embodichain.lab.sim.atomic_actions import (
+        ActionInvocation,
+        SceneSnapshot,
+        TaskState,
+    )
     from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
     from .config import SuiteCfg, TrackCfg
     from .contracts import ExecutionObservation, PhysicalStageEvaluator
@@ -81,6 +85,59 @@ class AtomicSkillCaseProvider(ABC):
     ) -> TaskState | None:
         """Return an optional symbolic precondition for isolated action testing."""
         del scenario, case
+        return None
+
+    def prefix_invocations(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> tuple[ActionInvocation, ...]:
+        """Return actions compiled before this skill to establish its precondition.
+
+        A skill that needs a held object, such as Pour, returns the PickUp that
+        acquires it.  The prefix is replayed and scored with the skill.
+
+        Returns:
+            Invocations compiled in order before :meth:`build_invocation`.
+        """
+        del scenario, case
+        return ()
+
+    def initial_scene(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> SceneSnapshot | None:
+        """Return explicit scene observations the skill plans against.
+
+        Returns:
+            A snapshot that replaces the engine's rigid-object observations, or
+            ``None`` to keep them.
+        """
+        del scenario, case
+        return None
+
+    def frozen_grasp(
+        self, case: BenchmarkCase
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Return the target pose and grasp the skill must sample for this case.
+
+        Skills that sample their own grasp, such as OpenDoor, receive this
+        manifest grasp instead, so every planner plans the same contact.
+
+        Returns:
+            ``(target_pose, grasp_pose)`` batches, or ``None`` when the skill
+            accepts an explicit grasp or needs none.
+        """
+        del case
+        return None
+
+    def object_rotation_segment(
+        self, compiled: CompiledTrajectory
+    ) -> tuple[int, int] | None:
+        """Return the waypoint window whose object rotation is measured.
+
+        Returns:
+            ``(start, stop)`` trajectory indices, or ``None`` when the skill is
+            not scored on how far it rotates the held object.
+        """
+        del compiled
         return None
 
     def physical_evaluator(self) -> PhysicalStageEvaluator | None:

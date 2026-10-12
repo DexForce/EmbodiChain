@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -47,6 +47,7 @@ from embodichain.lab.sim.atomic_actions import (
     PressAffordance,
     PressGoal,
     PressOptions,
+    SceneSnapshot,
     SlideAffordance,
     SlideGoal,
     SlideOptions,
@@ -112,6 +113,10 @@ _GRIPPER_SKILLS = {
     "press",
     "slide",
     "twist",
+    "open_door",
+    "pour",
+    "axis_align",
+    "push_object",
 }
 _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
@@ -125,6 +130,8 @@ class _ReplayMetrics:
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
     articulation_joint_peak_signed_delta: torch.Tensor | None = None
+    articulation_joint_effect_end: torch.Tensor | None = None
+    object_rotation_peak_signed_rad: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -405,6 +412,31 @@ def _randomization_parameters(
             }
         )
     return parameters
+
+
+def _signed_rotation_about_axis(
+    reference_rotation: torch.Tensor,
+    current_rotation: torch.Tensor,
+    world_axis: torch.Tensor,
+) -> torch.Tensor:
+    """Return the signed angle of ``current @ reference^T`` about ``world_axis``.
+
+    The sine comes from the relative rotation's skew part projected on the
+    axis and the cosine from its trace, so a rotation purely about the axis is
+    recovered exactly over the full ``(-pi, pi]`` range.
+    """
+    relative = current_rotation @ reference_rotation.transpose(-1, -2)
+    skew = 0.5 * torch.stack(
+        (
+            relative[:, 2, 1] - relative[:, 1, 2],
+            relative[:, 0, 2] - relative[:, 2, 0],
+            relative[:, 1, 0] - relative[:, 0, 1],
+        ),
+        dim=-1,
+    )
+    sine = (skew * world_axis).sum(dim=-1)
+    cosine = 0.5 * (torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1) - 1.0)
+    return torch.atan2(sine, cosine)
 
 
 def _motion_valid_mask(
@@ -821,6 +853,109 @@ class _FrozenArticulationGraspPoseGenerator(GraspPoseGenerator):
             poses,
             torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
         )
+
+
+class _ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
+    """Serve the manifest grasp of the case being compiled.
+
+    Skills such as OpenDoor sample their own grasp and accept no explicit one.
+    The scenario activates the case's frozen ``(target, grasp)`` pair around
+    compilation; the target-local grasp is replayed for the observed target
+    pose.  Without an active pair the request goes to ``fallback``.
+    """
+
+    def __init__(self, fallback: GraspPoseGenerator | None = None) -> None:
+        self._fallback = fallback
+        self._target_to_grasp: torch.Tensor | None = None
+
+    def activate(self, target_pose: torch.Tensor, grasp_pose: torch.Tensor) -> None:
+        """Freeze one case's target-local grasp for the next compilation."""
+        if target_pose.shape != grasp_pose.shape or target_pose.shape[-2:] != (4, 4):
+            raise ValueError("Frozen target and grasp poses must be equal (B, 4, 4).")
+        self._target_to_grasp = torch.bmm(
+            pose_inv(target_pose.to(dtype=torch.float32)),
+            grasp_pose.to(dtype=torch.float32),
+        )
+
+    def deactivate(self) -> None:
+        """Return to the fallback generator after compilation."""
+        self._target_to_grasp = None
+
+    def _resolve(self, obj_poses: torch.Tensor) -> torch.Tensor:
+        assert self._target_to_grasp is not None
+        target_to_grasp = self._target_to_grasp.to(device=obj_poses.device)
+        if target_to_grasp.shape[0] != obj_poses.shape[0]:
+            if target_to_grasp.shape[0] != 1:
+                raise ValueError("Frozen grasp batch does not match the target batch.")
+            target_to_grasp = target_to_grasp.expand(obj_poses.shape[0], -1, -1)
+        return torch.bmm(obj_poses.to(dtype=torch.float32), target_to_grasp)
+
+    def _require_fallback(self) -> GraspPoseGenerator:
+        if self._fallback is None:
+            raise RuntimeError("No frozen benchmark grasp is active for this request.")
+        return self._fallback
+
+    def get_valid_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        """Return the active frozen grasp as one zero-cost candidate per row."""
+        if self._target_to_grasp is None:
+            return self._require_fallback().get_valid_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+            )
+        poses = self._resolve(obj_poses)
+        return [
+            (
+                poses[index : index + 1],
+                torch.zeros(1, dtype=torch.float32, device=poses.device),
+            )
+            for index in range(poses.shape[0])
+        ]
+
+    def get_best_grasp_poses(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return the active frozen grasp for every target row."""
+        if self._target_to_grasp is None:
+            return self._require_fallback().get_best_grasp_poses(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+            )
+        poses = self._resolve(obj_poses)
+        return (
+            torch.ones(poses.shape[0], dtype=torch.bool, device=poses.device),
+            poses,
+            torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
+        )
+
+
+def _with_plan_options(
+    invocation: ActionInvocation, plan_opts: object
+) -> ActionInvocation:
+    """Give a motion-generation invocation planner options it left unset."""
+    policy = invocation.motion_policy
+    if policy.strategy != "motion_gen" or policy.plan_opts is not None:
+        return invocation
+    return replace(invocation, motion_policy=replace(policy, plan_opts=plan_opts))
 
 
 def _nearest_half_turn_pose(
@@ -2676,6 +2811,7 @@ class AtomicTaskScenario(ScenarioProvider):
         self._gripper_open: torch.Tensor | None = None
         self._gripper_grasp: torch.Tensor | None = None
         self._engine: AtomicActionEngine | None = None
+        self._case_grasp_generator: _ActiveCaseGraspPoseGenerator | None = None
         self._runtime_entities_created = False
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
@@ -2962,6 +3098,19 @@ class AtomicTaskScenario(ScenarioProvider):
                     ]
                 )
             }
+        self._case_grasp_generator = None
+        if any(
+            provider.frozen_grasp(self._cases_by_id[case_id]) is not None
+            for case_id, provider in self._case_providers.items()
+        ):
+            if self.end_effector_part is None:
+                raise RuntimeError("Frozen-grasp cases require an end-effector part.")
+            self._case_grasp_generator = _ActiveCaseGraspPoseGenerator(
+                None
+                if grasp_pose_generators is None
+                else grasp_pose_generators[self.end_effector_part]
+            )
+            grasp_pose_generators = {self.end_effector_part: self._case_grasp_generator}
         if scene_entities:
             self._engine = create_simulation_atomic_action_engine(
                 motion_generator=motion_generator,
@@ -2980,6 +3129,7 @@ class AtomicTaskScenario(ScenarioProvider):
         """Drop the engine before its adapter closes the shared generator."""
         del adapter
         self._engine = None
+        self._case_grasp_generator = None
 
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
@@ -3140,11 +3290,30 @@ class AtomicTaskScenario(ScenarioProvider):
             )
             invocations = (pick_invocation, invocation)
             task = TaskState(batch_size=case.batch_size, device=self.robot.device)
+        else:
+            prefix = provider.prefix_invocations(self, case)
+            if prefix:
+                invocations = (*prefix, invocation)
+        plan_opts = adapter.atomic_plan_options()
+        if plan_opts is not None:
+            invocations = tuple(
+                _with_plan_options(item, plan_opts) for item in invocations
+            )
         context = engine.initial_context(
             task=task,
+            scene=provider.initial_scene(self, case),
             control_dt=float(self.simulation.sim_config.physics_dt),
         )
-        return engine.compile(invocations, context=context)
+        frozen_grasp = provider.frozen_grasp(case)
+        if frozen_grasp is None:
+            return engine.compile(invocations, context=context)
+        if self._case_grasp_generator is None:
+            raise RuntimeError("Frozen-grasp cases require a prepared grasp generator.")
+        self._case_grasp_generator.activate(*frozen_grasp)
+        try:
+            return engine.compile(invocations, context=context)
+        finally:
+            self._case_grasp_generator.deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -3210,6 +3379,8 @@ class AtomicTaskScenario(ScenarioProvider):
             articulation_final = None
             articulation_delta = None
             articulation_peak = None
+            articulation_effect_end = None
+            object_rotation_peak = None
             task_failure_code = "task_goal_miss"
         else:
             execution_success = observation.execution_success
@@ -3247,6 +3418,8 @@ class AtomicTaskScenario(ScenarioProvider):
                 else articulation_final - articulation_initial
             )
             articulation_peak = observation.articulation_joint_peak_signed_delta
+            articulation_effect_end = observation.articulation_joint_effect_end
+            object_rotation_peak = observation.object_rotation_peak_signed_rad
 
         executed_translation_mm: torch.Tensor | None = None
         executed_rotation_deg: torch.Tensor | None = None
@@ -3319,6 +3492,16 @@ class AtomicTaskScenario(ScenarioProvider):
                         None
                         if articulation_peak is None
                         else float(articulation_peak[index].item())
+                    ),
+                    articulation_joint_effect_end=(
+                        None
+                        if articulation_effect_end is None
+                        else float(articulation_effect_end[index].item())
+                    ),
+                    object_rotation_peak_signed_rad=(
+                        None
+                        if object_rotation_peak is None
+                        else float(object_rotation_peak[index].item())
                     ),
                     replan_count=0,
                     failure_code=failure_code,
@@ -3460,6 +3643,10 @@ class AtomicTaskScenario(ScenarioProvider):
             articulation_joint_peak_signed_delta=(
                 replay_metrics.articulation_joint_peak_signed_delta
             ),
+            articulation_joint_effect_end=replay_metrics.articulation_joint_effect_end,
+            object_rotation_peak_signed_rad=(
+                replay_metrics.object_rotation_peak_signed_rad
+            ),
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -3552,6 +3739,30 @@ class AtomicTaskScenario(ScenarioProvider):
         effect_start = 0
         effect_stop = 0
         effect_sign = 1.0
+        articulation_effect_end: torch.Tensor | None = None
+        effect_end_index = -1
+        rotation_window = (
+            None
+            if provider is None or not collect_metrics or object_handle is None
+            else provider.object_rotation_segment(compiled)
+        )
+        rotation_axis_local: torch.Tensor | None = None
+        rotation_sign = 1.0
+        rotation_reference: torch.Tensor | None = None
+        rotation_axis_world: torch.Tensor | None = None
+        rotation_peak: torch.Tensor | None = None
+        if rotation_window is not None:
+            rotation_axis_local = torch.tensor(
+                case.case_parameters["object_rotation_axis"],
+                dtype=torch.float32,
+                device=trajectory.device,
+            )
+            rotation_axis_local = rotation_axis_local / torch.linalg.vector_norm(
+                rotation_axis_local
+            )
+            rotation_sign = float(case.case_parameters.get("object_rotation_sign", 1.0))
+            if rotation_sign not in (-1.0, 1.0):
+                raise ValueError("object_rotation_sign must be 1 or -1.")
         if collect_metrics:
             squared_tracking_error = torch.zeros(
                 case.batch_size, dtype=trajectory.dtype, device=trajectory.device
@@ -3583,11 +3794,43 @@ class AtomicTaskScenario(ScenarioProvider):
                 # the command segment ends.  Start at the manipulation segment,
                 # then observe through release, retract, and the final hold.
                 effect_start, effect_stop = segment.start, trajectory.shape[1]
+                effect_end_index = segment.stop - 1
         for waypoint_index in range(trajectory.shape[1]):
+            if rotation_window is not None and waypoint_index == rotation_window[0]:
+                assert object_handle is not None and rotation_axis_local is not None
+                rotation_reference = (
+                    object_handle.entity.get_local_pose(to_matrix=True)[:, :3, :3]
+                    .to(device=trajectory.device, dtype=torch.float32)
+                    .clone()
+                )
+                rotation_axis_world = rotation_reference @ rotation_axis_local
+                rotation_peak = torch.zeros(
+                    case.batch_size, dtype=torch.float32, device=trajectory.device
+                )
             positions = trajectory[:, waypoint_index]
             self.robot.set_qpos(positions, target=True)
             for _ in range(settings.steps_per_waypoint):
                 self.simulation.update(step=1)
+                if (
+                    rotation_window is not None
+                    and rotation_reference is not None
+                    and rotation_axis_world is not None
+                    and rotation_peak is not None
+                    and rotation_window[0] <= waypoint_index < rotation_window[1]
+                ):
+                    assert object_handle is not None
+                    current_rotation = object_handle.entity.get_local_pose(
+                        to_matrix=True
+                    )[:, :3, :3].to(device=trajectory.device, dtype=torch.float32)
+                    rotation_peak = torch.maximum(
+                        rotation_peak,
+                        _signed_rotation_about_axis(
+                            rotation_reference,
+                            current_rotation,
+                            rotation_axis_world,
+                        )
+                        * rotation_sign,
+                    )
                 if (
                     articulation_handle is not None
                     and articulation_joint_name is not None
@@ -3602,6 +3845,14 @@ class AtomicTaskScenario(ScenarioProvider):
                         articulation_peak,
                         (current_joint - articulation_initial) * effect_sign,
                     )
+            if (
+                articulation_handle is not None
+                and articulation_joint_name is not None
+                and waypoint_index == effect_end_index
+            ):
+                articulation_effect_end = articulation_handle.joint_qpos(
+                    articulation_joint_name
+                )
             if squared_tracking_error is not None:
                 observed = self.robot.get_qpos()
                 squared_tracking_error += ((observed - positions) ** 2).sum(dim=1)
@@ -3646,6 +3897,10 @@ class AtomicTaskScenario(ScenarioProvider):
                 articulation_joint_initial=articulation_initial,
                 articulation_joint_final=articulation_final,
                 articulation_joint_peak_signed_delta=articulation_peak,
+                articulation_joint_effect_end=articulation_effect_end,
+                object_rotation_peak_signed_rad=(
+                    None if rotation_peak is None else rotation_peak * rotation_sign
+                ),
             )
         return None
 
@@ -3700,6 +3955,68 @@ class AtomicTaskScenario(ScenarioProvider):
         planner therefore receives the same explicit grasp pose and planning
         latency excludes grasp generation.
         """
+
+        def pick_up_poses(grasp: torch.Tensor) -> tuple[torch.Tensor, ...]:
+            pre_grasp = grasp.clone()
+            pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
+            lift = grasp.clone()
+            lift[:, 2, 3] += lift_height
+            return pre_grasp, grasp, lift
+
+        return self.screen_antipodal_grasp(
+            handle,
+            object_pose,
+            approach_direction,
+            seed=seed,
+            start_qpos=start_qpos,
+            n_sample=n_sample,
+            max_candidates=max_candidates,
+            alignment_max_angle_deg=alignment_max_angle_deg,
+            waypoint_poses=pick_up_poses,
+        )
+
+    def screen_antipodal_grasp(
+        self,
+        handle: AtomicObjectHandle,
+        object_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        *,
+        seed: int,
+        start_qpos: torch.Tensor,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float,
+        waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+        rank: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+    ) -> torch.Tensor:
+        """Freeze the first sampled object grasp whose skill poses are reachable.
+
+        Candidates are sampled once with ``seed``, ordered by ``rank`` (grasp
+        cost by default), filtered by approach alignment, and tried with their
+        half-turn variant.  The first variant whose ``waypoint_poses`` pass
+        sequential IK from ``start_qpos`` is returned.
+
+        Args:
+            handle: Object whose mesh is sampled.
+            object_pose: Frozen object pose batch.
+            approach_direction: World approach axis the grasp must follow.
+            seed: Sampling seed.
+            start_qpos: Arm state the IK chain starts from.
+            n_sample: Generator surface-sample count.
+            max_candidates: Number of ranked candidates to screen.
+            alignment_max_angle_deg: Maximum grasp-axis deviation from the
+                approach axis.
+            waypoint_poses: Skill poses that a grasp variant must reach, in
+                order, given that variant with shape ``(1, 4, 4)``.
+            rank: Optional ordering of finite candidates from their poses and
+                costs; returns candidate indices, best first.
+
+        Returns:
+            The selected grasp with shape ``(1, 4, 4)``.
+
+        Raises:
+            RuntimeError: No candidate variant reaches every skill pose.
+        """
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         if n_sample < 1 or max_candidates < 1:
@@ -3744,7 +4061,11 @@ class AtomicTaskScenario(ScenarioProvider):
             raise RuntimeError(
                 f"No valid antipodal grasp candidates were found for {handle.object_id!r}."
             )
-        ranked = finite_indices[torch.argsort(costs[finite_indices])]
+        if rank is None:
+            ranked = finite_indices[torch.argsort(costs[finite_indices])]
+        else:
+            order = rank(candidates[finite_indices], costs[finite_indices])
+            ranked = finite_indices[order.to(device=finite_indices.device)]
         ranked = ranked[:max_candidates].detach().to("cpu").tolist()
         minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
         for candidate_index in ranked:
@@ -3761,28 +4082,29 @@ class AtomicTaskScenario(ScenarioProvider):
             mirrored[:3, 1] = -mirrored[:3, 1]
             for variant in (candidate, mirrored):
                 grasp = variant.unsqueeze(0)
-                pre_grasp = grasp.clone()
-                pre_grasp[:, :3, 3] -= approach_direction * pre_grasp_distance
-                lift = grasp.clone()
-                lift[:, 2, 3] += lift_height
-                seed = start_qpos
-                feasible = True
-                for pose in (pre_grasp, grasp, lift):
-                    success, seed = self.robot.compute_ik(
-                        pose=pose,
-                        joint_seed=seed,
-                        name=self.control_part,
-                    )
-                    if not bool(torch.as_tensor(success).all().item()):
-                        feasible = False
-                        break
-                    seed = _canonical_case_qpos(seed)
-                if feasible:
+                if self._ik_chain_feasible(start_qpos, waypoint_poses(grasp)):
                     return grasp
         raise RuntimeError(
             f"No independently reachable antipodal grasp remained for "
             f"{handle.object_id!r} after screening {len(ranked)} candidates."
         )
+
+    def _ik_chain_feasible(
+        self, start_qpos: torch.Tensor, poses: Sequence[torch.Tensor]
+    ) -> bool:
+        """Return whether every pose is reachable by IK seeded from the last."""
+        assert self.robot is not None
+        seed = start_qpos
+        for pose in poses:
+            success, seed = self.robot.compute_ik(
+                pose=pose,
+                joint_seed=seed,
+                name=self.control_part,
+            )
+            if not bool(torch.as_tensor(success).all().item()):
+                return False
+            seed = _canonical_case_qpos(seed)
+        return True
 
     def resolve_articulation_grasp(
         self,
@@ -3801,20 +4123,91 @@ class AtomicTaskScenario(ScenarioProvider):
         alignment_max_angle_deg: float,
     ) -> torch.Tensor:
         """Freeze a geometry-aware PGI grasp that can complete a Slide path."""
+        translation_sign = -1.0 if direction == "pull" else 1.0
+
+        def slide_poses(grasp: torch.Tensor) -> list[torch.Tensor]:
+            translated = grasp.clone()
+            translated[:, :3, 3] += (
+                approach_direction * translation_sign * translation_distance
+            )
+            approach = grasp.clone()
+            approach[:, :3, 3] -= approach_direction * approach_distance
+            poses = [approach, grasp, translated]
+            if direction == "push":
+                poses.append(approach)
+            return poses
+
+        return self.screen_articulation_grasp(
+            mesh_vertices=mesh_vertices,
+            mesh_triangles=mesh_triangles,
+            target_pose=target_pose,
+            approach_direction=approach_direction,
+            start_qpos=start_qpos,
+            seed=seed,
+            n_sample=n_sample,
+            max_candidates=max_candidates,
+            alignment_max_angle_deg=alignment_max_angle_deg,
+            waypoint_poses=slide_poses,
+        )
+
+    def screen_articulation_grasp(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        target_pose: torch.Tensor,
+        approach_direction: torch.Tensor,
+        start_qpos: torch.Tensor,
+        seed: int,
+        n_sample: int,
+        max_candidates: int,
+        alignment_max_angle_deg: float,
+        waypoint_poses: Callable[[torch.Tensor], Sequence[torch.Tensor]],
+    ) -> torch.Tensor:
+        """Freeze the first sampled link grasp whose skill poses are reachable.
+
+        All rows share one target-link mesh and differ only by the articulation
+        root pose, so candidates are sampled once and the selected target-local
+        grasp is preserved across the batch.
+
+        Args:
+            mesh_vertices: Target-link vertices in the link frame.
+            mesh_triangles: Target-link triangle indices.
+            target_pose: Link pose batch with shape ``(B, 4, 4)``.
+            approach_direction: World approach axes with shape ``(B, 3)``.
+            start_qpos: Arm state batch the IK chain starts from.
+            seed: Sampling seed.
+            n_sample: Generator surface-sample count.
+            max_candidates: Number of lowest-cost candidates to screen.
+            alignment_max_angle_deg: Maximum grasp-axis deviation from the
+                approach axis in every row.
+            waypoint_poses: Skill poses that a batched grasp variant must reach,
+                in order.
+
+        Returns:
+            The selected grasp batch with shape ``(B, 4, 4)``.
+
+        Raises:
+            RuntimeError: No candidate variant reaches every skill pose.
+        """
         if self.robot is None:
             raise RuntimeError("Atomic Task runtime is not configured.")
         if target_pose.dim() != 3 or target_pose.shape[1:] != (4, 4):
-            raise ValueError("Physical Slide target poses must have shape (B, 4, 4).")
+            raise ValueError(
+                "Articulation grasp target poses must have shape (B, 4, 4)."
+            )
         if approach_direction.shape != (target_pose.shape[0], 3):
             raise ValueError(
-                "Physical Slide approach directions must have shape (B, 3)."
+                "Articulation grasp approach directions must have shape (B, 3)."
             )
         if start_qpos.shape[0] != target_pose.shape[0]:
             raise ValueError(
-                "Physical Slide start states and target poses must share a batch."
+                "Articulation grasp start states and target poses must share a batch."
             )
         if n_sample < 1 or max_candidates < 1:
-            raise ValueError("Slide grasp sample/candidate counts must be positive.")
+            raise ValueError(
+                "Articulation grasp sample/candidate counts must be positive."
+            )
         if not 0.0 < alignment_max_angle_deg <= 90.0:
             raise ValueError("grasp_alignment_max_angle_deg must be in (0, 90].")
         from scripts.tutorials.atomic_action.tutorial_utils import (
@@ -3835,19 +4228,17 @@ class AtomicTaskScenario(ScenarioProvider):
             candidates, costs = generator.get_valid_grasp_poses(
                 mesh_vertices=mesh_vertices,
                 mesh_triangles=mesh_triangles,
-                # All rows share one target-link mesh and differ only by the
-                # articulation root pose.  Sample PGI candidates once, then
-                # preserve the selected target-local grasp across the batch.
                 obj_poses=target_pose[:1],
                 approach_direction=approach_direction[:1],
             )[0]
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
-            raise RuntimeError("No valid antipodal Slide grasp candidates were found.")
+            raise RuntimeError(
+                "No valid antipodal articulation grasp candidates were found."
+            )
         ranked = finite_indices[torch.argsort(costs[finite_indices])]
         ranked = ranked[:max_candidates].detach().to("cpu").tolist()
         minimum_alignment = math.cos(math.radians(alignment_max_angle_deg))
-        translation_sign = -1.0 if direction == "pull" else 1.0
         for candidate_index in ranked:
             candidate = candidates[candidate_index].to(
                 device=self.robot.device, dtype=torch.float32
@@ -3866,31 +4257,10 @@ class AtomicTaskScenario(ScenarioProvider):
                 alignment = torch.sum(variant[:, :3, 2] * approach_direction, dim=-1)
                 if not bool((alignment >= minimum_alignment).all().item()):
                     continue
-                translated = variant.clone()
-                translated[:, :3, 3] += (
-                    approach_direction * translation_sign * translation_distance
-                )
-                approach = variant.clone()
-                approach[:, :3, 3] -= approach_direction * approach_distance
-                poses = [approach, variant, translated]
-                if direction == "push":
-                    poses.append(approach)
-                qpos_seed = start_qpos
-                feasible = True
-                for pose in poses:
-                    success, qpos_seed = self.robot.compute_ik(
-                        pose=pose,
-                        joint_seed=qpos_seed,
-                        name=self.control_part,
-                    )
-                    if not bool(torch.as_tensor(success).all().item()):
-                        feasible = False
-                        break
-                    qpos_seed = _canonical_case_qpos(qpos_seed)
-                if feasible:
+                if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
                     return variant
         raise RuntimeError(
-            "No independently reachable antipodal Slide grasp remained after "
+            "No independently reachable antipodal articulation grasp remained after "
             f"screening {len(ranked)} candidates."
         )
 

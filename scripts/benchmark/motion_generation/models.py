@@ -153,6 +153,8 @@ class CaseOutcome:
     articulation_joint_final: float | None = None
     articulation_joint_delta: float | None = None
     articulation_joint_peak_signed_delta: float | None = None
+    articulation_joint_effect_end: float | None = None
+    object_rotation_peak_signed_rad: float | None = None
     replan_count: int | None = None
     min_translation_err_mm: float | None = None
     min_rotation_err_deg: float | None = None

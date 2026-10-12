@@ -461,12 +461,16 @@ def test_atomic_invocation_uses_motion_generator_policy():
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
     assert atomic_skill_provider_names() == (
+        "axis_align",
         "move_end_effector",
         "move_held_object",
         "move_joints",
+        "open_door",
         "pick_up",
         "place",
+        "pour",
         "press",
+        "push_object",
         "slide",
         "twist",
     )

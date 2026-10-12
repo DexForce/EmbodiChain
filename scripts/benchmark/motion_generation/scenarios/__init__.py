@@ -31,6 +31,7 @@ from .atomic_task import (
     create_atomic_skill_provider,
     register_atomic_skill_provider,
 )
+from . import atomic_skill_providers as _atomic_skill_providers  # noqa: F401
 from .base import ScenarioEvaluation, ScenarioProvider
 from .free_space import FreeSpaceScenario
 
