@@ -44,6 +44,7 @@ EXPECTED_COMMANDS = {
     "preview-asset",
     "preview_lerobot_data",
     "run-env",
+    "run-atomic-action",
     "scene-engine",
     "simready",
     "train-rl",

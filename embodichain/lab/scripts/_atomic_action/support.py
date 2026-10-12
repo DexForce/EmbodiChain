@@ -1,0 +1,2585 @@
+# ----------------------------------------------------------------------------
+# Copyright (c) 2021-2026 DexForce Technology Co., Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ----------------------------------------------------------------------------
+
+"""Shared helpers for atomic-action tutorial scripts."""
+
+from __future__ import annotations
+
+import argparse
+import math
+import pathlib
+import re
+import time
+from collections.abc import Callable, Collection, Mapping, Sequence
+from typing import Literal
+
+import torch
+
+from embodichain.data import get_data_path
+from embodichain.cli.sim import add_sim_args_to_parser
+from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import visualization_cfg_from_args
+from embodichain.lab.sim.atomic_actions import (
+    ActionPlan,
+    AffordanceSamplingContext,
+    AntipodalAffordance,
+    CompiledTrajectory,
+    ObjectSemantics,
+    TimedTrajectory,
+)
+from embodichain.lab.sim.cfg import (
+    ArticulationCfg,
+    CollisionPropertiesCfg,
+    DefaultRigidBodyPropertiesCfg,
+    LightCfg,
+    LinkPhysicsOverrideCfg,
+    MassPropertiesCfg,
+    MarkerCfg,
+    NewtonCollisionPropertiesCfg,
+    NewtonPhysicsCfg,
+    NewtonRigidBodyMaterialCfg,
+    PhysicsBackendCfg,
+    RenderCfg,
+    RigidBodyMaterialCfg,
+    RigidBodyPhysicsCfg,
+    RobotCfg,
+    physics_cfg_for_backend,
+)
+from embodichain.lab.sim.objects import RigidObject, Robot
+from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
+from embodichain.lab.sim.motion.planners import (
+    CuroboPlannerCfg,
+    ToppraPlannerCfg,
+    TrapezoidalPlannerCfg,
+)
+from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGenerator,
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
+)
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
+from embodichain.utils import logger
+
+RECORD_WIDTH = 640
+RECORD_HEIGHT = 480
+VIEWER_WIDTH = 1600
+VIEWER_HEIGHT = 900
+AUTO_PLAY_RECORD_FPS = 20
+AUTO_PLAY_RECORD_MAX_MEMORY = 2048
+DEFAULT_AUTO_PLAY_LOOK_AT = (
+    (-1.25, -1.15, 0.95),
+    (-0.25, -0.02, 0.25),
+    (0.0, 0.0, 1.0),
+)
+DEFAULT_AXIS_LEN = 0.06
+DEFAULT_AXIS_SIZE = 0.003
+
+GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
+GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
+ROBOTIQ_2F_140_URDF_PATH = "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
+ROBOTIQ_2F_140_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.21),
+    (0.0, 0.0, 0.0, 1.0),
+)
+# DexSim canonicalizes the UR source URDF's rounded +/-6.2832 limits to +/-2*pi.
+# Configure the solver with that physical range up front to avoid a no-op limit-sync
+# warning during tutorial robot construction.
+_UR_TUTORIAL_QPOS_LIMITS: tuple[tuple[float, float], ...] = tuple(
+    (-2.0 * math.pi, 2.0 * math.pi) for _ in range(6)
+)
+TUTORIAL_PARALLEL_JAW_MODEL = ParallelJawGripperModelCfg(
+    model_id="dh_pgi_140_80",
+    min_opening_width=0.003,
+    max_opening_width=0.100,
+    finger_length=0.10,
+    finger_width=0.040,
+    finger_thickness=0.01,
+    palm_depth=0.096,
+)
+DEFAULT_GRIPPER_CLOSE_QPOS = 0.036
+NEWTON_GRASP_CONTACT_STIFFNESS = 4.0e4
+NEWTON_GRASP_CONTACT_DAMPING = 4.0e2
+# MuJoCo-Warp's default contact dimension (3) has no torsional friction.  A
+# parallel-jaw grasp needs spin resistance as well as normal stiffness. Values
+# were selected from Newton's native-contact examples and a fixed-seed
+# Default-backend cube pick/place comparison. ``rolling_friction`` is retained
+# for solvers/condim=6 that consume it; MuJoCo-Warp condim=4 activates
+# torsional friction only. Keep this tutorial-local candidate profile on
+# manipulation contact surfaces rather than using it as a world-wide Newton
+# material.
+NEWTON_GRASP_TORSIONAL_FRICTION = 0.1
+NEWTON_GRASP_ROLLING_FRICTION = 0.01
+# The official Newton native-contact grasp example uses condim=4 to retain
+# torsional friction. The tutorial profile applies it just before replay.
+NEWTON_NATIVE_CONTACT_DIMENSION = 4
+# Native MuJoCo contacts need a short hold after the gripper first reaches its
+# commanded grasp position. Keep this as a duration rather than a raw number of
+# updates so the helper remains correct if a tutorial changes its control rate.
+NEWTON_NATIVE_CONTACT_SETTLE_DURATION = 0.24
+DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
+DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
+DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
+_FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
+_DEFAULT_GRIPPER_TCP_Z = 0.17
+_GRIPPER_CONTACT_LINK_PATTERN = (
+    r"(?:.*_)?(?:gripper_finger[12]_link_1|"
+    r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
+)
+_GRIPPER_TCP = (
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, _DEFAULT_GRIPPER_TCP_Z),
+    (0.0, 0.0, 0.0, 1.0),
+)
+TOP_DOWN_EEF_ROTATION = (
+    (-0.0539, -0.9985, -0.0022),
+    (-0.9977, 0.0540, -0.0401),
+    (0.0401, 0.0000, -0.9992),
+)
+
+TutorialCliFeature = Literal[
+    "affordance_sampling",
+    "trajectory_variants",
+    "debug_state",
+    "diagnose_plan",
+    "grasp_sampling",
+    "headless_play",
+    "visualize_axes",
+]
+TutorialRobot = Literal["ur5", "franka", "ur10"]
+TUTORIAL_ROBOTS: tuple[TutorialRobot, ...] = (
+    "ur5",
+    "franka",
+    "ur10",
+)
+TutorialPlanner = Literal["toppra", "trapezoidal", "curobo"]
+TUTORIAL_PLANNERS: tuple[TutorialPlanner, ...] = (
+    "toppra",
+    "trapezoidal",
+    "curobo",
+)
+
+
+def create_tutorial_argument_parser(
+    description: str,
+    *,
+    features: Collection[TutorialCliFeature] = (),
+    default_device: str | None = None,
+    default_renderer: str | None = None,
+    default_planner: TutorialPlanner = "trapezoidal",
+) -> argparse.ArgumentParser:
+    """Create a launcher parser with the shared atomic-tutorial switches.
+
+    Args:
+        description: Command-line program description.
+        features: Optional groups of tutorial-specific shared arguments.
+        default_device: Optional device override for the launcher arguments.
+        default_renderer: Optional renderer override for the launcher arguments.
+        default_planner: Planner selected when ``--planner`` is omitted. The
+            shared default is deterministic ``trapezoidal`` timing.
+
+    Returns:
+        The configured argument parser.
+
+    Raises:
+        ValueError: If ``default_planner`` is not a supported tutorial backend.
+    """
+    if default_planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"default_planner must be one of {TUTORIAL_PLANNERS}, "
+            f"got {default_planner!r}."
+        )
+    parser = argparse.ArgumentParser(description=description)
+    add_sim_args_to_parser(parser)
+    defaults = {}
+    if default_device is not None:
+        defaults["device"] = default_device
+    if default_renderer is not None:
+        defaults["renderer"] = default_renderer
+    if defaults:
+        parser.set_defaults(**defaults)
+
+    parser.add_argument(
+        "--auto_play",
+        action="store_true",
+        help="Run the demo without waiting for keyboard input.",
+    )
+    parser.add_argument(
+        "--auto_play_video_path",
+        type=str,
+        default=None,
+        help="Optional explicit MP4 path for auto-play recording.",
+    )
+    parser.add_argument(
+        "--robot",
+        choices=TUTORIAL_ROBOTS,
+        default="ur5",
+        help="Robot construction to use (default: ur5).",
+    )
+    parser.add_argument(
+        "--planner",
+        choices=TUTORIAL_PLANNERS,
+        default=default_planner,
+        help=(
+            "Motion-planner backend: toppra, trapezoidal, or curobo "
+            f"(default: {default_planner}). NeuralPlanner is not exposed "
+            "by this tutorial selector."
+        ),
+    )
+    if "debug_state" in features:
+        parser.add_argument(
+            "--debug_state",
+            action="store_true",
+            help="Log robot and object state during execution.",
+        )
+    if "diagnose_plan" in features:
+        parser.add_argument(
+            "--diagnose_plan",
+            action="store_true",
+            help="Plan and print diagnostics without playing the trajectory.",
+        )
+    if "grasp_sampling" in features:
+        parser.add_argument("--n_sample", type=int, default=10000)
+        parser.add_argument("--force_reannotate", action="store_true")
+    if "affordance_sampling" in features:
+        parser.add_argument(
+            "--affordance_branches",
+            type=int,
+            default=None,
+            help="Number of Affordance branches and simulation rows; defaults to --num_envs.",
+        )
+        parser.add_argument(
+            "--sampling_seed",
+            type=int,
+            default=0,
+            help="Base seed for Affordance sampling streams.",
+        )
+        parser.add_argument(
+            "--sampling_attempt",
+            type=int,
+            default=0,
+            help="Explicit resampling-attempt identity (not a retry count).",
+        )
+    if "trajectory_variants" in features:
+        parser.add_argument(
+            "--trajectory_variants",
+            type=int,
+            default=None,
+            help=(
+                "How many variants to generate; defaults to --num_envs. It may "
+                "exceed --num_envs, in which case only the first ones replay."
+            ),
+        )
+        variants = parser.add_argument_group(
+            "advanced variant options",
+            "Override the default augmentation policy. Omit them all and the "
+            "expansion helpers enable every implemented factor themselves.",
+        )
+        variants.add_argument("--variant_seed", type=int, default=None)
+        variants.add_argument(
+            "--spatial_methods",
+            nargs="+",
+            choices=("joint_residual", "via_points"),
+            default=None,
+        )
+        variants.add_argument("--via_count", type=int, default=None)
+        variants.add_argument("--joint_offset_scale", type=float, default=None)
+        variants.add_argument("--duration_scales", type=float, nargs="+", default=None)
+        variants.add_argument("--dedup_tolerance", type=float, default=None)
+        variants.add_argument("--no_redundancy", action="store_true")
+        variants.add_argument(
+            "--variant_plot_dir",
+            type=str,
+            default=None,
+            help="Write a joint-trajectory plot and a replay filmstrip here.",
+        )
+    if "headless_play" in features:
+        parser.add_argument(
+            "--headless_play",
+            action="store_true",
+            help="Execute trajectories without opening the viewer window.",
+        )
+    if "visualize_axes" in features:
+        parser.add_argument(
+            "--no_vis_eef_axis",
+            action="store_true",
+            help="Skip drawing target coordinate-frame markers.",
+        )
+    return parser
+
+
+def parse_affordance_sampling_arguments(
+    parser: argparse.ArgumentParser,
+) -> argparse.Namespace:
+    """Parse a sampling tutorial's arguments and map branches to environments.
+
+    Args:
+        parser: Tutorial parser with the ``affordance_sampling`` feature enabled.
+
+    Returns:
+        Parsed arguments with matching branch and environment counts.
+    """
+    args = parser.parse_args()
+    if args.affordance_branches is None:
+        args.affordance_branches = args.num_envs
+    if args.affordance_branches < 1:
+        parser.error("--affordance_branches must be positive.")
+    if args.sampling_seed < 0:
+        parser.error("--sampling_seed must be non-negative.")
+    if args.sampling_attempt < 0:
+        parser.error("--sampling_attempt must be non-negative.")
+    if args.num_envs not in (1, args.affordance_branches):
+        parser.error("--num_envs must be omitted or match --affordance_branches.")
+    args.num_envs = args.affordance_branches
+    return args
+
+
+def create_affordance_sampling_context(
+    args: argparse.Namespace,
+) -> AffordanceSamplingContext | None:
+    """Create caller-owned sampling identity for a parallel tutorial.
+
+    Args:
+        args: Validated arguments from :func:`parse_affordance_sampling_arguments`.
+
+    Returns:
+        Sampling context, or ``None`` for the nominal single branch.
+    """
+    if getattr(args, "_configured_run", False):
+        return AffordanceSamplingContext(
+            count=args.affordance_branches,
+            seed=args.sampling_seed,
+            # Branch identity stays independent of the batch/physical slot.
+            branch_overrides=tuple(branch for branch, _ in args._recipes),
+        )
+    if getattr(args, "affordance_branches", 1) == 1:
+        return None
+    return AffordanceSamplingContext(
+        count=args.affordance_branches,
+        seed=args.sampling_seed,
+        attempt_id=args.sampling_attempt,
+    )
+
+
+def log_affordance_branch_diagnostics(plan: ActionPlan) -> None:
+    """Log each named candidate selection or contact roll before replay.
+
+    Args:
+        plan: Action plan containing Affordance sampling metadata.
+    """
+    metadata = plan.diagnostics.metadata.get("affordance_sample", {})
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    samples = {"contact": metadata} if "roll" in metadata else metadata
+    for name, sample in samples.items():
+        if not isinstance(sample, dict):
+            continue
+        candidate_ids = sample.get("candidate_ids")
+        reused = sample.get("reused")
+        rolls = sample.get("roll")
+        for row, success in enumerate(plan.plan_success.tolist()):
+            if isinstance(candidate_ids, list) and isinstance(reused, list):
+                detail = f"candidate_id={candidate_ids[row]}, reused={reused[row]}"
+            elif isinstance(rolls, list):
+                detail = f"roll={rolls[row]:.6f} rad"
+            else:
+                continue
+            control_parts = sample.get("control_parts")
+            if isinstance(control_parts, list):
+                detail += f", control_part={control_parts[row]}"
+            logger.log_info(
+                f"Affordance branch {row} ({sample.get('key', name)}): "
+                f"success={success}, {detail}."
+            )
+
+
+_JUNCTION_DUPLICATE_TOLERANCE = 1.0e-5
+
+
+def _drop_action_junctions(
+    positions: torch.Tensor, intervals: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Remove the zero-duration sample each compiled action repeats at a join.
+
+    Concatenating actions leaves the previous action's final waypoint and the
+    next action's first waypoint at the same instant. That duplicate is not a
+    timed waypoint, and leaving it in would make the reference look
+    non-uniformly timed. A join that is not a duplicate is real motion in zero
+    time, so it is refused rather than discarded.
+
+    Args:
+        positions: Reference joint positions with shape ``(N, dof)``.
+        intervals: Arrival intervals with shape ``(N,)`` and ``intervals[0] == 0``.
+
+    Returns:
+        The compacted positions and intervals, plus a map from an original
+        sample index to its compacted index, with one extra trailing entry.
+
+    Raises:
+        ValueError: If a zero-duration sample moves the robot.
+    """
+    keep = torch.ones(positions.shape[0], dtype=torch.bool)
+    for index in range(1, positions.shape[0]):
+        if float(intervals[index]) != 0:
+            continue
+        drift = float((positions[index] - positions[index - 1]).abs().max())
+        if drift > _JUNCTION_DUPLICATE_TOLERANCE:
+            raise ValueError(
+                f"Sample {index} advances {drift:.3e} rad in zero time; the "
+                "reference cannot be placed on a command clock."
+            )
+        keep[index] = False
+    counts = torch.cumsum(keep.long(), 0)
+    remap = torch.cat((torch.zeros(1, dtype=torch.long), counts))
+    return positions[keep], intervals[keep], remap
+
+
+def parse_trajectory_variant_arguments(
+    parser: argparse.ArgumentParser,
+) -> argparse.Namespace:
+    """Parse a variant tutorial's arguments and map variants to environments.
+
+    Args:
+        parser: Tutorial parser with the ``trajectory_variants`` feature enabled.
+
+    Returns:
+        Parsed arguments with matching variant and environment counts.
+    """
+    args = parser.parse_args()
+    if args.trajectory_variants is None:
+        args.trajectory_variants = args.num_envs
+    if args.trajectory_variants < 1:
+        parser.error("--trajectory_variants must be positive.")
+    if args.variant_seed is not None and args.variant_seed < 0:
+        parser.error("--variant_seed must be non-negative.")
+    if args.via_count is not None and args.via_count < 1:
+        parser.error("--via_count must be positive.")
+    if args.joint_offset_scale is not None and not 0 < args.joint_offset_scale <= 1:
+        parser.error("--joint_offset_scale must lie in (0, 1].")
+    if args.dedup_tolerance is not None and not 0 < args.dedup_tolerance <= 1:
+        parser.error("--dedup_tolerance must lie in (0, 1].")
+    # Variants are generated from one reference, so their count is independent
+    # of how many of them a run replays in parallel. Only default the two to
+    # each other; an explicit --trajectory_variants may exceed --num_envs, and
+    # the extra variants are then plotted without being executed.
+    return args
+
+
+def create_trajectory_variant_cfg(
+    args: argparse.Namespace,
+) -> "TrajectoryAugmentationCfg | None":
+    """Return a variant override configuration, or ``None`` for the default.
+
+    Asking for a number of variants needs no configuration; the expansion
+    helpers enable every implemented factor the inputs support. Only an
+    advanced flag rebuilds the policy.
+
+    Args:
+        args: Validated arguments from :func:`parse_trajectory_variant_arguments`.
+
+    Returns:
+        A decoded configuration, or ``None`` when no override was requested.
+    """
+    from embodichain.lab.sim.motion.expansion import (
+        TrajectoryAugmentationCfg,
+        default_variant_factors,
+    )
+
+    overrides = (
+        args.variant_seed,
+        args.spatial_methods,
+        args.via_count,
+        args.joint_offset_scale,
+        args.duration_scales,
+        args.dedup_tolerance,
+    )
+    if not args.no_redundancy and all(value is None for value in overrides):
+        return None
+    policy = default_variant_factors(
+        seed=args.variant_seed or 0, redundancy=not args.no_redundancy
+    )
+    settings = policy.to_dict()
+    spatial = settings["factors"]["spatial"]
+    if args.spatial_methods is not None:
+        spatial["method"] = list(args.spatial_methods)
+    if args.via_count is not None:
+        spatial["via_count"] = args.via_count
+    if args.joint_offset_scale is not None:
+        spatial["joint_offset_scale"] = args.joint_offset_scale
+    if args.duration_scales is not None:
+        settings["factors"]["timing"]["duration_scales"] = list(args.duration_scales)
+    if args.dedup_tolerance is not None:
+        settings["coverage"]["joint_dedup_normalized_tol"] = args.dedup_tolerance
+    return TrajectoryAugmentationCfg.from_mapping(settings)
+
+
+def _variant_arm_columns(robot: Robot, control_part: str) -> tuple[int, ...]:
+    """Return the arm's joint columns in solver-Jacobian order.
+
+    Declaring the controlled joints in solver order means a supplied Jacobian's
+    columns already line up, so no permutation is needed anywhere else.
+    """
+    solver = robot.get_solver(control_part)
+    solver_names = list(getattr(solver, "joint_names", None) or ())
+    if not solver_names:
+        raise RuntimeError(
+            f"Control part {control_part!r} needs a solver that declares its "
+            "joint names before posture variants can be planned."
+        )
+    robot_names = list(robot.joint_names)
+    return tuple(robot_names.index(name) for name in solver_names)
+
+
+def expand_tutorial_trajectory_variants(
+    compiled,
+    robot: Robot,
+    args: argparse.Namespace,
+    *,
+    phase_kinds: Sequence[Mapping[str, str]],
+    retimable: Sequence[Collection[str]] = (),
+    control_part: str = "arm",
+):
+    """Expand one compiled action into a distinct variant per simulation row.
+
+    Phase boundaries come from the action's own named segments, so a tutorial
+    declares only which of them may move. Contact segments stay locked, which
+    is what keeps the planned waypoints exact.
+
+    Args:
+        compiled: Compiled trajectory whose segments annotate the reference.
+        robot: Tutorial robot supplying joint limits and the arm solver.
+        args: Validated variant arguments.
+        phase_kinds: One mapping per compiled action, naming each segment
+            ``free``, ``contact`` or ``hold``.
+        retimable: Free segment names per compiled action that may also change
+            duration. Restrict this when the tutorial triggers an event at a
+            fixed step index.
+        control_part: Control part whose joints the operators may move. The
+            configuration's ``ik.task_rows`` selects which Jacobian rows the
+            posture factor holds.
+
+    Returns:
+        The accepted variants, their factors and the rejection accounting.
+    """
+    from embodichain.lab.sim.motion.expansion import (
+        SceneCase,
+        TrajectoryPhase,
+        TrajectoryTemplate,
+        expand_trajectory_variants,
+    )
+
+    path_operators = ("joint_residual", "via_points", "nullspace_residual")
+    arm_columns = _variant_arm_columns(robot, control_part)
+    positions = compiled.trajectory.positions[0]
+    intervals = compiled.trajectory.dt[0].clone()
+    intervals[0] = 0
+    positions, intervals, remap = _drop_action_junctions(positions, intervals)
+    spacing = intervals[1:]
+    control_dt = float(spacing[0]) if spacing.numel() else 0.0
+    if control_dt <= 0 or bool((spacing - control_dt).abs().max() > 1e-6):
+        raise ValueError(
+            "Variant retiming needs a reference on a fixed command clock; this "
+            "action produced non-uniform arrival intervals."
+        )
+    phases = []
+    for index, kinds in enumerate(phase_kinds):
+        allowed = set(retimable[index]) if index < len(retimable) else set()
+        for name, kind in kinds.items():
+            segment = compiled.segment(index, name)
+            start, stop = int(remap[segment.start]), int(remap[segment.stop])
+            operators: tuple[str, ...] = ()
+            if kind == "free":
+                operators = path_operators + (("retime",) if name in allowed else ())
+            phases.append(
+                TrajectoryPhase(f"{index}_{name}", start, stop, kind, operators)
+            )
+    template = TrajectoryTemplate(
+        source_id="atomic_action_tutorial",
+        source_revision=f"waypoints{positions.shape[0]}",
+        template_id="tutorial_reference",
+        joint_names=tuple(robot.joint_names),
+        positions=positions,
+        dt=intervals,
+        phases=tuple(phases),
+        allowed_operators=path_operators + ("retime",),
+        controlled_joint_indices=arm_columns,
+    )
+    cfg = create_trajectory_variant_cfg(args)
+    jacobians = None
+    if cfg is None or cfg.factors.ik.enabled:
+        # Supply every spatial row; the configuration selects the constrained
+        # ones, so the tutorial does not duplicate that decision.
+        jacobians = robot.get_solver(control_part).get_jacobian(
+            positions[:, list(arm_columns)]
+        )
+    return expand_trajectory_variants(
+        template,
+        cfg=cfg,
+        case=SceneCase(
+            scene_case_id="atomic_action_tutorial",
+            initial_state_id="tutorial_initial_state",
+            scene_signature=str(robot.uid),
+            task_id=control_part,
+            robot_profile_id=getattr(args, "robot", "ur5"),
+        ),
+        count=args.trajectory_variants,
+        joint_limits=robot.get_qpos_limits()[0],
+        control_dt=control_dt,
+        task_jacobians=jacobians,
+    )
+
+
+def log_trajectory_variant_diagnostics(result, requested: int) -> None:
+    """Log each accepted variant's factors and every rejected proposal.
+
+    Args:
+        result: Accepted variants and their rejection accounting.
+        requested: Number of simulation rows that need a trajectory.
+    """
+    batch = result.candidates
+    for row, variant in enumerate(result.variants):
+        logger.log_info(
+            f"Trajectory variant {row}: operator={variant.spatial_operator}, "
+            f"duration_scale={variant.duration_scale}, "
+            f"profile={variant.timing_profile}, "
+            f"samples={int(batch.valid_length[row])}, "
+            f"family={batch.identities[row].geometry_family_id[:16]}."
+        )
+    if result.rejected:
+        logger.log_info(
+            f"Rejected {sum(result.rejected.values())} of {result.attempted} "
+            f"proposals: {dict(sorted(result.rejected.items()))}."
+        )
+    if len(result.variants) < requested:
+        logger.log_warning(
+            f"Only {len(result.variants)} distinct variants survived for "
+            f"{requested} rows; the remaining rows reuse earlier variants."
+        )
+
+
+def trajectory_variant_rows(result, num_envs: int) -> TimedTrajectory:
+    """Assign one accepted variant per simulation row, reusing when short.
+
+    Arrival intervals are preserved so replay spends the planned number of
+    physics steps on each waypoint instead of a fixed default.
+
+    Args:
+        result: Accepted variants padded to a common horizon.
+        num_envs: Number of simulation rows to fill.
+
+    Returns:
+        A timed trajectory with one row per environment.
+    """
+    batch = result.candidates
+    selection = [index % batch.positions.shape[0] for index in range(num_envs)]
+    positions = batch.positions[selection].clone()
+    return TimedTrajectory(
+        positions=positions,
+        velocities=None,
+        accelerations=None,
+        dt=batch.dt[selection].clone(),
+        env_ids=torch.arange(num_envs, dtype=torch.long, device=positions.device),
+    )
+
+
+VARIANT_PLOT_DPI = 130
+
+
+def _contact_phase_drift(result) -> float:
+    """Return the largest contact-phase deviation of any variant.
+
+    Contact phases are never retimed and never touched by an operator, so this
+    should be zero. Reporting it turns the plot's visual claim into a number.
+
+    Args:
+        result: Accepted variants sharing one reference.
+
+    Returns:
+        The maximum absolute joint deviation, in radians.
+    """
+    batch = result.candidates
+    reference = {phase.phase_id: phase for phase in batch.phases[0]}
+    worst = 0.0
+    for row in range(1, len(result.variants)):
+        for phase in batch.phases[row]:
+            source = reference.get(phase.phase_id)
+            if source is None or phase.kind == "free":
+                continue
+            variant_window = batch.positions[row, phase.start_index : phase.stop_index]
+            reference_window = batch.positions[
+                0, source.start_index : source.stop_index
+            ]
+            if variant_window.shape != reference_window.shape:
+                continue
+            worst = max(worst, float((variant_window - reference_window).abs().max()))
+    return worst
+
+
+def save_variant_joint_plot(result, robot: Robot, path: str | pathlib.Path) -> None:
+    """Plot every variant's controlled joints against time.
+
+    Curves meet inside the shaded contact windows and separate between them,
+    which is the claim variant expansion makes: the planned waypoints stay put
+    while the free motion differs.
+
+    Args:
+        result: Accepted variants from :func:`expand_tutorial_trajectory_variants`.
+        robot: Robot supplying joint names for the subplot titles.
+        path: Destination ``.png`` path.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    batch = result.candidates
+    joint_names = list(robot.joint_names)
+    arm = [i for i, name in enumerate(joint_names) if "gripper" not in name]
+    rows = (len(arm) + 2) // 3
+    figure, axes = plt.subplots(rows, 3, figsize=(13, 3.1 * rows), sharex=True)
+    flat = axes.flatten()
+    drift = _contact_phase_drift(result)
+    styles, groups = _variant_styles(result)
+    for position, joint in enumerate(arm):
+        axis = flat[position]
+        for row in range(len(result.variants)):
+            length = int(batch.valid_length[row])
+            time = batch.dt[row, :length].cumsum(0).cpu()
+            values = batch.positions[row, :length, joint].cpu()
+            # Only the first subplot contributes to the shared legend.
+            style = dict(styles[row])
+            if position:
+                style.pop("label", None)
+            axis.plot(time, values, **style)
+        # Shade every row's own contact window. Retimed rows reach theirs
+        # later, so shading only the reference would misplace the bands.
+        shaded = range(min(len(result.variants), VARIANT_CROWD_THRESHOLD))
+        for row in shaded:
+            elapsed = batch.dt[row, : int(batch.valid_length[row])].cumsum(0).cpu()
+            for phase in batch.phases[row]:
+                if phase.kind == "free":
+                    continue
+                axis.axvspan(
+                    float(elapsed[phase.start_index]),
+                    float(elapsed[phase.stop_index - 1]),
+                    color="0.85",
+                    alpha=0.45,
+                    linewidth=0,
+                    zorder=1,
+                )
+        axis.set_title(joint_names[joint], fontsize=10)
+        axis.grid(alpha=0.3)
+    for spare in range(len(arm), len(flat)):
+        flat[spare].axis("off")
+    for axis in flat[-3:]:
+        axis.set_xlabel("time (s)")
+    flat[0].set_ylabel("joint position (rad)")
+    if groups is None:
+        handles, labels = flat[0].get_legend_handles_labels()
+        figure.legend(
+            handles, labels, loc="lower center", ncol=3, frameon=False, fontsize=9
+        )
+    else:
+        # Two legends, because a crowded plot encodes the geometry operator in
+        # the colour and the timing signature in the dash pattern.
+        for index, (title, anchor) in enumerate(
+            (("path geometry", 0.27), ("timing", 0.73))
+        ):
+            handles, labels = _variant_legend_handles(
+                groups["geometry" if index == 0 else "timing"]
+            )
+            figure.legend(
+                handles,
+                labels,
+                title=title,
+                loc="lower center",
+                bbox_to_anchor=(anchor, 0.0),
+                ncol=2,
+                frameon=False,
+                fontsize=9,
+                title_fontsize=9,
+            )
+    figure.suptitle(
+        "Trajectory variants: curves separate between waypoints and rejoin inside "
+        f"the shaded contact phases (max contact deviation {drift:.2e} rad)",
+        fontsize=11,
+    )
+    figure.tight_layout(rect=(0, 0.1, 1, 0.97))
+    destination = pathlib.Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination, dpi=VARIANT_PLOT_DPI)
+    plt.close(figure)
+    logger.log_info(f"Saved variant joint plot to {destination}.")
+
+
+def _variant_tool_paths(robot: Robot, result, control_part: str) -> list:
+    """Return each variant's tool-centre path in the arena frame."""
+    solver = robot.get_solver(control_part)
+    columns = list(_variant_arm_columns(robot, control_part))
+    batch = result.candidates
+    paths = []
+    for row in range(len(result.variants)):
+        length = int(batch.valid_length[row])
+        arm_qpos = batch.positions[row, :length][:, columns].to(robot.device)
+        paths.append(solver.get_fk(arm_qpos)[:, :3, 3].detach().cpu())
+    return paths
+
+
+VARIANT_CROWD_THRESHOLD = 12
+OPERATOR_COLOURS = {
+    "none": "black",
+    "joint_residual": "tab:blue",
+    "via_points": "tab:orange",
+    "nullspace_residual": "tab:green",
+}
+TIMING_DASHES = (
+    (5, 2),
+    (1, 1.4),
+    (6, 2, 1, 2),
+    (3, 1, 1, 1, 1, 1),
+    (2, 2),
+    (9, 2, 1, 2),
+    (1, 3),
+)
+"""Dash patterns that distinguish timing variants once the legend is grouped."""
+
+
+def _timing_linestyles(count: int) -> list:
+    """Return ``count`` visually distinct line styles.
+
+    Reusing a pattern would make two timing signatures look alike, which is
+    what the grouped legend exists to avoid, so patterns past the table are
+    stretched copies rather than repeats.
+
+    Args:
+        count: Number of distinct timing signatures to distinguish.
+
+    Returns:
+        One line style per signature, the first of them a plain line.
+    """
+    styles: list = ["-"]
+    for index in range(max(count - 1, 0)):
+        base = TIMING_DASHES[index % len(TIMING_DASHES)]
+        stretch = 1.0 + 0.6 * (index // len(TIMING_DASHES))
+        styles.append((0, tuple(round(value * stretch, 2) for value in base)))
+    return styles[:count]
+
+
+def _timing_key(variant) -> str:
+    """Return a variant's timing signature, used as a legend entry."""
+    return f"{variant.timing_profile} x{variant.duration_scale:g}"
+
+
+def _variant_styles(result) -> tuple[list, dict | None]:
+    """Return per-variant plot keywords, grouping the legend when crowded.
+
+    Naming a hundred variants individually produces an unreadable legend, so
+    past a threshold the curves carry their provenance in two channels
+    instead: colour names the spatial operator and the dash pattern names the
+    timing signature. Every accepted variant therefore stays identifiable even
+    when two of them share a geometry and differ only in their timing.
+
+    Args:
+        result: Accepted variants.
+
+    Returns:
+        One keyword mapping per variant, and the legend groups to draw when
+        grouping was applied, or ``None`` when every variant is named directly.
+    """
+    from embodichain.lab.sim.motion.expansion import NOMINAL_OPERATOR
+
+    if len(result.variants) <= VARIANT_CROWD_THRESHOLD:
+        styles = [
+            {
+                "color": "black" if variant.is_nominal else None,
+                "linewidth": 2.4 if variant.is_nominal else 1.3,
+                "linestyle": "--" if variant.is_nominal else "-",
+                "zorder": 3 if variant.is_nominal else 2,
+                "label": (
+                    "reference"
+                    if variant.is_nominal
+                    else f"{variant.spatial_operator} {_timing_key(variant)}"
+                ),
+            }
+            for variant in result.variants
+        ]
+        return styles, None
+
+    timings = sorted({_timing_key(variant) for variant in result.variants})
+    dashes = dict(zip(timings, _timing_linestyles(len(timings))))
+    operators = sorted({variant.spatial_operator for variant in result.variants})
+    styles = []
+    for variant in result.variants:
+        nominal = variant.is_nominal
+        styles.append(
+            {
+                "color": OPERATOR_COLOURS.get(variant.spatial_operator),
+                "linewidth": 2.6 if nominal else 0.9,
+                "linestyle": "-" if nominal else dashes[_timing_key(variant)],
+                "alpha": 1.0 if nominal else 0.35,
+                "zorder": 3 if nominal else 2,
+            }
+        )
+    groups = {
+        "geometry": [
+            ("reference", {"color": "black", "linewidth": 2.6}),
+            *(
+                (name, {"color": OPERATOR_COLOURS.get(name), "linewidth": 1.8})
+                for name in operators
+                if name != NOMINAL_OPERATOR
+            ),
+        ],
+        "timing": [
+            (key, {"color": "0.35", "linewidth": 1.4, "linestyle": dashes[key]})
+            for key in timings
+        ],
+    }
+    return styles, groups
+
+
+def _variant_legend_handles(entries: list) -> tuple[list, list]:
+    """Build proxy lines for one grouped legend column."""
+    from matplotlib.lines import Line2D
+
+    handles = [Line2D([], [], **style) for _, style in entries]
+    return handles, [label for label, _ in entries]
+
+
+def _waypoint_tool_positions(result, paths: list) -> torch.Tensor:
+    """Return each variant's tool position at every annotated phase boundary.
+
+    Phase endpoints are the waypoints the operators must leave alone, so
+    stacking them across variants turns "the waypoints did not move" into
+    something measurable.
+
+    Args:
+        result: Accepted variants sharing one phase structure.
+        paths: Per-variant tool paths in the arena frame.
+
+    Returns:
+        Positions with shape ``(rows, boundaries, 3)``.
+    """
+    batch = result.candidates
+    stacked = []
+    for row in range(len(result.variants)):
+        indices: list[int] = []
+        for phase in batch.phases[row]:
+            indices.extend((phase.start_index, phase.stop_index - 1))
+        stacked.append(paths[row][indices])
+    return torch.stack(stacked)
+
+
+def _robot_link_points(robot: Robot, control_part: str) -> torch.Tensor:
+    """Return the arm's link origins at the robot's current configuration.
+
+    The chain continues past the control part into the tool so the drawing
+    reaches the point the paths start from. Fingers branch off it and would
+    fold the polyline back on itself, so they are left out.
+    """
+    part = list(robot.get_link_names(control_part) or [])
+    tail = [
+        name
+        for name in (robot.link_names or [])
+        if name not in part and "finger" not in name
+    ]
+    names = part + tail
+    points: list[torch.Tensor] = []
+    for name in names:
+        try:
+            pose = robot.get_link_pose(name, to_matrix=True)
+        except Exception:  # A control part may name a frame without a body.
+            continue
+        points.append(pose[0, :3, 3].detach().cpu())
+    return torch.stack(points)
+
+
+def _draw_ground_box(axis, centre: torch.Tensor, size: Sequence[float]) -> None:
+    """Draw a solid box centred on ``centre`` with full extents ``size``."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    half = [0.5 * float(value) for value in size]
+    lower = [float(centre[index]) - half[index] for index in range(3)]
+    upper = [float(centre[index]) + half[index] for index in range(3)]
+    x0, y0, z0 = lower
+    x1, y1, z1 = upper
+    faces = [
+        [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)],
+        [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)],
+        [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)],
+        [(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)],
+        [(x0, y0, z0), (x0, y1, z0), (x0, y1, z1), (x0, y0, z1)],
+        [(x1, y0, z0), (x1, y1, z0), (x1, y1, z1), (x1, y0, z1)],
+    ]
+    axis.add_collection3d(
+        Poly3DCollection(
+            faces, facecolor="0.55", edgecolor="0.25", alpha=0.75, linewidths=0.6
+        )
+    )
+
+
+def save_tool_path_view(
+    robot: Robot,
+    result,
+    path: str | pathlib.Path,
+    *,
+    target_object: RigidObject | None = None,
+    object_size: Sequence[float] = (0.05, 0.05, 0.05),
+    control_part: str = "arm",
+) -> None:
+    """Draw every variant's tool path beside the arm's starting configuration.
+
+    Stars mark the annotated waypoints, and every variant draws its own, so a
+    waypoint an operator had moved would show up as a scattered cluster rather
+    than a single star.
+
+    Args:
+        robot: Robot whose arm solver supplies forward kinematics. Its current
+            configuration is drawn, so call this before replaying anything.
+        result: Accepted variants from :func:`expand_tutorial_trajectory_variants`.
+        path: Destination ``.png`` path.
+        target_object: Optional manipulated object, drawn at its current pose.
+        object_size: Full extents of that object, in metres.
+        control_part: Control part whose tool path is drawn.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    paths = _variant_tool_paths(robot, result, control_part)
+    batch = result.candidates
+    lowest = min(float(tool[:, 2].min()) for tool in paths)
+    waypoints = _waypoint_tool_positions(result, paths)
+    spread = float(
+        (waypoints.max(dim=0).values - waypoints.min(dim=0).values).abs().max()
+    )
+    links = _robot_link_points(robot, control_part)
+    centre = (
+        None
+        if target_object is None
+        else target_object.get_local_pose(to_matrix=True)[0, :3, 3].detach().cpu()
+    )
+
+    figure = plt.figure(figsize=(9.5, 7.4))
+    space = figure.add_subplot(1, 1, 1, projection="3d")
+
+    space.plot(
+        links[:, 0],
+        links[:, 1],
+        links[:, 2],
+        color="0.25",
+        linewidth=4.0,
+        marker="o",
+        markersize=6,
+        markerfacecolor="0.85",
+        solid_capstyle="round",
+        label="arm at its starting configuration",
+        zorder=1,
+    )
+    if centre is not None:
+        _draw_ground_box(space, centre, object_size)
+
+    styles, groups = _variant_styles(result)
+    for row, variant in enumerate(result.variants):
+        tool = paths[row]
+        space.plot(tool[:, 0], tool[:, 1], tool[:, 2], **styles[row])
+        marks = waypoints[row]
+        space.plot(
+            marks[:, 0],
+            marks[:, 1],
+            marks[:, 2],
+            color="0.15",
+            marker="*",
+            markersize=14,
+            markerfacecolor="gold",
+            markeredgecolor="0.15",
+            markeredgewidth=0.7,
+            linestyle="none",
+            zorder=6,
+            label="waypoints" if row == 0 else None,
+        )
+
+    stacked = torch.cat(paths + [links])
+    bounds = torch.stack((stacked.min(dim=0).values, stacked.max(dim=0).values))
+    if centre is not None:
+        extent = torch.tensor(object_size, dtype=bounds.dtype) * 0.5
+        bounds[0] = torch.minimum(bounds[0], centre - extent)
+        bounds[1] = torch.maximum(bounds[1], centre + extent)
+    margin = 0.06
+    space.set_xlim(float(bounds[0, 0]) - margin, float(bounds[1, 0]) + margin)
+    space.set_ylim(float(bounds[0, 1]) - margin, float(bounds[1, 1]) + margin)
+    space.set_zlim(0.0, float(bounds[1, 2]) + margin)
+    # Keep the three axes to scale so the arm and the paths are comparable.
+    space.set_box_aspect(
+        tuple(
+            max(float(bounds[1, index] - bounds[0, index]), 0.15) for index in range(3)
+        )
+    )
+    space.locator_params(nbins=5)
+    space.view_init(elev=24, azim=-70)
+    space.set_xlabel("x (m)")
+    space.set_ylabel("y (m)")
+    space.set_zlabel("z (m)")
+    handles, labels = space.get_legend_handles_labels()
+    if groups is not None:
+        for entries in (groups["geometry"], groups["timing"]):
+            extra, names = _variant_legend_handles(entries)
+            handles.extend(extra)
+            labels.extend(names)
+    space.legend(handles, labels, loc="upper left", fontsize=8, framealpha=0.85)
+    space.set_title(
+        "Tool paths of every trajectory variant\n"
+        f"stars are the annotated waypoints and spread by {spread:.1e} m; "
+        f"the lowest tool centre stays {lowest * 100:.1f} cm above the ground",
+        fontsize=10,
+    )
+    figure.tight_layout()
+    destination = pathlib.Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(destination, dpi=VARIANT_PLOT_DPI)
+    plt.close(figure)
+    logger.log_info(f"Saved tool-path view to {destination}.")
+
+
+def _tutorial_physics_cfg(
+    backend: Literal["default", "newton"],
+) -> PhysicsBackendCfg:
+    """Build the shared physics configuration for atomic-action tutorials.
+
+    Newton tutorials intentionally use MuJoCo Warp's native collision path.
+    It generates contacts inside every solver substep, so an external Newton
+    collision pipeline would be unused and would only allocate unnecessary
+    contact buffers.
+    """
+    physics_cfg = physics_cfg_for_backend(backend)
+    if isinstance(physics_cfg, NewtonPhysicsCfg):
+        # Keep 0.5 ms internal solver steps for stable robot contacts. Newton's
+        # tuning guide recommends reducing the solver interval for stiff
+        # contacts and fast-changing manipulator loads. DexSim sizes
+        # contact/constraint buffers from the finalized scene, including the
+        # contact dimensions authored on gripper and object surfaces.
+        # MultiCCD retains up to four contacts per gripper-mesh/object pair,
+        # which prevents a marginal two-finger grasp from sliding away.
+        physics_cfg.num_substeps = 20
+        physics_cfg.collision_cfg = None
+        physics_cfg.solver_cfg = {
+            "solver_type": "mujoco_warp",
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1_000.0,
+            "use_mujoco_contacts": True,
+            "enable_multiccd": True,
+        }
+    return physics_cfg
+
+
+def create_tutorial_simulation(
+    args: argparse.Namespace,
+    *,
+    arena_space: float = 2.5,
+    sun_direction: Sequence[float] = DEFAULT_TUTORIAL_SUN_DIRECTION,
+) -> SimulationManager:
+    """Create the shared simulation setup used by atomic-action tutorials.
+
+    Args:
+        args: Parsed launcher arguments containing environment count, device,
+            and renderer selections.
+        arena_space: Spacing between parallel simulation arenas in meters.
+        sun_direction: Direction of the single global sun light. The vector
+            points from the light toward the scene.
+
+    Returns:
+        A simulation manager with the tutorial key light configured.
+    """
+    if getattr(args, "arena_space", None) is not None and getattr(
+        args, "_configured_run", False
+    ):
+        arena_space = args.arena_space
+    sim = SimulationManager(
+        SimulationManagerCfg(
+            width=VIEWER_WIDTH,
+            height=VIEWER_HEIGHT,
+            headless=True,
+            num_envs=args.num_envs,
+            device=args.device,
+            gpu_id=getattr(args, "gpu_id", 0),
+            physics_cfg=_tutorial_physics_cfg(getattr(args, "physics", "default")),
+            render_cfg=RenderCfg(renderer=args.renderer),
+            physics_dt=1.0 / 100.0,
+            arena_space=arena_space,
+            visualization=visualization_cfg_from_args(args),
+        )
+    )
+    sim.add_light(
+        cfg=LightCfg(
+            uid="main_light",
+            light_type="sun",
+            color=(0.6, 0.6, 0.6),
+            intensity=DEFAULT_TUTORIAL_SUN_INTENSITY,
+            direction=tuple(sun_direction),
+        )
+    )
+    return sim
+
+
+def run_tutorial(main: Callable[[], None]) -> None:
+    """Run a tutorial entry point and release its simulation at top level.
+
+    ``SimulationManager.destroy`` defers native cleanup because action and
+    planner locals may still retain wrapped C++ objects. Calling it only after
+    ``main`` has unwound makes the cleanup deterministic and avoids native
+    teardown during Python interpreter finalization.
+
+    Args:
+        main: Zero-argument tutorial entry point.
+    """
+    interrupted = False
+    try:
+        try:
+            main()
+        except KeyboardInterrupt:
+            # Handle Ctrl+C before native cleanup.  An active traceback keeps
+            # main() locals (including borrowed C++ material wrappers) alive;
+            # destroying World first would make their later destructors unsafe.
+            interrupted = True
+            logger.log_info("Tutorial interrupted; shutting down cleanly.")
+    finally:
+        if SimulationManager.is_instantiated():
+            sim = SimulationManager.get_instance()
+            if not getattr(sim, "_is_constructed", False):
+                SimulationManager.reset(getattr(sim, "instance_id", 0))
+            else:
+                if sim.is_window_recording():
+                    sim.stop_window_record()
+                sim.wait_window_record_saves()
+                sim.destroy(exit_process=False)
+                SimulationManager.flush_cleanup_queue()
+
+    if interrupted:
+        raise SystemExit(130)
+
+
+def add_ur5_gripper_robot(
+    sim: SimulationManager,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+) -> Robot:
+    """Add the standard UR5 plus PGI gripper tutorial robot.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        init_pos: Root position of the robot in its arena.
+
+    Returns:
+        The added robot instance.
+    """
+    robot_cfg = create_ur5_gripper_robot_cfg(
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        tcp_z=tcp_z,
+    )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
+
+
+def add_tutorial_robot(
+    sim: SimulationManager,
+    robot_type: TutorialRobot,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    **kwargs,
+) -> Robot:
+    """Add a selected tutorial robot with the shared PGI gripper.
+
+    Args:
+        sim: Simulation manager that owns the robot.
+        robot_type: Tutorial robot family to construct.
+        init_pos: Root position of the robot in its arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        The added robot instance.
+
+    Raises:
+        ValueError: If ``robot_type`` is not supported.
+    """
+    robot_cfg = create_tutorial_robot_cfg(
+        robot_type,
+        init_pos=init_pos,
+        init_qpos=init_qpos,
+        **kwargs,
+    )
+    configure_newton_gripper_contacts(sim, robot_cfg)
+    return sim.add_robot(cfg=robot_cfg)
+
+
+def create_tutorial_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a selected non-neural motion generator for a tutorial robot.
+
+    The selector intentionally mirrors the planner types that are usable from
+    the atomic-action tutorials. ``NeuralPlanner`` is omitted because it needs
+    a model-specific ONNX configuration and is not a drop-in backend for these
+    examples.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator for ``planner``.
+
+    Raises:
+        ValueError: If ``planner`` is not one of the supported tutorial
+            backends.
+    """
+    planner_cfg_types = {
+        "toppra": ToppraPlannerCfg,
+        "trapezoidal": TrapezoidalPlannerCfg,
+        "curobo": CuroboPlannerCfg,
+    }
+    if planner not in TUTORIAL_PLANNERS:
+        raise ValueError(
+            f"Unsupported tutorial planner {planner!r}; "
+            f"choose one of {TUTORIAL_PLANNERS}."
+        )
+    planner_cfg = planner_cfg_types[planner](robot_uid=robot.uid)
+    return MotionGenerator(cfg=MotionGenCfg(planner_cfg=planner_cfg))
+
+
+def create_toppra_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "toppra",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to TOPPRA.
+
+    ``planner`` keeps this historical helper compatible while allowing a
+    tutorial to opt into the shared command-line selector.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator.
+    """
+    return create_tutorial_motion_generator(robot, planner)
+
+
+def create_tutorial_rigid_body_physics(
+    *,
+    mass: float | None = None,
+    static_friction: float | None = None,
+    dynamic_friction: float | None = None,
+    restitution: float | None = None,
+    linear_damping: float | None = None,
+    angular_damping: float | None = None,
+    max_depenetration_velocity: float | None = None,
+    enable_ccd: bool | None = None,
+    min_position_iters: int | None = None,
+    min_velocity_iters: int | None = None,
+    contact_offset: float | None = None,
+    rest_offset: float | None = None,
+    newton_contact: bool = False,
+) -> RigidBodyPhysicsCfg:
+    """Create portable rigid-body physics for an atomic-action tutorial.
+
+    Material and mass values apply to both physics backends. The remaining
+    values are retained in the Default-backend configuration group; Newton
+    safely ignores those properties because it has no equivalent controls.
+    Set ``newton_contact`` only for a manipulation contact surface in a Newton
+    scene to use the task-scoped stiffness, damping, and torsional/rolling
+    friction profile used by the drawer tutorial.
+
+    Args:
+        newton_contact: Whether to add the Newton-only contact stiffness and
+            damping and torsional/rolling friction used on grasped or directly
+            manipulated objects.
+
+    Returns:
+        Grouped physics configuration accepted by both tutorial backends.
+    """
+    rigid_values = (
+        linear_damping,
+        angular_damping,
+        max_depenetration_velocity,
+        enable_ccd,
+        min_position_iters,
+        min_velocity_iters,
+    )
+    collision_values = (contact_offset, rest_offset)
+    material_values = (static_friction, dynamic_friction, restitution)
+    return RigidBodyPhysicsCfg(
+        mass_props=MassPropertiesCfg(mass=mass) if mass is not None else None,
+        rigid_props=(
+            DefaultRigidBodyPropertiesCfg(
+                linear_damping=linear_damping,
+                angular_damping=angular_damping,
+                max_depenetration_velocity=max_depenetration_velocity,
+                enable_ccd=enable_ccd,
+                min_position_iters=min_position_iters,
+                min_velocity_iters=min_velocity_iters,
+            )
+            if any(value is not None for value in rigid_values)
+            else None
+        ),
+        collision_props=(
+            (
+                NewtonCollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                )
+                if newton_contact
+                else CollisionPropertiesCfg(
+                    contact_offset=contact_offset,
+                    rest_offset=rest_offset,
+                )
+            )
+            if newton_contact or any(value is not None for value in collision_values)
+            else None
+        ),
+        material_props=(
+            (
+                NewtonRigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
+                )
+                if newton_contact
+                else RigidBodyMaterialCfg(
+                    static_friction=static_friction,
+                    dynamic_friction=dynamic_friction,
+                    restitution=restitution,
+                )
+            )
+            if newton_contact or any(value is not None for value in material_values)
+            else None
+        ),
+    )
+
+
+def configure_newton_link_contacts(
+    sim: SimulationManager,
+    articulation_cfg: ArticulationCfg,
+    *,
+    group_name: str,
+    link_names_expr: list[str],
+) -> None:
+    """Apply the tutorial Newton contact material to selected articulation links."""
+    if not sim.is_newton_backend:
+        return
+
+    articulation_cfg.link_attrs = {
+        **(articulation_cfg.link_attrs or {}),
+        group_name: LinkPhysicsOverrideCfg(
+            link_names_expr=link_names_expr,
+            attrs=RigidBodyPhysicsCfg(
+                collision_props=NewtonCollisionPropertiesCfg(
+                    condim=NEWTON_NATIVE_CONTACT_DIMENSION,
+                ),
+                material_props=NewtonRigidBodyMaterialCfg(
+                    ke=NEWTON_GRASP_CONTACT_STIFFNESS,
+                    kd=NEWTON_GRASP_CONTACT_DAMPING,
+                    torsional_friction=NEWTON_GRASP_TORSIONAL_FRICTION,
+                    rolling_friction=NEWTON_GRASP_ROLLING_FRICTION,
+                ),
+            ),
+        ),
+    }
+
+
+def configure_newton_gripper_contacts(
+    sim: SimulationManager,
+    robot_cfg: RobotCfg,
+) -> None:
+    """Configure Newton gripper contacts and recompute their source inertia."""
+    if not sim.is_newton_backend:
+        return
+
+    configure_newton_link_contacts(
+        sim,
+        robot_cfg,
+        group_name="newton_gripper_contacts",
+        link_names_expr=[_GRIPPER_CONTACT_LINK_PATTERN],
+    )
+    robot_cfg.link_attrs["newton_gripper_contacts"].attrs.mass_props = (
+        MassPropertiesCfg(recompute_inertia=True)
+    )
+
+
+def create_trapezoidal_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "trapezoidal",
+) -> MotionGenerator:
+    """Create a tutorial motion generator, defaulting to trapezoidal timing.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct.
+
+    Returns:
+        The configured motion generator.
+    """
+    return create_tutorial_motion_generator(robot, planner)
+
+
+def create_curobo_motion_generator(
+    robot: Robot,
+    planner: TutorialPlanner = "curobo",
+    *,
+    use_cuda_graph: bool = True,
+) -> MotionGenerator:
+    """Create a cuRobo-backed motion generator for a tutorial robot.
+
+    Args:
+        robot: Robot whose trajectories will be planned.
+        planner: Planner backend to construct. The default preserves the
+            historical cuRobo helper behavior.
+        use_cuda_graph: Whether cuRobo may capture CUDA graphs. Disable this
+            when the tutorial uses Newton physics, which owns CUDA graph
+            capture on the same device.
+
+    Returns:
+        The configured motion generator.
+    """
+    if planner != "curobo":
+        return create_tutorial_motion_generator(robot, planner)
+    return MotionGenerator(
+        cfg=MotionGenCfg(
+            planner_cfg=CuroboPlannerCfg(
+                robot_uid=robot.uid,
+                use_cuda_graph=use_cuda_graph,
+            )
+        )
+    )
+
+
+def get_hand_open_close_qpos(
+    robot: Robot,
+    *,
+    hand_control_part: str = "eef",
+    close_qpos: float | Sequence[float] = DEFAULT_GRIPPER_CLOSE_QPOS,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return open and closed positions for a tutorial parallel gripper.
+
+    PGI hands use their lower position limit as the open command. A Robotiq
+    2F-140 hand is recognized from its six expanded finger/knuckle joint names;
+    its open command is zero and a scalar close magnitude is negated for the
+    three knuckle joints according to the URDF mimic directions. Supplying a
+    sequence always uses those explicit signed per-joint positions.
+
+    Args:
+        robot: Robot containing the gripper control part.
+        hand_control_part: Name of the gripper control part.
+        close_qpos: Desired scalar close magnitude or explicit per-joint closed
+            positions, clamped to joint limits.
+
+    Returns:
+        Open and closed joint-position tensors on the robot device.
+    """
+    hand_limits = robot.get_qpos_limits(name=hand_control_part)[0].to(
+        device=robot.device, dtype=torch.float32
+    )
+    hand_joint_names = tuple(robot.cfg.control_parts.get(hand_control_part, ()))
+    is_robotiq_2f_140 = len(hand_joint_names) == 6 and all(
+        re.fullmatch(ROBOTIQ_HAND_JOINT_PATTERN, joint_name)
+        for joint_name in hand_joint_names
+    )
+    if isinstance(close_qpos, Sequence) and not isinstance(close_qpos, (str, bytes)):
+        hand_close = torch.as_tensor(
+            close_qpos,
+            device=robot.device,
+            dtype=torch.float32,
+        )
+        if hand_close.shape != (hand_limits.shape[0],):
+            raise ValueError(
+                "close_qpos must contain one value per hand joint; expected "
+                f"{hand_limits.shape[0]}, got {tuple(hand_close.shape)}."
+            )
+    else:
+        hand_close = torch.full_like(hand_limits[:, 1], float(close_qpos))
+        if is_robotiq_2f_140:
+            directions = torch.tensor(
+                [
+                    -1.0 if "knuckle_joint" in joint_name else 1.0
+                    for joint_name in hand_joint_names
+                ],
+                device=robot.device,
+                dtype=torch.float32,
+            )
+            hand_close = hand_close * directions
+    hand_open = (
+        torch.zeros_like(hand_limits[:, 0]) if is_robotiq_2f_140 else hand_limits[:, 0]
+    )
+    return hand_open, torch.clamp(
+        hand_close,
+        min=hand_limits[:, 0],
+        max=hand_limits[:, 1],
+    )
+
+
+def create_antipodal_semantics(
+    obj: RigidObject,
+    *,
+    label: str,
+) -> ObjectSemantics:
+    """Describe a rigid object using target-local antipodal geometry.
+
+    Args:
+        obj: Rigid object that will be grasped.
+        label: Human-readable object category.
+    Returns:
+        Object semantics with mesh data stored only on its affordance.
+    """
+    vertices = obj.get_vertices(env_ids=[0], scale=True)[0]
+    triangles = obj.get_triangles(env_ids=[0])[0]
+    return ObjectSemantics(
+        label=label,
+        geometry={},
+        affordance=AntipodalAffordance(
+            mesh_vertices=vertices,
+            mesh_triangles=triangles,
+        ),
+        entity_id=obj.uid,
+    )
+
+
+def create_parallel_jaw_grasp_pose_generator(
+    *,
+    n_sample: int,
+    force_refresh: bool,
+    opening_margin: float = 0.03,
+) -> AntipodalGraspPoseGenerator:
+    """Create the standalone generator shared by tutorial planning paths."""
+    return AntipodalGraspPoseGenerator(
+        TUTORIAL_PARALLEL_JAW_MODEL,
+        algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
+        collision_cfg=ParallelJawGraspCollisionCfg(
+            opening_margin=opening_margin,
+            point_sample_density=0.012,
+            filter_ground_collision=False,
+        ),
+        annotation_cfg=GraspAnnotationCfg(
+            selection_mode="whole_mesh",
+            viser_port=11801,
+            force_refresh=force_refresh,
+        ),
+    )
+
+
+def make_top_down_eef_pose(position: torch.Tensor) -> torch.Tensor:
+    """Build the standard downward-facing TCP pose at ``position``.
+
+    Args:
+        position: Three-dimensional position for the tool center point.
+
+    Returns:
+        A homogeneous end-effector pose.
+    """
+    pose = torch.eye(4, dtype=torch.float32, device=position.device)
+    pose[:3, :3] = torch.tensor(
+        TOP_DOWN_EEF_ROTATION,
+        dtype=torch.float32,
+        device=position.device,
+    )
+    pose[:3, 3] = position
+    return pose
+
+
+def format_tensor(tensor: torch.Tensor) -> str:
+    """Format a tensor compactly for tutorial log messages.
+
+    Args:
+        tensor: Tensor to render for a human-readable log message.
+
+    Returns:
+        A rounded Python-list representation.
+    """
+    rounded = (tensor.detach().cpu() * 10000.0).round() / 10000.0
+    return str(rounded.tolist())
+
+
+def make_eef_pose_at(robot: Robot, position: torch.Tensor) -> torch.Tensor:
+    """Reuse the current TCP orientation at a requested position.
+
+    Args:
+        robot: Robot whose current arm pose supplies the orientation.
+        position: Position tensor with shape ``(3,)`` or ``(num_envs, 3)``.
+
+    Returns:
+        A single or batched homogeneous pose matching ``position``.
+    """
+    pose = robot.compute_fk(
+        qpos=robot.get_qpos(name="arm"), name="arm", to_matrix=True
+    ).clone()
+    if position.dim() == 1:
+        pose = pose[0]
+    pose[..., :3, 3] = position
+    return pose
+
+
+def initialize_pre_pick_robot_pose(
+    robot: Robot,
+    obj: RigidObject,
+    hand_open: torch.Tensor,
+    *,
+    height: float = 0.36,
+) -> None:
+    """Set a tutorial robot at a deterministic open-gripper pose above an object.
+
+    Args:
+        robot: Robot to initialize.
+        obj: Object below the pre-pick TCP pose.
+        hand_open: Open gripper joint positions.
+        height: World-Z coordinate for the pre-pick TCP pose.
+
+    Raises:
+        RuntimeError: If the pre-pick pose is unreachable.
+    """
+    position = obj.get_local_pose(to_matrix=True)[:, :3, 3].clone()
+    position[:, 2] = height
+    ik_success, arm_qpos = robot.compute_ik(
+        pose=make_eef_pose_at(robot, position),
+        joint_seed=robot.get_qpos(name="arm"),
+        name="arm",
+    )
+    if not torch.all(ik_success):
+        raise RuntimeError("Failed to initialize the robot at the pre-pick pose.")
+
+    hand_qpos = hand_open.unsqueeze(0).repeat(robot.get_qpos().shape[0], 1)
+    for target in (False, True):
+        robot.set_qpos(arm_qpos, name="arm", target=target)
+        robot.set_qpos(hand_qpos, name="eef", target=target)
+    robot.clear_dynamics()
+
+
+def prepare_tutorial_scene(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    prompt: str,
+) -> bool:
+    """Open an interactive scene and optionally wait before planning.
+
+    Args:
+        sim: Simulation manager used by the tutorial.
+        args: Parsed tutorial arguments.
+        prompt: Prompt displayed for interactive runs.
+
+    Returns:
+        Whether the caller should retain later interactive pauses.
+    """
+    wait_for_user = should_wait_for_tutorial_input(args)
+    if should_open_tutorial_window(args):
+        sim.open_window()
+    if wait_for_user:
+        input(prompt)
+    return wait_for_user
+
+
+def publish_tutorial_scene(sim: SimulationManager, args: argparse.Namespace) -> None:
+    """Immediately push the current scene to the Viser browser.
+
+    Tutorials build their scene and then run slow grasp annotation and motion
+    planning before the next :meth:`SimulationManager.update`. Without this call
+    the browser stays empty during that gap. It is a no-op unless ``--viser`` is
+    set, so callers can always invoke it right after assembling the scene.
+
+    Args:
+        sim: Simulation manager whose scene should be published.
+        args: Parsed tutorial arguments.
+    """
+    if getattr(args, "viser", False):
+        sim.capture_visualization_safely(force=True)
+
+
+def serve_tutorial_scene(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    *,
+    message: str = "Viser browser preview open. Press Ctrl+C to exit.",
+) -> bool:
+    """Keep stepping the simulation so the Viser browser stays live.
+
+    After a tutorial replays its trajectory the process would otherwise exit and
+    tear the browser scene down. When ``--viser`` is set this blocks with a
+    physics-stepping loop until the user interrupts (``Ctrl+C``); otherwise it is
+    a no-op, so callers can always invoke it just before cleanup.
+
+    Args:
+        sim: Simulation manager to keep stepping.
+        args: Parsed tutorial arguments.
+        message: Informational message logged before the keep-alive loop.
+
+    Returns:
+        Whether a keep-alive loop was run.
+    """
+    if getattr(args, "_configured_run", False):
+        return False
+    if not getattr(args, "viser", False):
+        return False
+    logger.log_info(message, color="green")
+    try:
+        while True:
+            sim.update(step=1)
+    except KeyboardInterrupt:
+        pass
+    return True
+
+
+def replay_trajectory(
+    sim: SimulationManager,
+    robot: Robot,
+    trajectory: TimedTrajectory | torch.Tensor,
+    args: argparse.Namespace,
+    *,
+    video_prefix: str,
+    hold_steps: int,
+    trajectory_sim_steps: int | None = None,
+    hold_sim_steps: int = 2,
+    joint_ids: list[int] | None = None,
+    on_trajectory_step: Callable[[int, int], None] | None = None,
+    look_at: tuple[Sequence[float], Sequence[float], Sequence[float]] | None = None,
+    record: bool = True,
+    compiled: CompiledTrajectory | None = None,
+) -> None:
+    """Replay a trajectory, optionally record it, and hold its final pose.
+
+    Args:
+        sim: Simulation manager to step and record.
+        robot: Robot receiving full-DOF trajectory positions.
+        trajectory: Timed full-robot trajectory, or a legacy position tensor
+            with shape ``(num_envs, n_steps, dof)``.
+        args: Parsed tutorial arguments controlling auto-play recording.
+        video_prefix: Output video filename prefix.
+        hold_steps: Number of final-pose simulation updates after the trajectory.
+        trajectory_sim_steps: Optional fixed physics steps per waypoint. When
+            omitted for a ``TimedTrajectory``, its arrival intervals determine
+            the synchronized physics-step count. Native Newton replays add one
+            short contact-settling hold after each hand transition. Legacy
+            tensors otherwise default to four.
+        hold_sim_steps: Physics steps for each final-pose update.
+        joint_ids: Optional joint IDs when controlling a robot subset.
+        on_trajectory_step: Optional callback run after each trajectory update.
+        look_at: Optional recorder camera pose for auto-play videos.
+        record: Whether to start auto-play recording for this replay.
+        compiled: Original Atomic plan used by the configured CLI's expansion
+            host. Standalone example calls may omit it.
+    """
+    configured = getattr(args, "_configured_run", False)
+    replay_record_path = None
+    if configured:
+        from .expansion import _augment, _save_replay
+
+        if compiled is None:
+            raise ValueError("Configured replay requires the compiled Atomic plan")
+        trajectory, records = _augment(compiled, robot, args)
+        replay_record_path = _save_replay(
+            compiled, trajectory, records, args, video_prefix
+        )
+        record = args._config["output"]["save_video"]
+        if args.hold_steps is not None:
+            hold_steps = args.hold_steps
+    if trajectory_sim_steps is not None and trajectory_sim_steps <= 0:
+        raise ValueError("trajectory_sim_steps must be greater than zero.")
+    timed = trajectory if isinstance(trajectory, TimedTrajectory) else None
+    positions = timed.positions if timed is not None else trajectory
+    if not isinstance(positions, torch.Tensor) or positions.dim() != 3:
+        raise ValueError("trajectory positions must have shape (B, N, D).")
+    if positions.shape[1] == 0:
+        raise ValueError("trajectory must contain at least one waypoint.")
+
+    native_contact_settle_steps = _newton_native_contact_settle_steps(
+        sim,
+        robot,
+        positions,
+    )
+
+    recording_started = (
+        start_auto_play_recording(
+            sim,
+            args,
+            video_prefix=video_prefix,
+            look_at=DEFAULT_AUTO_PLAY_LOOK_AT if look_at is None else look_at,
+        )
+        if record
+        else False
+    )
+    try:
+        total_steps = positions.shape[1]
+        for step_idx in range(total_steps):
+            if joint_ids is None:
+                robot.set_qpos(positions[:, step_idx, :])
+            else:
+                robot.set_qpos(positions[:, step_idx, :], joint_ids=joint_ids)
+            waypoint_sim_steps = trajectory_sim_steps
+            if waypoint_sim_steps is None and timed is not None:
+                next_index = min(step_idx + 1, total_steps - 1)
+                duration = float(timed.dt[:, next_index].max().item())
+                step_ratio = duration / float(sim.sim_config.physics_dt)
+                nearest_step_count = round(step_ratio)
+                waypoint_sim_steps = max(
+                    1,
+                    (
+                        nearest_step_count
+                        if math.isclose(
+                            step_ratio,
+                            nearest_step_count,
+                            rel_tol=1.0e-6,
+                            abs_tol=1.0e-9,
+                        )
+                        else math.ceil(step_ratio)
+                    ),
+                )
+            if step_idx in native_contact_settle_steps:
+                settle_steps = math.ceil(
+                    NEWTON_NATIVE_CONTACT_SETTLE_DURATION
+                    / float(sim.sim_config.physics_dt)
+                )
+                waypoint_sim_steps = (
+                    4 if waypoint_sim_steps is None else waypoint_sim_steps
+                ) + max(1, settle_steps)
+            sim.update(step=4 if waypoint_sim_steps is None else waypoint_sim_steps)
+            if on_trajectory_step is not None:
+                on_trajectory_step(step_idx, total_steps)
+            if not configured or args.real_time:
+                time.sleep(1e-2)
+
+        final_qpos = positions[:, -1, :]
+        for _ in range(hold_steps):
+            if joint_ids is None:
+                robot.set_qpos(final_qpos)
+            else:
+                robot.set_qpos(final_qpos, joint_ids=joint_ids)
+            sim.update(step=hold_sim_steps)
+            if not configured or args.real_time:
+                time.sleep(1e-2)
+        if replay_record_path is not None:
+            import json
+
+            args._records[-1]["status"] = "executed"
+            replay_record_path.write_text(
+                json.dumps(args._records[-1], indent=2, default=str) + "\n"
+            )
+    finally:
+        stop_auto_play_recording(sim, recording_started)
+
+
+def _newton_native_contact_settle_steps(
+    sim: SimulationManager,
+    robot: Robot,
+    positions: torch.Tensor,
+) -> frozenset[int]:
+    """Return endpoints for contiguous native-MuJoCo hand-motion intervals.
+
+    MuJoCo-Warp creates contacts internally, rather than retaining the
+    external Newton pipeline's contact set. Each hand transition needs a brief
+    integration hold before subsequent object motion. This also covers the
+    receiving-hand close in the HandOver tutorial. Detect every contiguous
+    hand-motion interval generically from tutorial control parts so arm-only
+    trajectories retain their authored timing.
+    """
+    if getattr(sim, "is_newton_backend", False) is not True:
+        return frozenset()
+    control_parts = getattr(robot, "control_parts", None)
+    if not isinstance(control_parts, Mapping):
+        return frozenset()
+
+    hand_joint_ids: set[int] = set()
+    for part_name in control_parts:
+        if not any(
+            marker in part_name.lower() for marker in ("eef", "hand", "gripper")
+        ):
+            continue
+        joint_ids = robot.get_joint_ids(name=part_name)
+        hand_joint_ids.update(
+            joint_id
+            for joint_id in joint_ids
+            if isinstance(joint_id, int) and 0 <= joint_id < positions.shape[2]
+        )
+    if not hand_joint_ids:
+        return frozenset()
+
+    hand_positions = positions[:, :, sorted(hand_joint_ids)]
+    changed_from_previous = ~torch.isclose(
+        hand_positions[:, 1:, :],
+        hand_positions[:, :-1, :],
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+    changed_intervals = torch.nonzero(
+        changed_from_previous.any(dim=2).any(dim=0),
+        as_tuple=False,
+    ).flatten()
+    if changed_intervals.numel() == 0:
+        return frozenset()
+
+    # A changed interval i is the command transition from waypoint i to i + 1.
+    # Hold at each contiguous interval's endpoint, where its hand has reached
+    # the requested qpos. Separate hand phases arise in multi-arm handovers.
+    settle_steps: set[int] = set()
+    previous_interval: int | None = None
+    for interval_value in changed_intervals.tolist():
+        interval = int(interval_value)
+        if previous_interval is not None and interval != previous_interval + 1:
+            settle_step = previous_interval + 1
+            if settle_step < positions.shape[1]:
+                settle_steps.add(settle_step)
+        previous_interval = interval
+    if previous_interval is not None:
+        settle_step = previous_interval + 1
+        if settle_step < positions.shape[1]:
+            settle_steps.add(settle_step)
+    return frozenset(settle_steps)
+
+
+def make_clear_dynamics_callback(
+    obj: RigidObject,
+    clear_after_step: int,
+) -> Callable[[int, int], None]:
+    """Create a one-shot replay callback that freezes an attached object."""
+    dynamics_cleared = False
+
+    def clear_dynamics(step_idx: int, _: int) -> None:
+        nonlocal dynamics_cleared
+        if not dynamics_cleared and step_idx + 1 >= clear_after_step:
+            obj.clear_dynamics()
+            dynamics_cleared = True
+
+    return clear_dynamics
+
+
+_NONINTERACTIVE_DISPLAY_FLAGS = (
+    "headless",
+    "viser",
+    "diagnose_plan",
+    "headless_play",
+)
+
+
+def _uses_noninteractive_display(args: argparse.Namespace) -> bool:
+    return any(getattr(args, flag, False) for flag in _NONINTERACTIVE_DISPLAY_FLAGS)
+
+
+def should_open_tutorial_window(args: argparse.Namespace) -> bool:
+    """Return whether an interactive viewer window should be opened."""
+    return not _uses_noninteractive_display(args)
+
+
+def should_wait_for_tutorial_input(args: argparse.Namespace) -> bool:
+    """Return whether the tutorial should pause for terminal input."""
+    return not (getattr(args, "auto_play", False) or _uses_noninteractive_display(args))
+
+
+def start_auto_play_recording(
+    sim: SimulationManager,
+    args: argparse.Namespace,
+    video_prefix: str,
+    look_at: tuple[
+        Sequence[float],
+        Sequence[float],
+        Sequence[float],
+    ] = DEFAULT_AUTO_PLAY_LOOK_AT,
+) -> bool:
+    """Start recording for ``--auto_play`` tutorial runs."""
+    if not getattr(args, "auto_play", False):
+        return False
+
+    original_width = sim.sim_config.width
+    original_height = sim.sim_config.height
+    try:
+        sim.sim_config.width = RECORD_WIDTH
+        sim.sim_config.height = RECORD_HEIGHT
+        if not sim.start_window_record(
+            save_path=getattr(args, "auto_play_video_path", None),
+            fps=AUTO_PLAY_RECORD_FPS,
+            max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
+            video_prefix=video_prefix,
+            look_at=look_at,
+            use_sim_time=True,
+        ):
+            raise RuntimeError("Failed to start auto_play recording.")
+    finally:
+        sim.sim_config.width = original_width
+        sim.sim_config.height = original_height
+    return True
+
+
+def stop_auto_play_recording(
+    sim: SimulationManager,
+    recording_started: bool,
+) -> None:
+    """Stop recording and wait until the mp4 has been written."""
+    if not recording_started:
+        return
+
+    if sim.is_window_recording():
+        sim.stop_window_record()
+    sim.wait_window_record_saves()
+
+
+def draw_axis_marker(
+    sim: SimulationManager,
+    name: str,
+    xpos: torch.Tensor,
+    axis_len: float = DEFAULT_AXIS_LEN,
+    axis_size: float = DEFAULT_AXIS_SIZE,
+    arena_index: int = -1,
+) -> None:
+    """Draw a named coordinate-frame marker for a semantic tutorial target."""
+    arena_offsets = sim.arena_offsets
+    num_envs = arena_offsets.shape[0]
+
+    # Normalize a single (4, 4) pose to (1, 4, 4) so it is not mistaken for a
+    # per-environment batch when num_envs happens to equal 4.
+    if xpos.dim() == 2:
+        xpos = xpos.unsqueeze(0)
+
+    if num_envs == xpos.shape[0]:
+        # add arena offsets to xpos
+        draw_xpos = xpos.clone()
+        draw_xpos[:, :3, 3] += arena_offsets
+    else:
+        draw_xpos = xpos
+    sim.draw_marker(
+        cfg=MarkerCfg(
+            name=name,
+            marker_type="axis",
+            axis_xpos=draw_xpos,
+            axis_size=axis_size,
+            axis_len=axis_len,
+            arena_index=arena_index,
+        )
+    )
+
+
+def broadcast_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand a single pose to ``(num_envs, 4, 4)`` when needed."""
+    if pose.dim() == 2 and pose.shape == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1)
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1)
+    raise ValueError(
+        "Expected a pose with shape "
+        f"(4, 4), (1, 4, 4), or ({num_envs}, 4, 4) for num_envs={num_envs}, "
+        f"got {tuple(pose.shape)}."
+    )
+
+
+def broadcast_waypoint_pose_batch(pose: torch.Tensor, num_envs: int) -> torch.Tensor:
+    """Expand waypoint poses to ``(num_envs, n_waypoint, 4, 4)`` when needed."""
+    if pose.dim() == 3 and pose.shape[1:] == (4, 4):
+        return pose.unsqueeze(0).repeat(num_envs, 1, 1, 1)
+    if pose.dim() == 4 and pose.shape[2:] == (4, 4):
+        if pose.shape[0] == num_envs:
+            return pose
+        if pose.shape[0] == 1:
+            return pose.repeat(num_envs, 1, 1, 1)
+    raise ValueError(
+        "Expected waypoint poses with shape "
+        f"(n_waypoint, 4, 4), (1, n_waypoint, 4, 4), or ({num_envs}, n_waypoint, 4, 4) "
+        f"for num_envs={num_envs}, got {tuple(pose.shape)}."
+    )
+
+
+def clone_local_pose_from_first_env(entity) -> torch.Tensor:
+    """Copy the first environment's local pose onto every environment."""
+    pose = entity.get_local_pose(to_matrix=True)
+    if pose.dim() != 3 or pose.shape[1:] != (4, 4):
+        raise ValueError(
+            f"Expected entity local pose with shape (num_envs, 4, 4), got {tuple(pose.shape)}."
+        )
+    shared_pose = pose[:1].clone().repeat(pose.shape[0], 1, 1)
+    entity.set_local_pose(shared_pose)
+    return shared_pose
+
+
+def create_ur5_gripper_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    **kwargs,
+) -> RobotCfg:
+    """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
+
+    The arm is taken from :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`
+    so the URDF, joint names and drive defaults match the canonical UR family
+    config. The gripper and tool-center-point offset are added on top to match
+    the existing atomic-action tutorial setups.
+
+    .. attention::
+        :class:`~embodichain.lab.sim.cfg.URDFCfg` defaults to upper-casing joint
+        names during multi-component assembly. The override dict passed to
+        :meth:`URRobotCfg.from_dict` sets
+        ``urdf_cfg.name_case = {"joint": "lower", "link": "lower"}`` so the
+        assembled robot keeps the source URDF's lowercase joint names
+        (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
+        control parts produced by
+        :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+
+    Returns:
+        A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
+    """
+    qpos = (
+        [0.0, -1.57, 1.57, -1.57, -1.57, 0.0, 0.0, 0.0]
+        if init_qpos is None
+        else list(init_qpos)
+    )
+    return URRobotCfg.from_dict(
+        {
+            "robot_type": "ur5",
+            "uid": "UR5",
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "hand",
+                        "urdf_path": GRIPPER_URDF_PATH,
+                    }
+                ],
+            },
+            "control_parts": {
+                "eef": [GRIPPER_HAND_JOINT_PATTERN],
+            },
+            "joint_drive_props": {
+                "stiffness": {
+                    "arm": 5e4,
+                    GRIPPER_HAND_JOINT_PATTERN: 1e3,
+                },
+                "damping": {
+                    "arm": 5e3,
+                    GRIPPER_HAND_JOINT_PATTERN: 1e2,
+                },
+                "max_effort": {
+                    "arm": 1e6,
+                    GRIPPER_HAND_JOINT_PATTERN: 1e4,
+                },
+            },
+            "solver_cfg": {
+                "arm": {
+                    "tcp": [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, tcp_z],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ],
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
+                }
+            },
+            "init_qpos": qpos,
+            "init_pos": init_pos,
+        }
+    )
+
+
+def create_franka_panda_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    **kwargs,
+) -> RobotCfg:
+    """Build a Franka arm + PGI gripper configuration for the tutorials.
+
+    The shared scenes place manipulation targets on the robot's negative-X
+    side, so the base is rotated 180 degrees. The arm-only Franka URDF is
+    assembled with the same DH_PGI_140_80 component, hand control part, drive
+    properties, open state, and TCP offset used by the UR5 tutorial robot.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
+    """
+    overrides = {
+        "robot_type": "panda",
+        "uid": "FrankaPanda",
+        "init_pos": init_pos,
+        "init_rot": _FRANKA_TUTORIAL_BASE_ROTATION,
+        "urdf_cfg": {
+            "components": [
+                {
+                    "component_type": "arm",
+                    "urdf_path": "Franka/Panda/Panda.urdf",
+                },
+                {
+                    "component_type": "hand",
+                    "urdf_path": GRIPPER_URDF_PATH,
+                },
+            ],
+        },
+        "control_parts": {"eef": [GRIPPER_HAND_JOINT_PATTERN]},
+        "joint_drive_props": {
+            "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
+            "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
+            "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
+        },
+        "solver_cfg": {
+            "arm": {
+                "end_link_name": "fr3_link8",
+                "tcp": _GRIPPER_TCP,
+            }
+        },
+    }
+    if init_qpos is not None:
+        overrides["init_qpos"] = list(init_qpos)
+    cfg = FrankaPandaCfg.from_dict(overrides)
+    if init_qpos is None:
+        cfg.init_qpos[-2:] = [0.0, 0.0]
+    for drive_values in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        drive_values.pop("fr3_finger_joint[1-2]", None)
+    return cfg
+
+
+def create_ur10_robotiq_robot_cfg(
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    **kwargs,
+) -> RobotCfg:
+    """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
+
+    The hand control part is intentionally expressed as one regular expression.
+    Robot materialization expands it over the six active finger/knuckle joints
+    while excluding the gripper's fixed joints. The solver TCP includes the
+    Robotiq mounting rotation and its 0.23 m tool offset.
+
+    Args:
+        init_pos: Initial root position of the robot in the arena.
+        init_qpos: Optional full 12-DOF arm-plus-hand configuration.
+
+    Returns:
+        A UR10/Robotiq configuration exposing ``arm`` and six-joint ``eef``
+        control parts.
+    """
+    qpos = (
+        [0.0, -1.57, 1.57, -1.57, -1.57, 0.0] + [0.0] * 6
+        if init_qpos is None
+        else list(init_qpos)
+    )
+    if len(qpos) != 12:
+        raise ValueError(
+            "UR10/Robotiq init_qpos must contain 12 values: six arm and six "
+            f"gripper joints, got {len(qpos)}."
+        )
+    return URRobotCfg.from_dict(
+        {
+            "robot_type": "ur10",
+            "uid": "UR10Robotiq2F140",
+            "urdf_cfg": {
+                "components": [
+                    {
+                        "component_type": "hand",
+                        "urdf_path": get_data_path(ROBOTIQ_2F_140_URDF_PATH),
+                    }
+                ],
+            },
+            "control_parts": {
+                "eef": [ROBOTIQ_HAND_JOINT_PATTERN],
+            },
+            "joint_drive_props": {
+                "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
+                "damping": {ROBOTIQ_HAND_JOINT_PATTERN: 1e2},
+                "max_effort": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
+            },
+            "solver_cfg": {
+                "arm": {
+                    "tcp": ROBOTIQ_2F_140_TCP,
+                    "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
+                }
+            },
+            "init_qpos": qpos,
+            "init_pos": init_pos,
+        }
+    )
+
+
+def create_tutorial_robot_cfg(
+    robot_type: TutorialRobot,
+    init_pos: Sequence[float] = (0.0, 0.0, 0.0),
+    init_qpos: Sequence[float] | None = None,
+    **kwargs,
+) -> RobotCfg:
+    """Build a selected tutorial arm with the common PGI gripper contract.
+
+    Args:
+        robot_type: Tutorial robot family to construct.
+        init_pos: Initial root position of the robot in its arena.
+        init_qpos: Optional full robot joint configuration.
+
+    Returns:
+        A UR5, Franka, or UR10/Robotiq robot configuration exposing ``arm``
+        and ``eef``.
+
+    Raises:
+        ValueError: If ``robot_type`` is not supported.
+    """
+    if robot_type == "ur5":
+        return create_ur5_gripper_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            **kwargs,
+        )
+    if robot_type == "franka":
+        return create_franka_panda_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            **kwargs,
+        )
+    if robot_type == "ur10":
+        return create_ur10_robotiq_robot_cfg(
+            init_pos=init_pos,
+            init_qpos=init_qpos,
+            **kwargs,
+        )
+    raise ValueError(
+        f"Unsupported tutorial robot {robot_type!r}; expected one of {TUTORIAL_ROBOTS}."
+    )
+
+
+__all__ = [
+    "save_tool_path_view",
+    "save_variant_joint_plot",
+    "trajectory_variant_rows",
+    "log_trajectory_variant_diagnostics",
+    "expand_tutorial_trajectory_variants",
+    "create_trajectory_variant_cfg",
+    "parse_trajectory_variant_arguments",
+    "DEFAULT_AUTO_PLAY_LOOK_AT",
+    "DEFAULT_AXIS_LEN",
+    "DEFAULT_AXIS_SIZE",
+    "DEFAULT_GRIPPER_CLOSE_QPOS",
+    "DEFAULT_TUTORIAL_SUN_DIRECTION",
+    "DEFAULT_TUTORIAL_SUN_INTENSITY",
+    "GRIPPER_HAND_JOINT_PATTERN",
+    "GRIPPER_URDF_PATH",
+    "ROBOTIQ_2F_140_TCP",
+    "ROBOTIQ_2F_140_URDF_PATH",
+    "ROBOTIQ_HAND_JOINT_PATTERN",
+    "NEWTON_GRASP_CONTACT_DAMPING",
+    "NEWTON_GRASP_CONTACT_STIFFNESS",
+    "NEWTON_GRASP_ROLLING_FRICTION",
+    "NEWTON_GRASP_TORSIONAL_FRICTION",
+    "NEWTON_NATIVE_CONTACT_DIMENSION",
+    "NEWTON_NATIVE_CONTACT_SETTLE_DURATION",
+    "TOP_DOWN_EEF_ROTATION",
+    "TutorialCliFeature",
+    "TutorialPlanner",
+    "TutorialRobot",
+    "TUTORIAL_PLANNERS",
+    "TUTORIAL_ROBOTS",
+    "add_tutorial_robot",
+    "add_ur5_gripper_robot",
+    "broadcast_pose_batch",
+    "broadcast_waypoint_pose_batch",
+    "clone_local_pose_from_first_env",
+    "configure_newton_gripper_contacts",
+    "configure_newton_link_contacts",
+    "create_antipodal_semantics",
+    "create_affordance_sampling_context",
+    "create_parallel_jaw_grasp_pose_generator",
+    "create_curobo_motion_generator",
+    "create_franka_panda_robot_cfg",
+    "create_trapezoidal_motion_generator",
+    "create_toppra_motion_generator",
+    "create_tutorial_argument_parser",
+    "create_tutorial_motion_generator",
+    "create_tutorial_robot_cfg",
+    "create_tutorial_simulation",
+    "create_ur10_robotiq_robot_cfg",
+    "create_ur5_gripper_robot_cfg",
+    "format_tensor",
+    "get_hand_open_close_qpos",
+    "initialize_pre_pick_robot_pose",
+    "log_affordance_branch_diagnostics",
+    "make_eef_pose_at",
+    "make_clear_dynamics_callback",
+    "make_top_down_eef_pose",
+    "prepare_tutorial_scene",
+    "parse_affordance_sampling_arguments",
+    "publish_tutorial_scene",
+    "replay_trajectory",
+    "run_tutorial",
+    "serve_tutorial_scene",
+    "should_open_tutorial_window",
+    "should_wait_for_tutorial_input",
+    "start_auto_play_recording",
+    "stop_auto_play_recording",
+    "draw_axis_marker",
+]
+
+
+def initialize_benchmark_simulation(args) -> "SimulationManager":
+    """Create the tutorial simulation from a benchmark-style namespace.
+
+    Benchmark argument namespaces carry only ``device``/``renderer``; fill the
+    remaining launcher fields with tutorial defaults so
+    :func:`create_tutorial_simulation` accepts them unchanged.
+
+    Args:
+        args: Namespace with optional ``num_envs``/``device``/``renderer``.
+
+    Returns:
+        The shared tutorial simulation.
+    """
+    namespace = argparse.Namespace(
+        num_envs=getattr(args, "num_envs", 1),
+        device=getattr(args, "device", "cpu"),
+        renderer=getattr(args, "renderer", "auto"),
+        headless=True,
+    )
+    return create_tutorial_simulation(namespace)
+
+
+def compute_pick_close_end_step(compiled=None, invocation_index: int = 0) -> int:
+    """Trajectory step where PickUp's hand-close segment ends (lift start).
+
+    Args:
+        compiled: Optional compiled engine result; when given, the exact
+            ``lift`` segment start of the selected invocation is returned.
+        invocation_index: Invocation to inspect within ``compiled``.
+
+    Returns:
+        Step index separating the grasp phase from the lift phase. Without a
+        compiled result this uses the tutorial defaults
+        (``sample_count=120`` + ``hand_interp_steps=12`` + ``settle=0``).
+    """
+    if compiled is not None:
+        return int(compiled.segment(invocation_index, "lift").start)
+    return 120 + 12

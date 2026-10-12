@@ -130,6 +130,18 @@ Projected assurance is not physical task success.
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
+The configured direct-simulation host is `embodichain run-atomic-action --config`:
+`lab/scripts/run_atomic_action.py` owns selection, batching and cleanup;
+`lab/scripts/_atomic_action/` owns the ten example scenes and strict configuration.
+The matching tutorial files are compatibility entry points to those same scenes.
+Affordance branch overrides stay independent of physical slots, then the host
+adapts each compiled reference to `motion.expansion` for spatial variants.
+Contact phases and hand columns stay exact; original action joins and intervals
+are restored before replay so callbacks retain their source indices. Slide
+replans its push from the handle observed after the pull. Output status records
+planning/playback completion, with no measured physical-success authority or
+Gym dataset collection. Configurations and usage live in the host's `configs/README.md`.
+
 ## Recommended change sites
 
 | Change | Owning location |

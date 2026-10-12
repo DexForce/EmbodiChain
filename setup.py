@@ -132,6 +132,10 @@ def main():
         package_data={
             "embodichain": ["VERSION"],
             "embodichain.gen_sim.simready_pipeline.configs": ["*.json"],
+            "embodichain.lab.scripts._atomic_action": [
+                "configs/*.yaml",
+                "configs/README.md",
+            ],
             "embodichain_tasks.configs": [
                 "**/*.json",
                 "**/*.yaml",

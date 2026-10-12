@@ -268,7 +268,7 @@ topics:
 - id: atomic-actions
   title: Atomic Skills
   aliases: [atomic action, atomic skill, 原子动作, 原子技能]
-  keywords: [AtomicActionEngine, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
+  keywords: [AtomicActionEngine, run-atomic-action, PlanningContext, ExecutionSession, ExecutionRunner, ActionInvocation,
     RecoveryPolicy, HeldObjectGuardRequest, PhaseEffectGateRequest, articulation_geometry, control-grid retiming,
     AffordanceSamplingContext, AffordancePoseCandidates, AffordanceSample, affordance sampling]
   paths: [topics/atomic-actions/atomic-actions.md]
@@ -282,7 +282,10 @@ topics:
   - embodichain/lab/sim/atomic_actions/articulation_geometry.py
   - embodichain/lab/sim/atomic_actions/affordance_sampling.py
   - embodichain/lab/sim/atomic_actions/primitives/
-  watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/, scripts/tutorials/atomic_action/]
+  - embodichain/lab/scripts/run_atomic_action.py
+  - embodichain/lab/scripts/_atomic_action/
+  watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/, scripts/tutorials/atomic_action/,
+    embodichain/lab/scripts/run_atomic_action.py, embodichain/lab/scripts/_atomic_action/, tests/lab/scripts/test_run_atomic_action.py]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

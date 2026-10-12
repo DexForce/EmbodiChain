@@ -70,6 +70,11 @@ COMMANDS = (
         aliases=("run-task",),
     ),
     Command(
+        name="run-atomic-action",
+        target="embodichain.lab.scripts.run_atomic_action:cli",
+        help="Replay Atomic Skill scenes with grasp and trajectory expansion.",
+    ),
+    Command(
         name="list-task",
         target="embodichain.cli.list_task:main",
         help="List tasks by category, deployment, and capability.",
