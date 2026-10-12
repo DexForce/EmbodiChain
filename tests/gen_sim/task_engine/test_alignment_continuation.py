@@ -36,6 +36,9 @@ from embodichain.gen_sim.task_engine._task_program import (
     motion,
     planning_probe,
 )
+from embodichain.gen_sim.task_engine._task_program.state_handoff import (
+    StagingContract,
+)
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     JointPositionTarget,
@@ -312,15 +315,17 @@ def full_inputs(monkeypatch):
     action._planning_services = SimpleNamespace(
         robot=robot, device=robot.device, motion_generator=generator
     )
-    action._staging_rigid_entity_ids = frozenset({"item"})
-    action._staging_invocation_ids = frozenset({request.invocation_id})
-    action._staging_retention_sources = {
-        request.invocation_id: {
-            "entity_id": "item",
-            "resource_id": "active",
-            "preset_id": "verified",
-        }
-    }
+    action.staging_contract = StagingContract(
+        rigid_entity_ids=frozenset({"item"}),
+        invocation_ids=frozenset({request.invocation_id}),
+        retention_sources={
+            request.invocation_id: {
+                "entity_id": "item",
+                "resource_id": "active",
+                "preset_id": "verified",
+            }
+        },
+    )
     engine = SimpleNamespace(
         robot=robot,
         motion_generator=generator,
@@ -465,11 +470,19 @@ def test_runtime_scope_requires_real_factory_authority(full_inputs, invalid):
     elif invalid == "batch":
         context = replace(context, env_ids=torch.tensor([1]))
     elif invalid == "object":
-        p.action._staging_rigid_entity_ids = frozenset()
+        p.action.staging_contract = replace(
+            p.action.staging_contract, rigid_entity_ids=frozenset()
+        )
     elif invalid == "unowned":
-        p.action._staging_invocation_ids = frozenset()
+        p.action.staging_contract = replace(
+            p.action.staging_contract,
+            invocation_ids=frozenset(),
+            retention_sources={},
+        )
     elif invalid == "projected":
-        p.action._staging_retention_sources = {}
+        p.action.staging_contract = replace(
+            p.action.staging_contract, retention_sources={}
+        )
     elif invalid == "sampling":
         request = replace(
             request, motion_policy=replace(request.motion_policy, sample_count=320)

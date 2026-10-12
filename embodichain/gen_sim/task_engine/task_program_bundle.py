@@ -601,6 +601,10 @@ def generate_task_program_bundle(
         selected_graph, drawer_groups=drawer_groups
     )
     stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
+    (
+        stability["staging_calls"],
+        stability["staging_retention_sources"],
+    ) = _staging_contract_payload(selected_graph, scene, program_id)
     if drawers:
         stability["drawers"] = [route.payload() for route in drawers]
     save_config(
@@ -1274,6 +1278,99 @@ def _program_payload(
         "targets": deepcopy(graph["targets"]),
         "program": {"kind": "sequence", "items": items},
     }
+
+
+def _staging_contract_payload(
+    graph: SemanticTaskGraph,
+    scene: Any | None,
+    program_id: str,
+) -> tuple[list[str], list[list[str]]]:
+    """Emit explicit E2 staging ownership from graph dependencies.
+
+    The runtime must consume this declaration; it must not infer a predecessor
+    by scanning adjacent compiled segments.  Only a direct dependency with the
+    same object/resource is eligible for retention authority.
+    """
+    scene_rigid_objects = () if scene is None else scene.rigid_objects
+    rigid_ids = {
+        str(item.get("runtime_uid", item.get("uid")))
+        for item in scene_rigid_objects
+        if item.get("runtime_uid", item.get("uid")) is not None
+    }
+    nodes = {str(node["id"]): node for node in graph["nodes"]}
+    node_positions = {
+        str(node["id"]): index for index, node in enumerate(graph["nodes"])
+    }
+    staging_calls: list[str] = []
+    retention_sources: list[list[str]] = []
+    for node in graph["nodes"]:
+        call = node.get("call", {})
+        if (
+            call.get("kind") != "registered"
+            or call.get("call_id") != "gen_sim.align_held"
+        ):
+            continue
+        args = dict(call.get("arguments", {}))
+        entity = args.get("object")
+        resource = dict(call.get("resources", {})).get("primary")
+        if (
+            entity not in rigid_ids
+            or args.get("preserve_yaw") is not False
+            or args.get("target") == "current_object_pose"
+            or not isinstance(resource, str)
+        ):
+            continue
+        node_position = node_positions[node["id"]]
+        staging_id = (
+            f"{program_id}/{program_id}:segment:$.program.items[{node_position}]:0"
+        )
+        staging_calls.append(staging_id)
+        predecessors = [nodes[str(dep)] for dep in node.get("depends_on", ())]
+        eligible = []
+        for predecessor in predecessors:
+            predecessor_call = predecessor.get("call", {})
+            predecessor_args = dict(predecessor_call.get("arguments", {}))
+            predecessor_resource = dict(predecessor_call.get("resources", {})).get(
+                "primary"
+            )
+            predecessor_entity = predecessor_call.get(
+                "object", predecessor_args.get("object")
+            )
+            kind = predecessor_call.get("kind")
+            call_id = predecessor_call.get("call_id")
+            if (
+                predecessor_entity == entity
+                and predecessor_resource == resource
+                and (
+                    kind == "pick"
+                    or call_id == "gen_sim.align_held"
+                    or (
+                        isinstance(call_id, str) and call_id.startswith("gen_sim.pick.")
+                    )
+                )
+            ):
+                eligible.append(predecessor)
+        if len(eligible) == 1:
+            predecessor_position = node_positions[eligible[0]["id"]]
+            predecessor_id = (
+                f"{program_id}/{program_id}:segment:$.program.items["
+                f"{predecessor_position}]:0"
+            )
+            predecessor_call = eligible[0].get("call", {})
+            predecessor_call_id = predecessor_call.get("call_id")
+            if predecessor_call.get("kind") == "pick" and not predecessor_call_id:
+                predecessor_call_id = "pick"
+            if isinstance(predecessor_call_id, str) and predecessor_call_id:
+                retention_sources.append(
+                    [
+                        staging_id,
+                        predecessor_id,
+                        predecessor_call_id,
+                        entity,
+                        resource,
+                    ]
+                )
+    return staging_calls, retention_sources
 
 
 def _program_node(

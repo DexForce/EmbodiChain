@@ -42,6 +42,7 @@ from .grasp_filter import (
     install_grasp_filters,
 )
 from .motion import MOTION_VALIDATION_REVISION
+from .state_handoff import StagingContract
 
 __all__: list[str] = []
 
@@ -106,8 +107,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         articulation_calls: tuple[tuple[str, str], ...] = (),
         clearance_routes: tuple = (),
         alignment_continuation_routes: tuple = (),
-        staging_calls: tuple[str, ...] = (),
-        staging_retention_sources: tuple[tuple[str, str, str, str], ...] = (),
+        staging_contract: StagingContract | None = None,
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         pick_continuations: tuple = (),
@@ -124,12 +124,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._articulation_calls = articulation_calls
         self._clearance_routes = clearance_routes
         self._alignment_continuation_routes = alignment_continuation_routes
-        self._staging_calls = staging_calls
-        self._staging_retention_sources = staging_retention_sources
-        self._staging_rigid_entity_ids = frozenset(
-            item.entity_id
-            for item in self.task_program_registration.scene_binding.rigid_objects
-        )
+        self._staging_contract = staging_contract or StagingContract.empty()
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
@@ -243,21 +238,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
             pick.path_excluded_invocations = frozenset(self._cartesian_calls)
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
-        transport = GenSimMoveHeldObject()
-        if not self._drawers:
-            from .staging_recovery import verified_retention_sources
-
-            transport._staging_rigid_entity_ids = getattr(
-                self, "_staging_rigid_entity_ids", frozenset()
-            )
-            transport._staging_retention_sources = verified_retention_sources(
-                profile,
-                getattr(self, "_runtime_preset", None),
-                getattr(self, "_staging_retention_sources", ()),
-            )
-            transport._staging_invocation_ids = frozenset(
-                transport._staging_retention_sources
-            )
+        transport = GenSimMoveHeldObject(staging_contract=self._staging_contract)
         engine.register(transport, replace=True)
         place = GenSimPlace()
         if not self._drawers:
@@ -398,8 +379,7 @@ class TaskAdapterFactory:
     articulation_calls: tuple[tuple[str, str], ...] = ()
     clearance_routes: tuple = ()
     alignment_continuation_routes: tuple = ()
-    staging_calls: tuple[str, ...] = ()
-    staging_retention_sources: tuple[tuple[str, str, str, str], ...] = ()
+    staging_contract: StagingContract = StagingContract.empty()
     runtime_preset: str | None = None
     press_routes: tuple = ()
     twist_routes: tuple = ()
@@ -568,8 +548,7 @@ class TaskAdapterFactory:
             articulation_calls=self.articulation_calls,
             clearance_routes=self.clearance_routes,
             alignment_continuation_routes=self.alignment_continuation_routes,
-            staging_calls=self.staging_calls,
-            staging_retention_sources=self.staging_retention_sources,
+            staging_contract=self.staging_contract,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
@@ -601,6 +580,8 @@ def load_deployment(
             "motion_samples",
             "cartesian_calls",
             "pour_receivers",
+            "staging_calls",
+            "staging_retention_sources",
         }.issubset(payload)
         or set(payload)
         - {
@@ -612,6 +593,8 @@ def load_deployment(
             "motion_samples",
             "cartesian_calls",
             "pour_receivers",
+            "staging_calls",
+            "staging_retention_sources",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -802,37 +785,34 @@ def load_deployment(
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     articulation_calls = bind_articulation_calls(compiled)
-    from .staging_recovery import (
-        STAGING_RECOVERY_REVISION,
-        bind_staging_calls,
-        bind_staging_retention_sources,
-    )
+    from .staging_recovery import STAGING_RECOVERY_REVISION
 
     staging_calls = (
-        bind_staging_calls(
-            compiled,
-            frozenset(
-                item.entity_id for item in registration.scene_binding.rigid_objects
-            ),
-        )
+        tuple(str(value) for value in payload.get("staging_calls", ()))
         if not drawers
         else ()
     )
-    staging_retention_sources = bind_staging_retention_sources(
-        compiled,
-        staging_calls,
-        frozenset(
-            {"pick"}
-            | {
-                factory.call_id
-                for factory in registration.registered_semantic_lowerer_factories
-                if getattr(
-                    getattr(factory, "target_descriptor", None), "skill_id", None
-                )
-                == "pick_up"
-                or (type(factory) is _AlignHeldFactory and factory.verify_retention)
-            }
+    staging_retention_sources = tuple(
+        tuple(str(value) for value in source)
+        for source in payload.get("staging_retention_sources", ())
+    )
+    if any(len(source) != 5 for source in staging_retention_sources):
+        raise ValueError("Staging retention sources require five declared fields.")
+    from .staging_recovery import verified_retention_sources
+
+    verified_sources = verified_retention_sources(
+        registration.robot_profile_binding,
+        base.selection.runtime_preset,
+        staging_retention_sources,
+    )
+    staging_contract = StagingContract(
+        rigid_entity_ids=frozenset(
+            ()
+            if drawers
+            else (item.entity_id for item in registration.scene_binding.rigid_objects)
         ),
+        invocation_ids=frozenset() if drawers else frozenset(verified_sources),
+        retention_sources={} if drawers else verified_sources,
     )
     from .clearance_recovery import CLEARANCE_RECOVERY_REVISION, bind_clearance_calls
 
@@ -970,8 +950,7 @@ def load_deployment(
         articulation_calls=articulation_calls,
         clearance_routes=clearance_routes,
         alignment_continuation_routes=alignment_continuation_routes,
-        staging_calls=staging_calls,
-        staging_retention_sources=staging_retention_sources,
+        staging_contract=staging_contract,
         runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
         twist_routes=twist_routes,

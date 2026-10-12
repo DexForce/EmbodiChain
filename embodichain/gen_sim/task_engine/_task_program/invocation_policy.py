@@ -429,16 +429,16 @@ class GenSimActionEngine(AtomicActionEngine):
             context = self.initial_context()
         staging_transform_owned = False
         if alignment and plan_transform is not None:
-            from .actions import GenSimMoveHeldObject
             from .staging_recovery import owns_staging
 
             action = getattr(self, "_actions", {}).get(request.skill_id)
-            staging_transform_owned = isinstance(action, GenSimMoveHeldObject) and (
+            staging_contract = getattr(action, "staging_contract", None)
+            staging_transform_owned = staging_contract is not None and (
                 owns_staging(
                     request,
                     context,
-                    action._staging_rigid_entity_ids,
-                    action._staging_invocation_ids,
+                    staging_contract.rigid_entity_ids,
+                    staging_contract.invocation_ids,
                     self.motion_generator,
                 )
             )
@@ -601,7 +601,7 @@ class GenSimActionEngine(AtomicActionEngine):
                         selected_request,
                         context,
                         plan,
-                        retention_source=(action._staging_retention_sources or {}).get(
+                        retention_source=action.staging_contract.retention_source(
                             selected_request.invocation_id
                         ),
                         _require_retained_command=staging_report.get(

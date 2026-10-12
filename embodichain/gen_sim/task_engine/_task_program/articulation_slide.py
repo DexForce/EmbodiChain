@@ -61,6 +61,7 @@ from .articulation_binding import (
     inspect_prismatic_part,
     validate_placement,
 )
+from .state_handoff import GenSimStateHandoff
 
 __all__: list[str] = []
 
@@ -219,18 +220,12 @@ class _SlideLowerer(RegisteredSemanticLowerer):
         binding, semantics, art = self.bindings[key]
         target = binding.target(args["state"])
         endpoint = bound.binding.action_binding.endpoint("primary", "motion")
-        held = context.task.get_held_object(endpoint.task_state_key)
-        if held is not None and (held.env_mask is None or held.env_mask.any()):
-            raise ValueError(
-                "Articulation interaction cannot reuse a hand holding another object."
-            )
-        for resources, held in context.task.coordinated_held_objects.items():
-            if endpoint.task_state_key in resources and (
-                held.env_mask is None or held.env_mask.any()
-            ):
-                raise ValueError(
-                    "Articulation interaction cannot reuse a coordinated holding hand."
-                )
+        handoff = GenSimStateHandoff.from_binding(
+            bound.binding.action_binding,
+            context,
+            participant="Articulation interaction",
+        )
+        handoff.require_free(participant="Articulation interaction")
         return binding, semantics, art, target, endpoint
 
     def lower(

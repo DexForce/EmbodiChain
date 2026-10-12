@@ -150,7 +150,7 @@ def bind_previews(
 def eligible(
     engine: Any, request: Any, context: Any, preview: _PlacePreview | None
 ) -> bool:
-    from .actions import GenSimMoveHeldObject, GenSimPlace
+    from .actions import GenSimPlace
 
     if preview is None or _PREVIEW.get():
         return False
@@ -160,7 +160,7 @@ def eligible(
         return bool(
             request.invocation_id == preview.route.alignment_id
             and preview.compiler.integration.engine is engine
-            and isinstance(action, GenSimMoveHeldObject)
+            and getattr(action, "staging_contract", None) is not None
             and isinstance(engine._actions.get("place"), GenSimPlace)
             and request.motion_policy.sample_count == 260
             and isinstance(poses, torch.Tensor)
@@ -168,11 +168,11 @@ def eligible(
             and owns_staging(
                 request,
                 context,
-                action._staging_rigid_entity_ids,
-                action._staging_invocation_ids,
+                action.staging_contract.rigid_entity_ids,
+                action.staging_contract.invocation_ids,
                 engine.motion_generator,
             )
-            and (action._staging_retention_sources or {}).get(request.invocation_id)
+            and action.staging_contract.retention_source(request.invocation_id)
             is not None
         )
     except _UNAVAILABLE:
@@ -319,7 +319,9 @@ def inspect_alignment(
             selected,
             context,
             plan,
-            retention_source=action._staging_retention_sources[original.invocation_id],
+            retention_source=action.staging_contract.retention_source(
+                original.invocation_id
+            ),
         )
         if not acceptance["valid"] or not _velocity_payload_valid(
             engine.robot, context, plan

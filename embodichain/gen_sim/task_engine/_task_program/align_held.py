@@ -47,6 +47,8 @@ from embodichain.lab.task_program.semantics import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 
+from .state_handoff import GenSimStateHandoff
+
 __all__: list[str] = []
 
 ALIGN_HELD_CALL = "gen_sim.align_held"
@@ -85,11 +87,13 @@ class _AlignHeldLowerer(RegisteredSemanticLowerer):
         axis, position = self._routes[
             (args["object"], args["target"], args["preserve_yaw"])
         ]
+        handoff = GenSimStateHandoff.from_binding(
+            bound.binding.action_binding,
+            context,
+            participant="Held alignment",
+        )
         resource = bound.binding.resources["primary"]
-        key = resource.endpoints["motion"].task_state_key
-        held = context.task.get_held_object(key)
-        if held is None or held.semantics.entity_id != args["object"]:
-            raise ValueError("Held alignment requires the declared object to be held.")
+        held = handoff.require_held(entity_id=args["object"])
         effect = (
             RegisteredSemanticEffect(
                 effect_kind=SemanticEffectKind.ATTACH,

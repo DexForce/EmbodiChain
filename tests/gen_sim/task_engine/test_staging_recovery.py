@@ -39,6 +39,9 @@ from embodichain.gen_sim.task_engine._task_program import (
     motion,
     planning_probe,
 )
+from embodichain.gen_sim.task_engine._task_program.state_handoff import (
+    StagingContract,
+)
 from embodichain.lab.sim.atomic_actions import (
     AntipodalAffordance,
     JointPositionTarget,
@@ -150,8 +153,10 @@ def staging_inputs(monkeypatch):
         robot=robot,
         motion_generator=SimpleNamespace(direct_transport_planning=False),
     )
-    action._staging_rigid_entity_ids = frozenset({"item"})
-    action._staging_invocation_ids = frozenset({request.invocation_id})
+    action.staging_contract = StagingContract(
+        rigid_entity_ids=frozenset({"item"}),
+        invocation_ids=frozenset({request.invocation_id}),
+    )
     monkeypatch.setattr(
         motion, "_joint_velocity_limits", lambda *args: torch.ones(1, 6)
     )
@@ -791,7 +796,9 @@ def test_nonstaging_transform_does_not_add_boundary_search(
             ),
         )
     if exemption == "unbound_invocation":
-        probe.action._staging_invocation_ids = frozenset()
+        probe.action.staging_contract = replace(
+            probe.action.staging_contract, invocation_ids=frozenset()
+        )
     engine = object.__new__(GenSimActionEngine)
     engine._planning_services = probe.action._planning_services
     engine._actions = {probe.request.skill_id: probe.action}
@@ -968,7 +975,9 @@ def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unc
     )
     profile = deepcopy(arguments["skill_profile"])
     first = load_deployment(**arguments)
-    assert bool(first.integration.adapter_factory.staging_calls) is not preserve_yaw
+    assert bool(first.integration.adapter_factory.staging_contract.invocation_ids) is (
+        not preserve_yaw
+    )
     from embodichain.gen_sim.task_engine._task_program import pick_safety
 
     opening_revision = pick_safety.PICK_OPENING_RECOVERY_REVISION
@@ -1039,9 +1048,25 @@ def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capa
     )
     factory = assembly._TaskFactory(
         constraints={},
-        staging_calls=("compiled/align:0",),
-        staging_retention_sources=(
-            ("compiled/align:0", "simulation.pick", "rigid", "active"),
+        staging_contract=StagingContract(
+            rigid_entity_ids=(frozenset() if has_drawers else frozenset({"rigid"})),
+            invocation_ids=(
+                frozenset() if has_drawers else frozenset({"compiled/align:0"})
+            ),
+            retention_sources={
+                **(
+                    {}
+                    if has_drawers
+                    else {
+                        "compiled/align:0": {
+                            "predecessor_call_id": "simulation.pick",
+                            "predecessor_invocation_id": "compiled/pick:0",
+                            "entity_id": "rigid",
+                            "resource_id": "active",
+                        }
+                    }
+                ),
+            },
         ),
         runtime_preset="verified",
         drawer_routes=(object(),) if has_drawers else (),
@@ -1065,10 +1090,10 @@ def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capa
         for call in engine.register.call_args_list
         if isinstance(call.args[0], actions.GenSimMoveHeldObject)
     )
-    assert transport._staging_rigid_entity_ids == (
+    assert transport.staging_contract.rigid_entity_ids == (
         frozenset() if has_drawers else frozenset({"rigid"})
     )
-    assert transport._staging_invocation_ids == (
+    assert transport.staging_contract.invocation_ids == (
         frozenset() if has_drawers else frozenset({"compiled/align:0"})
     )
 
@@ -1117,7 +1142,9 @@ def test_same_command_override_requires_factory_verified_attachment_monitor_bind
         effect_monitors=monitors,
     )
     profile = SimpleNamespace(presets={"selected": preset})
-    sources = (("compiled/align:0", "simulation.pick", "item", "active"),)
+    sources = (
+        ("compiled/align:0", "compiled/pick:0", "simulation.pick", "item", "active"),
+    )
     actual = _module().verified_retention_sources(
         profile, "unknown" if scope == "unknown" else "selected", sources
     )
@@ -1322,67 +1349,6 @@ def test_strict_success_does_not_read_native_previous_command(
 
 
 @pytest.mark.parametrize(
-    "middle",
-    [
-        None,
-        "gen_sim.align_held",
-        "simulation.place",
-        "hand_over",
-        "simulation.move_held_object",
-        "unknown.motion",
-        "parallel",
-    ],
-)
-def test_verified_source_is_tightly_bound_to_preceding_acquisition(middle):
-    calls = [
-        SimpleNamespace(
-            semantic_id="simulation.pick",
-            arguments={"object": "item"},
-            resources={"primary": "active"},
-        )
-    ]
-    if middle is not None:
-        calls.append(
-            SimpleNamespace(
-                semantic_id=middle,
-                arguments={"object": "item"},
-                resources={"primary": "active"},
-            )
-        )
-    calls.append(
-        SimpleNamespace(
-            semantic_id="gen_sim.align_held",
-            arguments={"object": "item"},
-            resources={"primary": "active"},
-        )
-    )
-    segments = [
-        SimpleNamespace(
-            name=f"call_{index}",
-            segment_id=f"s{index}",
-            calls=(SimpleNamespace(call=call, segment_call_index=0),),
-            parallel_block=object() if call.semantic_id == "parallel" else None,
-        )
-        for index, call in enumerate(calls)
-    ]
-    program = SimpleNamespace(
-        program_id="compiled", iter_segments=lambda: iter(segments)
-    )
-    alignment = f"compiled/s{len(calls) - 1}:0"
-    sources = _module().bind_staging_retention_sources(
-        program, (alignment,), frozenset({"simulation.pick", "gen_sim.align_held"})
-    )
-    predecessor = (
-        "gen_sim.align_held" if middle == "gen_sim.align_held" else "simulation.pick"
-    )
-    assert sources == (
-        ((alignment, predecessor, "item", "active"),)
-        if middle in {None, "gen_sim.align_held"}
-        else ()
-    )
-
-
-@pytest.mark.parametrize(
     "change", [None, "release", "velocity", "long_hold_release", "unknown_reader"]
 )
 def test_retained_staging_transform_rechecks_fresh_command_identity(
@@ -1417,9 +1383,11 @@ def test_retained_staging_transform_rechecks_fresh_command_identity(
             },
         ),
     )
-    probe.action._staging_retention_sources = {
-        probe.request.invocation_id: fixture.source
-    }
+    probe.action.staging_contract = replace(
+        probe.action.staging_contract,
+        invocation_ids=frozenset({probe.request.invocation_id}),
+        retention_sources={probe.request.invocation_id: fixture.source},
+    )
     engine = object.__new__(GenSimActionEngine)
     engine._planning_services, engine._actions = probe.action._planning_services, {
         probe.request.skill_id: probe.action

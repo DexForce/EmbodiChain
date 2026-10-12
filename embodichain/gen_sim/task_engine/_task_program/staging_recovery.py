@@ -67,37 +67,6 @@ def bind_staging_calls(program: Any, rigid_ids: frozenset[str]) -> tuple[str, ..
     return tuple(result)
 
 
-def bind_staging_retention_sources(
-    program: Any, staging_calls: tuple[str, ...], attachment_call_ids: frozenset[str]
-) -> tuple[tuple[str, str, str, str], ...]:
-    from .invocation_policy import _invocation_ids
-
-    ids, previous, sources = _invocation_ids(program), None, []
-    for segment in program.iter_segments():
-        if getattr(segment, "parallel_block", None) is not None:
-            previous = None
-            continue
-        call = segment.calls[0].call
-        semantic_id = call.semantic_id
-        args = dict(getattr(call, "arguments", {}))
-        entity = args.get(
-            "object", getattr(getattr(call, "object", None), "entity_id", None)
-        )
-        resource = call.resources.get("primary")
-        if entity is None or resource is None:
-            previous = None
-            continue
-        key = (entity, resource)
-        if (
-            ids[segment.name] in staging_calls
-            and previous is not None
-            and previous[0] == key
-        ):
-            sources.append((ids[segment.name], previous[1], entity, resource))
-        previous = (key, semantic_id) if semantic_id in attachment_call_ids else None
-    return tuple(sources)
-
-
 def verified_retention_sources(
     profile: Any, preset_id: str | None, sources: tuple[tuple[str, str, str, str], ...]
 ) -> dict[str, dict[str, Any]]:
@@ -109,17 +78,33 @@ def verified_retention_sources(
     )
 
     presets = getattr(profile, "presets", {})
-    preset = presets.get(preset_id) if isinstance(presets, Mapping) else None
+    if isinstance(presets, Mapping):
+        preset = presets.get(preset_id)
+    else:
+        preset = next(
+            (
+                value
+                for value in presets
+                if getattr(value, "preset_id", None) == preset_id
+            ),
+            None,
+        )
     if (
         type(preset) is not SkillPolicyPreset
         or preset.effect_assurance is not EffectAssurance.VERIFIED
     ):
         return {}
     result = {}
-    for invocation_id, acquisition_id, entity_id, resource_id in sources:
+    for (
+        invocation_id,
+        acquisition_invocation_id,
+        acquisition_call_id,
+        entity_id,
+        resource_id,
+    ) in sources:
         monitors = tuple(
             preset.effect_monitors.get(call_id)
-            for call_id in (acquisition_id, ALIGN_HELD_CALL)
+            for call_id in (acquisition_call_id, ALIGN_HELD_CALL)
         )
         if any(
             type(ref) is not EffectMonitorRef
@@ -130,7 +115,8 @@ def verified_retention_sources(
             continue
         result[invocation_id] = {
             "preset_id": preset.preset_id,
-            "predecessor_call_id": acquisition_id,
+            "predecessor_call_id": acquisition_call_id,
+            "predecessor_invocation_id": acquisition_invocation_id,
             "entity_id": entity_id,
             "resource_id": resource_id,
             **{

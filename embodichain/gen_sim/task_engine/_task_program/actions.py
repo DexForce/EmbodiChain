@@ -37,7 +37,6 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
 from embodichain.lab.sim.atomic_actions.core import ObjectSemantics
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
-    require_shared_task_state_key,
 )
 from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     HeldObjectPoseGoal,
@@ -73,6 +72,11 @@ from .pick_safety import (
     _inspect_pick_motion,
     _inspect_pick_plan,
     _owns_constrained_pick,
+)
+from .state_handoff import (
+    GenSimStateHandoff,
+    StagingContract,
+    require_release_effect,
 )
 
 __all__ = [
@@ -871,9 +875,10 @@ class GenSimMoveHeldObject(MoveHeldObject):
     GoalType = MoveHeldObject.GoalType
     OptionsType = MoveHeldObject.OptionsType
     binding_contract = MoveHeldObject.binding_contract
-    _staging_rigid_entity_ids: frozenset[str] = frozenset()
-    _staging_invocation_ids: frozenset[str] = frozenset()
-    _staging_retention_sources: dict[str, dict] | None = None
+
+    def __init__(self, *, staging_contract: StagingContract | None = None) -> None:
+        super().__init__()
+        self.staging_contract = staging_contract or StagingContract.empty()
 
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_transport_planning", False) is True:
@@ -884,12 +889,11 @@ class GenSimMoveHeldObject(MoveHeldObject):
             motion = request.binding.endpoint("primary", "motion").require_target(
                 JointPositionTarget
             )
-            task_key = require_shared_task_state_key(
-                request.binding.endpoint("primary", "motion"),
-                request.binding.endpoint("primary", "grasp"),
-                participant="GenSim transport",
+            handoff = GenSimStateHandoff.from_request(
+                request, context, participant="GenSim transport"
             )
-            held = context.get_held_object(task_key)
+            task_key = handoff.resource
+            held = handoff.held
             if held is not None:
                 arm_qpos = arm_qpos_from_state(context, list(motion.joint_ids))
                 start = self.robot.compute_fk(
@@ -925,8 +929,8 @@ class GenSimMoveHeldObject(MoveHeldObject):
             if owns_staging(
                 request,
                 context,
-                self._staging_rigid_entity_ids,
-                self._staging_invocation_ids,
+                self.staging_contract.rigid_entity_ids,
+                self.staging_contract.invocation_ids,
                 self.motion_generator,
             )
             else None
@@ -969,21 +973,16 @@ class GenSimMoveHeldObject(MoveHeldObject):
             scope,
             before_original,
             lambda selected: build(selected)[0],
-            retention_source=(self._staging_retention_sources or {}).get(
+            retention_source=self.staging_contract.retention_source(
                 request.invocation_id
             ),
         )
-        motion = request.binding.endpoint("primary", "motion")
-        grasp = request.binding.endpoint("primary", "grasp")
-        task_key = require_shared_task_state_key(
-            motion, grasp, participant="GenSim transport"
+        handoff = GenSimStateHandoff.from_request(
+            request, context, participant="GenSim transport"
         )
-        held = context.get_held_object(task_key)
+        held = handoff.held
         if held is not None and plan.plan_success.any():
-            plan = replace(
-                plan,
-                expected_effects=StateDelta(held_object_updates={task_key: held}),
-            )
+            plan = handoff.retain(plan, held)
         return plan
 
 
@@ -1012,8 +1011,14 @@ class GenSimPlace(Place):
         return replace(plan, scene_dependency_monitor_until=monitor_until)
 
     def _plan(self, request, context):
+        handoff = GenSimStateHandoff.from_request(
+            request, context, participant="GenSim Place"
+        )
         if getattr(self.motion_generator, "direct_place_planning", False) is True:
-            return self._with_contact_monitor_boundary(super()._plan(request, context))
+            return require_release_effect(
+                self._with_contact_monitor_boundary(super()._plan(request, context)),
+                handoff.resource,
+            )
         from .motion import (
             _joint_velocity_limits,
             _velocity_validity,
@@ -1045,7 +1050,9 @@ class GenSimPlace(Place):
                     context,
                     message="Recovered Place exceeds final resampled joint velocity limits.",
                 )
-        return self._with_contact_monitor_boundary(plan)
+        return require_release_effect(
+            self._with_contact_monitor_boundary(plan), handoff.resource
+        )
 
 
 class GenSimPour(Pour):
@@ -1074,12 +1081,11 @@ class GenSimPour(Pour):
         motion = request.binding.endpoint("primary", "motion")
         grasp = request.binding.endpoint("primary", "grasp")
         motion_target = motion.require_target(JointPositionTarget)
-        task_key = require_shared_task_state_key(
-            motion, grasp, participant="GenSim Pour"
+        handoff = GenSimStateHandoff.from_request(
+            request, context, participant="GenSim Pour"
         )
-        held = context.get_held_object(task_key)
-        if held is None:
-            raise ValueError("GenSim Pour requires an exclusively held object.")
+        task_key = handoff.resource
+        held = handoff.require_held()
         arm_qpos = arm_qpos_from_state(context, list(motion_target.joint_ids))
         eef = self.robot.compute_fk(
             qpos=arm_qpos, name=motion_target.control_part, to_matrix=True
