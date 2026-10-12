@@ -782,16 +782,17 @@ def test_only_planners_that_solve_timing_declare_it():
     from scripts.benchmark.motion_generation.planners.ik_interpolate import (
         IkInterpolateAdapter,
     )
-    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
     from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
 
     # An adapter that declares nothing is not judged on an unsolved clock.
     assert PlannerAdapter.native_timing is False
     assert CuroboAdapter.native_timing is True
     assert ToppraAdapter.native_timing is True
-    # Both assign a constant interval that no limit informs.
+    # Assigns a constant interval that no limit informs.
     assert IkInterpolateAdapter.native_timing is False
-    assert NmgOnnxAdapter.native_timing is False
+    # NMG depends on its row: nominal unless `retime` solves the timing.
+    assert _nmg_adapter().native_timing is False
+    assert _nmg_adapter(retime=True).native_timing is True
 
 
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
