@@ -51,3 +51,44 @@ def test_training_node_capacity_reaches_world_config(
     manager.physics = SimpleNamespace(configure_world=Mock())
     world_cfg = manager._convert_sim_config(cfg)
     assert world_cfg.scene_node_capacity == (65536 if capacity is None else capacity)
+
+
+@pytest.mark.parametrize(
+    "renderer,override,demand,capacity,expected",
+    [
+        ("auto", "auto", False, 262144, 131071),
+        ("auto", "auto", False, 524288, 131071),
+        ("auto", "auto", False, 32000, 32000),
+        ("auto", "auto", False, None, 65536),
+        ("auto", "auto", True, 262144, 262144),
+        ("auto", "auto", None, 262144, 262144),
+        ("hybrid", "auto", False, 262144, 262144),
+        ("no-render", "auto", False, 262144, 131071),
+        ("auto", "hybrid", False, 262144, 262144),
+        ("auto", "no-render", False, 262144, 131071),
+    ],
+)
+def test_no_render_limits_capacity_reservations_without_mutating_config(
+    monkeypatch, renderer, override, demand, capacity, expected
+) -> None:
+    from embodichain.lab.sim import SimulationManagerCfg, cfg as sim_cfg
+    from embodichain.lab.sim.cfg import RenderCfg
+
+    monkeypatch.setattr(sim_cfg, "DEFAULT_RENDERER", override)
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "hybrid" if override == "auto" else override,
+    )
+    config = SimulationManagerCfg(
+        headless=True,
+        scene_node_capacity=capacity,
+        render_cfg=RenderCfg(renderer=renderer),
+    )
+    manager = object.__new__(SimulationManager)
+    manager._requires_native_renderer = demand
+    manager._material_cache_dir = Path("unused-material-cache")
+    manager.physics = SimpleNamespace(configure_world=Mock())
+    world = manager._convert_sim_config(config)
+    assert world.scene_node_capacity == expected
+    assert config.scene_node_capacity == capacity

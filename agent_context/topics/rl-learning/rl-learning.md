@@ -116,7 +116,9 @@ custom viewers can still request a native renderer. Default deployments budget
 environments with matching minibatch sizes to fit that native limit; other
 Default batches retain 4,096 environments. Newton deployments retain their
 existing batches. NoRender keeps their template nodes, but camera recording
-and Viewer paths still need capacity for native replicas. See
+and Viewer paths still need capacity for native replicas. Newton configs
+reserve native capacity for those paths; automatic NoRender selection applies
+its own lower capacity limit without changing the training batch. See
 [render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned

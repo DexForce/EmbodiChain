@@ -304,7 +304,10 @@ class SimulationManagerCfg:
     """Maximum scene nodes, or None to retain the DexSim World default.
 
     Large batches of articulated robots may require more nodes than the
-    default 65,536. This changes allocation capacity, not physics settings.
+    default 65,536. NoRender caps larger native-renderer reservations at its
+    131,071-node limit while retaining the authored capacity in this config.
+    Physical scene replication must fit the effective capacity. This changes
+    allocation capacity, not physics settings.
     """
 
     height: int = 1080
@@ -512,6 +515,8 @@ class SimulationManager:
     _instances = {}
     # World cleanup does not reset DexSim's process-wide renderer.
     _initialized_process_renderer = False
+    # DexSim NoRender uses the 17-bit EntityManager node allocator.
+    _NO_RENDER_SCENE_NODE_CAPACITY = 131071
 
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
@@ -1245,6 +1250,19 @@ class SimulationManager:
                 "World does not reset the process renderer. Start a new process to "
                 "change renderer. If any environment needs cameras, select a native "
                 "renderer before constructing its first World."
+            )
+
+        if (
+            sim_config.render_cfg.renderer == "no-render"
+            and world_config.scene_node_capacity
+            > SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+        ):
+            world_config.scene_node_capacity = (
+                SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+            )
+            logger.log_debug(
+                f"NoRender limits scene node capacity to {world_config.scene_node_capacity}; "
+                f"native-renderer reservation was {sim_config.scene_node_capacity}."
             )
 
         sim_config.render_cfg.apply_to_dexsim_config(world_config)

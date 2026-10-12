@@ -83,8 +83,14 @@ def test_packaged_deployment_and_agent_config_agree(
         assert "renderer" not in raw.get("render_cfg", {})
         assert "renderer" not in agent["trainer"]
         assert cfg.sim_cfg.render_cfg.renderer == "auto"
-        if backend == "default":
-            assert cfg.sim_cfg.scene_node_capacity == 131071
+        expected_capacity = (
+            {"g1_flat": 262144, "h1_2_flat": 262144, "microduck_flat": 524288}.get(
+                task.rsplit("/", 1)[-1], 131071
+            )
+            if backend == "newton"
+            else 131071
+        )
+        assert cfg.sim_cfg.scene_node_capacity == expected_capacity
         algorithm = agent["algorithm"]["cfg"]
         assert algorithm["batch_size"] == (
             agent["trainer"]["num_envs"]

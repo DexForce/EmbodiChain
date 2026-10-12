@@ -32,12 +32,30 @@ import pytest
 @pytest.mark.subprocess_sim
 @pytest.mark.gpu
 @pytest.mark.parametrize(
-    "scenario", ["no-render-first", "camera-first", "trainer-recording"]
+    "scenario,task",
+    [
+        ("no-render-first", "go1_flat"),
+        ("camera-first", "go1_flat"),
+        ("explicit-no-render", "g1_flat"),
+    ]
+    + [
+        ("trainer-recording", task)
+        for task in (
+            "go1_flat",
+            "go2_flat",
+            "g1_flat",
+            "h1_2_flat",
+            "anymal_c_flat",
+            "microduck_flat",
+        )
+    ],
 )
-def test_auto_renderer_process_lifecycle(scenario: str, tmp_path: Path) -> None:
+def test_auto_renderer_process_lifecycle(
+    scenario: str, task: str, tmp_path: Path
+) -> None:
     report = tmp_path / "renderer.json"
     result = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), scenario, str(report)],
+        [sys.executable, str(Path(__file__).resolve()), scenario, task, str(report)],
         cwd=Path(__file__).resolve().parents[3],
         env={**os.environ, "EMBODICHAIN_SIM_EXIT_PROCESS": "0"},
         text=True,
@@ -46,10 +64,12 @@ def test_auto_renderer_process_lifecycle(scenario: str, tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert report.is_file(), result.stdout + result.stderr
-    assert json.loads(report.read_text())["scenario"] == scenario
+    result = json.loads(report.read_text())
+    assert result["scenario"] == scenario
+    assert result["task"] == task
 
 
-def _run_scenario(scenario: str, report: Path) -> None:
+def _run_scenario(scenario: str, task: str, report: Path) -> None:
     import torch
     from embodichain.lab.gym.envs.managers.cfg import EventCfg
     from embodichain.lab.gym.envs.managers.event_manager import EventManager
@@ -61,10 +81,10 @@ def _run_scenario(scenario: str, report: Path) -> None:
     from embodichain.learning.rl.runtime import _build_gym_environment
     from embodichain.utils.utility import load_config
 
-    importlib.import_module("embodichain_tasks.locomotion.velocity.go1_flat")
+    importlib.import_module(f"embodichain_tasks.locomotion.velocity.{task}")
     sim_cfg.DEFAULT_RENDERER = "auto"
     task_path = Path(
-        "embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.newton.yaml"
+        f"embodichain_tasks/configs/tasks/locomotion/velocity/{task}/env.newton.yaml"
     )
     raw = load_config(task_path)
     agent = load_config(task_path.parent / "agents/ppo.newton.yaml")
@@ -113,16 +133,27 @@ def _run_scenario(scenario: str, report: Path) -> None:
                 native_env.get_active_scene_node_count() / env.num_envs
             )
             required = nodes_per_env * agent["trainer"]["num_envs"]
-            assert required <= native_env.get_scene_node_capacity() <= 131071
+            assert required <= native_env.get_scene_node_capacity(), (
+                task,
+                native_env.get_active_scene_node_count(),
+                required,
+                native_env.get_scene_node_capacity(),
+            )
             assert agent["trainer"]["num_envs"] == 4096
             env.sim.get_sensor("trainer-camera").update()
             assert env.sim.get_sensor("trainer-camera").get_data()["color"].shape[
                 -3:-1
             ] == (16, 16)
         else:
-            env = build_env(
-                raw["id"], base_env_cfg=configuration(scenario == "camera-first")
-            ).unwrapped
+            config = configuration(scenario == "camera-first")
+            if scenario == "explicit-no-render":
+                config.sim_cfg.render_cfg.renderer = "no-render"
+            env = build_env(raw["id"], base_env_cfg=config).unwrapped
+            if scenario == "explicit-no-render":
+                assert env.sim.get_world().get_env().get_scene_node_capacity() == 131071
+                assert env.sim.sim_config.scene_node_capacity == 262144
+                env.reset()
+                env.step(torch.zeros(env.action_space.shape, device=env.device))
             if scenario == "camera-first":
                 assert env.sim.has_native_renderer
                 env.sim.get_sensor("camera").update()
@@ -141,11 +172,13 @@ def _run_scenario(scenario: str, report: Path) -> None:
                 with pytest.raises(RuntimeError, match="Start a new process"):
                     build_env(raw["id"], base_env_cfg=configuration(True))
                 assert not SimulationManager._instances
-            else:
+            elif scenario == "camera-first":
                 env = build_env(raw["id"], base_env_cfg=configuration(False)).unwrapped
                 assert env.sim.has_native_renderer
                 assert env.sim.sim_config.render_cfg.renderer == initial_renderer
-        report.write_text(json.dumps({"scenario": scenario}), encoding="utf-8")
+        report.write_text(
+            json.dumps({"scenario": scenario, "task": task}), encoding="utf-8"
+        )
     finally:
         if manager is not None:
             manager.get_functor_cfg("record").func.finalize()
@@ -157,4 +190,4 @@ def _run_scenario(scenario: str, report: Path) -> None:
 
 
 if __name__ == "__main__":
-    _run_scenario(sys.argv[1], Path(sys.argv[2]))
+    _run_scenario(sys.argv[1], sys.argv[2], Path(sys.argv[3]))

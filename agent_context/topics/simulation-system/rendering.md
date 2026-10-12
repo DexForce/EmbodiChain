@@ -30,6 +30,12 @@ manager rejects that combination before constructing another World and asks
 for a new process with rendering reserved from its first environment. Process
 configuration, rather than the per-World requested renderer, owns this check.
 
+Native-renderer scene-node reservations may exceed NoRender's 131,071-node
+limit. The manager caps the effective NoRender World capacity at that limit
+while preserving the authored native-renderer reservation. This also applies
+to explicit NoRender selections and global defaults. Smaller reservations are
+retained, and physical replication must still fit the effective capacity.
+
 The manager skips native background, light and visual-material setup, keeps
 physical ground, and skips Newton render-state publication. Gym additionally
 skips configured lights/IBL and built-in native visual effects; background
