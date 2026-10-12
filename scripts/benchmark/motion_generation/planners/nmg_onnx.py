@@ -89,7 +89,8 @@ class NmgOnnxAdapter(PlannerAdapter):
 
         Raises:
             ValueError: If the suite states no acceleration limit, which leaves
-                nothing to retime against.
+                nothing to retime against, or if no stated velocity limit exists
+                and the asset's limits differ across environments.
         """
         acceleration = self.context.joint_acceleration_limit_rad_s2
         if acceleration is None:
@@ -98,14 +99,21 @@ class NmgOnnxAdapter(PlannerAdapter):
                 "asset supplies no acceleration limit."
             )
         num_joints = int(self.spec.config.get("num_arm_joints", 7))
-        asset_limits = self.context.robot.get_qvel_limits(
+        per_env_limits = self.context.robot.get_qvel_limits(
             name=self.context.control_part
-        )[0][:num_joints]
-        velocity = resolve_velocity_limits(
-            asset_limits,
-            self.context.joint_velocity_limit_rad_s,
-            asset_limits,
-        )
+        )[:, :num_joints]
+        asset_limits = per_env_limits[0]
+        stated = self.context.joint_velocity_limit_rad_s
+        # `NeuralPlannerCfg.constraints` holds one set of limits for the whole
+        # batch, while the metrics read each environment's own. Using the first
+        # environment's limits is only sound when every environment shares them.
+        if stated is None and not bool((per_env_limits == asset_limits).all()):
+            raise ValueError(
+                "retime needs one velocity limit for the batch, but the asset's "
+                "joint velocity limits differ across environments; state "
+                "protocol.joint_velocity_limit_rad_s instead."
+            )
+        velocity = resolve_velocity_limits(asset_limits, stated, asset_limits)
         if velocity is None:
             raise ValueError(
                 "retime found no usable joint velocity limit: the asset reports a "

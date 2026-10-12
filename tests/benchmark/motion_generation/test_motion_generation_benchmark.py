@@ -603,6 +603,27 @@ def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
     assert stated._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
 
 
+def test_nmg_retiming_requires_one_velocity_limit_for_every_environment():
+    # One set of retiming limits serves the whole batch, while the metrics
+    # check each environment against its own.
+    adapter = _nmg_adapter(retime=True)
+    differing = torch.tensor([[2.62] * 7, [1.0] * 7])
+    adapter.context.robot.get_qvel_limits = Mock(return_value=differing)
+    with pytest.raises(ValueError, match="differ across environments"):
+        adapter._retiming_constraints()
+
+    shared = _nmg_adapter(retime=True)
+    shared.context.robot.get_qvel_limits = Mock(
+        return_value=torch.tensor([[2.62] * 7, [2.62] * 7])
+    )
+    assert shared._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
+
+    # A suite-stated limit applies to every environment alike.
+    stated = _nmg_adapter(retime=True, velocity_limit=[2.0] * 7)
+    stated.context.robot.get_qvel_limits = Mock(return_value=differing)
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.0] * 7)
+
+
 def test_nmg_retiming_requires_a_suite_acceleration_limit():
     adapter = _nmg_adapter(retime=True, acceleration_limit=None)
     with pytest.raises(ValueError, match="joint_acceleration_limit_rad_s2"):
