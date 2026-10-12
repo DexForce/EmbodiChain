@@ -258,6 +258,11 @@ def create_atomic_object(
         length=3,
         default=(1.0, 1.0, 1.0),
     )
+    body_type = str(config.get("body_type", "dynamic"))
+    if body_type not in {"dynamic", "kinematic", "static"}:
+        raise ValueError(
+            f"objects[{object_id}].body_type must be dynamic, kinematic or static."
+        )
     entity = simulation.add_rigid_object(
         cfg=RigidObjectCfg(
             uid=f"atomic_benchmark_{object_id}",
@@ -281,6 +286,7 @@ def create_atomic_object(
                     restitution=float(config.get("restitution", 0.0)),
                 ),
             ),
+            body_type=body_type,
             init_pos=position,
             init_rot=rotation,
             body_scale=scale,

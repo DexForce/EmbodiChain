@@ -25,6 +25,12 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_door_pour_align_push --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_hand_over --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_pickment --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_placement --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
@@ -65,6 +71,19 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
+- Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
+  provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
+  one suite each, reusing each tutorial's robot settings and scene. These
+  skills reject cuRobo, so TOPPRA plans them. Each case compiles the skill
+  once with a reference TOPPRA generator while the manifest is built and
+  freezes every pose the skill requests for each arm; a row is motion-valid
+  only when both arms pass their own frozen poses in order. HandOver's sampled
+  pickup and receiving grasps are frozen from the same compile.
+  `CoordinatedPickment` solves its keyframes with robot IK and never calls the
+  planner, so its trajectory is the same for every planner.
+- Track configs may declare `grippers` (one entry per gripper) instead of
+  `gripper`, `fixtures` (static tables and slabs that are never parked), and
+  cases may keep extra objects in the scene through `scene_object_poses`.
 - Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics.
   TOPPRA also serves Atomic Skills and joint-space cases; Atomic Skill calls
   that leave planner options unset receive the suite's TOPPRA limits and
@@ -116,7 +135,8 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   but cuRobo still receives an empty external collision world. Contact replay
   validates target-joint actuation; it does not guarantee collision safety
   against non-target appliance links or other environment geometry
-- Dual-arm actions and multi-action chains
+- Dual-arm suites run on TOPPRA only; no collision-aware planner currently
+  accepts the coordinated skills
 - Latency-budget Pareto sweeps, confidence intervals, subprocess isolation
 
 

@@ -117,6 +117,9 @@ _GRIPPER_SKILLS = {
     "pour",
     "axis_align",
     "push_object",
+    "hand_over",
+    "coordinated_pickment",
+    "coordinated_placement",
 }
 _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
@@ -2810,8 +2813,11 @@ class AtomicTaskScenario(ScenarioProvider):
         self._base_full_qpos: torch.Tensor | None = None
         self._gripper_open: torch.Tensor | None = None
         self._gripper_grasp: torch.Tensor | None = None
+        self._gripper_states: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._fixtures: dict[str, AtomicObjectHandle] = {}
         self._engine: AtomicActionEngine | None = None
-        self._case_grasp_generator: _ActiveCaseGraspPoseGenerator | None = None
+        self._case_grasp_generators: dict[str, _ActiveCaseGraspPoseGenerator] = {}
+        self._reference_motion_generator: object | None = None
         self._runtime_entities_created = False
 
     def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
@@ -2847,6 +2853,23 @@ class AtomicTaskScenario(ScenarioProvider):
                 )
             self._articulations[handle.object_id] = handle
 
+        fixture_values = track.config.get("fixtures", [])
+        if not isinstance(fixture_values, list):
+            raise TypeError("atomic-task fixtures must be a list of mappings.")
+        for value in fixture_values:
+            if not isinstance(value, Mapping):
+                raise TypeError("Every atomic-task fixture must be a mapping.")
+            # Fixtures such as tables and support slabs stay at their declared
+            # pose for every case; they are never parked or reset.
+            handle = create_atomic_object(
+                simulation,
+                {"body_type": "static", **dict(value)},
+                initialize=False,
+            )
+            if handle.object_id in self._fixtures:
+                raise ValueError(f"Duplicate atomic fixture id {handle.object_id!r}.")
+            self._fixtures[handle.object_id] = handle
+
         object_values = track.config.get("objects", [])
         if not isinstance(object_values, list):
             raise TypeError("atomic-task objects must be a list of mappings.")
@@ -2857,6 +2880,7 @@ class AtomicTaskScenario(ScenarioProvider):
             if (
                 handle.object_id in self._objects
                 or handle.object_id in self._articulations
+                or handle.object_id in self._fixtures
             ):
                 raise ValueError(f"Duplicate atomic object id {handle.object_id!r}.")
             self._objects[handle.object_id] = handle
@@ -2892,49 +2916,69 @@ class AtomicTaskScenario(ScenarioProvider):
             isinstance(value, Mapping) and value.get("id") in _GRIPPER_SKILLS
             for value in track.config.get("skills", [])
         ):
-            gripper_value = track.config.get("gripper")
-            if not isinstance(gripper_value, Mapping):
-                raise ValueError(
-                    "Atomic gripper-action tracks must define a gripper mapping."
+            gripper_values = track.config.get("grippers")
+            if gripper_values is None:
+                gripper_value = track.config.get("gripper")
+                if not isinstance(gripper_value, Mapping):
+                    raise ValueError(
+                        "Atomic gripper-action tracks must define a gripper mapping."
+                    )
+                gripper_values = [gripper_value]
+            elif track.config.get("gripper") is not None:
+                raise ValueError("Define either gripper or grippers, not both.")
+            if not isinstance(gripper_values, list) or not gripper_values:
+                raise ValueError("grippers must be a non-empty list of mappings.")
+            for gripper_value in gripper_values:
+                part, open_state, grasp_state = self._resolve_gripper(
+                    robot, gripper_value
                 )
-            end_effector_part = gripper_value.get("control_part")
-            if not isinstance(end_effector_part, str) or not end_effector_part:
-                raise ValueError("gripper.control_part must be a non-empty string.")
-            self.end_effector_part = end_effector_part
-            limits = robot.get_qpos_limits(name=end_effector_part)[0].to(
-                device=robot.device, dtype=torch.float32
+                if part in self._gripper_states:
+                    raise ValueError(f"Gripper {part!r} is configured twice.")
+                self._gripper_states[part] = (open_state, grasp_state)
+            self.end_effector_part = next(iter(self._gripper_states))
+            self._gripper_open, self._gripper_grasp = self._gripper_states[
+                self.end_effector_part
+            ]
+
+    @staticmethod
+    def _resolve_gripper(
+        robot: Robot, gripper_value: object
+    ) -> tuple[str, torch.Tensor, torch.Tensor]:
+        """Validate one gripper control part and its open/grasp commands."""
+        if not isinstance(gripper_value, Mapping):
+            raise ValueError("Every gripper entry must be a mapping.")
+        end_effector_part = gripper_value.get("control_part")
+        if not isinstance(end_effector_part, str) or not end_effector_part:
+            raise ValueError("gripper.control_part must be a non-empty string.")
+        limits = robot.get_qpos_limits(name=end_effector_part)[0].to(
+            device=robot.device, dtype=torch.float32
+        )
+        dofs = limits.shape[0]
+        open_qpos = _float_vector(
+            gripper_value.get("open_qpos"),
+            name="gripper.open_qpos",
+            length=dofs,
+            default=limits[:, 0].detach().cpu().tolist(),
+        )
+        grasp_qpos = _float_vector(
+            gripper_value.get("grasp_qpos"),
+            name="gripper.grasp_qpos",
+            length=dofs,
+        )
+        open_state = torch.tensor(open_qpos, dtype=limits.dtype, device=limits.device)
+        grasp_state = torch.tensor(grasp_qpos, dtype=limits.dtype, device=limits.device)
+        if bool(
+            (
+                (open_state < limits[:, 0])
+                | (open_state > limits[:, 1])
+                | (grasp_state < limits[:, 0])
+                | (grasp_state > limits[:, 1])
             )
-            dofs = limits.shape[0]
-            open_qpos = _float_vector(
-                gripper_value.get("open_qpos"),
-                name="gripper.open_qpos",
-                length=dofs,
-                default=limits[:, 0].detach().cpu().tolist(),
-            )
-            grasp_qpos = _float_vector(
-                gripper_value.get("grasp_qpos"),
-                name="gripper.grasp_qpos",
-                length=dofs,
-            )
-            self._gripper_open = torch.tensor(
-                open_qpos, dtype=limits.dtype, device=limits.device
-            )
-            self._gripper_grasp = torch.tensor(
-                grasp_qpos, dtype=limits.dtype, device=limits.device
-            )
-            if bool(
-                (
-                    (self._gripper_open < limits[:, 0])
-                    | (self._gripper_open > limits[:, 1])
-                    | (self._gripper_grasp < limits[:, 0])
-                    | (self._gripper_grasp > limits[:, 1])
-                )
-                .any()
-                .item()
-            ):
-                raise ValueError(
-                    "gripper open/grasp qpos must lie within joint limits."
-                )
+            .any()
+            .item()
+        ):
+            raise ValueError("gripper open/grasp qpos must lie within joint limits.")
+        return end_effector_part, open_state, grasp_state
 
     def generate_cases(
         self,
@@ -3055,22 +3099,38 @@ class AtomicTaskScenario(ScenarioProvider):
         """Bind one AtomicActionEngine to the adapter-owned MotionGenerator."""
         del first_case
         control_profiles = None
+        grippers = self._configured_grippers()
         if any(provider.requires_gripper for provider in self._case_providers.values()):
-            if (
-                self.end_effector_part is None
-                or self._gripper_open is None
-                or self._gripper_grasp is None
-            ):
+            if not grippers:
                 raise RuntimeError("Configured gripper command states are unavailable.")
             control_profiles = {
-                self.end_effector_part: ControlPartCommandProfile.joint_positions(
-                    open=self._gripper_open,
-                    grasp=self._gripper_grasp,
+                part: ControlPartCommandProfile.joint_positions(
+                    open=open_state,
+                    grasp=grasp_state,
                 )
+                for part, (open_state, grasp_state) in grippers.items()
             }
         motion_generator = adapter.require_motion_generator()
         scene_entities = tuple(handle.entity for handle in self._objects.values())
-        grasp_pose_generators = None
+        grasp_pose_generators: dict[str, GraspPoseGenerator] | None = None
+        sampling_counts = [
+            int(
+                self._cases_by_id[case_id].case_parameters.get(
+                    "grasp_sample_count", 10_000
+                )
+            )
+            for case_id, provider in self._case_providers.items()
+            if provider.samples_grasps
+        ]
+        if sampling_counts:
+            from scripts.tutorials.atomic_action.tutorial_utils import (
+                create_parallel_jaw_grasp_pose_generator,
+            )
+
+            sampler = create_parallel_jaw_grasp_pose_generator(
+                n_sample=max(sampling_counts), force_refresh=False
+            )
+            grasp_pose_generators = {part: sampler for part in grippers}
         slide_cases = [
             self._cases_by_id[case_id]
             for case_id, provider in self._case_providers.items()
@@ -3080,6 +3140,7 @@ class AtomicTaskScenario(ScenarioProvider):
             if self.end_effector_part is None:
                 raise RuntimeError("Configured Slide grasp endpoint is unavailable.")
             grasp_pose_generators = {
+                **(grasp_pose_generators or {}),
                 self.end_effector_part: _FrozenArticulationGraspPoseGenerator(
                     [
                         (
@@ -3096,21 +3157,26 @@ class AtomicTaskScenario(ScenarioProvider):
                         )
                         for case in slide_cases
                     ]
-                )
+                ),
             }
-        self._case_grasp_generator = None
-        if any(
-            provider.frozen_grasp(self._cases_by_id[case_id]) is not None
+        frozen_parts = {
+            part
             for case_id, provider in self._case_providers.items()
-        ):
-            if self.end_effector_part is None:
-                raise RuntimeError("Frozen-grasp cases require an end-effector part.")
-            self._case_grasp_generator = _ActiveCaseGraspPoseGenerator(
+            for part in provider.frozen_grasps(self, self._cases_by_id[case_id])
+        }
+        self._case_grasp_generators = {
+            part: _ActiveCaseGraspPoseGenerator(
                 None
                 if grasp_pose_generators is None
-                else grasp_pose_generators[self.end_effector_part]
+                else grasp_pose_generators.get(part)
             )
-            grasp_pose_generators = {self.end_effector_part: self._case_grasp_generator}
+            for part in sorted(frozen_parts)
+        }
+        if self._case_grasp_generators:
+            grasp_pose_generators = {
+                **(grasp_pose_generators or {}),
+                **self._case_grasp_generators,
+            }
         if scene_entities:
             self._engine = create_simulation_atomic_action_engine(
                 motion_generator=motion_generator,
@@ -3125,11 +3191,23 @@ class AtomicTaskScenario(ScenarioProvider):
                 grasp_pose_generators=grasp_pose_generators,
             )
 
+    def _configured_grippers(self) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+        """Return every configured gripper's open and grasp commands."""
+        if self._gripper_states:
+            return dict(self._gripper_states)
+        if (
+            self.end_effector_part is None
+            or self._gripper_open is None
+            or self._gripper_grasp is None
+        ):
+            return {}
+        return {self.end_effector_part: (self._gripper_open, self._gripper_grasp)}
+
     def close_planner(self, adapter: PlannerAdapter) -> None:
         """Drop the engine before its adapter closes the shared generator."""
         del adapter
         self._engine = None
-        self._case_grasp_generator = None
+        self._case_grasp_generators = {}
 
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
@@ -3162,8 +3240,17 @@ class AtomicTaskScenario(ScenarioProvider):
             ]
             | None
         ) = None
+        scene_object_poses = {
+            str(object_id): torch.tensor(pose, dtype=torch.float32, device=robot.device)
+            for object_id, pose in dict(
+                case.case_parameters.get("scene_object_poses", {})
+            ).items()
+        }
         for index, handle in enumerate(self._objects.values()):
-            if handle.object_id == active_id:
+            if handle.object_id in scene_object_poses and handle.object_id != active_id:
+                handle.entity.set_local_pose(scene_object_poses[handle.object_id])
+                handle.entity.clear_dynamics()
+            elif handle.object_id == active_id:
                 reset_steps = int(
                     case.case_parameters.get("pre_action_settle_steps", reset_steps)
                 )
@@ -3217,6 +3304,10 @@ class AtomicTaskScenario(ScenarioProvider):
             if active_handle is not None:
                 active_handle.entity.set_local_pose(active_object_pose)
                 active_handle.entity.clear_dynamics()
+        for object_id, pose in scene_object_poses.items():
+            if object_id != active_id:
+                self.object_handle(object_id).entity.set_local_pose(pose)
+                self.object_handle(object_id).entity.clear_dynamics()
         if active_articulation_state is not None:
             # Settling may advance a weakly driven button/knob from the exact
             # state used to derive the frozen link target.  Restore the
@@ -3304,16 +3395,17 @@ class AtomicTaskScenario(ScenarioProvider):
             scene=provider.initial_scene(self, case),
             control_dt=float(self.simulation.sim_config.physics_dt),
         )
-        frozen_grasp = provider.frozen_grasp(case)
-        if frozen_grasp is None:
-            return engine.compile(invocations, context=context)
-        if self._case_grasp_generator is None:
-            raise RuntimeError("Frozen-grasp cases require a prepared grasp generator.")
-        self._case_grasp_generator.activate(*frozen_grasp)
+        frozen = provider.frozen_grasps(self, case)
+        missing = sorted(set(frozen) - set(self._case_grasp_generators))
+        if missing:
+            raise RuntimeError(f"No prepared frozen-grasp generator for {missing}.")
+        for part, (target_pose, grasp_pose) in frozen.items():
+            self._case_grasp_generators[part].activate(target_pose, grasp_pose)
         try:
             return engine.compile(invocations, context=context)
         finally:
-            self._case_grasp_generator.deactivate()
+            for part in frozen:
+                self._case_grasp_generators[part].deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -3363,6 +3455,9 @@ class AtomicTaskScenario(ScenarioProvider):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+        )
+        motion_outcomes = self._with_other_arm_validity(
+            result, case, robot, suite, motion_outcomes
         )
         provider = self._case_providers[case.case_id]
         observation = self._execute(result, case, provider)
@@ -3541,6 +3636,78 @@ class AtomicTaskScenario(ScenarioProvider):
             },
         )
 
+    @staticmethod
+    def _with_other_arm_validity(
+        result: CompiledTrajectory,
+        case: BenchmarkCase,
+        robot: Robot,
+        suite: SuiteCfg,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[CaseOutcome, ...]:
+        """Also require every other declared arm to pass its ordered waypoints.
+
+        Coordinated skills move two arms.  ``case.target_waypoints`` belongs to
+        the robot's primary control part; ``arm_waypoints`` lists the frozen
+        poses of each other arm.  A row is motion-valid only when every arm
+        passes its own waypoints in order within the joint limits.
+        """
+        arm_waypoints = case.case_parameters.get("arm_waypoints")
+        if not arm_waypoints:
+            return motion_outcomes
+        if case.full_start_qpos is None:
+            raise ValueError("Multi-arm cases require full_start_qpos.")
+        merged = list(motion_outcomes)
+        for part, waypoints in dict(arm_waypoints).items():
+            joint_ids = list(robot.get_joint_ids(name=part))
+            targets = torch.tensor(waypoints, dtype=torch.float32, device=robot.device)
+            part_case = replace(
+                case,
+                num_waypoints=targets.shape[1],
+                target_waypoints=targets,
+                start_qpos=case.full_start_qpos[:, joint_ids].to(robot.device),
+                reference_qpos=torch.zeros(
+                    case.batch_size,
+                    targets.shape[1],
+                    len(joint_ids),
+                    device=robot.device,
+                ),
+                case_parameters={
+                    **case.case_parameters,
+                    "motion_validity": "ordered_cartesian_waypoints",
+                    "waypoint_rotation_symmetry": None,
+                },
+            )
+            part_outcomes = compute_case_outcomes(
+                PlanResult(
+                    success=result.plan_success,
+                    positions=result.trajectory.positions[:, :, joint_ids],
+                    dt=result.trajectory.dt,
+                ),
+                part_case,
+                robot,
+                part,
+                validation_samples=suite.protocol.validation_samples,
+                position_threshold_m=suite.protocol.position_threshold_m,
+                rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
+                joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            )
+            for index, (outcome, other) in enumerate(
+                zip(merged, part_outcomes, strict=True)
+            ):
+                merged[index] = replace(
+                    outcome,
+                    ordered_waypoints_reached=(
+                        outcome.ordered_waypoints_reached
+                        and other.ordered_waypoints_reached
+                    ),
+                    motion_valid=outcome.motion_valid and other.motion_valid,
+                    joint_limit_violation=(
+                        outcome.joint_limit_violation or other.joint_limit_violation
+                    ),
+                    failure_code=outcome.failure_code or other.failure_code,
+                )
+        return tuple(merged)
+
     def record_replay(
         self,
         result: object,
@@ -3647,6 +3814,14 @@ class AtomicTaskScenario(ScenarioProvider):
             object_rotation_peak_signed_rad=(
                 replay_metrics.object_rotation_peak_signed_rad
             ),
+            scene_object_final_poses={
+                str(object_id): self.object_handle(str(object_id))
+                .entity.get_local_pose(to_matrix=True)
+                .clone()
+                for object_id in dict(
+                    case.case_parameters.get("scene_object_poses", {})
+                )
+            },
         )
 
     def _physics_settings(self) -> _PhysicsReplaySettings:
@@ -4494,6 +4669,21 @@ class AtomicTaskScenario(ScenarioProvider):
             self.simulation.update(step=2)
         return handle
 
+    def activate_objects(self, object_ids: Sequence[str]) -> list[AtomicObjectHandle]:
+        """Reset several case objects together and park every other one."""
+        handles = [self.object_handle(object_id) for object_id in object_ids]
+        active = {handle.object_id for handle in handles}
+        for index, candidate in enumerate(self._objects.values()):
+            if candidate.object_id in active:
+                candidate.reset()
+            else:
+                candidate.park(index)
+        for index, candidate in enumerate(self._articulations.values()):
+            candidate.park(len(self._objects) + index)
+        if self.simulation is not None:
+            self.simulation.update(step=2)
+        return handles
+
     def activate_articulation(self, object_id: str) -> AtomicArticulationHandle:
         """Reset one articulation and park all inactive scene objects."""
         handle = self.articulation_handle(object_id)
@@ -4600,8 +4790,46 @@ class AtomicTaskScenario(ScenarioProvider):
                 f"joint {resolved.name!r}, not configured joint {target_joint!r}."
             )
 
+    def reference_motion_generator(self) -> object:
+        """Return the TOPPRA generator used to record a skill's own key poses.
+
+        Coordinated skills compute their waypoints internally.  Providers
+        compile them once with this generator while building the manifest and
+        freeze the poses the skill requests; those poses do not depend on the
+        planner later being benchmarked.
+        """
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        if self._reference_motion_generator is None:
+            from embodichain.lab.sim.motion.motion_generator import (
+                MotionGenCfg,
+                MotionGenerator,
+            )
+            from embodichain.lab.sim.motion.planners import ToppraPlannerCfg
+
+            self._reference_motion_generator = MotionGenerator(
+                MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
+            )
+        return self._reference_motion_generator
+
+    def open_grippers(self) -> None:
+        """Command and set every configured gripper to its open state."""
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        batch_size = self.robot.get_qpos().shape[0]
+        for part, (open_state, _) in self._configured_grippers().items():
+            command = open_state.unsqueeze(0).expand(batch_size, -1)
+            for target in (False, True):
+                self.robot.set_qpos(command, name=part, target=target)
+        self.robot.clear_dynamics()
+
     def close_runtime(self) -> None:
         """Release Python references before SimulationManager teardown."""
+        reference = self._reference_motion_generator
+        self._reference_motion_generator = None
+        close = getattr(getattr(reference, "planner", None), "close", None)
+        if close is not None:
+            close()
         self._engine = None
         self._case_providers.clear()
         self._cases_by_id.clear()
@@ -4612,6 +4840,8 @@ class AtomicTaskScenario(ScenarioProvider):
         self.end_effector_part = None
         self._gripper_open = None
         self._gripper_grasp = None
+        self._gripper_states.clear()
+        self._fixtures.clear()
         self.simulation = None
         self.robot = None
         self.suite = None

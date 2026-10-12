@@ -607,13 +607,19 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
             },
         )
 
-    def frozen_grasp(self, case: BenchmarkCase) -> tuple[torch.Tensor, torch.Tensor]:
+    def frozen_grasps(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
         """Make OpenDoor sample the manifest handle grasp."""
+        if scenario.end_effector_part is None:
+            raise RuntimeError("OpenDoor requires a configured end-effector part.")
         device = torch.device("cpu")
-        return (
-            _case_pose(case, "door_target_pose", device=device),
-            _case_pose(case, "grasp_pose", device=device),
-        )
+        return {
+            scenario.end_effector_part: (
+                _case_pose(case, "door_target_pose", device=device),
+                _case_pose(case, "grasp_pose", device=device),
+            )
+        }
 
     def articulation_effect_segment(self, case: BenchmarkCase) -> str:
         """Score the hinge at the end of the segment that rotates the door."""

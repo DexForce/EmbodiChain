@@ -44,6 +44,8 @@ class AtomicSkillCaseProvider(ABC):
 
     skill_id: str
     requires_gripper = False
+    samples_grasps = False
+    """Whether the skill samples grasps itself and needs a grasp generator."""
 
     @abstractmethod
     def generate_case(
@@ -113,20 +115,21 @@ class AtomicSkillCaseProvider(ABC):
         del scenario, case
         return None
 
-    def frozen_grasp(
-        self, case: BenchmarkCase
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        """Return the target pose and grasp the skill must sample for this case.
+    def frozen_grasps(
+        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
+    ) -> Mapping[str, tuple[torch.Tensor, torch.Tensor]]:
+        """Return the grasps a self-sampling skill must use, by gripper part.
 
-        Skills that sample their own grasp, such as OpenDoor, receive this
-        manifest grasp instead, so every planner plans the same contact.
+        Skills that sample their own grasps, such as OpenDoor or HandOver,
+        receive these manifest grasps instead, so every planner plans the same
+        contacts.
 
         Returns:
-            ``(target_pose, grasp_pose)`` batches, or ``None`` when the skill
-            accepts an explicit grasp or needs none.
+            ``{gripper_part: (target_pose, grasp_pose)}`` batches; empty when
+            the skill accepts explicit grasps or needs none.
         """
-        del case
-        return None
+        del scenario, case
+        return {}
 
     def object_rotation_segment(
         self, compiled: CompiledTrajectory
