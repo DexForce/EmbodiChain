@@ -44,6 +44,9 @@ class ToppraAdapter(PlannerAdapter):
     """Pre-interpolate EEF targets through IK, then run TOPPRA."""
 
     capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    native_timing = True
+    """TOPPRA solves the time parameterization under velocity and acceleration
+    limits."""
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)

@@ -360,11 +360,54 @@ def test_velocity_violation_fails_motion_valid_and_reports_utilization():
 
 def test_unset_acceleration_and_jerk_limits_report_not_applicable():
     outcome = _dynamic_outcomes(_decelerating_path())[0]
-    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(80.0)
+    # 4 rad/s to rest within one 0.025 s step.
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(160.0)
     assert outcome.acceleration_utilization is None
     assert outcome.acceleration_limit_violation is None
     assert outcome.jerk_utilization is None
     assert outcome.jerk_limit_violation is None
+
+
+def test_dynamics_are_not_smoothed_across_a_reversing_path():
+    # A path that reverses every step: each step moves 4 rad/s and the rate
+    # flips by 8 rad/s per step. A central difference averages adjacent steps
+    # and would read this path as nearly at rest.
+    positions = torch.zeros(1, 6, 7)
+    positions[0, 1::2, 0] = 0.1
+    outcome = _dynamic_outcomes(positions)[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(320.0)
+    assert outcome.max_joint_jerk_rad_s3 == pytest.approx(25600.0)
+
+
+def test_zero_interval_duplicates_do_not_change_the_dynamics():
+    # A junction sample repeated at zero elapsed time adds no motion.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 4, 7)
+    positions[0, 1:, 0] = 0.1
+    positions[0, 3, 0] = 0.2
+    dt = torch.tensor([[0.0, 0.025, 0.0, 0.025]])
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(0.0)
+
+
+def test_a_two_sample_path_does_not_report_a_measured_acceleration():
+    # One step resolves a velocity but no change in it. Reporting zero would
+    # certify an acceleration limit the samples cannot speak to.
+    outcome = _dynamic_outcomes(joint_acceleration_limit_rad_s2=1.0)[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 is None
+    assert outcome.acceleration_limit_violation is None
 
 
 def test_configured_acceleration_limit_is_enforced_per_joint():
@@ -377,7 +420,10 @@ def test_configured_acceleration_limit_is_enforced_per_joint():
 
 
 def test_dynamic_limits_stay_satisfied_within_configured_limits():
-    case, positions = _valid_motion_case_and_positions()
+    case, _ = _valid_motion_case_and_positions()
+    # Long enough for every derivative up to jerk to be measured.
+    positions = torch.zeros(1, 4, 7)
+    positions[0, :, 0] = torch.linspace(0.0, 0.1, 4)
     outcome = compute_case_outcomes(
         _timed_plan_result(positions, success=True),
         case,
@@ -441,6 +487,27 @@ class _PlaceholderLimitRobot(_MetricRobot):
     """Backend that reports the float32 maximum instead of a real limit."""
 
     qvel_limit = float(torch.finfo(torch.float32).max)
+
+
+def test_placeholder_velocity_limit_leaves_a_zero_interval_move_unjudged():
+    # With no velocity limit configured anywhere, an unbounded velocity has
+    # nothing to violate; it is reported as a peak, not as a failed check.
+    case, positions = _valid_motion_case_and_positions()
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == math.inf
+    assert outcome.velocity_utilization is None
+    assert outcome.velocity_limit_violation is None
+    assert outcome.dynamic_limits_satisfied is None
 
 
 def test_placeholder_asset_velocity_limit_reads_as_not_applicable():
@@ -575,6 +642,62 @@ def test_unset_dynamic_limit_aggregates_to_none_not_a_zero_violation_rate():
     # An unconfigured acceleration limit must not read as a clean result.
     assert row["acceleration_violation_rate"] is None
     assert row["jerk_violation_rate"] is None
+
+
+def test_an_unbounded_peak_is_not_averaged_away():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+            native_timing=True,
+        )
+    ]
+    trial = _dynamic_trial(
+        (
+            replace(_outcome(), max_joint_velocity_rad_s=2.0, velocity_utilization=0.5),
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=math.inf,
+                velocity_utilization=math.inf,
+            ),
+        )
+    )
+    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
+    assert row["max_joint_velocity_rad_s"] == math.inf
+    assert row["velocity_utilization"] == math.inf
+
+
+@pytest.mark.parametrize("tolerance", [math.nan, math.inf, -0.1])
+def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
+    suite = load_suite("smoke")
+    suite.protocol.dynamic_limit_tolerance = tolerance
+
+    with pytest.raises(ValueError, match="dynamic_limit_tolerance"):
+        suite.validate_benchmark()
+
+
+def test_only_planners_that_solve_timing_declare_it():
+    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
+    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+    from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+        IkInterpolateAdapter,
+    )
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+
+    # An adapter that declares nothing is not judged on an unsolved clock.
+    assert PlannerAdapter.native_timing is False
+    assert CuroboAdapter.native_timing is True
+    assert ToppraAdapter.native_timing is True
+    # Both assign a constant interval that no limit informs.
+    assert IkInterpolateAdapter.native_timing is False
+    assert NmgOnnxAdapter.native_timing is False
 
 
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():

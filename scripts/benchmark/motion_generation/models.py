@@ -82,7 +82,7 @@ class PlannerMetadata:
     capabilities: frozenset[str]
     model_revision: str = "N/A"
     inference_dtype: str = "fp32"
-    native_timing: bool = True
+    native_timing: bool = False
     """Whether reported ``dt`` is solved rather than a nominal constant.
 
     ``PlanResult`` requires ``dt`` whenever it carries positions, so a planner

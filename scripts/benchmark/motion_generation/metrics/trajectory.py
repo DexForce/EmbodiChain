@@ -25,8 +25,6 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.compute.trajectory import differentiate_positions
-
 from ..models import BenchmarkCase, CaseOutcome
 from .stats import nearest_rank_percentile
 
@@ -492,8 +490,7 @@ def _trim_hold_padding(
 def _moves_in_zero_time(positions: torch.Tensor, dt: torch.Tensor) -> bool:
     """Return whether the path changes position across a zero-length interval.
 
-    ``dt[0]`` is an arrival offset rather than a step and is excluded, matching
-    :func:`differentiate_positions`.
+    ``dt[0]`` is an arrival offset rather than a step and is excluded.
     """
     steps = dt[1:]
     if steps.numel() == 0:
@@ -510,23 +507,40 @@ def _trajectory_derivatives(
 
     Derivatives are always recomputed here rather than read from
     :class:`PlanResult`, so every planner is measured with one operator on its
-    own timing instead of with whatever convention it reported. Repeated
-    three-point differencing damps the higher derivatives, which understates
-    peak jerk equally for every candidate.
+    own timing instead of with whatever convention it reported.
+
+    The operator is compact divided differences: velocity is each step's mean
+    rate, acceleration the change between adjacent step rates over the
+    distance between step midpoints, and jerk the same again. A central
+    difference averages each sample with both neighbors, and nesting it widens
+    that window further; a path that reverses direction every step then reads
+    as several times smoother than it is. The compact second difference equals
+    the path's true acceleration at some instant inside its window, so it never
+    overstates the peak and does not hide one either.
+
+    Samples a zero interval after an unchanged predecessor are dropped first:
+    they add no motion, and a position change across a zero interval is
+    rejected by the caller before this point.
 
     Args:
         positions: One environment's joint path of shape ``(N, DOF)``.
         dt: That path's arrival intervals of shape ``(N,)``.
 
     Returns:
-        Velocity, acceleration, and jerk, each shaped like ``positions``.
+        Velocity ``(N-1, DOF)``, acceleration ``(N-2, DOF)`` and jerk
+        ``(N-3, DOF)`` after dropping zero-interval samples; a derivative the
+        path is too short to resolve is empty.
     """
-    batched_positions = positions.unsqueeze(0)
-    batched_dt = dt.unsqueeze(0).to(positions.dtype)
-    velocity = differentiate_positions(batched_positions, batched_dt)
-    acceleration = differentiate_positions(velocity, batched_dt)
-    jerk = differentiate_positions(acceleration, batched_dt)
-    return velocity[0], acceleration[0], jerk[0]
+    keep = torch.ones(positions.shape[0], dtype=torch.bool, device=positions.device)
+    keep[1:] = dt[1:] > 0
+    positions = positions[keep]
+    steps = dt[keep][1:].to(positions.dtype)
+    velocity = positions.diff(dim=0) / steps.unsqueeze(-1)
+    midpoint_gaps = 0.5 * (steps[1:] + steps[:-1])
+    acceleration = velocity.diff(dim=0) / midpoint_gaps.unsqueeze(-1)
+    centre_gaps = 0.5 * (midpoint_gaps[1:] + midpoint_gaps[:-1])
+    jerk = acceleration.diff(dim=0) / centre_gaps.unsqueeze(-1)
+    return velocity, acceleration, jerk
 
 
 def _dynamic_limit_metrics(
@@ -560,17 +574,25 @@ def _dynamic_limit_metrics(
         # A position change across a zero interval is an unbounded velocity, so
         # report it as a definite violation instead of letting the
         # differentiator reject the trajectory and fail the whole trial.
+        # Each limit check is reported only where that limit is configured,
+        # exactly as on the ordinary path; with no limit at all there is
+        # nothing for the verdict to decide.
+        limited = [
+            limit is not None for limit in (qvel_limits, qacc_limits, qjerk_limits)
+        ]
         return {
             "max_joint_velocity_rad_s": math.inf,
-            "velocity_utilization": math.inf,
-            "velocity_limit_violation": True,
+            "velocity_utilization": math.inf if limited[0] else None,
+            "velocity_limit_violation": True if limited[0] else None,
             "max_joint_acceleration_rad_s2": math.inf,
-            "acceleration_utilization": (math.inf if qacc_limits is not None else None),
-            "acceleration_limit_violation": (True if qacc_limits is not None else None),
+            "acceleration_utilization": math.inf if limited[1] else None,
+            "acceleration_limit_violation": True if limited[1] else None,
             "max_joint_jerk_rad_s3": math.inf,
-            "jerk_utilization": math.inf if qjerk_limits is not None else None,
-            "jerk_limit_violation": True if qjerk_limits is not None else None,
-            "dynamic_limits_satisfied": False if timing_is_solved else None,
+            "jerk_utilization": math.inf if limited[2] else None,
+            "jerk_limit_violation": True if limited[2] else None,
+            "dynamic_limits_satisfied": (
+                False if (any(limited) and timing_is_solved) else None
+            ),
         }
     else:
         velocity, acceleration, jerk = _trajectory_derivatives(positions, dt)

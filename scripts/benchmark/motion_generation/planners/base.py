@@ -74,8 +74,14 @@ class PlannerAdapter(ABC):
     model_revision: str = "N/A"
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
-    native_timing: bool = True
-    """Whether this backend solves trajectory timing instead of assuming it."""
+    native_timing: bool = False
+    """Whether this backend solves trajectory timing instead of assuming it.
+
+    Defaults to nominal, so a backend that has not declared otherwise is not
+    judged on a clock it may never have solved: its dynamic-limit verdict
+    reads N/A, which is visible, rather than passing or failing silently. A
+    backend sets this only when its timing comes from a solve under limits.
+    """
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         self.spec = spec
