@@ -328,11 +328,19 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             n_approach,
             interpolation_dt=interpolation_dt,
         )
-        reach_keyframes = axis_translation_keyframes(
-            approach_xpos,
-            grasp_xpos,
-            approach_direction_world,
-            n_waypoints=n_reach - 1,
+        # ik_interp follows exact straight-line samples into and out of the
+        # handle.  motion_gen backends do not guarantee Cartesian samples, so
+        # they receive the segment endpoint instead.
+        linear_contact = request.motion_policy.strategy == "ik_interp"
+        reach_keyframes = (
+            axis_translation_keyframes(
+                approach_xpos,
+                grasp_xpos,
+                approach_direction_world,
+                n_waypoints=n_reach - 1,
+            )
+            if linear_contact
+            else grasp_xpos
         )
         reach_success, reach_arm = self._plan_pose_segment(
             reach_keyframes,
@@ -341,7 +349,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             request,
             n_reach,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
         open_success, open_arm = self._plan_pose_segment(
             opened_grasp_xpos,
@@ -351,11 +359,15 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             n_open,
             interpolation_dt=interpolation_dt,
         )
-        retract_keyframes = axis_translation_keyframes(
-            opened_grasp_xpos[:, -1],
-            retract_xpos,
-            rotated_approach_direction,
-            n_waypoints=n_retract - 1,
+        retract_keyframes = (
+            axis_translation_keyframes(
+                opened_grasp_xpos[:, -1],
+                retract_xpos,
+                rotated_approach_direction,
+                n_waypoints=n_retract - 1,
+            )
+            if linear_contact
+            else retract_xpos
         )
         retract_success, retract_arm = self._plan_pose_segment(
             retract_keyframes,
@@ -364,7 +376,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             request,
             n_retract,
             interpolation_dt=interpolation_dt,
-            cartesian_linear=True,
+            cartesian_linear=linear_contact,
         )
         planned_success = (
             actionable_grasp
