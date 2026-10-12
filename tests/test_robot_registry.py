@@ -114,8 +114,37 @@ def test_resolver_unknown_robot_has_actionable_error(catalogs):
         registry.resolve_robot_cfg("missing")
 
 
-def test_resolver_accepts_configuration_class_spelling(external_robot):
-    assert isinstance(registry.resolve_robot_cfg("vendor.armCfg"), external_robot[0])
+def test_resolver_rejects_unregistered_configuration_class_spelling(external_robot):
+    with pytest.raises(ValueError, match="Unknown robot.*vendor.armCfg"):
+        registry.resolve_robot_cfg("vendor.armCfg")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "aloha_mini",
+        "tianji_marvin",
+        "dexforce_w1",
+        "cobotmagic",
+        "franka",
+        "franka_panda",
+        "ur",
+        "AlohaMiniCfg",
+        "TianjiMarvinCfg",
+        "DexforceW1Cfg",
+        "CobotMagicCfg",
+        "FrankaPandaCfg",
+        "URRobotCfg",
+        "DualArmRobotCfg",
+    ],
+)
+def test_official_catalog_rejects_retired_selectors(catalogs, name):
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+
+    with pytest.raises(ValueError, match="Unknown robot"):
+        registry.resolve_robot_cfg(name)
 
 
 @pytest.mark.parametrize("name", [None, ""])
@@ -143,6 +172,158 @@ def test_invalid_catalog_is_rejected(catalogs, catalog):
 
     with pytest.raises(TypeError):
         registry.list_robot_cfgs()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"dof": -1},
+        {"dof": True},
+        {"dof": 1.5},
+        {"control_parts": ["arm"]},
+        {"control_parts": {"arm": -1}},
+        {"control_parts": {"arm": True}},
+        {"control_parts": {"": 6}},
+        {"mimic_joints": {"finger": None}},
+        {"control_part_mimics": {"arm": "finger"}},
+        {"mimic_joints": {}, "control_part_mimics": {"arm": ("finger",)}},
+        {"supports_dual_arm": "yes"},
+        {"variants": {"bad": {"dof": -1}}},
+    ],
+)
+def test_invalid_control_metadata_is_rejected(catalogs, fields):
+    spec = {"class_path": "absent_robots:RobotCfg", **fields}
+    catalogs.append(_entry("invalid", {"vendor.arm": spec}))
+    with pytest.raises(TypeError, match="dof|control_parts|mimic|supports_dual_arm"):
+        registry.list_robot_cfgs()
+
+
+@pytest.fixture
+def local_robot_assets(monkeypatch, tmp_path):
+    """Build metadata-only configs from temporary files without downloads."""
+    from importlib import import_module
+
+    def local_asset(path: str) -> str:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            '<robot name="test"><link name="base_link"/><link name="ee_link"/></robot>'
+        )
+        return str(target)
+
+    for module_name in (
+        "embodichain.data",
+        "embodichain_robots.aloha_mini",
+        "embodichain_robots.tianji_marvin",
+        "embodichain_robots.cobotmagic",
+        "embodichain_robots.franka_panda",
+        "embodichain_robots.ur_robot",
+        "embodichain_robots.dexforce_w1.utils",
+    ):
+        module = import_module(module_name)
+        if hasattr(module, "get_data_path"):
+            monkeypatch.setattr(module, "get_data_path", local_asset)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "AlohaMini",
+        "TianjiMarvin",
+        "CobotMagic",
+        "DexforceW1",
+        "FrankaPanda",
+        "URRobot",
+        "DualArmRobot",
+        "ur3",
+        "ur3e",
+        "ur5",
+        "ur5e",
+        "ur10",
+        "ur10e",
+    ],
+)
+def test_default_control_metadata_matches_robot_configuration(
+    catalogs, local_robot_assets, name
+):
+    """Catalog summaries track real defaults without downloading robot assets."""
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+
+    cfg = registry.resolve_robot_cfg(name)
+    spec = registry._robot_specs()[name]
+
+    assert spec["control_parts"] == {
+        part: len(set(joints)) for part, joints in cfg.control_parts.items()
+    }
+    controlled = {joint for joints in cfg.control_parts.values() for joint in joints}
+    assert spec["dof"] == len(controlled - set(spec.get("mimic_joints", {})))
+    assert spec["control_part_mimics"] == {
+        part: tuple(joint for joint in joints if joint in spec["mimic_joints"])
+        for part, joints in cfg.control_parts.items()
+        if any(joint in spec["mimic_joints"] for joint in joints)
+    }
+
+
+def test_w1_variant_catalog_covers_body_and_independent_hand_registries():
+    from embodichain_robots._catalog import ROBOT_CONFIGS, _W1_HANDS, _W1_VERSIONS
+    from embodichain_robots.dexforce_w1.types import (
+        DexforceW1Version,
+        DexforceW1HandBrand,
+    )
+    from embodichain_robots.dexforce_w1.hand_specs import (
+        get_default_w1_hand_version,
+        get_w1_hand_spec,
+    )
+
+    assert set(_W1_VERSIONS) == {version.value for version in DexforceW1Version}
+    assert set(_W1_HANDS) == {brand.value for brand in DexforceW1HandBrand}
+    for brand in DexforceW1HandBrand:
+        assert get_w1_hand_spec(brand, get_default_w1_hand_version(brand))
+    variants = ROBOT_CONFIGS["DexforceW1"]["variants"]
+    expected_count = len(DexforceW1Version) * (
+        1 + (len(DexforceW1HandBrand) - 1) ** 2 + 1
+    )
+    assert len(variants) == expected_count
+    assert ROBOT_CONFIGS["DexforceW1"]["default_variant"] == "v021/BrainCo"
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        f"{version}/{hands}"
+        for version in ("v021", "v022", "v025")
+        for hands in (
+            "BrainCo",
+            "DH_PGC",
+            "DH_PGC_M",
+            "bare",
+            "L=DH_PGC,R=DH_PGC_M",
+            "L=DH_PGC_M,R=DH_PGC",
+        )
+    ],
+)
+def test_w1_variant_metadata_matches_config(catalogs, local_robot_assets, variant):
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+    profile = ROBOT_CONFIGS["DexforceW1"]["variants"][variant]
+    cfg = registry.resolve_robot_cfg("DexforceW1", profile["defaults"])
+    joints = {joint for names in cfg.control_parts.values() for joint in names}
+
+    assert cfg.version.value == variant.split("/")[0]
+    assert profile["control_parts"] == {
+        part: len(set(names)) for part, names in cfg.control_parts.items()
+    }
+    assert profile["dof"] == len(joints - set(profile["mimic_joints"]))
+    assert profile["control_part_mimics"] == {
+        part: tuple(joint for joint in names if joint in profile["mimic_joints"])
+        for part, names in cfg.control_parts.items()
+        if any(joint in profile["mimic_joints"] for joint in names)
+    }
+    if "hand_versions" in profile["defaults"]:
+        assert set(profile["defaults"]["hand_versions"].values()) == {"v021"}
 
 
 def test_selected_class_must_be_a_robot_config(catalogs):
@@ -196,6 +377,25 @@ def test_workspace_cli_accepts_and_builds_external_robot(external_robot):
     assert cfg.uid == "workspace_robot"
     assert control_part == "arm"
     assert urdf_path is None
+
+
+def test_declared_dual_arm_summary_matches_external_configuration(external_robot):
+    """Compatible provider bases appear with their own composed joint counts."""
+    _cfg_cls, spec = external_robot
+    spec.update(
+        dof=1,
+        control_parts={"arm": 1},
+        mimic_joints={},
+        control_part_mimics={},
+        supports_dual_arm=True,
+    )
+    profile = registry._robot_specs()["DualArmRobot"]["variants"]["vendor.arm"]
+    cfg = registry.resolve_robot_cfg("DualArmRobot", {"base_robot": "vendor.arm"})
+
+    assert profile["dof"] == 2
+    assert profile["control_parts"] == {
+        part: len(joints) for part, joints in cfg.control_parts.items()
+    }
 
 
 def test_dual_arm_composes_external_robot_without_builtin_mapping(external_robot):

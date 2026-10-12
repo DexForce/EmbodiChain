@@ -32,21 +32,21 @@ from embodichain.lab.sim.cfg import (
     RobotCfg,
 )
 from embodichain.lab.sim.motion.workspace import RobotWorkspaceCfg
-from embodichain.lab.sim.robots.dexforce_w1 import DexforceW1Cfg
-from embodichain.lab.sim.robots.dexforce_w1.params import W1ArmKineParams
-from embodichain.lab.sim.robots.dexforce_w1.types import (
+from embodichain_robots.dexforce_w1 import DexforceW1Cfg
+from embodichain_robots.dexforce_w1.params import W1ArmKineParams
+from embodichain_robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1HandBrand,
     DexforceW1HandVersion,
     DexforceW1Type,
     DexforceW1Version,
 )
-from embodichain.lab.sim.robots.dexforce_w1.hand_specs import (
+from embodichain_robots.dexforce_w1.hand_specs import (
     get_default_w1_hand_version,
     get_w1_hand_spec,
 )
-from embodichain.lab.sim.robots.dexforce_w1.specs import get_w1_version_spec
-from embodichain.lab.sim.robots.dexforce_w1.utils import (
+from embodichain_robots.dexforce_w1.specs import get_w1_version_spec
+from embodichain_robots.dexforce_w1.utils import (
     build_dexforce_w1_assembly_urdf_cfg,
     build_dexforce_w1_control_parts,
 )
@@ -57,7 +57,7 @@ from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 def _mock_w1_asset_paths(monkeypatch, tmp_path):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce_w1 import utils as w1_utils
 
     def resolve(path):
         resolved = tmp_path / path
@@ -231,7 +231,7 @@ def test_w1_v022_provisional_eef_baseline_is_composed_consistently():
 
 def test_w1_v022_cfg_uses_registered_asset_paths(tmp_path, monkeypatch):
     import embodichain.lab.sim.cfg as sim_cfg
-    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce_w1 import utils as w1_utils
 
     registered_paths = []
 
@@ -283,7 +283,7 @@ def test_w1_cfg_builds_complete_dual_arm_robot(monkeypatch, tmp_path):
 
 def test_w1_hand_version_is_independent_of_robot_version(monkeypatch, tmp_path):
     _mock_w1_asset_paths(monkeypatch, tmp_path)
-    from embodichain.lab.sim.robots.dexforce_w1 import utils as w1_utils
+    from embodichain_robots.dexforce_w1 import utils as w1_utils
 
     selected_versions = []
     original_get_urdf = w1_utils.hand_manager.get_urdf
@@ -440,10 +440,10 @@ def test_robotcfg_to_dict_roundtrip():
     assert cfg2.joint_drive_props.stiffness == {"J[1-2]": 1e4}
 
 
-from embodichain.lab.sim.robots.cobotmagic import CobotMagicCfg
-from embodichain.lab.sim.robots import AlohaMiniCfg, TianjiMarvinCfg
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
-from embodichain.lab.sim.robots.ur_robot import URRobotCfg
+from embodichain_robots.cobotmagic import CobotMagicCfg
+from embodichain_robots import AlohaMiniCfg, TianjiMarvinCfg
+from embodichain_robots.franka_panda import FrankaPandaCfg
+from embodichain_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
@@ -477,7 +477,7 @@ def test_specified_robot_defaults_use_eef_control_part_names(
     """Renaming the default groups preserves their source joint identifiers."""
     monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     monkeypatch.setattr(
-        f"embodichain.lab.sim.robots.{module_path}.get_data_path", lambda value: value
+        f"embodichain_robots.{module_path}.get_data_path", lambda value: value
     )
     cfg = robot_class.from_dict({})
 

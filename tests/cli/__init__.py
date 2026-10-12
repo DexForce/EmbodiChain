@@ -14,20 +14,6 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Compatibility alias for :mod:`embodichain_robots.ur_robot`."""
+"""Tests for lightweight command-line adapters."""
 
 from __future__ import annotations
-
-from importlib import import_module
-import sys
-
-__all__ = ["URRobotCfg"]
-
-if __name__ == "__main__":
-    from pathlib import Path
-    import runpy
-
-    sys.path[0] = str(Path(__file__).resolve().parents[4])
-    runpy.run_module("embodichain_robots.ur_robot", run_name="__main__")
-else:
-    sys.modules[__name__] = import_module("embodichain_robots.ur_robot")

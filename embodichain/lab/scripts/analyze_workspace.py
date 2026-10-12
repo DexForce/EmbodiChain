@@ -21,14 +21,14 @@ Usage examples::
     # Predefined EmbodiChain robot -- control parts + solver come from the
     # preset, so only --control-part (optional) is needed.
     embodichain analyze-workspace \\
-        --robot franka_panda --mode joint_space --num-samples 20000
+        --robot FrankaPanda --mode joint_space --num-samples 20000
 
     embodichain analyze-workspace \\
-        --robot cobotmagic --control-part left_arm --mode cartesian_space \\
+        --robot CobotMagic --control-part left_arm --mode cartesian_space \\
         --bounds -0.5 0.5 -0.5 0.5 0.6 1.5 --ik-samples-per-point 5
 
     embodichain analyze-workspace \\
-        --robot dexforce_w1 \\
+        --robot DexforceW1 \\
         --robot-params '{"version":"v025","with_default_eef":false}' \\
         --control-part left_arm --mode joint_space
 
@@ -45,12 +45,12 @@ Usage examples::
 
     # Preview an already-computed workspace cache with its robot in EmbodiChain
     embodichain analyze-workspace \\
-        --robot franka_panda \\
+        --robot FrankaPanda \\
         --preview-cache ~/.cache/embodichain_data/robot_workspace/<key>
 
     # Analyze or preview with the robot and workspace in a Viser browser
     embodichain analyze-workspace \\
-        --robot franka_panda --mode joint_space --viser
+        --robot FrankaPanda --mode joint_space --viser
 
 Results are cached to disk (``--cache-dir``, default
 ``~/.cache/embodichain_data/robot_workspace``) keyed by the robot + parameters,

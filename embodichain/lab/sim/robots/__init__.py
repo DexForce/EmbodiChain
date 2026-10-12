@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Legacy robot exports and the generic dual-arm composition API."""
+"""Generic dual-arm composition; concrete presets live in embodichain_robots."""
 
 from __future__ import annotations
 
@@ -22,35 +22,15 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "AlohaMiniCfg",
-    "TianjiMarvinCfg",
-    "DexforceW1Cfg",
-    "CobotMagicCfg",
-    "FrankaPandaCfg",
-    "URRobotCfg",
     "DualArmRobotCfg",
     "build_dual_arm_cfg",
 ]
 
 _EXPORTS = {
-    "AlohaMiniCfg": "embodichain_robots",
-    "TianjiMarvinCfg": "embodichain_robots",
-    "DexforceW1Cfg": "embodichain_robots",
-    "CobotMagicCfg": "embodichain_robots",
-    "FrankaPandaCfg": "embodichain_robots",
-    "URRobotCfg": "embodichain_robots",
     "DualArmRobotCfg": ".dual_arm",
     "build_dual_arm_cfg": ".dual_arm",
 }
-_MODULES = (
-    "aloha_mini",
-    "tianji_marvin",
-    "dexforce_w1",
-    "cobotmagic",
-    "franka_panda",
-    "ur_robot",
-    "dual_arm",
-)
+_MODULES = ("dual_arm",)
 
 
 def __getattr__(name: str) -> Any:

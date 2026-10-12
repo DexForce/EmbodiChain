@@ -63,7 +63,7 @@ def test_imported_benchmark_drains_cleanup_after_preparation_failure(
     """A benchmark host must not retain queued native worlds after an error."""
     from embodichain import data
     from embodichain.lab import sim
-    from embodichain.lab.sim.robots import CobotMagicCfg
+    from embodichain_robots import CobotMagicCfg
     from scripts.benchmark.robotics import cobotmagic_drives
 
     events = []

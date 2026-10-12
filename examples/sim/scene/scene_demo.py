@@ -179,7 +179,7 @@ def main(args: argparse.Namespace | None = None) -> None:
             )
         )
         if args.scene == "factory":
-            from embodichain.lab.sim.robots.dexforce_w1.cfg import DexforceW1Cfg
+            from embodichain_robots.dexforce_w1.cfg import DexforceW1Cfg
 
             w1_robot: Robot = sim.add_robot(
                 cfg=DexforceW1Cfg.from_dict(

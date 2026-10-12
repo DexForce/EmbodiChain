@@ -119,8 +119,16 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
    The main wheel already advertises this catalog through `embodichain.robots`.
    Gym, workspace CLI, and dual-arm composition use its shared resolver.
-   Optional aliases/defaults belong in the catalog. New robots do not need
-   entries in the legacy import compatibility package or a CLI class map.
+   Variant defaults belong in the catalog. Concrete robots use only the
+   canonical package; no core compatibility module or CLI class map is needed.
+   Supply optional control metadata when known: `dof` counts unique independent
+   default control joints, excluding mimic followers; `control_parts` records
+   raw per-part counts. `mimic_joints` maps followers to leaders, and
+   `control_part_mimics` records follower membership by group. Overlapping groups
+   must not inflate DOF. Declare `supports_dual_arm` only for a compatible default
+   single-arm URDF/control-part/solver contract. Families may declare `variants`
+   with control profiles and a `default_variant`; flat preset IDs use `variant_of`.
+   Keep the catalog free of robot/configuration imports.
 
 7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
    it to `docs/source/resources/robot/index.rst`.

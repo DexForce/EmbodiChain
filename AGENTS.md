@@ -40,8 +40,9 @@ bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
 Generic robot runtime/configuration and dual-arm composition remain in
 `embodichain/lab/sim/`; lightweight catalog resolution lives in
 `embodichain/robot_registry.py`. Concrete robot presets register
-through the `embodichain.robots` catalog entry point; legacy imports under
-`embodichain.lab.sim.robots` are compatibility aliases.
+through the `embodichain.robots` catalog entry point. Concrete presets import
+from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
 under private `_warp/` packages. Compute must not import `lab`, simulation

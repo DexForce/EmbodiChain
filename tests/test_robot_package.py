@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""The main wheel stages official robots and legacy compatibility modules."""
+"""The main wheel stages official robot presets and core dual-arm composition."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from setuptools.command.build_py import build_py
 from setup import get_package_dir, get_packages
 
 
-def test_main_distribution_stages_robot_package_and_compatibility(tmp_path):
+def test_main_distribution_stages_robot_package_without_legacy_modules(tmp_path):
     packages = [
         name
         for name in get_packages()
@@ -55,9 +55,14 @@ def test_main_distribution_stages_robot_package_and_compatibility(tmp_path):
         "embodichain_robots/ur_robot.py",
         "embodichain_robots/dexforce_w1/cfg.py",
         "embodichain_robots/dexforce_w1/types.py",
-        "embodichain/lab/sim/robots/franka_panda.py",
-        "embodichain/lab/sim/robots/dexforce_w1/types.py",
         "embodichain/lab/sim/robots/dual_arm.py",
         "embodichain/robot_registry.py",
     ):
         assert (output / relative).is_file(), relative
+
+    legacy = output / "embodichain/lab/sim/robots"
+    assert {path.name for path in legacy.glob("*.py")} == {
+        "__init__.py",
+        "dual_arm.py",
+    }
+    assert not (legacy / "dexforce_w1").exists()

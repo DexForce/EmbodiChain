@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.robots import FrankaPandaCfg
+from embodichain_robots import FrankaPandaCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from scripts.tutorials.atomic_action.tutorial_utils import (
     create_franka_panda_robot_cfg,

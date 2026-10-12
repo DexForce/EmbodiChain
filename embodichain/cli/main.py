@@ -75,6 +75,11 @@ COMMANDS = (
         help="List tasks by category, deployment, and capability.",
     ),
     Command(
+        name="list-robot",
+        target="embodichain.cli.list_robot:main",
+        help="List robot families, variants, independent control DOFs, and mimic joints.",
+    ),
+    Command(
         name="show-task",
         target="embodichain.cli.show_task:main",
         help="Inspect a logical task and its deployments.",

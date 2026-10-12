@@ -27,12 +27,52 @@ Gym's `robot.class_type`, `analyze-workspace --robot`, and the dual-arm
 from embodichain.robot_registry import list_robot_cfgs, resolve_robot_cfg
 
 cfg = resolve_robot_cfg("URRobot", {"robot_type": "ur5"})
-cfg = resolve_robot_cfg("ur5")  # compatibility alias with variant defaults
+cfg = resolve_robot_cfg("ur5")  # UR variant preset with its own defaults
 ```
 
 The official lightweight catalog is `_catalog.py`. It contains import strings
 and optional default fields; listing robots does not import their configuration
 classes. Configuration classes and top-level exports load on first use.
+
+List installed robot configurations and UR variants:
+
+```bash
+embodichain list-robot
+# Equivalent module entry point:
+python -m embodichain list-robot
+```
+
+The table groups registered models into robot families. URRobot lists its six
+series in one entry. DualArmRobot lists compatible base variants and their own
+DOFs and control parts: dual UR has 12 independent control DOFs, while dual Panda
+has 16 plus two mimic followers. A `*` marks the default variant.
+
+DexforceW1 declares body releases `v021`, `v022`, and `v025`. For each body,
+the catalog covers dual BrainCo and all four pairings of DH_PGC/DH_PGC_M,
+plus a bare configuration (`with_default_eef=False`). Their independent
+control DOFs are 32 for dual BrainCo, 22 for dual DH grippers, and 20 without
+end effectors. Mixed dexterous-hand/two-finger-gripper profiles are omitted
+from the advertised catalog. The display condenses equivalent body
+releases while retaining the hand pairing and per-profile DOF/mimic information.
+
+Hand revisions are independent of body releases: all three registered hand
+brands currently use hand revision `v021`, including with body `v022` or `v025`.
+The compact labels DH_PGC and DH_PGC_M correspond to `DH_PGC_GRIPPER` and
+`DH_PGC_GRIPPER_M`; the DH types can be paired independently through
+`hand_types`. The default is body `v021` with two `BRAINCO_HAND` hands.
+
+Control DOF counts unique independent joints in the default control parts,
+excluding mimic followers. Overlapping groups such as `dual_arm` and
+`full_body` count once. A part annotated `eef (1+1m)` has one independent
+joint and one mimic. The Mimic Joints column names all default URDF followers,
+including passive followers outside the control groups, such as the W1 hand
+PIP joints. Thus Control DOF describes the configured control surface rather
+than all movable joints in an asset.
+
+Listing reads only catalog metadata and does not construct robot configurations
+or download assets. Missing metadata is shown as `-`; `None` means a known
+absence of mimics. Variant IDs such as `ur5` remain accepted by the shared
+resolver even though their table rows are grouped under URRobot.
 
 An installed provider can advertise its own catalog:
 
@@ -47,6 +87,11 @@ ROBOTS = {
     "acme.arm": {
         "class_path": "acme_robots.arm:ArmCfg",
         "defaults": {"variant": "standard"},
+        "dof": 6,
+        "control_parts": {"arm": 6},
+        "mimic_joints": {},
+        "control_part_mimics": {},
+        "supports_dual_arm": True,
     },
 }
 ```
@@ -73,14 +118,18 @@ cfg = DualArmRobotCfg.from_dict({"base_robot": "acme.arm"})
 Dual-arm composition requires the existing single-arm URDF/control-part/solver
 contract. Per-use overrides remain supported through
 `base_robot: {type: acme.arm, init: {...}}`.
+Only bases explicitly declaring `supports_dual_arm` are advertised in the CLI's
+DualArmRobot variants; the runtime still validates the selected configuration.
 
-## Compatibility and installation
+## Imports and installation
 
-Existing YAML selectors, CLI aliases, and imports under
-`embodichain.lab.sim.robots` remain supported. Legacy leaf modules alias their
-canonical modules, preserving class/enum identity and module-level monkeypatches.
-Use `embodichain_robots` for new concrete-robot imports; generic dual-arm helpers
-remain in the core.
+Import concrete robot configurations from `embodichain_robots`. Generic dual-arm
+helpers remain in `embodichain.lab.sim.robots.dual_arm`. The former concrete
+modules and exports under `embodichain.lab.sim.robots` have been removed.
+
+Robot selectors use exact catalog IDs such as `FrankaPanda`, `CobotMagic`,
+`URRobot`, and `ur5`. Old aliases such as `franka_panda`, `cobotmagic`, and
+`ur`, as well as unregistered `Cfg`-suffixed spellings, are no longer accepted.
 
 Install the main distribution normally:
 
