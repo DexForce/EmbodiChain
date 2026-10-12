@@ -38,6 +38,26 @@ def _mean(values: Iterable[float | None]) -> float | None:
     return sum(finite) / len(finite) if finite else None
 
 
+def _mean_unbounded(values: Iterable[float | None]) -> float | None:
+    """Return the mean of measured values, keeping an unbounded one unbounded.
+
+    A position change across a zero interval is recorded as an infinite peak.
+    :func:`_mean` would drop it as non-finite and summarize the remaining
+    trajectories as if it had never happened, so here any infinite value makes
+    the mean infinite. NaN still carries no measurement and is ignored.
+    """
+    measured = [
+        float(value)
+        for value in values
+        if value is not None and not math.isnan(float(value))
+    ]
+    if not measured:
+        return None
+    if any(math.isinf(value) for value in measured):
+        return math.inf
+    return sum(measured) / len(measured)
+
+
 def _case_macro_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
@@ -644,22 +664,22 @@ def _metric_rows(
                     # outcome invalid, so restricting the population here would
                     # drop exactly the trajectories with the largest peaks and
                     # pair a modest peak with a nonzero violation rate.
-                    "max_joint_velocity_rad_s": _mean(
+                    "max_joint_velocity_rad_s": _mean_unbounded(
                         outcome.max_joint_velocity_rad_s for outcome in outcomes
                     ),
-                    "max_joint_acceleration_rad_s2": _mean(
+                    "max_joint_acceleration_rad_s2": _mean_unbounded(
                         outcome.max_joint_acceleration_rad_s2 for outcome in outcomes
                     ),
-                    "max_joint_jerk_rad_s3": _mean(
+                    "max_joint_jerk_rad_s3": _mean_unbounded(
                         outcome.max_joint_jerk_rad_s3 for outcome in outcomes
                     ),
-                    "velocity_utilization": _mean(
+                    "velocity_utilization": _mean_unbounded(
                         outcome.velocity_utilization for outcome in outcomes
                     ),
-                    "acceleration_utilization": _mean(
+                    "acceleration_utilization": _mean_unbounded(
                         outcome.acceleration_utilization for outcome in outcomes
                     ),
-                    "jerk_utilization": _mean(
+                    "jerk_utilization": _mean_unbounded(
                         outcome.jerk_utilization for outcome in outcomes
                     ),
                     "joint_path_length_rad": _mean(

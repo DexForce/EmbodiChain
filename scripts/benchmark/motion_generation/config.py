@@ -276,8 +276,16 @@ class SuiteCfg:
                 for value in values
             ):
                 raise ValueError(f"{field_name} entries must be finite and > 0.")
-        if self.protocol.dynamic_limit_tolerance < 0.0:
-            raise ValueError("dynamic_limit_tolerance must be >= 0.")
+        # NaN fails every comparison, so `tolerance < 0` would let it through
+        # and `utilization > 1 + nan` would then never report a violation.
+        tolerance = self.protocol.dynamic_limit_tolerance
+        if (
+            not isinstance(tolerance, (int, float))
+            or isinstance(tolerance, bool)
+            or not math.isfinite(float(tolerance))
+            or float(tolerance) < 0.0
+        ):
+            raise ValueError("dynamic_limit_tolerance must be finite and >= 0.")
         if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
             _validate_free_space(self.free_space)
         for track in self.tracks:

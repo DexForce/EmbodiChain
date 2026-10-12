@@ -142,7 +142,9 @@ physical task success.
   joint-position finite differences. `PlanResult` requires `dt` whenever it
   carries positions, so the nominal value cannot be withheld; adapters instead
   declare `native_timing`, and a row that does not solve timing reports no
-  comparable duration;
+  comparable duration. The default is nominal: only cuRobo and TOPPRA declare
+  solved timing, while IK interpolation assigns a configured constant interval
+  and stays nominal like NMG;
 - has no explicit obstacle, collision, multimodal-sampling, or APG-refinement
   input/output interface yet.
 
@@ -570,6 +572,14 @@ not select unrelated best samples.
 - path curvature and path-only smoothness;
 - time-indexed integrated squared acceleration and jerk;
 - endpoint settling error and hold stability.
+
+Velocity, acceleration and jerk are recomputed from each planner's positions
+and reported timing with compact divided differences, not read from the
+planner. A central difference averages neighboring steps and reads a path that
+reverses every step as nearly at rest; the compact second difference equals the
+true acceleration somewhere in its window, so it neither overstates nor hides
+the peak. A derivative the path is too short to resolve is reported as not
+applicable rather than zero.
 
 Define `motion_valid` independently:
 
