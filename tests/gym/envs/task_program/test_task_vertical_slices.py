@@ -402,15 +402,16 @@ def test_newton_contact_overlays_are_scoped_in_packaged_manipulation_configs() -
     assert cube_physics.num_substeps == 20
     assert cube_physics.collision_cfg is None
     assert cube_physics.solver_cfg == {
-        "solver_type": "mujoco_warp",
-        "solver": "newton",
-        "integrator": "implicitfast",
-        "iterations": 20,
-        "ls_iterations": 100,
-        "cone": "elliptic",
-        "impratio": 1000.0,
-        "use_mujoco_contacts": True,
-        "enable_multiccd": True,
+        "solver_type": "dexuni",
+        "mujoco_options": {
+            "solver": "newton",
+            "integrator": "implicitfast",
+            "iterations": 20,
+            "ls_iterations": 100,
+            "cone": "elliptic",
+            "impratio": 1000.0,
+            "enable_multiccd": True,
+        },
     }
     cube_collision = cube_cfg.rigid_object[0].attrs.collision_props
     assert isinstance(cube_collision, NewtonCollisionPropertiesCfg)

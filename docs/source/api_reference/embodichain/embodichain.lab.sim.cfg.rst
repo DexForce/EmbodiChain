@@ -135,6 +135,13 @@ For manager-owned Newton steps, ``sync_to_renderer=None`` or ``False`` publishes
 only for visual consumers; ``True`` additionally requests publication on steps
 without consumers.
 
+DexUni accepts ``coupling="two_way"`` with ``joint_mode="dynamic"`` to feed
+contact reactions back to articulations. Keep ``collision_cfg=None`` when
+DexUni owns collision detection. ``coupling_options`` configures the native
+feedback policy; full-surface rigid-soft contacts are unsupported in this mode.
+Articulation gravity compensation and passive joint damping are configured
+separately below.
+
 .. currentmodule:: embodichain.lab.sim.cfg.physics
 
 .. autosummary::
@@ -147,6 +154,41 @@ without consumers.
    physics_cfg_for_backend
    physics_backend_from_cfg
    validate_physics_cfg
+
+Articulation configuration module
+---------------------------------
+
+Articulation types live in ``embodichain.lab.sim.cfg.articulation`` and remain
+available from the ``embodichain.lab.sim.cfg`` facade. Root creation settings
+are independent of sparse link and joint physics overlays.
+``root_props.newton_gravity_compensation`` compensates articulation link
+weight on MuJoCo-backed Newton solvers while retaining payload gravity and
+contact reactions. Omission preserves source intent.
+
+``NewtonJointDrivePropertiesCfg.passive_damping`` selects passive DOF damping
+through the same exact-name, regex and control-part rules as the drive gains.
+It is independent of the drive velocity gain ``damping`` and stays active for
+passive and effort target modes. In dictionaries, select this subtype with
+``joint_drive_props.backend="newton"``. Both settings require Newton.
+
+.. currentmodule:: embodichain.lab.sim.cfg.articulation
+
+.. autosummary::
+
+   ArticulationRootPropertiesCfg
+   LinkPhysicsOverrideCfg
+   link_attrs_from_dict
+   JointDrivePropertiesCfg
+   NewtonJointDrivePropertiesCfg
+   ArticulationCfg
+
+.. autoclass:: ArticulationRootPropertiesCfg
+   :members:
+   :no-index:
+
+.. autoclass:: NewtonJointDrivePropertiesCfg
+   :members:
+   :no-index:
 
 Compatibility facade
 --------------------

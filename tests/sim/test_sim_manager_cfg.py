@@ -174,7 +174,7 @@ def test_newton_physics_cfg_requires_dexsim_auto_solver_api(
 
 @pytest.mark.no_sim
 def test_newton_gradient_mode_rejects_auto_solver() -> None:
-    cfg = NewtonPhysicsCfg(requires_grad=True)
+    cfg = NewtonPhysicsCfg(solver_cfg=None, requires_grad=True)
 
     with pytest.raises(RuntimeError, match="explicit.*semi_implicit"):
         cfg.to_dexsim_cfg(gpu_id=0)
@@ -193,7 +193,9 @@ def test_newton_physics_cfg_passes_warp_log_suppression() -> None:
 def test_newton_physics_cfg_forwards_collision_pipeline_update_interval(
     update_interval: int | None,
 ) -> None:
-    cfg = NewtonPhysicsCfg(collision_cfg={"update_interval": update_interval})
+    cfg = NewtonPhysicsCfg(
+        solver_cfg=None, collision_cfg={"update_interval": update_interval}
+    )
 
     dexsim_cfg = cfg.to_dexsim_cfg(gpu_id=0)
 
@@ -300,7 +302,7 @@ def test_newton_backend_reports_scene_resolved_auto_solver(
     manager = SimpleNamespace(_world=world)
     backend = NewtonPhysicsBackend(manager)
     world_config = SimpleNamespace(newton_cfg=None)
-    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg())
+    sim_config = SimulationManagerCfg(physics_cfg=NewtonPhysicsCfg(solver_cfg=None))
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
         lambda candidate: native_backend if candidate is world else None,
@@ -474,8 +476,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
     cfg = NewtonPhysicsCfg(
         solver_cfg={
             config_key: solver_name,
-            "iterations": 12,
-            "step_rigid_bodies": False,
+            "joint_mode": "kinematic",
+            "vbd_options": {"iterations": 12},
         }
     )
 
@@ -483,8 +485,8 @@ def test_newton_physics_cfg_accepts_dexuni_solver_mapping(
 
     assert isinstance(dexsim_cfg.solver_cfg, DexUniSolverCfg)
     assert dexsim_cfg.solver_cfg.solver_type == "dexuni"
-    assert dexsim_cfg.solver_cfg.iterations == 12
-    assert dexsim_cfg.solver_cfg.step_rigid_bodies is False
+    assert dexsim_cfg.solver_cfg.joint_mode == "kinematic"
+    assert dexsim_cfg.solver_cfg.vbd_options["iterations"] == 12
 
 
 @pytest.mark.no_sim
@@ -499,3 +501,54 @@ def test_newton_physics_cfg_directly_accepts_dexsim_solver_cfg_object() -> None:
     assert isinstance(dexsim_cfg.solver_cfg, XPBDSolverCfg)
     assert dexsim_cfg.solver_cfg.iterations == 8
     assert dexsim_cfg.solver_cfg.enable_restitution is True
+
+
+@pytest.mark.no_sim
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_newton_physics_cfg_forwards_two_way_coupling() -> None:
+    cfg = NewtonPhysicsCfg(
+        collision_cfg=None,
+        solver_cfg={
+            "solver_type": "dexuni",
+            "joint_mode": "dynamic",
+            "coupling": "two_way",
+            "coupling_options": {
+                "mass_scale": 4.0,
+                "proxy_relaxation": 0.5,
+                "iterations": 2,
+            },
+            "mujoco_articulation_paths": ("env_0/robot",),
+            "vbd_options": {"iterations": 10},
+        },
+    )
+    native = cfg.to_dexsim_cfg(gpu_id=0)
+    assert native.collision_pipeline_cfg is None
+    assert native.solver_cfg.joint_mode == "dynamic"
+    assert native.solver_cfg.coupling == "two_way"
+    assert native.solver_cfg.coupling_options == cfg.solver_cfg["coupling_options"]
+    assert native.solver_cfg.mujoco_articulation_paths == ("env_0/robot",)
+    assert native.solver_cfg.vbd_options == {"iterations": 10}
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    ("options", "error"),
+    [
+        ({"joint_mode": "kinematic"}, "requires joint_mode='dynamic'"),
+        ({"coupling_options": {"mass_scale": 0.0}}, "mass_scale"),
+        ({"coupling_options": {"proxy_relaxation": 1.1}}, "proxy_relaxation"),
+        ({"coupling_options": {"iterations": 0}}, "iterations"),
+        ({"coupling_options": {"unknown": 1.0}}, "Unsupported"),
+        (
+            {"collision_options": {"enable_rigid_soft_full_surface_contact": True}},
+            "full-surface",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("requires_dexuni_two_way")
+def test_newton_physics_cfg_preserves_native_two_way_validation(options, error) -> None:
+    cfg = NewtonPhysicsCfg(
+        solver_cfg={"solver_type": "dexuni", "coupling": "two_way", **options}
+    )
+    with pytest.raises(ValueError, match=error):
+        cfg.to_dexsim_cfg(gpu_id=0)

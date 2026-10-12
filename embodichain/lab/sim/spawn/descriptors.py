@@ -71,6 +71,7 @@ from embodichain.lab.sim.cfg import (
     DefaultRigidBodyPropertiesCfg,
     MassPropertiesCfg,
     NewtonCollisionPropertiesCfg,
+    NewtonJointDrivePropertiesCfg,
     NewtonRigidBodyMaterialCfg,
     RigidBodyMaterialCfg,
     RigidBodyPhysicsCfg,
@@ -621,6 +622,10 @@ def articulation_desc_from_cfg(
             newton_solver_type=newton_solver_type,
         )
     fixed_base, self_collision_enabled = _articulation_root_values(cfg)
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
+    newton_options = (
+        {} if compensation is None else {"newton_gravity_compensation": compensation}
+    )
     return ArticulationDesc(
         name=_articulation_uid(cfg.uid, str(path)),
         pose=_pose_from_cfg(cfg),
@@ -635,7 +640,30 @@ def articulation_desc_from_cfg(
         urdf_read_inertia=True,
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),
+        **newton_options,
     )
+
+
+def _articulation_gravity_compensation(
+    cfg: ArticulationCfg, newton_solver_type: str | None
+) -> float | None:
+    """Validate explicit Newton articulation creation intent."""
+    value = cfg.root_props.newton_gravity_compensation
+    if value is None:
+        return None
+    if (
+        not isinstance(value, numbers.Real)
+        or not np.isfinite(value)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError("newton_gravity_compensation must be finite and in [0, 1].")
+    if newton_solver_type is None:
+        raise ValueError("newton_gravity_compensation requires the Newton backend.")
+    if not hasattr(ArticulationDesc, "newton_gravity_compensation"):
+        raise RuntimeError(
+            "newton_gravity_compensation requires DexSim dev f32785317 or newer."
+        )
+    return float(value)
 
 
 def _validate_articulation_rigid_physics(
@@ -734,6 +762,9 @@ def configure_articulation_desc(
             f"Articulation source {desc.name!r} must be resolved before "
             "configuration."
         )
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
+    if compensation is not None:
+        desc.newton_gravity_compensation = compensation
     preserve_source_physics = cfg.resolve_asset_physics_mode() == "preserve"
     setattr(desc, "_embodichain_preserve_source_physics", preserve_source_physics)
     for link in desc.links:
@@ -895,6 +926,14 @@ def configure_articulation_desc(
             newton=newton_desc,
             newton_target_mode=joint_target_modes.get(joint_name),
         )
+        if (
+            newton_desc.damping is not None
+            and desc.get_joint_desc(joint_name).newton.damping != newton_desc.damping
+        ):
+            raise RuntimeError(
+                "DexSim did not retain passive_damping; install DexSim dev "
+                "f32785317 or newer."
+            )
     _apply_articulation_newton_gap_default(desc, newton_solver_type)
     return desc
 
@@ -1151,6 +1190,27 @@ def _compile_joint_properties(
                     setattr(default_desc, default_field, scalar)
                     setattr(newton_desc, newton_field, scalar)
 
+    if (
+        isinstance(cfg.joint_drive_props, NewtonJointDrivePropertiesCfg)
+        and cfg.joint_drive_props.passive_damping is not None
+    ):
+        if newton_solver_type is None:
+            raise ValueError("passive_damping requires the Newton backend.")
+        matches = _joint_property_matches(
+            cfg.joint_drive_props.passive_damping,
+            joint_names,
+            property_name="passive_damping",
+            control_parts=control_parts,
+        )
+        for joint_name, value in matches:
+            if (
+                not isinstance(value, numbers.Real)
+                or not np.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError("passive_damping must be finite and nonnegative.")
+            joint_properties[joint_name][1].damping = float(value)
+
     # Solvers that ignore Newton's target-mode enum still consume drive gains.
     # Masking inactive components makes NONE, EFFORT, and VELOCITY deterministic
     # across the currently supported solver set.
@@ -1170,9 +1230,13 @@ def _compile_joint_properties(
         if newton_solver_type is None
         else newton_solver_type.replace("-", "_").lower()
     )
-    if normalized_solver not in {None, "auto", "mujoco_warp", "mjwarp"} and any(
-        mode == 1 for mode in joint_target_modes.values()
-    ):
+    if normalized_solver not in {
+        None,
+        "auto",
+        "mujoco_warp",
+        "mjwarp",
+        "dexuni",
+    } and any(mode == 1 for mode in joint_target_modes.values()):
         warnings.warn(
             f"Newton solver {newton_solver_type!r} does not consume "
             "joint_target_mode. POSITION is emulated with its configured "

@@ -40,6 +40,8 @@ from embodichain.lab.sim.objects import RigidObject
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.utils import logger
 from scripts.tutorials.atomic_action.tutorial_utils import (
+    DEFAULT_GRIPPER_CLOSE_QPOS,
+    DEXUNI_CUBE_CLOSE_QPOS,
     add_tutorial_robot,
     clone_local_pose_from_first_env,
     create_affordance_sampling_context,
@@ -138,7 +140,14 @@ def main() -> None:
     robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
     obj = create_pick_object(sim)
     sim.prepare()
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
+    hand_open, hand_close = get_hand_open_close_qpos(
+        robot,
+        close_qpos=(
+            DEXUNI_CUBE_CLOSE_QPOS
+            if args.robot == "ur5" and sim.physics.solver_type == "dexuni"
+            else DEFAULT_GRIPPER_CLOSE_QPOS
+        ),
+    )
     initialize_pre_pick_robot_pose(robot, obj, hand_open)
     motion_gen = create_curobo_motion_generator(
         robot,

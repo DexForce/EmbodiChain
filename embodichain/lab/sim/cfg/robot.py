@@ -357,6 +357,8 @@ class RobotPresetCfg:
             solver_candidates = []
             if solver_type != "auto":
                 solver_candidates.append(f"newton_{solver_type}")
+                if solver_type == "dexuni":
+                    solver_candidates.extend(("newton_mujoco_warp", "newton_mjwarp"))
                 if solver_type == "mujoco_warp":
                     solver_candidates.append("newton_mjwarp")
             candidates = (*solver_candidates, "newton", "default")

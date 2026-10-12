@@ -437,29 +437,28 @@ def main(args: argparse.Namespace | None = None) -> None:
             num_substeps=12,
             solver_cfg={
                 "solver_type": "dexuni",
-                "iterations": 24,
-                "particle_enable_self_contact": True,
-                "particle_self_contact_radius": 0.002,
-                "particle_self_contact_margin": 0.002,
-                "particle_topological_contact_filter_threshold": 1,
-                "particle_rest_shape_contact_exclusion_radius": 0.005,
-                "particle_vertex_contact_buffer_size": 96,
-                "particle_edge_contact_buffer_size": 128,
-                "particle_collision_detection_interval": -1,
-                "particle_enable_tile_solve": True,
-                "soft_contact_margin": 0.008,
+                "joint_mode": "kinematic",
+                "contact_mode": "soft",
+                "vbd_options": {
+                    "iterations": 24,
+                    "particle_enable_self_contact": True,
+                    "particle_self_contact_radius": 0.002,
+                    "particle_self_contact_margin": 0.002,
+                    "particle_topological_contact_filter_threshold": 1,
+                    "particle_rest_shape_contact_exclusion_radius": 0.005,
+                    "particle_vertex_contact_buffer_size": 96,
+                    "particle_edge_contact_buffer_size": 128,
+                    "particle_collision_detection_interval": -1,
+                    "particle_enable_tile_solve": True,
+                    "rigid_contact_k_start": CLOTH_RIGID_CONTACT_KE,
+                    "rigid_body_particle_contact_buffer_size": 512,
+                },
+                "collision_options": {
+                    "soft_contact_margin": 0.008,
+                },
                 "soft_contact_ke": CLOTH_RIGID_CONTACT_KE,
                 "soft_contact_kd": CLOTH_RIGID_CONTACT_KD,
                 "soft_contact_mu": CLOTH_RIGID_CONTACT_MU,
-                # Use the mixed material stiffness immediately instead of
-                # ramping new contacts from the low DexUni default.
-                "rigid_contact_k_start": CLOTH_RIGID_CONTACT_KE,
-                "rigid_body_particle_contact_buffer_size": 512,
-                "rigid_contact_max": 0,
-                # The registered runtime control advances and interpolates the
-                # robot kinematically at every Newton substep.
-                "step_rigid_bodies": False,
-                "self_contact_bvh_rebuild_interval_frames": 1,
             },
             # DexUni owns its particle-shape contacts and collision detection.
             collision_cfg=None,

@@ -39,6 +39,7 @@ from embodichain.lab.sim.spawn.descriptors import (
     _compile_rigid_physics,
     _compile_visual_material,
     _articulation_root_values,
+    _articulation_gravity_compensation,
     _pose_from_cfg,
     _required_uid,
     _resolve_rigid_physics,
@@ -178,6 +179,7 @@ def articulation_desc_from_usd(
     newton_solver_type: str | None = None,
 ) -> tuple[ArticulationDesc, dict[str, MaterialDesc]]:
     """Select the sole articulation in a USD stage."""
+    compensation = _articulation_gravity_compensation(cfg, newton_solver_type)
     preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
     if not preserve_asset_physics:
         _validate_articulation_rigid_physics(
@@ -206,6 +208,8 @@ def articulation_desc_from_usd(
         fixed_base_default=bool(desc.fixed_base),
         self_collision_default=desc.enable_self_collision,
     )
+    if compensation is not None:
+        desc.newton_gravity_compensation = compensation
     return desc, materials
 
 
