@@ -67,6 +67,7 @@ def _run_scenario(scenario: str, report: Path) -> None:
         "embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.newton.yaml"
     )
     raw = load_config(task_path)
+    agent = load_config(task_path.parent / "agents/ppo.newton.yaml")
 
     def configuration(camera: bool):
         config = config_to_cfg(raw, manager_modules=get_manager_modules())
@@ -93,7 +94,7 @@ def _run_scenario(scenario: str, report: Path) -> None:
             runtime = _build_gym_environment(
                 {"trainer": {"gym_config": str(task_path)}},
                 simulation_device=torch.device("cuda:0"),
-                num_envs=1,
+                num_envs=2,
                 headless=True,
                 renderer=None,
                 gpu_id=0,
@@ -103,6 +104,17 @@ def _run_scenario(scenario: str, report: Path) -> None:
             assert env.sim.has_native_renderer
             # Trainer initializes the same EventManager after its runtime exists.
             manager = EventManager({"record": event}, env)
+            # Include the late recording cameras when budgeting the real PPO
+            # batch, rather than only checking one environment can initialize.
+            import math
+
+            native_env = env.sim.get_world().get_env()
+            nodes_per_env = math.ceil(
+                native_env.get_active_scene_node_count() / env.num_envs
+            )
+            required = nodes_per_env * agent["trainer"]["num_envs"]
+            assert required <= native_env.get_scene_node_capacity() <= 131071
+            assert agent["trainer"]["num_envs"] == 4096
             env.sim.get_sensor("trainer-camera").update()
             assert env.sim.get_sensor("trainer-camera").get_data()["color"].shape[
                 -3:-1

@@ -115,7 +115,8 @@ custom viewers can still request a native renderer. Default deployments budget
 131,071 scene nodes for physical-link replication. G1 and MicroDuck Default PPO use 2,048
 environments with matching minibatch sizes to fit that native limit; other
 Default batches retain 4,096 environments. Newton deployments retain their
-existing batches because NoRender does not clone their physical link nodes. See
+existing batches. NoRender keeps their template nodes, but camera recording
+and Viewer paths still need capacity for native replicas. See
 [render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned
