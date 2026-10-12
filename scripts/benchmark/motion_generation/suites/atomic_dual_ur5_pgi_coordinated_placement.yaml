@@ -8,11 +8,13 @@ profile: smoke
 # below are the tutorial's table, bread and pan poses after its mesh-frame
 # corrections.  The bread uses this benchmark's default friction and damping;
 # the tutorial leaves them at the engine defaults.  The skill rejects cuRobo.
-# Known result on current main: with the tutorial's robot mount the arm bases
-# sit below the table top, and TOPPRA's path to the pan handle sweeps the
-# right upper arm under the table edge, so the case plans but ends in a
-# controller tracking failure.  The tutorial itself fails to plan this
-# placement on main.
+# Known result on current main: the case plans, but TOPPRA's path to the pan
+# handle drives the right arm into the table (right_joint1 stops at -0.29 rad
+# for a -0.47 rad command and reaches it once the table is moved away), so it
+# ends in a controller tracking failure.  Mounting the robot at
+# (1.95, 0.0, 0.2) clears the table, but the left PGI closes only to 0.0013
+# on the bread and the bread slips out during the placing move.  The tutorial
+# itself fails to plan this placement on main.
 robot:
   id: dual_ur5_pgi_coordinated_placement
   provider: dual_arm
