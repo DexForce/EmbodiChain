@@ -239,9 +239,13 @@ def retime_joint_paths(
     nominal ``dt`` that no dynamic limit informed; feeding those samples here
     replaces that timing with a solved one that respects the limits.
 
-    Backend selection follows :class:`ToppraPlanner`'s ``auto`` mode: Warp on
-    CUDA inputs or when a gradient is required, NumPy otherwise. Both enforce
-    the limits over every grid interval rather than only at grid points.
+    Backend selection extends :class:`ToppraPlanner`'s ``auto`` mode: Warp on
+    CUDA inputs, when a gradient is required, or for a CPU batch of more than
+    one row, and NumPy for a single CPU row. The planner fans CPU rows out to a
+    worker pool it owns; a stateless function has no pool, and solving rows one
+    after another in NumPy is several times slower than one batched Warp solve
+    on the same CPU. Both backends enforce the limits over every grid interval
+    rather than only at grid points.
 
     The path geometry is resampled along the fitted spline, so poses derived
     from the input samples must be recomputed from the returned positions.
@@ -294,7 +298,7 @@ def retime_joint_paths(
             for limit in (velocity, acceleration)
         )
     )
-    if positions.is_cuda or needs_grad:
+    if positions.is_cuda or needs_grad or batch > 1:
         from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
 
         quantity = sample_method == TrajectorySampleMethod.QUANTITY
