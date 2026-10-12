@@ -80,8 +80,10 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
-The current configured transform is B=1 and accepts neither timing nor
-Affordance expansion. Generic profile decoding, source adapters, candidate
+The configured combined transform supports batches and Pick Affordance
+expansion; timing expansion is not connected to this transform. Batch expansion
+records retain the stable environment IDs from the planning context, including
+reordered batches. Generic profile decoding, source adapters, candidate
 identity and coordination are owned by the
 [Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
 not by Task Program or Gym.

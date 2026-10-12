@@ -51,7 +51,10 @@ class ParallelJawGripperModelCfg:
 
     ``model_id`` names one concrete end-effector model or calibration. Product
     names belong in that value (for example ``"dh_pgi_140_80"``), not in the
-    generator class hierarchy.
+    generator class hierarchy. Dimensions are in metres: the grasp frame's X
+    axis is the opening axis, Z is the approach axis, and Y is the remaining
+    finger-width axis. These scalar box dimensions do not encode a mounting
+    transform or the robot's complete collision geometry.
     """
 
     model_id: str = "parallel_jaw"
@@ -121,6 +124,41 @@ _PARALLEL_JAW_GRIPPER_MODELS = MappingProxyType(
                 "palm_depth": 0.096,
             }
         ),
+        # Geometry provenance and mesh-axis mapping: graspkit/README.md.
+        # The 1 mm minimum is a planning cutoff, not a hardware closing limit.
+        "franka_panda_hand": MappingProxyType(
+            {
+                "model_id": "franka_panda_hand",
+                "min_opening_width": 0.001,
+                "max_opening_width": 0.08,
+                "finger_length": 0.054,
+                "finger_width": 0.022,
+                "finger_thickness": 0.027,
+                "palm_depth": 0.092,
+            }
+        ),
+        "cobotmagic_v100_gripper": MappingProxyType(
+            {
+                "model_id": "cobotmagic_v100_gripper",
+                "min_opening_width": 0.001,
+                "max_opening_width": 0.1,
+                "finger_length": 0.077,
+                "finger_width": 0.056,
+                "finger_thickness": 0.025,
+                "palm_depth": 0.074,
+            }
+        ),
+        "tianji_marvin_gripper": MappingProxyType(
+            {
+                "model_id": "tianji_marvin_gripper",
+                "min_opening_width": 0.001,
+                "max_opening_width": 0.095,
+                "finger_length": 0.103,
+                "finger_width": 0.043,
+                "finger_thickness": 0.034,
+                "palm_depth": 0.082,
+            }
+        ),
     }
 )
 
@@ -131,6 +169,13 @@ def get_parallel_jaw_gripper_model(model_id: str) -> ParallelJawGripperModelCfg:
     The built-in catalog contains grasp-planning geometry rather than URDF or
     downloadable asset metadata. Callers with an unregistered calibration can
     construct :class:`ParallelJawGripperModelCfg` directly.
+
+    Built-in IDs are ``dh_pgi_140_80``, ``franka_panda_hand`` (the hand in the
+    packaged Panda asset), ``cobotmagic_v100_gripper`` (the V100 fingers), and
+    ``tianji_marvin_gripper`` (both hands in the asset with end effectors).
+    The V100 preset is distinct from CobotMagic's V70 hardware variant. Source
+    archive checksums and dimension derivations are recorded in GraspKit's
+    ``README.md``. Sampling and collision policy remain generator settings.
 
     Args:
         model_id: Stable identifier of a built-in gripper geometry.

@@ -1129,6 +1129,64 @@ def _sample_effect(
     )
 
 
+def test_bridge_reuses_real_workflow_across_pick_and_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+    adapter, assembly, robot, cube = _evidence_adapter_runtime()
+    data = _pick_place_program_data()
+    data["integration"] = {
+        "robot_profile": "evidence_profile",
+        "scene_registry": "evidence_scene",
+        "runtime_preset": "evidence",
+    }
+    data["program"]["items"] = [
+        {"kind": "segment", "name": node["call"]["kind"], "steps": node}
+        for node in data["program"]["items"]
+    ]
+    compiled = adapter.compile(decode_task_program(data))
+    compiler = assembly.compiler
+    original_analyze, original_ground = compiler.analyze, compiler.ground
+    analyses = []
+    grounded_indices = []
+
+    def analyze(calls, **kwargs):
+        workflow = original_analyze(calls, **kwargs)
+        analyses.append(workflow)
+        return workflow
+
+    def ground(workflow, index, context, **kwargs):
+        value = original_ground(workflow, index, context, **kwargs)
+        grounded_indices.append(index)
+        return value
+
+    monkeypatch.setattr(compiler, "analyze", analyze)
+    monkeypatch.setattr(compiler, "ground", ground)
+    bridge = TaskProgramDemoBridge(
+        compiled, assembly.runtime, assembly.command_sink, assembly.clock
+    )
+    local_indices = []
+    for segment_index, segment in enumerate(bridge.iter_segments()):
+        for action in segment.actions:
+            robot.qpos = action.value.clone()
+            robot.constraint_state = torch.isclose(
+                robot.qpos[:, 1],
+                torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
+            )
+            if segment_index == 1:
+                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+        assert segment.validator().all()
+        local_indices.append(
+            [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
+        )
+    assert bridge.completion_mask.all()
+    assert len(analyses) == 1
+    assert grounded_indices == [0, 1]
+    assert local_indices == [[0], [0]]
+    assert len(analyses[0].calls[0].downstream_object_targets) == 1
+
+
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {

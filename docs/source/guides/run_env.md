@@ -394,6 +394,11 @@ For structured datasets, see {doc}`/tutorial/data_expansion` and
 {doc}`/overview/gym/dataset_functors`. For human-viewable video, see
 {doc}`/overview/gym/event_functors`.
 
+After finalization, use the exact auto-numbered dataset directory with the
+validation, grouped split, and recovery commands in
+{doc}`offline_expert_datasets`. For official LeRobot 0.6.1 language and depth
+features, follow {doc}`lerobot_export` in its independent Python environment.
+
 ### Record replayable trajectories
 
 Add `--record_trajectory` to a normal rollout:

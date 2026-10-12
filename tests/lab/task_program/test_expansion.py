@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
@@ -243,6 +244,49 @@ def test_combined_factory_expands_multi_environment_batch() -> None:
     assert rebuilt.joint_trajectory is not None
     assert rebuilt.joint_trajectory.batch_size == 2
     assert len(factory.records) == 2
+
+
+@pytest.mark.parametrize("generic", [False, True])
+def test_combined_factory_preserves_reordered_environment_identity(
+    generic: bool,
+) -> None:
+    engine, invocation, resolved, context, _ = _planned_place_batch(batch_size=2)
+    stable_ids = torch.tensor([7, 3], dtype=torch.long)
+    context = replace(context, env_ids=stable_ids)
+    plan = engine.plan(invocation, context)
+    payload = {
+        "source": {
+            "kind": "task_program",
+            "source_id": "repeated_cube_pick_place",
+            "source_revision": "config:repeated_pick_place_v1",
+            "unit_scope": "episode",
+            "template_id": "repeated_pick_place_episode",
+        }
+    }
+    if generic:
+        payload["source"].update(
+            phase_permissions={
+                "approach": [],
+                "release": [],
+                "retract": ["joint_residual", "via_points"],
+            },
+            phase_kinds={"approach": "free", "release": "contact", "retract": "free"},
+        )
+    factory = CombinedTaskProgramExpansionFactory(
+        CombinedExpansionProfile.from_mapping(payload),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    rebuilt = factory.create_plan_transform(request, engine=engine)(
+        resolved, context, plan
+    )
+    assert rebuilt.success_all
+    assert torch.equal(rebuilt.joint_trajectory.env_ids, stable_ids)
+    assert [record.env_id for record in factory.records] == stable_ids.tolist()
+    assert [record.to_metadata()["env_id"] for record in factory.records] == [7, 3]
 
 
 def test_combined_factory_uses_explicit_recipe_indices_per_row() -> None:

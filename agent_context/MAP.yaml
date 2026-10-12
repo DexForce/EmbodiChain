@@ -341,9 +341,10 @@ topics:
 - id: data-pipeline
   title: Data Pipeline
   aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
-    深度视频]
+    深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
     DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
+    validate_dataset, create_split_manifest, recover_recording, episode_uuid, language_persistent,
     SharedLanguageRegistry, resolve_language]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
@@ -355,10 +356,14 @@ topics:
   - embodichain/lab/gym/envs/managers/async_datasets.py
   - embodichain/data_pipeline/depth_video/writer.py
   - embodichain/data_pipeline/depth_video/reader.py
+  - embodichain/data_pipeline/datasets/inspection.py
+  - embodichain/data_pipeline/recording/
+  - embodichain/cli/dataset.py
+  - tools/lerobot_export/
   - embodichain/lab/scripts/run_env.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
-    tests/data_pipeline/]
+    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active
 - id: robot-workspace
