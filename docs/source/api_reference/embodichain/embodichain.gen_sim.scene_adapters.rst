@@ -114,6 +114,7 @@ Keeps file-independent mesh input and optional support-detection plots; the shar
 .. automodule:: embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface
    :members:
    :imported-members:
+   :exclude-members: SupportSurfaceConfig
 
 embodichain.gen_sim.scene_engine.pipeline.utils.table_surface_layout_optimizer
 ------------------------------------------------------------------------------
