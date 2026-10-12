@@ -65,6 +65,8 @@ __all__ = [
     "JointVelocityAction",
     "ParallelGripperAction",
     "RelativeJointPositionAction",
+    "register_action_contract",
+    "resolve_action_contract",
     "DatasetManager",
     "LeRobotRecorder",
     "AsyncLeRobotRecorder",

@@ -257,18 +257,18 @@
       "topic_ids": [
         "motion-planning"
       ],
-      "summary": "Tracks trajectory candidates, generation budgets, coverage, and commit receipts.",
+      "summary": "Tracks trajectory candidates, expansion budgets, coverage, and commit receipts.",
       "details": "The expansion package provides candidate contracts, residual and retiming operators, coverage metrics, and bounded session bookkeeping. Host integrations supply rollout execution, initial-state restoration, physical validation, and durable recording.",
       "boundaries": [
-        "GenerationSession does not step or reset environments and does not write datasets."
+        "ExpansionSession does not step or reset environments and does not write datasets."
       ],
       "evidence": [
         {
           "path": "embodichain/lab/sim/motion/expansion/session.py",
-          "symbol": "GenerationSession",
+          "symbol": "ExpansionSession",
           "start_line": 108,
           "end_line": 108,
-          "excerpt": "class GenerationSession:"
+          "excerpt": "class ExpansionSession:"
         }
       ],
       "documentation": [

@@ -33,6 +33,7 @@ import embodichain.lab.sim.sim_manager as sim_manager_module
 import embodichain.lab.visualization as visualization_module
 from embodichain.lab.sim.cfg import (
     DefaultPhysicsCfg,
+    DenoisingCfg,
     DLSSCfg,
     MarkerCfg,
     NewtonPhysicsCfg,
@@ -69,15 +70,15 @@ pytestmark = pytest.mark.no_sim
 
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
-@pytest.mark.parametrize("dlss_enabled", [False, True])
-def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
+@pytest.mark.parametrize("denoising_mode", ["optix", "dlss"])
+def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     renderer: str,
     headless: bool,
-    dlss_enabled: bool,
+    denoising_mode: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Headless and auto-selected renderers retain explicit DLSS configuration."""
+    """Headless and auto-selected renderers retain explicit pipeline settings."""
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _gpu_id: "hybrid",
@@ -89,8 +90,11 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
         height=480,
         render_cfg=RenderCfg(
             renderer=renderer,
+            denoising=DenoisingCfg(
+                window=denoising_mode,
+                offscreen="nrd",
+            ),
             dlss=DLSSCfg(
-                dlss_enabled=dlss_enabled,
                 dlss_quality=3,
                 target_width=1920,
                 target_height=1080,
@@ -104,7 +108,14 @@ def test_convert_sim_config_applies_dlss_for_all_renderers_and_camera_modes(
 
     world = SimulationManager._convert_sim_config(manager, config)
 
-    assert world.dlss_config.dlss_enabled is dlss_enabled
+    expected_window_mode = {
+        "optix": dexsim.types.RTRenderMode.OPTIX_DENOISE,
+        "dlss": dexsim.types.RTRenderMode.DLSS_RR,
+    }[denoising_mode]
+    assert world.rt_pipeline_config.window.mode == expected_window_mode
+    assert (
+        world.rt_pipeline_config.offscreen.mode == dexsim.types.RTRenderMode.NRD_RELAX
+    )
     assert world.dlss_config.dlss_quality == 3
     assert world.dlss_config.render_width == world.dlss_config.render_height == 0
     assert (world.win_config.width, world.win_config.height) == (640, 480)
@@ -547,6 +558,92 @@ def test_drawing_markers_and_publishing_visualization_do_not_step_physics() -> N
     assert sim._visualization_sim_time == 0.0
     assert runtime.capture_calls[-1]["sim_step"] == 0
     assert runtime.capture_calls[-1]["sim_time"] == 0.0
+
+
+@pytest.mark.no_sim
+def test_axis_helper_publishes_without_advancing_simulation() -> None:
+    from embodichain.lab.sim.utility.atom_action_utils import draw_axis
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+
+    draw_axis(SimpleNamespace(sim=sim), torch.eye(4))
+
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+    assert runtime.capture_calls[-1]["sim_time"] == 0.0
+
+
+@pytest.mark.no_sim
+def test_camera_keyboard_edits_capture_viser_snapshots_without_physics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim.utility import keyboard_utils
+
+    sim, runtime = _make_visualization_sim_manager()
+    sim._markers = {}
+    sim._env = MagicMock()
+    pose = torch.eye(4).unsqueeze(0)
+    snapshots: list[torch.Tensor] = []
+    original_capture = runtime.capture
+
+    def set_pose(value: torch.Tensor) -> None:
+        pose.copy_(value)
+
+    def capture(**kwargs: object) -> bool:
+        assert kwargs["force"] is True
+        snapshots.append(pose.clone())
+        return original_capture(**kwargs)
+
+    runtime.capture = capture
+    sensor = SimpleNamespace(
+        num_instances=1,
+        is_attached=False,
+        _entities=[MagicMock()],
+        get_local_pose=lambda **_: pose.clone(),
+        get_arena_pose=lambda **_: pose.clone(),
+        set_local_pose=set_pose,
+        update=MagicMock(),
+        get_data=lambda: {"color": torch.zeros((1, 2, 2, 3), dtype=torch.uint8)},
+    )
+    monkeypatch.setattr(SimulationManager, "get_instance", lambda: sim)
+    keys = iter([ord("w"), ord("d"), 255, 27])
+    monkeypatch.setattr(keyboard_utils.cv2, "waitKey", lambda _: next(keys))
+    monkeypatch.setattr(keyboard_utils.cv2, "imshow", lambda *_: None)
+    monkeypatch.setattr(keyboard_utils.cv2, "destroyAllWindows", lambda: None)
+
+    keyboard_utils.run_keyboard_control_for_camera(sensor, vis_pose=True)
+
+    assert len(snapshots) == 2
+    assert snapshots[0][0, 2, 3] == pytest.approx(0.01)
+    assert snapshots[0][0, 1, 3] == 0.0
+    assert snapshots[1][0, 2, 3] == pytest.approx(0.01)
+    assert snapshots[1][0, 1, 3] == pytest.approx(0.01)
+    assert len(runtime.capture_calls) == 2
+    assert sim._world.physics_updates == []
+    assert sim._visualization_sim_step == 0
+    assert sim._visualization_sim_time == 0.0
+
+
+@pytest.mark.no_sim
+def test_default_state_publication_does_not_integrate_time() -> None:
+    state = SimpleNamespace(time=0.0, position=1.0, published=False)
+
+    def update(dt: float) -> None:
+        state.time += dt
+        state.position += 2.0 * dt
+        state.published = True
+
+    backend = DefaultPhysicsBackend(
+        SimpleNamespace(_world=SimpleNamespace(update=update))
+    )
+    backend.sync_render_state(object())
+
+    assert state.published
+    assert state.time == 0.0
+    assert state.position == 1.0
 
 
 def test_sim_manager_persists_overlays_across_automatic_captures() -> None:
@@ -1933,7 +2030,9 @@ def test_add_camera_uses_owning_manager_render_context(
     arenas = [object(), object()]
 
     sim = object.__new__(SimulationManager)
-    sim.sim_config = SimpleNamespace(num_envs=len(arenas))
+    sim.sim_config = SimpleNamespace(
+        num_envs=len(arenas), render_cfg=RenderCfg(renderer="hybrid")
+    )
     sim.device = torch.device("cpu")
     sim._world = world
     sim._arenas = arenas

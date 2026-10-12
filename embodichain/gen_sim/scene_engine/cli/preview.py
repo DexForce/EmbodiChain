@@ -119,7 +119,7 @@ def preview_scene_export(
             enabled=is_viser and joint_control,
         )
         if headless and not is_viser:
-            sim.update(step=1)
+            sim.sync_render_state()
             print(f"Loaded scene preview headlessly: {source_path}")
             return
 
@@ -127,12 +127,9 @@ def preview_scene_export(
             print(f"Previewing in Viser: {source_path}")
         else:
             print(f"Previewing: {source_path}")
-            # Native DexSim windows do not advance the manually-updated world
-            # for us.  In particular, whole-scene USD import restores each
-            # rigid's pose after constructing its wrapper; without an update,
-            # the window renders the pre-restore mesh-node state while Viser
-            # (which updates below) looks correct.
-            sim.update(step=1)
+            # Publish restored native transforms before the first window frame.
+            # Display initialization must not integrate imported dynamic bodies.
+            sim.sync_render_state()
             sim.open_window()
         print("Close with Ctrl-C.")
         while True:

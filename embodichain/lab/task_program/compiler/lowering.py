@@ -1452,7 +1452,8 @@ class SemanticCallCompiler:
         assert type(pick) is Pick
         object_id = pick.object.entity_id
         targets: list[SemanticObjectTarget] = []
-        for bound in bound_calls[pick_index + 1 :]:
+        for index in range(pick_index + 1, len(bound_calls)):
+            bound = bound_calls[index]
             call = bound.linked.call
             if type(call) is RegisteredSemanticCall:
                 lowerer = self._registered_lowerers[call.call_id]

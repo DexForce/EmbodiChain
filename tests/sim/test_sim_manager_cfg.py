@@ -375,20 +375,33 @@ def test_newton_teardown_skips_cpu_devices(
     render_sync.clear.assert_called_once_with()
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize("has_native_renderer", [True, False])
 def test_newton_backend_uses_unified_render_sync_entry(
     monkeypatch: pytest.MonkeyPatch,
+    has_native_renderer: bool,
 ) -> None:
     world = object()
     native_backend = SimpleNamespace(sync_to_dexsim=MagicMock())
+    lookup = MagicMock(
+        side_effect=lambda candidate: native_backend if candidate is world else None
+    )
     monkeypatch.setattr(
         "dexsim.engine.newton_physics.backend_registry.get_newton_backend",
-        lambda candidate: native_backend if candidate is world else None,
+        lookup,
     )
-    backend = NewtonPhysicsBackend(SimpleNamespace())
+    backend = NewtonPhysicsBackend(
+        SimpleNamespace(has_native_renderer=has_native_renderer)
+    )
 
     backend.sync_render_state(SimpleNamespace(world=world))
 
-    native_backend.sync_to_dexsim.assert_called_once_with(world)
+    if has_native_renderer:
+        lookup.assert_called_once_with(world)
+        native_backend.sync_to_dexsim.assert_called_once_with(world)
+    else:
+        lookup.assert_not_called()
+        native_backend.sync_to_dexsim.assert_not_called()
 
 
 @pytest.mark.parametrize(

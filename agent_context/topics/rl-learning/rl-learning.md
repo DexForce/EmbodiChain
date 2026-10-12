@@ -168,6 +168,10 @@ consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
 
+Trainer throughput counts transitions collected during the current `train()`
+call. Restored `global_step` remains a cumulative checkpoint counter and is
+excluded from that call's SPS numerator.
+
 For actor-critic policies, `policy.obs_groups.actor` and `.critic` select ordered
 observation groups. The collector and standard buffer preserve separate
 `critic_obs` when configured; evaluation applies the same selection. The PPO
@@ -183,6 +187,11 @@ distributed ownership, official examples and adding algorithms/policies/envs.
 DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
 observation and action path. Supplying an Environment means the adapter owns
 its camera lifecycle; Kit's default flat-ground camera is not applied to it.
+
+Headless evaluation accepts `--renderer no-render`. When a saved training
+configuration uses NoRender, Viewer evaluation defaults to Hybrid; an explicit
+native renderer overrides that choice. `--viewer --renderer no-render` is
+rejected before creating the simulation.
 
 Tasks opt in through `PolicyViewerCameraCfg` and
 `get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat

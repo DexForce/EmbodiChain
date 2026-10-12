@@ -213,7 +213,7 @@ def main() -> None:
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
-            "hand": ControlPartCommandProfile.joint_positions(
+            "eef": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
             )
@@ -233,7 +233,7 @@ def main() -> None:
                     semantics,
                     target_pose,
                 ),
-                control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+                control_parts={"primary": {"motion": "arm", "grasp": "eef"}},
                 motion_policy=MotionPolicy(
                     # Contact/path segments require exact Cartesian samples.
                     strategy="ik_interp",

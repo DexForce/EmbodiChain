@@ -66,6 +66,13 @@ class OnlineDataset(IterableDataset):
         Multi-worker DataLoader: each worker gets its own iterator; since
         sampling is independent random draws from shared memory, this is safe.
 
+    Language-conditioned training uses the numeric ``task_index`` and
+    ``subtask_index`` fields. Call :meth:`resolve_language` on the copied item
+    or collated batch to get the overall task and current segment text, then
+    tokenize them in the consumer or a transform. The text dictionaries append
+    new entries without changing existing indices, so previously sampled items
+    retain their language when the engine refills trajectory slots.
+
     Args:
         engine: A started OnlineDataEngine whose shared buffer is used for
             sampling.
@@ -163,6 +170,18 @@ class OnlineDataset(IterableDataset):
         if isinstance(self._chunk_size, int):
             return self._chunk_size
         return self._chunk_size()
+
+    def resolve_language(self, batch: TensorDict) -> dict[str, object]:
+        """Decode the overall and segment instructions for an item or batch.
+
+        Args:
+            batch: Copied numeric sample with task/subtask index fields.
+
+        Returns:
+            ``task`` and ``subtask`` strings nested to match batch dimensions.
+            Lookup remains valid after trajectory refills and engine shutdown.
+        """
+        return self._engine.resolve_language(batch)
 
     # ------------------------------------------------------------------
     # IterableDataset interface

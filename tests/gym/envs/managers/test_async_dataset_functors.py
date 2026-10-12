@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import Mock, patch
 
 import pytest
@@ -180,6 +181,7 @@ def _make_recorder(
     mock_dataset: _MockDataset,
     *,
     action_contract: dict[str, object] | None = None,
+    async_queue_maxsize: int | None = None,
 ) -> AsyncLeRobotRecorder:
     """Build an AsyncLeRobotRecorder with the LeRobotDataset.create patched out."""
     from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
@@ -194,6 +196,8 @@ def _make_recorder(
     }
     if action_contract is not None:
         params["action_contract"] = action_contract
+    if async_queue_maxsize is not None:
+        params["async_queue_maxsize"] = async_queue_maxsize
     cfg = DatasetFunctorCfg(func=AsyncLeRobotRecorder, params=params)
     with patch("embodichain.lab.gym.envs.managers.datasets.LeRobotDataset") as mock_cls:
         mock_cls.create.return_value = mock_dataset
@@ -203,6 +207,64 @@ def _make_recorder(
 @pytest.mark.skipif(not LEROBOT_AVAILABLE, reason="LeRobot not installed")
 class TestAsyncLeRobotRecorder:
     """Tests for AsyncLeRobotRecorder enqueue/drain behavior."""
+
+    def test_configures_bounded_queue_and_reports_stats(self):
+        """A positive queue limit enables backpressure without changing drain order."""
+        env = _MockEnv(num_envs=1, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        try:
+            assert recorder._save_queue.maxsize == 1
+            stats = recorder.async_stats
+            assert stats["queue_maxsize"] == 1
+            assert stats["queue_size"] == 0
+            assert stats["queue_peak"] == 0
+            assert stats["backpressure_events"] == 0
+        finally:
+            recorder.finalize()
+
+    def test_rejects_negative_queue_limit(self):
+        """Negative queue limits fail before starting a background worker."""
+        env = _MockEnv(num_envs=1, steps=1)
+        with pytest.raises(ValueError, match="async_queue_maxsize"):
+            _make_recorder(env, _MockDataset(), async_queue_maxsize=-1)
+
+    def test_bounded_queue_blocks_until_worker_catches_up(self):
+        """A full queue blocks the producer and records the backpressure time."""
+        env = _MockEnv(num_envs=3, steps=1)
+        recorder = _make_recorder(env, _MockDataset(), async_queue_maxsize=1)
+        worker_entered = threading.Event()
+        release_worker = threading.Event()
+
+        def persist_payload(*args, **kwargs):
+            worker_entered.set()
+            assert release_worker.wait(timeout=2.0)
+            return True
+
+        recorder._persist_episode_payload = Mock(side_effect=persist_payload)
+        enqueue_done = threading.Event()
+
+        def enqueue_payloads() -> None:
+            recorder(env, env_ids=torch.tensor([0, 1, 2]))
+            enqueue_done.set()
+
+        enqueue_thread = threading.Thread(target=enqueue_payloads)
+        enqueue_thread.start()
+
+        try:
+            assert worker_entered.wait(timeout=2.0)
+            assert not enqueue_done.wait(timeout=0.05)
+        finally:
+            release_worker.set()
+            enqueue_thread.join(timeout=2.0)
+            env.current_rollout_step = 0
+            recorder.finalize()
+
+        assert enqueue_done.is_set()
+        stats = recorder.async_stats
+        assert stats["queue_maxsize"] == 1
+        assert stats["queue_peak"] == 1
+        assert stats["backpressure_events"] >= 1
+        assert stats["backpressure_s"] > 0.0
 
     def test_call_accepts_construction_only_kwargs(self):
         """``__call__`` must accept image_writer_threads/processes (regression).
@@ -246,7 +308,10 @@ class TestAsyncLeRobotRecorder:
         assert mock_ds.save_episode_calls == 2
         assert len(mock_ds.add_frame_calls) == 8
 
-    def test_call_enqueues_each_accepted_segment_as_independent_fragment(self):
+    @pytest.mark.parametrize("with_contract", [False, True])
+    def test_call_enqueues_each_accepted_segment_as_independent_fragment(
+        self, with_contract
+    ):
         env = _MockEnv(num_envs=1, steps=4)
         env.rollout_buffer["segment_id"][0] = torch.tensor([0, 0, 1, 1])
         env.rollout_buffer["segment_step"][0] = torch.tensor([0, 1, 0, 1])
@@ -283,7 +348,15 @@ class TestAsyncLeRobotRecorder:
             ],
         }
         mock_ds = _MockDataset()
-        recorder = _make_recorder(env, mock_ds)
+        recorder = _make_recorder(
+            env,
+            mock_ds,
+            action_contract=(
+                {"version": 1, "representation": "joint_position"}
+                if with_contract
+                else None
+            ),
+        )
 
         recorder(env, env_ids=torch.tensor([0]))
         env.current_rollout_step = 0
@@ -291,7 +364,11 @@ class TestAsyncLeRobotRecorder:
 
         assert mock_ds.save_episode_calls == 1
         assert len(mock_ds.add_frame_calls) == 2
-        assert {frame["task"] for frame in mock_ds.add_frame_calls} == {"pick task"}
+        assert {frame["task"] for frame in mock_ds.add_frame_calls} == {"test"}
+        assert mock_ds.meta.subtasks.index.tolist() == ["pick task"]
+        assert all(
+            frame["subtask_index"].tolist() == [0] for frame in mock_ds.add_frame_calls
+        )
         assert all(
             frame["annotation.segment_accepted"].tolist() == [1]
             for frame in mock_ds.add_frame_calls
@@ -334,6 +411,8 @@ class TestAsyncLeRobotRecorder:
         caller thread so the worker is immune to buffer reuse on reset.
         """
         env = _MockEnv(num_envs=1, steps=3)
+        env.episode_metadata["instruction"] = "Dynamic episode task"
+        env.episode_metadata["instruction_source"] = "episode"
         mock_ds = _MockDataset()
         recorder = _make_recorder(env, mock_ds)
 
@@ -345,6 +424,7 @@ class TestAsyncLeRobotRecorder:
         env.rollout_buffer["actions"][0, :3] = 999.0
         env.rollout_buffer["segment_id"][0, :3] = 999
         env.episode_metadata["segments"][0]["instruction"] = "corrupted"
+        env.episode_metadata["instruction"] = "corrupted task"
 
         recorder.finalize()
 
@@ -353,7 +433,7 @@ class TestAsyncLeRobotRecorder:
             assert (frame[LeRobotKey.OBS_STATE.value] == 0).all()
             assert (frame[LeRobotKey.ACTION.value] == 0).all()
             assert frame["annotation.segment_id"].tolist() == [0]
-            assert frame["task"] == "test"
+            assert frame["task"] == "Dynamic episode task"
             assert frame["subtask_index"].tolist() == [0]
         assert mock_ds.meta.subtasks.index.tolist() == ["original segment task"]
         assert mock_ds.add_frame_calls[-1]["annotation.segment_end"].tolist() == [1]

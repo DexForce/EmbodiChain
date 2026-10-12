@@ -222,6 +222,12 @@ def create_tutorial_argument_parser(
         help="Run the demo without waiting for keyboard input.",
     )
     parser.add_argument(
+        "--auto_play_video_path",
+        type=str,
+        default=None,
+        help="Optional explicit MP4 path for auto-play recording.",
+    )
+    parser.add_argument(
         "--robot",
         choices=TUTORIAL_ROBOTS,
         default="ur5",
@@ -1567,7 +1573,7 @@ def create_curobo_motion_generator(
 def get_hand_open_close_qpos(
     robot: Robot,
     *,
-    hand_control_part: str = "hand",
+    hand_control_part: str = "eef",
     close_qpos: float | Sequence[float] = DEFAULT_GRIPPER_CLOSE_QPOS,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return open and closed positions for a tutorial parallel gripper.
@@ -1759,7 +1765,7 @@ def initialize_pre_pick_robot_pose(
     hand_qpos = hand_open.unsqueeze(0).repeat(robot.get_qpos().shape[0], 1)
     for target in (False, True):
         robot.set_qpos(arm_qpos, name="arm", target=target)
-        robot.set_qpos(hand_qpos, name="hand", target=target)
+        robot.set_qpos(hand_qpos, name="eef", target=target)
     robot.clear_dynamics()
 
 
@@ -1968,7 +1974,9 @@ def _newton_native_contact_settle_steps(
 
     hand_joint_ids: set[int] = set()
     for part_name in control_parts:
-        if "hand" not in part_name.lower() and "gripper" not in part_name.lower():
+        if not any(
+            marker in part_name.lower() for marker in ("eef", "hand", "gripper")
+        ):
             continue
         joint_ids = robot.get_joint_ids(name=part_name)
         hand_joint_ids.update(
@@ -2070,6 +2078,7 @@ def start_auto_play_recording(
         sim.sim_config.width = RECORD_WIDTH
         sim.sim_config.height = RECORD_HEIGHT
         if not sim.start_window_record(
+            save_path=getattr(args, "auto_play_video_path", None),
             fps=AUTO_PLAY_RECORD_FPS,
             max_memory=AUTO_PLAY_RECORD_MAX_MEMORY,
             video_prefix=video_prefix,
@@ -2222,7 +2231,7 @@ def create_ur5_gripper_robot_cfg(
                 ],
             },
             "control_parts": {
-                "hand": [GRIPPER_HAND_JOINT_PATTERN],
+                "eef": [GRIPPER_HAND_JOINT_PATTERN],
             },
             "joint_drive_props": {
                 "stiffness": {
@@ -2291,7 +2300,7 @@ def create_franka_panda_robot_cfg(
                 },
             ],
         },
-        "control_parts": {"hand": [GRIPPER_HAND_JOINT_PATTERN]},
+        "control_parts": {"eef": [GRIPPER_HAND_JOINT_PATTERN]},
         "joint_drive_props": {
             "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
             "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
@@ -2335,7 +2344,7 @@ def create_ur10_robotiq_robot_cfg(
         init_qpos: Optional full 12-DOF arm-plus-hand configuration.
 
     Returns:
-        A UR10/Robotiq configuration exposing ``arm`` and six-joint ``hand``
+        A UR10/Robotiq configuration exposing ``arm`` and six-joint ``eef``
         control parts.
     """
     qpos = (
@@ -2361,7 +2370,7 @@ def create_ur10_robotiq_robot_cfg(
                 ],
             },
             "control_parts": {
-                "hand": [ROBOTIQ_HAND_JOINT_PATTERN],
+                "eef": [ROBOTIQ_HAND_JOINT_PATTERN],
             },
             "joint_drive_props": {
                 "stiffness": {ROBOTIQ_HAND_JOINT_PATTERN: 1e3},
@@ -2395,7 +2404,7 @@ def create_tutorial_robot_cfg(
 
     Returns:
         A UR5, Franka, or UR10/Robotiq robot configuration exposing ``arm``
-        and ``hand``.
+        and ``eef``.
 
     Raises:
         ValueError: If ``robot_type`` is not supported.

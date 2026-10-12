@@ -1,0 +1,11 @@
+task_key: stack_blocks_two
+title: Stack Two Blocks
+summary: Stack two tableware blocks with the bundled environment.
+tags:
+- tableware
+- stacking
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json

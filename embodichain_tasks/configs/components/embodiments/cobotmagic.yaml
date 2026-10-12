@@ -76,3 +76,8 @@ skill_profile:
       commands:
         open: [0.05, 0.05]
         grasp: [0.0, 0.0]
+  runtime_services:
+    grasp_pose_generators:
+      right_eef:
+        kind: antipodal_parallel_jaw
+        model: cobotmagic_v100_gripper

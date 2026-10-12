@@ -20,9 +20,13 @@ from collections.abc import Mapping, Sequence
 from math import log
 from functools import wraps
 from datetime import datetime
+import logging
 import os
 import threading
 import copy
+from pathlib import Path
+import tempfile
+from uuid import uuid4
 import torch
 import numpy as np
 import gymnasium as gym
@@ -85,15 +89,20 @@ from embodichain.lab.gym.utils.gym_utils import (
     init_rollout_buffer_from_gym_space,
 )
 from embodichain.lab.gym.utils.trajectory_state import capture_trajectory_state
+from embodichain.data_pipeline.recording import build_recording_provenance
 from embodichain.utils import configclass, logger
 from embodichain.data import get_data_path
 from embodichain.data.constants import EMBODICHAIN_DEFAULT_DATA_ROOT
 
 if TYPE_CHECKING:
+    from embodichain.lab.sim.motion.expansion import (
+        CombinedExpansionProfile,
+    )
     from embodichain.lab.task_program import CompiledTaskProgram, TaskProgramCfg
     from embodichain.lab.task_program.integrations import (
         TaskProgramAdapterFactory,
         TaskProgramEnvironmentAdapter,
+        TaskProgramExpansionRecord,
     )
     from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
 
@@ -225,6 +234,14 @@ class EmbodiedEnvCfg(EnvCfg):
     objective: OrderedPlacementObjectiveCfg | None = None
     """Optional measured physical objective, independent of task success and persistence."""
 
+    task_instruction: str | None = None
+    """Overall task language for handwritten/direct-control demonstrations.
+
+    Task Programs own their instruction in the program configuration. Explicit
+    episode instructions take precedence; recorder instructions are legacy
+    fallbacks and are not required to enable task language.
+    """
+
     expert_trajectory: ExpertTrajectoryCfg = ExpertTrajectoryCfg()
     """Source-neutral expert trajectory control and recording settings."""
 
@@ -279,7 +296,8 @@ class EmbodiedEnvCfg(EnvCfg):
 
     trajectory_auto_save: bool = True
     """If True (and record_trajectory is True), auto-save each env's trajectory to
-    ``trajectory_save_dir`` at episode end and on close()."""
+    ``trajectory_save_dir`` before an explicitly committed episode reset.
+    Closing discards trajectories that were never committed."""
 
     task_program: TaskProgramCfg | None = None
     """Optional declarative Task Program used to generate demo segments.
@@ -898,7 +916,9 @@ class EmbodiedEnv(BaseEnv):
             dtype=torch.bool,
             device=self.episode_success_status.device,
         )
-        self.episode_success_status[update_mask] = success[update_mask]
+        self.episode_success_status.copy_(
+            torch.where(update_mask, success, self.episode_success_status)
+        )
 
     def _extend_obs(self, obs: EnvObs, **kwargs) -> EnvObs:
         if self.observation_manager:
@@ -986,7 +1006,10 @@ class EmbodiedEnv(BaseEnv):
     def _initialize_episode(
         self, env_ids: Sequence[int] | None = None, **kwargs
     ) -> None:
-        logger.log_debug(f"Initializing episode for env_ids: {env_ids}", color="blue")
+        if logger.logger.isEnabledFor(logging.DEBUG):
+            logger.log_debug(
+                f"Initializing episode for env_ids: {env_ids}", color="blue"
+            )
         save_data = kwargs.get("save_data", True)
 
         # Determine which environments to process
@@ -1023,6 +1046,19 @@ class EmbodiedEnv(BaseEnv):
                 raise ValueError(
                     "commit_env_ids must be a subset of the rows being reset."
                 )
+
+        # Persist replay state before the dataset recorder snapshots metadata
+        # (including asynchronous snapshots). The existing state buffer retains
+        # the source episode's initial state even when training exports fragments.
+        _traj_buffer = getattr(self, "_traj_buffer", None)
+        if (
+            save_data
+            and _traj_buffer is not None
+            and getattr(self.cfg, "trajectory_auto_save", False)
+        ):
+            with self._profiler.section("trajectory_save"):
+                for env_id in env_ids_to_process.tolist():
+                    self._save_trajectory_for_env(env_id)
 
         # Save dataset before clearing buffers for environments that are being reset
         if env_ids_to_commit.numel() > 0 and self.dataset_manager:
@@ -1071,22 +1107,9 @@ class EmbodiedEnv(BaseEnv):
                                     env_ids=env_ids_to_process
                                 )
 
-        # Auto-save + reset the per-env trajectory buffer for environments being
-        # reset. Use getattr so this no-ops on envs/subclasses that don't allocate
-        # a _traj_buffer (e.g. unit-test stubs of _initialize_episode).
-        _traj_buffer = getattr(self, "_traj_buffer", None)
-        if (
-            save_data
-            and _traj_buffer is not None
-            and getattr(self.cfg, "trajectory_auto_save", False)
-        ):
-            with self._profiler.section("trajectory_save"):
-                for env_id in env_ids_to_process.tolist():
-                    self._save_trajectory_for_env(env_id)
-
         _traj_steps = getattr(self, "_traj_steps", None)
         if _traj_steps is not None:
-            _traj_steps[env_ids_to_process] = 0
+            _traj_steps.index_fill_(0, env_ids_to_process, 0)
 
         # Clear episode buffers only after every recorder has consumed them.
         if self.rollout_buffer is not None and self._rollout_buffer_mode != "rl":
@@ -1111,7 +1134,7 @@ class EmbodiedEnv(BaseEnv):
             self._demo_active_rollout_start_steps[demo_ids] = 0
             self._demo_steps[demo_ids] = 0
 
-        self.episode_success_status[env_ids_to_process] = False
+        self.episode_success_status.index_fill_(0, env_ids_to_process, False)
 
         # Stateful managers reset selected rows before reset-mode events run.
         action_manager = getattr(self, "action_manager", None)
@@ -1202,13 +1225,27 @@ class EmbodiedEnv(BaseEnv):
 
     def _new_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Create an empty metadata record for one environment row."""
+        if getattr(self, "_recording_run_uuid", None) is None:
+            self._recording_run_uuid = str(uuid4())
+        if getattr(self, "_recording_provenance", None) is None:
+            self._recording_provenance = build_recording_provenance(self)
+        episode_uuid = str(uuid4())
         execution_cfg = getattr(self, "_demo_execution_cfg", None)
         if execution_cfg is None:
             execution_cfg = DemoExecutionCfg()
         attempt_id = int(getattr(self, "_demo_attempt_id", 0))
+        from .demo import _episode_instruction
+
+        instruction, instruction_source = _episode_instruction(self)
         metadata = {
+            "instruction": instruction,
+            "instruction_source": instruction_source,
             "schema_version": DEMO_SCHEMA_VERSION,
+            "run_uuid": self._recording_run_uuid,
+            "episode_uuid": episode_uuid,
+            "source_episode_uuid": episode_uuid,
             "episode_index": int(getattr(self, "_demo_episode_index", 0)),
+            "seed": getattr(getattr(self, "cfg", None), "seed", None),
             "output_mode": execution_cfg.mode,
             "save_failed_fragments": execution_cfg.save_failed_fragments,
             "attempt_id": attempt_id,
@@ -1229,6 +1266,7 @@ class EmbodiedEnv(BaseEnv):
             "terminal_reason": "unknown",
             "segments": [],
         }
+        metadata.update(copy.deepcopy(self._recording_provenance))
         expert_action_spec = getattr(self, "expert_action_spec", None)
         if expert_action_spec is not None:
             metadata.update(expert_action_spec.metadata(step_dt=self.step_dt))
@@ -1257,6 +1295,14 @@ class EmbodiedEnv(BaseEnv):
         self._demo_episode_metadata = [
             self._new_demo_episode_metadata(env_id) for env_id in range(self.num_envs)
         ]
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
+            for metadata in self._demo_episode_metadata:
+                metadata["program_hash"] = program_hash
 
     def _begin_demo_segment_recording(
         self, segment_id: int, segment: DemoSegment
@@ -1329,6 +1375,13 @@ class EmbodiedEnv(BaseEnv):
 
     def _end_demo_episode_recording(self, result: DemoEpisodeResult) -> None:
         """Finalize per-environment metadata after demonstration execution."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        program = getattr(bridge, "_program", None)
+        program_hash = None
+        if program is not None:
+            from embodichain.data_pipeline.recording import stable_config_hash
+
+            program_hash = stable_config_hash(program)
         for env_id in range(self.num_envs):
             metadata = self._demo_episode_metadata[env_id]
             length = (
@@ -1357,6 +1410,57 @@ class EmbodiedEnv(BaseEnv):
                     "terminal_reason": terminal_reason,
                 }
             )
+            if result.instruction is not None:
+                metadata["instruction"] = result.instruction
+                metadata["instruction_source"] = result.instruction_source
+            collection_stats = getattr(self, "_collection_stats", None)
+            if isinstance(collection_stats, Mapping):
+                metadata["collection"] = dict(collection_stats)
+            if bridge is not None:
+                metadata["program_hash"] = program_hash
+                records = bridge.expansion_records
+                metadata["expansion"] = []
+                for record in records:
+                    if getattr(record, "env_id", None) not in (None, env_id):
+                        continue
+                    expansion_metadata = dict(record.to_metadata())
+                    selected_identity = next(
+                        (
+                            candidate.identity
+                            for candidate in getattr(record, "candidates", ())
+                            if candidate.identity.candidate_id
+                            == record.selected_candidate_id
+                        ),
+                        None,
+                    )
+                    if selected_identity is not None:
+                        # Keep the actual source/case identity. Some adapters
+                        # put a recipe candidate in template_id, so downstream
+                        # grouping must not assume it names a shared reference.
+                        expansion_metadata["selected_candidate_lineage"] = {
+                            name: getattr(selected_identity, name)
+                            for name in (
+                                "scene_case_id",
+                                "initial_state_id",
+                                "candidate_id",
+                                "geometry_family_id",
+                                "source_id",
+                                "source_revision",
+                                "template_id",
+                                "attempt_id",
+                                "parent_id",
+                            )
+                        }
+                    metadata["expansion"].append(expansion_metadata)
+                source_uuids = {
+                    record["source_episode_uuid"]
+                    for record in metadata["expansion"]
+                    if isinstance(record.get("source_episode_uuid"), str)
+                }
+                if len(source_uuids) == 1:
+                    metadata["source_episode_uuid"] = next(iter(source_uuids))
+                elif source_uuids:
+                    metadata["source_episode_uuids"] = sorted(source_uuids)
 
     def get_demo_episode_metadata(self, env_id: int) -> dict[str, Any]:
         """Return segment-aware metadata for one buffered episode.
@@ -1384,24 +1488,14 @@ class EmbodiedEnv(BaseEnv):
             ).item()
         )
         metadata["length"] = length
+        if metadata.get("instruction") is None:
+            from .demo import resolve_demo_instruction
+
+            metadata["instruction"], metadata["instruction_source"] = (
+                resolve_demo_instruction(self)
+            )
         if length > 0 and not metadata["segments"]:
-            env_metadata = getattr(self, "metadata", {})
-            dataset_metadata = (
-                env_metadata.get("dataset", {})
-                if isinstance(env_metadata, Mapping)
-                else {}
-            )
-            instruction_cfg = (
-                dataset_metadata.get("instruction")
-                if isinstance(dataset_metadata, Mapping)
-                else None
-            )
-            instruction = (
-                instruction_cfg.get("lang")
-                if isinstance(instruction_cfg, Mapping)
-                else instruction_cfg
-            )
-            instruction = str(instruction) if instruction else "unknown_task"
+            instruction = metadata["instruction"]
             success_status = getattr(self, "episode_success_status", None)
             task_success = getattr(self, "_task_success", None)
             success = bool(
@@ -1452,6 +1546,7 @@ class EmbodiedEnv(BaseEnv):
                     ),
                     "target_uid": None,
                     "instruction": instruction,
+                    "instruction_source": "task_fallback",
                     "failure_reason": None if success else terminal_reason,
                     "metadata": {},
                 }
@@ -2612,17 +2707,37 @@ class EmbodiedEnv(BaseEnv):
     def create_task_program_bridge(
         self,
         program: CompiledTaskProgram,
+        *,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
+        expansion_recipe_indices: tuple[int, ...] | None = None,
     ) -> TaskProgramDemoBridge:
         """Create the Gym demo bridge through the explicit adapter.
 
         Args:
             program: Compiled provider-free Task Program.
+            expansion_profile: Optional episode-scoped Expansion Profile.
+            expansion_candidate_index: FIFO candidate ordinal selected from
+                each matching Atomic plan.
 
         Returns:
             Atomic demo bridge whose segments are consumed lazily.
 
         """
-        return self._checked_task_program_adapter().create_bridge(program)
+        return self._checked_task_program_adapter().create_bridge(
+            program,
+            expansion_profile=expansion_profile,
+            candidate_index=expansion_candidate_index,
+            recipe_indices=expansion_recipe_indices,
+        )
+
+    @property
+    def task_program_expansion_records(
+        self,
+    ) -> tuple[TaskProgramExpansionRecord, ...]:
+        """Return records owned by the active generated Task Program episode."""
+        bridge = getattr(self, "_active_task_program_bridge", None)
+        return () if bridge is None else bridge.expansion_records
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
         """Return completed Task Program acceptance or legacy task success.
@@ -2664,6 +2779,9 @@ class EmbodiedEnv(BaseEnv):
         self,
         *args,
         task_program: TaskProgramCfg | CompiledTaskProgram | None = None,
+        expansion_profile: CombinedExpansionProfile | None = None,
+        expansion_candidate_index: int = 0,
+        expansion_recipe_indices: tuple[int, ...] | None = None,
         **kwargs,
     ) -> Iterable[DemoSegment] | None:
         """Create the semantic segments that make up one task episode.
@@ -2678,6 +2796,10 @@ class EmbodiedEnv(BaseEnv):
             *args: Positional arguments forwarded to the legacy planner.
             task_program: Optional episode-level program config or provider-free
                 compiled program.
+            expansion_profile: Optional source-neutral profile applied to
+                matching grounded Atomic calls in this episode.
+            expansion_candidate_index: FIFO candidate ordinal selected from
+                each generated reference.
             **kwargs: Keyword arguments forwarded to the legacy planner.
 
         Returns:
@@ -2698,9 +2820,41 @@ class EmbodiedEnv(BaseEnv):
                 if type(selected_program) is CompiledTaskProgram
                 else self.compile_task_program(selected_program)
             )
-            bridge = self.create_task_program_bridge(compiled_program)
+            if (
+                expansion_profile is None
+                and expansion_candidate_index == 0
+                and expansion_recipe_indices is None
+            ):
+                bridge = self.create_task_program_bridge(compiled_program)
+            else:
+                bridge = self.create_task_program_bridge(
+                    compiled_program,
+                    expansion_profile=expansion_profile,
+                    expansion_candidate_index=expansion_candidate_index,
+                    expansion_recipe_indices=expansion_recipe_indices,
+                )
             self._active_task_program_bridge = bridge
+            if getattr(self, "_demo_instruction_snapshot", None) is None:
+                from .demo import resolve_demo_instruction
+
+                text, source = resolve_demo_instruction(
+                    self, task_program=compiled_program
+                )
+                for metadata in getattr(self, "_demo_episode_metadata", []):
+                    metadata["instruction"] = text
+                    metadata["instruction_source"] = source
             return bridge.iter_segments()
+
+        if expansion_profile is not None:
+            raise ValueError("expansion_profile requires a selected Task Program")
+        if expansion_candidate_index != 0:
+            raise ValueError(
+                "expansion_candidate_index requires a selected Task Program"
+            )
+        if expansion_recipe_indices is not None:
+            raise ValueError(
+                "expansion_recipe_indices requires a selected Task Program"
+            )
 
         actions = self.create_demo_action_list(*args, **kwargs)
         if actions is None:
@@ -2762,7 +2916,55 @@ class EmbodiedEnv(BaseEnv):
             ],
         }
         meta.update(self._trajectory_action_metadata())
-        torch.save({"states": states, "actions": actions, "meta": meta}, path)
+        meta["run_uuid"] = meta["demo_episodes"][0].get("run_uuid")
+        meta["episode_uuids"] = [
+            episode.get("episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["source_episode_uuids"] = [
+            episode.get("source_episode_uuid") for episode in meta["demo_episodes"]
+        ]
+        meta["config_hash"] = meta["demo_episodes"][0].get("config_hash")
+        meta["provenance"] = copy.deepcopy(
+            meta["demo_episodes"][0].get("provenance", {})
+        )
+        meta["initial_state_step"] = 0
+        if len(env_ids) == 1:
+            meta["episode_uuid"] = meta["episode_uuids"][0]
+            meta["source_episode_uuid"] = meta["source_episode_uuids"][0]
+            meta["program_hash"] = meta["demo_episodes"][0].get("program_hash")
+        replay_path = str(Path(path).resolve())
+        for episode in meta["demo_episodes"]:
+            episode["trajectory_path"] = replay_path
+            episode["replay_artifact"] = {
+                "path": replay_path,
+                "source_episode_uuid": episode.get("episode_uuid"),
+                "env_id": episode["env_id"],
+                "initial_state_step": 0,
+                "length": episode["length"],
+                "state_alignment": "source_episode",
+                "external": True,
+            }
+        destination = Path(path)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{destination.name}.", dir=destination.parent
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                torch.save({"states": states, "actions": actions, "meta": meta}, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+            directory = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        for env_id, episode in zip(env_ids, meta["demo_episodes"]):
+            live_metadata = self._demo_episode_metadata[env_id]
+            live_metadata["trajectory_path"] = replay_path
+            live_metadata["replay_artifact"] = copy.deepcopy(episode["replay_artifact"])
         return path
 
     def _save_trajectory_for_env(self, env_id: int) -> str | None:
@@ -2776,6 +2978,15 @@ class EmbodiedEnv(BaseEnv):
             return None
         if int(self._traj_steps[env_id].item()) == 0:
             return None
+        metadata = self._demo_episode_metadata[env_id]
+        existing_path = metadata.get("trajectory_path")
+        replay = metadata.get("replay_artifact", {})
+        if (
+            existing_path is not None
+            and Path(existing_path).is_file()
+            and replay.get("length") == int(self._traj_steps[env_id].item())
+        ):
+            return existing_path
         base = self.cfg.trajectory_save_dir
         if base is None:
             base = os.path.join(

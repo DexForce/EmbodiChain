@@ -78,6 +78,9 @@ class AntipodalGraspPoseGeneratorCfg:
     max_candidates: int = 50
     """Maximum number of ranked candidates returned per object pose."""
 
+    center_mode: Literal["bounds", "centroid"] = "bounds"
+    """Reference center used for ray sampling, partitioning, and ranking."""
+
     def __post_init__(self) -> None:
         self.sample_count = _positive_int(
             self.sample_count,
@@ -101,6 +104,8 @@ class AntipodalGraspPoseGeneratorCfg:
             field_name="approach_deviation_angle",
             minimum=0.0,
         )
+        if self.center_mode not in {"bounds", "centroid"}:
+            raise ValueError("center_mode must be 'bounds' or 'centroid'.")
 
 
 @configclass
@@ -308,6 +313,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 max_angle=algorithm.ray_deviation_angle,
                 max_length=model.max_opening_width,
                 min_length=model.min_opening_width,
+                center_mode=algorithm.center_mode,
             ),
             collision_cfg=GripperCollisionCfg(
                 max_open_length=model.max_opening_width,
@@ -413,6 +419,29 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         is_positive_part: bool | torch.Tensor = True,
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         """Return ranked candidates, optionally from one projected axis end."""
+        return [
+            (poses, costs)
+            for poses, _, costs in self.get_grasp_candidates(
+                mesh_vertices=mesh_vertices,
+                mesh_triangles=mesh_triangles,
+                obj_poses=obj_poses,
+                approach_direction=approach_direction,
+                obj_longest_axis=obj_longest_axis,
+                is_positive_part=is_positive_part,
+            )
+        ]
+
+    def get_grasp_candidates(
+        self,
+        *,
+        mesh_vertices: torch.Tensor,
+        mesh_triangles: torch.Tensor,
+        obj_poses: torch.Tensor,
+        approach_direction: torch.Tensor,
+        obj_longest_axis: torch.Tensor | None = None,
+        is_positive_part: bool | torch.Tensor = True,
+    ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Expose candidate opening widths alongside their poses and costs."""
         backend = self._backend(mesh_vertices, mesh_triangles)
         poses = self._object_poses(obj_poses, device=backend.device)
         directions = self._approach_directions(
@@ -457,9 +486,9 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     "is_positive_part must be a bool or a bool tensor with shape "
                     f"({poses.shape[0]},)."
                 )
-        results: list[tuple[torch.Tensor, torch.Tensor]] = []
+        results: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = []
         for index, object_pose in enumerate(poses):
-            success, grasp_poses, _, costs = backend.get_valid_grasp_poses(
+            success, grasp_poses, widths, costs = backend.get_valid_grasp_poses(
                 object_pose=object_pose,
                 approach_direction=directions[index],
                 obj_longest_axis=None if axes is None else axes[index],
@@ -469,6 +498,11 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                 grasp_poses = grasp_poses.unsqueeze(0)
             if costs.dim() == 0:
                 costs = costs.unsqueeze(0)
+            widths = torch.as_tensor(
+                widths, device=backend.device, dtype=torch.float32
+            ).reshape(-1)
+            if widths.shape != costs.shape or widths.shape != grasp_poses.shape[:1]:
+                raise ValueError("Grasp poses, opening widths and costs must align.")
             if not success:
                 logger.log_warning(
                     f"Failed to find valid grasp poses for object row {index}."
@@ -479,7 +513,7 @@ class AntipodalGraspPoseGenerator(ParallelJawGraspPoseGenerator):
                     dtype=torch.float32,
                     device=backend.device,
                 )
-            results.append((grasp_poses, costs))
+            results.append((grasp_poses, widths, costs))
         return results
 
     def get_best_grasp_poses(

@@ -9,8 +9,8 @@ topics:
 - id: simulation-system
   title: Simulation System
   aliases: [simulation system, simulation manager, Newton physics backend, motion module, sim motion, camera attachment, 运动能力模块, 仿真系统, 仿真管理器]
-  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DLSSCfg, DLSS, frame_time_delta_ms,
-    offscreen_dlss_enabled, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
+  keywords: [SimulationManager, SimulationManagerCfg, RenderCfg, DenoisingCfg, DenoisingMode, DLSSCfg,
+    NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
     fixed-cadence playback, quaternion, xyzw]
@@ -45,6 +45,7 @@ topics:
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
   paths: [topics/env-framework/env-framework.md]
   source_of_truth:
@@ -165,10 +166,12 @@ topics:
 - id: motion-planning
   title: Motion Planning
   aliases: [motion planning, trajectory planning, trajectory playback, fixed-cadence trajectory playback, motion expansion,
-    trajectory expansion, trajectory augmentation, fixed scene trajectory augmentation, trajectory variants,
-    trajectory variant expansion, 轨迹播放, 轨迹扩增, 运动规划, 轨迹规划, 轨迹变体]
+    trajectory expansion, trajectory augmentation, expansion profile, configured trajectory expansion,
+    fixed scene trajectory augmentation, trajectory variants, trajectory variant expansion,
+    轨迹播放, 轨迹扩增, 轨迹扩增配置, 运动规划, 轨迹规划, 轨迹变体]
   keywords: [BasePlanner, PlanState, PlanResult, MotionGenerator, ToppraPlanner, TrapezoidalPlanner, CuroboPlanner, NeuralPlanner,
-    expansion, GenerationSession, TrajectoryAugmentationCfg, CandidateTrajectoryBatch,
+    expansion, ExpansionSession, TrajectoryAugmentationCfg, TrajectoryExpansionJobCfg,
+    load_expansion_profile, SourceAdapter, CandidateCoordinator, CandidateTrajectoryBatch,
     ManipulabilityBands, manipulability_guided_residual, manipulability coverage bands,
     TrajectoryVariant, plan_trajectory_variants, apply_trajectory_variant, expand_trajectory_variants,
     via_points, nullspace_residual, perturb_approach_direction, sample_approach_cone, TIMING_PROFILES,
@@ -286,7 +289,8 @@ topics:
   title: Embodied Task Program
   aliases: [task program, semantic call, 任务程序, 语义调用]
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
-    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, execution_policy, SemanticPose, quaternion_xyzw,
+    EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
+    CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
     joint_command_mode]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
@@ -337,22 +341,29 @@ topics:
 - id: data-pipeline
   title: Data Pipeline
   aliases: [online data, online dataset, async recorder, dataset persistence, 数据管线, 在线数据, 数据集持久化, 数据保存,
-    深度视频]
+    深度视频, 数据集校验, 数据集转换, 数据集划分]
   keywords: [OnlineDataEngine, OnlineDataset, sample_batch, lock_index, LeRobotRecorder, AsyncLeRobotRecorder,
-    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice]
+    DepthSidecarManager, depth_meta.json, fragment_id, finalize, expert action schema, qpos_slice, qvel_slice,
+    validate_dataset, create_split_manifest, recover_recording, episode_uuid, language_persistent,
+    SharedLanguageRegistry, resolve_language]
   paths: [topics/data-pipeline/data-pipeline.md]
   source_of_truth:
   - embodichain/data_pipeline/engine/data.py
+  - embodichain/data_pipeline/engine/language.py
   - embodichain/data_pipeline/datasets/online_data.py
   - embodichain/lab/gym/envs/managers/dataset_manager.py
   - embodichain/lab/gym/envs/managers/datasets.py
   - embodichain/lab/gym/envs/managers/async_datasets.py
   - embodichain/data_pipeline/depth_video/writer.py
   - embodichain/data_pipeline/depth_video/reader.py
+  - embodichain/data_pipeline/datasets/inspection.py
+  - embodichain/data_pipeline/recording/
+  - embodichain/cli/dataset.py
+  - tools/lerobot_export/
   - embodichain/lab/scripts/run_env.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
     embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
-    tests/data_pipeline/]
+    tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active
 - id: robot-workspace

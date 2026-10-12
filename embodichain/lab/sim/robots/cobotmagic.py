@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import torch
 import numpy as np
+import re
 
 from typing import TYPE_CHECKING, Dict, List, Union
 
@@ -44,6 +45,20 @@ __all__ = ["CobotMagicCfg"]
 
 @configclass
 class CobotMagicCfg(RobotCfg):
+    """Dual-arm CobotMagic with source arm limits and calibrated gripper drives.
+
+    Arm effort follows the asset URDF. Arm speeds use the lower of its limits
+    and the standard PiPER manual's reference speeds; the V100 hardware variant
+    still needs device-specific calibration. Per-axis PD gains and gripper speed
+    are simulation settings. The coupled gripper uses a 40 N simulation drive
+    budget, qualified at 100 Hz by
+    ``scripts/benchmark/robotics/cobotmagic_drives.py``. It is not a hardware
+    clamping-force rating; the authored gripper joints each declare 10 N.
+
+    Caller drive patterns replace matching defaults, retaining defaults for
+    other joints. Control-part overrides remain usable alongside direct rules.
+    """
+
     urdf_cfg: URDFCfg = None
     control_parts: Dict[str, List[str]] | None = None
     solver_cfg: Dict[str, "SolverCfg"] | None = None
@@ -52,7 +67,44 @@ class CobotMagicCfg(RobotCfg):
     def from_dict(cls, init_dict: Dict[str, Union[str, float, int]]) -> CobotMagicCfg:
         cfg = cls()
         cfg._build_defaults(init_dict)
+        cfg._prepare_joint_drive_overrides(init_dict)
         return merge_robot_cfg(cfg, init_dict)
+
+    def _prepare_joint_drive_overrides(self, init_dict: dict) -> None:
+        """Let caller patterns replace matching defaults without rule overlap."""
+        overrides = init_dict.get("joint_drive_props")
+        if not isinstance(overrides, dict):
+            return
+        parts = dict(self.control_parts)
+        if isinstance(init_dict.get("control_parts"), dict):
+            parts.update(init_dict["control_parts"])
+        joint_names = [name for names in self.control_parts.values() for name in names]
+        for field in ("stiffness", "damping", "max_effort", "max_velocity"):
+            provided = overrides.get(field)
+            defaults = getattr(self.joint_drive_props, field)
+            if not isinstance(provided, dict) or not isinstance(defaults, dict):
+                continue
+            shadowed = {
+                name
+                for name in joint_names
+                if any(
+                    re.fullmatch(expression, name)
+                    for pattern in provided
+                    for expression in parts.get(pattern, [pattern])
+                )
+            }
+            remaining = {}
+            for pattern, value in defaults.items():
+                if pattern in provided:
+                    continue
+                matched = [name for name in joint_names if re.fullmatch(pattern, name)]
+                if shadowed.isdisjoint(matched):
+                    remaining[pattern] = value
+                else:
+                    remaining.update(
+                        {name: value for name in matched if name not in shadowed}
+                    )
+            setattr(self.joint_drive_props, field, remaining)
 
     def _build_defaults(self, init_dict: dict | None = None) -> None:
         """Populate default urdf/control/solver/physics for CobotMagic."""
@@ -128,22 +180,57 @@ class CobotMagicCfg(RobotCfg):
         self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
-                "left_joint[1-6]": 7e4,
-                "right_joint[1-6]": 7e4,
-                "left_joint[7-8]": 3e2,
-                "right_joint[7-8]": 3e2,
+                "left_joint[1-2]": 3e4,
+                "right_joint[1-2]": 3e4,
+                "left_joint3": 2e4,
+                "right_joint3": 2e4,
+                "left_joint4": 1.2e4,
+                "right_joint4": 1.2e4,
+                "left_joint5": 8e3,
+                "right_joint5": 8e3,
+                "left_joint6": 4e3,
+                "right_joint6": 4e3,
+                "left_joint[7-8]": 2e3,
+                "right_joint[7-8]": 2e3,
             },
             damping={
-                "left_joint[1-6]": 1e3,
-                "right_joint[1-6]": 1e3,
-                "left_joint[7-8]": 3e1,
-                "right_joint[7-8]": 3e1,
+                "left_joint[1-2]": 6e2,
+                "right_joint[1-2]": 6e2,
+                "left_joint3": 4e2,
+                "right_joint3": 4e2,
+                "left_joint4": 2.4e2,
+                "right_joint4": 2.4e2,
+                "left_joint5": 1.6e2,
+                "right_joint5": 1.6e2,
+                "left_joint6": 8e1,
+                "right_joint6": 8e1,
+                "left_joint[7-8]": 7e1,
+                "right_joint[7-8]": 7e1,
             },
             max_effort={
-                "left_joint[1-6]": 3e6,
-                "right_joint[1-6]": 3e6,
-                "left_joint[7-8]": 3e3,
-                "right_joint[7-8]": 3e3,
+                "left_joint[1-6]": 100.0,
+                "right_joint[1-6]": 100.0,
+                # Calibrated simulation budget for each coupled gripper.
+                # This is a simulation calibration, not a direct copy of
+                # per-joint URDF limits or product clamping-force ratings.
+                "left_joint[7-8]": 40.0,
+                "right_joint[7-8]": 40.0,
+            },
+            # Standard PiPER quick-start manual: 180/195/180/225/225/225 deg/s.
+            # Keep joint 6's stricter 3 rad/s asset limit. Apply these caps to
+            # physical drives and planning metadata; they are not V100 ratings.
+            max_velocity={
+                "left_joint[13]": np.pi,
+                "right_joint[13]": np.pi,
+                "left_joint2": np.deg2rad(195.0),
+                "right_joint2": np.deg2rad(195.0),
+                "left_joint[45]": np.deg2rad(225.0),
+                "right_joint[45]": np.deg2rad(225.0),
+                "left_joint6": 3.0,
+                "right_joint6": 3.0,
+                # Qualified simulated grasp speed, not a product specification.
+                "left_joint[7-8]": 0.25,
+                "right_joint[7-8]": 0.25,
             },
         )
         self.root_props = ArticulationRootPropertiesCfg(

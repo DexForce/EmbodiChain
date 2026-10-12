@@ -70,3 +70,52 @@ def test_resolve_config_path_rejects_packaged_path_escape(
 
     with pytest.raises(ValueError, match="stay within the package"):
         resolve_config_path("embodichain_tasks/configs/../VERSION")
+
+
+def test_owner_relative_config_ignores_same_named_cwd_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit owner directory controls ordinary relative references."""
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    (owner / "config.yaml").write_text("owner: true\n")
+    (tmp_path / "config.yaml").write_text("shadow: true\n")
+    monkeypatch.chdir(tmp_path)
+
+    assert resolve_config_path("config.yaml", base_dir=owner) == owner / "config.yaml"
+    assert resolve_config_path("config.yaml") == Path("config.yaml")
+    assert resolve_config_path(owner / "config.yaml", base_dir=tmp_path) == (
+        owner / "config.yaml"
+    )
+
+
+def test_owned_official_config_ignores_same_named_cwd_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Component references bind packaged configs to their imported SDK."""
+    reference = Path(
+        "embodichain_tasks/configs/components/embodiments/franka_panda.yaml"
+    )
+    shadow = tmp_path / reference
+    shadow.parent.mkdir(parents=True)
+    shadow.write_text("shadow: true\n")
+    monkeypatch.chdir(tmp_path)
+    expected = Path(__file__).resolve().parents[2] / reference
+
+    assert resolve_config_path(reference, base_dir=tmp_path / "deployment") == expected
+    assert resolve_config_path(reference) == reference
+
+
+def test_owned_official_config_rejects_escape_even_when_cwd_target_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing CWD file cannot bypass the packaged selector boundary."""
+    shadow_root = tmp_path / "embodichain_tasks"
+    (shadow_root / "configs").mkdir(parents=True)
+    (shadow_root / "VERSION").write_text("shadow\n")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="stay within the package"):
+        resolve_config_path(
+            "embodichain_tasks/configs/../VERSION", base_dir=tmp_path / "deployment"
+        )

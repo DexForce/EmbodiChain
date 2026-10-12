@@ -1,4 +1,5 @@
 program_id: dual_ur5_hand_over
+instruction: Pass the can from one robot arm to the other and move it to the delivery position.
 targets:
   delivery_pose:
     kind: cyclic_pose
@@ -9,6 +10,7 @@ targets:
 program:
   kind: segment
   name: hand_over_can
+  instruction: Transfer the can between the two grippers and move it to the delivery position.
   steps:
     kind: sequence
     items:

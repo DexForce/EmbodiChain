@@ -1011,3 +1011,52 @@ def test_scene_export_rejects_backslash_in_object_id(tmp_path: Path) -> None:
             scene_graph=_scene_graph(scene),
             output_root=tmp_path / "output",
         ).export()
+
+
+@pytest.mark.parametrize("headless", [True, False])
+def test_preview_initial_display_does_not_integrate_physics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, headless: bool
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    root = tmp_path / "export"
+    (root / "scene_export").mkdir(parents=True)
+    (root / "scene_export" / "scene_config.json").write_text("{}")
+    events: list[str] = []
+
+    class FakeSimulation:
+        def __init__(self, cfg: object) -> None:
+            self.sim_config = SimpleNamespace(
+                visualization=SimpleNamespace(backend="none")
+            )
+
+        def prepare(self) -> None:
+            events.append("prepare")
+
+        def sync_render_state(self) -> None:
+            events.append("publish")
+
+        def open_window(self) -> None:
+            assert events[-1] == "publish"
+            events.append("open")
+
+        def update(self, **kwargs: object) -> None:
+            assert "open" in events
+            events.append("explicit_preview_step")
+            raise KeyboardInterrupt
+
+        def destroy(self, **kwargs: object) -> None:
+            events.append("destroy")
+
+        @staticmethod
+        def flush_cleanup_queue() -> None:
+            events.append("flush")
+
+    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
+    monkeypatch.setattr(preview, "load_scene_export_into_sim", lambda **_: [])
+    preview.preview_scene_export(output_root=root, headless=headless)
+
+    expected = ["prepare", "publish"]
+    if not headless:
+        expected += ["open", "explicit_preview_step"]
+    assert events == expected + ["destroy", "flush"]

@@ -37,6 +37,7 @@ from tqdm import tqdm
 
 from embodichain.utils.logger import log_info, log_error
 from embodichain.utils import configclass
+from .language import SharedLanguageRegistry
 
 __all__ = [
     "OnlineDataEngine",
@@ -47,6 +48,7 @@ __all__ = [
 
 if TYPE_CHECKING:
     from embodichain.lab.sim import SimulationManagerCfg
+    from embodichain.lab.gym.envs.demo import DemoEpisodeResult
 
 _ERROR_BUFFER_SIZE = 64 * 1024
 
@@ -241,6 +243,73 @@ class OnlineDataEngineCfg:
     initialization_timeout: float = 300.0
     """Maximum seconds to wait for the worker's initial buffer fill."""
 
+    language_buffer_bytes: int = 1024 * 1024
+    """Append-only task/subtask dictionary capacity in UTF-8 bytes. Descriptions
+    remain available for copied samples after trajectory slots are reused.
+    Exhaustion fails the worker explicitly; increase this for many unique tasks."""
+
+
+def _populate_language_indices(
+    buffer: TensorDict,
+    result: "DemoEpisodeResult",
+    registry: SharedLanguageRegistry,
+) -> None:
+    """Assign immutable text indices before publishing a successful write window."""
+    rows, capacity = buffer.batch_size
+    lengths = getattr(result, "lengths", ()) or (result.length,) * rows
+    if len(lengths) != rows or any(
+        type(length) is not int or not 0 <= length <= capacity for length in lengths
+    ):
+        raise ValueError("Online language row lengths must match the trajectory buffer")
+    task = getattr(result, "instruction", None) or "unknown_task"
+    task_id = registry.intern(task, kind="task")
+    fallback_id = registry.intern(task, kind="subtask")
+    task_indices, subtask_indices = buffer["task_index"], buffer["subtask_index"]
+    task_indices.fill_(-1)
+    subtask_indices.fill_(-1)
+    valid = buffer.get("valid", None)
+    occupied = torch.zeros(
+        (rows, capacity), dtype=torch.bool, device=task_indices.device
+    )
+    for row, length in enumerate(lengths):
+        if valid is not None and valid[row, length:].any():
+            raise ValueError(
+                f"Online row {row} has valid frames beyond result length {length}"
+            )
+        task_indices[row, :length] = task_id
+        subtask_indices[row, :length] = fallback_id
+    for segment in getattr(result, "segments", ()):
+        active = getattr(segment, "active", ())
+        starts, ends = getattr(segment, "start_steps", ()), getattr(
+            segment, "end_steps", ()
+        )
+        instruction = getattr(segment, "instruction", None) or task
+        subtask_id = None
+        for row, length in enumerate(lengths):
+            if active and row < len(active) and not active[row]:
+                continue
+            start = starts[row] if row < len(starts) else segment.start_step
+            end = ends[row] if row < len(ends) else segment.end_step
+            if (
+                type(start) is not int
+                or type(end) is not int
+                or not 0 <= start <= end <= length
+            ):
+                raise ValueError(
+                    f"Online language segment span [{start}, {end}) is outside row {row} length {length}"
+                )
+            if occupied[row, start:end].any():
+                raise ValueError(f"Online language segment spans overlap in row {row}")
+            if start == end:
+                continue
+            if subtask_id is None:
+                subtask_id = registry.intern(instruction, kind="subtask")
+            occupied[row, start:end] = True
+            subtask_indices[row, start:end] = subtask_id
+    if valid is not None:
+        task_indices[~valid.bool()] = -1
+        subtask_indices[~valid.bool()] = -1
+
 
 def _apply_worker_simulation_overrides(
     sim_cfg: "SimulationManagerCfg",
@@ -282,6 +351,7 @@ def _run_sim_worker(
     failed_signal: MpEvent,
     state_value: Synchronized,
     error_reported: list[bool],
+    language_registry: SharedLanguageRegistry | None = None,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -302,6 +372,9 @@ def _run_sim_worker(
         init_signal: Event set by this worker after the first fill completes.
             Remains set permanently thereafter.
         close_signal: Event set by the main process to request a graceful shutdown.
+        language_registry: Optional shared immutable text dictionaries. Real
+            engines populate frame indices while the write window is excluded
+            from sampling; omitted only by legacy lightweight worker callers.
     """
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import (
@@ -416,6 +489,9 @@ def _run_sim_worker(
                         f"{cfg.max_generation_attempts} attempts."
                     )
 
+                if language_registry is not None:
+                    _populate_language_indices(tmp_buffer, result, language_registry)
+
                 rollout_idx += 1
 
                 log_info(
@@ -479,6 +555,7 @@ def _sim_worker_fn(
     error_length: Synchronized,
     failed_signal: MpEvent,
     state_value: Synchronized,
+    language_registry: SharedLanguageRegistry | None = None,
 ) -> None:
     """Run the simulation worker and publish a stable exception envelope.
 
@@ -489,7 +566,7 @@ def _sim_worker_fn(
     """
     error_reported = [False]
     try:
-        _run_sim_worker(
+        worker_args = (
             cfg,
             shared_buffer,
             lock_index,
@@ -502,6 +579,10 @@ def _sim_worker_fn(
             state_value,
             error_reported,
         )
+        if language_registry is None:
+            _run_sim_worker(*worker_args)
+        else:
+            _run_sim_worker(*worker_args, language_registry)
     except BaseException as error:
         if not error_reported[0]:
             _publish_worker_error(
@@ -582,6 +663,8 @@ class OnlineDataEngine:
                 "max_generation_attempts must be at least 1, "
                 f"got {cfg.max_generation_attempts}."
             )
+        if type(cfg.language_buffer_bytes) is not int or cfg.language_buffer_bytes < 1:
+            raise ValueError("language_buffer_bytes must be a positive integer")
         if (
             not math.isfinite(cfg.initialization_timeout)
             or cfg.initialization_timeout <= 0
@@ -611,6 +694,9 @@ class OnlineDataEngine:
 
         # Use a spawn context to avoid forking unsafe runtime state.
         self._mp_ctx = mp.get_context("forkserver")
+        self._language_registry = SharedLanguageRegistry(
+            cfg.language_buffer_bytes, context=self._mp_ctx
+        )
 
         # Current write window: subprocess updates these after each rollout.
         # Shape: [write_start, write_end)  (exclusive upper bound).
@@ -675,6 +761,7 @@ class OnlineDataEngine:
                         self._worker_error_length,
                         self._worker_failed_signal,
                         self._state_value,
+                        getattr(self, "_language_registry", None),
                     ),
                     # Some planners create their own process pool. A daemonic
                     # producer would make those nested workers illegal.
@@ -920,6 +1007,11 @@ class OnlineDataEngine:
             state_dim=self.cfg.state_dim,
         )
 
+        for key in ("task_index", "subtask_index"):
+            shared_td[key] = torch.full(
+                shared_td.batch_size, -1, dtype=torch.int64, device=shared_td.device
+            )
+
         if shared_td.device.type == "cpu":
             shared_td.share_memory_()
 
@@ -971,7 +1063,9 @@ class OnlineDataEngine:
             sampling_mode: Segment-boundary policy for candidate windows.
 
         Returns:
-            TensorDict with batch size ``[batch_size, chunk_size]``.
+            TensorDict with batch size ``[batch_size, chunk_size]``. Integer
+            ``task_index`` and ``subtask_index`` identify immutable language
+            snapshots; :meth:`resolve_language` decodes their descriptions.
 
         Raises:
             ValueError: If an argument is invalid.
@@ -1095,6 +1189,36 @@ class OnlineDataEngine:
         self._trigger_refill_if_needed(batch_size)
 
         return result
+
+    def resolve_language(self, batch: TensorDict) -> dict[str, object]:
+        """Decode overall tasks and current subtasks for a copied sample batch.
+
+        The lookup remains valid after a ring-buffer refill or engine shutdown.
+        Returned strings are separate from the shared numeric TensorDict; callers
+        can tokenize them in a training transform without changing sampling locks
+        or collation behavior.
+
+        Args:
+            batch: Sampled TensorDict containing ``task_index``/``subtask_index``.
+
+        Returns:
+            ``task`` and ``subtask`` strings nested to match the batch dimensions
+            (for example ``[batch_size][chunk_size]``).
+
+        Raises:
+            ValueError: If language indices are absent, unknown, or padding.
+        """
+        if "task_index" not in batch.keys() or "subtask_index" not in batch.keys():
+            raise ValueError(
+                "Online batch has no task_index/subtask_index language fields"
+            )
+        registry = getattr(self, "_language_registry", None)
+        if registry is None:
+            raise ValueError("Online engine has no shared language registry")
+        return {
+            "task": registry.resolve(batch["task_index"], kind="task"),
+            "subtask": registry.resolve(batch["subtask_index"], kind="subtask"),
+        }
 
     # -----------------------------------------------------------------------
     # Refill criterion

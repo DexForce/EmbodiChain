@@ -247,5 +247,5 @@ Next Steps
 
 - :doc:`task_program` — Compose a modular environment with a declarative Task
   Program, embodiment, scene binding, and execution policy.
-- :doc:`data_generation` — Record expert demonstrations from modular
+- :doc:`data_expansion` — Record expert demonstrations from modular
   environments.

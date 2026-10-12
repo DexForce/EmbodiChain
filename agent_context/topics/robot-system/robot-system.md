@@ -45,6 +45,20 @@ frames. Mount transforms belong to assembly, not the serial chain.
 
 ## Joint and solver boundaries
 
+Official defaults use `arm` / `eef` for single-arm control groups and
+`left_arm`, `right_arm`, `left_eef`, `right_eef` for dual-arm groups. The EEF
+group can control parallel grippers or dexterous hands; its name does not
+declare capabilities. Custom keys, including `hand`, remain valid and are not
+automatically aliased. URDF component names such as `left_hand` and native link
+or joint names belong to the asset namespace and are independent of this rule.
+
+Panda's default `hand` group is now `eef`; Aloha Mini, Tianji Marvin and the
+official dual-UR5 embodiment use `left_eef` / `right_eef` in place of
+`left_hand` / `right_hand`. Callers of those defaults must update named-part
+queries, drive overrides, endpoint bindings and service keys together. Existing
+trajectory-file field names are independent and should be mapped explicitly
+when loading older data, rather than renamed as part of a control-group change.
+
 `control_parts` expands joint-name patterns at initialization. For Spawn-bound
 robots, part IDs resolve by name against the final batch `qpos` order, not
 native source traversal order. Source-ordered `init_qpos` is remapped on reset.

@@ -14,6 +14,8 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
 import numpy as np
 import torch
 import ast
@@ -52,7 +54,8 @@ def draw_axis(env, pose):
         arena_index=-1,  # All arenas
     )
     env.sim.draw_marker(cfg=marker_cfg)
-    env.sim.update()
+    env.sim.sync_render_state()
+    env.sim.capture_visualization(force=True)
 
 
 def get_arm_states(env, robot_name):

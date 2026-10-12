@@ -155,7 +155,7 @@ def create_dual_tutorial_robot_cfg(
         )
         base_cfg.solver_cfg["arm"] = base_solver
 
-    hand_joint_pattern = base_cfg.control_parts["hand"][0]
+    hand_joint_pattern = base_cfg.control_parts["eef"][0]
     for property_name, value in (
         ("stiffness", hand_stiffness),
         ("damping", hand_damping),

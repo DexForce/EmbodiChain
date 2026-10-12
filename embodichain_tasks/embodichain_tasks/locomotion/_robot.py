@@ -59,6 +59,7 @@ def task_joint_drive_properties(
         return None
     return JointDrivePropertiesCfg(
         drive_type="force",
+        target_mode=None if defaults is None else defaults.target_mode,
         stiffness=stiffness,
         damping=damping,
         max_effort=resolve_or_default("effort_limit", "max_effort"),

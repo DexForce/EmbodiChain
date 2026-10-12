@@ -22,6 +22,8 @@ import copy
 import json
 import math
 import threading
+import os
+from uuid import UUID, uuid4, uuid5
 
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -42,8 +44,18 @@ from embodichain.data_pipeline.depth_video import (
     DepthVideoCfg,
     detect_depth_encoder,
 )
+from embodichain.data_pipeline.recording import (
+    RecordingJournal,
+    build_recording_provenance,
+    inspect_recording,
+)
+from embodichain.data_pipeline.recording.segments import segments_for_frames
 from embodichain.lab.sim.sensors import Camera, ContactSensor
-from embodichain.lab.gym.envs.demo import DEMO_ANNOTATION_KEYS, DEMO_SCHEMA_VERSION
+from embodichain.lab.gym.envs.demo import (
+    DEMO_ANNOTATION_KEYS,
+    DEMO_SCHEMA_VERSION,
+    resolve_demo_instruction,
+)
 from embodichain.lab.gym.envs.expert_trajectory import encode_expert_action
 from .action_types import ActionDescriptor
 from .manager_base import Functor
@@ -109,6 +121,25 @@ except ImportError:
     __all__ = []
 
 
+if LEROBOT_AVAILABLE:
+
+    class _ImageCompressionLeRobotDataset(LeRobotDataset):
+        """LeRobot dataset that overrides image PNG compression on request."""
+
+        def _save_image(self, image: Any, fpath: Path, compress_level: int = 1) -> None:
+            # LeRobot passes level 6 for image features and level 1 for the
+            # temporary PNGs used by video features.  Keep the latter at its
+            # upstream default so ``image_compress_level`` only tunes image
+            # feature writes.
+            image_compress_level = getattr(self, "image_compress_level", None)
+            if image_compress_level is not None and compress_level == 6:
+                compress_level = image_compress_level
+            super()._save_image(image, fpath, compress_level)
+
+else:
+    _ImageCompressionLeRobotDataset = None
+
+
 class LeRobotRecorder(Functor):
     """Functor for recording episodes in LeRobot format.
 
@@ -121,6 +152,8 @@ class LeRobotRecorder(Functor):
     Without an ``action_contract`` parameter, the recorder preserves the
     existing joint-action schema. An optional versioned action contract can
     select a joint or EEF representation and its auxiliary fields explicitly.
+    All representations retain the overall instruction as LeRobot's ``task``
+    and the current segment instruction as ``subtask``, including fragments.
     """
 
     def __init__(self, cfg: DatasetFunctorCfg, env: EmbodiedEnv):
@@ -130,11 +163,17 @@ class LeRobotRecorder(Functor):
             cfg: Functor configuration containing params:
                 - save_path: Root directory for saving datasets
                 - robot_meta: Robot metadata for dataset
-                - instruction: Optional task instruction
+                - instruction: Optional legacy fallback; task/episode language takes precedence
                 - extra: Optional extra metadata
                 - use_videos: Whether to save videos
                 - image_writer_threads: Number of threads for image writing
                 - image_writer_processes: Number of processes for image writing
+                - image_compress_level: Optional PNG compression level (0-9)
+                  for image features; video temporary PNGs keep LeRobot's
+                  default level 1
+                - metadata_buffer_size: Positive LeRobot episode metadata
+                  buffer size; default 1. Larger buffers increase data at risk
+                  until the SDK is finalized.
             env: The environment instance
         """
         if not LEROBOT_AVAILABLE:
@@ -179,11 +218,13 @@ class LeRobotRecorder(Functor):
             and self._action_contract_cfg["record_eef_observation"]
         )
         self._eef_observation_terms: tuple[Any, Any] | None = None
-        self.use_official_task_index = self._action_contract_cfg is not None
         self._validate_action_contract_environment()
 
         # Experimental parameters for extra episode info saving.
         self.use_videos = params.get("use_videos", False)
+        self.image_compress_level = self._parse_image_compress_level(
+            params.get("image_compress_level")
+        )
 
         # Async image writing (lerobot official AsyncImageWriter).
         # When > 0, per-frame PNG writes are offloaded to a thread/process pool
@@ -193,6 +234,9 @@ class LeRobotRecorder(Functor):
         # processes add isolation at a higher spawn cost.
         self.image_writer_threads = int(params.get("image_writer_threads", 0))
         self.image_writer_processes = int(params.get("image_writer_processes", 0))
+        self.metadata_buffer_size = params.get("metadata_buffer_size", 1)
+        if type(self.metadata_buffer_size) is not int or self.metadata_buffer_size < 1:
+            raise ValueError("metadata_buffer_size must be a positive integer")
 
         # Compressed depth sidecar videos (issue #424, Path A). When enabled and
         # an HEVC encoder is available, camera depth is written as gray12le/HEVC
@@ -219,6 +263,13 @@ class LeRobotRecorder(Functor):
         self._fragment_commit_lock = threading.RLock()
         self._committed_fragment_ids: dict[str, int] = {}
         self._partial_fragment_commits: dict[str, tuple[int, str]] = {}
+        self._recording_run_uuid = str(
+            getattr(env, "_recording_run_uuid", None) or uuid4()
+        )
+        self._recording_provenance = build_recording_provenance(env)
+        self._recording_journal: RecordingJournal | None = None
+        self._completed_episode_uuids: set[str] = set()
+        self._uncertain_commit_error: str | None = None
         self._finalize_lock = threading.Lock()
         self._finalized = False
         self._finalize_result: Optional[str] = None
@@ -226,6 +277,31 @@ class LeRobotRecorder(Functor):
 
         # Initialize dataset
         self._initialize_dataset()
+
+    @staticmethod
+    def _parse_image_compress_level(value: Any) -> int | None:
+        """Validate an optional lossless PNG compression level.
+
+        Args:
+            value: ``None`` to preserve LeRobot defaults, or an integer from
+                0 through 9.
+
+        Returns:
+            The validated compression level, or ``None``.
+
+        Raises:
+            TypeError: If ``value`` is not ``None`` or an integer.
+            ValueError: If the integer is outside the PNG level range.
+        """
+        if value is None:
+            return None
+        if type(value) is not int:
+            raise TypeError(
+                "image_compress_level must be None or an integer from 0 to 9."
+            )
+        if not 0 <= value <= 9:
+            raise ValueError("image_compress_level must be between 0 and 9.")
+        return value
 
     @staticmethod
     def _parse_action_contract(value: Any) -> dict[str, Any] | None:
@@ -669,6 +745,7 @@ class LeRobotRecorder(Functor):
         episode_metadata: Mapping[str, Any] | None,
     ) -> Iterable[tuple[int, Any, Any, Mapping[str, Any], Mapping[str, Any] | None]]:
         """Yield one continuous payload or independent natural-segment slices."""
+        episode_metadata = self._ensure_episode_identity(env_id, episode_metadata)
         if (
             episode_metadata is None
             or episode_metadata.get("output_mode") != "segment_fragments"
@@ -677,6 +754,7 @@ class LeRobotRecorder(Functor):
             return
 
         episode_length = min(len(obs_list), len(action_list))
+        segments_for_frames(episode_metadata, episode_length)
         include_failed = bool(episode_metadata.get("save_failed_fragments", False))
         for segment in episode_metadata.get("segments", []):
             if not isinstance(segment, Mapping):
@@ -793,6 +871,24 @@ class LeRobotRecorder(Functor):
                     "segments": [fragment_segment],
                 }
             )
+            source_uuid = episode_metadata["episode_uuid"]
+            fragment_uuid = str(
+                uuid5(
+                    UUID(source_uuid),
+                    f"segment:{int(segment.get('segment_id', 0))}:"
+                    f"{segment_attempt_id}:{continuity_id}:{start}:{end}",
+                )
+            )
+            fragment_metadata["episode_uuid"] = fragment_uuid
+            fragment_metadata["source_episode_uuid"] = episode_metadata.get(
+                "source_episode_uuid", source_uuid
+            )
+            fragment_metadata["parent_episode_uuid"] = source_uuid
+            fragment_metadata["fragment_id"] = fragment_uuid
+            if "trajectory_path" in fragment_metadata:
+                fragment_metadata["source_trajectory_path"] = fragment_metadata[
+                    "trajectory_path"
+                ]
             yield (
                 env_id,
                 obs_list[start:end].clone(),
@@ -800,6 +896,45 @@ class LeRobotRecorder(Functor):
                 fragment_annotations,
                 fragment_metadata,
             )
+
+    def _ensure_episode_identity(
+        self, env_id: int, metadata: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        """Attach stable collection identity before async snapshot/fragment split."""
+        result = dict(metadata or {})
+        run_uuid = result.get("run_uuid") or getattr(self, "_recording_run_uuid", None)
+        if run_uuid is None:
+            run_uuid = str(uuid4())
+            self._recording_run_uuid = run_uuid
+        result["run_uuid"] = str(UUID(str(run_uuid)))
+        if not result.get("episode_uuid"):
+            # Legacy/external payloads have no environment-owned UUID. Scope
+            # repeatable identity to explicit source keys. Without them, create
+            # a new UUID in the caller: async payloads must not all inherit the
+            # worker's still-unadvanced curr_episode index.
+            source_key = (
+                f"env:{env_id}:episode:{result.get('episode_index', '')}:"
+                f"run:{result.get('program_run_id', '')}:"
+                f"fragment:{result.get('fragment_id', '')}"
+            )
+            has_source_key = "episode_index" in result or bool(
+                result.get("program_run_id") or result.get("fragment_id")
+            )
+            result["episode_uuid"] = str(
+                uuid5(UUID(result["run_uuid"]), source_key)
+                if has_source_key
+                else uuid4()
+            )
+        else:
+            result["episode_uuid"] = str(UUID(str(result["episode_uuid"])))
+        result.setdefault("source_episode_uuid", result["episode_uuid"])
+        provenance = getattr(self, "_recording_provenance", None)
+        if provenance is None:
+            provenance = build_recording_provenance(getattr(self, "_env", None))
+            self._recording_provenance = provenance
+        for key, value in provenance.items():
+            result.setdefault(key, copy.deepcopy(value))
+        return result
 
     @staticmethod
     def _fragment_id_from_metadata(
@@ -846,6 +981,46 @@ class LeRobotRecorder(Functor):
         duplicate with incomplete sidecar durability.
         """
         fragment_id = self._fragment_id_from_metadata(episode_metadata)
+        uncertain = getattr(self, "_uncertain_commit_error", None)
+        if uncertain is not None:
+            raise RuntimeError(
+                "The previous LeRobot SDK commit failed in an unknown state; "
+                f"stop recording and inspect/recover it before new writes: {uncertain}"
+            )
+        journal = getattr(self, "_recording_journal", None)
+        if journal is not None:
+            episode_metadata = self._ensure_episode_identity(env_id, episode_metadata)
+            previous = journal.get(episode_metadata["episode_uuid"])
+            if previous is not None and previous["phase"] == "complete":
+                identity = episode_metadata["episode_uuid"]
+                if identity not in getattr(self, "_completed_episode_uuids", set()):
+                    # A new process must verify on-disk evidence. ``save_episode``
+                    # may have returned before SDK parquet writers were closed.
+                    report = inspect_recording(journal.root)
+                    target = next(
+                        (
+                            item
+                            for item in report["commits"]
+                            if item["episode_uuid"] == identity
+                        ),
+                        None,
+                    )
+                    if (
+                        report["errors"]
+                        or target is None
+                        or target["status"] != "complete"
+                    ):
+                        raise RuntimeError(
+                            f"Episode {identity} has a complete journal but incomplete "
+                            "disk evidence. Refusing to replay it; run dataset recovery."
+                        )
+                return True
+            if previous is not None and previous["phase"] != "prepared":
+                raise RuntimeError(
+                    f"Episode {episode_metadata['episode_uuid']} reached journal phase "
+                    f"{previous['phase']}; Refusing to write a duplicate. Run dataset "
+                    "recovery after stopping the recorder."
+                )
         if fragment_id is None:
             return self._save_single_episode(
                 env_id,
@@ -920,17 +1095,15 @@ class LeRobotRecorder(Functor):
         Returns:
             True if the episode was saved successfully, False otherwise.
         """
-        task = (
-            self.instruction.get("lang", "unknown_task")
-            if self.instruction
-            else "unknown_task"
+        snapshot_instruction = (episode_metadata or {}).get("instruction")
+        snapshot_source = (episode_metadata or {}).get("instruction_source")
+        task, instruction_source = resolve_demo_instruction(
+            self._env,
+            instruction=snapshot_instruction,
+            legacy_instruction=self.instruction,
         )
-        if episode_metadata is not None and episode_metadata.get("fragment"):
-            segments = episode_metadata.get("segments", [])
-            if segments and isinstance(segments[0], Mapping):
-                task = self._normalize_subtask_description(
-                    segments[0].get("instruction") or task
-                )
+        if snapshot_instruction is not None:
+            instruction_source = snapshot_source or "episode"
 
         if len(obs_list) == 0:
             logger.log_warning(f"No episode data to save for env {env_id}")
@@ -949,14 +1122,16 @@ class LeRobotRecorder(Functor):
                 key: values[:episode_length] for key, values in annotations.items()
             }
 
+        episode_metadata = self._ensure_episode_identity(env_id, episode_metadata)
+        frame_segments = segments_for_frames(episode_metadata, episode_length)
+
         # Update metadata
         extra_info = self.extra.copy() if self.extra else {}
         current_episode_time = len(obs_list) * float(self._env.step_dt)
 
         episode_extra_info = extra_info.copy()
         previous_total_time = self.total_time
-        self.total_time += current_episode_time
-        episode_extra_info["total_time"] = self.total_time
+        episode_extra_info["total_time"] = previous_total_time + current_episode_time
         action_contract = self._action_contract()
         if action_contract is not None:
             episode_extra_info["action_contract"] = action_contract
@@ -971,17 +1146,69 @@ class LeRobotRecorder(Functor):
         fragment_id = self._fragment_id_from_metadata(episode_metadata)
         episode_attempt_id = int((episode_metadata or {}).get("attempt_id", 0))
         episode_continuity_id = int((episode_metadata or {}).get("continuity_id", 0))
-        try:
-            use_official_task_index = getattr(self, "use_official_task_index", False)
-            frame_subtasks = [
-                self._subtask_for_frame(task, episode_metadata, frame_index)
-                for frame_index in range(episode_length)
+        sidecar_metadata = copy.deepcopy(dict(episode_metadata))
+        if not sidecar_metadata.get("segments"):
+            sidecar_metadata["segments"] = [
+                {
+                    "segment_id": 0,
+                    "name": "legacy",
+                    "start_step": 0,
+                    "end_step": len(obs_list),
+                    "success": True,
+                    "target_uid": None,
+                    "instruction": task,
+                    "instruction_source": "task_fallback",
+                    "failure_reason": None,
+                    "metadata": {},
+                }
             ]
-            subtask_indices = (
-                None
-                if use_official_task_index
-                else self._register_subtasks(frame_subtasks)
-            )
+        sidecar_metadata.update(episode_extra_info)
+        for key in (
+            "run_uuid",
+            "episode_uuid",
+            "source_episode_uuid",
+            "parent_episode_uuid",
+            "config_hash",
+            "program_hash",
+            "provenance",
+            "replay_artifact",
+            "trajectory_path",
+            "source_trajectory_path",
+        ):
+            if key in episode_metadata:
+                sidecar_metadata[key] = copy.deepcopy(episode_metadata[key])
+        sidecar_metadata.update(
+            {
+                "schema_version": DEMO_SCHEMA_VERSION,
+                "lerobot_episode_index": episode_index,
+                "env_id": env_id,
+                "length": len(obs_list),
+                "instruction": task,
+                "instruction_source": instruction_source,
+            }
+        )
+        sidecar_metadata = json.loads(
+            json.dumps(sidecar_metadata, default=self._json_default)
+        )
+        journal = getattr(self, "_recording_journal", None)
+        identity = sidecar_metadata["episode_uuid"]
+        commit_started = False
+        journal_prepared = False
+        try:
+            self.total_time = episode_extra_info["total_time"]
+            if journal is not None:
+                journal.prepare(
+                    sidecar_metadata,
+                    list(self._depth_sensor_specs) if self._depth_manager else [],
+                )
+                journal_prepared = True
+            frame_subtasks = [
+                self._normalize_subtask_description(
+                    segment.get("instruction") or task if segment is not None else task
+                )
+                for segment in frame_segments
+            ]
+            subtask_indices = self._register_subtasks(frame_subtasks)
             if self._depth_manager is not None:
                 self._depth_manager.start_episode(
                     episode_index, list(self._depth_sensor_specs.keys())
@@ -993,13 +1220,23 @@ class LeRobotRecorder(Functor):
                     desc=f"Converting env {env_id} episode to LeRobot format",
                 )
             ):
-                frame_segment = self._segment_for_frame(episode_metadata, frame_index)
+                frame_segment = frame_segments[frame_index]
+                segment_start = (
+                    int(frame_segment.get("start_step", 0)) if frame_segment else 0
+                )
+                segment_end = (
+                    int(frame_segment.get("end_step", episode_length))
+                    if frame_segment
+                    else episode_length
+                )
                 frame_annotations = {
                     "episode_step": frame_index,
-                    "segment_id": 0,
-                    "segment_step": frame_index,
-                    "segment_start": frame_index == 0,
-                    "segment_end": frame_index == len(obs_list) - 1,
+                    "segment_id": (
+                        int(frame_segment.get("segment_id", 0)) if frame_segment else 0
+                    ),
+                    "segment_step": frame_index - segment_start,
+                    "segment_start": frame_index == segment_start,
+                    "segment_end": frame_index == segment_end - 1,
                     "segment_accepted": (
                         bool(frame_segment.get("success", True))
                         if frame_segment is not None
@@ -1034,14 +1271,10 @@ class LeRobotRecorder(Functor):
                 frame = self._convert_frame_to_lerobot(
                     obs,
                     action,
-                    frame_subtask if use_official_task_index else task,
+                    task,
                     env_id=env_id,
                     annotations=frame_annotations,
-                    subtask_index=(
-                        None
-                        if subtask_indices is None
-                        else subtask_indices[frame_subtask]
-                    ),
+                    subtask_index=subtask_indices[frame_subtask],
                 )
                 # Offload depth to the sidecar writer and drop it from the frame
                 # so LeRobot's RGB-only image/video path never sees it. With
@@ -1056,41 +1289,27 @@ class LeRobotRecorder(Functor):
                 self.dataset.add_frame(frame)
 
             self._normalize_scalar_episode_buffer()
+            if journal is not None:
+                journal.advance(identity, "lerobot_committing")
+            commit_started = True
             self.dataset.save_episode()
             # LeRobot has committed this index. Advance immediately so a later
             # depth/metadata failure cannot make the next queued episode reuse
             # and overwrite the same sidecar filename.
             dataset_committed = True
             self.curr_episode += 1
+            if journal is not None:
+                journal.advance(identity, "lerobot_committed")
             if self._depth_manager is not None:
                 self._depth_manager.end_episode(episode_index)
-
-            sidecar_metadata = dict(episode_metadata or {})
-            if not sidecar_metadata.get("segments"):
-                sidecar_metadata["segments"] = [
-                    {
-                        "segment_id": 0,
-                        "name": "legacy",
-                        "start_step": 0,
-                        "end_step": len(obs_list),
-                        "success": True,
-                        "target_uid": None,
-                        "instruction": task,
-                        "failure_reason": None,
-                        "metadata": {},
-                    }
-                ]
-            sidecar_metadata.update(episode_extra_info)
-            sidecar_metadata.update(
-                {
-                    "schema_version": DEMO_SCHEMA_VERSION,
-                    "lerobot_episode_index": episode_index,
-                    "env_id": env_id,
-                    "length": len(obs_list),
-                    "instruction": task,
-                }
-            )
+            if journal is not None:
+                journal.advance(identity, "depth_committed")
             self._write_episode_metadata(sidecar_metadata)
+            if journal is not None:
+                journal.advance(identity, "complete")
+                if not hasattr(self, "_completed_episode_uuids"):
+                    self._completed_episode_uuids = set()
+                self._completed_episode_uuids.add(identity)
 
             logger.log_info(
                 f"[LeRobotRecorder] Saved dataset to: {self.dataset_path}\n"
@@ -1099,6 +1318,15 @@ class LeRobotRecorder(Functor):
 
             return True
         except Exception as error:
+            if commit_started and not dataset_committed:
+                self._uncertain_commit_error = f"{type(error).__name__}: {error}"
+            if journal is not None and journal_prepared:
+                try:
+                    journal.record_error(identity, error)
+                except Exception as journal_error:
+                    logger.log_warning(
+                        f"Could not persist recording error: {journal_error}"
+                    )
             if dataset_committed and fragment_id is not None:
                 self._ensure_fragment_commit_tracking()
                 with self._fragment_commit_lock:
@@ -1108,14 +1336,22 @@ class LeRobotRecorder(Functor):
                     )
             if not dataset_committed:
                 self.total_time = previous_total_time
+                if not commit_started:
+                    clear_buffer = getattr(self.dataset, "clear_episode_buffer", None)
+                    if callable(clear_buffer):
+                        clear_buffer()
             if self._depth_manager is not None and not dataset_committed:
                 try:
                     self._depth_manager.abort_episode()
                 except Exception as abort_error:  # noqa: BLE001 - preserve primary
-                    error.add_note(
+                    message = (
                         "Depth sidecar abort also failed: "
                         f"{type(abort_error).__name__}: {abort_error}"
                     )
+                    if hasattr(error, "add_note"):
+                        error.add_note(message)
+                    else:
+                        logger.log_warning(message)
             raise
 
     def _normalize_scalar_episode_buffer(self) -> None:
@@ -1307,6 +1543,8 @@ class LeRobotRecorder(Functor):
         with self._metadata_lock, metadata_path.open("a", encoding="utf-8") as stream:
             json.dump(dict(metadata), stream, default=self._json_default)
             stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
 
     def finalize(self) -> Optional[str]:
         """Finalize resources without implicitly committing a partial episode.
@@ -1464,17 +1702,28 @@ class LeRobotRecorder(Functor):
 
         features = self._build_features()
 
-        self.dataset = LeRobotDataset.create(
+        dataset_cls = (
+            _ImageCompressionLeRobotDataset
+            if self.image_compress_level is not None
+            else LeRobotDataset
+        )
+        self.dataset = dataset_cls.create(
             repo_id=dataset_name,
             fps=self.dataset_fps,
             root=str(self.dataset_full_path),
             robot_type=robot_type,
             features=features,
             use_videos=self.use_videos,
-            metadata_buffer_size=1,
+            metadata_buffer_size=self.metadata_buffer_size,
             image_writer_processes=self.image_writer_processes,
             image_writer_threads=self.image_writer_threads,
         )
+        if self.image_compress_level is not None:
+            # ``LeRobotDataset.create`` constructs the object with
+            # ``cls.__new__(cls)``. Set the override after create, before the
+            # first frame reaches ``_save_image``.
+            self.dataset.image_compress_level = self.image_compress_level
+        self._recording_journal = RecordingJournal(self.dataset_full_path)
         logger.log_info(f"Created LeRobot dataset at: {self.dataset_full_path}")
 
         # Set up the depth sidecar manager now that the dataset root and fps are
@@ -1559,12 +1808,11 @@ class LeRobotRecorder(Functor):
                     descriptor.to_dict()
                     for descriptor in self._policy_action_descriptors
                 ]
-        if not self.use_official_task_index:
-            features[LEROBOT_SUBTASK_INDEX_KEY] = {
-                "dtype": "int64",
-                "shape": (1,),
-                "names": None,
-            }
+        features[LEROBOT_SUBTASK_INDEX_KEY] = {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": None,
+        }
 
         for feature_key in DEMO_FRAME_FEATURES.values():
             features[feature_key] = {
@@ -1733,7 +1981,7 @@ class LeRobotRecorder(Functor):
         yaw = torch.where(singular, torch.zeros_like(yaw), yaw)
 
         if binding is None:
-            hand_ids = self._env.robot.get_joint_ids("hand", remove_mimic=True)
+            hand_ids = self._env.robot.get_joint_ids("eef", remove_mimic=True)
             hand_qpos = qpos[:, _active_columns(hand_ids)].mean(dim=-1)
             limits = self._env.robot.body_data.qpos_limits[0, hand_ids]
             gripper = (
@@ -1899,17 +2147,15 @@ class LeRobotRecorder(Functor):
             task: Episode-level task description.
             env_id: Source vector-environment row for FK-sensitive features.
             annotations: Optional segment and terminal fields for this frame.
-            subtask_index: Optional legacy dataset-global subtask index.
+            subtask_index: Optional dataset-global subtask index.
 
         Returns:
             Frame dict in LeRobot format with numpy arrays
         """
         frame = {"task": task}
-        if not self.use_official_task_index:
-            legacy_subtask_index = 0 if subtask_index is None else subtask_index
-            frame[LEROBOT_SUBTASK_INDEX_KEY] = torch.tensor(
-                [legacy_subtask_index], dtype=torch.int64
-            )
+        frame[LEROBOT_SUBTASK_INDEX_KEY] = torch.tensor(
+            [0 if subtask_index is None else subtask_index], dtype=torch.int64
+        )
 
         if self._env.has_sensors:
             sensor_obs_space: dict = self._env.single_observation_space["sensor"]

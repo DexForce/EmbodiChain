@@ -116,7 +116,7 @@ class ScenarioProvider(ABC):
             for target in (False, True):
                 robot.set_qpos(case.start_qpos, name=control_part, target=target)
         robot.clear_dynamics()
-        simulation.update(step=1)
+        simulation.sync_render_state()
 
     def plan_case(self, adapter: "PlannerAdapter", case: "BenchmarkCase") -> object:
         """Plan one case through the selected adapter."""

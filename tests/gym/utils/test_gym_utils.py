@@ -53,7 +53,7 @@ _CUBE_GYM_CONFIG_PATH = (
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
-_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "env.yaml"
+_CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
 _COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
@@ -177,6 +177,50 @@ def test_config_to_cfg_rejects_removed_action_protocol(
     }
 
     with pytest.raises(ValueError, match=message):
+        config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+
+def test_config_to_cfg_migrates_published_default_position_term() -> None:
+    """Published pretrained locomotion snapshots remain loadable after renaming."""
+    config = {
+        "id": "LegacyLocomotion-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "DefaultJointPositionTerm",
+                    "params": {},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    cfg = config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
+
+    assert cfg.actions.joint_position.contract == "joint_position.default_offset@1"
+    assert cfg.actions.joint_position.func.__name__ == "DefaultJointPositionAction"
+    assert cfg.actions.joint_position.params["clip"] is None
+
+
+def test_config_to_cfg_rejects_conflicting_action_declarations() -> None:
+    """A YAML action cannot silently discard either semantic declaration."""
+    config = {
+        "id": "ConflictingActionDeclarations-v1",
+        "physics": "default",
+        "env": {
+            "actions": {
+                "joint_position": {
+                    "func": "JointVelocityAction",
+                    "contract": "joint_position.absolute@1",
+                    "params": {"part_name": "arm"},
+                }
+            }
+        },
+        "robot": {"uid": "robot"},
+    }
+
+    with pytest.raises(ValueError, match="both 'func' and 'contract'"):
         config_to_cfg(config, manager_modules=DEFAULT_MANAGER_MODULES)
 
 
@@ -809,6 +853,102 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @pytest.mark.parametrize("value", (True, False))
+    def test_config_to_cfg_forwards_ignore_terminations(self, value: bool) -> None:
+        """The explicit environment field reaches the public typed config."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {"ignore_terminations": value},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        assert config_to_cfg(config).ignore_terminations is value
+
+    def test_config_to_cfg_preserves_default_terminations(self) -> None:
+        """Omitting the field retains the environment's termination default."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        assert config_to_cfg(config).ignore_terminations is False
+
+    @pytest.mark.parametrize("value", ("false", 0, 1, None))
+    def test_config_to_cfg_rejects_non_boolean_termination_flag(
+        self, value: object
+    ) -> None:
+        """Configuration mistakes cannot silently disable terminations."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {"ignore_terminations": value},
+            "robot": {"uid": "ConfigOnly"},
+        }
+
+        with pytest.raises(TypeError, match="ignore_terminations must be a bool"):
+            config_to_cfg(config)
+
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    def test_gym_config_forwards_render_bounce_limits(
+        self, tmp_path: Path, extension: str
+    ) -> None:
+        """File-defined path budgets reach the native WorldConfig through the loader."""
+        import dexsim
+
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "render_cfg": {
+                "renderer": "fast-rt",
+                "min_bounces": 1,
+                "max_bounces": 4,
+            },
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+        cfg = config_to_cfg(
+            load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+        )
+        world_config = dexsim.WorldConfig()
+
+        cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
+
+        assert world_config.raytrace_config.min_bounces == 1
+        assert world_config.raytrace_config.max_bounces == 4
+
+    @pytest.mark.parametrize("extension", ["json", "yaml"])
+    @pytest.mark.parametrize(
+        "limits",
+        [
+            {"min_bounces": "1", "max_bounces": 4},
+            {"min_bounces": 1, "max_bounces": True},
+            {"min_bounces": 4, "max_bounces": 1},
+        ],
+    )
+    def test_gym_config_rejects_invalid_render_bounce_limits(
+        self, tmp_path: Path, extension: str, limits: dict[str, object]
+    ) -> None:
+        """Malformed file values fail at rendering decoding instead of coercion."""
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "TestRobot"},
+            "render_cfg": limits,
+        }
+        config_path = tmp_path / f"gym_config.{extension}"
+        save_config(config_path, config)
+
+        with pytest.raises(ValueError, match="bounces"):
+            config_to_cfg(
+                load_config(config_path), manager_modules=DEFAULT_MANAGER_MODULES
+            )
+
     @staticmethod
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
@@ -1100,6 +1240,66 @@ class TestConfigToCfgFromFile:
         assert deployment_dir.is_dir()
         assert cfg.task_program.program_id == "configured_pick"
         assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.max_episode_steps == 1200
+
+    def test_deployment_resolves_packaged_components_despite_cwd_shadows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All five selections use the imported SDK from an external deployment."""
+        cwd = tmp_path / "cwd"
+        owner = tmp_path / "external_deployment"
+        cwd.mkdir()
+        owner.mkdir()
+        config = self._minimal_gym_config()
+        config["id"] = "PackagedPrefixComposition-v1"
+        references = {
+            "environment": _CUBE_ENVIRONMENT_PATH,
+            "embodiment": _CUBE_EMBODIMENT_PATH,
+            "program": _CUBE_TASK_PROGRAM_DIR / "program.yaml",
+            "integration": _CUBE_INTEGRATION_PATH,
+            "execution_policy": _CUBE_POLICY_PATH,
+        }
+        for field, target in references.items():
+            reference = target.relative_to(_REPOSITORY_ROOT).as_posix()
+            shadow = cwd / reference
+            shadow.parent.mkdir(parents=True, exist_ok=True)
+            shadow.write_text("shadow: true\n")
+            if field in ("environment", "embodiment"):
+                config[field]["component"] = reference
+            else:
+                config["task_program"][field] = reference
+        original = deepcopy(config)
+        monkeypatch.chdir(cwd)
+
+        cfg = config_to_cfg(config, source_path=owner / "deployment.yaml")
+
+        assert config == original
+        assert cfg.task_program.program_id == "repeated_cube_pick_place"
+        assert cfg.task_program.integration.scene_registry == CUBE_SCENE_REGISTRY_ID
+        assert cfg.robot.uid == load_config(_CUBE_EMBODIMENT_PATH)["simulation"]["uid"]
+
+    def test_owner_relative_components_ignore_cwd_namesakes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ordinary references keep their source-file base despite CWD files."""
+        owner = self._write_deployment(tmp_path / "owner")
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        for name in (
+            "env.yaml",
+            "embodiment.yaml",
+            "program.yaml",
+            "integration.yaml",
+            "policy.yaml",
+        ):
+            (cwd / name).write_text("shadow: true\n")
+        config = self._minimal_gym_config()
+        config["id"] = "OwnerRelativeComposition-v1"
+        monkeypatch.chdir(cwd)
+
+        cfg = config_to_cfg(config, source_path=owner / "deployment.yaml")
+
+        assert cfg.task_program.program_id == "configured_pick"
         assert cfg.max_episode_steps == 1200
 
     def test_launcher_returns_environment_component_runtime_values(
@@ -1817,8 +2017,7 @@ class TestConfigToCfgFromFile:
     @pytest.mark.parametrize(
         ("field_name", "invalid_value"),
         [
-            ("dlss_enabled", "false"),
-            ("upscale_enabled", None),
+            ("tiled_enabled", "false"),
             ("upsample_ratio", "2.0"),
             ("exposure_compensation", "1.0"),
         ],
@@ -1921,10 +2120,17 @@ class TestConfigToCfgFromFile:
                 "spp": 4,
                 "tone_mapping_enabled": True,
                 "tone_mapping_exposure": 1.25,
+                "denoising": {
+                    "window": "optix",
+                    "offscreen": "nrd",
+                },
                 "dlss": {
-                    "dlss_enabled": True,
-                    "upscale_enabled": True,
                     "dlss_quality": 1,
+                    "tiled_enabled": False,
+                },
+                "nrd": {
+                    "max_accumulated_frame_num": 24,
+                    "taa_min_current_weight": 0.125,
                 },
             },
             "visualization": {
@@ -1990,15 +2196,26 @@ class TestConfigToCfgFromFile:
         assert cfg.sim_cfg.render_cfg.spp == 4
         assert cfg.sim_cfg.render_cfg.tone_mapping_enabled is True
         assert cfg.sim_cfg.render_cfg.tone_mapping_exposure == 1.25
-        from embodichain.lab.sim import DLSSCfg
+        from embodichain.lab.sim import DenoisingCfg, DLSSCfg, NRDCfg
         import dexsim
 
+        assert isinstance(cfg.sim_cfg.render_cfg.denoising, DenoisingCfg)
         assert isinstance(cfg.sim_cfg.render_cfg.dlss, DLSSCfg)
+        assert isinstance(cfg.sim_cfg.render_cfg.nrd, NRDCfg)
         world_config = dexsim.WorldConfig()
         cfg.sim_cfg.render_cfg.apply_to_dexsim_config(world_config)
-        assert world_config.dlss_config.dlss_enabled is True
-        assert world_config.dlss_config.upscale_enabled is True
+        assert (
+            world_config.rt_pipeline_config.window.mode
+            == dexsim.types.RTRenderMode.OPTIX_DENOISE
+        )
+        assert (
+            world_config.rt_pipeline_config.offscreen.mode
+            == dexsim.types.RTRenderMode.NRD_RELAX
+        )
         assert world_config.dlss_config.dlss_quality == 1
+        assert world_config.dlss_config.tiled_enabled is False
+        assert world_config.nrd_config.max_accumulated_frame_num == 24
+        assert world_config.nrd_config.taa_min_current_weight == pytest.approx(0.125)
         assert cfg.sim_cfg.visualization.backend == "viser"
         assert cfg.sim_cfg.visualization.scene_fps == 12.5
         assert cfg.sim_cfg.visualization.viser_server.host == "0.0.0.0"

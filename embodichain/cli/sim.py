@@ -62,7 +62,7 @@ def add_sim_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["auto", "hybrid", "fast-rt", "rt"],
+        choices=["auto", "no-render", "hybrid", "fast-rt", "rt"],
         default="auto",
         help="Renderer backend; omission preserves the launcher/config default.",
     )

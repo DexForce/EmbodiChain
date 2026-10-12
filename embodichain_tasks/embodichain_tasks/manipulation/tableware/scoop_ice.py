@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import pickle
 
 from copy import deepcopy
@@ -25,7 +27,7 @@ import numpy as np
 import torch
 from scipy.spatial.transform import Rotation as R
 
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.data import get_data_path
 from embodichain.utils import logger
@@ -210,6 +212,28 @@ class ScoopIce(EmbodiedEnv):
         if self.cfg.events:
             if "reset" in self.event_manager.available_modes:
                 self.event_manager.apply(mode="reset", env_ids=env_ids)
+
+    def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
+        """Yield the task's single continuous demonstration subgoal.
+
+        The recording contains no reliable intermediate semantic boundaries; keep
+        the complete demonstrated motion together.
+
+        Args:
+            **kwargs: Arguments forwarded to the existing demonstration planner.
+
+        Yields:
+            One named segment with an explicit instruction.
+        """
+        actions = self.create_demo_action_list(**kwargs)
+        yield DemoSegment(
+            actions=actions,
+            name="scoop_ice",
+            target_uid="scoop",
+            instruction="Follow the demonstrated motion to scoop ice and transfer it into the paper cup.",
+            metadata={"segment_index": 0, "segment_count": 1},
+            progress_total_steps=len(actions),
+        )
 
     def create_demo_action_list(self, *args, **kwargs):
         logger.log_info(

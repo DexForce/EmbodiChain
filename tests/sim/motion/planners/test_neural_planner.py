@@ -149,6 +149,60 @@ def test_neural_planner_observation_width_matches_nmg_contract(
     assert tuple(name for name, _ in layout.block_widths) == NMG_OBSERVATION_BLOCKS
 
 
+def test_ur5_periodic_observation_matches_nmg_export(tmp_path, monkeypatch):
+    """UR5 policy consumes raw joints followed by sin/cos in the ONNX contract."""
+    layout = neural_planner_module._WaypointObservationLayout(5, 6, True, True, True)
+    assert layout.dim == 186
+    assert layout.fingerprint == (
+        "5cd10ef20e627bdc17b9fd4f1c038d6615faad192796168695de0afa92c4dd49"
+    )
+    assert tuple(name for name, _ in layout.block_widths)[-2:] == (
+        "joint_sin",
+        "joint_cos",
+    )
+    assert layout.onnx_metadata["nmg.joint_periodic_encoding"] == "sin_cos_radians"
+
+    class FakeUr5Policy(FakeOnnxPolicy):
+        output_dim = 6
+        observation_metadata = layout.onnx_metadata
+
+    monkeypatch.setattr(neural_planner_module, "_OnnxPolicy", FakeUr5Policy)
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: FakeSimulationManager()),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=_create_fake_onnx_model(tmp_path),
+            control_part="main_arm",
+            num_arm_joints=6,
+            joint_periodic_features=True,
+        )
+    )
+    joint = torch.tensor([[0.0, 1.0, -1.0, 2.0, -2.0, 3.0]])
+    eef = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
+    zeros = torch.zeros(1, 5)
+    obs = planner._build_obs(
+        joint,
+        eef,
+        torch.zeros(1, 5, 3),
+        eef[:, None, 3:].expand(1, 5, 4),
+        torch.zeros(1, 5, 6),
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        torch.zeros(1, dtype=torch.long),
+        torch.zeros_like(joint),
+    )
+    assert obs.shape == (1, 186)
+    torch.testing.assert_close(obs[:, layout.slices["joint"]], joint)
+    torch.testing.assert_close(obs[:, layout.slices["joint_sin"]], joint.sin())
+    torch.testing.assert_close(obs[:, layout.slices["joint_cos"]], joint.cos())
+
+
 def test_neural_planner_default_observation_width_matches_k5_nmg_export():
     assert NeuralPlannerCfg().num_waypoints == NUM_WAYPOINTS
     assert neural_planner_module._waypoint_obs_dim(5, use_relative_obs=True) == 186

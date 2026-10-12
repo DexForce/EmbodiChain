@@ -68,6 +68,7 @@ embodichain.lab.sim.atomic_actions
 
       AtomicAction
       AtomicActionEngine
+      PlanTransform
       ExecutionSession
       ExecutionRunner
       ExecutionRunnerCfg
@@ -311,6 +312,18 @@ Planning and state
 .. autoclass:: ActionPlan
    :members:
 
+.. autoclass:: ActionPlanTemplateAdapter
+   :members:
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions.trajectory_adapter
+
+.. autosummary::
+   :nosignatures:
+
+   ActionPlanTemplateAdapter
+
+.. currentmodule:: embodichain.lab.sim.atomic_actions
+
 Engine and execution
 --------------------
 
@@ -319,6 +332,8 @@ Engine and execution
 
 .. autoclass:: AtomicActionEngine
    :members:
+
+.. autodata:: PlanTransform
 
 .. autoclass:: ExecutionSession
    :members:

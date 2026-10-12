@@ -444,7 +444,7 @@ def test_nullspace_residual_accepts_a_rank_deficient_task() -> None:
 
 
 def test_a_limit_violation_is_a_rejection_not_a_malformed_input() -> None:
-    # A generation loop retries on a rejected draw; it must not retry past a
+    # A expansion loop retries on a rejected draw; it must not retry past a
     # caller error, so the two carry different exception types.
     source = path_template()
     tight = torch.stack((torch.zeros(4), torch.full((4,), 1e-3)), dim=1)

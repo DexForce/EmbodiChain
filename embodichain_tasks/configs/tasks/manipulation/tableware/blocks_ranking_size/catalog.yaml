@@ -1,0 +1,10 @@
+task_key: blocks_ranking_size
+title: Blocks Ranking by Size
+summary: Rank tableware blocks by their size attributes.
+tags:
+- tableware
+- reinforcement_learning
+default_deployment: default
+deployments:
+  default:
+    config: env.json

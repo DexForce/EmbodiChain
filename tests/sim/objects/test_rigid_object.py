@@ -52,6 +52,70 @@ Z_TRANSLATION = 2.0
 NEWTON_INERTIA_ROUND_TRIP_ATOL = 2e-4
 
 
+@pytest.mark.parametrize("device", ["cpu", "cuda:0"])
+@pytest.mark.parametrize("operation", ["initialization", "reset", "pose"])
+def test_rigid_state_writes_do_not_advance_other_bodies(
+    device: str, operation: str
+) -> None:
+    """State writes take effect immediately and preserve unrelated motion."""
+    sim = SimulationManager(
+        SimulationManagerCfg(headless=True, device=device, num_envs=2)
+    )
+    target = other = None
+    try:
+        target = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="target",
+                shape=CubeCfg(size=(0.05, 0.05, 0.05)),
+                init_pos=(0.0, 0.0, 1.0),
+            )
+        )
+        other = sim.add_rigid_object(
+            RigidObjectCfg(
+                uid="other",
+                shape=CubeCfg(size=(0.05, 0.05, 0.05)),
+                init_pos=(1.0, 0.0, 2.0),
+            )
+        )
+        sim.prepare()
+        moved_pose = torch.tensor(
+            [
+                [0.25, -0.125, 2.0, 0.0, 0.0, 0.0, 1.0],
+                [0.5, -0.25, 2.5, 0.0, 0.0, 0.0, 1.0],
+            ],
+            device=sim.device,
+        )
+        velocity = torch.tensor(
+            [[0.125, 0.0, 0.25], [0.25, 0.0, 0.5]], device=sim.device
+        )
+        target.set_local_pose(moved_pose)
+        target.set_velocity(lin_vel=velocity, ang_vel=velocity)
+        other.set_velocity(lin_vel=velocity, ang_vel=velocity)
+        expected = target.body_state.clone()
+        other_state = other.body_state.clone()
+
+        if operation == "initialization":
+            target._apply_initial_state()
+            expected[:, :3] = torch.tensor([0.0, 0.0, 1.0], device=sim.device)
+            expected[:, 7:] = 0.0
+        elif operation == "reset":
+            target.reset(env_ids=[0])
+            expected[0, :3] = torch.tensor([0.0, 0.0, 1.0], device=sim.device)
+            expected[0, 7:] = 0.0
+        else:
+            pose = moved_pose[:1].clone()
+            pose[:, :3] = torch.tensor([0.75, 0.125, 1.5], device=sim.device)
+            target.set_local_pose(pose, env_ids=[0])
+            expected[0, :7] = pose[0]
+
+        torch.testing.assert_close(target.body_state, expected, rtol=0, atol=0)
+        torch.testing.assert_close(other.body_state, other_state, rtol=0, atol=0)
+    finally:
+        sim.destroy(exit_process=False)
+        del target, other
+        SimulationManager.flush_cleanup_queue()
+
+
 def _make_test_com_pose(device: torch.device) -> torch.Tensor:
     """Create per-env COM poses using EmbodiChain xyzw quaternion convention."""
     return torch.tensor(

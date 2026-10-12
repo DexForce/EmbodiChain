@@ -25,6 +25,7 @@ Usage examples::
     embodichain benchmark atomic-action --smoke
     embodichain benchmark grasp-pose-generator --device cuda
     embodichain benchmark workspace-analyzer
+    embodichain benchmark rendering --camera-count 2 --resolution 1280x720
 """
 
 from __future__ import annotations
@@ -78,6 +79,13 @@ def _run_workspace_analyzer_cli(_: argparse.Namespace) -> None:
     )
 
     run_all_benchmarks()
+
+
+def _run_rendering_cli(_: argparse.Namespace) -> None:
+    """Run the configurable rendering benchmark entrypoint."""
+    from scripts.benchmark.rendering.offscreen_denoising import main as rendering_main
+
+    rendering_main()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -146,6 +154,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     workspace_parser.set_defaults(func=_run_workspace_analyzer_cli)
 
+    # -- rendering -----------------------------------------------------------
+    rendering_parser = subparsers.add_parser(
+        "rendering",
+        add_help=False,
+        help="Benchmark configurable offscreen rendering and denoising.",
+    )
+    rendering_parser.set_defaults(func=_run_rendering_cli)
+
     # -- Parse ---------------------------------------------------------------
     # If no sub-command is given, print help and exit.
     arguments = list(sys.argv[1:] if argv is None else argv)
@@ -155,7 +171,12 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     # Determine which sub-command was selected, then reconstruct argv so
     # that each sub-command's entry point can call ``parse_args()`` normally.
-    delegated_commands = {"rl", "atomic-action", "grasp-pose-generator"}
+    delegated_commands = {
+        "rl",
+        "atomic-action",
+        "grasp-pose-generator",
+        "rendering",
+    }
     if arguments[0] in delegated_commands:
         known, _ = parser.parse_known_args(arguments)
     else:

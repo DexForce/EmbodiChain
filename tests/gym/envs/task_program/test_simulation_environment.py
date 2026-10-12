@@ -138,7 +138,10 @@ from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
 )
-from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+from embodichain.lab.task_program.semantics.scene import (
+    SceneCollisionRole,
+    SceneObjectRef,
+)
 
 _BATCH_SIZE = 3
 _ROBOT_DOF = 2
@@ -1126,6 +1129,64 @@ def _sample_effect(
     )
 
 
+def test_bridge_reuses_real_workflow_across_pick_and_place(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.gym.envs.task_program.bridge import TaskProgramDemoBridge
+
+    adapter, assembly, robot, cube = _evidence_adapter_runtime()
+    data = _pick_place_program_data()
+    data["integration"] = {
+        "robot_profile": "evidence_profile",
+        "scene_registry": "evidence_scene",
+        "runtime_preset": "evidence",
+    }
+    data["program"]["items"] = [
+        {"kind": "segment", "name": node["call"]["kind"], "steps": node}
+        for node in data["program"]["items"]
+    ]
+    compiled = adapter.compile(decode_task_program(data))
+    compiler = assembly.compiler
+    original_analyze, original_ground = compiler.analyze, compiler.ground
+    analyses = []
+    grounded_indices = []
+
+    def analyze(calls, **kwargs):
+        workflow = original_analyze(calls, **kwargs)
+        analyses.append(workflow)
+        return workflow
+
+    def ground(workflow, index, context, **kwargs):
+        value = original_ground(workflow, index, context, **kwargs)
+        grounded_indices.append(index)
+        return value
+
+    monkeypatch.setattr(compiler, "analyze", analyze)
+    monkeypatch.setattr(compiler, "ground", ground)
+    bridge = TaskProgramDemoBridge(
+        compiled, assembly.runtime, assembly.command_sink, assembly.clock
+    )
+    local_indices = []
+    for segment_index, segment in enumerate(bridge.iter_segments()):
+        for action in segment.actions:
+            robot.qpos = action.value.clone()
+            robot.constraint_state = torch.isclose(
+                robot.qpos[:, 1],
+                torch.full_like(robot.qpos[:, 1], _HAND_GRASP_POSITION),
+            )
+            if segment_index == 1:
+                cube.pose[:, 0, 3] = _RELEASE_SEPARATION
+        assert segment.validator().all()
+        local_indices.append(
+            [call["call_index"] for call in segment.metadata["runtime"]["calls"]]
+        )
+    assert bridge.completion_mask.all()
+    assert len(analyses) == 1
+    assert grounded_indices == [0, 1]
+    assert local_indices == [[0], [0]]
+    assert len(analyses[0].calls[0].downstream_object_targets) == 1
+
+
 def _pick_place_program_data() -> dict[str, object]:
     """Return the integration-free program shared with the MLLM frontend."""
     return {
@@ -1529,6 +1590,83 @@ def test_adapter_factory_binds_registration_to_initialized_environment(
         "registration": registration,
         "grasp_pose_generators": {},
     }
+
+
+def test_adapter_factory_forwards_policy_planner_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execution-policy planner data reaches the live simulation factory."""
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(registry_id="scene"),
+        _profile_binding(),
+    )
+    planner_config = {"type": "toppra", "config": {"max_workers": 2}}
+    factory = SimulationTaskProgramAdapterFactory(
+        registration,
+        planner_config=planner_config,
+    )
+    captured: dict[str, object] = {}
+
+    def _create_adapter(bound_environment: object, **kwargs: object):
+        captured["environment"] = bound_environment
+        captured.update(kwargs)
+        return object.__new__(TaskProgramEnvironmentAdapter)
+
+    monkeypatch.setattr(
+        simulation_environment_module,
+        "create_simulation_task_program_adapter",
+        _create_adapter,
+    )
+
+    factory.create_adapter(object())
+
+    assert captured["planner_config"] == planner_config
+
+
+def test_planner_config_decodes_to_typed_runtime_cfg() -> None:
+    """A serialized planner selection becomes the selected planner config type."""
+    planner_cfg = simulation_environment_module._planner_cfg_from_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        robot_uid="robot",
+    )
+
+    assert isinstance(planner_cfg, simulation_environment_module.ToppraPlannerCfg)
+    assert planner_cfg.robot_uid == "robot"
+    assert planner_cfg.max_workers == 2
+
+
+def test_curobo_scene_binding_preserves_live_object_references() -> None:
+    """Configured cuRobo worlds survive config copies without cloning handles."""
+    robot = _Robot()
+    cube = _RigidObject()
+    simulation = _Simulation(robot, {"cube_native": cube})
+    registration = SimulationTaskProgramRegistration(
+        SimulationSceneBinding(
+            registry_id="scene",
+            rigid_objects=(
+                SimulationRigidObjectBinding(
+                    entity_id="cube",
+                    simulation_uid="cube_native",
+                    collision_role=SceneCollisionRole.STATIC,
+                ),
+            ),
+        ),
+        _profile_binding(),
+    )
+    factory = SimulationTaskProgramFactory(
+        simulation,  # type: ignore[arg-type]
+        robot,  # type: ignore[arg-type]
+        registration,
+        step_dt=_STEP_DT,
+        planner_cfg=simulation_environment_module.CuroboPlannerCfg(robot_uid=robot.uid),
+    )
+
+    assert factory._planner_cfg is not None
+    factory._bind_curobo_scene(factory._planner_cfg)
+    copied = factory._planner_cfg.copy()
+
+    assert copied.world.rigid_objects is not None
+    assert copied.world.rigid_objects["cube"] is cube
 
 
 def test_standard_registration_owns_and_freezes_live_runtime_assembly() -> None:

@@ -3,6 +3,7 @@
     "physics": "default",
     "max_episodes": 1,
     "env": {
+        "task_instruction": "Keep the robot stationary while recording camera observations.",
         "dataset": {
             "lerobot": {
                 "func": "LeRobotRecorder",
@@ -10,9 +11,6 @@
                 "params": {
                     "robot_meta": {
                         "robot_type": "UR10"
-                    },
-                    "instruction": {
-                        "lang": "Hold still while recording"
                     },
                     "extra": {
                         "scene_type": "benchmark",

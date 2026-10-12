@@ -1,0 +1,11 @@
+task_key: pour_water
+title: Pour Water
+summary: Pour water using a configured CobotMagic Task Program.
+tags:
+- tableware
+- manipulation
+- task_program
+default_deployment: cobotmagic
+deployments:
+  cobotmagic:
+    config: task.cobotmagic.yaml

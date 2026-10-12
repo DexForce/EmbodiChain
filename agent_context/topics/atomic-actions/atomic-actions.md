@@ -50,6 +50,19 @@ gate, or held-object guard. Evidence acquisition stays outside planning and
 does not mutate symbolic task state; verification results are the only path
 that commits or invalidates observed effects.
 
+`MoveHeldObject` accepts ordered object-pose waypoints without rebasing the
+verified grasp. Its goal optionally frees only the final world yaw; default
+goals remain exact. Heading alternatives are checked as complete motion paths,
+with accepted rows retained independently and selected offsets in diagnostics.
+
+`SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
+absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
+remaining distance from same-timestamp joint/robot observations per planning row;
+already-satisfied rows hold, invalid observations fail, and mixed active directions
+are rejected. Omitting the target preserves fixed-distance `SlideOptions` and the
+original Slide tutorial. Slide remains open-loop; this extension does not certify
+contact or physical goal satisfaction.
+
 ## Package map
 
 | Concern | Source of truth |

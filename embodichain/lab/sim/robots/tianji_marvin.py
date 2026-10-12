@@ -60,7 +60,7 @@ class TianjiMarvinCfg(RobotCfg):
     """Configure Tianji Marvin with or without its parallel-jaw grippers.
 
     Both variants expose seven-joint ``left_arm`` and ``right_arm`` parts.
-    With grippers, ``left_hand`` and ``right_hand`` each include the two
+    With grippers, ``left_eef`` and ``right_eef`` each include the two
     finger joints; finger 2 mimics finger 1. Hands use joint-space control.
     Both variants apply an additional TCP transform to their source end links:
     a translation of 0.13 m along the end link's +X axis and a +90 degree
@@ -121,8 +121,8 @@ class TianjiMarvinCfg(RobotCfg):
         }
         if self.with_gripper:
             self.control_parts.update(
-                left_hand=["LEFT_HAND_FINGER_1", "LEFT_HAND_FINGER_2"],
-                right_hand=["RIGHT_HAND_FINGER_1", "RIGHT_HAND_FINGER_2"],
+                left_eef=["LEFT_HAND_FINGER_1", "LEFT_HAND_FINGER_2"],
+                right_eef=["RIGHT_HAND_FINGER_1", "RIGHT_HAND_FINGER_2"],
             )
         self.solver_cfg = {
             part: PytorchSolverCfg(
@@ -142,15 +142,15 @@ class TianjiMarvinCfg(RobotCfg):
         self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",
             stiffness={
-                part: 3e2 if part.endswith("_hand") else 7e4
+                part: 3e2 if part.endswith("_eef") else 7e4
                 for part in self.control_parts
             },
             damping={
-                part: 3e1 if part.endswith("_hand") else 1e3
+                part: 3e1 if part.endswith("_eef") else 1e3
                 for part in self.control_parts
             },
             max_effort={
-                part: 3e3 if part.endswith("_hand") else 3e6
+                part: 3e3 if part.endswith("_eef") else 3e6
                 for part in self.control_parts
             },
         )

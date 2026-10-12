@@ -128,7 +128,7 @@ class FrankaPandaCfg(RobotCfg):
 
         self.control_parts = {
             "arm": [f"fr3_joint{i}" for i in range(1, 8)],
-            "hand": ["fr3_finger_joint1", "fr3_finger_joint2"],
+            "eef": ["fr3_finger_joint1", "fr3_finger_joint2"],
         }
 
         self.solver_cfg = {

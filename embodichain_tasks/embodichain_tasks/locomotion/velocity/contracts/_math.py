@@ -35,7 +35,11 @@ __all__ = [
 
 def constant(values: tuple[float, ...], like: torch.Tensor) -> torch.Tensor:
     """Create a constant tensor on the same device and dtype as ``like``."""
-    return torch.tensor(values, device=like.device, dtype=like.dtype)
+    # The direct CUDA constructor waits for the upload, which also stalls on
+    # earlier work in the stream. Queue the copy on the caller's stream while
+    # preserving independent storage for each invocation.
+    host = torch.tensor(values, device="cpu", dtype=like.dtype)
+    return host.to(device=like.device, non_blocking=True)
 
 
 def phase_signal(
