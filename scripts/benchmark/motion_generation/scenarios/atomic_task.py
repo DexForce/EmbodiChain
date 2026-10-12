@@ -74,7 +74,7 @@ from ..config import (
     resolve_atomic_pose_randomization,
 )
 from ..metrics.trajectory import compute_case_outcomes
-from ..models import BenchmarkCase, CaseOutcome
+from ..models import BenchmarkCase, CaseOutcome, with_physical_evaluation
 from ..registry import register_scenario_provider
 from ..video import VideoRecordCfg, build_video_path, record_with_window
 from .atomic_objects import (
@@ -3305,6 +3305,11 @@ class AtomicTaskScenario(ScenarioProvider):
                     ),
                 )
             )
+        if physical_results:
+            outcomes = [
+                with_physical_evaluation(outcome, physical, skill_id=case.skill_id)
+                for outcome, physical in zip(outcomes, physical_results)
+            ]
         trajectory_duration = (
             float(durations.mean().item()) if durations.numel() else None
         )

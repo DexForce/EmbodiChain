@@ -24,13 +24,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.lab.sim.motion.planners.utils import PlanResult
-
 from ..models import BenchmarkCase, CaseOutcome
 from .stats import nearest_rank_percentile
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
+    from embodichain.lab.sim.motion.planners.utils import PlanResult
 
 __all__ = [
     "compute_case_outcomes",
