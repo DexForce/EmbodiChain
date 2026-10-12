@@ -81,9 +81,19 @@ def _reference_reservation(
             if key in seen:
                 continue
             seen.add(key)
-            if (experiment / "references" / key).exists():
-                continue
+            local = experiment / "references" / key
             shared = cache / "references" / key
+            if local.exists():
+                if not shared.exists():
+                    reserve += (
+                        sum(
+                            path.stat().st_size
+                            for path in local.rglob("*")
+                            if path.is_file()
+                        )
+                        + _MIB
+                    )
+                continue
             if shared.exists():
                 reserve += (
                     sum(
@@ -326,12 +336,21 @@ def run_proofs(
                 )
                 write_json(root / "campaign-state.json", state)
                 continue
-        gate = storage_gate(
-            definition,
-            reservation_bytes=reserve,
-            destination=destination if kind in ("history", "routing") else root,
+        destinations = (
+            [destination, experiment]
+            if kind == "history"
+            else [destination] if kind == "routing" else [experiment, cache]
         )
+        gates = []
+        for location in destinations:
+            gate = storage_gate(
+                definition, reservation_bytes=reserve, destination=location
+            )
+            gates.append(gate)
+            if not gate["passed"]:
+                break
         proof["storage_reservation_bytes"] = reserve
+        proof["storage_gates"] = gates
         if not gate["passed"]:
             proof["reason"] = gate["reason"]
             proof["storage_gate"] = gate
@@ -373,9 +392,22 @@ def run_proofs(
                 )
                 if result["status"] != "completed":
                     raise RuntimeError(f"History acquisition failed: {result}")
+                proof["acquisition"] = result
+                import_bytes = sum(
+                    path.stat().st_size
+                    for path in Path(result["root"]).rglob("*")
+                    if path.is_file()
+                )
+                import_gate = storage_gate(
+                    definition, reservation_bytes=import_bytes, destination=experiment
+                )
+                proof["import_storage_gate"] = import_gate
+                if not import_gate["passed"]:
+                    raise RuntimeError(
+                        f"history_import_storage_gate: {import_gate['reason']}"
+                    )
                 imported = import_history_proof(Path(result["history"]), experiment)
                 proof["history_evidence"] = imported["history_evidence"]["path"]
-                proof["acquisition"] = result
             elif kind == "routing":
                 from .routing_diagnostic import prepare_routing_diagnostic
                 from scripts.benchmark.core.execution import execute_worker

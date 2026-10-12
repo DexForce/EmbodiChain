@@ -201,6 +201,9 @@ def test_fhd_history_admission_counts_distinct_states_and_both_precision_rungs(
     # separately verifies completeness/checksums before consuming them.
     for key in keys:
         (tmp_path / "references" / key).mkdir(parents=True)
+    assert proofs._reference_reservation(tmp_path, row, cache) == (512 + 200) * 1024**2
+    for key in keys:
+        (cache / "references" / key).mkdir(parents=True)
     assert proofs._reference_reservation(tmp_path, row, cache) == 512 * 1024**2
 
 
@@ -252,3 +255,66 @@ def test_cpu_proof_stays_not_run_when_complete_reference_population_cannot_fit(
     assert proof["status"] == "not_run" and proof["reason"] == "evidence_budget"
     assert proof["storage_reservation_bytes"] == cold_bytes
     assert state["reserved_worker_runs"] == 0
+
+
+def test_history_checks_acquisition_and_import_destinations_before_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, state, _ = _proof_campaign(tmp_path, monkeypatch)
+    request = {**proofs.proof_population(root, "routing")[0], "kind": "history"}
+    request["case"]["modalities"] = ["rgb"]
+    request["case"]["num_envs"] = request["case"]["cameras_per_env"] = 1
+    monkeypatch.setattr(proofs, "proof_population", lambda *args: [request])
+    checked = []
+
+    def gate(definition, **kwargs):
+        checked.append(kwargs["destination"])
+        passed = kwargs["destination"] != root / "original"
+        return {"passed": passed, "reason": None if passed else "disk_headroom"}
+
+    monkeypatch.setattr(proofs, "storage_gate", gate)
+    proofs.run_proofs(root, kind="history")
+    assert len(checked) == 2 and checked[-1] == root / "original"
+    assert state["proofs"][0]["reason"] == "disk_headroom"
+    assert state["proofs"][0]["status"] == "not_run"
+    assert state["reserved_worker_runs"] == 0
+
+
+def test_history_rechecks_import_headroom_after_acquisition_and_retains_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.benchmark.rendering import history_acquisition, history_binding
+
+    root, state, _ = _proof_campaign(tmp_path, monkeypatch)
+    request = {**proofs.proof_population(root, "routing")[0], "kind": "history"}
+    request["case"].update(modalities=["rgb"], num_envs=1, cameras_per_env=1)
+    monkeypatch.setattr(proofs, "proof_population", lambda *args: [request])
+    acquisition = tmp_path / "acquired"
+    acquisition.mkdir()
+    artifact = acquisition / "history.json"
+    write_json(artifact, {"evidence": "retained"})
+    result = {"status": "completed", "root": str(acquisition), "history": str(artifact)}
+    monkeypatch.setattr(
+        history_acquisition, "acquire_history", lambda *args, **kwargs: result
+    )
+    imported = []
+    monkeypatch.setattr(
+        history_binding, "import_history_proof", lambda *args: imported.append(args)
+    )
+    gates = []
+
+    def gate(definition, **kwargs):
+        gates.append(kwargs)
+        return {"passed": len(gates) < 3, "reason": "disk_headroom"}
+
+    monkeypatch.setattr(proofs, "storage_gate", gate)
+    proofs.run_proofs(root, kind="history")
+    proof = state["proofs"][0]
+    assert len(gates) == 3 and gates[-1]["destination"] == root / "original"
+    assert (
+        proof["status"] == "failed" and "history_import_storage_gate" in proof["reason"]
+    )
+    assert proof["acquisition"] == result and artifact.exists()
+    assert not imported
