@@ -118,3 +118,35 @@ def test_camera_recording_defaults_to_the_run_directory(tmp_path):
     )
 
     assert params["save_path"] == str(tmp_path / "run" / "videos" / "eval")
+
+
+@pytest.mark.parametrize(
+    "phase,enabled,expected",
+    [("train", False, 1), ("eval", True, 1), ("eval", False, 0)],
+)
+def test_active_recording_events_are_resolved_before_first_environment(
+    tmp_path, monkeypatch, phase, enabled, expected
+) -> None:
+    from embodichain.lab.gym.envs.managers.record import record_camera_data_async
+
+    module = importlib.import_module("embodichain.learning.rl.train")
+    trainer = {
+        "gym_config": "task.yaml",
+        "device": "cpu",
+        "enable_eval": enabled,
+        "events": {phase: {"record": {"func": "record_camera_data_async"}}},
+    }
+    config_path = tmp_path / "train.json"
+    config_path.write_text(
+        json.dumps({"trainer": trainer, "policy": {}, "algorithm": {}})
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(module, "SummaryWriter", Mock())
+    build = Mock(side_effect=RuntimeError("environment boundary"))
+    monkeypatch.setattr(module, "build_gym_policy_runtime", build)
+    with pytest.raises(RuntimeError, match="environment boundary"):
+        train_from_config(str(config_path))
+    events = build.call_args.kwargs["trainer_events"]
+    assert len(events) == expected
+    if expected:
+        assert events[0].func is record_camera_data_async

@@ -510,6 +510,8 @@ class SimulationManager:
     """
 
     _instances = {}
+    # World cleanup does not reset DexSim's process-wide renderer.
+    _initialized_process_renderer = False
 
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
@@ -594,7 +596,11 @@ class SimulationManager:
         # branching on a backend name throughout the manager.
         self.physics = make_physics_backend(sim_config.physics_cfg, self)
 
-        world_config = self._convert_sim_config(sim_config)
+        try:
+            world_config = self._convert_sim_config(sim_config)
+        except Exception:
+            type(self)._instances.pop(instance_id, None)
+            raise
         self._world_config = world_config
         self.profiler = Profiler(sim_config.profiler, self.device)
 
@@ -611,6 +617,7 @@ class SimulationManager:
                     self._render_device_name = render_device.name
                     break
         self._world: dexsim.World = dexsim.World(world_config)
+        SimulationManager._initialized_process_renderer = True
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
 
@@ -1157,6 +1164,24 @@ class SimulationManager:
                     cancel("viser:")
             self._visualization_runtime = None
 
+    @staticmethod
+    def _get_process_renderer() -> str | None:
+        """Read the engine configuration, which outlives individual Worlds."""
+        renderer = dexsim.get_world_config().renderer
+        # Before engine initialization get_world_config returns the default
+        # (Hybrid); NoRender therefore also identifies an externally initialized
+        # engine after all of its Worlds have been released.
+        if not (
+            SimulationManager._initialized_process_renderer
+            or dexsim.get_world_num() > 0
+            or renderer == dexsim.types.Renderer.NORENDER
+        ):
+            return None
+        for name in ("no-render", "hybrid", "fast-rt", "rt"):
+            if RenderCfg(renderer=name).to_dexsim_flags() == renderer:
+                return name
+        raise RuntimeError(f"Unsupported DexSim process renderer: {renderer}.")
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
@@ -1175,6 +1200,8 @@ class SimulationManager:
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
 
+        process_renderer = SimulationManager._get_process_renderer()
+
         if sim_config.render_cfg.renderer == "auto":
             from embodichain.lab.sim import cfg
             from embodichain.lab.sim.utility.render_utils import (
@@ -1183,20 +1210,42 @@ class SimulationManager:
 
             if (
                 cfg.DEFAULT_RENDERER == "auto"
+                and process_renderer is not None
+                and process_renderer != "no-render"
+            ):
+                resolved_renderer = process_renderer
+                self._renderer_selection_reason = "reuse process renderer"
+            elif (
+                cfg.DEFAULT_RENDERER == "auto"
                 and getattr(self, "_requires_native_renderer", None) is False
                 and sim_config.headless
                 and sim_config.visualization.backend == "none"
                 and getattr(sim_config.physics_cfg, "sync_to_renderer", None)
                 is not True
             ):
-                resolved_renderer = "no-render"
-                self._renderer_selection_reason = "no native render consumers"
+                resolved_renderer = process_renderer or "no-render"
+                self._renderer_selection_reason = (
+                    "reuse process renderer"
+                    if process_renderer
+                    else "no native render consumers"
+                )
             else:
                 resolved_renderer = select_default_renderer(sim_config.gpu_id)
             logger.log_debug(
                 f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
             )
             sim_config.render_cfg.renderer = resolved_renderer
+
+        if process_renderer is not None and (
+            sim_config.render_cfg.renderer == "no-render"
+        ) != (process_renderer == "no-render"):
+            raise RuntimeError(
+                f"DexSim's process renderer is already '{process_renderer}', but this "
+                f"environment requires '{sim_config.render_cfg.renderer}'. Closing a "
+                "World does not reset the process renderer. Start a new process to "
+                "change renderer. If any environment needs cameras, select a native "
+                "renderer before constructing its first World."
+            )
 
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
         if sim_config.render_cfg.renderer == "no-render":

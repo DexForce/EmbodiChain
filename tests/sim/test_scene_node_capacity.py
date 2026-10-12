@@ -29,7 +29,10 @@ pytestmark = pytest.mark.no_sim
 
 
 @pytest.mark.parametrize("capacity", [None, 262144])
-def test_training_node_capacity_reaches_world_config(capacity: int | None) -> None:
+def test_training_node_capacity_reaches_world_config(
+    capacity: int | None, monkeypatch
+) -> None:
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     data = {
         "id": "Test-Node-Capacity-v0",
         "robot": {},

@@ -23,6 +23,13 @@ renderer selections and global defaults retain precedence. The default demand
 cameras added after startup, must reserve rendering before construction; no
 runtime renderer switching or speculative constructors are used.
 
+DexSim keeps its process renderer after World cleanup. Subsequent auto Worlds
+reuse an initialized native renderer, including camera-free Worlds. A process
+initialized with NoRender cannot later create native render consumers: the
+manager rejects that combination before constructing another World and asks
+for a new process with rendering reserved from its first environment. Process
+configuration, rather than the per-World requested renderer, owns this check.
+
 The manager skips native background, light and visual-material setup, keeps
 physical ground, and skips Newton render-state publication. Gym additionally
 skips configured lights/IBL and built-in native visual effects; background

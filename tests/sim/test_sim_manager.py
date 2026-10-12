@@ -90,6 +90,7 @@ def test_auto_renderer_respects_demand_and_overrides(
 ) -> None:
     from embodichain.lab.sim import cfg
 
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(cfg, "DEFAULT_RENDERER", override)
     selector = MagicMock(return_value=override if override != "auto" else "hybrid")
     monkeypatch.setattr(
@@ -122,6 +123,7 @@ def test_auto_no_render_is_resolved_before_world_construction(monkeypatch) -> No
     from embodichain.lab.sim import cfg
 
     monkeypatch.setattr(cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(SimulationManager, "_instances", {})
     monkeypatch.setattr(sim_manager_module, "_initialize_warp_runtime", lambda _: None)
     create_world = MagicMock(
@@ -153,6 +155,7 @@ def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     tmp_path: Path,
 ) -> None:
     """Headless and auto-selected renderers retain explicit pipeline settings."""
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _gpu_id: "hybrid",
@@ -2737,3 +2740,46 @@ def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     ] * max(0, steps - 1) + ([True] if steps else [])
     sim.update(0.01, 1)
     assert len(observed) == steps  # The observer is not retained for later calls.
+
+
+@pytest.mark.parametrize("process_renderer", ["no-render", "hybrid", "fast-rt", "rt"])
+@pytest.mark.parametrize("demand", [False, True])
+def test_auto_renderer_uses_process_backend_or_rejects_incompatible_demand(
+    monkeypatch, tmp_path, process_renderer, demand
+) -> None:
+    from embodichain.lab.sim import cfg
+
+    monkeypatch.setattr(cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", lambda: process_renderer
+    )
+    probe = MagicMock(side_effect=AssertionError("unexpected GPU probe"))
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer", probe
+    )
+    config = SimulationManagerCfg(headless=True)
+    manager = SimpleNamespace(
+        _requires_native_renderer=demand,
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    if process_renderer == "no-render" and demand:
+        probe.side_effect = None
+        probe.return_value = "hybrid"
+        with pytest.raises(RuntimeError, match="Start a new process"):
+            SimulationManager._convert_sim_config(manager, config)
+    else:
+        world = SimulationManager._convert_sim_config(manager, config)
+        assert world.renderer == RenderCfg(renderer=process_renderer).to_dexsim_flags()
+        probe.assert_not_called()
+
+
+def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
+    monkeypatch.setattr(SimulationManager, "_initialized_process_renderer", False)
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: 0)
+    monkeypatch.setattr(
+        dexsim,
+        "get_world_config",
+        lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
+    )
+    assert SimulationManager._get_process_renderer() == "no-render"

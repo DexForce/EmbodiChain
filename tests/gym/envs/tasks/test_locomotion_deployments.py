@@ -83,6 +83,14 @@ def test_packaged_deployment_and_agent_config_agree(
         assert "renderer" not in raw.get("render_cfg", {})
         assert "renderer" not in agent["trainer"]
         assert cfg.sim_cfg.render_cfg.renderer == "auto"
+        if backend == "default":
+            assert cfg.sim_cfg.scene_node_capacity == 131071
+        algorithm = agent["algorithm"]["cfg"]
+        assert algorithm["batch_size"] == (
+            agent["trainer"]["num_envs"]
+            * agent["trainer"]["buffer_size"]
+            // algorithm["num_mini_batches"]
+        )
     else:
         assert agent["trainer"]["renderer"] == cfg.sim_cfg.render_cfg.renderer
     assert Path(agent["trainer"]["gym_config"]).resolve() == path.resolve()
@@ -187,7 +195,7 @@ def _verify_native_no_render(task: str, backend: str, report_path: Path) -> None
         runtime = _build_gym_environment(
             agent,
             simulation_device=torch.device(agent["trainer"]["device"]),
-            num_envs=1,
+            num_envs=2 if backend == "default" else 1,
             headless=agent["trainer"]["headless"],
             renderer=agent["trainer"].get("renderer"),
             gpu_id=0,
@@ -201,6 +209,16 @@ def _verify_native_no_render(task: str, backend: str, report_path: Path) -> None
         assert sim.get_world().get_renderer_type() == Renderer.NORENDER
         assert not sim.get_world().is_window_initialized()
         assert not sim.has_native_renderer
+        if backend == "default":
+            # Measure real native allocations on a small batch, then budget the
+            # authored PPO batch. Rounding up also budgets process-owned roots.
+            import math
+
+            nodes = sim.get_world().get_env().get_active_scene_node_count()
+            nodes_per_env = math.ceil(nodes / env.num_envs)
+            required = nodes_per_env * agent["trainer"]["num_envs"]
+            capacity = sim.get_world().get_env().get_scene_node_capacity()
+            assert required <= capacity <= 131071, (task, nodes, required, capacity)
         assert sim._sensors and all(
             sensor.cfg.sensor_type == "ContactSensor"
             for sensor in sim._sensors.values()
@@ -221,6 +239,12 @@ def _verify_native_no_render(task: str, backend: str, report_path: Path) -> None
                     "requested_renderer": sim._requested_renderer,
                     "native_renderer": sim.get_world().get_renderer_type().name,
                     "contact_sensors": len(sim._sensors),
+                    "scene_nodes": sim.get_world()
+                    .get_env()
+                    .get_active_scene_node_count(),
+                    "scene_node_capacity": sim.get_world()
+                    .get_env()
+                    .get_scene_node_capacity(),
                     "steps": 2,
                     "reset": "passed",
                 }

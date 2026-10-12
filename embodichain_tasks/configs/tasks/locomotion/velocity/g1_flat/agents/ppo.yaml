@@ -4,7 +4,7 @@ trainer:
   seed: 42
   device: cuda:0
   headless: true
-  num_envs: 4096
+  num_envs: 2048
   iterations: 10001
   buffer_size: 24
   enable_eval: false
@@ -49,7 +49,7 @@ algorithm:
     maximum_learning_rate: 0.01
     n_epochs: 5
     num_mini_batches: 4
-    batch_size: 24576
+    batch_size: 12288
     gamma: 0.99
     gae_lambda: 0.95
     clip_coef: 0.2

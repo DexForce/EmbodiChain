@@ -64,6 +64,9 @@ Select this path with `trainer.gym_config`.
 4. Trainer runtime fields override simulation device, GPU, headless mode,
    environment count, and optional profiling. An explicit `trainer.renderer`
    overrides rendering; omission preserves the task's render configuration.
+   Active train events and rank-zero enabled eval events are resolved before
+   the first World; built-in recording and nonempty validation cameras reserve
+   a native renderer when the effective task renderer is auto.
 5. `build_env()` constructs the registered Gym environment.
 6. A sample reset determines flattened observation and action dimensions.
 
@@ -108,7 +111,11 @@ randomization use the standard manager components.
 
 The six flat velocity tasks omit renderer overrides in both environment and
 PPO files. Their headless, contact-only environments resolve auto to NoRender;
-custom viewers can still request a native renderer. See
+custom viewers can still request a native renderer. Default deployments budget
+131,071 scene nodes for physical-link replication. G1 and MicroDuck Default PPO use 2,048
+environments with matching minibatch sizes to fit that native limit; other
+Default batches retain 4,096 environments. Newton deployments retain their
+existing batches because NoRender does not clone their physical link nodes. See
 [render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned
