@@ -60,7 +60,7 @@ class MarkerCfg:
     """Type of corner/joint visualization for axis markers (e.g., SPHERE, CUBE, etc.)."""
 
     arena_index: int = -1
-    """Index of the arena where the marker should be placed. -1 means all arenas."""
+    """Index of the arena where the marker should be placed. -1 selects world coordinates in the global environment."""
 
 
 @configclass
