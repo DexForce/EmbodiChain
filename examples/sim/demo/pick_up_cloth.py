@@ -132,7 +132,7 @@ def create_robot(
                 },
             },
             "control_parts": {
-                "hand": ["FINGER[1-2]"],
+                "eef": ["FINGER[1-2]"],
             },
             "solver_cfg": {
                 "arm": {

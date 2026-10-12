@@ -357,8 +357,8 @@ def log_execution_state(
 ) -> None:
     """Log hand and object state during execution."""
     object_pose = obj.get_local_pose(to_matrix=True)
-    left_hand = robot.get_qpos(name="left_hand")
-    right_hand = robot.get_qpos(name="right_hand")
+    left_hand = robot.get_qpos(name="left_eef")
+    right_hand = robot.get_qpos(name="right_eef")
     logger.log_info(
         f"step={step_idx}/{total_steps - 1}, "
         f"left_hand={format_tensor(left_hand[0])}, "
@@ -397,12 +397,12 @@ def run_coordinated_pickment_demo(
     )
     left_open, left_close = get_hand_open_close_qpos(
         robot,
-        hand_control_part="left_hand",
+        hand_control_part="left_eef",
         close_qpos=hand_close_qpos,
     )
     right_open, right_close = get_hand_open_close_qpos(
         robot,
-        hand_control_part="right_hand",
+        hand_control_part="right_eef",
         close_qpos=hand_close_qpos,
     )
     pickment_options = CoordinatedPickmentOptions(
@@ -421,18 +421,18 @@ def run_coordinated_pickment_demo(
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
-            "left_hand": ControlPartCommandProfile.joint_positions(
+            "left_eef": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
             ),
-            "right_hand": ControlPartCommandProfile.joint_positions(
+            "right_eef": ControlPartCommandProfile.joint_positions(
                 open=right_open,
                 grasp=right_close,
             ),
         },
         grasp_pose_generators={
-            "left_hand": grasp_pose_generator,
-            "right_hand": grasp_pose_generator,
+            "left_eef": grasp_pose_generator,
+            "right_eef": grasp_pose_generator,
         },
     )
     target_pose = build_object_target_pose(
@@ -462,8 +462,8 @@ def run_coordinated_pickment_demo(
                 "coordinated_pickment",
                 pickment_target,
                 control_parts={
-                    "left": {"motion": "left_arm", "grasp": "left_hand"},
-                    "right": {"motion": "right_arm", "grasp": "right_hand"},
+                    "left": {"motion": "left_arm", "grasp": "left_eef"},
+                    "right": {"motion": "right_arm", "grasp": "right_eef"},
                 },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",

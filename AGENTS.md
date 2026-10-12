@@ -59,6 +59,13 @@ generation bookkeeping; execution, reset and persistence belong to host integrat
 
 ## Task ownership
 
+Official robot defaults and examples name end-effector control groups `eef`
+(single arm) or `left_eef` / `right_eef` (dual arm), alongside `arm` or
+`left_arm` / `right_arm`. This is a naming convention, not a schema restriction:
+custom control-part names remain valid and must not be automatically rewritten.
+URDF component, link and joint names are separate identifiers and retain their
+asset-defined spelling. Capabilities come from explicit configuration, not names.
+
 Organize official tasks by family, optional subdomain and task identity.
 Keep import registration in the task-named module at
 `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`; configs belong

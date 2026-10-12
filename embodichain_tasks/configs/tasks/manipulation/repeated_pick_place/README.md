@@ -42,6 +42,13 @@ scene/affordance/trajectory/visual overrides, runtime recorder events, and the
 collection target. The task config remains the only file that selects the
 robot and environment.
 
+The trajectory override declares both the joint-space amplitude
+(`trajectory.spatial.joint_offset_scale`) and the deduplication tolerance
+(`trajectory.spatial.dedup_tolerance`), both as fractions of each joint's
+declared range. The tolerance has to stay below the amplitude: at or above it
+every proposal counts as a copy of the reference trajectory, and each recipe
+would keep the unmodified nominal motion instead of the requested variant.
+
 Run the complete 64-recipe batch schedule through the formal task entry point:
 
 ```bash
@@ -70,17 +77,17 @@ Expansion declaration. The recorder can be filtered for a dry run with
 `--filter-dataset-saving`.
 
 The Python showcase remains available for visual debugging and uses the same
-`task.ur5.yaml` deployment and referenced expansion config:
+`task.ur5.yaml` deployment and referenced expansion config. Both commands write
+below the repository's `output/` directory unless `--output-dir` overrides it:
 
 ```bash
 python examples/sim/motion/repeated_pick_place_expansion_combined.py \
-  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
-  --output-dir /tmp/repeated-pick-place/expansion
+  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
 python examples/sim/motion/repeated_pick_place_expansion_showcase.py \
   --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
   --candidate-indices 0 16 32 48 --num_envs 16 --seed 7 \
-  --device cpu --headless --output-dir /tmp/repeated-pick-place/showcase
+  --device cpu --headless
 ```
 
 The expansion runtime adds a reset event for the selected candidate and a

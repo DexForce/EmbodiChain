@@ -3680,9 +3680,9 @@
         {
           "path": "embodichain/lab/gym/envs/base_env.py",
           "symbol": "BaseEnv._setup_scene",
-          "start_line": 534,
-          "end_line": 534,
-          "excerpt": "        self.sim = SimulationManager(self.sim_cfg, defer_startup_summary=True)"
+          "start_line": 556,
+          "end_line": 560,
+          "excerpt": "            self.sim = SimulationManager(\n                self.sim_cfg,\n                defer_startup_summary=True,\n                requires_native_renderer=requires_native_renderer,\n            )"
         }
       ]
     },

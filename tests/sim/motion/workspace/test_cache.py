@@ -615,7 +615,7 @@ def test_build_preset_robot_cfg_franka():
         )
     )
     assert isinstance(cfg, FrankaPandaCfg)
-    assert "arm" in cfg.control_parts and "hand" in cfg.control_parts
+    assert "arm" in cfg.control_parts and "eef" in cfg.control_parts
     # Solver + ee-link come from the preset, not the CLI.
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
     assert part is None  # auto-resolved later by _resolve_control_part

@@ -403,6 +403,23 @@ class TrajectoryAugmentationCfg:
             self.max_variants_per_reference,
             "max_variants_per_reference",
         )
+        spatial = self.factors.spatial
+        # A spatial offset at or below the deduplication tolerance measures as a
+        # duplicate of the reference, so the reference survives alone and the
+        # enabled factor silently contributes nothing. Only a disabled factor
+        # may hold a scale that low.
+        if (
+            spatial.enabled
+            and spatial.joint_offset_scale <= self.coverage.joint_dedup_normalized_tol
+        ):
+            raise ValueError(
+                "factors.spatial.joint_offset_scale must exceed "
+                "coverage.joint_dedup_normalized_tol; a combined expansion "
+                "profile sets that tolerance through trajectory.spatial."
+                "dedup_tolerance. At or below the tolerance every spatial "
+                "proposal measures as a duplicate of the reference trajectory, so "
+                "only the nominal variant survives"
+            )
 
 
 @configclass

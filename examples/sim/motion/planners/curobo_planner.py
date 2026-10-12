@@ -342,7 +342,7 @@ def _build_scene(
                         ]
                     },
                     "control_parts": {
-                        "hand": [
+                        "eef": [
                             "LEFT_HAND_THUMB1",
                             "LEFT_HAND_THUMB2",
                             "LEFT_HAND_INDEX",

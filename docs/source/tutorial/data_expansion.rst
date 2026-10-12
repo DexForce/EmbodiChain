@@ -527,6 +527,29 @@ directory when interactive Rerun plots and camera playback are needed. The
 EmbodiChain preview focuses on structure and annotations; it does not render
 images or time-series plots.
 
+Validate and Prepare Training Data
+----------------------------------
+
+After finalizing collection, use the exact auto-numbered dataset root printed
+by the runner, rather than the parent used with preview's ``--latest``:
+
+.. code-block:: bash
+
+   embodichain dataset validate /absolute/path/to/finalized-dataset \
+       --media-frame-counts --output /tmp/expert-validation.json
+   embodichain dataset split /absolute/path/to/finalized-dataset \
+       /tmp/expert-split.json --seed 42 --success-only
+
+The split manifest keeps source episodes and their fragments/derivatives in
+one partition. Apply its episode indices explicitly in the training reader.
+If collection was interrupted, stop writers and diagnose commit evidence with
+``embodichain dataset recover`` before requesting metadata repair.
+
+See :doc:`/guides/offline_expert_datasets` for parameters, quality evidence,
+provenance, report interpretation and recovery boundaries. Continue with
+:doc:`/guides/lerobot_export` to create an official LeRobot 0.6.1 language/depth
+dataset in a separate Python 3.12 environment.
+
 Best Practices
 --------------
 

@@ -525,8 +525,8 @@ def log_execution_state(
     """Log hand and object state during execution."""
     bread_pose = bread.get_local_pose(to_matrix=True)
     pan_pose = pan.get_local_pose(to_matrix=True)
-    left_hand = robot.get_qpos(name="left_hand")
-    right_hand = robot.get_qpos(name="right_hand")
+    left_hand = robot.get_qpos(name="left_eef")
+    right_hand = robot.get_qpos(name="right_eef")
     logger.log_info(
         f"step={step_idx}/{total_steps - 1}, "
         f"left_hand={format_tensor(left_hand[0])}, "
@@ -566,12 +566,12 @@ def run_coordinated_placement_demo(
 
     right_open, right_close = get_hand_open_close_qpos(
         robot,
-        hand_control_part="right_hand",
+        hand_control_part="right_eef",
         close_qpos=PAN_HANDLE_CLOSE_QPOS,
     )
     left_open, left_close = get_hand_open_close_qpos(
         robot,
-        hand_control_part="left_hand",
+        hand_control_part="left_eef",
         close_qpos=0.030,
     )
     left_pick_options = PickUpOptions(
@@ -597,11 +597,11 @@ def run_coordinated_placement_demo(
         motion_generator=motion_gen,
         scene_entities=(bread, pan),
         control_profiles={
-            "left_hand": ControlPartCommandProfile.joint_positions(
+            "left_eef": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
             ),
-            "right_hand": ControlPartCommandProfile.joint_positions(
+            "right_eef": ControlPartCommandProfile.joint_positions(
                 open=right_open,
                 grasp=right_close,
             ),
@@ -635,7 +635,7 @@ def run_coordinated_placement_demo(
                 semantics=bread_semantics,
                 grasp_xpos=broadcast_pose_batch(bread_grasp_pose, num_envs=num_envs),
             ),
-            control_parts={"primary": {"motion": "left_arm", "grasp": "left_hand"}},
+            control_parts={"primary": {"motion": "left_arm", "grasp": "left_eef"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PICK_SAMPLE_INTERVAL,
@@ -648,7 +648,7 @@ def run_coordinated_placement_demo(
                 semantics=pan_semantics,
                 grasp_xpos=broadcast_pose_batch(pan_grasp_pose, num_envs=num_envs),
             ),
-            control_parts={"primary": {"motion": "right_arm", "grasp": "right_hand"}},
+            control_parts={"primary": {"motion": "right_arm", "grasp": "right_eef"}},
             motion_policy=MotionPolicy(
                 strategy="motion_gen",
                 sample_count=PAN_PICK_SAMPLE_INTERVAL,
@@ -802,8 +802,8 @@ def run_coordinated_placement_demo(
                 "coordinated_placement",
                 coordinated_target,
                 control_parts={
-                    "placing": {"motion": "left_arm", "grasp": "left_hand"},
-                    "support": {"motion": "right_arm", "grasp": "right_hand"},
+                    "placing": {"motion": "left_arm", "grasp": "left_eef"},
+                    "support": {"motion": "right_arm", "grasp": "right_eef"},
                 },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",

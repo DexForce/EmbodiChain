@@ -213,10 +213,10 @@ def run_handover_demo(
     )
 
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="left_eef", close_qpos=HAND_CLOSE_QPOS
     )
     right_open, right_close = get_hand_open_close_qpos(
-        robot, hand_control_part="right_hand", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="right_eef", close_qpos=HAND_CLOSE_QPOS
     )
 
     final_pose = torch.eye(4, dtype=torch.float32)
@@ -235,18 +235,18 @@ def run_handover_demo(
         motion_generator=motion_gen,
         scene_entities=(obj,),
         control_profiles={
-            "left_hand": ControlPartCommandProfile.joint_positions(
+            "left_eef": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
             ),
-            "right_hand": ControlPartCommandProfile.joint_positions(
+            "right_eef": ControlPartCommandProfile.joint_positions(
                 open=right_open,
                 grasp=right_close,
             ),
         },
         grasp_pose_generators={
-            "left_hand": grasp_pose_generator,
-            "right_hand": grasp_pose_generator,
+            "left_eef": grasp_pose_generator,
+            "right_eef": grasp_pose_generator,
         },
     )
     wait_for_user = prepare_tutorial_scene(
@@ -263,11 +263,11 @@ def run_handover_demo(
                 control_parts={
                     "source": {
                         "motion": "left_arm",
-                        "grasp": "left_hand",
+                        "grasp": "left_eef",
                     },
                     "destination": {
                         "motion": "right_arm",
-                        "grasp": "right_hand",
+                        "grasp": "right_eef",
                     },
                 },
                 motion_policy=MotionPolicy(

@@ -1067,7 +1067,9 @@ def build_plan(
             _normalize_path(path)
             for change in changed
             for path in change.paths
-            if _is_test_path(path) and _selector_has_slow_marker(repository_root, path)
+            if _is_test_path(path)
+            and Path(path).suffix == ".py"
+            and _selector_has_slow_marker(repository_root, path)
         }
     )
 
@@ -1105,6 +1107,26 @@ def build_plan(
                 topics=topic_ids,
                 slow_selectors=slow_selectors,
             )
+
+    for change in changed:
+        for path in change.paths:
+            if (
+                _is_test_path(path)
+                and Path(path).suffix != ".py"
+                and not _is_doc_path(path)
+            ):
+                # Fixture consumers can live outside the asset's directory.
+                # Do not parse media as Python or pass assets to pytest.
+                return _full_plan(
+                    repository_root,
+                    mode="full-pr",
+                    base_sha=base_sha,
+                    head_sha=head_sha,
+                    changed=changed,
+                    reason=f"changed test asset requires consumer coverage: {path}",
+                    topics=topic_ids,
+                    slow_selectors=slow_selectors,
+                )
 
     docs_changed = any(
         _is_doc_path(path) for change in changed for path in change.paths

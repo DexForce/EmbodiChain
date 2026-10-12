@@ -64,6 +64,8 @@ from embodichain.lab.task_program.runtime.parallel_executor import (
     ParallelSemanticExecutor,
 )
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
+from embodichain.lab.task_program.compiler.program import CompiledTaskProgram
+from embodichain.lab.task_program.compiler.lowering import SemanticWorkflow
 from embodichain.lab.task_program.runtime.results import (
     SemanticExecutionResult,
     SemanticExecutionStatus,
@@ -1125,6 +1127,7 @@ class TaskProgramDemoBridge:
         self._active_segment_id: str | None = None
         self._eligible_mask: torch.Tensor | None = None
         self._program_completed = False
+        self._sequential_workflows: dict[int, tuple[SemanticWorkflow, int]] = {}
 
     @property
     def clock(self) -> EnvironmentStepClock:
@@ -1362,6 +1365,32 @@ class TaskProgramDemoBridge:
                 lifecycle.runtime = segment_runtime
                 result = _validate_runtime_result(
                     segment_runtime.start(
+                        workflow_id=f"{self._program.program_id}/{segment_id}",
+                        eligible_mask=self._eligible_mask,
+                    )
+                )
+            elif type(self._program) is CompiledTaskProgram and isinstance(
+                segment_runtime, SemanticCallExecutor
+            ):
+                lifecycle.runtime = segment_runtime
+                if not self._sequential_workflows:
+                    segments = tuple(self._program.iter_segments())
+                    for analysis in self._program.preflight_analyses():
+                        if analysis.kind != "sequential_stretch":
+                            continue
+                        workflow = segment_runtime.compiler.analyze(
+                            analysis.calls, workflow_id=analysis.analysis_id
+                        )
+                        offset = 0
+                        for index in analysis.segment_indices:
+                            self._sequential_workflows[index] = (workflow, offset)
+                            offset += len(segments[index].calls)
+                workflow, offset = self._sequential_workflows[segment.segment_index]
+                result = _validate_runtime_result(
+                    segment_runtime._start_analyzed(
+                        workflow,
+                        call_offset=offset,
+                        execution_prefix_length=len(segment.calls),
                         workflow_id=f"{self._program.program_id}/{segment_id}",
                         eligible_mask=self._eligible_mask,
                     )

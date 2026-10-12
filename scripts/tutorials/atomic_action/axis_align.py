@@ -163,13 +163,13 @@ def main() -> None:
         motion_generator=motion_gen,
         scene_entities=(obj,),
         control_profiles={
-            "hand": ControlPartCommandProfile.joint_positions(
+            "eef": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
             )
         },
         grasp_pose_generators={
-            "hand": create_parallel_jaw_grasp_pose_generator(
+            "eef": create_parallel_jaw_grasp_pose_generator(
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
             )
@@ -198,7 +198,7 @@ def main() -> None:
                 "axis_align",
                 AxisAlignGoal(semantics),
                 control_parts={
-                    "primary": {"motion": "arm", "grasp": "hand"},
+                    "primary": {"motion": "arm", "grasp": "eef"},
                 },
                 motion_policy=MotionPolicy(
                     strategy="motion_gen",

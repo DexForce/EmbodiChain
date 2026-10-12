@@ -144,7 +144,7 @@ def create_robot(sim: SimulationManager, position=[0.0, 0.0, 0.0]) -> Robot:
         ),
         control_parts={
             "arm": ["Joint[0-9]"],
-            "hand": ["FINGER[1-2]"],
+            "eef": ["FINGER[1-2]"],
         },
         solver_cfg={
             "arm": URSolverCfg(
