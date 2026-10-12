@@ -1,0 +1,6 @@
+{
+  "assembly_result": "../../../../outputs/assemble/phone_stand/latest.json",
+  "execution": {
+    "grasp_mode": "fixed_constraint"
+  }
+}

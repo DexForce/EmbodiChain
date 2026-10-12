@@ -121,6 +121,7 @@ celerybeat.pid
 
 # Environments
 .env
+.mesh_affordance.local.json
 .venv
 env/
 venv/
