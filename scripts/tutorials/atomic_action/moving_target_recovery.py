@@ -315,7 +315,7 @@ def main() -> None:
     engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
-            "hand": ControlPartCommandProfile.joint_positions(
+            "eef": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
             )
@@ -330,7 +330,7 @@ def main() -> None:
                 relative_pose=target_to_grasp,
             ),
         ),
-        control_parts={"primary": {"motion": "arm", "grasp": "hand"}},
+        control_parts={"primary": {"motion": "arm", "grasp": "eef"}},
         motion_policy=MotionPolicy(
             strategy="motion_gen",
             sample_count=PICK_SAMPLE_COUNT,

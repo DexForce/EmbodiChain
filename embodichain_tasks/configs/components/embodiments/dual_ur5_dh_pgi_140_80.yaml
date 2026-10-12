@@ -30,8 +30,8 @@ simulation:
     left_arm: ["left_joint[0-9]"]
     right_arm: ["right_joint[0-9]"]
     dual_arm: ["left_joint[0-9]", "right_joint[0-9]"]
-    left_hand: [left_gripper_finger1_joint_1]
-    right_hand: [right_gripper_finger1_joint_1]
+    left_eef: [left_gripper_finger1_joint_1]
+    right_eef: [right_gripper_finger1_joint_1]
   joint_drive_props:
     stiffness:
       "left_joint[0-9]": 10000.0
@@ -128,7 +128,7 @@ skill_profile:
             - motion.cartesian_pose
             - kinematics.forward
         - endpoint_id: grasp
-          control_part: left_hand
+          control_part: left_eef
           capabilities: [interaction.grasp]
           command_preset: left_parallel_gripper
     - resource_id: right
@@ -140,23 +140,23 @@ skill_profile:
             - motion.cartesian_pose
             - kinematics.forward
         - endpoint_id: grasp
-          control_part: right_hand
+          control_part: right_eef
           capabilities: [interaction.grasp]
           command_preset: right_parallel_gripper
   command_presets:
     - preset_id: left_parallel_gripper
-      control_part: left_hand
+      control_part: left_eef
       commands:
         open: [0.0]
         grasp: [0.04]
     - preset_id: right_parallel_gripper
-      control_part: right_hand
+      control_part: right_eef
       commands:
         open: [0.0]
         grasp: [0.04]
   runtime_services:
     grasp_pose_generators:
-      left_hand:
+      left_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
         approach_direction_samples: 1
@@ -164,7 +164,7 @@ skill_profile:
         point_sample_density: 0.012
         filter_ground_collision: false
         model: dh_pgi_140_80
-      right_hand:
+      right_eef:
         kind: antipodal_parallel_jaw
         sample_count: 10000
         approach_direction_samples: 1
@@ -174,6 +174,6 @@ skill_profile:
         model: dh_pgi_140_80
     control_part_evidence:
       kind: joint_position_constraint
-      control_parts: [left_hand, right_hand]
+      control_parts: [left_eef, right_eef]
       open_qpos: [0.0]
       minimum_displacement: 0.004

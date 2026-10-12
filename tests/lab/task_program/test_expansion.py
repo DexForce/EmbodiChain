@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+import pytest
 import torch
 
 from embodichain.lab.sim.atomic_actions import (
@@ -184,6 +185,20 @@ def _combined_profile() -> CombinedExpansionProfile:
     )
 
 
+def _combined_profile_with_spatial(
+    *,
+    scale: float,
+    tolerance: float | None,
+) -> CombinedExpansionProfile:
+    """Return the canonical profile with one explicit spatial amplitude."""
+    payload = _combined_profile().to_dict()
+    spatial = payload["trajectory"]["spatial"]
+    spatial["enabled"] = True
+    spatial["joint_offset_scale"] = scale
+    spatial["dedup_tolerance"] = tolerance
+    return CombinedExpansionProfile.from_mapping(payload)
+
+
 def test_combined_factory_pins_recipe_affordance_before_atomic_planning() -> None:
     engine, invocation, _, context, _ = _planned_place()
     factory = CombinedTaskProgramExpansionFactory(
@@ -224,6 +239,63 @@ def test_combined_factory_expands_place_on_requested_cycle_variant() -> None:
     assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)
 
 
+def test_combined_factory_forwards_the_profile_dedup_tolerance() -> None:
+    factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile_with_spatial(scale=0.005, tolerance=0.002),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="ur5_dh_pgi_140_80",
+    )
+
+    payload = factory._augmentation_payload(7)
+
+    assert payload["coverage"] == {"joint_dedup_normalized_tol": 0.002}
+    assert payload["factors"]["spatial"]["joint_offset_scale"] == 0.005
+
+    # A profile that names no tolerance keeps the contract default, which then
+    # has to stay below the profile's own offset scale.
+    default_factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile(),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="ur5_dh_pgi_140_80",
+    )
+    assert "coverage" not in default_factory._augmentation_payload(7)
+
+
+def test_combined_factory_keeps_a_conservative_amplitude_effective() -> None:
+    # The packaged task declares a small offset scale, so the profile has to
+    # carry a smaller deduplication tolerance. Otherwise every proposal measures
+    # as a duplicate of the reference and the requested variant falls back to
+    # the unmodified nominal trajectory.
+    engine, invocation, resolved, context, plan = _planned_place()
+    factory = CombinedTaskProgramExpansionFactory(
+        _combined_profile_with_spatial(scale=0.005, tolerance=0.002),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="ur5_dh_pgi_140_80",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    transform = factory.create_plan_transform(request, engine=engine)
+    assert transform is not None
+
+    rebuilt = transform(resolved, context, plan)
+    record = factory.records[0]
+
+    assert record.trajectory_requested == 1
+    assert record.trajectory_selected == 1
+    assert record.fallback_count == 0
+    assert not torch.equal(
+        rebuilt.joint_trajectory.positions,
+        plan.joint_trajectory.positions,
+    )
+    # Retiming stays disabled, so the variant keeps the reference arrival times.
+    assert torch.equal(rebuilt.joint_trajectory.dt, plan.joint_trajectory.dt)
+
+
 def test_combined_factory_expands_multi_environment_batch() -> None:
     engine, invocation, resolved, context, plan = _planned_place_batch(batch_size=2)
     factory = CombinedTaskProgramExpansionFactory(
@@ -243,6 +315,49 @@ def test_combined_factory_expands_multi_environment_batch() -> None:
     assert rebuilt.joint_trajectory is not None
     assert rebuilt.joint_trajectory.batch_size == 2
     assert len(factory.records) == 2
+
+
+@pytest.mark.parametrize("generic", [False, True])
+def test_combined_factory_preserves_reordered_environment_identity(
+    generic: bool,
+) -> None:
+    engine, invocation, resolved, context, _ = _planned_place_batch(batch_size=2)
+    stable_ids = torch.tensor([7, 3], dtype=torch.long)
+    context = replace(context, env_ids=stable_ids)
+    plan = engine.plan(invocation, context)
+    payload = {
+        "source": {
+            "kind": "task_program",
+            "source_id": "repeated_cube_pick_place",
+            "source_revision": "config:repeated_pick_place_v1",
+            "unit_scope": "episode",
+            "template_id": "repeated_pick_place_episode",
+        }
+    }
+    if generic:
+        payload["source"].update(
+            phase_permissions={
+                "approach": [],
+                "release": [],
+                "retract": ["joint_residual", "via_points"],
+            },
+            phase_kinds={"approach": "free", "release": "contact", "retract": "free"},
+        )
+    factory = CombinedTaskProgramExpansionFactory(
+        CombinedExpansionProfile.from_mapping(payload),
+        candidate_index=1,
+        program_id="repeated_cube_pick_place",
+        integration_id="repeated_pick_place_v1",
+        robot_profile_id="franka_panda",
+    )
+    request = replace(_plan_request(invocation), workflow_call_index=1)
+    rebuilt = factory.create_plan_transform(request, engine=engine)(
+        resolved, context, plan
+    )
+    assert rebuilt.success_all
+    assert torch.equal(rebuilt.joint_trajectory.env_ids, stable_ids)
+    assert [record.env_id for record in factory.records] == stable_ids.tolist()
+    assert [record.to_metadata()["env_id"] for record in factory.records] == [7, 3]
 
 
 def test_combined_factory_uses_explicit_recipe_indices_per_row() -> None:

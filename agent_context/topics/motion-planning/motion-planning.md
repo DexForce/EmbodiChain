@@ -92,7 +92,11 @@ expansion: they decode the combined profile, enumerate reference-family,
 affordance and trajectory recipes, assign one visual profile per episode, and
 reserve generic compatible slots. `schedule_digest` provides deterministic
 rerun identity; restoration, measured acceptance, and artifact writing remain
-host responsibilities.
+host responsibilities. A profile that declares a conservative
+`trajectory.spatial.joint_offset_scale` also names a smaller
+`trajectory.spatial.dedup_tolerance`, which the Task Program integration
+forwards as the augmentation coverage tolerance; omitting it keeps the contract
+default.
 
 The generic B=1 host orchestration and its restore/executor/sink ports live in
 `motion/execution.py`, alongside standalone playback. The runner drives injected
@@ -139,7 +143,9 @@ joint-trajectory figure and a tool-path figure with waypoint markers. Task
 Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
 bookkeeping are deliberately out of scope; this is a direct-simulation
 contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
-genuinely different variants are discarded as duplicates.
+genuinely different variants are discarded as duplicates; an enabled spatial
+factor at or below the tolerance now fails configuration decoding instead of
+silently keeping the nominal variant alone.
 
 `expansion/manipulability.py` profiles posture conditioning through
 `embodichain.compute.kinematics.yoshikawa_manipulability`. Callers supply the

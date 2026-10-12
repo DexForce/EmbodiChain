@@ -56,3 +56,21 @@ does not catch these exceptions, so retry policy belongs to the consumer.
 | Sequence crosses a reset or fragment | Fix validity/`continuity_id`/segment eligibility in `sample_batch()`, not downstream training code. |
 | Engine cannot restart | Expected after FAILED/STOPPED; create a new engine instance. |
 | Non-CPU online buffer is not truly process-shared | `_create_buffer()` currently does not reject it but skips `share_memory_()`; keep `buffer_device="cpu"` unless the implementation adds another explicit interprocess transport. |
+
+## Online language ownership
+
+The successful demo result supplies overall and segment text. The worker fills
+`task_index`/`subtask_index` while its row window remains excluded, then publishes
+the rows. `SharedLanguageRegistry` appends immutable task/subtask dictionaries in
+a bounded shared UTF-8 buffer. No manager server or simulation object is needed
+by a consumer. Registry and row locks retain independent responsibilities.
+
+`engine.resolve_language(batch)` and `OnlineDataset.resolve_language(batch)`
+return nested strings matching sampled dimensions. Tokenization belongs to the
+training transform; shared TensorDicts retain numeric IDs. IDs are engine-local,
+not portable offline dataset indices. They remain valid across refill/shutdown
+while the engine/registry object is retained. Exhausting `language_buffer_bytes`
+fails generation through the existing worker-error channel before publishing an
+incomplete rollout; create a new engine with adequate capacity rather than
+reusing IDs. See `tests/data_pipeline/test_online_language.py` for forkserver,
+spawn DataLoader, frozen sample, failure, and half-open range coverage.

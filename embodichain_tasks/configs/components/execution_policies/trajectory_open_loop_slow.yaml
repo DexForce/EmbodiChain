@@ -1,0 +1,29 @@
+policy_id: trajectory_open_loop_slow_v1
+preset_id: trajectory
+
+requires:
+  embodiment_contract: single_arm_parallel_gripper
+
+motion:
+  # At the pour environment's 100 Hz cadence, arm moves keep their 4.8 s
+  # duration while position targets advance smoothly at every physics step.
+  sample_count: 480
+  dynamic_collision_mode: "off"
+
+tracking:
+  kind: timed
+
+recovery:
+  max_replans: 0
+  max_action_retries: 0
+  goal_rotation_threshold: 3.141592653589793
+
+workflow_recovery:
+  max_recovery_attempts: 0
+
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: false
+  hold_during_effect_verification: false
+
+effect_assurance: projected

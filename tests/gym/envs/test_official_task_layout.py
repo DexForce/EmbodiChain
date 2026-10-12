@@ -233,3 +233,36 @@ def test_config_defined_task_programs_do_not_need_python_task_modules() -> None:
         assert integration_path.is_file()
         assert "scene_binding" in load_config(integration_path)
         assert not (config_root / "task_program/scene_binding.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    "config_relative_path",
+    [
+        "manipulation/tableware/blocks_ranking_rgb/env.json",
+        "manipulation/tableware/stack_blocks_two/env.json",
+        "special/stay_still_save_3cam/env_ur10_3cam.json",
+        "special/stay_still_save/env_ur10.json",
+        "special/stay_still_save/env_async_ur10.json",
+        "special/simple_task/env_ur10.json",
+        "manipulation/tableware/scoop_ice/env.json",
+    ],
+)
+def test_handwritten_segmented_tasks_configure_overall_instructions(
+    config_relative_path: str,
+) -> None:
+    """Handwritten tasks own overall language independently of recording."""
+    path = TASK_CONFIG_ROOT / config_relative_path
+    cfg = config_to_cfg(load_config(path), source_path=path)
+    instruction = cfg.task_instruction
+    assert "instruction" not in cfg.dataset.lerobot.params
+    assert isinstance(instruction, str) and instruction.strip()
+    assert instruction != "unknown_task"
+
+
+@pytest.mark.parametrize("instruction", ["", "  ", " padded ", True, 7])
+def test_task_instruction_rejects_invalid_configuration(instruction) -> None:
+    path = TASK_CONFIG_ROOT / "special/simple_task/env_ur10.json"
+    payload = load_config(path)
+    payload["env"]["task_instruction"] = instruction
+    with pytest.raises(ValueError, match="env.task_instruction"):
+        config_to_cfg(payload, source_path=path)

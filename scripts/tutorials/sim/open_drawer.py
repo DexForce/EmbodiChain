@@ -111,7 +111,7 @@ __all__ = [
 ]
 
 ARM_NAME = "arm"
-HAND_NAME = "hand"
+HAND_NAME = "eef"
 HANDLE_LINK_NAME = "handle_xpos"
 DRAWER_CONTACT_LINK_NAME = "inner_box"
 LEFT_FINGER_LINK_NAME = "fr3_leftfinger"

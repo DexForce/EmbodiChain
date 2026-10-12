@@ -447,6 +447,59 @@ from embodichain.lab.sim.robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import OPWSolverCfg
 
 
+@pytest.mark.parametrize("part_name", ["eef", "hand", "custom_claw"])
+def test_control_part_naming_convention_does_not_rewrite_user_names(
+    part_name: str,
+) -> None:
+    """Control-group names remain user-defined through config round trips."""
+    parts = {"motion_group": ["joint1"], part_name: ["finger_joint"]}
+    cfg = RobotCfg.from_dict({"control_parts": parts})
+
+    assert cfg.control_parts == parts
+    restored = RobotCfg.from_dict(cfg.to_dict())
+    assert restored.control_parts == parts
+
+
+@pytest.mark.parametrize(
+    ("robot_class", "module_path", "expected_eef_parts"),
+    [
+        (FrankaPandaCfg, "franka_panda", {"eef"}),
+        (AlohaMiniCfg, "aloha_mini", {"left_eef", "right_eef"}),
+        (TianjiMarvinCfg, "tianji_marvin", {"left_eef", "right_eef"}),
+    ],
+)
+def test_specified_robot_defaults_use_eef_control_part_names(
+    robot_class: type[RobotCfg],
+    module_path: str,
+    expected_eef_parts: set[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Renaming the default groups preserves their source joint identifiers."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    monkeypatch.setattr(
+        f"embodichain.lab.sim.robots.{module_path}.get_data_path", lambda value: value
+    )
+    cfg = robot_class.from_dict({})
+
+    assert expected_eef_parts.issubset(cfg.control_parts)
+    assert {"hand", "left_hand", "right_hand"}.isdisjoint(cfg.control_parts)
+    if robot_class is FrankaPandaCfg:
+        assert cfg.control_parts["eef"] == ["fr3_finger_joint1", "fr3_finger_joint2"]
+    elif robot_class is AlohaMiniCfg:
+        assert cfg.control_parts["left_eef"] == ["left_gripper"]
+    else:
+        assert cfg.control_parts["left_eef"] == [
+            "LEFT_HAND_FINGER_1",
+            "LEFT_HAND_FINGER_2",
+        ]
+    if robot_class in (AlohaMiniCfg, TianjiMarvinCfg):
+        # Existing gripper gains and effort budgets must survive the rename.
+        for part in expected_eef_parts:
+            assert cfg.joint_drive_props.stiffness[part] == 3e2
+            assert cfg.joint_drive_props.damping[part] == 3e1
+            assert cfg.joint_drive_props.max_effort[part] == 3e3
+
+
 def test_aloha_mini_control_parts_match_source_joints():
     cfg = AlohaMiniCfg.from_dict({})
     assert cfg.uid == "AlohaMini"
@@ -455,13 +508,13 @@ def test_aloha_mini_control_parts_match_source_joints():
     assert {part: len(joints) for part, joints in cfg.control_parts.items()} == {
         "left_arm": 6,
         "right_arm": 6,
-        "left_hand": 1,
-        "right_hand": 1,
+        "left_eef": 1,
+        "right_eef": 1,
         "torso": 1,
     }
     assert cfg.control_parts["torso"] == ["vertical_move"]
-    assert cfg.control_parts["left_hand"] == ["left_gripper"]
-    assert cfg.control_parts["right_hand"] == ["right_gripper"]
+    assert cfg.control_parts["left_eef"] == ["left_gripper"]
+    assert cfg.control_parts["right_eef"] == ["right_gripper"]
     source = ET.parse(cfg.fpath).getroot()
     movable_joints = {
         joint.get("name")
@@ -558,7 +611,7 @@ def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
     assert cfg.urdf_cfg is None
     expected_dofs = {"left_arm": 7, "right_arm": 7}
     if with_gripper:
-        expected_dofs.update(left_hand=2, right_hand=2)
+        expected_dofs.update(left_eef=2, right_eef=2)
     assert {
         part: len(joints) for part, joints in cfg.control_parts.items()
     } == expected_dofs
@@ -573,7 +626,7 @@ def test_tianji_marvin_control_parts_match_source_joints(with_gripper):
     assert set(controlled) == movable_joints
     for side in ("left", "right"):
         if with_gripper:
-            leader, follower = cfg.control_parts[f"{side}_hand"]
+            leader, follower = cfg.control_parts[f"{side}_eef"]
             mimic = source.find(f"joint[@name='{follower}']/mimic")
             assert mimic.get("joint") == leader
             assert float(mimic.get("multiplier")) == 1.0
@@ -693,10 +746,10 @@ def test_tianji_marvin_grippers_follow_position_targets():
         # Move both ways within the URDF's [-0.05, 0] metre finger range.
         for position in (-0.025, -0.01):
             target = torch.full((1, 2), position)
-            for part in ("left_hand", "right_hand"):
+            for part in ("left_eef", "right_eef"):
                 robot.set_qpos(target, name=part, target=True)
             sim.update(step=100)
-            for part in ("left_hand", "right_hand"):
+            for part in ("left_eef", "right_eef"):
                 torch.testing.assert_close(
                     robot.get_qpos(name=part), target, atol=1e-3, rtol=0
                 )
@@ -730,6 +783,193 @@ def test_cobotmagic_from_dict_and_roundtrip():
     assert cfg2.uid == "CobotMagic"
     assert cfg2.control_parts == cfg.control_parts
     assert isinstance(cfg2.solver_cfg["left_arm"], OPWSolverCfg)
+
+
+def test_cobotmagic_arm_effort_and_conservative_joint_velocity_limits() -> None:
+    """Retain source torque bounds and cap speed by the stricter reference."""
+    cfg = CobotMagicCfg.from_dict({})
+    source_path = cfg.urdf_cfg.components["left_arm"]["urdf_path"]
+    source_joints = {
+        joint.get("name"): joint
+        for joint in ET.parse(source_path).getroot().findall("joint")
+    }
+    from embodichain.utils.string import resolve_matching_names_values
+
+    for side in ("left", "right"):
+        names = [f"{side}_joint{index}" for index in range(1, 9)]
+        for field, source_field in (
+            ("max_effort", "effort"),
+            ("max_velocity", "velocity"),
+        ):
+            rules = {
+                key: value
+                for key, value in getattr(cfg.joint_drive_props, field).items()
+                if key.startswith(f"{side}_")
+            }
+            _, matched_names, values = resolve_matching_names_values(rules, names)
+            limits = dict(zip(matched_names, values))
+            assert set(limits) == set(names)
+            for index, name in enumerate(names, 1):
+                if field == "max_effort" and index >= 7:
+                    continue  # The coupled gripper has a calibrated drive budget.
+                expected = float(
+                    source_joints[f"joint{index}"].find("limit").get(source_field)
+                )
+                if field == "max_velocity":
+                    reference = (
+                        np.deg2rad([180, 195, 180, 225, 225, 225])[index - 1]
+                        if index <= 6
+                        else 0.25
+                    )
+                    expected = min(expected, reference)
+                assert limits[name] == pytest.approx(expected)
+
+
+def test_cobotmagic_coupled_gripper_uses_calibrated_simulation_budget() -> None:
+    """Keep the tested grasp budget separate from authored joint limits."""
+    cfg = CobotMagicCfg.from_dict({})
+    for side in ("left", "right"):
+        pattern = f"{side}_joint[7-8]"
+        assert cfg.joint_drive_props.max_effort[pattern] == 40.0
+        assert cfg.joint_drive_props.stiffness[pattern] == 2000.0
+        assert cfg.joint_drive_props.damping[pattern] == 70.0
+        assert cfg.joint_drive_props.max_velocity[pattern] == 0.25
+    restored = CobotMagicCfg.from_dict(cfg.to_dict())
+    assert restored.joint_drive_props.max_effort == cfg.joint_drive_props.max_effort
+
+
+@pytest.mark.parametrize(
+    ("field", "arm_gains", "gripper_gain"),
+    [
+        ("stiffness", [30000, 30000, 20000, 12000, 8000, 4000], 2000),
+        ("damping", [600, 600, 400, 240, 160, 80], 70),
+    ],
+)
+def test_cobotmagic_per_joint_gains_resolve_after_roundtrip(
+    field: str, arm_gains: list[float], gripper_gain: float
+) -> None:
+    """Bind each axis once in state order while retaining both gripper gains."""
+    from embodichain.utils.string import resolve_matching_names_values
+
+    cfg = CobotMagicCfg.from_dict({})
+    restored = CobotMagicCfg.from_dict(cfg.to_dict())
+    names = [
+        f"{side}_joint{index}"
+        for index in range(8, 0, -1)
+        for side in ("right", "left")
+    ]
+    _, matched, values = resolve_matching_names_values(
+        getattr(restored.joint_drive_props, field), names
+    )
+    assert matched == names
+    expected = [
+        arm_gains[index - 1] if index <= 6 else gripper_gain
+        for index in range(8, 0, -1)
+        for _ in range(2)
+    ]
+    assert values == expected
+
+
+def test_cobotmagic_custom_effort_preserves_velocity_limits_on_roundtrip() -> None:
+    cfg = CobotMagicCfg.from_dict(
+        {"joint_drive_props": {"max_effort": {"right_joint[1-6]": 70.0}}}
+    )
+    assert cfg.joint_drive_props.max_effort["right_joint[1-6]"] == 70.0
+    assert cfg.joint_drive_props.max_effort["left_joint[1-6]"] == 100.0
+    restored = CobotMagicCfg.from_dict(cfg.to_dict())
+    assert restored.joint_drive_props.max_effort == cfg.joint_drive_props.max_effort
+    assert restored.joint_drive_props.max_velocity == cfg.joint_drive_props.max_velocity
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("stiffness", 12000.0), ("damping", 300.0), ("max_velocity", 2.0)],
+)
+def test_cobotmagic_legacy_arm_overrides_replace_defaults_without_overlap(
+    side: str, field: str, value: float
+) -> None:
+    """Existing whole-arm patterns keep working after per-axis default tuning."""
+    from embodichain.utils.string import resolve_matching_names_values
+
+    names = [
+        f"{arm}_joint{joint}" for arm in ("left", "right") for joint in range(1, 9)
+    ]
+    baseline = CobotMagicCfg.from_dict({})
+    _, base_names, base_values = resolve_matching_names_values(
+        getattr(baseline.joint_drive_props, field), names
+    )
+    expected = dict(zip(base_names, base_values))
+    expected.update({f"{side}_joint{joint}": value for joint in range(1, 7)})
+    overrides = {"joint_drive_props": {field: {f"{side}_joint[1-6]": value}}}
+    cfg = CobotMagicCfg.from_dict(overrides)
+    restored = CobotMagicCfg.from_dict(cfg.to_dict())
+    for candidate in (cfg, restored):
+        _, matched, values = resolve_matching_names_values(
+            getattr(candidate.joint_drive_props, field), names
+        )
+        assert dict(zip(matched, values)) == expected
+    assert overrides == {"joint_drive_props": {field: {f"{side}_joint[1-6]": value}}}
+
+
+def test_cobotmagic_partial_drive_override_preserves_other_group_members() -> None:
+    from embodichain.utils.string import resolve_matching_names_values
+
+    cfg = CobotMagicCfg.from_dict(
+        {"joint_drive_props": {"stiffness": {"left_joint1": 9000.0}}}
+    )
+    names = [
+        f"{arm}_joint{joint}" for arm in ("left", "right") for joint in range(1, 9)
+    ]
+    _, matched, values = resolve_matching_names_values(
+        cfg.joint_drive_props.stiffness, names
+    )
+    resolved = dict(zip(matched, values))
+    assert resolved["left_joint1"] == 9000.0
+    assert resolved["left_joint2"] == 30000.0
+    assert resolved["right_joint1"] == 30000.0
+    assert resolved["left_joint7"] == 2000.0
+
+
+def test_cobotmagic_rejects_ambiguous_caller_drive_patterns() -> None:
+    from embodichain.utils.string import resolve_matching_names_values
+
+    cfg = CobotMagicCfg.from_dict(
+        {
+            "joint_drive_props": {
+                "stiffness": {"left_joint[1-6]": 9000.0, "left_joint1": 8000.0}
+            }
+        }
+    )
+    names = [
+        f"{arm}_joint{joint}" for arm in ("left", "right") for joint in range(1, 9)
+    ]
+    with pytest.raises(ValueError, match="Multiple matches"):
+        resolve_matching_names_values(cfg.joint_drive_props.stiffness, names)
+
+
+def test_cobotmagic_control_part_speed_override_retains_direct_rule_priority() -> None:
+    from embodichain.lab.sim.spawn.descriptors import _joint_property_matches
+
+    cfg = CobotMagicCfg.from_dict(
+        {"joint_drive_props": {"max_velocity": {"left_arm": 2.0, "left_joint6": 1.5}}}
+    )
+    names = [
+        f"{side}_joint{joint}" for side in ("left", "right") for joint in range(1, 9)
+    ]
+    for candidate in (cfg, CobotMagicCfg.from_dict(cfg.to_dict())):
+        resolved = dict(
+            _joint_property_matches(
+                candidate.joint_drive_props.max_velocity,
+                names,
+                property_name="max_velocity",
+                control_parts=candidate.control_parts,
+            )
+        )
+        assert all(resolved[f"left_joint{joint}"] == 2.0 for joint in range(1, 6))
+        assert resolved["left_joint6"] == 1.5
+        assert resolved["right_joint1"] == pytest.approx(np.pi)
+        assert resolved["left_joint7"] == 0.25
 
 
 @pytest.mark.parametrize(

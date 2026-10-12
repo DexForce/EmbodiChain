@@ -786,6 +786,16 @@ def config_to_cfg(
     if type(ignore_terminations) is not bool:
         raise TypeError("env.ignore_terminations must be a bool.")
     env_cfg.ignore_terminations = ignore_terminations
+    task_instruction = config["env"].get("task_instruction")
+    if task_instruction is not None and (
+        type(task_instruction) is not str
+        or not task_instruction
+        or task_instruction != task_instruction.strip()
+    ):
+        raise ValueError(
+            "env.task_instruction must be a non-empty string without outer whitespace or None."
+        )
+    env_cfg.task_instruction = task_instruction
     env_cfg.target_control_frequency = config["env"].get(
         "target_control_frequency", None
     )

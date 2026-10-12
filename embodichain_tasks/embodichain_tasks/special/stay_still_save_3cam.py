@@ -53,7 +53,9 @@ class StayStillSave3CamEnv(EmbodiedEnv):
         yield DemoSegment(
             actions=actions(),
             name="hold_still_300_steps",
-            instruction="Hold still while recording three RGB cameras",
+            instruction=(
+                "Hold the robot still for 300 steps while recording three RGB cameras."
+            ),
             metadata={"segment_index": 0, "segment_count": 1, "steps": 300},
             progress_total_steps=300,
         )

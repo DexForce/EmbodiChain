@@ -143,26 +143,75 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
     assert "pgi" not in type(generator.gripper_model).__name__.lower()
 
 
-def test_named_gripper_model_returns_the_pgi_geometry() -> None:
-    model = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("dh_pgi_140_80", (0.005, 0.1, 0.12, 0.04, 0.01, 0.096)),
+        # Versioned URDF limits and collision-mesh extents;
+        # see graspkit/README.md for the source hashes and axis mapping.
+        ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
+        ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
+        ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
+    ],
+)
+def test_named_gripper_model_returns_reviewed_geometry(
+    model_id: str, expected: tuple[float, ...]
+) -> None:
+    model = get_parallel_jaw_gripper_model(model_id)
 
-    assert model.model_id == "dh_pgi_140_80"
-    assert model.min_opening_width == pytest.approx(0.005)
-    assert model.max_opening_width == pytest.approx(0.1)
-    assert model.finger_length == pytest.approx(0.12)
-    assert model.finger_width == pytest.approx(0.04)
-    assert model.finger_thickness == pytest.approx(0.01)
-    assert model.palm_depth == pytest.approx(0.096)
+    assert model.model_id == model_id
+    assert (
+        model.min_opening_width,
+        model.max_opening_width,
+        model.finger_length,
+        model.finger_width,
+        model.finger_thickness,
+        model.palm_depth,
+    ) == pytest.approx(expected)
 
 
-def test_named_gripper_model_returns_independent_configs() -> None:
-    first = get_parallel_jaw_gripper_model("dh_pgi_140_80")
-    second = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "dh_pgi_140_80",
+        "franka_panda_hand",
+        "cobotmagic_v100_gripper",
+        "tianji_marvin_gripper",
+    ],
+)
+def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
+    first = get_parallel_jaw_gripper_model(model_id)
+    second = get_parallel_jaw_gripper_model(model_id)
+    expected = second.to_dict()
 
     first.palm_depth = 1.0
+    first.max_opening_width = 2.0
 
     assert first is not second
-    assert second.palm_depth == pytest.approx(0.096)
+    assert second.to_dict() == expected
+    assert get_parallel_jaw_gripper_model(model_id).to_dict() == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("min_opening_width", -0.001, ValueError),
+        ("min_opening_width", 0.08, ValueError),
+        ("max_opening_width", float("nan"), ValueError),
+        ("finger_length", float("inf"), ValueError),
+        ("finger_width", 0.0, ValueError),
+        ("finger_thickness", True, TypeError),
+        ("palm_depth", -0.01, ValueError),
+    ],
+)
+def test_named_geometry_rejects_invalid_calibration(
+    field: str, value: float | bool, error: type[Exception]
+) -> None:
+    values = get_parallel_jaw_gripper_model("franka_panda_hand").to_dict()
+    values[field] = value
+
+    with pytest.raises(error, match=field):
+        ParallelJawGripperModelCfg(**values)
 
 
 def test_named_gripper_model_rejects_unknown_ids() -> None:

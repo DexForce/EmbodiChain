@@ -44,8 +44,8 @@ __all__ = ["AlohaMiniCfg"]
 _PART_FRAMES = {
     "left_arm": ("left_Base", "left_tcp"),
     "right_arm": ("right_Base", "right_tcp"),
-    "left_hand": ("left_Fixed_Jaw", "left_Moving_Jaw"),
-    "right_hand": ("right_Fixed_Jaw", "right_Moving_Jaw"),
+    "left_eef": ("left_Fixed_Jaw", "left_Moving_Jaw"),
+    "right_eef": ("right_Fixed_Jaw", "right_Moving_Jaw"),
     "torso": ("base_cad_link", "vertical_link"),
 }
 
@@ -96,8 +96,8 @@ class AlohaMiniCfg(RobotCfg):
             for side in ("left", "right")
         }
         self.control_parts.update(
-            left_hand=["left_gripper"],
-            right_hand=["right_gripper"],
+            left_eef=["left_gripper"],
+            right_eef=["right_gripper"],
             torso=["vertical_move"],
         )
         self.solver_cfg = {
@@ -114,8 +114,8 @@ class AlohaMiniCfg(RobotCfg):
             stiffness={
                 "left_arm": 7e4,
                 "right_arm": 7e4,
-                "left_hand": 3e2,
-                "right_hand": 3e2,
+                "left_eef": 3e2,
+                "right_eef": 3e2,
                 "torso": 7e4,
                 "root_.*_joint": 7e4,
                 "wheel[1-3]_joint": 7e4,
@@ -123,8 +123,8 @@ class AlohaMiniCfg(RobotCfg):
             damping={
                 "left_arm": 1e3,
                 "right_arm": 1e3,
-                "left_hand": 3e1,
-                "right_hand": 3e1,
+                "left_eef": 3e1,
+                "right_eef": 3e1,
                 "torso": 1e3,
                 "root_.*_joint": 1e3,
                 "wheel[1-3]_joint": 1e3,
@@ -132,8 +132,8 @@ class AlohaMiniCfg(RobotCfg):
             max_effort={
                 "left_arm": 3e6,
                 "right_arm": 3e6,
-                "left_hand": 3e3,
-                "right_hand": 3e3,
+                "left_eef": 3e3,
+                "right_eef": 3e3,
                 "torso": 3e6,
                 "root_.*_joint": 3e6,
                 "wheel[1-3]_joint": 3e6,

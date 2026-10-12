@@ -16,9 +16,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 import torch
 
-from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
+from embodichain.lab.gym.envs import DemoSegment, EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
 from embodichain.utils import logger
 
@@ -35,6 +38,26 @@ class SimpleTaskEnv(EmbodiedEnv):
 
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
         super().__init__(cfg, **kwargs)
+
+    def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
+        """Yield the task's single continuous demonstration subgoal.
+
+        This task has one continuous subgoal and needs no intermediate boundary.
+
+        Args:
+            **kwargs: Arguments forwarded to the existing demonstration planner.
+
+        Yields:
+            One named segment with an explicit instruction.
+        """
+        actions = self.create_demo_action_list(**kwargs)
+        yield DemoSegment(
+            actions=actions,
+            name="oscillate_joints",
+            instruction="Execute one cycle of the joint oscillation pattern.",
+            metadata={"segment_index": 0, "segment_count": 1},
+            progress_total_steps=len(actions),
+        )
 
     def create_demo_action_list(self, *args, **kwargs):
         """

@@ -27,6 +27,9 @@ overrides:
       enabled: true
       operators: [joint_residual]
       joint_offset_scale: 0.001
+      # Has to stay below joint_offset_scale, or the pull variants measure as
+      # duplicates of the reference and only the nominal one survives.
+      dedup_tolerance: 0.0004
       via_count: 1
     timing:
       enabled: false
