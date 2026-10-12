@@ -66,7 +66,7 @@ _ISAAC_POSTPROCESS = {
 
 _PROFILES = {
     "realtime": {
-        "version": "1.7",
+        "version": "1.8-ea",
         "name": "realtime",
         "frame_time_s": 1 / 30,
         "embodichain": {
@@ -89,7 +89,10 @@ _PROFILES = {
             "enable_dl_denoiser": True,
             "enable_reflections": True,
             "enable_global_illumination": True,
-            "carb_settings": dict(_ISAAC_POSTPROCESS),
+            "carb_settings": {
+                **_ISAAC_POSTPROCESS,
+                "/rtx/rendermode": "RaytracedLighting",
+            },
         },
         "frame_generation": False,
         "isaaclab_light_contract": {
@@ -116,7 +119,7 @@ _PROFILES = {
         "photometric_calibration": {"status": "not_qualified"},
     },
     "high_quality": {
-        "version": "1.7",
+        "version": "1.8-ea",
         "name": "high_quality",
         "frame_time_s": 1 / 30,
         "embodichain": {

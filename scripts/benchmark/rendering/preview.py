@@ -166,6 +166,7 @@ def _worker(args: argparse.Namespace) -> None:
         ),
     }
     renderer = None
+    num_envs = getattr(args, "num_envs", 1)
     try:
         profile_options = {}
         if args.render_profile is not None:
@@ -195,12 +196,13 @@ def _worker(args: argparse.Namespace) -> None:
             height=args.height,
             gpu_id=args.gpu_id,
             modalities=("rgb", "depth", "seg"),
+            **({"num_envs": num_envs} if num_envs != 1 else {}),
             **profile_options,
         )
         for _ in range(args.settle_frames):
             arrays = renderer.capture()
         names = renderer.metadata["camera_names"]
-        if arrays["rgb"].shape != (len(names), args.height, args.width, 3):
+        if arrays["rgb"].shape != (num_envs * len(names), args.height, args.width, 3):
             raise ValueError("Rendered camera batch does not match the frozen scene")
         for index, name in enumerate(names):
             rgb = arrays["rgb"][index]
@@ -212,8 +214,13 @@ def _worker(args: argparse.Namespace) -> None:
                 **{key: value[index] for key, value in arrays.items()},
             )
         result.update(
-            status="completed", renderer=renderer.metadata, camera_names=names
+            status="completed",
+            renderer=renderer.metadata,
+            camera_names=names,
+            num_envs=num_envs,
         )
+        if num_envs > 1:
+            np.savez_compressed(args.output / "batch_preview.npz", **arrays)
     except Exception as exc:
         result.update(
             error=f"{type(exc).__name__}: {exc}", traceback=traceback.format_exc()
@@ -282,14 +289,19 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
             record["scene_sha256"] != scene_fingerprint(scene) for record in (lhs, rhs)
         ):
             raise ValueError(f"Preview scene fingerprints do not match: {name}")
-        if not np.allclose(lhs["intrinsics"], rhs["intrinsics"], atol=1e-3, rtol=0):
+        if not np.allclose(
+            lhs.get("batch_intrinsics", lhs["intrinsics"]),
+            rhs.get("batch_intrinsics", rhs["intrinsics"]),
+            atol=1e-3,
+            rtol=0,
+        ):
             raise ValueError(f"Preview camera intrinsics do not match: {name}")
         native_poses = np.asarray(lhs["camera_poses"])
         usd_poses = np.tile(np.eye(4), (len(native_poses), 1, 1))
         usd_poses[:, :3, :3] = Rotation.from_quat(
-            rhs["camera_quaternions_xyzw"]
+            rhs["camera_quaternions_xyzw"][: len(native_poses)]
         ).as_matrix()
-        usd_poses[:, :3, 3] = rhs["camera_positions"]
+        usd_poses[:, :3, 3] = rhs["camera_positions"][: len(native_poses)]
         if not np.allclose(native_poses, usd_poses, atol=1e-5, rtol=0):
             raise ValueError(f"Resolved camera poses do not match: {name}")
         for view in scene["cameras"]:
@@ -301,6 +313,7 @@ def write_comparison(root: Path, scene_names: tuple[str, ...]) -> list[Path]:
                     {
                         "scene": name,
                         "camera": view["name"],
+                        "pose_and_image_scope": "environment_0; batch intrinsics checked separately",
                         **compare_geometry(dict(first), dict(second)),
                     }
                 )
@@ -378,6 +391,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--scene", choices=("all", *SCENE_NAMES), default="all")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gpu-id", type=int, default=0)
+    parser.add_argument("--num-envs", type=int, default=1)
     parser.add_argument("--width", type=int, default=800)
     parser.add_argument("--height", type=int, default=600)
     parser.add_argument("--settle-frames", type=int, default=16)
@@ -405,7 +419,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.render_profile_sha256 is not None and args.render_profile is None:
         parser.error("--render-profile-sha256 requires --render-profile")
-    if min(args.width, args.height, args.settle_frames) < 1 or args.gpu_id < 0:
+    if (
+        min(args.width, args.height, args.settle_frames, args.num_envs) < 1
+        or args.gpu_id < 0
+    ):
         parser.error(
             "width, height and settle-frames must be positive; gpu-id must be nonnegative"
         )
@@ -480,6 +497,8 @@ def main(argv: list[str] | None = None) -> None:
                 str(args.gpu_id),
                 "--settle-frames",
                 str(args.settle_frames),
+                "--num-envs",
+                str(args.num_envs),
                 "--isaaclab-root",
                 str(args.isaaclab_root),
             ]

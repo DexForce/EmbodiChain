@@ -20,6 +20,8 @@ Commands, matrices and runtime requirements are in the
 | Aggregate populations and comparison gates | `scripts/benchmark/reporting/aggregation.py`, `comparison.py` |
 | Formal cases, profiles, approval and view identities | `scripts/benchmark/rendering/formal.py` |
 | Formal selection, runtime environment and recovery | `scripts/benchmark/rendering/formal_runner.py` |
+| RTX 5090 / Isaac EA campaign, phase budgets and offline coverage | `scripts/benchmark/rendering/campaign.py`, `campaign_proofs.py` |
+| Exact-identity reference sharing | `scripts/benchmark/rendering/reference_cache.py` |
 | Worker capture, freshness, samples and cleanup | `scripts/benchmark/rendering/formal_worker.py`, `capture.py` |
 | Approved scene manifests, assets and twenty views | `scripts/benchmark/rendering/scenes.py`, `scene_cases.py`, `preview.py` |
 | Frozen CPU replay and external deformation validation | `scripts/benchmark/rendering/replay.py` |
@@ -107,6 +109,16 @@ initializes PhysX GPU pose storage with one source-documented warm-start step;
 capture never steps physics. Missing runtime libraries fail before measurement,
 and workers do not download them. Preserve native shader gamma evidence instead
 of labeling it exact IEC sRGB without verification.
+
+EA uses `IsaacRtxRendererCfg.global_settings` and numeric environment roots
+matching the public RTX partition convention. Verify actual root/camera tokens
+and use the public scene-state cadence reset after changed state. Partition
+authoring is not proof of indirect-light isolation. Campaign source/runtime
+bindings, independent three-/ten-repeat populations, worker reservations and
+storage headroom are frozen; phase reports do not pool retries or historical
+hardware. The [campaign guide](../../../scripts/benchmark/rendering/EA_CAMPAIGN.md)
+owns operator commands and core-point selection. Shared references require exact
+physical/generator/runtime identities and a fully checked source closure.
 
 Profiles freeze explicit per-renderer settings. High-quality Isaac capture uses
 PT16 with accumulation reset per exposure. Realtime DLAA may enlarge internal

@@ -40,6 +40,9 @@ class _ArenaSlice:
     def get_world(self) -> Any:
         return self.owner.get_world()
 
+    def _require_native_renderer(self, feature: str) -> None:
+        self.owner._require_native_renderer(feature)
+
     def get_env(self, index: int) -> Any:
         if not 0 <= index < self.num_envs:
             raise IndexError(index)
@@ -661,6 +664,14 @@ class EmbodiChainScene:
 
     def refresh_metadata(self) -> dict[str, Any]:
         """Read actual poses outside timing and record explicit render submissions."""
+        self.metadata["batch_intrinsics"] = (
+            self.torch.stack(
+                [camera.get_intrinsics() for camera in self.cameras], dim=1
+            )
+            .reshape(self.num_envs * len(self.cameras), 3, 3)
+            .cpu()
+            .tolist()
+        )
         self.metadata["camera_poses"] = [
             camera.get_arena_pose(to_matrix=True)[0].cpu().tolist()
             for camera in self.cameras

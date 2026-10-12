@@ -220,7 +220,49 @@ def camera_prim_path(env_id: int, camera_id: int) -> str:
     Returns:
         USD camera path with one parent prim per logical camera exposure.
     """
-    return f"/World/Envs/env_{env_id:06d}/Cameras/view_{camera_id:02d}/Camera"
+    return f"/World/envs/env_{env_id}/Cameras/view_{camera_id:02d}/Camera"
+
+
+def _ea_global_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Resolve explicit EA global settings without passing removed presets."""
+    result = copy.deepcopy(settings)
+    result.pop("rendering_mode", None)
+    return result
+
+
+def _reset_scene_state_cadence(context: Any) -> None:
+    """Invalidate changed scene state through the installed public contract."""
+    reset = getattr(context, "reset_scene_state_cadence", None)
+    if reset is None:
+        reset = context.reset_transform_cadence
+    reset()
+
+
+def _partition_evidence(stage: Any, num_envs: int, camera_count: int) -> dict[str, Any]:
+    """Verify actual per-environment and camera partition tokens after setup."""
+    records = []
+    for env in range(num_envs):
+        expected = f"env_{env}"
+        root = stage.GetPrimAtPath(f"/World/envs/{expected}")
+        root_token = root.GetAttribute("primvars:omni:scenePartition").Get()
+        cameras = [
+            stage.GetPrimAtPath(camera_prim_path(env, camera))
+            .GetAttribute("omni:scenePartition")
+            .Get()
+            for camera in range(camera_count)
+        ]
+        if root_token != expected or any(token != expected for token in cameras):
+            raise RuntimeError(
+                f"RTX environment partition is missing or misrouted: {env}"
+            )
+        records.append(
+            {"env_id": env, "root_token": root_token, "camera_tokens": cameras}
+        )
+    return {
+        "status": "verified",
+        "scope": "authored_RTX_partition_tokens",
+        "environments": records,
+    }
 
 
 def _selected_cameras(
@@ -626,6 +668,24 @@ class IsaacLabScene:
         from isaaclab.sensors import Camera, CameraCfg
         from isaaclab_physx.renderers import IsaacRtxRendererCfg
 
+        ea_runtime = not hasattr(sim_utils, "RenderCfg")
+        if ea_runtime:
+            from isaaclab_physx.renderers import IsaacRtxRendererGlobalSettingsCfg
+
+            renderer_config = IsaacRtxRendererCfg(
+                global_settings=IsaacRtxRendererGlobalSettingsCfg(
+                    **_ea_global_settings(settings)
+                ),
+                enable_scene_partitioning=True,
+                colorize_instance_id_segmentation=False,
+            )
+            simulation_render_options = {}
+        else:
+            renderer_config = IsaacRtxRendererCfg(
+                colorize_instance_id_segmentation=False
+            )
+            simulation_render_options = {"render": sim_utils.RenderCfg(**settings)}
+
         self.torch, self.wp, self.Gf, self.Sdf = torch, wp, Gf, Sdf
         self.modalities = modalities
         self.num_envs = num_envs
@@ -645,8 +705,8 @@ class IsaacLabScene:
             sim_utils.SimulationCfg(
                 dt=1 / 240,
                 device=self.device,
-                render=sim_utils.RenderCfg(**settings),
                 visualizer_cfgs=[],
+                **simulation_render_options,
             )
         )
         import omni.usd
@@ -668,9 +728,8 @@ class IsaacLabScene:
         camera_radius = max(
             float(np.linalg.norm(camera["eye"])) for camera in self.camera_specs
         )
-        # No RTX per-camera visibility collection exists in this frozen backend.
-        # A 2D grid bounds coordinate magnitudes and keeps neighboring geometry
-        # outside primary clipping range. Indirect transport remains shared.
+        # Retain the frozen spatial grid while EA additionally authors explicit
+        # environment partitions. Native tokens are verified after initialization.
         self._replica_spacing = 4 * (
             self.scene["camera_model"]["far_m"] + self._scene_radius + camera_radius
         )
@@ -708,7 +767,7 @@ class IsaacLabScene:
             )
         for env_id in range(num_envs):
             offset = self._env_offsets[env_id]
-            prefix = f"/World/Envs/env_{env_id:06d}"
+            prefix = f"/World/envs/env_{env_id}"
             UsdGeom.Xform.Define(stage, prefix)
             for index, obj in enumerate(self.scene["objects"]):
                 path = prefix + "/Objects/" + obj["uid"]
@@ -756,9 +815,13 @@ class IsaacLabScene:
             dome.CreateColorAttr(Gf.Vec3f(*lighting_controls["environment_color"]))
         _apply_light_contract(light, dome, light_contract)
         sim_utils.update_stage()
+        if ea_runtime:
+            self.sim.render_context.get_renderer(renderer_config).prepare_stage(
+                stage, num_envs
+            )
         self.camera = Camera(
             CameraCfg(
-                prim_path="/World/Envs/env_.*/Cameras/view_.*/Camera",
+                prim_path="/World/envs/env_[0-9]+/Cameras/view_[0-9]+/Camera",
                 update_period=0.0,
                 update_latest_camera_pose=diagnostic_pose_updates,
                 width=width,
@@ -767,9 +830,7 @@ class IsaacLabScene:
                     "instance_id_segmentation_fast" if value == "seg" else value
                     for value in modalities
                 ],
-                renderer_cfg=IsaacRtxRendererCfg(
-                    colorize_instance_id_segmentation=False
-                ),
+                renderer_cfg=renderer_config,
                 spawn=None,
             )
         )
@@ -792,7 +853,7 @@ class IsaacLabScene:
                 orientations=torch.tensor(orientations, device=self.device),
                 convention="opengl",
             )
-        self.sim.render_context.reset_transform_cadence()
+        _reset_scene_state_cadence(self.sim.render_context)
         import omni.physx
         import omni.timeline
 
@@ -811,6 +872,14 @@ class IsaacLabScene:
         self.metadata = {
             "backend": "isaaclab",
             "renderer": "Isaac RTX tiled",
+            "runtime_contract": (
+                "v3.0.0-EA/global_settings" if ea_runtime else "legacy/RenderCfg"
+            ),
+            "scene_partitioning": (
+                _partition_evidence(stage, num_envs, len(self.camera_specs))
+                if ea_runtime
+                else {"status": "unavailable", "reason": "legacy runtime"}
+            ),
             "spp": settings["samples_per_pixel"],
             "antialiasing": settings["antialiasing_mode"],
             "dl_denoiser": settings["enable_dl_denoiser"],
@@ -834,7 +903,7 @@ class IsaacLabScene:
             },
             "post_camera_carb_overrides": self._post_camera_overrides,
             "accumulation_setup": accumulation_setup,
-            "spp_semantics": "requested RenderCfg direct-light setting; actual total rays per pixel are not measured",
+            "spp_semantics": "requested renderer direct-light setting; actual total rays per pixel are not measured",
             "diagnostic_pose_updates": diagnostic_pose_updates,
             "num_envs": num_envs,
             "cameras_per_env": len(self.camera_specs),
@@ -869,9 +938,17 @@ class IsaacLabScene:
             "replica_offsets_m": [offset.tolist() for offset in self._env_offsets],
             "replica_spacing_m": self._replica_spacing,
             "environment_isolation": {
-                "primary_rays": "spatial grid, neighbor bounds outside camera far plane",
-                "indirect_lighting": "not_qualified; all replicas share one RTX scene",
-                "native_per_camera_isolation": "not exposed by frozen IsaacRtxRenderer",
+                "primary_rays": (
+                    "verified EA environment partition tokens plus spatial bounds"
+                    if ea_runtime
+                    else "spatial grid, neighbor bounds outside camera far plane"
+                ),
+                "indirect_lighting": "not_qualified; token authoring is not a measured light-transport proof",
+                "native_per_camera_isolation": (
+                    "verified authored EA partition tokens"
+                    if ea_runtime
+                    else "not exposed by frozen IsaacRtxRenderer"
+                ),
             },
             "quality_limitations": (
                 [
@@ -1207,7 +1284,12 @@ class IsaacLabScene:
         evidence["runtime_log_path"] = log_path
         evidence["runtime_log_missing_reason"] = log_missing_reason
         products = []
-        for path in self.camera._render_data.render_product_paths:
+        render_data = self.camera._render_data
+        product_paths = getattr(render_data, "render_product_paths", None)
+        if product_paths is None:
+            product = getattr(render_data, "render_product", None)
+            product_paths = [product.path] if product is not None else []
+        for path in product_paths:
             prim = self.stage.GetPrimAtPath(path)
             resolution = (
                 prim.GetAttribute("resolution").Get() if prim.IsValid() else None
@@ -1296,7 +1378,7 @@ class IsaacLabScene:
         self.camera_specs = specs
         self.metadata["camera_names"] = [spec["name"] for spec in specs]
         self.metadata["view_sha256"] = stable_hash(specs)
-        self.sim.render_context.reset_transform_cadence()
+        _reset_scene_state_cadence(self.sim.render_context)
 
     def set_cameras(self, specs: list[dict[str, Any]]) -> None:
         """Replace a fixed-count view set and refresh diagnostics outside timing.

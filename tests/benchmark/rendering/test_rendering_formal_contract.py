@@ -81,7 +81,7 @@ def test_profiles_are_independent_and_forbid_frame_generation() -> None:
     assert original["frame_generation"] is False
     for name in ("realtime", "high_quality"):
         profile = render_profile(name)
-        assert profile["version"] == "1.7"
+        assert profile["version"] == "1.8-ea"
         assert (
             profile["embodichain"]["state_publication_policy"]
             == "on_frozen_state_change"
@@ -275,6 +275,9 @@ def _native_adapter(events: list[str]) -> EmbodiChainScene:
         def __init__(self, index):
             self.index = index
             self.group_ids = [10 + 2 * index, 11 + 2 * index]
+
+        def get_intrinsics(self):
+            return torch.eye(3).repeat(2, 1, 1)
 
         def update(self, **kwargs):
             assert kwargs == {"fetch_only": True}

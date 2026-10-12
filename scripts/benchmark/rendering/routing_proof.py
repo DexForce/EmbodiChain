@@ -35,10 +35,56 @@ from scripts.benchmark.core.artifacts import stable_hash, write_json
 from scripts.benchmark.core.measurement import Measurement
 
 __all__ = [
+    "routing_env_ids",
     "publish_indexed_camera",
     "publication_callback_wall",
     "run_routing_probe",
 ]
+
+
+def routing_env_ids(num_envs: int) -> list[int]:
+    """Select endpoints and the first, central and last 32-view boundaries.
+
+    Args:
+        num_envs: Positive environment population.
+
+    Returns:
+        Unique valid environment indices; untested chunks remain untested.
+    """
+    if type(num_envs) is not int or num_envs < 1:
+        raise ValueError("num_envs must be a positive integer")
+    indices = {0, num_envs // 2, num_envs - 1}
+    for boundary in {32, num_envs // 2 // 32 * 32, (num_envs - 1) // 32 * 32}:
+        if 0 < boundary < num_envs:
+            indices.update((boundary - 1, boundary))
+    return sorted(indices)
+
+
+def _observed_poses(adapter: Any, backend: str) -> dict[str, Any]:
+    """Read completed pose buffers without rendering or publishing a new state."""
+    try:
+        if backend == "embodichain":
+            values = [
+                camera.get_arena_pose(to_matrix=True).cpu().tolist()
+                for camera in adapter.cameras
+            ]
+            return {
+                "status": "recorded",
+                "scope": "Camera.get_arena_pose: scene-graph poses uploaded to a device tensor",
+                "camera_poses": values,
+                "renderer_gpu_pose_status": "missing",
+                "renderer_gpu_pose_reason": "Public Camera getter reads entity.get_world_pose; native renderer uniform buffers are not exposed",
+            }
+        data = adapter._camera_data
+        return {
+            "status": "recorded",
+            "scope": "Isaac_GPU_pose_buffers; renderer uniform consumption is not independently observed",
+            "positions": data.pos_w.torch.cpu().tolist(),
+            "quaternions_xyzw": data.quat_w_opengl.torch.cpu().tolist(),
+        }
+    except (AttributeError, RuntimeError, TypeError) as error:
+        return {"status": "missing", "reason": str(error)}
+
 
 _REQUIRED_BINDINGS = (
     "run_id",
@@ -151,7 +197,11 @@ def publish_indexed_camera(
             env_ids=[sensor_id],
             convention="opengl",
         )
-    adapter.sim.render_context.reset_transform_cadence()
+    context = adapter.sim.render_context
+    reset = getattr(context, "reset_scene_state_cadence", None)
+    if reset is None:
+        reset = context.reset_transform_cadence
+    reset()
     return {
         "api": "Camera.set_world_poses(env_ids)",
         "global_env_id": env_id,
@@ -420,7 +470,7 @@ def run_routing_probe(
         def setter(env: int, camera: int, spec: dict[str, Any]) -> Any:
             return publish_indexed_camera(adapter, backend, env, camera, spec)
 
-    anchors = sorted({0, num_envs // 2, num_envs - 1})
+    anchors = routing_env_ids(num_envs)
     policy = {
         "stationary_captures": stationary_captures,
         "moved_captures": 1 + settle_captures,
@@ -503,6 +553,7 @@ def run_routing_probe(
             "ordinal": ordinal,
             "phase": phase,
             "packet": packet_metadata,
+            "observed_pose_buffers": _observed_poses(adapter, backend),
             "full_shapes": shapes,
             "sample_stride_yx": [stride_y, stride_x],
             "sampled_shapes": {

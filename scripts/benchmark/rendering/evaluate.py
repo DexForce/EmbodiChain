@@ -609,6 +609,7 @@ def _independent_reference(
     run: dict[str, Any],
     descriptor: dict[str, Any],
     settings: dict[str, int],
+    shared_cache: Path | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     metadata, case = descriptor["metadata"], run["case"]
     spec = _reference_spec(metadata)
@@ -625,10 +626,16 @@ def _independent_reference(
         "height": case.height,
         "settings": settings,
         "reference_implementation_sha256": _sha256(Path(reference.__file__)),
+        "reference_runtime": reference.reference_dependencies()["versions"],
     }
     key = stable_hash(identity)
     directory = root / "references" / key
     descriptor_path = directory / "cache_binding.json"
+    restored = False
+    if not directory.exists() and shared_cache is not None:
+        from .reference_cache import transfer_reference
+
+        restored = transfer_reference(shared_cache, root, key, identity)
     if directory.exists():
         if not descriptor_path.is_file():
             raise ValueError(
@@ -676,6 +683,17 @@ def _independent_reference(
         for artifact in binding["artifacts"]:
             _register(ArtifactStore(root), root / artifact["path"], artifact["kind"])
         _register(ArtifactStore(root), descriptor_path, "reference_cache_binding")
+    if restored:
+        store = ArtifactStore(root)
+        _register_batch(
+            store,
+            binding["artifacts"]
+            + [_artifact(root, descriptor_path, "reference_cache_binding")],
+        )
+    if shared_cache is not None:
+        from .reference_cache import transfer_reference
+
+        transfer_reference(root, shared_cache, key, identity)
     loaded = reference.load_reference_frame(_inside(root, binding["frame"]))
     # The immutable render is keyed by camera and object geometry, not temporal
     # labels. Identical held/static states can reuse pixels at another timestamp.
@@ -879,6 +897,7 @@ def _evaluate_run(
     settings: dict[str, int],
     calibration: dict[str, Any] | None,
     precision: dict[str, Any] | None = None,
+    shared_cache: Path | None = None,
 ) -> dict[str, Any]:
     from scripts.benchmark.rendering.quality import evaluate_frame, evaluate_sequence
 
@@ -982,7 +1001,17 @@ def _evaluate_run(
                 root,
                 precision["directory"],
                 precision["policy"],
-                lambda selected: _independent_reference(root, run, item, selected),
+                lambda selected: _independent_reference(
+                    root,
+                    run,
+                    item,
+                    selected,
+                    **(
+                        {"shared_cache": shared_cache}
+                        if shared_cache is not None
+                        else {}
+                    ),
+                ),
             )
             precision_passed &= ref["reference_validation"]["passed"]
         candidate = _candidate(item)
@@ -990,7 +1019,13 @@ def _evaluate_run(
         for key in ("effective_lighting_controls", "postprocess_evidence"):
             candidate["metadata"][key] = deepcopy(run["renderer"].get(key))
         if precision is None:
-            ref, binding = _independent_reference(root, run, item, settings)
+            ref, binding = _independent_reference(
+                root,
+                run,
+                item,
+                settings,
+                **({"shared_cache": shared_cache} if shared_cache is not None else {}),
+            )
         bindings.append(binding)
         if ref is not None:
             reference_ids.add(ref["reference_provenance"]["reference_id"])
@@ -1172,6 +1207,7 @@ def evaluate_experiment(
     calibration_evidence: Path | None = None,
     history_evidence: list[Path] | None = None,
     reference_precision_policy: str | None = None,
+    shared_reference_cache: Path | None = None,
 ) -> Path:
     """Evaluate selected completed runs, append evidence, and rebuild the report.
 
@@ -1192,6 +1228,8 @@ def evaluate_experiment(
         reference_precision_policy: Optional fixed reference-only 4096/16384 spp
             selection. Requires explicitly supplied spp=4096, seed=0, threads=8;
             the default single-precision evaluation remains unchanged.
+        shared_reference_cache: Optional checksummed cache with exact generator,
+            scene, camera, geometry, resolution and seed/precision identity.
 
     Returns:
         Path of the rebuilt Markdown report. Timing fields and raw.jsonl bytes
@@ -1313,6 +1351,7 @@ def evaluate_experiment(
                     "quality_regions.py",
                     "_publication_figures.py",
                     "reference.py",
+                    *(("reference_cache.py",) if shared_reference_cache else ()),
                     "calibration.py",
                     *(("reference_precision.py",) if precision else ()),
                     *(
@@ -1332,7 +1371,13 @@ def evaluate_experiment(
     evaluated = {}
     for index, run in enumerate(runs):
         record = _evaluate_run(
-            root, event_dir / f"run_{index:04d}", run, settings, calibration, precision
+            root,
+            event_dir / f"run_{index:04d}",
+            run,
+            settings,
+            calibration,
+            precision,
+            shared_reference_cache,
         )
         if calibration_record is not None:
             record["artifacts"].append(calibration_record)
@@ -1417,6 +1462,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", action="append", dest="run_ids")
     parser.add_argument("--calibration-evidence", type=Path)
     parser.add_argument("--history-evidence", type=Path, action="append")
+    parser.add_argument("--shared-reference-cache", type=Path)
     parser.add_argument(
         "--reference-precision-policy",
         choices=[reference_precision.PRECISION_POLICY_ID],
@@ -1433,6 +1479,7 @@ def main(argv: list[str] | None = None) -> int:
             calibration_evidence=args.calibration_evidence,
             history_evidence=args.history_evidence,
             reference_precision_policy=args.reference_precision_policy,
+            shared_reference_cache=args.shared_reference_cache,
         )
     )
     return 0

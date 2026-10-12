@@ -1,5 +1,10 @@
 # Rendering benchmarks
 
+The RTX 5090 / Isaac Lab **3.0.0-EA** continuation is documented in
+[the campaign guide](EA_CAMPAIGN.md). It uses the installed Isaac Sim 6.1 runtime,
+new profile hashes, separate coverage/publication populations and budgeted
+untimed history, routing and independent-reference operations.
+
 Use `python -m scripts.benchmark rendering-formal` for the document-aligned
 rendering experiments. The common artifact schema remains **1**; formal
 experiment definitions are **2.0**. `camera-pilot` and `rendering-suite` retain
@@ -117,9 +122,10 @@ photometric calibration, image metrics and comparison eligibility.
 ## Runtime requirements
 
 Isaac Lab is an **external frozen dependency**. This comparison targets the
-`v3.0.0-beta2.patch1` checkout at
-`ffff603eafc6b74264a5261cc0183d6a65390d78` with its matching Isaac Sim runtime
-(the exercised runtime line is Isaac Sim `6.0.1.0`). Keep its environment separate
+`v3.0.0-EA` checkout at
+`ae37b028ea415c91ea2bc32609efcd759ed2b974` with matching Isaac Sim `6.1.0.0`.
+Prior beta2/Isaac Sim 6.0.1 measurements retain their original frozen source and
+profile groups. Keep the selected environment separate
 from EmbodiChain/DexSim. Record the actual source revision, distribution versions,
 CUDA/runtime/driver and dirty-source hashes; a package version alone is insufficient.
 

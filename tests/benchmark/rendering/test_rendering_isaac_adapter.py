@@ -742,3 +742,71 @@ def test_apply_state_updates_cached_ops_without_physics_or_pose_readback() -> No
         np.testing.assert_allclose(matrix[:3, :3], np.diag([1, 2, 3]))
     assert adapter.metadata["frame_id"] == 5
     adapter._publish_cameras.assert_called_once()
+
+
+def test_ea_global_settings_preserve_explicit_controls_without_removed_preset() -> None:
+    from scripts.benchmark.rendering.backends.scene_isaaclab import _ea_global_settings
+
+    settings = _render_settings(render_profile("high_quality"))
+    resolved = _ea_global_settings(settings)
+    assert "rendering_mode" not in resolved
+    assert resolved["samples_per_pixel"] == 16
+    assert resolved["carb_settings"]["/rtx/rendermode"] == "PathTracing"
+    resolved["carb_settings"]["/rtx/pathtracing/spp"] = 8
+    assert settings["carb_settings"]["/rtx/pathtracing/spp"] == 16
+
+
+def test_state_cadence_uses_ea_contract_and_preserves_legacy_support() -> None:
+    from scripts.benchmark.rendering.backends.scene_isaaclab import (
+        _reset_scene_state_cadence,
+    )
+
+    current, legacy = Mock(), Mock()
+    _reset_scene_state_cadence(
+        SimpleNamespace(
+            reset_scene_state_cadence=current, reset_transform_cadence=legacy
+        )
+    )
+    current.assert_called_once_with()
+    legacy.assert_not_called()
+    _reset_scene_state_cadence(SimpleNamespace(reset_transform_cadence=legacy))
+    legacy.assert_called_once_with()
+
+
+def test_ea_partition_proof_rejects_an_unpartitioned_camera() -> None:
+    from scripts.benchmark.rendering.backends.scene_isaaclab import (
+        _partition_evidence,
+        camera_prim_path,
+    )
+
+    tokens = {
+        "/World/envs/env_0": "env_0",
+        "/World/envs/env_1": "env_1",
+        **{
+            camera_prim_path(env, camera): f"env_{env}"
+            for env in range(2)
+            for camera in range(3)
+        },
+    }
+    stage = SimpleNamespace(
+        GetPrimAtPath=lambda path: SimpleNamespace(
+            GetAttribute=lambda name: SimpleNamespace(Get=lambda: tokens.get(path))
+        )
+    )
+    proof = _partition_evidence(stage, 2, 3)
+    assert proof["status"] == "verified"
+    assert len(proof["environments"]) == 2
+    tokens[camera_prim_path(1, 2)] = "env_0"
+    with pytest.raises(RuntimeError, match="misrouted: 1"):
+        _partition_evidence(stage, 2, 3)
+
+
+def test_chunk_owner_preserves_native_renderer_guard() -> None:
+    from scripts.benchmark.rendering.backends.scene_embodichain import _ArenaSlice
+
+    owner = SimpleNamespace(
+        _require_native_renderer=Mock(side_effect=RuntimeError("disabled"))
+    )
+    with pytest.raises(RuntimeError, match="disabled"):
+        _ArenaSlice(owner, 0, 1)._require_native_renderer("Native cameras")
+    owner._require_native_renderer.assert_called_once_with("Native cameras")
