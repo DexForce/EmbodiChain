@@ -500,6 +500,51 @@ def test_corrected_driver_launches_original_source_and_records_it(
         campaign.run_campaign(root, phase="coverage", source_worktree=original)
 
 
+@pytest.mark.parametrize(
+    "second_failure",
+    [KeyboardInterrupt(), campaign.subprocess.TimeoutExpired("launcher", 30)],
+)
+def test_frozen_launcher_reaps_child_after_repeated_cancel_or_grace_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    second_failure: BaseException,
+) -> None:
+    effects = [KeyboardInterrupt(), second_failure, 0]
+    sent = []
+    killed = []
+
+    def wait(**kwargs):
+        effect = effects.pop(0)
+        if isinstance(effect, BaseException):
+            raise effect
+        return effect
+
+    proc = SimpleNamespace(
+        pid=2**31 - 1,
+        wait=wait,
+        send_signal=sent.append,
+        kill=lambda: killed.append(True),
+    )
+    monkeypatch.setattr(campaign.subprocess, "Popen", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(
+        campaign.signal, "signal", lambda *args: campaign.signal.SIG_DFL
+    )
+    with pytest.raises(KeyboardInterrupt):
+        campaign._run_frozen_formal(tmp_path, [])
+    assert len(sent) == 1 and killed == [True] and effects == []
+
+
+def test_cancelled_invocation_recovers_frozen_manifest_without_final_index(
+    tmp_path: Path,
+) -> None:
+    experiment = tmp_path / "invocation" / "R-03" / "experiment"
+    experiment.mkdir(parents=True)
+    write_json(experiment / "manifest.json", {"experiment_id": "R-03"})
+    write_json(experiment / "selection.json", {"trials": []})
+    write_json(experiment / "runs.json", [])
+    assert campaign._attempt_experiments(tmp_path) == [experiment]
+
+
 def test_worker_completion_is_selected_by_frozen_plan_when_flag_is_absent(
     tmp_path: Path,
 ) -> None:

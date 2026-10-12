@@ -434,15 +434,61 @@ def _run_frozen_formal(source: Path, argv: list[str]) -> None:
                 pass
             try:
                 proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                _reap_frozen_launcher(proc)
             raise
         if code:
             raise SystemExit(130 if code == -signal.SIGINT else code)
     finally:
         if previous_term is not None:
             signal.signal(signal.SIGTERM, previous_term)
+
+
+def _reap_frozen_launcher(proc: subprocess.Popen[Any]) -> None:
+    """Reap the launcher and its independently grouped workers on this Linux host."""
+    handlers = {}
+    if threading.current_thread() is threading.main_thread():
+        handlers = {
+            sig: signal.signal(sig, signal.SIG_IGN)
+            for sig in (signal.SIGINT, signal.SIGTERM)
+        }
+    try:
+        pending = [proc.pid]
+        descendants = []
+        for owner in pending:
+            path = Path(f"/proc/{owner}/task/{owner}/children")
+            try:
+                children = [int(value) for value in path.read_text().split()]
+            except FileNotFoundError:
+                continue
+            descendants.extend(children)
+            pending.extend(children)
+        for pid in reversed(descendants):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        proc.kill()
+        proc.wait()
+    finally:
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+
+
+def _attempt_experiments(output: Path) -> list[Path]:
+    """Recover frozen experiment links even if interrupted reports have no index."""
+    experiments = set()
+    for index in output.glob("*/index.json"):
+        experiments.update(
+            index.parent / row["path"] for row in read_json_object(index)["experiments"]
+        )
+    for manifest in output.glob("*/*/*/manifest.json"):
+        candidate = manifest.parent
+        if (candidate / "selection.json").is_file() and (
+            candidate / "runs.json"
+        ).is_file():
+            experiments.add(candidate)
+    return sorted(experiments)
 
 
 def run_campaign(
@@ -609,14 +655,10 @@ def run_campaign(
             attempt["error"] = str(error)
         except Exception as error:
             attempt["error"] = str(error)
-        roots = [p.parent for p in output.glob("*/index.json")]
         rows = []
-        for invocation in roots:
-            for entry in read_json_object(invocation / "index.json")["experiments"]:
-                experiment = invocation / entry["path"]
-                attempt["experiments"].append(experiment.relative_to(root).as_posix())
-                selected = selected_case_rows(experiment, job["case_id"])
-                rows += selected
+        for experiment in _attempt_experiments(output):
+            attempt["experiments"].append(experiment.relative_to(root).as_posix())
+            rows += selected_case_rows(experiment, job["case_id"])
         attempt["capacity"] = {
             b: reason
             for b in _BACKENDS

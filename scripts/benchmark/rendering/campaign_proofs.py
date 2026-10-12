@@ -259,7 +259,15 @@ def run_proofs(
                 write_json(root / "campaign-state.json", state)
                 break
             state["reserved_worker_runs"] += 1
-        proof["status"] = "running"
+        proof.setdefault(
+            "queued_driver_source_commit", proof.get("driver_source_commit")
+        )
+        proof.update(
+            status="running",
+            execution_source_root=str(source),
+            driver_source_commit=git_revision(ROOT),
+            driver_source_files=_source_files(),
+        )
         write_json(root / "campaign-state.json", state)
         print(f"{kind}: {proof['run_id']}", flush=True)
         try:

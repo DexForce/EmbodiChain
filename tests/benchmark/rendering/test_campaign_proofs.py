@@ -26,6 +26,7 @@ import pytest
 from scripts.benchmark.rendering import campaign_proofs as proofs
 from scripts.benchmark.rendering import routing_diagnostic
 from scripts.benchmark.core import execution
+from scripts.benchmark.core.artifacts import stable_hash
 
 
 def _proof_campaign(
@@ -128,3 +129,28 @@ def test_unfiltered_proof_retry_is_rejected_before_reserving_workers(
     with pytest.raises(ValueError, match="explicit original-run selection"):
         proofs.run_proofs(root, kind="routing", retry_failed=True)
     assert state["reserved_worker_runs"] == 0
+
+
+def test_pending_legacy_proof_records_the_actual_resuming_driver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, state, _ = _proof_campaign(tmp_path, monkeypatch)
+    request = proofs.proof_population(root, "routing")[0]
+    state["proofs"] = [
+        {
+            **request,
+            "proof_id": stable_hash(request),
+            "evaluation_attempt": 0,
+            "status": "not_run",
+            "reason": "disk_headroom",
+        }
+    ]
+    monkeypatch.setattr(proofs, "git_revision", lambda root: "corrected-driver")
+    monkeypatch.setattr(proofs, "_source_files", lambda: {"driver.py": "current"})
+    proofs.run_proofs(root, kind="routing")
+    assert all(p["status"] == "completed" for p in state["proofs"])
+    assert all(p["driver_source_commit"] == "corrected-driver" for p in state["proofs"])
+    assert all(
+        p["driver_source_files"] == {"driver.py": "current"} for p in state["proofs"]
+    )
