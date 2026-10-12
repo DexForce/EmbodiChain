@@ -741,6 +741,12 @@ class NeuralPlanner(BasePlanner):
         Applies the rollout's own arrival test to the resampled grid, so a
         trajectory that passes a waypoint only between output samples is not
         reported as reaching it.
+
+        The test runs once per waypoint over every sample at once rather than
+        once per sample, so its cost does not grow with the solved duration
+        and nothing synchronizes with the host inside the loop. Order follows
+        the rollout: waypoint ``k + 1`` counts only at a sample strictly after
+        the one where waypoint ``k`` was first reached.
         """
         (
             waypoints_pos,
@@ -751,29 +757,36 @@ class NeuralPlanner(BasePlanner):
             joint_mask,
         ) = waypoints
         batch, samples = positions.shape[:2]
-        policy_poses = self._policy_pose_xyzw(poses.flatten(0, 1)).view(
-            batch, samples, -1
-        )
-        active_idx = torch.zeros(batch, dtype=torch.long, device=self.device)
-        for index in range(samples):
-            qpos = positions[:, index]
-            reached = self._is_active_reached(
-                qpos[:, : self._action_dim],
-                policy_poses[:, index],
+        flat_joint = positions[..., : self._action_dim].flatten(0, 1)
+        flat_pose = self._policy_pose_xyzw(poses.flatten(0, 1))
+        per_sample = lambda tensor: tensor.repeat_interleave(samples, dim=0)
+        targets = tuple(
+            per_sample(tensor)
+            for tensor in (
                 waypoints_pos,
                 waypoints_quat,
                 waypoints_joint,
                 pos_mask,
                 rot_mask,
                 joint_mask,
-                active_idx,
             )
-            active_idx = torch.where(
-                reached & (active_idx < episode_k), active_idx + 1, active_idx
+        )
+        sample_index = torch.arange(samples, device=self.device)
+        # Sample at which the previous waypoint was first reached; -1 before
+        # the first, and `samples` once a row has missed one.
+        reached_at = torch.full((batch,), -1, dtype=torch.long, device=self.device)
+        for waypoint in range(episode_k):
+            active = torch.full(
+                (batch * samples,), waypoint, dtype=torch.long, device=self.device
             )
-            if bool((active_idx >= episode_k).all()):
-                break
-        return active_idx >= episode_k
+            reached = self._is_active_reached(
+                flat_joint, flat_pose, *targets, active
+            ).view(batch, samples)
+            eligible = reached & (sample_index > reached_at.unsqueeze(-1))
+            reached_at = torch.where(
+                eligible, sample_index, torch.full_like(sample_index, samples)
+            ).amin(dim=-1)
+        return reached_at < samples
 
     def _parse_waypoints(self, target_states: list[PlanState]) -> tuple[
         torch.Tensor,

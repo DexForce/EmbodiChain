@@ -134,10 +134,11 @@ semantics are owned by [collision worlds](collision-worlds.md).
 `toppra_planner.py::retime_joint_paths()` is the shared entry point for
 re-parameterizing an already-planned joint path under velocity and acceleration
 limits, used by planners that emit geometry without executable timing. It is
-the planner's own time parameterization with the same backend selection, so
-CUDA paths and gradient requests run on Warp; it resamples along the fitted
-spline, so recompute derived poses from its output rather than reusing the
-input samples.
+the planner's own time parameterization. CUDA paths, gradient requests and
+CPU batches of more than one row run on Warp, since the function has no worker
+pool to fan NumPy rows out to; a single CPU row stays on NumPy. It resamples
+along the fitted spline, so recompute derived poses from its output rather
+than reusing the input samples.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time

@@ -500,6 +500,34 @@ def test_retime_joint_paths_rejects_malformed_input():
         )
 
 
+def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
+    import embodichain.compute.trajectory._toppra_warp as warp_module
+
+    paths = torch.zeros(3, 6, NUM_ARM_JOINTS, dtype=torch.float64)
+    paths[:, :, 0] = torch.linspace(0.0, 1.0, 6)
+    paths[1, :, 1] = torch.linspace(0.0, -0.5, 6)
+    paths[2, :, 0] *= 0.3
+    limits = {"velocity": 1.0, "acceleration": 2.0}
+    rows = [retime_joint_paths(paths[i : i + 1], constraints=limits) for i in range(3)]
+
+    calls = []
+    original = warp_module._retime_toppra_warp
+    monkeypatch.setattr(
+        warp_module,
+        "_retime_toppra_warp",
+        lambda *args, **kwargs: calls.append(1) or original(*args, **kwargs),
+    )
+    batched = retime_joint_paths(paths, constraints=limits)
+
+    # Rows are no longer solved one after another on the CPU.
+    assert len(calls) == 1
+    assert bool(batched.success.all())
+    for index, row in enumerate(rows):
+        assert float(batched.dt[index].sum()) == pytest.approx(
+            float(row.dt.sum()), abs=1e-5
+        )
+
+
 def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
     tmp_path, monkeypatch
 ):
@@ -537,6 +565,61 @@ def test_retimed_success_reflects_the_trajectory_actually_returned(
     assert float(arm.max()) <= 2.0 + 1e-6
     assert float(arm.min()) >= -2.0 - 1e-6
     assert float(retimed.dt.sum()) > 0.0
+
+
+def test_retimed_waypoint_check_keeps_order_and_runs_once_per_waypoint(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    # Two joint-space waypoints on joint 0: 0.5 rad, then 1.0 rad.
+    batch, samples = 3, 3
+    waypoints_joint = torch.zeros(batch, NUM_WAYPOINTS, NUM_ARM_JOINTS)
+    waypoints_joint[:, 0, 0] = 0.5
+    waypoints_joint[:, 1, 0] = 1.0
+    joint_mask = torch.zeros(batch, NUM_WAYPOINTS)
+    joint_mask[:, :2] = 1.0
+    waypoints_quat = torch.zeros(batch, NUM_WAYPOINTS, 4)
+    waypoints_quat[..., 3] = 1.0
+    no_mask = torch.zeros(batch, NUM_WAYPOINTS)
+    waypoints = (
+        torch.zeros(batch, NUM_WAYPOINTS, 3),
+        waypoints_quat,
+        waypoints_joint,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    positions = torch.zeros(batch, samples, NUM_ARM_JOINTS)
+    positions[0, :, 0] = torch.tensor([0.0, 0.5, 1.0])  # in order
+    positions[1, :, 0] = torch.tensor([0.0, 1.0, 0.5])  # second before first
+    positions[2, :, 0] = torch.tensor([0.0, 0.0, 0.5])  # never the second
+    poses = torch.eye(4).repeat(batch, samples, 1, 1)
+
+    calls = []
+    original = planner._is_active_reached
+    monkeypatch.setattr(
+        planner,
+        "_is_active_reached",
+        lambda *args: calls.append(1) or original(*args),
+    )
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 2)
+
+    assert reached.tolist() == [True, False, False]
+    # One batched test per waypoint, independent of the sample count.
+    assert len(calls) == 2
 
 
 def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):
