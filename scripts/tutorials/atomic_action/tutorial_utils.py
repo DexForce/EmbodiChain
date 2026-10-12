@@ -2324,6 +2324,9 @@ def create_franka_panda_robot_cfg(
         cfg.joint_drive_props.max_effort,
     ):
         drive_values.pop("fr3_finger_joint[1-2]", None)
+    # The stock Franka contact override names the fr3 finger links, which the
+    # PGI assembly replaces; Newton scenes add PGI contacts separately.
+    cfg.link_attrs.pop("newton_gripper_contacts", None)
     return cfg
 
 
