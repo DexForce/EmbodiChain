@@ -30,7 +30,13 @@ import subprocess
 from typing import Any
 
 from scripts.benchmark.core.artifacts import read_json_object, write_json, stable_hash
-from .campaign import ROOT, _load, storage_gate, rebuild_campaign_report
+from .campaign import (
+    ROOT,
+    _load,
+    storage_gate,
+    rebuild_campaign_report,
+    selected_case_rows,
+)
 
 __all__ = ["proof_population", "run_proofs", "main"]
 
@@ -73,12 +79,8 @@ def proof_population(root: Path, kind: str) -> list[dict[str, Any]]:
         for attempt in job["attempts"]:
             for relative in attempt["experiments"]:
                 experiment = root / relative
-                for row in json.loads((experiment / "runs.json").read_text()):
-                    if (
-                        not row.get("selected")
-                        or row["status"] != "completed"
-                        or row["case_id"] != job["case_id"]
-                    ):
+                for row in selected_case_rows(experiment, job["case_id"]):
+                    if row["status"] != "completed":
                         continue
                     if kind == "routing" and row["repeat"] != 0:
                         continue

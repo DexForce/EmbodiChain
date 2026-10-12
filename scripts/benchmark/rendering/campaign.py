@@ -49,6 +49,7 @@ from .formal import (
 )
 
 __all__ = [
+    "selected_case_rows",
     "campaign_cases",
     "initialize_campaign",
     "run_campaign",
@@ -56,6 +57,42 @@ __all__ = [
     "storage_gate",
     "main",
 ]
+
+
+def selected_case_rows(experiment: Path, case_id: str) -> list[dict[str, Any]]:
+    """Resolve selected workers from the frozen plan, including flagless results.
+
+    Args:
+        experiment: Formal experiment containing its plan and result projection.
+        case_id: Exact frozen campaign case identity.
+
+    Returns:
+        Original selected rows without adding or changing measurement fields.
+    """
+    rows = json.loads((experiment / "runs.json").read_text())
+    plan_path = experiment / "selection.json"
+    if not plan_path.exists():
+        return [
+            row for row in rows if row.get("selected") and row["case_id"] == case_id
+        ]
+    plans = {
+        row["run_id"]: row
+        for row in read_json_object(plan_path)["trials"]
+        if row.get("selected") and row["case_id"] == case_id
+    }
+    selected = []
+    for row in rows:
+        planned = plans.get(row["run_id"])
+        if planned is None:
+            continue
+        if any(
+            row.get(key) != planned[key] for key in ("backend", "case_id", "repeat")
+        ):
+            raise ValueError("Worker identity differs from frozen selected plan")
+        selected.append(row)
+    return selected
+
+
 ROOT = Path(__file__).resolve().parents[3]
 EA_COMMIT = "ae37b028ea415c91ea2bc32609efcd759ed2b974"
 _GIB = 1024**3
@@ -499,11 +536,7 @@ def run_campaign(
             for entry in read_json_object(invocation / "index.json")["experiments"]:
                 experiment = invocation / entry["path"]
                 attempt["experiments"].append(experiment.relative_to(root).as_posix())
-                selected = [
-                    r
-                    for r in json.loads((experiment / "runs.json").read_text())
-                    if r.get("selected") and r["case_id"] == job["case_id"]
-                ]
+                selected = selected_case_rows(experiment, job["case_id"])
                 rows += selected
         attempt["capacity"] = {
             b: reason
@@ -743,11 +776,7 @@ def rebuild_campaign_report(root: Path) -> Path:
                                 ),
                             }
                         )
-                rows = [
-                    r
-                    for r in json.loads((experiment / "runs.json").read_text())
-                    if r.get("selected") and r["case_id"] == job["case_id"]
-                ]
+                rows = selected_case_rows(experiment, job["case_id"])
                 counts.update(r["status"] for r in rows)
                 reports.append(
                     {

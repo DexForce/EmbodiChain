@@ -345,3 +345,33 @@ def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
         ).is_file()
         assert "raw-sha" in (tmp_path / figure["svg"]).read_text()
     assert "coverage/original" in (tmp_path / "campaign-figure-data.csv").read_text()
+
+
+def test_worker_completion_is_selected_by_frozen_plan_when_flag_is_absent(
+    tmp_path: Path,
+) -> None:
+    from scripts.benchmark.rendering.campaign import selected_case_rows
+
+    planned = {
+        "run_id": "actual",
+        "backend": "isaaclab",
+        "case_id": "chosen",
+        "repeat": 0,
+        "selected": True,
+    }
+    excluded = {**planned, "run_id": "excluded", "selected": False}
+    write_json(tmp_path / "selection.json", {"trials": [planned, excluded]})
+    worker = {k: v for k, v in planned.items() if k != "selected"}
+    write_json(
+        tmp_path / "runs.json",
+        [{**worker, "status": "completed"}, {**excluded, "status": "not_run"}],
+    )
+    assert [row["run_id"] for row in selected_case_rows(tmp_path, "chosen")] == [
+        "actual"
+    ]
+    write_json(
+        tmp_path / "runs.json",
+        [{**worker, "backend": "embodichain", "status": "completed"}],
+    )
+    with pytest.raises(ValueError, match="identity"):
+        selected_case_rows(tmp_path, "chosen")
