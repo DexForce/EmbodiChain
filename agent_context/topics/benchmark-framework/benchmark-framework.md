@@ -116,7 +116,11 @@ and use the public scene-state cadence reset after changed state. Partition
 authoring is not proof of indirect-light isolation. Campaign source/runtime
 bindings, independent three-/ten-repeat populations, worker reservations and
 storage headroom are frozen; phase reports do not pool retries or historical
-hardware. The [campaign guide](../../../scripts/benchmark/rendering/EA_CAMPAIGN.md)
+hardware. A corrected driver may use `--source-worktree` to launch the unchanged
+original checkout; each attempt records both identities. Storage admission reserves
+all backend/repeat outputs on their actual filesystem, and explicit proof retries
+use new attempt directories without replacing interrupted evidence.
+The [campaign guide](../../../scripts/benchmark/rendering/EA_CAMPAIGN.md)
 owns operator commands and core-point selection. Shared references require exact
 physical/generator/runtime identities and a fully checked source closure.
 

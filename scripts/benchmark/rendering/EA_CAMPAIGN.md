@@ -33,6 +33,12 @@ metadata have their own explicitly recorded populations.
 
 Commit and freeze benchmark source before timing. The source tree must remain
 unchanged while acquiring original-history and routing proofs.
+If the orchestration or reporting driver needs a correction, keep the measurement
+checkout frozen and run the corrected driver from a separate clean checkout with
+`--source-worktree "$FROZEN_SOURCE"`. Formal launchers and GPU adapters still import
+the original source, whose commit and file hashes must match the campaign. Each
+new attempt records both the execution checkout and the corrected driver identity;
+the campaign definition and prior timing records remain unchanged.
 
 ## Plan and performance execution
 
@@ -65,7 +71,8 @@ capacity reserved for additional work. Original failed attempts remain in the le
 
 The evidence limit is 100 GiB with at least 20 GiB filesystem headroom. Before a
 new operation, the campaign counts all registered evidence locations and checks
-a conservative next-operation reservation. Blocked work remains not-run with a
+a conservative reservation for every backend/repeat in the admitted job, on the
+actual destination filesystem. Blocked work remains not-run with a
 reason. Histories/routing outputs use a sibling `evidence/` directory outside the
 frozen source tree; its bytes are included. Shared hardlinked references count
 once physically and retain independent per-experiment checksum bindings.
@@ -86,7 +93,10 @@ python -m scripts.benchmark.rendering.campaign_proofs --root "$CAMPAIGN_ROOT" --
 ```
 
 `--list` inspects source runs without starting acquisition; `--run-id` selects a
-source explicitly. History covers every original publication moving run's
+source explicitly. A failed/interrupted history or routing proof can use
+`--retry-failed --run-id ID`; a new attempt directory and worker reservation preserve
+the original proof. The proof driver also accepts `--source-worktree` for the clean
+original measurement checkout. History covers every original publication moving run's
 construction/freshness prefix, warmup, all 300 measured exposures and its final
 warmup guard. The other moving captures remain diagnostic and cannot certify
 original timed history. History/readback has no throughput claim.

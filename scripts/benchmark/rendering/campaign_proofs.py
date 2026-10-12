@@ -36,7 +36,10 @@ from .campaign import (
     storage_gate,
     rebuild_campaign_report,
     selected_case_rows,
+    _verify_execution_source,
+    _source_files,
 )
+from scripts.benchmark.core.provenance import git_revision
 
 __all__ = ["proof_population", "run_proofs", "main"]
 
@@ -142,7 +145,13 @@ def _calibrate(experiment: Path, row: dict[str, Any], cache: Path) -> Path:
 
 
 def run_proofs(
-    root: Path, *, kind: str, run_ids: tuple[str, ...] = (), reevaluate: bool = False
+    root: Path,
+    *,
+    kind: str,
+    run_ids: tuple[str, ...] = (),
+    reevaluate: bool = False,
+    retry_failed: bool = False,
+    source_worktree: Path | None = None,
 ) -> None:
     """Preserve a ledger for every untimed proof/evaluation operation.
 
@@ -151,9 +160,20 @@ def run_proofs(
         kind: History, routing, independent quality or measured calibration.
         run_ids: Optional explicit original-run filter.
         reevaluate: Append a new quality evaluation after calibration/history updates.
+        retry_failed: Append an explicitly selected failed/interrupted proof attempt.
+        source_worktree: Clean original source used by history/routing workers.
     """
     root = Path(root).absolute()
     definition, state = _load(root)
+    if retry_failed and not run_ids:
+        raise ValueError("Proof retries require an explicit original-run selection")
+    if reevaluate and kind != "quality":
+        raise ValueError("Reevaluation applies only to quality")
+    source = (
+        _verify_execution_source(definition, source_worktree)
+        if kind in ("history", "routing")
+        else ROOT
+    )
     requests = proof_population(root, kind)
     if run_ids:
         requests = [r for r in requests if r["run_id"] in run_ids]
@@ -161,13 +181,21 @@ def run_proofs(
     for request in requests:
         identity = stable_hash(request)
         previous = [p for p in proofs if p["proof_id"] == identity]
-        if previous and not (reevaluate and kind == "quality"):
-            continue
+        if previous:
+            if not (
+                reevaluate
+                or retry_failed
+                and previous[-1]["status"] in ("failed", "interrupted")
+            ):
+                continue
         proof = {
             **request,
             "proof_id": identity,
             "evaluation_attempt": len(previous),
             "status": "not_run",
+            "execution_source_root": str(source),
+            "driver_source_commit": git_revision(ROOT),
+            "driver_source_files": _source_files(),
         }
         proofs.append(proof)
     write_json(root / "campaign-state.json", state)
@@ -182,12 +210,20 @@ def run_proofs(
         ):
             continue
         case = proof["case"]
+        identity = proof["proof_id"]
+        destination = (
+            proof_root / kind / identity / f"attempt-{proof['evaluation_attempt']:03d}"
+        )
         reserve = (
             301 * case["width"] * case["height"] * 3 * 3
             if kind == "history"
             else 256 * 1024**2
         )
-        gate = storage_gate(definition, reservation_bytes=reserve)
+        gate = storage_gate(
+            definition,
+            reservation_bytes=reserve,
+            destination=destination if kind in ("history", "routing") else root,
+        )
         if not gate["passed"]:
             proof["reason"] = gate["reason"]
             proof["storage_gate"] = gate
@@ -234,9 +270,9 @@ def run_proofs(
                 result = acquire_history(
                     experiment,
                     proof["run_id"],
-                    source_worktree=ROOT,
+                    source_worktree=source,
                     source_commit=definition["source_commit"],
-                    output=proof_root / "history" / identity,
+                    output=destination,
                     gpu_id=0,
                     timeout_s=definition["history_timeout_s"],
                 )
@@ -250,11 +286,11 @@ def run_proofs(
                 from scripts.benchmark.core.execution import execute_worker
 
                 request = prepare_routing_diagnostic(
-                    ROOT,
+                    source,
                     definition["source_commit"],
                     experiment,
                     proof["run_id"],
-                    proof_root / "routing" / identity,
+                    destination,
                     gpu_id=0,
                 )
                 output = request["output"]
@@ -335,6 +371,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--run-id", action="append", default=[])
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--reevaluate", action="store_true")
+    parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--source-worktree", type=Path)
     args = parser.parse_args(argv)
     if args.list:
         print(json.dumps(proof_population(args.root, args.kind), indent=2))
@@ -344,6 +382,8 @@ def main(argv: list[str] | None = None) -> None:
         kind=args.kind,
         run_ids=tuple(args.run_id),
         reevaluate=args.reevaluate,
+        retry_failed=args.retry_failed,
+        source_worktree=args.source_worktree,
     )
 
 

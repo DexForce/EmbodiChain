@@ -33,8 +33,10 @@ import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 from typing import Any
 
 from scripts.benchmark.core.artifacts import read_json_object, write_json, stable_hash
@@ -146,16 +148,18 @@ def _runtime_evidence(python: Path) -> dict[str, Any]:
     )
 
 
-def _source_files() -> dict[str, str]:
+def _source_files(source_root: Path | None = None) -> dict[str, str]:
+    source_root = ROOT if source_root is None else source_root
     paths = (
-        sorted((ROOT / "scripts/benchmark/core").glob("*.py"))
-        + sorted((ROOT / "scripts/benchmark/rendering").glob("*.py"))
-        + sorted((ROOT / "scripts/benchmark/rendering/backends").glob("*.py"))
+        sorted((source_root / "scripts/benchmark/core").glob("*.py"))
+        + sorted((source_root / "scripts/benchmark/rendering").glob("*.py"))
+        + sorted((source_root / "scripts/benchmark/rendering/backends").glob("*.py"))
     )
-    return {
-        p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in paths
-    }
+    hashes = {}
+    for path in paths:
+        relative = path.relative_to(source_root).as_posix()
+        hashes[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
 
 
 def initialize_campaign(
@@ -305,13 +309,17 @@ def _load(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def storage_gate(
-    definition: dict[str, Any], *, reservation_bytes: int = 0
+    definition: dict[str, Any],
+    *,
+    reservation_bytes: int = 0,
+    destination: Path | None = None,
 ) -> dict[str, Any]:
     """Check all evidence roots and filesystem headroom before a new operation.
 
     Args:
         definition: Frozen campaign budget and evidence locations.
         reservation_bytes: Uncompressed upper estimate for the next acquisition.
+        destination: Actual output destination, including on a separate filesystem.
 
     Returns:
         Measured bytes and an explicit blocked reason or a passing gate.
@@ -328,7 +336,10 @@ def storage_gate(
                 if identity not in seen:
                     seen.add(identity)
                     used += stat.st_size
-    free = shutil.disk_usage(definition["evidence_roots"][0]).free
+    filesystem = Path(destination or definition["evidence_roots"][0]).resolve()
+    while not filesystem.exists():
+        filesystem = filesystem.parent
+    free = shutil.disk_usage(filesystem).free
     budget = definition["budget"]
     reason = (
         "evidence_budget"
@@ -345,6 +356,7 @@ def storage_gate(
         "used_bytes": used,
         "free_bytes": free,
         "reservation_bytes": reservation_bytes,
+        "filesystem_path": str(filesystem),
     }
 
 
@@ -376,12 +388,70 @@ def _capacity_reason(rows: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _verify_execution_source(
+    definition: dict[str, Any],
+    source_worktree: Path | None,
+) -> Path:
+    """Check the original source even when a corrected driver lives elsewhere."""
+    source = ROOT if source_worktree is None else Path(source_worktree).resolve()
+    files = _source_files() if source == ROOT else _source_files(source)
+    if (
+        files != definition["source_files"]
+        or git_revision(source) != definition["source_commit"]
+    ):
+        raise ValueError("Campaign source changed after freezing")
+    for owner in {source, ROOT}:
+        if subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=owner,
+            text=True,
+        ):
+            raise ValueError("Frozen source checkout or selected driver is dirty")
+    return source
+
+
+def _run_frozen_formal(source: Path, argv: list[str]) -> None:
+    """Forward cancellation to the original launcher, which reaps its GPU worker."""
+    from scripts.benchmark.core.execution import _cancel_on_signal
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "scripts.benchmark.rendering.formal_runner", *argv],
+        cwd=source,
+        start_new_session=True,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    )
+    previous_term = None
+    if threading.current_thread() is threading.main_thread():
+        previous_term = signal.signal(signal.SIGTERM, _cancel_on_signal)
+    try:
+        try:
+            code = proc.wait()
+        except KeyboardInterrupt:
+            try:
+                proc.send_signal(signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise
+        if code:
+            raise SystemExit(130 if code == -signal.SIGINT else code)
+    finally:
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM, previous_term)
+
+
 def run_campaign(
     root: Path,
     *,
     phase: str,
     case_ids: tuple[str, ...] = (),
     retry_failed: bool = False,
+    source_worktree: Path | None = None,
 ) -> None:
     """Execute pending jobs through the existing formal runner and persist progress.
 
@@ -390,19 +460,17 @@ def run_campaign(
         phase: Smoke, three-repeat coverage, or independent ten-repeat publication.
         case_ids: Optional explicit subset; unselected jobs retain their state.
         retry_failed: Reserve a new attempt for explicitly selected failures.
+        source_worktree: Clean original source; a separate driver never changes
+            worker imports or the frozen measurement definition.
     """
     from .formal_runner import main as formal_main
 
     root = Path(root).absolute()
     definition, state = _load(root)
-    if (
-        _source_files() != definition["source_files"]
-        or git_revision(ROOT) != definition["source_commit"]
-    ):
-        raise ValueError("Campaign source changed after freezing")
+    source = _verify_execution_source(definition, source_worktree)
     if git_revision(Path(definition["isaaclab_root"])) != definition["isaaclab_commit"]:
         raise ValueError("External EA revision changed")
-    for owner in (ROOT, Path(definition["isaaclab_root"])):
+    for owner in (Path(definition["isaaclab_root"]),):
         if subprocess.check_output(
             ["git", "status", "--porcelain", "--untracked-files=no"],
             cwd=owner,
@@ -455,7 +523,12 @@ def run_campaign(
                                 backend
                             ] = f"{reason}:N={other['num_envs']}"
         backends = [b for b in _BACKENDS if b not in job["blocked_backends"]]
-        gate = storage_gate(definition, reservation_bytes=_reservation(case))
+        reservation = job["repeats"] * len(backends)
+        gate = storage_gate(
+            definition,
+            reservation_bytes=_reservation(case) * reservation,
+            destination=root / phase,
+        )
         if not gate["passed"]:
             job.update(reason=gate["reason"], storage_gate=gate)
             write_json(root / "campaign-state.json", state)
@@ -464,7 +537,6 @@ def run_campaign(
             job.update(status="blocked", reason="observed_capacity_stop")
             write_json(root / "campaign-state.json", state)
             continue
-        reservation = job["repeats"] * len(backends)
         if (
             state["reserved_worker_runs"] + reservation
             > definition["budget"]["maximum_worker_runs"]
@@ -507,6 +579,9 @@ def run_campaign(
             "status": "running",
             "experiments": [],
             "reserved_worker_runs": reservation,
+            "execution_source_root": str(source),
+            "driver_source_commit": git_revision(ROOT),
+            "driver_source_files": _source_files(),
         }
         state["reserved_worker_runs"] += reservation
         job["attempts"].append(attempt)
@@ -516,19 +591,23 @@ def run_campaign(
             f"{phase}: {job['case_id']} ({','.join(backends)}, repeats={job['repeats']})",
             flush=True,
         )
+        interrupted = False
         try:
             with (
                 (output / "launcher.log").open("w") as log,
                 redirect_stdout(log),
                 redirect_stderr(log),
             ):
-                formal_main(argv)
+                if source == ROOT:
+                    formal_main(argv)
+                else:
+                    _run_frozen_formal(source, argv)
         except KeyboardInterrupt:
-            attempt["status"] = "interrupted"
-            job["status"] = "interrupted"
-            write_json(root / "campaign-state.json", state)
-            raise
-        except (Exception, SystemExit) as error:
+            interrupted = True
+        except SystemExit as error:
+            interrupted = error.code == 130
+            attempt["error"] = str(error)
+        except Exception as error:
             attempt["error"] = str(error)
         roots = [p.parent for p in output.glob("*/index.json")]
         rows = []
@@ -549,8 +628,12 @@ def run_campaign(
             if rows and all(r["status"] == "completed" for r in rows)
             else "failed"
         )
+        if interrupted:
+            attempt["status"] = "interrupted"
         job["status"] = attempt["status"]
         write_json(root / "campaign-state.json", state)
+        if interrupted:
+            raise KeyboardInterrupt("Campaign cancelled; original evidence retained")
         rebuild_campaign_report(root)
 
 
@@ -626,7 +709,7 @@ def _campaign_figures(
             point = {
                 "x": x,
                 "y": value["median"],
-                "mad": value.get("uncertainty", {}).get("value"),
+                "mad": (value.get("uncertainty") or {}).get("value"),
                 "backend": group["backend"],
                 "case_id": group["case_id"],
                 "source_runs": value.get("source_runs", group["source_runs"]),
@@ -648,7 +731,8 @@ def _campaign_figures(
         for backend in _BACKENDS:
             values = []
             for point in sorted(
-                (p for p in members if p["backend"] == backend), key=lambda p: p["x"]
+                (p for p in members if p["backend"] == backend and p["y"] is not None),
+                key=lambda p: p["x"],
             ):
                 spread = point["mad"] or 0
                 values.append(
@@ -878,6 +962,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--evidence-root", type=Path, action="append", default=[])
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--source-worktree", type=Path)
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args(argv)
     if args.list:
@@ -908,6 +993,7 @@ def main(argv: list[str] | None = None) -> None:
             phase=args.phase,
             case_ids=tuple(args.case_id),
             retry_failed=args.retry_failed,
+            source_worktree=args.source_worktree,
         )
     print(rebuild_campaign_report(args.root))
 

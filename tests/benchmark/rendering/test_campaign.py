@@ -282,8 +282,10 @@ def test_proof_selection_requires_original_completed_runs_and_separates_history(
     assert proof_population(root, "routing") == []
 
 
+@pytest.mark.parametrize("failed", [False, True])
 def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
     tmp_path: Path,
+    failed: bool,
 ) -> None:
     metrics = {
         name: {
@@ -336,6 +338,30 @@ def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
         }
         for phase in ("coverage", "publication")
     ]
+    if failed:
+        from scripts.benchmark.rendering.publication_report import _aggregate
+
+        groups = _aggregate(
+            [
+                {
+                    "run_id": "oom",
+                    "backend": "isaaclab",
+                    "case_id": "case",
+                    "repeat": 0,
+                    "experiment_id": "R-04",
+                    "hardware_id": "uuid",
+                    "config": group["config"],
+                    "config_sha256": "config",
+                    "metrics": {},
+                    "status": "failed",
+                    "failure_reason_code": "oom",
+                    "quality_status": "missing",
+                    "qualified_for_comparison": False,
+                }
+            ]
+        )
+        for record in records:
+            record["group"] = groups[0]
     figures = campaign._campaign_figures(tmp_path, records)
     assert len(figures) == 10
     assert {f["scope"]["phase"] for f in figures} == {"coverage", "publication"}
@@ -345,6 +371,133 @@ def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
         ).is_file()
         assert "raw-sha" in (tmp_path / figure["svg"]).read_text()
     assert "coverage/original" in (tmp_path / "campaign-figure-data.csv").read_text()
+    if failed:
+        import csv
+
+        with (tmp_path / "campaign-figure-data.csv").open() as stream:
+            data = list(csv.DictReader(stream))
+        assert all(point["y"] == "" and point["mad"] == "" for point in data)
+
+
+def test_formal_exit_130_harvests_evidence_and_stops_later_jobs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.benchmark.rendering import formal_runner
+
+    root = _campaign(tmp_path, monkeypatch)
+    monkeypatch.setattr(campaign, "validate_approval", lambda path: {})
+    monkeypatch.setattr(
+        campaign, "rebuild_campaign_report", lambda root: root / "report.md"
+    )
+    monkeypatch.setattr(
+        campaign, "storage_gate", lambda *args, **kwargs: {"passed": True}
+    )
+    calls = []
+
+    def launch(argv):
+        calls.append(argv)
+        output = Path(argv[argv.index("--output") + 1]) / "invocation"
+        experiment = output / "R-01"
+        experiment.mkdir(parents=True)
+        write_json(output / "index.json", {"experiments": [{"path": "R-01"}]})
+        write_json(
+            experiment / "runs.json",
+            [
+                {
+                    "selected": True,
+                    "backend": "isaaclab",
+                    "repeat": 0,
+                    "run_id": "interrupted",
+                    "status": "interrupted",
+                    "case_id": argv[argv.index("--case-id") + 1],
+                }
+            ],
+        )
+        raise SystemExit(130)
+
+    monkeypatch.setattr(formal_runner, "main", launch)
+    with pytest.raises(KeyboardInterrupt):
+        campaign.run_campaign(root, phase="coverage")
+    _, state = campaign._load(root)
+    jobs = [j for j in state["jobs"] if j["phase"] == "coverage"]
+    assert len(calls) == 1
+    assert jobs[0]["status"] == jobs[0]["attempts"][0]["status"] == "interrupted"
+    assert jobs[0]["attempts"][0]["experiments"]
+    assert jobs[1]["status"] == "not_run"
+
+
+def test_job_reserves_all_backend_repeat_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _campaign(tmp_path, monkeypatch)
+    monkeypatch.setattr(campaign, "validate_approval", lambda path: {})
+    admitted = []
+    monkeypatch.setattr(
+        campaign,
+        "storage_gate",
+        lambda definition, **kwargs: (
+            admitted.append(kwargs) or {"passed": False, "reason": "evidence_budget"}
+        ),
+    )
+    definition, _ = campaign._load(root)
+    selected = next(c for c in definition["cases"] if c["publication_core"])
+    campaign.run_campaign(root, phase="publication", case_ids=(selected["case_id"],))
+    assert admitted[0]["reservation_bytes"] == 20 * campaign._reservation(
+        selected["case"]
+    )
+
+
+def test_storage_gate_checks_actual_proof_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _campaign(tmp_path, monkeypatch)
+    definition, _ = campaign._load(root)
+    proof = tmp_path / "proof-volume"
+    proof.mkdir()
+    definition["budget"] = {"evidence_bytes": 1024**3, "minimum_free_bytes": 20}
+    checked = []
+
+    def disk_usage(path):
+        checked.append(Path(path))
+        return SimpleNamespace(free=10 if Path(path) == proof else 100)
+
+    monkeypatch.setattr(campaign.shutil, "disk_usage", disk_usage)
+    gate = campaign.storage_gate(definition, destination=proof / "new-proof")
+    assert gate["reason"] == "disk_headroom" and proof in checked
+
+
+def test_corrected_driver_launches_original_source_and_records_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _campaign(tmp_path, monkeypatch)
+    original = tmp_path / "frozen-source"
+    original.mkdir()
+    monkeypatch.setattr(campaign, "_source_files", lambda *args: {"file.py": "frozen"})
+    monkeypatch.setattr(campaign, "validate_approval", lambda path: {})
+    monkeypatch.setattr(
+        campaign, "rebuild_campaign_report", lambda root: root / "report.md"
+    )
+    calls = []
+
+    def launch(source, argv):
+        calls.append((source, argv))
+        raise SystemExit(130)
+
+    monkeypatch.setattr(campaign, "_run_frozen_formal", launch)
+    with pytest.raises(KeyboardInterrupt):
+        campaign.run_campaign(root, phase="coverage", source_worktree=original)
+    _, state = campaign._load(root)
+    attempt = next(j for j in state["jobs"] if j["phase"] == "coverage")["attempts"][0]
+    assert calls[0][0] == original
+    assert attempt["execution_source_root"] == str(original)
+    assert attempt["driver_source_commit"] == campaign.EA_COMMIT
+    monkeypatch.setattr(campaign, "_source_files", lambda *args: {"file.py": "drifted"})
+    with pytest.raises(ValueError, match="source changed"):
+        campaign.run_campaign(root, phase="coverage", source_worktree=original)
 
 
 def test_worker_completion_is_selected_by_frozen_plan_when_flag_is_absent(
