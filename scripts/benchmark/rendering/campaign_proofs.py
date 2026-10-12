@@ -43,6 +43,60 @@ from scripts.benchmark.core.provenance import git_revision
 
 __all__ = ["proof_population", "run_proofs", "main"]
 
+_MIB = 1024**2
+
+
+def _reference_reservation(
+    experiment: Path,
+    row: dict[str, Any],
+    cache: Path,
+    history: Path | None = None,
+) -> int:
+    """Bound all distinct precision rungs and diagnostic output before CPU work.
+
+    Cold references reserve raw float32 RGB/repeat, depth and int32 labels,
+    metadata, and a possible cache copy. Existing shared entries reserve their
+    full actual closure as a possible copy, even when hardlinks will save space.
+    Existing local references create no new closure; their checksums remain the
+    evaluator's responsibility. Corrupt entries are never regenerated in place.
+    """
+    from .evaluate import _load_run, _load_history, _reference_identity
+
+    run = _load_run(experiment, row)
+    if history is not None:
+        run = _load_history(experiment, run, history)
+    pixels = run["case"].width * run["case"].height
+    reserve = (
+        max(512 * _MIB, 100 * pixels * len(run["descriptors"]))
+        if row["config"]["temporal_mode"] == "static"
+        else 512 * _MIB
+    )
+    seen = set()
+    for descriptor in run["descriptors"]:
+        for spp in (4096, 16384):
+            identity = _reference_identity(
+                run, descriptor, {"spp": spp, "threads": 8, "seed": 0}
+            )
+            key = stable_hash(identity)
+            if key in seen:
+                continue
+            seen.add(key)
+            if (experiment / "references" / key).exists():
+                continue
+            shared = cache / "references" / key
+            if shared.exists():
+                reserve += (
+                    sum(
+                        path.stat().st_size
+                        for path in shared.rglob("*")
+                        if path.is_file()
+                    )
+                    + _MIB
+                )
+            else:
+                reserve += 2 * (32 * pixels + _MIB)
+    return reserve
+
 
 def proof_population(root: Path, kind: str) -> list[dict[str, Any]]:
     """Select completed original runs without changing any trial population.
@@ -214,21 +268,6 @@ def run_proofs(
         destination = (
             proof_root / kind / identity / f"attempt-{proof['evaluation_attempt']:03d}"
         )
-        reserve = (
-            301 * case["width"] * case["height"] * 3 * 3
-            if kind == "history"
-            else 256 * 1024**2
-        )
-        gate = storage_gate(
-            definition,
-            reservation_bytes=reserve,
-            destination=destination if kind in ("history", "routing") else root,
-        )
-        if not gate["passed"]:
-            proof["reason"] = gate["reason"]
-            proof["storage_gate"] = gate
-            write_json(root / "campaign-state.json", state)
-            break
         experiment = root / proof["experiment"]
         history = next(
             (
@@ -250,6 +289,54 @@ def run_proofs(
             proof["reason"] = "complete_publication_history_required"
             write_json(root / "campaign-state.json", state)
             continue
+        reserve = 256 * _MIB
+        if kind == "history":
+            # 4 prefix + 30 warmups + 300 measured captures, with padding.
+            # Both acquisition and portable import persist NPZ/PNG evidence.
+            pixel_bytes = sum(
+                {"rgb": 3, "depth": 4, "seg": 4, "normals": 12}[m]
+                for m in case["modalities"]
+            )
+            reserve += (
+                350
+                * case["width"]
+                * case["height"]
+                * case["num_envs"]
+                * case["cameras_per_env"]
+                * (pixel_bytes + 3)
+                * 2
+            )
+        elif kind in ("quality", "calibration"):
+            try:
+                row = next(
+                    r
+                    for r in json.loads((experiment / "runs.json").read_text())
+                    if r["run_id"] == proof["run_id"]
+                )
+                reserve = _reference_reservation(
+                    experiment,
+                    row,
+                    cache,
+                    experiment / history["history_evidence"] if history else None,
+                )
+            except Exception as error:
+                proof.update(
+                    status="failed",
+                    reason=f"proof_admission_input: {type(error).__name__}: {error}",
+                )
+                write_json(root / "campaign-state.json", state)
+                continue
+        gate = storage_gate(
+            definition,
+            reservation_bytes=reserve,
+            destination=destination if kind in ("history", "routing") else root,
+        )
+        proof["storage_reservation_bytes"] = reserve
+        if not gate["passed"]:
+            proof["reason"] = gate["reason"]
+            proof["storage_gate"] = gate
+            write_json(root / "campaign-state.json", state)
+            break
         if kind in ("history", "routing"):
             if (
                 state["reserved_worker_runs"]

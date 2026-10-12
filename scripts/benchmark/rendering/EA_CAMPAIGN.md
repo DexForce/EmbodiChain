@@ -114,6 +114,12 @@ seeds 0/1 and eight CPU threads. Shared cache keys include scene, camera, object
 state, resolution, settings, implementation and reference-runtime identity.
 Corrupt/incomplete/conflicting entries fail closed before reuse. Each importing
 experiment registers the complete checked source closure.
+CPU admission enumerates distinct physical reference keys before evaluation and
+reserves both 4096/16384-spp rungs, uncompressed arrays, possible cache copies and
+diagnostic output. Existing local references need no new allocation; shared cache
+entries reserve a possible full copy using their actual sizes. Full history
+admission also includes prefix/warmup captures and portable import copies. A
+failed admission leaves the proof not-run with its recorded storage reason.
 
 Calibration uses the calibration scene's first ten views for training and last
 ten for heldout validation, with frozen actual controls. The owner recomputes

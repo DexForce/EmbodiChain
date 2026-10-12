@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from scripts.benchmark.rendering import campaign_proofs as proofs
 from scripts.benchmark.rendering import routing_diagnostic
 from scripts.benchmark.core import execution
 from scripts.benchmark.core.artifacts import stable_hash
+from scripts.benchmark.core.artifacts import write_json
 
 
 def _proof_campaign(
@@ -154,3 +156,99 @@ def test_pending_legacy_proof_records_the_actual_resuming_driver(
     assert all(
         p["driver_source_files"] == {"driver.py": "current"} for p in state["proofs"]
     )
+
+
+def test_fhd_history_admission_counts_distinct_states_and_both_precision_rungs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.benchmark.rendering import evaluate
+    from scripts.benchmark.rendering import reference
+
+    descriptors = [
+        {
+            "metadata": {
+                "scene_sha256": "scene",
+                "world_from_objects": {"state": i % 100},
+            },
+            "canonical_camera": {"name": "camera", "intrinsics": [1, 2, 3]},
+        }
+        for i in range(301)
+    ]
+    run = {"descriptors": descriptors, "case": SimpleNamespace(width=1920, height=1080)}
+    monkeypatch.setattr(evaluate, "_load_run", lambda *args: run)
+    monkeypatch.setattr(
+        reference, "reference_dependencies", lambda: {"versions": {"mitsuba": "frozen"}}
+    )
+    row = {"config": {"temporal_mode": "moving"}}
+    cache = tmp_path / "cache"
+    reserve = proofs._reference_reservation(tmp_path, row, cache)
+    # 100 physical states, both rungs, potential cache copies plus diagnostics.
+    expected = 512 * 1024**2 + 100 * 2 * 2 * (32 * 1920 * 1080 + 1024**2)
+    assert reserve == expected
+    assert reserve > 256 * 1024**2
+    keys = []
+    for descriptor in descriptors[:100]:
+        for spp in (4096, 16384):
+            keys.append(
+                stable_hash(
+                    evaluate._reference_identity(
+                        run, descriptor, {"spp": spp, "threads": 8, "seed": 0}
+                    )
+                )
+            )
+    # Locally present immutable entries need no new array allocation. Evaluation
+    # separately verifies completeness/checksums before consuming them.
+    for key in keys:
+        (tmp_path / "references" / key).mkdir(parents=True)
+    assert proofs._reference_reservation(tmp_path, row, cache) == 512 * 1024**2
+
+
+def test_shared_reference_admission_reserves_actual_possible_copy_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.benchmark.rendering import evaluate
+
+    run = {"descriptors": [{}], "case": SimpleNamespace(width=128, height=128)}
+    monkeypatch.setattr(evaluate, "_load_run", lambda *args: run)
+    monkeypatch.setattr(
+        evaluate, "_reference_identity", lambda run, descriptor, settings: settings
+    )
+    cache = tmp_path / "cache"
+    for spp in (4096, 16384):
+        key = stable_hash({"spp": spp, "threads": 8, "seed": 0})
+        directory = cache / "references" / key
+        directory.mkdir(parents=True)
+        (directory / "arrays.npz").write_bytes(b"x" * 64)
+    reserve = proofs._reference_reservation(
+        tmp_path, {"config": {"temporal_mode": "static"}}, cache
+    )
+    assert reserve == 512 * 1024**2 + 2 * (64 + 1024**2)
+
+
+def test_cpu_proof_stays_not_run_when_complete_reference_population_cannot_fit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, state, _ = _proof_campaign(tmp_path, monkeypatch)
+    request = {**proofs.proof_population(root, "routing")[0], "kind": "quality"}
+    monkeypatch.setattr(proofs, "proof_population", lambda *args: [request])
+    experiment = root / "original"
+    experiment.mkdir()
+    write_json(experiment / "runs.json", [{"run_id": "run-0"}])
+    cold_bytes = 12 * 1024**3
+    admitted = []
+    monkeypatch.setattr(proofs, "_reference_reservation", lambda *args: cold_bytes)
+
+    def gate(definition, **kwargs):
+        admitted.append(kwargs)
+        return {"passed": False, "reason": "evidence_budget"}
+
+    monkeypatch.setattr(proofs, "storage_gate", gate)
+    proofs.run_proofs(root, kind="quality")
+    proof = state["proofs"][0]
+    assert admitted[0]["reservation_bytes"] == cold_bytes
+    assert proof["status"] == "not_run" and proof["reason"] == "evidence_budget"
+    assert proof["storage_reservation_bytes"] == cold_bytes
+    assert state["reserved_worker_runs"] == 0

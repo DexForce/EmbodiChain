@@ -604,6 +604,30 @@ def _reference_spec(metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _reference_identity(
+    run: dict[str, Any],
+    descriptor: dict[str, Any],
+    settings: dict[str, int],
+) -> dict[str, Any]:
+    """Return the complete physical/generator identity shared by admission and reuse."""
+    metadata, case = descriptor["metadata"], run["case"]
+    return {
+        "schema_version": 1,
+        "scene_sha256": metadata["scene_sha256"],
+        "camera": {
+            key: value
+            for key, value in descriptor["canonical_camera"].items()
+            if key != "name"
+        },
+        "object_transforms": metadata["world_from_objects"],
+        "width": case.width,
+        "height": case.height,
+        "settings": settings,
+        "reference_implementation_sha256": _sha256(Path(reference.__file__)),
+        "reference_runtime": reference.reference_dependencies()["versions"],
+    }
+
+
 def _independent_reference(
     root: Path,
     run: dict[str, Any],
@@ -613,21 +637,7 @@ def _independent_reference(
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     metadata, case = descriptor["metadata"], run["case"]
     spec = _reference_spec(metadata)
-    identity = {
-        "schema_version": 1,
-        "scene_sha256": metadata["scene_sha256"],
-        "camera": {
-            key: value
-            for key, value in descriptor["canonical_camera"].items()
-            if key != "name"
-        },
-        "object_transforms": spec["object_transforms"],
-        "width": case.width,
-        "height": case.height,
-        "settings": settings,
-        "reference_implementation_sha256": _sha256(Path(reference.__file__)),
-        "reference_runtime": reference.reference_dependencies()["versions"],
-    }
+    identity = _reference_identity(run, descriptor, settings)
     key = stable_hash(identity)
     directory = root / "references" / key
     descriptor_path = directory / "cache_binding.json"
