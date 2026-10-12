@@ -92,6 +92,7 @@ def _local_place_ik(
     options: MotionGenOptions,
     *,
     candidate_predicate: Callable[[torch.Tensor], bool] | None = None,
+    operation: str = "Place",
 ) -> PlanResult | None:
     """Recover a single-environment path without changing targets or timing."""
     robot = generator.robot
@@ -171,7 +172,7 @@ def _local_place_ik(
     if not success.all():
         return None
     logger.log_info(
-        f"GenSim Place local IK recovery accepted: {repairs} local searches, "
+        f"GenSim {operation} local IK recovery accepted: {repairs} local searches, "
         f"{path.shape[1]} unchanged-time samples."
     )
     return PlanResult(success=success, positions=path, dt=dt)

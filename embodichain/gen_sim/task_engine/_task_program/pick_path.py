@@ -37,7 +37,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from .articulation_collision import check_free_motion
 from .held_alignment_recovery import _RandomState, _cuda_devices
-from .motion import _joint_velocity_limits
+from .motion import _joint_velocity_limits, _local_place_ik
 from .pick_safety import _inspect_pick_plan
 
 __all__: list[str] = []
@@ -268,19 +268,21 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
         base_count = max(2, stop - boundary)
         for count in (base_count, base_count * 2 - 1):
             state.restore()
+            contact_targets = build_pose_plan_states(
+                interpolate_xpos_batched(grasp, pre, count)[:, 1:]
+            )
+            contact_options = MotionGenOptions(
+                strategy="ik_interp",
+                start_qpos=qgrasp,
+                control_part=arm.control_part,
+                sample_count=count,
+                interpolation_dt=dt,
+                preserve_cartesian_samples=True,
+                is_linear=True,
+            )
             backward = action.motion_generator._generate_checked(
-                build_pose_plan_states(
-                    interpolate_xpos_batched(grasp, pre, count)[:, 1:]
-                ),
-                options=MotionGenOptions(
-                    strategy="ik_interp",
-                    start_qpos=qgrasp,
-                    control_part=arm.control_part,
-                    sample_count=count,
-                    interpolation_dt=dt,
-                    preserve_cartesian_samples=True,
-                    is_linear=True,
-                ),
+                contact_targets,
+                options=contact_options,
             )
             note: dict[str, Any] = {
                 "contact_samples": count,
@@ -288,7 +290,16 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
             }
             attempts.append(note)
             if not backward.success.all():
-                continue
+                recovered = _local_place_ik(
+                    action.motion_generator,
+                    contact_targets,
+                    contact_options,
+                    operation="Pick contact",
+                )
+                note["contact_local_ik_valid"] = recovered is not None
+                if recovered is None:
+                    continue
+                backward = recovered
             contact = backward.positions.flip(1)
             poses = action.robot.compute_batch_fk(
                 qpos=contact, name=arm.control_part, to_matrix=True

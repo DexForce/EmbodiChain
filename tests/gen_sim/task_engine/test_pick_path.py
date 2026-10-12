@@ -264,19 +264,53 @@ def test_collision_unavailable_fails_closed_without_dispatching_original(
     assert result.diagnostics.failure.code == "gen_sim_pick_path_unqualified"
 
 
-def test_failed_cartesian_samples_are_not_dropped_or_replaced_by_joint_sweep(
+def test_failed_cartesian_samples_use_bounded_local_ik_and_fail_closed(
     monkeypatch,
 ) -> None:
     data = _fixture(monkeypatch)
     failed = NS(success=torch.tensor([False]), positions=None, dt=None)
     generate = Mock(return_value=failed)
+    local = Mock(return_value=None)
     data[0].motion_generator._generate_checked = generate
+    monkeypatch.setattr(path, "_local_place_ik", local)
     result = path.rebuild(*data)
     assert not result.plan_success.any()
     assert generate.call_count == 2
+    assert local.call_count == 2
     assert all(
         call.kwargs["options"].preserve_cartesian_samples
         for call in generate.call_args_list
+    )
+
+
+def test_failed_cartesian_samples_accept_local_ik_recovery(monkeypatch) -> None:
+    data = _fixture(monkeypatch)
+    failed = NS(success=torch.tensor([False]), positions=None, dt=None)
+    original_generate = data[0].motion_generator._generate_checked
+
+    def generate(states, *, options):
+        if options.preserve_cartesian_samples:
+            return failed
+        return original_generate(states, options=options)
+
+    data[0].motion_generator._generate_checked = generate
+    recovered = NS(
+        success=torch.tensor([True]),
+        positions=torch.tensor([[[0.2, 0.0], [0.2, 0.1], [0.2, 0.2]]]),
+        dt=torch.tensor([[0.0, 0.04, 0.04]]),
+    )
+    local = Mock(return_value=recovered)
+    monkeypatch.setattr(path, "_local_place_ik", local)
+
+    result = path.rebuild(*data)
+
+    assert result.plan_success.all()
+    assert local.call_count == 1
+    assert (
+        result.diagnostics.metadata["gen_sim_pick_path"]["attempts"][0][
+            "contact_local_ik_valid"
+        ]
+        is True
     )
 
 
