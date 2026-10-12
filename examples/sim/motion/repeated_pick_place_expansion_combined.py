@@ -51,17 +51,60 @@ _DEFAULT_TASK_CONFIG = (
     _REPOSITORY_ROOT
     / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
+_DEFAULT_OUTPUT_DIR = (
+    _REPOSITORY_ROOT / "output" / "repeated_pick_place_expansion_combined"
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-config", type=Path, default=_DEFAULT_TASK_CONFIG)
     parser.add_argument("--expansion-profile", type=Path, default=None)
-    parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--num-envs", type=int, default=16)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=_DEFAULT_OUTPUT_DIR,
+        help=f"Artifact directory. Default: {_DEFAULT_OUTPUT_DIR}",
+    )
+    parser.add_argument(
+        "--num-envs",
+        type=int,
+        default=None,
+        help="Batch width; omission uses the profile's execution.max_inflight.",
+    )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--headless", action="store_true")
     return parser
+
+
+def _preflight_augmentation(profile: CombinedExpansionProfile) -> None:
+    """Reject a profile whose amplitude cannot produce a distinct variant.
+
+    The host runner builds its augmentation settings from this profile, and the
+    contract refuses an enabled spatial factor whose offset scale does not
+    exceed the deduplication tolerance. Preflighting the very same settings
+    reports that configuration error before a simulator is ever constructed.
+    """
+    from embodichain.lab.sim.motion.expansion import TrajectoryExpansionCfg
+    from embodichain.lab.task_program.integrations.expansion import (
+        _combined_augmentation_payload,
+    )
+
+    cfg = TrajectoryExpansionCfg.from_mapping(
+        {
+            "augmentation": _combined_augmentation_payload(profile, 0),
+            "affordance": {"enabled": False},
+            "scheduling": {"candidate_budget": profile.trajectory.variants_per_family},
+            "execution": {"max_inflight": 1},
+            "observation": {"enabled": False, "profiles": []},
+        }
+    )
+    spatial = cfg.augmentation.factors.spatial
+    print(
+        f"trajectory augmentation: operators={list(spatial.method)} "
+        f"scale={spatial.joint_offset_scale} via_count={spatial.via_count} "
+        f"dedup_tolerance={cfg.augmentation.coverage.joint_dedup_normalized_tol}"
+    )
 
 
 def _record(recipe: CandidateRecipe) -> dict[str, object]:
@@ -93,27 +136,38 @@ def main(argv: list[str] | None = None) -> None:
             _resolve_expansion_request,
         )
 
+        if not args.task_config.is_file():
+            raise FileNotFoundError(f"task config does not exist: {args.task_config}")
         task_path = resolve_config_path(args.task_config)
+        # The task-bound resolver reads its own launcher namespace, so expose the
+        # task path under the attribute name it expects. It returns the profile,
+        # the selected logical recipes, the profile anchor, and the collection
+        # section.
         args.gym_config = str(task_path)
-        args.expansion_candidate_indices = None
         request = _resolve_expansion_request(args, load_config(task_path))
         if request is None:
             raise ValueError(
                 "task config must bind a expansion policy when "
                 "--expansion-profile is omitted"
             )
-        profile, _, profile_anchor = request
+        profile, _, profile_anchor, _ = request
         profile_source = str(profile_anchor)
     else:
+        if not args.expansion_profile.is_file():
+            raise FileNotFoundError(
+                f"expansion profile does not exist: {args.expansion_profile}"
+            )
         profile = load_expansion_profile(args.expansion_profile)
         profile_source = str(args.expansion_profile)
     if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError(
             "the combined command requires schema_version: 1 and trajectory"
         )
-    profile.validate_for_num_envs(args.num_envs)
-    if args.task_config is not None and not args.task_config.is_file():
-        raise FileNotFoundError(f"task config does not exist: {args.task_config}")
+    _preflight_augmentation(profile)
+    num_envs = (
+        profile.execution.max_inflight if args.num_envs is None else args.num_envs
+    )
+    profile.validate_for_num_envs(num_envs)
     visual_registry = (
         VisualProfileRegistry.from_yaml(
             resolve_config_path(profile.visual.profile_file),
@@ -139,7 +193,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     coordinator = CombinedEpisodeCoordinator(
         recipes,
-        slot_pool=PhysicalSlotPool(args.num_envs),
+        slot_pool=PhysicalSlotPool(num_envs),
         family_count=len(families),
         compatibility_key="strict:configured-preflight",
     )
@@ -165,7 +219,7 @@ def main(argv: list[str] | None = None) -> None:
         "schema_version": profile.schema_version,
         "reference_family_count": len(families),
         "candidate_count": len(scheduled_recipes),
-        "max_inflight": profile.execution.max_inflight,
+        "max_inflight": num_envs,
         "visual_profiles": list(visual_registry.profile_ids),
         "observation_profiles": list(profile.observation.profiles),
         "schedule_digest": digest,
@@ -181,9 +235,10 @@ def main(argv: list[str] | None = None) -> None:
     manifest_tmp.replace(manifest_path)
     print(
         f"resolved m={len(families)} a={profile.affordance.branches_per_family} "
-        f"t={profile.trajectory.variants_per_family} n={args.num_envs}"
+        f"t={profile.trajectory.variants_per_family} n={num_envs}"
     )
     print(f"schedule digest: {digest}")
+    print(f"schedule: {schedule_path}")
     print(f"manifest: {manifest_path}")
 
 

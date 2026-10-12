@@ -60,6 +60,9 @@ _TASK_ROOT = (
 )
 _DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"
 _DEFAULT_GENERATION_PROFILE = None
+_DEFAULT_OUTPUT_DIR = (
+    _REPOSITORY_ROOT / "output" / "repeated_pick_place_expansion_showcase"
+)
 _VIDEO_LOOK_AT = (
     (-1.25, -1.15, 0.95),
     (-0.25, -0.02, 0.25),
@@ -167,14 +170,16 @@ def _save_expansion_plot(
 def _validate_candidate_indices(
     values: Iterable[int],
     *,
-    profile: CombinedExpansionProfile,
+    recipe_count: int,
 ) -> tuple[int, ...]:
+    """Require a nonempty, unique selection inside the enumerated recipes."""
     indices = tuple(values)
     if not indices or len(set(indices)) != len(indices):
         raise ValueError("candidate indices must be nonempty and unique")
-    limit = len(enumerate_candidate_recipes(profile))
-    if any(type(index) is not int or not 0 <= index < limit for index in indices):
-        raise ValueError(f"candidate indices must be within [0, {limit})")
+    if any(
+        type(index) is not int or not 0 <= index < recipe_count for index in indices
+    ):
+        raise ValueError(f"candidate indices must be within [0, {recipe_count})")
     return indices
 
 
@@ -196,7 +201,12 @@ def _create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=_DEFAULT_GENERATION_PROFILE,
     )
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=_DEFAULT_OUTPUT_DIR,
+        help=f"Candidate artifact directory. Default: {_DEFAULT_OUTPUT_DIR}",
+    )
     parser.add_argument(
         "--candidate-indices",
         nargs="+",
@@ -326,23 +336,52 @@ def main(argv: list[str] | None = None) -> None:
         from embodichain.utils.utility import load_config
 
         task_path = resolve_config_path(args.gym_config)
+        # The task-bound resolver reads its own launcher namespace, so expose the
+        # task path under the attribute name it expects. It returns the profile,
+        # the selected logical recipes, the profile anchor, and the collection
+        # section.
+        args.gym_config = str(task_path)
         request = _resolve_expansion_request(args, load_config(task_path))
         if request is None:
             raise ValueError(
                 "task config must bind a expansion policy when "
                 "--expansion-profile is omitted"
             )
-        profile, _, _ = request
+        profile, _, _, _ = request
     else:
+        if not args.expansion_profile.is_file():
+            raise FileNotFoundError(
+                f"expansion profile does not exist: {args.expansion_profile}"
+            )
         profile = load_expansion_profile(args.expansion_profile)
     if not isinstance(profile, CombinedExpansionProfile):
         raise ValueError(
             "the Task Program showcase requires a schema_version=1 "
             "CombinedExpansionProfile"
         )
+    visual_registry = (
+        VisualProfileRegistry.from_yaml(
+            resolve_config_path(profile.visual.profile_file)
+        )
+        if profile.visual.enabled
+        else None
+    )
+    if profile.scene_randomization.enabled:
+        reference_families = CubeInitialPoseProvider.from_yaml(
+            resolve_config_path(profile.scene_randomization.profile_file),
+            seed=7,
+        ).enumerate(profile.scene_randomization.reference_family_count)
+    else:
+        reference_families = CubeInitialPoseProvider().enumerate(
+            profile.scene_randomization.reference_family_count
+        )
+    combined_recipes = enumerate_candidate_recipes(
+        profile,
+        families=reference_families,
+    )
     candidate_indices = _validate_candidate_indices(
         args.candidate_indices,
-        profile=profile,
+        recipe_count=len(combined_recipes),
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -350,103 +389,73 @@ def main(argv: list[str] | None = None) -> None:
     execute_init_hooks()
     env_cfg, gym_config, action_config = build_env_cfg_from_args(args)
     env = gymnasium.make(id=gym_config["id"], cfg=env_cfg, **action_config)
-    visual_registry = None
-    combined_recipes = ()
-    reference_families = ()
-    if isinstance(profile, CombinedExpansionProfile):
-        if profile.visual.enabled:
-            visual_registry = VisualProfileRegistry.from_yaml(
-                resolve_config_path(profile.visual.profile_file)
-            )
-        if profile.scene_randomization.enabled:
-            reference_families = CubeInitialPoseProvider.from_yaml(
-                resolve_config_path(profile.scene_randomization.profile_file),
-                seed=7,
-            ).enumerate(profile.scene_randomization.reference_family_count)
-        else:
-            reference_families = CubeInitialPoseProvider().enumerate(
-                profile.scene_randomization.reference_family_count
-            )
-        combined_recipes = enumerate_candidate_recipes(
-            profile,
-            families=reference_families,
-        )
     try:
         for candidate_index in candidate_indices:
             reset_params: dict[str, object] = {}
-            batch_recipes = ()
-            visual_assignments: dict[int, str] = {}
-            if isinstance(profile, CombinedExpansionProfile):
-                batch_size = int(env.unwrapped.num_envs)
-                if candidate_index >= len(combined_recipes):
-                    raise ValueError(
-                        "candidate_index batch exceeds the combined recipe budget"
-                    )
-                batch_recipes = tuple(
-                    combined_recipes[(candidate_index + row) % len(combined_recipes)]
-                    for row in range(batch_size)
+            batch_size = int(env.unwrapped.num_envs)
+            if candidate_index >= len(combined_recipes):
+                raise ValueError(
+                    "candidate_index batch exceeds the combined recipe budget"
                 )
-                family_by_id = {
-                    family.reference_family_id: family for family in reference_families
-                }
-                if profile.scene_randomization.enabled:
-                    pose = torch.tensor(
+            batch_recipes = tuple(
+                combined_recipes[(candidate_index + row) % len(combined_recipes)]
+                for row in range(batch_size)
+            )
+            family_by_id = {
+                family.reference_family_id: family for family in reference_families
+            }
+            if profile.scene_randomization.enabled:
+                pose = torch.tensor(
+                    [
                         [
-                            [
-                                *family_by_id[recipe.reference_family_id].cube_position,
-                                *family_by_id[
-                                    recipe.reference_family_id
-                                ].cube_quaternion_xyzw,
-                            ]
-                            for recipe in batch_recipes
-                        ],
-                        dtype=torch.float32,
-                        device=env.unwrapped.device,
-                    )
-                    reset_params["cube_pose"] = pose
-                if profile.visual.enabled:
-                    visual_assignments = {
-                        env_id: recipe.visual_profile_id
-                        for env_id, recipe in enumerate(batch_recipes)
+                            *family_by_id[recipe.reference_family_id].cube_position,
+                            *family_by_id[
+                                recipe.reference_family_id
+                            ].cube_quaternion_xyzw,
+                        ]
+                        for recipe in batch_recipes
+                    ],
+                    dtype=torch.float32,
+                    device=env.unwrapped.device,
+                )
+                reset_params["cube_pose"] = pose
+            if profile.visual.enabled:
+                visual_assignments = {
+                    env_id: recipe.visual_profile_id
+                    for env_id, recipe in enumerate(batch_recipes)
+                }
+                reset_params.update(
+                    {
+                        "visual_registry": visual_registry,
+                        "visual_assignments": visual_assignments,
+                        "visual_seed": 7 + candidate_index,
                     }
-                    reset_params.update(
-                        {
-                            "visual_registry": visual_registry,
-                            "visual_assignments": visual_assignments,
-                            "visual_seed": 7 + candidate_index,
-                        }
-                    )
-                if reset_params:
-                    _configure_expansion_reset_event(env, reset_params)
+                )
+            if reset_params:
+                _configure_expansion_reset_event(env, reset_params)
 
             env.reset(seed=args.seed, options={"save_data": False})
 
-            scheduler = None
-            assignments = ()
-            if isinstance(profile, CombinedExpansionProfile):
-                batch_size = int(env.unwrapped.num_envs)
-                scheduler = CombinedEpisodeCoordinator(
-                    batch_recipes,
-                    slot_pool=PhysicalSlotPool(batch_size),
-                    family_count=max(
-                        1,
-                        len({recipe.reference_family_id for recipe in batch_recipes}),
-                    ),
-                    compatibility_key="strict:configured-expansion",
-                )
-                assignments = tuple(
-                    assignment
-                    for _ in range(batch_size)
-                    if (assignment := scheduler.acquire_next()) is not None
-                )
-                if len(assignments) != batch_size:
-                    raise RuntimeError("combined scheduler could not reserve every row")
-                if tuple(
-                    assignment.reservation.slot_id for assignment in assignments
-                ) != tuple(range(batch_size)):
-                    raise RuntimeError(
-                        "combined scheduler returned non-contiguous rows"
-                    )
+            scheduler = CombinedEpisodeCoordinator(
+                batch_recipes,
+                slot_pool=PhysicalSlotPool(batch_size),
+                family_count=max(
+                    1,
+                    len({recipe.reference_family_id for recipe in batch_recipes}),
+                ),
+                compatibility_key="strict:configured-expansion",
+            )
+            assignments = tuple(
+                assignment
+                for _ in range(batch_size)
+                if (assignment := scheduler.acquire_next()) is not None
+            )
+            if len(assignments) != batch_size:
+                raise RuntimeError("combined scheduler could not reserve every row")
+            if tuple(assignment.reservation.slot_id for assignment in assignments) != (
+                tuple(range(batch_size))
+            ):
+                raise RuntimeError("combined scheduler returned non-contiguous rows")
             recording_started = False
             terminal_status = "rejected"
             try:
@@ -466,7 +475,7 @@ def main(argv: list[str] | None = None) -> None:
                     expansion_profile=profile,
                     expansion_candidate_index=candidate_index,
                 )
-                if result.completed and bool(result.success) and all(result.success):
+                if result.completed and result.all_success:
                     terminal_status = "accepted"
             finally:
                 if recording_started:
@@ -496,18 +505,14 @@ def main(argv: list[str] | None = None) -> None:
                     raise RuntimeError(
                         f"Candidate {candidate_index} stopped: {result.terminal_reason}"
                     )
-                task_success = bool(result.success) and all(result.success)
-                env.reset(
-                    options={"save_data": bool(result.completed and task_success)}
-                )
+                env.reset(options={"save_data": bool(result.all_success)})
             finally:
-                if scheduler is not None:
-                    for assignment in assignments:
-                        try:
-                            scheduler.finish(assignment, status=terminal_status)
-                        except ValueError:
-                            scheduler.cancel()
-                            break
+                for assignment in assignments:
+                    try:
+                        scheduler.finish(assignment, status=terminal_status)
+                    except ValueError:
+                        scheduler.cancel()
+                        break
     finally:
         env.close()
     if args.concat_video:
@@ -515,6 +520,8 @@ def main(argv: list[str] | None = None) -> None:
             raise ValueError("--concat-video requires --save-video")
         combined = _write_combined_video(args.output_dir, candidate_indices)
         print(f"combined video: {combined}")
+    print(f"candidates: {list(candidate_indices)}")
+    print(f"artifacts: {args.output_dir}")
 
 
 if __name__ == "__main__":

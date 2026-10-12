@@ -234,6 +234,7 @@ class _SpatialCfg:
     enabled: bool = True
     operators: tuple[str, ...] = ("joint_residual", "via_points")
     joint_offset_scale: float = 0.05
+    dedup_tolerance: float | None = None
     via_count: int = 1
 
     def __post_init__(self) -> None:
@@ -248,6 +249,21 @@ class _SpatialCfg:
         )
         if not 0 <= self.joint_offset_scale <= 1:
             raise ValueError("trajectory.spatial.joint_offset_scale must be in [0, 1]")
+        if self.dedup_tolerance is not None:
+            self.dedup_tolerance = _finite(
+                self.dedup_tolerance,
+                "trajectory.spatial.dedup_tolerance",
+                positive=True,
+            )
+            # The tolerance decides which proposals count as genuinely new. At
+            # or above the offset scale every proposal measures as a duplicate
+            # of the reference, so the configured amplitude would be discarded
+            # and only the nominal variant would survive.
+            if self.enabled and self.dedup_tolerance >= self.joint_offset_scale:
+                raise ValueError(
+                    "trajectory.spatial.dedup_tolerance must stay below "
+                    "joint_offset_scale"
+                )
         _int(self.via_count, "trajectory.spatial.via_count", 1)
 
 
@@ -500,7 +516,13 @@ class CombinedExpansionProfile:
             _SpatialCfg,
             trajectory.get("spatial", {}),
             "trajectory.spatial",
-            {"enabled", "operators", "joint_offset_scale", "via_count"},
+            {
+                "enabled",
+                "operators",
+                "joint_offset_scale",
+                "dedup_tolerance",
+                "via_count",
+            },
         )
         timing = _construct(
             _TimingCfg, trajectory.get("timing", {}), "trajectory.timing", {"enabled"}

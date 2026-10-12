@@ -60,6 +60,46 @@ __all__ = [
 ]
 
 
+def _combined_augmentation_payload(
+    profile: CombinedExpansionProfile,
+    seed: int,
+) -> dict[str, object]:
+    """Return the augmentation settings every combined transform shares.
+
+    The profile's deduplication tolerance travels with the offset scale it has
+    to stay below: with the contract default, a profile that declares a
+    conservative amplitude would have every proposal measured as a duplicate of
+    the reference and would keep the nominal variant alone.
+
+    Args:
+        profile: Combined episode profile that owns the trajectory settings.
+        seed: Local sampling seed for this recipe's expansion streams.
+
+    Returns:
+        JSON-compatible augmentation settings.
+    """
+    if not isinstance(profile, CombinedExpansionProfile):
+        raise TypeError("profile must be a CombinedExpansionProfile")
+    spatial = profile.trajectory.spatial
+    payload: dict[str, object] = {
+        "seed": seed,
+        "max_variants_per_reference": profile.trajectory.variants_per_family,
+        "factors": {
+            "spatial": {
+                "enabled": spatial.enabled,
+                "method": spatial.operators,
+                "joint_offset_scale": spatial.joint_offset_scale,
+                "via_count": spatial.via_count,
+            }
+        },
+    }
+    if spatial.dedup_tolerance is not None:
+        payload["coverage"] = {
+            "joint_dedup_normalized_tol": spatial.dedup_tolerance,
+        }
+    return payload
+
+
 def _arm_joint_indices(
     robot: object,
     joint_count: int,
@@ -321,6 +361,17 @@ class CombinedTaskProgramExpansionFactory:
             return self._recipes[self._recipe_indices[row_index]]
         return self._recipes[(self._candidate_index + row_index) % len(self._recipes)]
 
+    def _augmentation_payload(self, seed: int) -> dict[str, object]:
+        """Return the augmentation settings every combined transform shares.
+
+        Args:
+            seed: Local sampling seed for this recipe's expansion streams.
+
+        Returns:
+            JSON-compatible augmentation settings.
+        """
+        return _combined_augmentation_payload(self._profile, seed)
+
     @property
     def records(self) -> tuple[TaskProgramExpansionRecord, ...]:
         """Return Place expansion records in planning-call order."""
@@ -443,18 +494,9 @@ class CombinedTaskProgramExpansionFactory:
                 "phase_permissions": permissions,
                 "phase_kinds": kinds,
             },
-            "augmentation": {
-                "seed": self._recipe.visual_seed % (2**63),
-                "max_variants_per_reference": self._profile.trajectory.variants_per_family,
-                "factors": {
-                    "spatial": {
-                        "enabled": self._profile.trajectory.spatial.enabled,
-                        "method": self._profile.trajectory.spatial.operators,
-                        "joint_offset_scale": self._profile.trajectory.spatial.joint_offset_scale,
-                        "via_count": self._profile.trajectory.spatial.via_count,
-                    }
-                },
-            },
+            "augmentation": self._augmentation_payload(
+                self._recipe.visual_seed % (2**63)
+            ),
             "affordance": {"enabled": False},
             "scheduling": {
                 "candidate_budget": self._profile.trajectory.variants_per_family,
@@ -619,19 +661,9 @@ class CombinedTaskProgramExpansionFactory:
                     "phase_permissions": self._profile.source.phase_permissions,
                     "phase_kinds": self._profile.source.phase_kinds,
                 },
-                "augmentation": {
-                    "seed": recipe.visual_seed % (2**63),
-                    "max_variants_per_reference": self._profile.trajectory.variants_per_family,
-                    "factors": {
-                        "spatial": {
-                            "enabled": self._profile.trajectory.spatial.enabled,
-                            "method": self._profile.trajectory.spatial.operators,
-                            "joint_offset_scale": self._profile.trajectory.spatial.joint_offset_scale,
-                            "via_count": self._profile.trajectory.spatial.via_count,
-                        },
-                        "timing": {"enabled": False},
-                    },
-                },
+                "augmentation": self._augmentation_payload(
+                    recipe.visual_seed % (2**63)
+                ),
                 "affordance": {"enabled": False},
                 "scheduling": {
                     "candidate_budget": self._profile.trajectory.variants_per_family,
@@ -798,18 +830,9 @@ class CombinedTaskProgramExpansionFactory:
                     "phase_permissions": permissions,
                     "phase_kinds": kinds,
                 },
-                "augmentation": {
-                    "seed": recipe.visual_seed % (2**63),
-                    "max_variants_per_reference": self._profile.trajectory.variants_per_family,
-                    "factors": {
-                        "spatial": {
-                            "enabled": self._profile.trajectory.spatial.enabled,
-                            "method": self._profile.trajectory.spatial.operators,
-                            "joint_offset_scale": self._profile.trajectory.spatial.joint_offset_scale,
-                            "via_count": self._profile.trajectory.spatial.via_count,
-                        }
-                    },
-                },
+                "augmentation": self._augmentation_payload(
+                    recipe.visual_seed % (2**63)
+                ),
                 "affordance": {"enabled": False},
                 "scheduling": {
                     "candidate_budget": self._profile.trajectory.variants_per_family,
