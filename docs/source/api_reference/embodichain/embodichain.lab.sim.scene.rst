@@ -33,6 +33,58 @@ six parts and a keep-out region. It generates a proposal, prepares the existing
 manager, settles through the caller-owned physics loop, checks measured layout
 and restores a physical snapshot. It requires a working native simulator;
 installing the numerical extra alone does not provide that runtime.
+Browser visualization is explicitly disabled with
+``VisualizationCfg(backend="none")``, and the renderer is ``"no-render"``.
+Use ``--output /path/to/report.json`` to save the measured checks. Successful
+execution reports ``layout_status="solved"``, ``stable=true``,
+``measured_xy_layout_valid=true`` and ``state_restored=true``. These checks
+qualify this tabletop preparation; they do not establish robot reachability
+or task success.
+
+GenSim integration and current scope
+------------------------------------
+
+GenSim's established entry points adapt the shared services while retaining
+their editing conventions and lifecycle. The following capabilities already
+use a single shared implementation:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 35 37
+
+   * - Capability
+     - GenSim entry point
+     - Shared implementation
+   * - Main horizontal support detection
+     - ``TableSupportSurfaceDetector``
+     - Scene CPU support detection, also used by ``detect_support_region``.
+   * - Group height alignment and planar placement
+     - ``AssetsGroupTableAligner`` and ``AssetsGroupSupportClamp``
+     - Scene CPU group-offset and support-containment strategies.
+   * - Independent AABB separation
+     - ``AssetsSupportLayoutOptimizer``
+     - Scene CPU packing strategy, also used by ``separate_aabbs``.
+   * - Tabletop and parent-surface constraints
+     - ``TableSurfaceLayoutOptimizer`` and ``ParentSurfaceLayoutOptimizer``
+     - ``LayoutProblem`` and ``solve_layout`` with the existing GenSim policy.
+   * - Physical settling and pose readback
+     - ``GravitySettler``
+     - ``settle_scene`` and ``SceneView.pose``; convergence is explicit opt-in.
+
+See :doc:`embodichain.gen_sim.scene_adapters` for the adapter APIs.
+GenSim owns image/text understanding, model clients, asset preparation, visual
+orientation decisions, the editable scene graph, hierarchy traversal, Y-up
+conversion, diagnostics and export. Its temporary simulation remains
+caller-owned. ``SceneFragment`` and ``SceneRecipe`` provide a separate explicit
+construction path; the existing image/edit pipelines do not run through that
+recipe interface or use the physical snapshot-restoration workflow.
+
+Physical mutation and restoration currently support B=1 with fixed topology.
+Parallel tensor geometry does not extend that runtime scope. Mesh support
+detection selects one main horizontal outer contour, and layout uses fixed-
+orientation XY AABBs. Changed orientations require measured footprints for
+post-settle layout checks. General room construction, batched physical writes,
+exact mesh collision and full solver checkpoints remain future work.
 
 CPU strategies and tensor kernels
 ---------------------------------

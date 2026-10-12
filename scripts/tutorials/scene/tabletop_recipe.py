@@ -30,6 +30,7 @@ import numpy as np
 from pathlib import Path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.scene import (
@@ -104,7 +105,12 @@ def run(seed: int) -> dict[str, object]:
     generated = generate(recipe, seed=seed)
     if generated.fragment is None or generated.variant is None:
         raise RuntimeError(generated.layout.message)
-    cfg = SimulationManagerCfg(headless=True, device="cpu", num_envs=1)
+    cfg = SimulationManagerCfg(
+        headless=True,
+        device="cpu",
+        num_envs=1,
+        visualization=VisualizationCfg(backend="none"),
+    )
     cfg.render_cfg.renderer = "no-render"
     sim = SimulationManager(cfg)
     try:
