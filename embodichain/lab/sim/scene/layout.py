@@ -23,7 +23,7 @@ from typing import Literal
 
 import numpy as np
 
-from embodichain.compute.layout import solve_aabb_layout
+from embodichain.lab.sim.scene._layout_cpu import solve_aabb_layout
 from embodichain.utils import configclass
 
 __all__ = [
@@ -108,7 +108,10 @@ class LayoutSolution:
 def solve_layout(
     problem: LayoutProblem, cfg: LayoutCfg | None = None
 ) -> LayoutSolution:
-    """Generate an arena-local XY proposal without reading or changing physics.
+    """Generate an arena-local XY proposal using the CPU SLSQP scene strategy.
+
+    This policy does not read or change physics. Shared tensor geometry kernels
+    support other devices independently; this search remains CPU-only.
 
     Args:
         problem: UID, geometry, boundary and relation inputs in metres.

@@ -20,15 +20,21 @@ from __future__ import annotations
 
 import numpy as np
 
-from embodichain.compute.geometry.aabb import AABBLayoutConfig, AABBLayoutOptimizer
-from embodichain.compute.geometry.placement import (
+from embodichain.lab.sim.scene._packing_cpu import AABBLayoutConfig, AABBLayoutOptimizer
+from embodichain.lab.sim.scene._placement_cpu import (
     GroupSupportClamp,
     GroupSupportClampConfig,
     group_height_offset,
 )
 from .geometry import SupportRegion
 
-__all__ = ["clamp_group", "separate_aabbs", "align_group_height"]
+__all__ = [
+    "AABBLayoutConfig",
+    "GroupSupportClampConfig",
+    "clamp_group",
+    "separate_aabbs",
+    "align_group_height",
+]
 
 
 def clamp_group(

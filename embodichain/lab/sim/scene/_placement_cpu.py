@@ -14,12 +14,17 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Numerical rigid-group placement on polygonal support regions."""
+"""CPU polygonal placement policy with raster search and tensor measurements."""
 
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 import numpy as np
+import torch
+from embodichain.compute.geometry import (
+    aabb_containment_violation,
+    group_height_offset as _group_height_offset_tensor,
+)
 from scipy.ndimage import binary_erosion
 from shapely import affinity, intersects_xy
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
@@ -353,6 +358,20 @@ class GroupSupportClamp:
         aabbs_by_id: dict[str, np.ndarray],
         delta_xy: np.ndarray,
     ) -> bool:
+        bounds = np.stack(
+            [
+                np.stack((corners.min(axis=0), corners.max(axis=0))) + delta_xy
+                for corners in aabbs_by_id.values()
+            ]
+        )
+        region_bounds = np.asarray(support.bounds, dtype=float).reshape(2, 2)
+        # Batch the numeric broad phase; Shapely still owns exact polygon/holes.
+        if bool(
+            aabb_containment_violation(
+                torch.from_numpy(bounds), torch.from_numpy(region_bounds)
+            ).any()
+        ):
+            return False
         return all(
             support.covers(
                 affinity.translate(
@@ -411,4 +430,11 @@ def group_height_offset(
         raise ValueError(
             "Support height must be finite and clearance finite and non-negative."
         )
-    return float(support_top_z + clearance_m - bounds[:, 0, 2].min())
+    offset, valid = _group_height_offset_tensor(
+        torch.from_numpy(bounds),
+        torch.as_tensor(support_top_z, dtype=torch.float64),
+        clearance=clearance_m,
+    )
+    if not bool(valid):
+        raise ValueError("Group height requires at least one valid bound.")
+    return float(offset)

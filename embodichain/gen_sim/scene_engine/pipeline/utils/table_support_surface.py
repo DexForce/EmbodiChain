@@ -27,7 +27,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-from embodichain.compute.geometry.support import (
+from embodichain.lab.sim.scene._support_cpu import (
     SupportSurfaceConfig,
     DetectedSupportSurface as TableSupportRegion,
     SupportSurfaceDetector,

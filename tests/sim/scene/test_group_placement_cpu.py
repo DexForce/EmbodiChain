@@ -20,11 +20,10 @@ import numpy as np
 import pytest
 from shapely.geometry import MultiPolygon, Polygon, box
 
-from embodichain.compute.geometry import (
-    AABBLayoutConfig,
-    AABBLayoutOptimizer,
-    GroupSupportClamp,
+from embodichain.lab.sim.scene._packing_cpu import AABBLayoutConfig, AABBLayoutOptimizer
+from embodichain.lab.sim.scene._placement_cpu import (
     GroupSupportClampConfig,
+    GroupSupportClamp,
     group_height_offset,
 )
 
@@ -141,3 +140,30 @@ def test_group_center_may_stay_in_gap_between_disconnected_supports() -> None:
     ).find_translation(support, bounds)
     assert delta is not None
     assert all(support.covers(Polygon(corners + delta)) for corners in bounds.values())
+
+
+@pytest.mark.parametrize("object_count", [16, 256])
+def test_candidate_pair_geometry_work_is_independent_of_scene_size(
+    monkeypatch, object_count
+):
+    from embodichain.lab.sim.scene import _packing_cpu
+
+    original = _packing_cpu.aabb_overlap_depth
+    measured_pair_counts = []
+
+    def counted_overlap(first, second):
+        # Enforce the pair evaluator's workload budget, not a specific indexing
+        # implementation. Candidate refinement must not compare unrelated bodies.
+        measured_pair_counts.append(int(np.prod(first.shape[:-2])))
+        assert first.numel() + second.numel() <= 8
+        return original(first, second)
+
+    monkeypatch.setattr(_packing_cpu, "aabb_overlap_depth", counted_overlap)
+    footprints = np.stack([_corners(0.2, 0.2)] * object_count)
+    result = AABBLayoutOptimizer()._overlap_details(
+        footprints, np.zeros((object_count, 2)), (0, object_count - 1)
+    )
+    assert measured_pair_counts == [1]
+    assert len(result) == 1
+    assert result[0][:2] == pytest.approx((0.200001, 0.200001))
+    assert result[0][2:] == (0, object_count - 1)

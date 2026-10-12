@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Array-only constrained XY layout with iterative AABB separation."""
+"""CPU scene-layout search policy using SLSQP and shared tensor geometry."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+import torch
+from embodichain.compute.geometry import aabb_overlap_depth
 from scipy.optimize import minimize
 
 __all__ = ["AABBLayoutResult", "solve_aabb_layout"]
@@ -159,17 +161,39 @@ def solve_aabb_layout(
             -float(half[source, axis] + half[target, axis] + relation_clearance_m)
         )
 
+    pair_first, pair_second = np.triu_indices(n, k=1)
+    if skip_fixed_collisions:
+        permitted = ~(fixed[pair_first] & fixed[pair_second])
+        pair_first, pair_second = pair_first[permitted], pair_second[permitted]
+    margin = collision_margin_m if enforce_all_clearances else 0.0
+    pair_half_sum = half[pair_first] + half[pair_second] + margin
+    degenerate = np.any(half == 0, axis=1)
+    degenerate_pairs = degenerate[pair_first] | degenerate[pair_second]
+
     def overlaps(xy: np.ndarray) -> list[tuple[float, int, int]]:
-        pairs = []
-        margin = collision_margin_m if enforce_all_clearances else 0.0
-        for i in range(n):
-            for j in range(i + 1, n):
-                if skip_fixed_collisions and fixed[i] and fixed[j]:
-                    continue
-                penetration = half[i] + half[j] + margin - np.abs(xy[i] - xy[j])
-                if np.all(penetration > feasibility_tolerance):
-                    pairs.append((float(np.min(penetration)), i, j))
-        return sorted(pairs, reverse=True)
+        expanded = np.stack((xy - half - margin / 2, xy + half + margin / 2), axis=1)
+        overlap = aabb_overlap_depth(
+            torch.from_numpy(expanded[pair_first]),
+            torch.from_numpy(expanded[pair_second]),
+        ).numpy()
+        # Retain minimum separation distance for contained or zero-sized proxies;
+        # intersection widths alone do not express the SLSQP strategy's metric.
+        penetration = pair_half_sum - np.abs(xy[pair_first] - xy[pair_second])
+        active = np.flatnonzero(
+            (degenerate_pairs | np.all(overlap > 0, axis=1))
+            & np.all(penetration > feasibility_tolerance, axis=1)
+        )
+        return sorted(
+            (
+                (
+                    float(penetration[index].min()),
+                    int(pair_first[index]),
+                    int(pair_second[index]),
+                )
+                for index in active
+            ),
+            reverse=True,
+        )
 
     def report(xy: np.ndarray, status: str, message: str) -> AABBLayoutResult:
         linear = max(

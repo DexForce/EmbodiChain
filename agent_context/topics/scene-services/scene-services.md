@@ -17,12 +17,15 @@ semantic scene graph, generation model client or task lifecycle.
 | Immutable physical capture and restoration | `embodichain/lab/sim/scene/state.py` |
 | Preflighted allowed rigid-body pose changes | `embodichain/lab/sim/scene/operations.py` |
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
-| Numerical geometry and constraint optimization | `embodichain/compute/geometry/`, `embodichain/compute/layout/` |
+| Batched tensor geometry kernels | `embodichain/compute/geometry/` |
+| CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
 `scene.expansion` namespace; the old `sim.scene_expansion` imports re-export the
-same contracts. `compute` takes numeric data, never simulation or GenSim models.
+same contracts. `compute.geometry` takes Torch tensors, never entity UIDs,
+polygon objects, simulation or GenSim models. Scene CPU strategies own support
+selection, polygon search, greedy packing and SciPy SLSQP optimization.
 
 ## Construction and proposal flow
 
@@ -47,6 +50,24 @@ unsupported frames are reported instead of reinterpreted. `solved`,
 `no_solution`, `budget_exhausted` and `unsupported` distinguish outcomes.
 Failure does not prove mathematical infeasibility. Geometry checks do not prove
 mesh collision freedom, vertical support, stability, reachability or task success.
+
+## Tensor batching and CPU strategies
+
+The geometry kernels preserve CPU/CUDA device and float32/float64 dtype. They
+compute AABB overlap and containment violations, affine AABB bounds, triangle
+normals/areas, and masked group-height reductions. Shape/dtype/device checks use
+host metadata; numeric invalidity is represented by outputs on the input device.
+
+`B` indexes independent layouts; `N` indexes objects in one layout. An `(N, 2, 3)`
+AABB collection is one object set, not N independent environments. Kernels
+broadcast leading dimensions; callers introduce separate object-pair axes when
+requesting pairwise comparisons. Group-height reduction consumes `(..., N, 2, 3)`
+and an optional boolean `(..., N)` validity mask, retaining independent leading
+batches. Padding is excluded; empty/all-padding batches return invalid evidence.
+
+Scene strategies still run on CPU and use Shapely, Trimesh and SciPy. Their
+Torch-kernel calls do not offload polygon search or SLSQP to CUDA. CUDA kernel
+support does not enable B>1 physics capture, edits or host stepping.
 
 ## Frames and runtime invariants
 
@@ -96,15 +117,20 @@ initial-state provenance while using these physical services. General
 [simulation lifecycle](../simulation-system/simulation-system.md) remains owned
 by Spawn and SimulationManager.
 
-The numerical dependencies are available as the `scene` extra. The standalone
+The CPU strategy dependencies are available as the `scene` extra. The standalone
 `scripts/tutorials/scene/tabletop_recipe.py` demonstrates a workbench, two
 panel-built containers, parts and a keep-out region with native preparation,
 settling, measured layout and restoration; it requires the installed simulation
 runtime and does not call a model provider.
 
+The standalone `scripts/benchmark/scene/geometry_kernels.py` measures geometry
+kernels separately from solver/host execution. Report its actual device, dtype,
+batch shape and synchronization policy; do not treat kernel throughput as
+end-to-end layout or simulator throughput.
+
 ## Focused validation
 
-Use `tests/compute/geometry/`, `tests/compute/layout/` and `tests/sim/scene/` for
+Use `tests/compute/geometry/` and `tests/sim/scene/` for
 geometry, constraints, recipes and runtime contracts. GenSim adapter regressions
 live in `tests/gen_sim/scene_engine/`; generic Task Program expansion regressions
 live in `tests/gym/envs/task_program/test_scene_expansion.py`. Concrete Gym-host

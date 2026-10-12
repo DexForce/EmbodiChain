@@ -208,15 +208,15 @@ topics:
   keywords: [SceneFragment, SceneRecipe, GeneratedScene, SupportRegion, LayoutProblem,
     LayoutSolution, PlanarRelation, SceneView, SceneState, SceneChangeSet, SceneCheckReport,
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
-    solve_layout, capture_state, restore_state, settle_scene, check_layout]
+    solve_layout, capture_state, restore_state, settle_scene, check_layout,
+    aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
+    geometry kernels, 场景几何核]
   paths: [topics/scene-services/scene-services.md]
   source_of_truth:
   - embodichain/lab/sim/scene/
   - embodichain/compute/geometry/
-  - embodichain/compute/layout/
   watch_paths: [embodichain/lab/sim/scene/, embodichain/compute/geometry/,
-    embodichain/compute/layout/, tests/sim/scene/, tests/compute/geometry/,
-    tests/compute/layout/]
+    tests/sim/scene/, tests/compute/geometry/]
   related_topics: [simulation-system, scene-expansion, gen-sim, task-programs]
   status: active
 - id: scene-expansion

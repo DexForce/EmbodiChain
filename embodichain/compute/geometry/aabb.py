@@ -14,378 +14,171 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Support-constrained numerical pairwise AABB layout."""
+"""Broadcastable Torch box arithmetic without host reads of tensor values."""
 
 from __future__ import annotations
-import numpy as np
-from shapely import affinity
-from shapely.geometry import MultiPolygon, Polygon
-from embodichain.utils import configclass
-from embodichain.utils.logger import log_info, log_warning
-from .placement import GroupSupportClamp, SupportGeometry
 
-__all__ = ["AABBLayoutConfig", "AABBLayoutOptimizer"]
+import math
+
+import torch
+
+__all__ = ["aabb_overlap_depth", "aabb_containment_violation", "group_height_offset"]
 
 
-@configclass
-class AABBLayoutConfig:
-    """Controls for support-constrained pairwise AABB separation."""
+def _float_tensor(value: torch.Tensor, name: str) -> None:
+    if not isinstance(value, torch.Tensor):
+        raise TypeError(f"{name} must be a torch.Tensor")
+    if (
+        value.dtype not in (torch.float32, torch.float64)
+        or value.layout != torch.strided
+    ):
+        raise ValueError(f"{name} must be a strided float32 or float64 tensor")
 
-    margin_m: float = 0.0  # Required clearance between each AABB and the boundary.
-    aabb_clearance_m: float = 1e-6  # Required clearance between AABB pairs.
-    max_rounds: int = 64  # Maximum greedy pair-separation passes.
-    split_samples: int = 9  # Candidate splits between the two overlapping AABBs.
+
+def _same_type(reference: torch.Tensor, other: torch.Tensor) -> None:
+    if reference.dtype != other.dtype or reference.device != other.device:
+        raise ValueError("Geometry inputs must have the same dtype and device")
 
 
-class AABBLayoutOptimizer:
-    """Greedily separate XY AABBs while checking the full support polygon."""
+def _bounds_tensor(value: torch.Tensor, name: str) -> None:
+    _float_tensor(value, name)
+    if value.ndim < 2 or value.shape[-2] != 2 or value.shape[-1] < 1:
+        raise ValueError(f"{name} must have shape (..., 2, D) with D >= 1")
 
-    def __init__(self, *, config: AABBLayoutConfig | None = None) -> None:
-        """Configure deterministic greedy separation.
 
-        Args:
-            config: Boundary, clearance and search budget parameters.
-        """
-        self.config = config if config is not None else AABBLayoutConfig()
-        self._validate_config()
+def _valid_bounds(value: torch.Tensor) -> torch.Tensor:
+    return torch.isfinite(value).all(dim=(-2, -1)) & (
+        value[..., 0, :] <= value[..., 1, :]
+    ).all(dim=-1)
 
-    def _validate_config(self) -> None:
-        """Recheck mutable controls at each public solve boundary."""
-        self.config.validate()
+
+def _pair_bounds(first: torch.Tensor, second: torch.Tensor) -> None:
+    _bounds_tensor(first, "bounds_a")
+    _bounds_tensor(second, "bounds_b")
+    _same_type(first, second)
+    if first.shape[-1] != second.shape[-1]:
+        raise ValueError("Bounds must have the same coordinate dimension")
+    torch.broadcast_shapes(first.shape[:-2], second.shape[:-2])
+
+
+def aabb_overlap_depth(bounds_a: torch.Tensor, bounds_b: torch.Tensor) -> torch.Tensor:
+    """Return nonnegative intersection lengths along every coordinate axis.
+
+    Args:
+        bounds_a: Minimum and maximum corners, shaped ``(..., 2, D)``.
+        bounds_b: Corresponding or broadcastable boxes, shaped ``(..., 2, D)``.
+
+    Returns:
+        Intersection lengths, shaped ``broadcast(...), D``. A pair intersects
+        with positive volume only when every component is positive. Touching
+        faces and disjoint axes have zero depth. Invalid (nonfinite or reversed)
+        input boxes produce an all-NaN row without synchronizing the device.
+
+    Inputs must share float32/float64 dtype and device. Add singleton leading
+    axes explicitly for pairwise comparisons; this function does not infer an
+    object axis or materialize an implicit N-by-N matrix.
+    """
+    _pair_bounds(bounds_a, bounds_b)
+    depth = (
+        torch.minimum(bounds_a[..., 1, :], bounds_b[..., 1, :])
+        - torch.maximum(bounds_a[..., 0, :], bounds_b[..., 0, :])
+    ).clamp_min(0)
+    valid = (
+        _valid_bounds(bounds_a)
+        & _valid_bounds(bounds_b)
+        & torch.isfinite(depth).all(dim=-1)
+    )
+    return torch.where(valid[..., None], depth, float("nan"))
+
+
+def aabb_containment_violation(
+    bounds: torch.Tensor, region: torch.Tensor
+) -> torch.Tensor:
+    """Return the largest boundary violation on each coordinate axis.
+
+    Args:
+        bounds: Object minimum and maximum corners, shaped ``(..., 2, D)``.
+        region: Allowed minimum and maximum corners, shaped ``(..., 2, D)``.
+
+    Returns:
+        Nonnegative violation distances, shaped ``broadcast(...), D``. A fully
+        contained box has a zero row, including boundary contact. Invalid boxes
+        produce all-NaN rows. Tensor values remain on their original device;
+        only shape/dtype/device metadata is validated on the host.
+    """
+    _pair_bounds(bounds, region)
+    violation = torch.maximum(
+        region[..., 0, :] - bounds[..., 0, :], bounds[..., 1, :] - region[..., 1, :]
+    ).clamp_min(0)
+    valid = (
+        _valid_bounds(bounds)
+        & _valid_bounds(region)
+        & torch.isfinite(violation).all(dim=-1)
+    )
+    return torch.where(valid[..., None], violation, float("nan"))
+
+
+def group_height_offset(
+    bounds: torch.Tensor,
+    support_z: torch.Tensor,
+    *,
+    valid_mask: torch.Tensor | None = None,
+    clearance: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute a common Z translation aligning a group's lowest box to a height.
+
+    Args:
+        bounds: Group boxes, shaped ``(..., N, 2, 3)``. Leading dimensions are
+            independent batches; N is the number of objects within one group.
+        support_z: Target support height, broadcastable to the leading batch
+            dimensions. Must share the bounds' float32/float64 dtype and device.
+        valid_mask: Optional bool tensor, shaped ``(..., N)``, on the same
+            device. False entries are padding; their numeric values are ignored.
+        clearance: Finite Python scalar added to the target height, in metres.
+
+    Returns:
+        ``(offset, valid)`` with the broadcast batch shape. Empty/all-padding
+        groups, nonfinite support heights, or any unmasked invalid box return
+        zero offset and false validity. The validity tensor is never read by the
+        host. A valid offset translates every group member by the same amount.
+    """
+    _bounds_tensor(bounds, "bounds")
+    _float_tensor(support_z, "support_z")
+    _same_type(bounds, support_z)
+    if bounds.ndim < 3 or bounds.shape[-1] != 3:
+        raise ValueError("Group bounds must have shape (..., N, 2, 3)")
+    if type(clearance) not in (int, float) or not math.isfinite(clearance):
+        raise ValueError("clearance must be a finite Python scalar")
+    count = bounds.shape[-3]
+    batch_shape = torch.broadcast_shapes(bounds.shape[:-3], support_z.shape)
+    if valid_mask is not None:
         if (
-            not np.isfinite([self.config.margin_m, self.config.aabb_clearance_m]).all()
-            or min(self.config.margin_m, self.config.aabb_clearance_m) < 0
+            not isinstance(valid_mask, torch.Tensor)
+            or valid_mask.dtype != torch.bool
+            or valid_mask.layout != torch.strided
         ):
-            raise ValueError("Margins and clearances must be finite and non-negative.")
-        if (
-            type(self.config.max_rounds) is not int
-            or type(self.config.split_samples) is not int
-            or self.config.max_rounds <= 0
-            or self.config.split_samples < 2
-        ):
-            raise ValueError(
-                "max_rounds must be a positive integer and split_samples an integer >= 2."
-            )
-
-    def solve(
-        self, support_region: SupportGeometry, aabbs_by_id: dict[str, np.ndarray]
-    ) -> dict[str, np.ndarray]:
-        """Separate AABBs within a support polygon using greedy pair proposals.
-
-        Args:
-            support_region: Allowed XY region.
-            aabbs_by_id: Finite four-corner AABBs per logical object.
-
-        Returns:
-            Object UID to XY translation mapping.
-
-        Raises:
-            ValueError: Invalid input or no placement found within the budget.
-        """
-        self._validate_config()
-        # Check inputs just like the previous GroupSupportClamp step would have done.
-        aabbs_by_id = GroupSupportClamp._validate_aabbs(aabbs_by_id)
-        raw_support = GroupSupportClamp._coerce_support_geometry(support_region)
-        if raw_support is None:
-            log_warning("AABB overlap optimization failed: invalid support geometry.")
-            raise ValueError("Support region is invalid.")
-        safe_support = (
-            raw_support
-            if self.config.margin_m == 0.0
-            else GroupSupportClamp._polygonal_geometry(
-                raw_support.buffer(-self.config.margin_m)
-            )
+            raise ValueError("valid_mask must be a strided boolean tensor")
+        if valid_mask.device != bounds.device:
+            raise ValueError("valid_mask must be on the bounds device")
+        if valid_mask.ndim < 1 or valid_mask.shape[-1] != count:
+            raise ValueError("valid_mask must have shape (..., N)")
+        batch_shape = torch.broadcast_shapes(batch_shape, valid_mask.shape[:-1])
+    if count == 0:
+        return bounds.new_zeros(batch_shape), torch.zeros(
+            batch_shape, dtype=torch.bool, device=bounds.device
         )
-        if safe_support is None or safe_support.is_empty:
-            log_warning(
-                "AABB overlap optimization failed: support region is empty after "
-                f"applying a {self.config.margin_m:.4f} m boundary margin."
-            )
-            raise ValueError("Support region is empty after applying layout margin.")
-
-        asset_ids = sorted(aabbs_by_id)
-        base_aabbs = np.stack([aabbs_by_id[asset_id] for asset_id in asset_ids])
-        offsets = np.zeros((len(asset_ids), 2), dtype=float)
-        if not self._all_contained(safe_support, base_aabbs, offsets):
-            # Independently project each AABB into the rectangular optimization region.
-            offsets = self._project_aabbs_inside_rectangle(safe_support, base_aabbs)
-            if not self._all_contained(safe_support, base_aabbs, offsets):
-                raise ValueError("Projected AABBs are not contained in support.")
-        initial_overlaps = self._overlaps(base_aabbs, offsets)
-        projected_asset_count = int(np.count_nonzero(np.any(offsets != 0.0, axis=1)))
-        log_info(
-            "Support-constrained AABB overlap optimization started: "
-            f"assets={len(asset_ids)}, initial_overlaps={len(initial_overlaps)}, "
-            f"initial_projections={projected_asset_count}, "
-            f"boundary_margin={self.config.margin_m:.4f} m, "
-            f"aabb_clearance={self.config.aabb_clearance_m:.4f} m, "
-            f"max_rounds={self.config.max_rounds}."
-        )
-        if not initial_overlaps:  # Return directly if there are no overlaps to resolve.
-            log_info("AABB overlap optimization succeeded without pair separation.")
-            return {uid: offsets[index].copy() for index, uid in enumerate(asset_ids)}
-
-        for round_index in range(self.config.max_rounds):
-            # Check whether any overlaps remain.
-            overlaps = self._overlaps(base_aabbs, offsets)
-            if not overlaps:
-                log_info(
-                    "AABB overlap optimization succeeded after "
-                    f"{round_index} rounds."
-                )
-                return {
-                    uid: offsets[index].copy() for index, uid in enumerate(asset_ids)
-                }
-            log_info(
-                "AABB overlap optimization round "
-                f"{round_index + 1}/{self.config.max_rounds}: "
-                f"remaining_overlaps={len(overlaps)}."
-            )
-            moved = False
-            # Choose a pair once.
-            for _, first_index, second_index in overlaps:
-                # If the overlaps is handeled by a previous pair, skip it.
-                if not self._overlaps(base_aabbs, offsets, (first_index, second_index)):
-                    continue
-                candidates = self._separation_candidates(
-                    base_aabbs=base_aabbs,
-                    offsets=offsets,
-                    first_index=first_index,
-                    second_index=second_index,
-                    safe_support=safe_support,
-                )
-                if candidates:
-                    # A local separation must not blindly create a new
-                    # collision with a third asset.  Prefer candidates with
-                    # no new collisions; when every placement causes one,
-                    # retain the least-colliding state before considering
-                    # displacement from the generated layout.
-                    offsets = min(
-                        candidates,
-                        key=lambda candidate: self._candidate_score(
-                            base_aabbs=base_aabbs,
-                            current_offsets=offsets,
-                            candidate_offsets=candidate,
-                        ),
-                    )  # Choose the best candidate with score.
-                    moved = True
-                else:
-                    log_warning(
-                        "No support-valid axis-aligned separation candidate for "
-                        f"overlapping AABBs {asset_ids[first_index]!r} and "
-                        f"{asset_ids[second_index]!r}."
-                    )
-            if not moved:
-                break
-
-        if not self._overlaps(base_aabbs, offsets):
-            return {uid: offsets[index].copy() for index, uid in enumerate(asset_ids)}
-
-        unresolved_pairs = [
-            f"{asset_ids[first_index]}/{asset_ids[second_index]}"
-            for _, first_index, second_index in self._overlaps(base_aabbs, offsets)
-        ]
-        log_warning(
-            "Unable to resolve all asset AABB overlaps inside the detected support "
-            "region; unresolved pairs="
-            f"{unresolved_pairs}."
-        )
-        raise ValueError(
-            "Asset AABB overlap cannot be resolved within the search budget while keeping all assets "
-            "inside the detected table support region."
-        )
-
-    @staticmethod
-    def _project_aabbs_inside_rectangle(
-        support: Polygon | MultiPolygon,
-        base_aabbs: np.ndarray,
-    ) -> np.ndarray:
-        """Return minimum per-AABB offsets that place AABBs in a rectangle."""
-        if not isinstance(support, Polygon) or support.interiors:
-            raise ValueError(
-                "Initial AABB projection requires an axis-aligned rectangular "
-                "support region."
-            )
-        minimum_x, minimum_y, maximum_x, maximum_y = support.bounds
-        rectangle = Polygon(
-            [
-                (minimum_x, minimum_y),
-                (maximum_x, minimum_y),
-                (maximum_x, maximum_y),
-                (minimum_x, maximum_y),
-            ]
-        )
-        if not support.equals(rectangle):
-            raise ValueError(
-                "Initial AABB projection requires an axis-aligned rectangular "
-                "support region."
-            )
-
-        aabb_minimums, aabb_maximums = base_aabbs.min(axis=1), base_aabbs.max(axis=1)
-        half_extents = (aabb_maximums - aabb_minimums) / 2.0
-        support_minimum = np.array([minimum_x, minimum_y], dtype=float)
-        support_maximum = np.array([maximum_x, maximum_y], dtype=float)
-        valid_center_minimums = support_minimum + half_extents
-        valid_center_maximums = support_maximum - half_extents
-        if np.any(valid_center_minimums > valid_center_maximums):
-            raise ValueError(
-                "An asset AABB is larger than the rectangular support region."
-            )
-
-        centers = (aabb_minimums + aabb_maximums) / 2.0
-        # A center must stay inset from each boundary by its AABB half extent.
-        projected_centers = np.clip(
-            centers, valid_center_minimums, valid_center_maximums
-        )
-        return projected_centers - centers
-
-    def _separation_candidates(
-        self,
-        *,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        first_index: int,
-        second_index: int,
-        safe_support: Polygon | MultiPolygon,
-    ) -> list[np.ndarray]:
-        # Get current aabbs.
-        current_aabbs = base_aabbs + offsets[:, None, :]
-        minimums, maximums = current_aabbs.min(axis=1), current_aabbs.max(axis=1)
-        candidates: list[np.ndarray] = []
-        for axis in (0, 1):
-            directions_and_distances = (
-                (
-                    -1.0,
-                    maximums[first_index, axis]
-                    + self.config.aabb_clearance_m
-                    - minimums[second_index, axis],
-                ),
-                (
-                    1.0,
-                    maximums[second_index, axis]
-                    + self.config.aabb_clearance_m
-                    - minimums[first_index, axis],
-                ),
-            )
-            for first_direction, required_distance in directions_and_distances:
-                if required_distance <= 0.0:
-                    continue
-                for fraction in np.linspace(0.0, 1.0, self.config.split_samples):
-                    candidate = offsets.copy()
-                    first_move = required_distance * float(fraction)
-                    candidate[first_index, axis] += first_direction * first_move
-                    candidate[second_index, axis] -= first_direction * (
-                        required_distance - first_move
-                    )
-                    if not self._overlaps(
-                        base_aabbs, candidate, (first_index, second_index)
-                    ) and self._all_contained(safe_support, base_aabbs, candidate):
-                        candidates.append(candidate)
-        return candidates
-
-    def _overlaps(
-        self,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        only_pair: tuple[int, int] | None = None,
-    ) -> list[tuple[float, int, int]]:
-        return sorted(
-            [
-                (min(overlap_x, overlap_y), first_index, second_index)
-                for overlap_x, overlap_y, first_index, second_index in self._overlap_details(
-                    base_aabbs, offsets, only_pair
-                )
-            ],
-            reverse=True,
-        )
-
-    def _overlap_details(
-        self,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-        only_pair: tuple[int, int] | None = None,
-    ) -> list[tuple[float, float, int, int]]:
-        """Return positive XY penetration extents, including requested clearance."""
-        current_aabbs = base_aabbs + offsets[:, None, :]
-        minimums, maximums = current_aabbs.min(axis=1), current_aabbs.max(axis=1)
-        pairs = (
-            [only_pair]
-            if only_pair is not None
-            else [
-                (first_index, second_index)
-                for first_index in range(len(current_aabbs))
-                for second_index in range(first_index + 1, len(current_aabbs))
-            ]
-        )
-        overlaps: list[tuple[float, float, int, int]] = []
-        for first_index, second_index in pairs:
-            overlap_x = (
-                min(maximums[first_index, 0], maximums[second_index, 0])
-                - max(minimums[first_index, 0], minimums[second_index, 0])
-                + self.config.aabb_clearance_m
-            )
-            overlap_y = (
-                min(maximums[first_index, 1], maximums[second_index, 1])
-                - max(minimums[first_index, 1], minimums[second_index, 1])
-                + self.config.aabb_clearance_m
-            )
-            if overlap_x > 1e-9 and overlap_y > 1e-9:
-                overlaps.append((overlap_x, overlap_y, first_index, second_index))
-        return overlaps
-
-    def _candidate_score(
-        self,
-        *,
-        base_aabbs: np.ndarray,
-        current_offsets: np.ndarray,
-        candidate_offsets: np.ndarray,
-    ) -> tuple[int, int, float, float]:
-        """Rank a valid pair-separation candidate by global collision impact.
-
-        The first term is deliberately based on *new* overlap pairs: this
-        keeps a pairwise correction from simply transferring its collision to
-        a nearby third asset.  If every candidate causes a new collision, the
-        remaining terms prefer fewer total overlaps, less total penetration,
-        then less layout displacement.
-        """
-        current_pairs = {
-            (first_index, second_index)
-            for _, _, first_index, second_index in self._overlap_details(
-                base_aabbs, current_offsets
-            )
-        }
-        candidate_details = self._overlap_details(base_aabbs, candidate_offsets)
-        candidate_pairs = {
-            (first_index, second_index)
-            for _, _, first_index, second_index in candidate_details
-        }
-        new_overlap_count = len(candidate_pairs - current_pairs)
-        total_penetration_area = sum(
-            overlap_x * overlap_y for overlap_x, overlap_y, _, _ in candidate_details
-        )
-        total_squared_displacement = float(
-            np.einsum("ij,ij->", candidate_offsets, candidate_offsets)
-        )
-        return (
-            new_overlap_count,
-            len(candidate_pairs),
-            total_penetration_area,
-            total_squared_displacement,
-        )
-
-    @staticmethod
-    def _all_contained(
-        support: Polygon | MultiPolygon,
-        base_aabbs: np.ndarray,
-        offsets: np.ndarray,
-    ) -> bool:
-        return all(
-            support.covers(
-                affinity.translate(
-                    GroupSupportClamp._aabb_polygon(corners),
-                    xoff=float(offset[0]),
-                    yoff=float(offset[1]),
-                )
-            )
-            for corners, offset in zip(base_aabbs, offsets)
-        )
+    expanded = bounds.expand(*batch_shape, count, 2, 3)
+    selected = (
+        torch.ones((*batch_shape, count), dtype=torch.bool, device=bounds.device)
+        if valid_mask is None
+        else valid_mask.expand(*batch_shape, count)
+    )
+    valid = (
+        selected.any(dim=-1)
+        & (~selected | _valid_bounds(expanded)).all(dim=-1)
+        & torch.isfinite(support_z)
+    )
+    lowest = torch.where(selected, expanded[..., 0, 2], float("inf")).amin(dim=-1)
+    offset = support_z + clearance - lowest
+    valid = valid & torch.isfinite(offset)
+    return torch.where(valid, offset, 0.0), valid

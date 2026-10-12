@@ -81,8 +81,8 @@ not by themselves provide scene restoration or certify a new layout.
 ## Change sites and validation
 
 Keep bounded candidate contracts under `lab/sim/scene/expansion`; shared
-layout and physical services belong to its parent scene package, with numerical
-algorithms under `compute`. Keep task-specific adaptation in Task Program
+layout policies and physical services belong to its parent scene package, with
+reusable tensor geometry kernels under `compute`. Keep task-specific adaptation in Task Program
 integrations and GenSim asset/model dependencies in GenSim. Extend the host
 boundary when adding physical preparation, preserving Gym lifecycle ownership.
 

@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 
-from embodichain.compute.geometry.placement import (
+from embodichain.lab.sim.scene._placement_cpu import (
     GroupSupportClamp,
     GroupSupportClampConfig as AssetsGroupSupportClampConfig,
     SupportGeometry,

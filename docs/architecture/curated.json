@@ -821,7 +821,7 @@
           "label": "Compute API reference"
         }
       ],
-      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
+      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. The geometry facade exposes Torch kernels with broadcast batch dimensions; scene-specific CPU search and solver policies stay in sim.scene. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
     },
     {
       "id": "rl",
@@ -3271,11 +3271,12 @@
         "scene-services"
       ],
       "summary": "Composes explicit configurations, proposes layouts, and operates on caller-owned physical state.",
-      "details": "Scene services are shared by procedural recipes and GenSim adapters. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change supported B=1 physical state, and collect measured validation. Compute owns numerical algorithms. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
+      "details": "Scene services are shared by procedural recipes and GenSim adapters. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change supported B=1 physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
       "boundaries": [
         "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
         "Runtime state operations currently require B=1; snapshots are owner-bound physical state, not complete backend checkpoints.",
-        "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats."
+        "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
+        "Tensor geometry supports independent leading batches and CPU/CUDA devices; current physical state services remain B=1 and CPU strategies do not become GPU solvers."
       ],
       "evidence": [
         {
@@ -5536,16 +5537,16 @@
       "source": "scene-services",
       "target": "compute",
       "relation": "calls",
-      "description": "Delegates numeric fixed-orientation AABB constraint solving to compute.",
+      "description": "Reuses batched tensor geometry kernels inside CPU scene strategies.",
       "provenance": "source-reviewed",
-      "scope": "The scene layer adapts entity UIDs and frame semantics to numeric arrays; compute owns no simulation lifecycle.",
+      "scope": "Scene retains support-selection, polygon-search and SLSQP policies. Tensor batches represent independent numeric inputs, not B>1 simulator-host support.",
       "evidence": [
         {
-          "path": "embodichain/lab/sim/scene/layout.py",
-          "symbol": "solve_layout",
-          "start_line": 179,
-          "end_line": 179,
-          "excerpt": "    result = solve_aabb_layout("
+          "path": "embodichain/lab/sim/scene/_support_cpu.py",
+          "symbol": "SupportSurfaceDetector.detect",
+          "start_line": 142,
+          "end_line": 142,
+          "excerpt": "        face_normals, _, valid_faces = triangle_geometry("
         }
       ]
     },

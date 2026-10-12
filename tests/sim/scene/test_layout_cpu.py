@@ -16,14 +16,11 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from embodichain.compute.layout import solve_aabb_layout
+from embodichain.lab.sim.scene._layout_cpu import solve_aabb_layout
 
 
 def _solve(*, seeds=None, bounds=None, fixed=None, **kwargs):
@@ -132,21 +129,6 @@ def test_collision_pair_budget_is_reported_separately_from_no_solution() -> None
     assert result.residuals["collision"] > 0.0
 
 
-def test_numeric_layout_import_does_not_load_simulation_or_gensim() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; import embodichain.compute.layout; assert not any(n.startswith(('embodichain.lab', 'embodichain.gen_sim', 'dexsim')) for n in sys.modules)",
-        ],
-        cwd=Path(__file__).resolve().parents[3],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 @pytest.mark.parametrize("fixed", [[0, 1], [False, float("nan")]])
 def test_fixed_mask_cannot_silently_cast_invalid_values(fixed) -> None:
     with pytest.raises(ValueError, match="boolean"):
@@ -157,3 +139,33 @@ def test_fixed_mask_cannot_silently_cast_invalid_values(fixed) -> None:
 def test_relation_indices_reject_nonintegral_values(relations) -> None:
     with pytest.raises(ValueError):
         _solve(relations=relations)
+
+
+@pytest.mark.parametrize("inner_half", [0.1, 0.0])
+def test_contained_proxy_retains_separation_depth_not_intersection_width(inner_half):
+    # A zero-width proxy still requires displacement to leave a enclosing box;
+    # plain intersection width would incorrectly report zero collision here.
+    result = solve_aabb_layout(
+        np.zeros((2, 2)),
+        np.array([[1.0, 1.0], [inner_half, inner_half]]),
+        np.tile([[-2.0, -2.0], [2.0, 2.0]], (2, 1, 1)),
+        np.ones(2, dtype=bool),
+        np.ones(2),
+        collision_margin_m=0.0,
+    )
+    assert result.status == "no_solution"
+    assert result.residuals["collision"] == pytest.approx(1.0 + inner_half)
+
+
+def test_tiny_contained_proxy_is_not_hidden_by_overlap_width_tolerance():
+    tiny_half = 1e-9  # Smaller than the feasibility tolerance, but still enclosed.
+    result = solve_aabb_layout(
+        np.zeros((2, 2)),
+        np.array([[1.0, 1.0], [tiny_half, tiny_half]]),
+        np.tile([[-2.0, -2.0], [2.0, 2.0]], (2, 1, 1)),
+        np.ones(2, dtype=bool),
+        np.ones(2),
+        collision_margin_m=0.0,
+    )
+    assert result.status == "no_solution"
+    assert result.residuals["collision"] > 1.0

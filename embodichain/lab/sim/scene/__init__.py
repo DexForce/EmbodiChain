@@ -27,6 +27,9 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
+    "SupportSurfaceConfig",
+    "GroupSupportClampConfig",
+    "AABBLayoutConfig",
     "SceneFragment",
     "compose",
     "declare_fragment",
@@ -61,6 +64,9 @@ __all__ = [
 ]
 
 _EXPORT_MODULES = {
+    "SupportSurfaceConfig": "geometry",
+    "GroupSupportClampConfig": "placement",
+    "AABBLayoutConfig": "placement",
     "SceneFragment": "composition",
     "compose": "composition",
     "declare_fragment": "composition",

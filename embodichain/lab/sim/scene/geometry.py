@@ -24,12 +24,12 @@ from typing import Literal
 import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 
-from embodichain.compute.geometry.support import (
+from embodichain.lab.sim.scene._support_cpu import (
     SupportSurfaceConfig,
     SupportSurfaceDetector,
 )
 
-__all__ = ["SupportRegion", "detect_support_region"]
+__all__ = ["SupportSurfaceConfig", "SupportRegion", "detect_support_region"]
 
 
 @dataclass(frozen=True)

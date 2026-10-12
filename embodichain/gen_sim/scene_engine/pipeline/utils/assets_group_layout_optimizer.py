@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 
-from embodichain.compute.geometry.aabb import (
+from embodichain.lab.sim.scene._packing_cpu import (
     AABBLayoutOptimizer,
     AABBLayoutConfig as AssetsSupportLayoutOptimizerConfig,
 )

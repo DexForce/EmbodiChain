@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from embodichain.compute.geometry.placement import group_height_offset
+from embodichain.lab.sim.scene._placement_cpu import group_height_offset
 from embodichain.gen_sim.scene_engine.pipeline.utils.scene_generation_utils import (
     layout_object_to_transform_matrix,
     load_glb_mesh,

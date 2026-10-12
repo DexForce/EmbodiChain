@@ -1,119 +1,134 @@
-Scene geometry and layout
-=========================
+Geometry tensor kernels
+=======================
 
-These numerical packages accept arrays and polygonal geometry, never
-simulation objects. They own no world, resource registry, task semantics or
-file-based GenSim model. Scene and GenSim adapters reuse these implementations.
+``embodichain.compute.geometry`` provides reusable Torch operations on dense
+float32/float64 tensors. Inputs share dtype and device; outputs stay on that
+CPU or CUDA device. The kernels do not accept entity UIDs, asset paths, mesh
+library objects or simulator handles, and do not import scene services.
 
-Support detection uses already transformed Z-up mesh vertices in metres.
-The initial detector selects the largest outer contour at the chosen main
-horizontal level. Group placement accepts holes and disconnected polygonal
-regions, uses raster proposals, then checks exact polygon containment.
-The greedy AABB optimizer is distinct from the constrained SLSQP layout solver:
-the former preserves the existing generation strategy, while the latter
-expresses explicit fixed positions, bounds, planar relations and preferences.
-Neither is an exact 3D collision or physical stability solver.
+Shape, dtype, device and scalar-argument checks use host metadata. Numeric
+validity is computed on the tensor device and returned through masks or NaN
+outputs; no tensor value is copied to the host to decide validity.
 
-embodichain.compute.geometry
-----------------------------
+Independent batches and object axes
+-----------------------------------
 
-Package-level geometry contracts and reusable placement algorithms.
+Leading dimensions broadcast according to Torch rules. ``B`` denotes
+independent layouts and ``N`` denotes objects within one layout. A collection
+of N objects is not N independent layouts. Pairwise comparisons require
+explicit singleton axes; there is no implicit all-pairs expansion:
+
+.. code-block:: python
+
+   # boxes: (B, N, 2, 3), with min/max corners in the penultimate axis.
+   from embodichain.compute.geometry import aabb_overlap_depth
+
+   depths = aabb_overlap_depth(boxes[:, :, None], boxes[:, None, :])
+   # depths: (B, N, N, 3), with comparisons confined to each batch.
+
+``group_height_offset`` reduces only the N object axis of ``(..., N, 2, 3)``
+boxes. Its boolean ``valid_mask`` has shape ``(..., N)`` and ignores padded
+objects, including their invalid numeric values. Support heights and mask
+leading axes may broadcast with the independent batch dimensions. Empty or
+all-padding groups return zero offsets and false validity. This object mask
+is independent of simulator environment selection.
+
+Operations and invalid values
+-----------------------------
+
+.. list-table:: Tensor contracts
+   :header-rows: 1
+   :widths: 25 30 45
+
+   * - Operation
+     - Output
+     - Numeric invalidity
+   * - ``aabb_overlap_depth``
+     - Per-axis intersection lengths, ``(..., D)``
+     - Nonfinite/reversed boxes or nonfinite results produce all-NaN rows.
+   * - ``aabb_containment_violation``
+     - Per-axis boundary violations, ``(..., D)``
+     - Invalid boxes or regions produce all-NaN rows; boundary contact is valid.
+   * - ``group_height_offset``
+     - ``(offset, valid)`` in the broadcast batch shape
+     - An unmasked invalid box or invalid support/result invalidates that group.
+   * - ``transform_aabbs``
+     - Affine-transformed bounds, ``(..., 2, 3)``
+     - Invalid boxes, transforms, non-affine last rows or overflow produce NaN boxes.
+   * - ``triangle_geometry``
+     - Normals ``(..., 3)``, areas ``(...)``, validity ``(...)``
+     - Degenerate, nonfinite or unrepresentable triangles return zero measurements and false validity.
+
+AABB overlap is positive volume only when all axis depths are positive;
+touching faces produce zero on the touching axis. Affine transforms support
+rotation, nonuniform scale, shear and reflection, with an exact final row of
+``[0, 0, 0, 1]``. They bound transformed input boxes, not the original mesh.
+Triangle winding controls normal sign; callers own slope and area thresholds.
+
+CPU strategies and benchmark scope
+----------------------------------
+
+Scene support selection, polygon placement, greedy packing and constrained
+SLSQP solving remain CPU strategies under ``sim.scene``. They may invoke these
+kernels using CPU tensors. Kernel CUDA support does not move those strategies
+to GPU or enable B>1 scene-state operations and physical hosts.
+
+The :download:`geometry kernel benchmark
+<../../../../scripts/benchmark/scene/geometry_kernels.py>` measures kernels
+separately from scene solver and simulator work. Compare recorded shapes,
+dtype, device, warmup and synchronization policy when interpreting results.
+
+Public kernel namespace
+-----------------------
 
 .. currentmodule:: embodichain.compute.geometry
 
 .. autosummary::
    :nosignatures:
 
-   SupportSurfaceConfig
-   DetectedSupportSurface
-   SupportSurfaceDetector
-   SupportGeometry
-   GroupSupportClampConfig
-   GroupSupportClamp
+   aabb_overlap_depth
+   aabb_containment_violation
    group_height_offset
-   AABBLayoutConfig
-   AABBLayoutOptimizer
+   transform_aabbs
+   triangle_geometry
 
-embodichain.compute.geometry.support
+AABB arithmetic and group reductions
 ------------------------------------
-
-Array-based mesh support extraction. Normal repair and seam merging are internal geometric preparation; input arrays are not modified.
-
-.. currentmodule:: embodichain.compute.geometry.support
-
-.. autosummary::
-   :nosignatures:
-
-   SupportSurfaceConfig
-   DetectedSupportSurface
-   SupportSurfaceDetector
-
-.. automodule:: embodichain.compute.geometry.support
-   :members:
-   :imported-members:
-
-embodichain.compute.geometry.placement
---------------------------------------
-
-Rigid-group XY translation and vertical alignment. ``find_translation`` returns ``None`` when its bounded search finds no valid translation.
-
-.. currentmodule:: embodichain.compute.geometry.placement
-
-.. autosummary::
-   :nosignatures:
-
-   SupportGeometry
-   GroupSupportClampConfig
-   GroupSupportClamp
-   group_height_offset
-
-.. automodule:: embodichain.compute.geometry.placement
-   :members:
-   :imported-members:
-
-embodichain.compute.geometry.aabb
----------------------------------
-
-Greedy pairwise separation with support containment and a finite round budget. Unsuccessful search raises ``ValueError`` without establishing mathematical infeasibility.
 
 .. currentmodule:: embodichain.compute.geometry.aabb
 
 .. autosummary::
    :nosignatures:
 
-   AABBLayoutConfig
-   AABBLayoutOptimizer
+   aabb_overlap_depth
+   aabb_containment_violation
+   group_height_offset
 
 .. automodule:: embodichain.compute.geometry.aabb
    :members:
-   :imported-members:
 
-embodichain.compute.layout
---------------------------
+Affine box transforms
+---------------------
 
-Constrained fixed-orientation AABB layout. Results include candidate coordinates, status and measured residuals even on numerical failure.
-
-.. currentmodule:: embodichain.compute.layout
+.. currentmodule:: embodichain.compute.geometry.transforms
 
 .. autosummary::
    :nosignatures:
 
-   AABBLayoutResult
-   solve_aabb_layout
+   transform_aabbs
 
-embodichain.compute.layout.aabb
--------------------------------
-
-The SLSQP solver eliminates fixed variables, adds separating constraints for detected pairs, and reports budget exhaustion separately from a failed solve. Bounds constrain complete boxes rather than only their centers.
-
-.. currentmodule:: embodichain.compute.layout.aabb
-
-.. autosummary::
-   :nosignatures:
-
-   AABBLayoutResult
-   solve_aabb_layout
-
-.. automodule:: embodichain.compute.layout.aabb
+.. automodule:: embodichain.compute.geometry.transforms
    :members:
-   :imported-members:
+
+Triangle measurements
+---------------------
+
+.. currentmodule:: embodichain.compute.geometry.mesh
+
+.. autosummary::
+   :nosignatures:
+
+   triangle_geometry
+
+.. automodule:: embodichain.compute.geometry.mesh
+   :members:

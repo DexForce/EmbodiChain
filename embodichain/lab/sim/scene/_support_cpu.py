@@ -14,12 +14,14 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Numerical extraction of a single horizontal mesh support surface."""
+"""CPU support-surface selection, connectivity and polygon construction."""
 
 from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import numpy as np
+import torch
+from embodichain.compute.geometry import triangle_geometry
 from scipy.spatial import ConvexHull, QhullError
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
@@ -137,9 +139,13 @@ class SupportSurfaceDetector:
 
         face_vertices = mesh.vertices[mesh.faces]
         face_height_ranges = np.ptp(face_vertices[:, :, 2], axis=1)
+        face_normals, _, valid_faces = triangle_geometry(
+            torch.from_numpy(face_vertices)
+        )
         # Check: 1. range of z values of each triangle; 2. upward-facing triangles.
         candidate_face_indices = np.flatnonzero(
-            (mesh.face_normals[:, 2] >= self.config.normal_z_min)
+            valid_faces.numpy()
+            & (face_normals[:, 2].numpy() >= self.config.normal_z_min)
             & (face_height_ranges <= self.config.max_face_height_span_m)
         )
         if len(candidate_face_indices) == 0:
@@ -309,21 +315,18 @@ class SupportSurfaceDetector:
     @staticmethod
     def _projected_triangle_area(triangles_xy: np.ndarray) -> float:
         """Compute the total area of triangles projected onto the XY plane."""
-        first_edges = triangles_xy[:, 1] - triangles_xy[:, 0]
-        second_edges = triangles_xy[:, 2] - triangles_xy[:, 0]
-        cross_products = (
-            first_edges[:, 0] * second_edges[:, 1]
-            - first_edges[:, 1] * second_edges[:, 0]
-        )
-        return float(np.abs(cross_products).sum() / 2.0)
+        triangles = np.zeros((*triangles_xy.shape[:-1], 3), dtype=float)
+        triangles[..., :2] = triangles_xy
+        _, areas, _ = triangle_geometry(torch.from_numpy(triangles))
+        return float(areas.sum())
 
     @classmethod
     def _extract_largest_support_polygon(cls, triangles_xy: np.ndarray) -> Polygon:
-        projected_triangles = [
-            Polygon(triangle)
-            for triangle in triangles_xy
-            if cls._projected_triangle_area(triangle[None, ...]) > 1e-12
-        ]
+        triangles = np.zeros((*triangles_xy.shape[:-1], 3), dtype=float)
+        triangles[..., :2] = triangles_xy
+        _, areas, valid = triangle_geometry(torch.from_numpy(triangles))
+        selected = (valid & (areas > 1e-12)).numpy()
+        projected_triangles = [Polygon(triangle) for triangle in triangles_xy[selected]]
         if not projected_triangles:
             raise ValueError(
                 "Selected support surface has no non-degenerate XY triangles."

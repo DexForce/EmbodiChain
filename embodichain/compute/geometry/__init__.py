@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Lazy geometry facade; existing Warp consumers need no scene dependencies."""
+"""Lazy tensor geometry kernels; private Warp consumers remain independent."""
 
 from __future__ import annotations
 
@@ -22,27 +22,19 @@ from importlib import import_module
 from typing import Any
 
 __all__ = [
-    "SupportSurfaceConfig",
-    "DetectedSupportSurface",
-    "SupportSurfaceDetector",
-    "SupportGeometry",
-    "GroupSupportClampConfig",
-    "GroupSupportClamp",
+    "aabb_overlap_depth",
+    "aabb_containment_violation",
     "group_height_offset",
-    "AABBLayoutConfig",
-    "AABBLayoutOptimizer",
+    "transform_aabbs",
+    "triangle_geometry",
 ]
 
 _EXPORT_MODULES = {
-    "SupportSurfaceConfig": "support",
-    "DetectedSupportSurface": "support",
-    "SupportSurfaceDetector": "support",
-    "SupportGeometry": "placement",
-    "GroupSupportClampConfig": "placement",
-    "GroupSupportClamp": "placement",
-    "group_height_offset": "placement",
-    "AABBLayoutConfig": "aabb",
-    "AABBLayoutOptimizer": "aabb",
+    "aabb_overlap_depth": "aabb",
+    "aabb_containment_violation": "aabb",
+    "group_height_offset": "aabb",
+    "transform_aabbs": "transforms",
+    "triangle_geometry": "mesh",
 }
 
 

@@ -5,11 +5,14 @@ These existing entry points adapt GenSim's editable Y-up layouts and asset
 files to shared numerical geometry and arena-local scene services. They retain
 diagnostic output and generation/edit orchestration. GenSim still owns model
 clients, asset preparation, temporary simulator lifecycle and export formats.
+Support selection, polygon search, greedy packing and SLSQP are CPU strategies
+owned by ``sim.scene``. Their reusable tensor operations use
+``compute.geometry``; kernel CUDA support does not migrate these pipelines to GPU.
 
 embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer
 -----------------------------------------------------------------------------
 
-Preserves the generation path's greedy AABB separation strategy and Y-up output; numeric offsets come from the shared compute implementation.
+Preserves the generation path's greedy AABB separation strategy and Y-up output; numeric offsets come from the shared scene CPU packing strategy.
 
 .. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.utils.assets_group_layout_optimizer
 
@@ -97,7 +100,7 @@ Translates per-parent support problems into shared scene layout inputs. The Scen
 embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface
 ---------------------------------------------------------------------
 
-Keeps file-independent mesh input and optional support-detection plots; the shared numerical detector owns surface selection.
+Keeps file-independent mesh input and optional support-detection plots; the shared scene CPU detector owns surface selection.
 
 .. currentmodule:: embodichain.gen_sim.scene_engine.pipeline.utils.table_support_surface
 

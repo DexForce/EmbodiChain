@@ -34,6 +34,24 @@ manager, settles through the caller-owned physics loop, checks measured layout
 and restores a physical snapshot. It requires a working native simulator;
 installing the numerical extra alone does not provide that runtime.
 
+CPU strategies and tensor kernels
+---------------------------------
+
+Scene layout, support selection and placement retain their CPU algorithms and
+Shapely/Trimesh/SciPy dependencies. They call reusable Torch geometry kernels;
+this does not move SLSQP, polygon search or physical hosts to GPU.
+
+Kernel batching distinguishes independent leading layouts ``B`` from the
+objects ``N`` within each layout. For example, ``(B, N, 2, 3)`` contains B sets
+of N 3D boxes. Object masks belong to that object axis; masking padding does not
+select simulation environments. Scene runtime services still require B=1.
+
+See :doc:`embodichain.compute.scene_geometry` for tensor shape, mask, dtype and
+device contracts. The :download:`geometry kernel benchmark
+<../../../../scripts/benchmark/scene/geometry_kernels.py>` measures kernels
+separately from CPU strategy solving and simulator execution. Its results must
+be reported with the actual device, shapes and synchronization policy.
+
 Public facade
 -------------
 
@@ -53,8 +71,11 @@ that package's normal simulation dependency requirements.
    GeneratedScene
    generate
    check_layout
+   SupportSurfaceConfig
    SupportRegion
    detect_support_region
+   AABBLayoutConfig
+   GroupSupportClampConfig
    clamp_group
    separate_aabbs
    align_group_height
@@ -125,6 +146,7 @@ Support regions identify a supporting entity and its arena-local polygon. Direct
 .. autosummary::
    :nosignatures:
 
+   SupportSurfaceConfig
    SupportRegion
    detect_support_region
 
@@ -142,6 +164,8 @@ Group clamping preserves relative positions; AABB separation moves entities inde
 .. autosummary::
    :nosignatures:
 
+   AABBLayoutConfig
+   GroupSupportClampConfig
    clamp_group
    separate_aabbs
    align_group_height
@@ -258,5 +282,6 @@ The generic scene services own no task lifecycle or dataset writer.
    embodichain.gen_sim.scene_adapters
 
 See :mod:`embodichain.lab.task_program.integrations.scene_expansion` for task
-execution and :mod:`embodichain.compute.geometry` and
-:mod:`embodichain.compute.layout` for numerical implementations.
+execution and :mod:`embodichain.compute.geometry` for reusable tensor kernels.
+The support, polygon-placement, greedy-packing and SLSQP policies remain private
+CPU implementations in ``sim.scene``.

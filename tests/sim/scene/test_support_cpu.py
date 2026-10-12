@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from embodichain.compute.geometry import SupportSurfaceDetector
+from embodichain.lab.sim.scene._support_cpu import SupportSurfaceDetector
 
 
 def test_detector_keeps_input_geometry_unchanged() -> None:
@@ -49,7 +49,7 @@ def test_degenerate_horizontal_geometry_rejected() -> None:
 
 
 def test_mutated_detection_threshold_rejected_before_mesh_search() -> None:
-    from embodichain.compute.geometry import SupportSurfaceConfig
+    from embodichain.lab.sim.scene._support_cpu import SupportSurfaceConfig
 
     cfg = SupportSurfaceConfig()
     mesh = trimesh.creation.box()
@@ -57,17 +57,3 @@ def test_mutated_detection_threshold_rejected_before_mesh_search() -> None:
     cfg.normal_z_min = float("nan")
     with pytest.raises(ValueError, match="finite"):
         detector.detect()
-
-
-def test_geometry_facade_does_not_load_optional_scene_dependencies():
-    import subprocess
-    import sys
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; import embodichain.compute.geometry; assert not any(name.split('.')[0] in {'scipy', 'shapely', 'trimesh', 'dexsim'} for name in sys.modules)",
-        ],
-        check=True,
-    )

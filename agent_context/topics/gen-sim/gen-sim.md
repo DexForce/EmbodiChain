@@ -53,8 +53,9 @@ root.
 ## Shared scene services
 
 Geometric support detection, group translation/alignment and AABB separation
-use `compute.geometry`; tabletop and parent-surface optimization adapt
-`sim.scene.layout`. Existing adapters keep Y-up conversion and debug output;
+use private CPU strategies under `sim.scene`; tabletop and parent-surface
+optimization adapt `sim.scene.layout`. These strategies reuse Torch geometry
+kernels from `compute.geometry`, while Shapely, Trimesh and SLSQP stay on CPU. Existing adapters keep Y-up conversion and debug output;
 `SceneLayoutConstructor` retains hierarchy traversal and edit-specific pose
 propagation. `GravitySettler` owns its temporary simulator and fixed-step default;
 optional convergence checks use shared scene validation. See
