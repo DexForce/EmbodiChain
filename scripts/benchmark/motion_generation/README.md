@@ -80,7 +80,13 @@ in that run's `videos/` directory.
   only when both arms pass their own frozen poses in order. HandOver's sampled
   pickup and receiving grasps are frozen from the same compile.
   `CoordinatedPickment` solves its keyframes with robot IK and never calls the
-  planner, so its trajectory is the same for every planner.
+  planner, so its trajectory is the same for every planner. It samples its
+  grasps during compilation with the case's own `grasp_sample_count`, so cases
+  in one track cannot change each other's grasps. It succeeds only when both
+  grippers end at least `gripper_hold_gap` past open and short of their grasp
+  command (a gripper that misses closes to the command) and the object is
+  within its position and full-rotation tolerance. `CoordinatedPlacement` compares the placed
+  object's full rotation relative to its support.
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
   cases may keep extra objects in the scene through `scene_object_poses`.
@@ -118,7 +124,7 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   hooks cover skills with a precondition or their own sampling:
   `prefix_invocations()` compiles actions such as the PickUp that a Pour needs,
   `initial_scene()` supplies observations such as an OpenDoor hinge angle,
-  `frozen_grasp()` makes a skill that samples its own grasp use the manifest
+  `frozen_grasps()` makes a skill that samples its own grasp use the manifest
   grasp, and `object_rotation_segment()` names the window in which the replay
   measures the held object's peak rotation.
 
@@ -220,8 +226,9 @@ The evaluator receives frozen task inputs, measured replay observations, and
 motion-validation results. It receives neither the scenario/engine nor a
 `CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
 contains the existing measured replay summary, plus the target joint at the end
-of the declared articulation segment and the held object's peak signed rotation
-in a provider-declared window. Missing optional measurements
+of the declared articulation segment, the held object's peak signed rotation
+in a provider-declared window, and each configured gripper's final joint
+positions. Missing optional measurements
 mean unavailable evidence; the follow-up evaluation work must extend observation
 collection before claiming grasp/release/retention or intermediate-stage success.
 

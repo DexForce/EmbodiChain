@@ -60,7 +60,10 @@ from embodichain.lab.sim.atomic_actions import (
 )
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.lab.sim.motion.planners.utils import PlanResult
-from embodichain.toolkits.graspkit import GraspPoseGenerator
+from embodichain.toolkits.graspkit import (
+    GraspPoseGenerator,
+    ParallelJawGraspPoseGenerator,
+)
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider
@@ -586,6 +589,11 @@ def _executed_final_pose_errors(
     return translation, rotation
 
 
+def _grasp_sample_count(case: BenchmarkCase) -> int:
+    """Return the grasp sampler size a self-sampling case was frozen with."""
+    return int(case.case_parameters.get("grasp_sample_count", 10_000))
+
+
 def _case_pose(case: BenchmarkCase, name: str, *, device: torch.device) -> torch.Tensor:
     """Restore one frozen pose tensor from JSON-compatible case parameters."""
     return torch.tensor(case.case_parameters[name], dtype=torch.float32, device=device)
@@ -949,6 +957,60 @@ class _ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
             poses,
             torch.zeros(poses.shape[0], dtype=torch.float32, device=poses.device),
         )
+
+
+class _CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
+    """Serve each grasp-sampling case from a sampler with its own sample count.
+
+    Skills such as CoordinatedPickment sample their grasps during compilation
+    and the case manifest froze the waypoints those grasps produced with the
+    case's ``grasp_sample_count``.  The scenario activates that count around
+    compilation so another case in the track cannot change the sampled
+    surface.  Without an active count the request goes to ``default_count``.
+    """
+
+    def __init__(
+        self,
+        samplers: Mapping[int, ParallelJawGraspPoseGenerator],
+        *,
+        default_count: int,
+    ) -> None:
+        if default_count not in samplers:
+            raise ValueError("The default sample count needs its own sampler.")
+        super().__init__(samplers[default_count].gripper_model)
+        self._samplers = dict(samplers)
+        self._default_count = default_count
+        self._active_count = default_count
+
+    def activate(self, sample_count: int) -> None:
+        """Use the sampler built with ``sample_count`` for the next compilation."""
+        if sample_count not in self._samplers:
+            raise ValueError(f"No grasp sampler was prepared for {sample_count}.")
+        self._active_count = sample_count
+
+    def deactivate(self) -> None:
+        """Return to the default sampler after compilation."""
+        self._active_count = self._default_count
+
+    @property
+    def _sampler(self) -> ParallelJawGraspPoseGenerator:
+        return self._samplers[self._active_count]
+
+    def get_valid_grasp_poses(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_valid_grasp_poses(**kwargs)
+
+    def get_best_grasp_poses(self, **kwargs: object) -> tuple:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_best_grasp_poses(**kwargs)
+
+    def get_grasp_candidates(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_grasp_candidates(**kwargs)
+
+    def get_dual_arm_valid_grasp_poses(self, **kwargs: object) -> list:
+        """Forward the request to the active sampler."""
+        return self._sampler.get_dual_arm_valid_grasp_poses(**kwargs)
 
 
 def _with_plan_options(
@@ -2817,6 +2879,7 @@ class AtomicTaskScenario(ScenarioProvider):
         self._fixtures: dict[str, AtomicObjectHandle] = {}
         self._engine: AtomicActionEngine | None = None
         self._case_grasp_generators: dict[str, _ActiveCaseGraspPoseGenerator] = {}
+        self._case_grasp_sampler: _CaseSampleCountGraspPoseGenerator | None = None
         self._reference_motion_generator: object | None = None
         self._runtime_entities_created = False
 
@@ -3113,24 +3176,29 @@ class AtomicTaskScenario(ScenarioProvider):
         motion_generator = adapter.require_motion_generator()
         scene_entities = tuple(handle.entity for handle in self._objects.values())
         grasp_pose_generators: dict[str, GraspPoseGenerator] | None = None
-        sampling_counts = [
-            int(
-                self._cases_by_id[case_id].case_parameters.get(
-                    "grasp_sample_count", 10_000
-                )
-            )
+        self._case_grasp_sampler = None
+        sampling_counts = {
+            _grasp_sample_count(self._cases_by_id[case_id])
             for case_id, provider in self._case_providers.items()
             if provider.samples_grasps
-        ]
+        }
         if sampling_counts:
             from scripts.tutorials.atomic_action.tutorial_utils import (
                 create_parallel_jaw_grasp_pose_generator,
             )
 
-            sampler = create_parallel_jaw_grasp_pose_generator(
-                n_sample=max(sampling_counts), force_refresh=False
+            self._case_grasp_sampler = _CaseSampleCountGraspPoseGenerator(
+                {
+                    count: create_parallel_jaw_grasp_pose_generator(
+                        n_sample=count, force_refresh=False
+                    )
+                    for count in sorted(sampling_counts)
+                },
+                default_count=max(sampling_counts),
             )
-            grasp_pose_generators = {part: sampler for part in grippers}
+            grasp_pose_generators = {
+                part: self._case_grasp_sampler for part in grippers
+            }
         slide_cases = [
             self._cases_by_id[case_id]
             for case_id, provider in self._case_providers.items()
@@ -3208,6 +3276,7 @@ class AtomicTaskScenario(ScenarioProvider):
         del adapter
         self._engine = None
         self._case_grasp_generators = {}
+        self._case_grasp_sampler = None
 
     def require_engine(self) -> AtomicActionEngine:
         """Return the prepared Atomic Action engine."""
@@ -3401,11 +3470,16 @@ class AtomicTaskScenario(ScenarioProvider):
             raise RuntimeError(f"No prepared frozen-grasp generator for {missing}.")
         for part, (target_pose, grasp_pose) in frozen.items():
             self._case_grasp_generators[part].activate(target_pose, grasp_pose)
+        sampler = self._case_grasp_sampler if provider.samples_grasps else None
+        if sampler is not None:
+            sampler.activate(_grasp_sample_count(case))
         try:
             return engine.compile(invocations, context=context)
         finally:
             for part in frozen:
                 self._case_grasp_generators[part].deactivate()
+            if sampler is not None:
+                sampler.deactivate()
 
     def plan_contract_error(self, result: object) -> str | None:
         """Accept compiled Atomic Action trajectories instead of raw plans."""
@@ -3821,6 +3895,10 @@ class AtomicTaskScenario(ScenarioProvider):
                 for object_id in dict(
                     case.case_parameters.get("scene_object_poses", {})
                 )
+            },
+            final_gripper_qpos={
+                part: self.robot.get_qpos(name=part).clone()
+                for part in self._configured_grippers()
             },
         )
 

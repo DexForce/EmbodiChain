@@ -84,6 +84,51 @@ __all__: list[str] = []
 
 _TASK_POSITION_TOLERANCE_M = 0.01
 _TASK_ROTATION_TOLERANCE_RAD = math.radians(5.0)
+# A parallel-jaw gripper closing on an object stops at the object's width; one
+# that misses runs to its grasp command.  The tutorial PGI holding the plastic
+# tray stops about 3.4 mm short of its 0.026 command and reaches the command
+# within 0.1 mm when it closes on nothing.
+_GRIPPER_HOLD_GAP = 0.001
+
+
+def _rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Return the angle of the rotation between two ``(B, 4, 4)`` poses."""
+    relative = target[:, :3, :3].transpose(-1, -2) @ actual[:, :3, :3]
+    trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
+    return torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+
+
+def _grippers_holding(
+    scenario: "AtomicTaskScenario",
+    grasp_parts: Sequence[str],
+    observation: _ExecutionObservation,
+    *,
+    gap: float,
+) -> torch.Tensor:
+    """Return rows where every gripper closed on something.
+
+    Measured along the closing direction, each final gripper joint must have
+    moved at least ``gap`` from open and stopped at least ``gap`` short of the
+    grasp command: a gripper that misses runs to the command, and one that
+    never closed stays open.  A gripper without a measured final state counts
+    as not holding.
+    """
+    commands = scenario._configured_grippers()
+    held = torch.ones_like(observation.execution_success)
+    for part in grasp_parts:
+        qpos = observation.final_gripper_qpos.get(part)
+        if qpos is None or part not in commands:
+            return torch.zeros_like(observation.execution_success)
+        open_state, grasp_state = (
+            state.to(device=qpos.device, dtype=qpos.dtype) for state in commands[part]
+        )
+        direction = torch.sign(grasp_state - open_state)
+        closed = (qpos - open_state) * direction
+        remaining = (grasp_state - qpos) * direction
+        held = held & ((closed >= gap) & (remaining >= gap)).all(dim=-1).to(
+            device=held.device
+        )
+    return held
 
 
 # ---------------------------------------------------------------------------
@@ -689,10 +734,13 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
                         "object_position_threshold_m", _TASK_POSITION_TOLERANCE_M
                     )
                 ),
-                "object_tilt_threshold_rad": float(
+                "object_rotation_threshold_rad": float(
                     config.get(
-                        "object_tilt_threshold_rad", _TASK_ROTATION_TOLERANCE_RAD
+                        "object_rotation_threshold_rad", _TASK_ROTATION_TOLERANCE_RAD
                     )
+                ),
+                "gripper_hold_gap": float(
+                    config.get("gripper_hold_gap", _GRIPPER_HOLD_GAP)
                 ),
                 "task_success_scope": "physical_object_pose_while_held_by_both",
             },
@@ -735,10 +783,31 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[torch.Tensor, str]:
         del compiled
-        from .atomic_task import _object_pose_success
-
+        final_pose = observation.final_object_pose
+        if final_pose is None:
+            return torch.zeros_like(observation.execution_success), "object_goal_miss"
+        target = _case_pose(case, "target_object_pose", device=final_pose.device).to(
+            dtype=final_pose.dtype
+        )
+        position_error = torch.linalg.vector_norm(
+            final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        parameters = case.case_parameters
+        held = _grippers_holding(
+            scenario,
+            [values["grasp"] for values in dict(parameters["control_parts"]).values()],
+            observation,
+            gap=float(parameters["gripper_hold_gap"]),
+        )
         return (
-            _object_pose_success(scenario, case, observation, motion_outcomes),
+            observation.execution_success
+            & _motion_valid_mask(motion_outcomes, device=final_pose.device)
+            & held
+            & (position_error <= float(parameters["object_position_threshold_m"]))
+            & (
+                _rotation_error(final_pose, target)
+                <= float(parameters["object_rotation_threshold_rad"])
+            ),
             "object_goal_miss",
         )
 
@@ -1014,9 +1083,10 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
                         "placement_position_tolerance_m", _TASK_POSITION_TOLERANCE_M
                     )
                 ),
-                "placement_tilt_tolerance_rad": float(
+                "placement_rotation_tolerance_rad": float(
                     config.get(
-                        "placement_tilt_tolerance_rad", _TASK_ROTATION_TOLERANCE_RAD
+                        "placement_rotation_tolerance_rad",
+                        _TASK_ROTATION_TOLERANCE_RAD,
                     )
                 ),
                 "task_success_scope": "physical_object_pose_relative_to_support",
@@ -1100,15 +1170,15 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
         position_error = torch.linalg.vector_norm(
             relative[:, :3, 3] - target[:, :3, 3], dim=-1
         )
-        tilt = torch.arccos(
-            torch.clamp((relative[:, :3, 2] * target[:, :3, 2]).sum(dim=-1), -1.0, 1.0)
-        )
         parameters = case.case_parameters
         return (
             observation.execution_success
             & _motion_valid_mask(motion_outcomes, device=placing.device)
             & (position_error <= float(parameters["placement_position_tolerance_m"]))
-            & (tilt <= float(parameters["placement_tilt_tolerance_rad"])),
+            & (
+                _rotation_error(relative, target)
+                <= float(parameters["placement_rotation_tolerance_rad"])
+            ),
             "object_goal_miss",
         )
 

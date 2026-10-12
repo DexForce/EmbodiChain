@@ -189,6 +189,7 @@ class ExecutionObservation:
     articulation_joint_effect_end: torch.Tensor | None = None
     object_rotation_peak_signed_rad: torch.Tensor | None = None
     scene_object_final_poses: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    final_gripper_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
 
 
 class PhysicalStageEvaluator(Protocol):

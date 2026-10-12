@@ -27,6 +27,10 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.planners import PlanState
+from embodichain.toolkits.graspkit import (
+    ParallelJawGraspPoseGenerator,
+    ParallelJawGripperModelCfg,
+)
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.models import BenchmarkCase, CaseOutcome
@@ -38,6 +42,7 @@ from scripts.benchmark.motion_generation.scenarios import (
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
     _ActiveCaseGraspPoseGenerator,
+    _CaseSampleCountGraspPoseGenerator,
     _ExecutionObservation,
     create_atomic_skill_provider,
 )
@@ -284,6 +289,87 @@ def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
     )
 
 
+class _CountingSampler(ParallelJawGraspPoseGenerator):
+    """Report the sample count it was built with instead of sampling."""
+
+    def __init__(self, n_sample: int) -> None:
+        super().__init__(ParallelJawGripperModelCfg())
+        self.n_sample = n_sample
+
+    def get_valid_grasp_poses(self, **kwargs: object) -> list:
+        return []
+
+    def get_best_grasp_poses(self, **kwargs: object) -> tuple:
+        return ()
+
+    def get_dual_arm_valid_grasp_poses(self, **kwargs: object) -> list:
+        return [self.n_sample]
+
+
+def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch):
+    from scripts.tutorials.atomic_action import tutorial_utils
+
+    monkeypatch.setattr(
+        tutorial_utils,
+        "create_parallel_jaw_grasp_pose_generator",
+        lambda *, n_sample, force_refresh: _CountingSampler(n_sample),
+    )
+    robot = Mock(device=CPU)
+    robot.control_parts = {"left_eef": object(), "right_eef": object()}
+    robot.get_joint_ids.side_effect = lambda name: {
+        "left_eef": [12],
+        "right_eef": [13],
+    }[name]
+    robot.get_qpos_limits.side_effect = lambda name: torch.tensor([[[0.0, 0.04]]])
+    scenario = AtomicTaskScenario()
+    scenario.robot = robot
+    scenario.simulation = Mock(sim_config=Mock(physics_dt=0.01))
+    scenario._gripper_states = {
+        part: (torch.tensor([0.0]), torch.tensor([0.026]))
+        for part in ("left_eef", "right_eef")
+    }
+    provider = Mock(
+        samples_grasps=True,
+        requires_gripper=True,
+        skill_id="coordinated_pickment",
+    )
+    provider.frozen_grasps.return_value = {}
+    provider.prefix_invocations.return_value = ()
+    provider.build_invocation.return_value = Mock(
+        motion_policy=Mock(strategy="motion_gen")
+    )
+    cases = {}
+    for name, count in (("small", 2_000), ("large", 10_000)):
+        cases[name] = replace(
+            _case("coordinated_pickment"),
+            case_id=name,
+            case_parameters={"grasp_sample_count": count},
+        )
+        scenario._case_providers[name] = provider
+        scenario._cases_by_id[name] = cases[name]
+    motion_generator = Mock(robot=robot, device=CPU)
+    motion_generator.planner.cfg.planner_type = "stub"
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+    adapter.atomic_plan_options.return_value = None
+
+    scenario.prepare_planner(adapter, Mock())
+
+    sampler = scenario.require_engine().grasp_pose_generators["left_eef"]
+    assert isinstance(sampler, _CaseSampleCountGraspPoseGenerator)
+    assert scenario.require_engine().grasp_pose_generators["right_eef"] is sampler
+    engine = Mock(motion_generator=motion_generator)
+    engine.compile.side_effect = lambda *args, **kwargs: (
+        sampler.get_dual_arm_valid_grasp_poses()[0]
+    )
+    scenario._engine = engine
+
+    assert scenario.plan_case(adapter, cases["small"]) == 2_000
+    assert scenario.plan_case(adapter, cases["large"]) == 10_000
+    # Outside a case compile the sampler falls back to the largest count.
+    assert sampler.get_dual_arm_valid_grasp_poses() == [10_000]
+
+
 def test_scenario_rejects_single_and_multiple_gripper_declarations_together():
     robot = Mock(device=CPU)
     robot.get_qpos.return_value = torch.zeros(1, 8)
@@ -382,30 +468,89 @@ def test_hand_over_scores_delivery_within_the_derived_budget():
     assert not result(_pose(0.0, -0.2, 0.65))
 
 
-def test_coordinated_pickment_scores_the_object_pose_while_held():
-    provider = create_atomic_skill_provider("coordinated_pickment")
-    assert provider.samples_grasps
-    case = _case(
+def _scenario_with_grippers(grasp_qpos: float) -> AtomicTaskScenario:
+    scenario = AtomicTaskScenario()
+    scenario._gripper_states = {
+        part: (torch.tensor([0.0]), torch.tensor([grasp_qpos]))
+        for part in ("left_eef", "right_eef")
+    }
+    return scenario
+
+
+def _pickment_case() -> BenchmarkCase:
+    return _case(
         "coordinated_pickment",
         target_object_pose=_pose(0.0, 0.0, 0.7).unsqueeze(0).tolist(),
         object_position_threshold_m=0.01,
-        object_tilt_threshold_rad=0.0873,
+        object_rotation_threshold_rad=0.0873,
+        gripper_hold_gap=0.001,
+        control_parts=dual._control_parts({}, ("left", "right")),
     )
-    scenario = AtomicTaskScenario()
-    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.1))
+
+
+def test_coordinated_pickment_scores_the_object_pose_while_held():
+    provider = create_atomic_skill_provider("coordinated_pickment")
+    assert provider.samples_grasps
+    case = _pickment_case()
+    scenario = _scenario_with_grippers(0.026)
 
     def result(final: torch.Tensor) -> bool:
-        success, _ = provider.task_result(
+        success, code = provider.task_result(
             scenario,
             case,
             Mock(),
-            _observation(final_object_pose=final.unsqueeze(0)),
+            _observation(
+                final_object_pose=final.unsqueeze(0),
+                final_gripper_qpos={
+                    "left_eef": torch.tensor([[0.02]]),
+                    "right_eef": torch.tensor([[0.02]]),
+                },
+            ),
             (_outcome(),),
         )
+        assert code == "object_goal_miss"
         return bool(success.item())
 
     assert result(_pose(0.005, 0.0, 0.7))
     assert not result(_pose(0.02, 0.0, 0.7))
+    # Upright but facing the wrong way: a tilt-only check would accept it.
+    turned = _pose(0.0, 0.0, 0.7)
+    turned[:3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([0.0, 0.0, math.pi / 2])
+    )
+    assert not result(turned)
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "held"),
+    [
+        (0.02, 0.02, True),
+        (0.02, 0.026, False),
+        (0.0255, 0.02, False),
+        (0.0, 0.02, False),
+        (None, 0.02, False),
+    ],
+)
+def test_coordinated_pickment_requires_both_grippers_to_hold(
+    left: float | None, right: float, held: bool
+):
+    provider = create_atomic_skill_provider("coordinated_pickment")
+    grippers = {"right_eef": torch.tensor([[right]])}
+    if left is not None:
+        grippers["left_eef"] = torch.tensor([[left]])
+
+    success, _ = provider.task_result(
+        _scenario_with_grippers(0.026),
+        _pickment_case(),
+        Mock(),
+        _observation(
+            final_object_pose=_pose(0.0, 0.0, 0.7).unsqueeze(0),
+            final_gripper_qpos=grippers,
+        ),
+        (_outcome(),),
+    )
+
+    assert success.tolist() == [held]
 
 
 def test_coordinated_placement_scores_the_object_relative_to_its_support():
@@ -416,7 +561,7 @@ def test_coordinated_placement_scores_the_object_relative_to_its_support():
         support_object_id="pan",
         placing_relative_target_pose=relative.unsqueeze(0).tolist(),
         placement_position_tolerance_m=0.01,
-        placement_tilt_tolerance_rad=0.0873,
+        placement_rotation_tolerance_rad=0.0873,
     )
     support = _pose(0.5, 0.2, 0.7)
     support[:3, :3] = axis_angle_to_rotation_matrix(torch.tensor([0.0, 0.0, 0.4]))
@@ -441,6 +586,11 @@ def test_coordinated_placement_scores_the_object_relative_to_its_support():
         torch.tensor([0.3, 0.0, 0.0])
     )
     assert not result(tilted)
+    turned = support @ relative
+    turned[:3, :3] = turned[:3, :3] @ axis_angle_to_rotation_matrix(
+        torch.tensor([0.0, 0.0, 0.3])
+    )
+    assert not result(turned)
     missing, _ = provider.task_result(
         Mock(),
         case,
