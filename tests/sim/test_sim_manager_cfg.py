@@ -29,6 +29,7 @@ from embodichain.lab.sim.cfg import (
     NewtonPhysicsCfg,
     PhysicsBackendCfg,
     WindowCameraPoseCfg,
+    WindowCaptureCfg,
 )
 from embodichain.lab.sim.physics import DefaultPhysicsBackend, NewtonPhysicsBackend
 from embodichain.lab.sim.physics import newton as newton_physics
@@ -104,6 +105,14 @@ def test_simulation_manager_cfg_initializes_window_camera_pose() -> None:
     cfg = SimulationManagerCfg(window_camera_pose=window_camera_pose)
 
     assert cfg.window_camera_pose == window_camera_pose
+
+
+def test_simulation_manager_cfg_initializes_window_capture() -> None:
+    cfg = SimulationManagerCfg()
+
+    assert cfg.window_capture == WindowCaptureCfg()
+    assert cfg.window_capture.enable_hotkey is True
+    assert cfg.window_capture.hotkey.name == "SCANCODE_C"
 
 
 def test_simulation_manager_cfg_has_no_scene_construction_switch() -> None:
