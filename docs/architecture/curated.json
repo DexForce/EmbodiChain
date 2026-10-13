@@ -3887,9 +3887,9 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 999,
-          "end_line": 1003,
-          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
+          "start_line": 1075,
+          "end_line": 1080,
+          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        self._visualization_runtime = runtime\n        runtime.start()"
         }
       ]
     },
