@@ -89,25 +89,40 @@ class StageOutcome:
     """
 
     stage_id: str
-    status: Literal["passed", "failed", "not_reached", "not_applicable"]
+    status: Literal["passed", "failed", "not_reached", "not_applicable", "unavailable"]
     failure_code: str | None = None
     measurements: dict[str, float | bool] = field(default_factory=dict)
+    evidence_source: str | None = None
+    observation_window: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.stage_id, str) or not self.stage_id.strip():
             raise ValueError("stage_id must be a non-empty string.")
-        if self.status not in {"passed", "failed", "not_reached", "not_applicable"}:
+        if self.status not in {
+            "passed",
+            "failed",
+            "not_reached",
+            "not_applicable",
+            "unavailable",
+        }:
             raise ValueError(f"Unknown stage status: {self.status!r}.")
-        if self.status == "failed":
+        if self.status in {"failed", "unavailable"}:
             if not isinstance(self.failure_code, str) or not self.failure_code.strip():
-                raise ValueError("A failed stage requires a failure_code.")
+                raise ValueError(
+                    "A failed or unavailable stage requires a failure_code."
+                )
         elif self.failure_code is not None:
-            raise ValueError("Only a failed stage may carry a failure_code.")
+            raise ValueError(
+                "Only a failed or unavailable stage may carry a failure_code."
+            )
         for name, value in self.measurements.items():
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("Measurement names must be non-empty strings.")
             if not isinstance(value, (int, float, bool)) or not math.isfinite(value):
                 raise ValueError("Stage measurements must be finite numeric values.")
+        for value in (self.evidence_source, self.observation_window):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError("Evidence provenance must be a non-empty string.")
 
 
 @dataclass(frozen=True)
@@ -116,22 +131,32 @@ class PhysicalEvaluation:
 
     env_index: int
     stages: tuple[StageOutcome, ...]
+    protocol_version: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.env_index) is not int or self.env_index < 0:
             raise ValueError("env_index must be a non-negative integer.")
         if not self.stages:
             raise ValueError("Physical evaluation requires at least one stage.")
+        if self.protocol_version is not None and (
+            not isinstance(self.protocol_version, str)
+            or not self.protocol_version.strip()
+        ):
+            raise ValueError("protocol_version must be a non-empty string.")
         names = [stage.stage_id for stage in self.stages]
         if len(names) != len(set(names)):
             raise ValueError("Physical stage ids must be unique.")
         stopped = False
         for stage in self.stages:
-            if stopped and stage.status in {"passed", "failed"}:
+            if stopped and stage.status in {"passed", "failed", "unavailable"}:
                 raise ValueError(
                     "A reached stage cannot follow a failed or unreached stage."
                 )
-            stopped = stopped or stage.status in {"failed", "not_reached"}
+            stopped = stopped or stage.status in {
+                "failed",
+                "not_reached",
+                "unavailable",
+            }
 
     @property
     def task_success(self) -> bool:
@@ -150,7 +175,7 @@ class PhysicalEvaluation:
             (
                 stage.stage_id
                 for stage in self.stages
-                if stage.status in {"failed", "not_reached"}
+                if stage.status in {"failed", "not_reached", "unavailable"}
             ),
             None,
         )
@@ -161,7 +186,11 @@ class PhysicalEvaluation:
         if self.task_success:
             return None
         return next(
-            (stage.failure_code for stage in self.stages if stage.status == "failed"),
+            (
+                stage.failure_code
+                for stage in self.stages
+                if stage.status in {"failed", "unavailable"}
+            ),
             "physical_stages_incomplete",
         )
 
@@ -245,4 +274,8 @@ def validate_physical_evaluations(
         tuple(stage.stage_id for stage in result.stages) != schema for result in ordered
     ):
         raise ValueError("Physical stage order must match across environment rows.")
+    if len({result.protocol_version for result in ordered}) != 1:
+        raise ValueError(
+            "Physical protocol version must match across environment rows."
+        )
     return ordered
