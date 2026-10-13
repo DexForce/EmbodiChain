@@ -86,7 +86,7 @@ def place_ik_recovery() -> Iterator[_PlaceIKRecovery]:
         _PLACE_IK_RECOVERY.reset(token)
 
 
-def _local_place_ik(
+def resolve_continuous_ik_path(
     generator: MotionGenerator,
     targets: list[PlanState],
     options: MotionGenOptions,
@@ -94,7 +94,13 @@ def _local_place_ik(
     candidate_predicate: Callable[[torch.Tensor], bool] | None = None,
     operation: str = "Place",
 ) -> PlanResult | None:
-    """Recover a single-environment path without changing targets or timing."""
+    """Resolve one Cartesian path on a continuous joint branch.
+
+    The resolver keeps the previous waypoint as the next IK seed, retries near
+    joint limits with bounded local seed perturbations, and accepts only paths
+    that satisfy the declared per-step velocity limits. It never changes the
+    requested Cartesian targets or timing.
+    """
     robot = generator.robot
     seed = options.start_qpos.clone()
     bounds = robot.get_qpos_limits(name=options.control_part).to(seed)
@@ -176,6 +182,24 @@ def _local_place_ik(
         f"{path.shape[1]} unchanged-time samples."
     )
     return PlanResult(success=success, positions=path, dt=dt)
+
+
+def _local_place_ik(
+    generator: MotionGenerator,
+    targets: list[PlanState],
+    options: MotionGenOptions,
+    *,
+    candidate_predicate: Callable[[torch.Tensor], bool] | None = None,
+    operation: str = "Place",
+) -> PlanResult | None:
+    """Private delegation retained for existing GenSim recovery callers."""
+    return resolve_continuous_ik_path(
+        generator,
+        targets,
+        options,
+        candidate_predicate=candidate_predicate,
+        operation=operation,
+    )
 
 
 def _velocity_retry_samples(sample_count: int | None) -> tuple[int, ...]:

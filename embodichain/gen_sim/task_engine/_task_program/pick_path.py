@@ -37,7 +37,7 @@ from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
 from .articulation_collision import check_free_motion
 from .held_alignment_recovery import _RandomState, _cuda_devices
-from .motion import _joint_velocity_limits, _local_place_ik
+from .motion import _joint_velocity_limits, resolve_continuous_ik_path
 from .pick_safety import _inspect_pick_plan
 
 __all__: list[str] = []
@@ -290,7 +290,7 @@ def rebuild(action: Any, request: Any, context: Any, first: Any, selection: Any)
             }
             attempts.append(note)
             if not backward.success.all():
-                recovered = _local_place_ik(
+                recovered = resolve_continuous_ik_path(
                     action.motion_generator,
                     contact_targets,
                     contact_options,

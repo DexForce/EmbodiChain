@@ -272,7 +272,7 @@ def test_failed_cartesian_samples_use_bounded_local_ik_and_fail_closed(
     generate = Mock(return_value=failed)
     local = Mock(return_value=None)
     data[0].motion_generator._generate_checked = generate
-    monkeypatch.setattr(path, "_local_place_ik", local)
+    monkeypatch.setattr(path, "resolve_continuous_ik_path", local)
     result = path.rebuild(*data)
     assert not result.plan_success.any()
     assert generate.call_count == 2
@@ -300,7 +300,7 @@ def test_failed_cartesian_samples_accept_local_ik_recovery(monkeypatch) -> None:
         dt=torch.tensor([[0.0, 0.04, 0.04]]),
     )
     local = Mock(return_value=recovered)
-    monkeypatch.setattr(path, "_local_place_ik", local)
+    monkeypatch.setattr(path, "resolve_continuous_ik_path", local)
 
     result = path.rebuild(*data)
 
