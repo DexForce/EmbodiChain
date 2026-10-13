@@ -959,6 +959,17 @@ class _ActiveCaseGraspPoseGenerator(GraspPoseGenerator):
         )
 
 
+def _parallel_jaw_sampler(n_sample: int) -> ParallelJawGraspPoseGenerator:
+    """Build the PGI grasp sampler a self-sampling case compiles with."""
+    from scripts.tutorials.atomic_action.tutorial_utils import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    return create_parallel_jaw_grasp_pose_generator(
+        n_sample=n_sample, force_refresh=False
+    )
+
+
 class _CaseSampleCountGraspPoseGenerator(ParallelJawGraspPoseGenerator):
     """Serve each grasp-sampling case from a sampler with its own sample count.
 
@@ -3183,15 +3194,9 @@ class AtomicTaskScenario(ScenarioProvider):
             if provider.samples_grasps
         }
         if sampling_counts:
-            from scripts.tutorials.atomic_action.tutorial_utils import (
-                create_parallel_jaw_grasp_pose_generator,
-            )
-
             self._case_grasp_sampler = _CaseSampleCountGraspPoseGenerator(
                 {
-                    count: create_parallel_jaw_grasp_pose_generator(
-                        n_sample=count, force_refresh=False
-                    )
+                    count: _parallel_jaw_sampler(count)
                     for count in sorted(sampling_counts)
                 },
                 default_count=max(sampling_counts),

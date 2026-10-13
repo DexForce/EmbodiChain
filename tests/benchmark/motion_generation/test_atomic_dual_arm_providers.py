@@ -39,6 +39,7 @@ from scripts.benchmark.motion_generation.registry import create_robot_provider
 from scripts.benchmark.motion_generation.scenarios import (
     atomic_dual_arm_providers as dual,
 )
+from scripts.benchmark.motion_generation.scenarios import atomic_task
 from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
     _ActiveCaseGraspPoseGenerator,
@@ -307,13 +308,7 @@ class _CountingSampler(ParallelJawGraspPoseGenerator):
 
 
 def test_each_self_sampling_case_compiles_with_its_own_sample_count(monkeypatch):
-    from scripts.tutorials.atomic_action import tutorial_utils
-
-    monkeypatch.setattr(
-        tutorial_utils,
-        "create_parallel_jaw_grasp_pose_generator",
-        lambda *, n_sample, force_refresh: _CountingSampler(n_sample),
-    )
+    monkeypatch.setattr(atomic_task, "_parallel_jaw_sampler", _CountingSampler)
     robot = Mock(device=CPU)
     robot.control_parts = {"left_eef": object(), "right_eef": object()}
     robot.get_joint_ids.side_effect = lambda name: {
