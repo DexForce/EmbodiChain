@@ -63,6 +63,7 @@ from ..config import SuiteCfg, TrackCfg
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_task import (
     _ExecutionObservation,
+    _apply_target_yaw_randomization,
     _atomic_case_id,
     _case_name,
     _case_pose,
@@ -364,6 +365,12 @@ def _randomized_target_pose(
         device=object_pose.device,
         dtype=object_pose.dtype,
     )
+    _apply_target_yaw_randomization(
+        target_pose,
+        config,
+        seed=seed,
+        stream=stream + 1,
+    )
     return target_pose
 
 
@@ -374,13 +381,23 @@ def _support_randomization_config(
     support_config = dict(config)
     support_config.pop("object_position_jitter_m", None)
     support_config.pop("object_yaw_jitter_rad", None)
+    support_config.pop("_pose_batch_object_translation_jitter_m", None)
+    support_config.pop("_pose_batch_object_yaw_jitter_rad", None)
     if "support_object_position_jitter_m" in config:
         support_config["object_position_jitter_m"] = config[
             "support_object_position_jitter_m"
         ]
+    elif "_pose_batch_support_object_translation_jitter_m" in config:
+        support_config["object_position_jitter_m"] = config[
+            "_pose_batch_support_object_translation_jitter_m"
+        ]
     if "support_object_yaw_jitter_rad" in config:
         support_config["object_yaw_jitter_rad"] = config[
             "support_object_yaw_jitter_rad"
+        ]
+    elif "_pose_batch_support_object_yaw_jitter_rad" in config:
+        support_config["object_yaw_jitter_rad"] = config[
+            "_pose_batch_support_object_yaw_jitter_rad"
         ]
     return support_config
 
@@ -991,6 +1008,12 @@ def _placement_poses(
     )
     poses["placing_target_pose"][:, :3, 3] += target_offset
     poses["support_target_pose"][:, :3, 3] += target_offset
+    _apply_target_yaw_randomization(
+        poses["placing_target_pose"],
+        config,
+        seed=seed,
+        stream=907,
+    )
     return poses
 
 

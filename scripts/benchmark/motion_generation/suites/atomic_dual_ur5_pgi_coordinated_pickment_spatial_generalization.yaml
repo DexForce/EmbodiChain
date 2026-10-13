@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_dual_ur5_pgi_coordinated_pickment_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization_v1
+suite_version: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization_v2
 profile: coverage
 
 robot:
@@ -111,6 +111,30 @@ tracks:
             object_translation_jitter_m: [0.0, 0.0, 0.0]
             object_yaw_jitter_rad: 0.0
             target_translation_jitter_m: [0.02, 0.02, 0.0]
+            seed_stride: 1
+      - id: target_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          target_yaw_jitter_rad: 0.523599
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.0
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            target_yaw_jitter_rad: 0.523599
             seed_stride: 1
     config:
       batch_sizes: [1]

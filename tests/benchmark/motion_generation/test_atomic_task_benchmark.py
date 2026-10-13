@@ -938,6 +938,45 @@ def test_object_motion_requires_measured_target_pose(
     assert actual_failure_code == failure_code
 
 
+@pytest.mark.parametrize("skill_id", ["move_held_object", "place"])
+def test_target_yaw_domain_requires_measured_full_rotation(skill_id: str) -> None:
+    """A target-yaw case rejects a yaw miss even when object tilt is zero."""
+    provider = create_atomic_skill_provider(skill_id)
+    target_pose = torch.eye(4).repeat(2, 1, 1)
+    final_pose = target_pose.clone()
+    yaw = torch.tensor(0.20)
+    final_pose[1, 0, 0] = torch.cos(yaw)
+    final_pose[1, 0, 1] = -torch.sin(yaw)
+    final_pose[1, 1, 0] = torch.sin(yaw)
+    final_pose[1, 1, 1] = torch.cos(yaw)
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        skill_id=skill_id,
+        case_parameters={
+            "target_object_pose": target_pose.tolist(),
+            "object_position_threshold_m": 0.05,
+            "object_tilt_threshold_rad": 0.10,
+            "object_rotation_threshold_rad": 0.10,
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.1,
+        final_object_pose=final_pose,
+    )
+    scenario = AtomicTaskScenario()
+    scenario.suite = Mock(protocol=Mock(rotation_threshold_rad=0.10))
+    outcomes = tuple(replace(_atomic_outcome(), env_index=index) for index in range(2))
+
+    success, _ = provider.task_result(scenario, case, Mock(), observation, outcomes)
+
+    assert success.tolist() == [True, False]
+
+
 @pytest.mark.parametrize("skill_id", ["press", "slide", "twist"])
 def test_articulation_tasks_require_measured_joint_displacement(skill_id: str) -> None:
     provider = create_atomic_skill_provider(skill_id)

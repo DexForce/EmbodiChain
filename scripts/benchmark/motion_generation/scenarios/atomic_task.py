@@ -109,6 +109,8 @@ _TOP_DOWN_ROTATION = (
     (0.0401, 0.0000, -0.9992),
 )
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
+_TASK_FRAME_TRANSLATION_STREAM = 90_001
+_TASK_FRAME_YAW_STREAM = 90_002
 _GRIPPER_SKILLS = {
     "pick_up",
     "move_held_object",
@@ -277,6 +279,44 @@ def _seeded_jitter(
     return values[0] if batch_size == 1 else values
 
 
+def _seeded_yaw_rotation(
+    *,
+    batch_size: int,
+    amplitude: object,
+    name: str,
+    seed: int,
+    stream: int,
+    seed_stride: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic world-Z rotation matrices for a pose batch."""
+    yaw_amplitude = float(amplitude)
+    if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative.")
+    yaw = _seeded_jitter(
+        (yaw_amplitude,),
+        seed=seed,
+        stream=stream,
+        dtype=dtype,
+        device=device,
+        batch_size=batch_size,
+        seed_stride=seed_stride,
+    )
+    if yaw.dim() == 1:
+        yaw = yaw[:1]
+    else:
+        yaw = yaw[:, 0]
+    cosine = torch.cos(yaw)
+    sine = torch.sin(yaw)
+    yaw_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    yaw_rotation[:, 0, 0] = cosine
+    yaw_rotation[:, 0, 1] = -sine
+    yaw_rotation[:, 1, 0] = sine
+    yaw_rotation[:, 1, 1] = cosine
+    return yaw_rotation
+
+
 def _apply_seeded_yaw_jitter(
     pose: torch.Tensor,
     amplitude: object,
@@ -287,32 +327,59 @@ def _apply_seeded_yaw_jitter(
     seed_stride: int,
 ) -> None:
     """Rotate every pose row about world Z by deterministic yaw jitter."""
-    yaw_amplitude = float(amplitude)
-    if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
-        raise ValueError(f"{name} must be finite and non-negative.")
-    yaw = _seeded_jitter(
-        (yaw_amplitude,),
+    yaw_rotation = _seeded_yaw_rotation(
+        batch_size=pose.shape[0],
+        amplitude=amplitude,
+        name=name,
         seed=seed,
         stream=stream,
+        seed_stride=seed_stride,
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
+
+
+def _apply_task_frame_randomization(
+    pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+) -> None:
+    """Apply one shared planar task-frame transform to every scene entity."""
+    stride = int(config.get("_pose_batch_seed_stride", 1))
+    translation_amplitude = _float_vector(
+        config.get("_pose_batch_task_frame_translation_jitter_m"),
+        name="task_frame_translation_jitter_m",
+        length=3,
+        default=(0.0, 0.0, 0.0),
+    )
+    if any(value < 0.0 for value in translation_amplitude):
+        raise ValueError("task_frame_translation_jitter_m values must be non-negative.")
+    rotation = _seeded_yaw_rotation(
+        batch_size=pose.shape[0],
+        amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
+        name="task_frame_yaw_jitter_rad",
+        seed=seed,
+        stream=_TASK_FRAME_YAW_STREAM,
+        seed_stride=stride,
+        dtype=pose.dtype,
+        device=pose.device,
+    )
+    translation = _seeded_jitter(
+        translation_amplitude,
+        seed=seed,
+        stream=_TASK_FRAME_TRANSLATION_STREAM,
         dtype=pose.dtype,
         device=pose.device,
         batch_size=pose.shape[0],
-        seed_stride=seed_stride,
+        seed_stride=stride,
     )
-    if yaw.dim() == 1:
-        yaw = yaw[:1]
-    else:
-        yaw = yaw[:, 0]
-    cosine = torch.cos(yaw)
-    sine = torch.sin(yaw)
-    yaw_rotation = torch.eye(3, dtype=pose.dtype, device=pose.device).repeat(
-        pose.shape[0], 1, 1
-    )
-    yaw_rotation[:, 0, 0] = cosine
-    yaw_rotation[:, 0, 1] = -sine
-    yaw_rotation[:, 1, 0] = sine
-    yaw_rotation[:, 1, 1] = cosine
-    pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
+    if translation.dim() == 1:
+        translation = translation.unsqueeze(0)
+    pose[:, :3, 3] = torch.bmm(rotation, pose[:, :3, 3, None]).squeeze(-1)
+    pose[:, :3, 3] += translation
+    pose[:, :3, :3] = rotation @ pose[:, :3, :3]
 
 
 def _case_generation_seed(seed: int, *, skill_index: int, case_index: int) -> int:
@@ -416,7 +483,49 @@ def _randomized_vector_batch(
     base_tensor = torch.tensor(base_values, dtype=dtype, device=device).expand(
         batch_size, -1
     )
-    return base_tensor + jitter
+    randomized = base_tensor + jitter
+    if jitter_name in {"target_offset_jitter_m", "target_object_offset_jitter_m"}:
+        task_frame_rotation = _seeded_yaw_rotation(
+            batch_size=batch_size,
+            amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
+            name="task_frame_yaw_jitter_rad",
+            seed=seed,
+            stream=_TASK_FRAME_YAW_STREAM,
+            seed_stride=stride,
+            dtype=dtype,
+            device=device,
+        )
+        randomized = torch.bmm(task_frame_rotation, randomized[:, :, None]).squeeze(-1)
+    return randomized
+
+
+def _apply_target_yaw_randomization(
+    pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+    stream: int,
+) -> None:
+    """Apply the configured goal-relative yaw to a target object pose."""
+    amplitude = config.get("target_yaw_jitter_rad")
+    if amplitude is None:
+        amplitude = config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+    _apply_seeded_yaw_jitter(
+        pose,
+        amplitude,
+        name="target_yaw_jitter_rad",
+        seed=seed,
+        stream=stream,
+        seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+    )
+
+
+def _target_yaw_is_enabled(config: Mapping[str, object]) -> bool:
+    """Return whether a case requests a non-zero goal-relative yaw range."""
+    amplitude = config.get("target_yaw_jitter_rad")
+    if amplitude is None:
+        amplitude = config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+    return float(amplitude) > 0.0
 
 
 def _randomization_parameters(
@@ -454,6 +563,27 @@ def _randomization_parameters(
                 ),
                 "pose_batch_object_yaw_jitter_rad": float(
                     config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_target_yaw_jitter_rad": float(
+                    config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_support_object_translation_jitter_m": list(
+                    config.get(
+                        "_pose_batch_support_object_translation_jitter_m",
+                        (0.0, 0.0, 0.0),
+                    )
+                ),
+                "pose_batch_support_object_yaw_jitter_rad": float(
+                    config.get("_pose_batch_support_object_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_task_frame_translation_jitter_m": list(
+                    config.get(
+                        "_pose_batch_task_frame_translation_jitter_m",
+                        (0.0, 0.0, 0.0),
+                    )
+                ),
+                "pose_batch_task_frame_yaw_jitter_rad": float(
+                    config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0)
                 ),
                 "batch_semantics": "one_pose_per_environment_row",
             }
@@ -539,7 +669,7 @@ def _object_pose_success(
     observation: _ExecutionObservation,
     motion_outcomes: tuple[CaseOutcome, ...],
 ) -> torch.Tensor:
-    """Gate object transport/place success on measured position and tilt."""
+    """Gate object transport/place success on its configured pose metric."""
     if scenario.suite is None:
         raise RuntimeError("Atomic Task suite is not configured.")
     final_pose = observation.final_object_pose
@@ -553,23 +683,30 @@ def _object_pose_success(
     translation = torch.linalg.vector_norm(
         final_pose[:, :3, 3] - target[:, :3, 3], dim=-1
     )
-    target_up = target[:, :3, 2]
-    final_up = final_pose[:, :3, 2]
-    tilt = torch.arccos(torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0))
-    position_threshold = float(case.case_parameters["object_position_threshold_m"])
-    tilt_threshold = float(
-        case.case_parameters.get(
+    rotation_threshold = case.case_parameters.get("object_rotation_threshold_rad")
+    if rotation_threshold is None:
+        target_up = target[:, :3, 2]
+        final_up = final_pose[:, :3, 2]
+        rotation = torch.arccos(
+            torch.clamp((target_up * final_up).sum(dim=-1), -1.0, 1.0)
+        )
+        rotation_threshold = case.case_parameters.get(
             "object_tilt_threshold_rad",
             scenario.suite.protocol.rotation_threshold_rad,
         )
-    )
+    else:
+        relative = target[:, :3, :3].transpose(-1, -2) @ final_pose[:, :3, :3]
+        trace = torch.diagonal(relative, dim1=-2, dim2=-1).sum(dim=-1)
+        rotation = torch.arccos(torch.clamp((trace - 1.0) * 0.5, -1.0, 1.0))
+    position_threshold = float(case.case_parameters["object_position_threshold_m"])
+    rotation_threshold = float(rotation_threshold)
     return (
         observation.execution_success
         & _motion_valid_mask(motion_outcomes, device=translation.device)
         & torch.isfinite(translation)
-        & torch.isfinite(tilt)
+        & torch.isfinite(rotation)
         & (translation <= position_threshold)
-        & (tilt <= tilt_threshold)
+        & (rotation <= rotation_threshold)
     )
 
 
@@ -1892,6 +2029,12 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
+        _apply_target_yaw_randomization(
+            target_object,
+            config,
+            seed=seed,
+            stream=312,
+        )
         # The object is now picked from the table and lifted before the
         # transport action.  Express the transport target relative to that
         # lifted state instead of the old teleported held-object pose.
@@ -1971,6 +2114,18 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                         "object_tilt_threshold_rad",
                         suite.protocol.rotation_threshold_rad,
                     )
+                ),
+                **(
+                    {
+                        "object_rotation_threshold_rad": float(
+                            config.get(
+                                "object_rotation_threshold_rad",
+                                suite.protocol.rotation_threshold_rad,
+                            )
+                        )
+                    }
+                    if _target_yaw_is_enabled(config)
+                    else {}
                 ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
@@ -2053,6 +2208,12 @@ class _PlaceCases(_HeldObjectCases):
             batch_size=object_pose.shape[0],
             dtype=object_pose.dtype,
             device=object_pose.device,
+        )
+        _apply_target_yaw_randomization(
+            target_object,
+            config,
+            seed=seed,
+            stream=322,
         )
         release = torch.bmm(target_object, object_to_eef)
         lift_height = float(config.get("retract_height_m", 0.10))
@@ -2138,6 +2299,18 @@ class _PlaceCases(_HeldObjectCases):
                         "object_tilt_threshold_rad",
                         suite.protocol.rotation_threshold_rad,
                     )
+                ),
+                **(
+                    {
+                        "object_rotation_threshold_rad": float(
+                            config.get(
+                                "object_rotation_threshold_rad",
+                                suite.protocol.rotation_threshold_rad,
+                            )
+                        )
+                    }
+                    if _target_yaw_is_enabled(config)
+                    else {}
                 ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
@@ -3204,9 +3377,24 @@ class AtomicTaskScenario(ScenarioProvider):
                 config["_pose_batch_object_translation_jitter_m"] = list(
                     randomization.object_translation_jitter_m
                 )
+                config["_pose_batch_support_object_translation_jitter_m"] = list(
+                    randomization.support_object_translation_jitter_m
+                )
+                config["_pose_batch_task_frame_translation_jitter_m"] = list(
+                    randomization.task_frame_translation_jitter_m
+                )
             if randomization.mode == "planar_pose":
                 config["_pose_batch_object_yaw_jitter_rad"] = (
                     randomization.object_yaw_jitter_rad
+                )
+                config["_pose_batch_target_yaw_jitter_rad"] = (
+                    randomization.target_yaw_jitter_rad
+                )
+                config["_pose_batch_support_object_yaw_jitter_rad"] = (
+                    randomization.support_object_yaw_jitter_rad
+                )
+                config["_pose_batch_task_frame_yaw_jitter_rad"] = (
+                    randomization.task_frame_yaw_jitter_rad
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
             config["_pose_batch_enabled"] = True
@@ -4676,6 +4864,7 @@ class AtomicTaskScenario(ScenarioProvider):
             stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
+        _apply_task_frame_randomization(pose, config, seed=seed)
         handle.reset(pose=pose, qpos=handle.initial_qpos)
 
         update_steps = handle.config.get("reset_settle_steps", 10)
@@ -4743,6 +4932,7 @@ class AtomicTaskScenario(ScenarioProvider):
             stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
+        _apply_task_frame_randomization(pose, config, seed=seed)
 
         handle.entity.set_local_pose(pose)
         handle.entity.clear_dynamics()

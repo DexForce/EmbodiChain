@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v3
+suite_version: atomic_franka_pgi_spatial_generalization_v4
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -79,6 +79,30 @@ x-domain-target-relative-pose: &domain_target_relative_pose
       object_translation_jitter_m: [0.0, 0.0, 0.0]
       object_yaw_jitter_rad: 0.0
       target_translation_jitter_m: [0.02, 0.02, 0.0]
+      seed_stride: 1
+
+x-domain-target-yaw: &domain_target_yaw
+  id: target_yaw
+  version: v1
+  kind: robustness
+  case_generator: deterministic_uniform_pose_batch
+  perturbations:
+    distribution: uniform
+    object_translation_jitter_m: [0.0, 0.0, 0.0]
+    object_yaw_jitter_rad: 0.0
+    target_translation_jitter_m: [0.0, 0.0, 0.0]
+    target_yaw_jitter_rad: 0.523599
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: planar_pose
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.0, 0.0, 0.0]
+      object_yaw_jitter_rad: 0.0
+      target_translation_jitter_m: [0.0, 0.0, 0.0]
+      target_yaw_jitter_rad: 0.523599
       seed_stride: 1
 
 x-physics: &physics
@@ -437,21 +461,24 @@ tracks:
       objects: [*cube]
       skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
 
-  - id: spatial-rigid-object-target
+  - id: spatial-rigid-object-pose-target
     scenario: atomic_task
     enabled: true
     domains:
       - <<: *domain_nominal
-        applicability: [move_held_object, place, push_object]
+        applicability: [move_held_object, place]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_object_xy
-        applicability: [move_held_object, place, push_object]
+        applicability: [move_held_object, place]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_object_yaw
-        applicability: [move_held_object, place, push_object]
+        applicability: [move_held_object, place]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_target_relative_pose
-        applicability: [move_held_object, place, push_object]
+        applicability: [move_held_object, place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_yaw
+        applicability: [move_held_object, place]
         scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
@@ -459,7 +486,31 @@ tracks:
       physics: *physics
       gripper: *gripper_cube
       objects: [*cube]
-      skills: [*skill_move_held_object, *skill_place, *skill_push_object]
+      skills: [*skill_move_held_object, *skill_place]
+
+  - id: spatial-rigid-object-position-target
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_nominal
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_xy
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_yaw
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_relative_pose
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_cube
+      objects: [*cube]
+      skills: [*skill_push_object]
 
   - id: spatial-microwave-controls
     scenario: atomic_task

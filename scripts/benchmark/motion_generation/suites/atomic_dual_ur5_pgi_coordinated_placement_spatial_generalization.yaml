@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_dual_ur5_pgi_coordinated_placement_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v1
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v2
 profile: coverage
 
 robot:
@@ -112,6 +112,103 @@ tracks:
             object_translation_jitter_m: [0.0, 0.0, 0.0]
             object_yaw_jitter_rad: 0.0
             target_translation_jitter_m: [0.02, 0.02, 0.0]
+            seed_stride: 1
+      - id: target_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          target_yaw_jitter_rad: 0.523599
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            target_yaw_jitter_rad: 0.523599
+            seed_stride: 1
+      - id: support_object_xy
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          support_object_translation_jitter_m: [0.03, 0.03, 0.0]
+          support_object_yaw_jitter_rad: 0.0
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            support_object_translation_jitter_m: [0.03, 0.03, 0.0]
+            seed_stride: 1
+      - id: support_object_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          support_object_translation_jitter_m: [0.0, 0.0, 0.0]
+          support_object_yaw_jitter_rad: 0.523599
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            support_object_yaw_jitter_rad: 0.523599
+            seed_stride: 1
+      - id: task_frame_xy
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+          task_frame_yaw_jitter_rad: 0.0
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+            seed_stride: 1
+      - id: task_frame_yaw
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          task_frame_translation_jitter_m: [0.0, 0.0, 0.0]
+          task_frame_yaw_jitter_rad: 0.174533
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            task_frame_yaw_jitter_rad: 0.174533
             seed_stride: 1
     config:
       batch_sizes: [1]
