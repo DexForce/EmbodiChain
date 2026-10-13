@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 import sys
 from typing import Any
 
@@ -27,15 +28,16 @@ import pytest
 from scripts.benchmark.rendering import routing_diagnostic as launch
 
 
+@pytest.mark.parametrize("backend", ["embodichain", "isaaclab"])
 def test_preparation_pins_original_interpreter_sources_and_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
 ) -> None:
     source = tmp_path / "original"
     source.mkdir()
     experiment = source / "outputs/experiment"
     experiment.mkdir(parents=True)
     output = tmp_path / "new-proof"
-    identity = {"backend": "embodichain", "run_id": "synthetic-run"}
+    identity = {"backend": backend, "run_id": "synthetic-run"}
     original = {
         "row": {
             "command": [sys.executable, "-m", "original.worker", "--gpu-id", "5"],
@@ -46,7 +48,7 @@ def test_preparation_pins_original_interpreter_sources_and_command(
         "worktree": str(source),
         "commit": "a" * 40,
         "source_files": {"synthetic": "b" * 64},
-        "isaaclab_root": None,
+        "isaaclab_root": str(tmp_path / "IsaacLab"),
     }
     calls = []
     monkeypatch.setattr(
@@ -72,13 +74,17 @@ def test_preparation_pins_original_interpreter_sources_and_command(
         "renderer_control_signature",
         lambda metadata, backend: {"synthetic": True},
     )
+    external_paths = []
     monkeypatch.setattr(
         launch.frozen,
         "original_environment",
-        lambda tree, python, external: {
-            "PYTHONPATH": str(tree),
-            "FROZEN_PYTHON": str(python),
-        },
+        lambda tree, python, external: (
+            external_paths.append(external)
+            or {
+                "PYTHONPATH": str(tree),
+                "FROZEN_PYTHON": str(python),
+            }
+        ),
     )
 
     def forbid_process(*args: Any, **kwargs: Any) -> None:
@@ -96,6 +102,9 @@ def test_preparation_pins_original_interpreter_sources_and_command(
     assert Path(result["command"][1]).name == "routing_worker.py"
     assert Path(result["command"][1]).is_absolute()
     assert result["environment"]["PYTHONPATH"] == str(source)
+    assert external_paths == [
+        Path(verified["isaaclab_root"]) if backend == "isaaclab" else None
+    ]
     payload = launch.frozen.read_json(output / "routing_config.json")
     assert payload["source"] == verified
     assert payload["original_binding"] == identity
@@ -105,6 +114,24 @@ def test_preparation_pins_original_interpreter_sources_and_command(
     for item in payload["proof_sources"]:
         assert launch.frozen.sha256(output / item["snapshot"]["path"]) == item["sha256"]
     assert launch.frozen.read_json(output / "launch.json")["execution_started"] is False
+
+
+@pytest.mark.parametrize("backend", ["embodichain", "isaaclab"])
+def test_worker_pins_only_original_backend_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(launch.__file__).parent))
+    worker = runpy.run_path(str(Path(launch.__file__).with_name("routing_worker.py")))
+    recorded = []
+    monkeypatch.setattr(
+        worker["frozen"], "pin_source_imports", lambda source: recorded.append(source)
+    )
+    source = {"worktree": str(tmp_path), "isaaclab_root": str(tmp_path / "IsaacLab")}
+    worker["_pin_sources"](source, backend)
+    assert recorded[0]["isaaclab_root"] == (
+        source["isaaclab_root"] if backend == "isaaclab" else None
+    )
+    assert source["isaaclab_root"] == str(tmp_path / "IsaacLab")
 
 
 def test_proof_output_cannot_write_into_original_worktree(tmp_path: Path) -> None:

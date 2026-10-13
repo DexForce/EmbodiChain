@@ -153,7 +153,11 @@ def prepare_routing_diagnostic(
     environment = frozen.original_environment(
         source_worktree,
         Path(command[0]),
-        Path(source["isaaclab_root"]) if source.get("isaaclab_root") else None,
+        (
+            Path(source["isaaclab_root"])
+            if binding["backend"] == "isaaclab" and source.get("isaaclab_root")
+            else None
+        ),
     )
     frozen.write_json(
         output / "launch.json",

@@ -29,6 +29,14 @@ import frozen_source as frozen
 __all__ = ["main"]
 
 
+def _pin_sources(source: dict[str, Any], backend: str) -> None:
+    """Keep checkout provenance while importing only the original backend's paths."""
+    imports = dict(source)
+    if backend != "isaaclab":
+        imports["isaaclab_root"] = None
+    frozen.pin_source_imports(imports)
+
+
 def main() -> int:
     """Run only after the separate source-pinned launcher explicitly starts it."""
     faulthandler.enable()
@@ -58,7 +66,7 @@ def main() -> int:
             snapshot = output / item["snapshot"]["path"]
             if frozen.sha256(snapshot) != item["sha256"]:
                 raise ValueError("Frozen follow-up source snapshot changed")
-        frozen.pin_source_imports(source)
+        _pin_sources(source, binding["backend"])
         # Every scripts.* module below comes from the ORIGINAL worktree.
         from scripts.benchmark.rendering import formal_worker as original
         from scripts.benchmark.rendering.resources import ResourceSampler
