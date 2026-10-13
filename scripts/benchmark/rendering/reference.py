@@ -50,6 +50,19 @@ __all__ = [
 
 DEPTH_SEMANTICS = "optical_axis_metres"
 SEGMENTATION_SEMANTICS = "canonical_instance_ids_zero_background"
+_MAX_WAVEFRONT_SAMPLES = 1 << 24
+
+
+def _samples_per_pass(spp: int, width: int, height: int) -> int:
+    """Bound live sample lanes without dropping any samples from a repeat.
+
+    Mitsuba's LLVM integrator seeds once and advances the sampler between
+    passes. Choose a power-of-two divisor of the requested sample count so
+    both independent repeats keep their original seeds and exact total spp.
+    A film larger than the lane budget still needs one sample per pixel.
+    """
+    limit = max(1, _MAX_WAVEFRONT_SAMPLES // (width * height))
+    return math.gcd(spp, 1 << (limit.bit_length() - 1))
 
 
 def reference_dependencies() -> dict[str, Any]:
@@ -277,6 +290,7 @@ def render_reference(
 
     mi.set_variant("llvm_ad_rgb")
     dr.set_thread_count(threads)
+    samples_per_pass = _samples_per_pass(spp, width, height)
     destination = Path(output_dir).resolve()
     destination.mkdir(parents=True, exist_ok=False)
     provenance = {
@@ -306,6 +320,10 @@ def render_reference(
             "spp": spp,
             "seed": seed,
             "independent_repeat_count": 2,
+            "sampling_policy": "bounded_wavefront/v1",
+            "samples_per_pass": samples_per_pass,
+            "passes_per_repeat": spp // samples_per_pass,
+            "maximum_wavefront_samples": _MAX_WAVEFRONT_SAMPLES,
         },
         "geometry_sampling": "native ray intersections at pixel centres, unfiltered",
         "material_model": "Mitsuba principled; canonical linear base_color/roughness/metallic",
@@ -355,7 +373,11 @@ def render_reference(
                 obj["world_from_object"] = transforms[obj["uid"]]
         scene_dict = {
             "type": "scene",
-            "integrator": {"type": "path", "max_depth": 8},
+            "integrator": {
+                "type": "path",
+                "max_depth": 8,
+                "samples_per_pass": samples_per_pass,
+            },
             "sensor": {
                 "type": "perspective",
                 "fov": frozen["camera_model"]["horizontal_fov_deg"],

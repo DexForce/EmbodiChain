@@ -123,6 +123,9 @@ use new attempt directories without replacing interrupted evidence.
 The [campaign guide](../../../scripts/benchmark/rendering/EA_CAMPAIGN.md)
 owns operator commands and core-point selection. Shared references require exact
 physical/generator/runtime identities and a fully checked source closure.
+Independent CPU references use bounded LLVM wavefront passes while preserving
+total spp and independent sampler seeds. Pass sizing is recorded; a changed
+generator hashes into a new reference epoch rather than reusing older bytes.
 CPU proof admission counts unique missing reference keys at both precision rungs,
 possible cache/import copies and diagnostic outputs before evaluation starts.
 

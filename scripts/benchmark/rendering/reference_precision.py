@@ -136,6 +136,36 @@ def _read_policy(root: Path, descriptor: dict[str, Any]) -> dict[str, Any]:
     return policy
 
 
+def _supported_integrator(value: Any, spp: int, width: int, height: int) -> bool:
+    """Verify legacy or bounded-pass provenance before comparing precision rungs."""
+    base = {
+        "type": "path",
+        "max_depth": 8,
+        "spp": spp,
+        "seed": 0,
+        "independent_repeat_count": 2,
+    }
+    if value == base:
+        return True
+    lanes = 1 << 24
+    limit = max(1, lanes // (width * height))
+    count = math.gcd(spp, 1 << (limit.bit_length() - 1))
+    return value == {
+        **base,
+        "sampling_policy": "bounded_wavefront/v1",
+        "samples_per_pass": count,
+        "passes_per_repeat": spp // count,
+        "maximum_wavefront_samples": lanes,
+    } and all(
+        type(value[name]) is int
+        for name in (
+            "samples_per_pass",
+            "passes_per_repeat",
+            "maximum_wavefront_samples",
+        )
+    )
+
+
 def _noise_evidence(root: Path, cache_binding: Path, spp: int) -> dict[str, Any]:
     """Verify the existing generator/cache envelope without importing NumPy."""
     if type(spp) is not int or spp not in _POLICY["samples_per_pixel"]:
@@ -189,14 +219,9 @@ def _noise_evidence(root: Path, cache_binding: Path, spp: int) -> dict[str, Any]
         or provenance.get("threads") != 8
         or provenance.get("width") != identity["width"]
         or provenance.get("height") != identity["height"]
-        or provenance.get("integrator")
-        != {
-            "type": "path",
-            "max_depth": 8,
-            "spp": spp,
-            "seed": 0,
-            "independent_repeat_count": 2,
-        }
+        or not _supported_integrator(
+            provenance.get("integrator"), spp, identity["width"], identity["height"]
+        )
         or provenance.get("noise_floor_policy", {}).get("metric") != _POLICY["metric"]
         or provenance.get("noise_floor_policy", {}).get("maximum") != 0.01
         or frame["metadata"].get("rgb_encoding") != "linear_rec709"
@@ -222,6 +247,10 @@ def _noise_evidence(root: Path, cache_binding: Path, spp: int) -> dict[str, Any]
     for name in ("reference_id", "camera_specs_sha256"):
         physical.pop(name, None)
     del physical["integrator"]["spp"]
+    # Verified above; these derive from precision, film size and the retained
+    # lane budget and cannot change the physical scene identity between rungs.
+    physical["integrator"].pop("samples_per_pass", None)
+    physical["integrator"].pop("passes_per_repeat", None)
     return {
         "schema_version": 1,
         "spp": spp,

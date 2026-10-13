@@ -54,6 +54,7 @@ def render_fixture(
     deviation: float,
     *,
     metadata: dict[str, Any] | None = None,
+    bounded: bool = False,
 ) -> dict[str, Any]:
     """Persist numerical repeats using the real reference artifact envelope."""
     settings = identity["settings"]
@@ -86,6 +87,14 @@ def render_fixture(
         "lighting": {"fixture_radiance": 0.15},
         "camera_specs_sha256": "fixture",
     }
+    if bounded:
+        count = reference._samples_per_pass(settings["spp"], width, height)
+        provenance["integrator"].update(
+            sampling_policy="bounded_wavefront/v1",
+            samples_per_pass=count,
+            passes_per_repeat=settings["spp"] // count,
+            maximum_wavefront_samples=1 << 24,
+        )
     provenance["reference_id"] = stable_hash(provenance)
     rgb = np.full((height, width, 3), 0.5, dtype=np.float32)
     repeat = rgb + np.float32(deviation)
@@ -145,9 +154,18 @@ def render_fixture(
 class Cache:
     """Exercise real persisted arrays with an acquisition callback free of candidates."""
 
-    def __init__(self, root: Path, deviations: tuple[float, float]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        deviations: tuple[float, float],
+        *,
+        bounded: bool = False,
+        shape: tuple[int, int] = (8, 6),
+    ) -> None:
         self.root = root
         self.deviations = deviations
+        self.bounded = bounded
+        self.width, self.height = shape
         self.calls: list[int] = []
         self.frame_id = 0
         self.time_s = 0.0
@@ -167,8 +185,8 @@ class Cache:
             "scene_sha256": "frozen-scene",
             "camera": {"fixture": "fixed"},
             "object_transforms": {},
-            "width": 8,
-            "height": 6,
+            "width": self.width,
+            "height": self.height,
             "settings": settings,
             "reference_implementation_sha256": "frozen-generator",
         }
@@ -177,7 +195,10 @@ class Cache:
         path = directory / "cache_binding.json"
         if not directory.exists():
             render_fixture(
-                directory, identity, self.deviations[settings["spp"] == 16384]
+                directory,
+                identity,
+                self.deviations[settings["spp"] == 16384],
+                bounded=self.bounded,
             )
             binding = {
                 "identity": identity,
@@ -322,6 +343,42 @@ def test_fixed_ladder_preserves_every_attempt_and_selects_first_pass_or_cap(
     assert precision.precision_quality_reasons(tmp_path, record) == (
         [] if passed else ["quality_reference_precision_noise"]
     )
+
+
+@pytest.mark.parametrize("shape", [(8, 6), (128, 128)])
+def test_bounded_precision_rungs_normalize_derived_passes(
+    tmp_path: Path, shape: tuple[int, int]
+) -> None:
+    cache = Cache(tmp_path, (0.1, 0.0), bounded=True, shape=shape)
+    _, alias = cache.select()
+    proof = precision.verify_reference_precision(tmp_path, alias["reference_precision"])
+    assert cache.calls == [4096, 16384]
+    assert proof["passed"]
+    assert proof["selected"]["spp"] == 16384
+
+
+@pytest.mark.parametrize(
+    "field", ["samples_per_pass", "passes_per_repeat", "maximum_wavefront_samples"]
+)
+def test_bounded_provenance_rejects_changed_pass_policy(
+    tmp_path: Path, field: str
+) -> None:
+    cache = Cache(tmp_path, (0.0, 0.0), bounded=True)
+
+    def mutate(path: Path) -> None:
+        frame_path = path.parent / "frame_0000.json"
+        frame = read_json_object(frame_path)
+        provenance = frame["reference_provenance"]
+        provenance["integrator"][field] += 1
+        provenance["reference_id"] = stable_hash(
+            {k: v for k, v in provenance.items() if k != "reference_id"}
+        )
+        write_json(frame_path, frame)
+        reseal_cache(path)
+
+    cache.mutate = mutate
+    with pytest.raises(ValueError, match="unsupported or inconsistent provenance"):
+        cache.select()
 
 
 def test_reused_geometry_preserves_new_raw_and_history_aliases(

@@ -26,6 +26,7 @@ import pytest
 
 from scripts.benchmark.core.artifacts import stable_hash, write_json
 from scripts.benchmark.rendering import reference
+from scripts.benchmark.rendering import reference_precision
 from scripts.benchmark.rendering.reference import (
     camera_metadata,
     load_reference_frame,
@@ -87,6 +88,84 @@ def test_camera_metadata_has_pixel_centre_cv_axes(tmp_path: Path) -> None:
     assert camera["intrinsics"][1][2] == 12
     assert camera["pixel_centres"] == "half_integer"
     assert camera["convention"] == "opencv"
+
+
+@pytest.mark.parametrize("spp", [3, 256, 4095, 4096, 16384])
+@pytest.mark.parametrize("shape", [(128, 128), (512, 512), (1920, 1080)])
+def test_reference_pass_budget_preserves_all_requested_samples(
+    spp: int, shape: tuple[int, int]
+) -> None:
+    width, height = shape
+    count = reference._samples_per_pass(spp, width, height)
+    assert count >= 1
+    assert spp % count == 0
+    assert count * width * height <= reference._MAX_WAVEFRONT_SAMPLES
+    assert (spp // count) * count == spp
+
+
+def test_real_bounded_passes_keep_independent_seeds_and_geometry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("mitsuba")
+    monkeypatch.setattr(reference, "_MAX_WAVEFRONT_SAMPLES", 32 * 32 * 2)
+    manifest = render_reference(
+        _scene(tmp_path / "scene"),
+        None,
+        32,
+        32,
+        tmp_path / "reference",
+        spp=8,
+        threads=2,
+    )
+    integrator = manifest["provenance"]["integrator"]
+    assert integrator["spp"] == 8
+    assert integrator["samples_per_pass"] == 2
+    assert integrator["passes_per_repeat"] == 4
+    frame = load_reference_frame(tmp_path / "reference/frame_0000.json")
+    assert frame["reference_validation"]["seeds"] == [0, 1]
+    assert frame["reference_validation"]["samples_per_pixel_per_repeat"] == 8
+    assert set(np.unique(frame["seg"])) == {0, 7, 19}
+    with np.load(tmp_path / "reference/frame_0000.npz") as arrays:
+        assert not np.array_equal(arrays["rgb"], arrays["rgb_repeat"])
+
+
+def test_real_bounded_generator_matches_both_precision_envelopes(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("mitsuba")
+    scene_path = _scene(tmp_path / "scene")
+    scene = load_scene(scene_path)
+    signatures = []
+    for spp in (4096, 16384):
+        identity = {
+            "settings": {"spp": spp, "seed": 0, "threads": 8},
+            "scene_sha256": scene_fingerprint(scene),
+            "reference_implementation_sha256": hashlib.sha256(
+                Path(reference.__file__).read_bytes()
+            ).hexdigest(),
+            "width": 8,
+            "height": 8,
+        }
+        directory = tmp_path / "references" / stable_hash(identity)
+        directory.parent.mkdir(exist_ok=True)
+        render_reference(scene_path, None, 8, 8, directory, spp=spp, threads=8, seed=0)
+        binding = {
+            "identity": identity,
+            "frame": (directory / "frame_0000.json").relative_to(tmp_path).as_posix(),
+            "artifacts": [
+                {
+                    "path": (directory / name).relative_to(tmp_path).as_posix(),
+                    "sha256": hashlib.sha256(
+                        (directory / name).read_bytes()
+                    ).hexdigest(),
+                }
+                for name in ("reference.json", "frame_0000.json", "frame_0000.npz")
+            ],
+        }
+        cache = write_json(directory / "cache_binding.json", binding)
+        verified = reference_precision._noise_evidence(tmp_path, cache, spp)
+        signatures.append(verified["physical_signature_sha256"])
+    assert signatures[0] == signatures[1]
 
 
 def test_optional_missing_renderer_is_explicit_without_output(

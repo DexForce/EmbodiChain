@@ -114,6 +114,14 @@ seeds 0/1 and eight CPU threads. Shared cache keys include scene, camera, object
 state, resolution, settings, implementation and reference-runtime identity.
 Corrupt/incomplete/conflicting entries fail closed before reuse. Each importing
 experiment registers the complete checked source closure.
+CPU path tracing caps each live LLVM wavefront at 2^24 sample lanes (or one
+sample per pixel for larger films). `samples_per_pass` divides the requested
+sample count exactly; total 4096/16384 spp, seeds, depths and quality thresholds
+stay fixed. Mitsuba 3.7.1 seeds the sampler once and advances it between passes;
+the [pinned implementation](https://github.com/mitsuba-renderer/mitsuba3/blob/v3.7.1/src/render/integrator.cpp)
+defines those semantics. The manifest records pass sizing and generator hashing
+creates a distinct reference epoch. Earlier unbounded references and CPU OOM
+attempts remain available and are never silently reused by the new generator.
 CPU admission enumerates distinct physical reference keys before evaluation and
 reserves both 4096/16384-spp rungs, uncompressed arrays, possible cache copies and
 diagnostic output. Existing local references reserve possible cache publication;
