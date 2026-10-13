@@ -178,8 +178,9 @@ def _verify_native_sdk(snapshot: dict[str, Any], python: Path) -> None:
     origin = subprocess.check_output(
         [
             str(python.absolute()),
+            "-I",
             "-c",
-            "import importlib.util; print(importlib.util.find_spec('dexsim').origin)",
+            "import importlib.util; print(getattr(importlib.util.find_spec('dexsim'), 'origin', ''))",
         ],
         text=True,
     ).strip()

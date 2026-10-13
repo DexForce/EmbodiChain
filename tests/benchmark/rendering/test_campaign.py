@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import hashlib
+import sys
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -253,6 +255,37 @@ def test_native_editable_sdk_binding_checks_bytes_inventory_and_import_origin(
         )
     with pytest.raises(ValueError, match="SDK|frozen SDK"):
         campaign._verify_native_sdk(snapshot, Path("python"))
+
+
+def test_native_sdk_origin_probe_rejects_pythonpath_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sdk = tmp_path / "shadow"
+    module = sdk / "dexsim" / "__init__.py"
+    module.parent.mkdir(parents=True)
+    module.write_bytes(b"shadow")
+    snapshot = {
+        "snapshot": str(sdk),
+        "files": [
+            {
+                "path": "dexsim/__init__.py",
+                "bytes": 6,
+                "sha256": hashlib.sha256(module.read_bytes()).hexdigest(),
+            }
+        ],
+    }
+    monkeypatch.setenv("PYTHONPATH", str(sdk))
+    ordinary = subprocess.check_output(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util; print(importlib.util.find_spec('dexsim').origin)",
+        ],
+        text=True,
+    ).strip()
+    assert ordinary == str(module)
+    with pytest.raises(ValueError, match="does not resolve the frozen SDK"):
+        campaign._verify_native_sdk(snapshot, Path(sys.executable))
 
 
 @pytest.mark.parametrize(
