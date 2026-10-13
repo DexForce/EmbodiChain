@@ -16,6 +16,7 @@ Practical guides for common tasks in EmbodiChain.
    offline_expert_datasets
    lerobot_export
    task_catalog
+   robot_catalog
    policy_evaluation
    rlinf
    cli

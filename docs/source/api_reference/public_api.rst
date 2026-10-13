@@ -1238,66 +1238,6 @@ embodichain.lab.sim.motion.planners.utils
    interpolate_xpos
    interpolate_xpos_batched
 
-embodichain.lab.sim.robots.cobotmagic
--------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
-
-.. autosummary::
-
-   CobotMagicCfg
-
-embodichain.lab.sim.robots.dexforce_w1.hand_specs
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
-
-.. autosummary::
-
-   W1HandSideSpec
-   W1HandSpec
-   get_default_w1_hand_version
-   get_w1_hand_spec
-   normalize_w1_hand_mappings
-
-embodichain.lab.sim.robots.dexforce_w1.specs
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
-
-.. autosummary::
-
-   W1VersionSpec
-   get_w1_version_spec
-
-embodichain.lab.sim.robots.dexforce_w1.types
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
-
-.. autosummary::
-
-   DexforceW1Version
-   DexforceW1HandVersion
-   DexforceW1ArmSide
-   DexforceW1Type
-   DexforceW1HandBrand
-
-embodichain.lab.sim.robots.dexforce_w1.utils
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
-
-.. autosummary::
-
-   ChassisManager
-   TorsoManager
-   HeadManager
-   ArmManager
-   HandManager
-   EyesManager
-   build_dexforce_w1_assembly_urdf_cfg
-
 embodichain.lab.sim.robots.dual_arm
 -----------------------------------
 
@@ -1308,24 +1248,6 @@ embodichain.lab.sim.robots.dual_arm
    DualArmRobotCfg
    build_dual_arm_cfg
    resolve_mounts
-
-embodichain.lab.sim.robots.franka_panda
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.franka_panda
-
-.. autosummary::
-
-   FrankaPandaCfg
-
-embodichain.lab.sim.robots.ur_robot
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.ur_robot
-
-.. autosummary::
-
-   URRobotCfg
 
 embodichain.lab.sim.sensors.camera
 ----------------------------------

@@ -8,15 +8,22 @@ remain in the core.
 
 Gym robot selectors, workspace analysis, and dual-arm base selection share a
 catalog resolver. Catalog entry points advertise robot IDs, configuration class
-import paths, and optional defaults. Listing catalogs defers robot class imports
-and simulation initialization; resolution validates the selected class and
-isolates its default/override fields.
+import paths, optional defaults, and optional control/variant summaries.
+``embodichain list-robot`` reads these summaries to display independent control
+DOFs, default control parts, and mimic followers. Listing defers robot class
+imports and simulation initialization; resolution validates the selected class
+and isolates its default/override fields. See :doc:`/guides/robot_catalog` for
+the CLI, variant selection, and provider registration.
 
 Official configurations provide the existing ``RobotCfg.from_dict()`` and
-``build_pk_serial_chain()`` contracts. Legacy import aliases retain the same
-class, enum, and module objects. Shared runtime fields remain documented on
-``RobotCfg``; the class declarations below identify canonical imports without
-re-expanding inherited configuration fields or generated constructors.
+``build_pk_serial_chain()`` contracts. Import concrete configurations from
+``embodichain_robots`` and generic dual-arm helpers from
+``embodichain.lab.sim.robots``. Former concrete imports under the core robot
+package and historical selector aliases have been removed. Selectors use exact
+registered IDs such as ``FrankaPanda``, ``URRobot``, or ``ur5``.
+Shared runtime fields remain documented on ``RobotCfg``; the class declarations
+below identify canonical imports without re-expanding inherited configuration
+fields or generated constructors.
 
 
 embodichain.robot_registry
@@ -44,7 +51,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    fields and backend selection follow ``RobotCfg``.
 
 .. py:class:: embodichain_robots.TianjiMarvinCfg
-   :no-index:
 
    Configure Tianji Marvin with or without its parallel-jaw grippers.
 
@@ -53,7 +59,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    fields and backend selection follow ``RobotCfg``.
 
 .. py:class:: embodichain_robots.DexforceW1Cfg
-   :no-index:
 
    DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters.
 
@@ -62,7 +67,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    fields and backend selection follow ``RobotCfg``.
 
 .. py:class:: embodichain_robots.CobotMagicCfg
-   :no-index:
 
    Dual-arm CobotMagic with source arm limits and calibrated gripper drives.
 
@@ -71,7 +75,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    fields and backend selection follow ``RobotCfg``.
 
 .. py:class:: embodichain_robots.FrankaPandaCfg
-   :no-index:
 
    Configuration for the Franka Emika Panda robot with Panda hand.
 
@@ -80,7 +83,6 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    fields and backend selection follow ``RobotCfg``.
 
 .. py:class:: embodichain_robots.URRobotCfg
-   :no-index:
 
    Configuration for the UR family of robots.
 
@@ -292,44 +294,3 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
-
-
-embodichain.lab.sim.robots.dexforce_w1
---------------------------------------
-
-Compatibility imports for existing W1 configuration and kinematic-parameter consumers.
-
-.. py:class:: embodichain.lab.sim.robots.dexforce_w1.DexforceW1Cfg
-   :no-index:
-
-   DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters.
-
-   Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
-   the robot-specific differentiable kinematic chains. Generic runtime
-   fields and backend selection follow ``RobotCfg``.
-
-
-embodichain.lab.sim.robots.dexforce_w1.cfg
-------------------------------------------
-
-Compatibility imports for existing W1 configuration and kinematic-parameter consumers.
-
-.. py:class:: embodichain.lab.sim.robots.dexforce_w1.cfg.DexforceW1Cfg
-   :no-index:
-
-   DexforceW1 specific configuration, inherits from RobotCfg and allows custom parameters.
-
-   Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
-   the robot-specific differentiable kinematic chains. Generic runtime
-   fields and backend selection follow ``RobotCfg``.
-
-
-embodichain.lab.sim.robots.dexforce_w1.params
----------------------------------------------
-
-Compatibility imports for existing W1 configuration and kinematic-parameter consumers.
-
-.. py:class:: embodichain.lab.sim.robots.dexforce_w1.params.W1ArmKineParams
-   :no-index:
-
-   Kinematics parameters for a W1 arm.

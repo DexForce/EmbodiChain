@@ -94,6 +94,43 @@ See {doc}`task_catalog` for catalog authoring and gallery export.
 
 ---
 
+(cli-list-robots)=
+## List Robots
+
+Discover installed robot families and their supported configurations:
+
+```bash
+embodichain list-robot
+python -m embodichain list-robot
+embodichain list-robot --help
+```
+
+The command reads lightweight catalog metadata without constructing robot
+configurations, initializing simulation, or downloading assets.
+
+| Column | Meaning |
+|---|---|
+| `Robot ID` | Registered family ID, such as `FrankaPanda`, `URRobot`, or `DexforceW1` |
+| `Variants` | Supported models or configuration profiles; `*` marks the default |
+| `Control DOF` | Unique independent joints in the default control parts; mimic followers are excluded and overlapping groups count once |
+| `Control Parts` | Default group names and joint counts; `eef (1+1m)` means one independent joint and one mimic follower |
+| `Mimic Joints` | Follower joint names from the default URDF, including passive followers outside the control parts |
+
+`-` means unavailable metadata. `None` in the mimic column means that the
+catalog declares no mimic joints. A count marked `total` includes all joints
+in that part when mimic membership is unknown.
+
+UR models share one family row. Dual-arm variants show the DOFs of each base
+robot, and W1 variants show body releases and hand combinations. Equivalent
+profiles are grouped together. Long values wrap to fit the terminal, and
+the table width is bounded between 80 and 120 columns.
+`NO_COLOR=1 embodichain list-robot` disables terminal colors.
+
+See {doc}`robot_catalog` for variant selection, DOF examples, third-party
+catalog registration, and the current import paths.
+
+---
+
 (cli-run-environment)=
 ## Run Environment
 
