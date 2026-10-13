@@ -20,19 +20,18 @@ other than B=1 and selections other than ``env_ids=(0,)`` before writing.
 Installation and runnable recipe
 --------------------------------
 
-Install the numerical scene dependencies alongside the normal simulation
-runtime, then run the model-free example:
+Use the normal EmbodiChain installation, then run the model-free example.
+DexSim supplies SciPy and Trimesh; EmbodiChain requires Shapely 2 or newer:
 
 .. code-block:: bash
 
-   pip install -e '.[scene]'
+   pip install -e .
    PYTHONPATH=. python scripts/tutorials/scene/tabletop_recipe.py --seed 7
 
 The example declares a workbench, two containers built from five panels each,
 six parts and a keep-out region. It generates a proposal, prepares the existing
 manager, settles through the caller-owned physics loop, checks measured layout
-and restores a physical snapshot. It requires a working native simulator;
-installing the numerical extra alone does not provide that runtime.
+and restores a physical snapshot. It requires a working native simulator.
 Browser visualization is explicitly disabled with
 ``VisualizationCfg(backend="none")``, and the renderer is ``"no-render"``.
 Use ``--output /path/to/report.json`` to save the measured checks. Successful
@@ -265,7 +264,7 @@ A view reads existing physical bindings and cloned poses while retaining the env
 embodichain.lab.sim.scene.state
 -------------------------------
 
-Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding and topology before writes, does not step, and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
+Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. Saved joint positions or targets outside those limits are rejected rather than silently clipped. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
 
 .. currentmodule:: embodichain.lab.sim.scene.state
 

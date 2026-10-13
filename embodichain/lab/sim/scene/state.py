@@ -250,13 +250,37 @@ def _preflight_restore(
                     for name in ("qpos", "qvel", "target_qpos", "target_qvel", "qf")
                 }
             )
-        prepared[state.uid] = (
-            bindings[state.uid],
-            {
-                name: _backend_tensor(value, device=view.sim.device)
-                for name, value in values.items()
-            },
-        )
+        entity = bindings[state.uid]
+        tensors = {
+            name: _backend_tensor(value, device=view.sim.device)
+            for name, value in values.items()
+        }
+        if state.kind != "rigid_object":
+            # Articulation.set_state clips positions and targets to current
+            # limits. Reject before any writes instead of silently changing
+            # measured snapshot fields during restoration.
+            limits = torch.as_tensor(
+                entity.body_data.qpos_limits, device=view.sim.device
+            )
+            if (
+                limits.shape != (1, len(state.joint_names), 2)
+                or bool(torch.isnan(limits).any())
+                or bool((limits[..., 0] > limits[..., 1]).any())
+            ):
+                raise ValueError(
+                    f"Entity {state.uid!r} has invalid joint position limits"
+                )
+            for name in ("qpos", "target_qpos"):
+                if bool(
+                    (
+                        (tensors[name] < limits[..., 0])
+                        | (tensors[name] > limits[..., 1])
+                    ).any()
+                ):
+                    raise ValueError(
+                        f"Snapshot {state.uid}.{name} exceeds current joint position limits"
+                    )
+        prepared[state.uid] = (entity, tensors)
     return prepared
 
 
@@ -267,7 +291,8 @@ def restore_state(view: SceneView, snapshot: SceneState) -> None:
         view: Original scene selection with unchanged bindings.
         snapshot: Owned state captured from the same simulation.
     Raises:
-        ValueError: For unsupported topology or foreign state before any writes.
+        ValueError: For unsupported topology, foreign state, or saved joint
+            positions/targets outside current limits, before any writes.
         RuntimeError: For native writes that failed; partial writes are not rolled back.
     """
     prepared = _preflight_restore(view, snapshot)

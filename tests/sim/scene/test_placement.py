@@ -52,3 +52,24 @@ def test_scene_separation_retains_uid_mapping_and_support() -> None:
     assert region.support_polygon.covers(first) and region.support_polygon.covers(
         second
     )
+
+
+@pytest.mark.parametrize(
+    "origin,size", [(-0.9, 0.3), (1.2, 0.3), (-0.1, 0.2), (0.8, 0.3)]
+)
+def test_decimal_boundary_projection_remains_exactly_inside_support(
+    origin: float, size: float
+) -> None:
+    region = SupportRegion("table", 1.0, box(0, 0, 1, 1))
+    footprint = np.array(
+        [
+            [origin, origin],
+            [origin + size, origin],
+            [origin + size, origin + size],
+            [origin, origin + size],
+        ]
+    )
+    before = footprint.copy()
+    offsets = separate_aabbs(region, {"part": footprint})
+    assert region.support_polygon.covers(Polygon(footprint + offsets["part"]))
+    np.testing.assert_array_equal(footprint, before)

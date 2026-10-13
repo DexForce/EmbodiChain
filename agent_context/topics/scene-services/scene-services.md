@@ -93,6 +93,8 @@ support does not enable B>1 physics capture, edits or host stepping.
   restore checks original ownership, binding, backend and topology. It does not
   restore solver internals, task progress or a full backend checkpoint. Host
   integrations retain control-period and episode identity contracts.
+  Restoration rejects saved joint positions or targets outside current limits
+  during preflight, before any writes; the articulation writer would clip them.
 - Change sets preflight all UIDs and movable permissions, apply rigid poses,
   clear dynamics and publish render state without stepping. Native write errors
   propagate without guaranteed rollback. The host handles reported planner and
@@ -126,7 +128,8 @@ initial-state provenance while using these physical services. General
 [simulation lifecycle](../simulation-system/simulation-system.md) remains owned
 by Spawn and SimulationManager.
 
-The CPU strategy dependencies are available as the `scene` extra. The standalone
+CPU strategies use SciPy and Trimesh supplied by DexSim; EmbodiChain's core
+dependency requires Shapely 2 or newer. No scene-specific extra is needed. The standalone
 `scripts/tutorials/scene/tabletop_recipe.py` demonstrates a workbench, two
 panel-built containers, parts and a keep-out region with native preparation,
 settling, measured layout and restoration; it requires the installed simulation

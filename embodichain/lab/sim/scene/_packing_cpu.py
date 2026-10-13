@@ -224,22 +224,27 @@ class AABBLayoutOptimizer:
             )
 
         aabb_minimums, aabb_maximums = base_aabbs.min(axis=1), base_aabbs.max(axis=1)
-        half_extents = (aabb_maximums - aabb_minimums) / 2.0
         support_minimum = np.array([minimum_x, minimum_y], dtype=float)
         support_maximum = np.array([maximum_x, maximum_y], dtype=float)
-        valid_center_minimums = support_minimum + half_extents
-        valid_center_maximums = support_maximum - half_extents
-        if np.any(valid_center_minimums > valid_center_maximums):
+        minimum_offsets = support_minimum - aabb_minimums
+        maximum_offsets = support_maximum - aabb_maximums
+        if np.any(minimum_offsets > maximum_offsets):
             raise ValueError(
                 "An asset AABB is larger than the rectangular support region."
             )
 
-        centers = (aabb_minimums + aabb_maximums) / 2.0
-        # A center must stay inset from each boundary by its AABB half extent.
-        projected_centers = np.clip(
-            centers, valid_center_minimums, valid_center_maximums
+        # Project translations directly: center/half-extent arithmetic can
+        # introduce a second rounding error that leaves a feasible box outside.
+        offsets = np.clip(
+            np.zeros_like(minimum_offsets), minimum_offsets, maximum_offsets
         )
-        return projected_centers - centers
+        # Subtraction can still round an endpoint offset outward. Move that
+        # offset one representable value inward before exact containment checks.
+        below = aabb_minimums + offsets < support_minimum
+        offsets = np.where(below, np.nextafter(offsets, np.inf), offsets)
+        above = aabb_maximums + offsets > support_maximum
+        offsets = np.where(above, np.nextafter(offsets, -np.inf), offsets)
+        return offsets
 
     def _separation_candidates(
         self,

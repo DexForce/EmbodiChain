@@ -102,3 +102,67 @@ def test_restore_backend_overflow_preflight_does_not_clear_earlier_entities():
     assert all(body.writes == 0 for body in sim.rigid.values())
     assert sim.articulations["drawer"].state["qf"].item() == 7.0
     assert sim.syncs == 0
+
+
+@pytest.mark.parametrize("field", ["qpos", "target_qpos"])
+@pytest.mark.parametrize("position", [-1.001, 1.001])
+def test_restore_rejects_limit_excursions_before_any_write(
+    field: str, position: float
+) -> None:
+    sim = Sim()
+    articulation = sim.articulations["drawer"]
+    articulation.state[field][:] = position
+    view = SceneView(sim)
+    saved = capture_state(view)
+    articulation.state[field][:] = 0.0
+    before = capture_state(view)
+
+    def unexpected_write(**kwargs):
+        pytest.fail("Snapshot rejection must precede all articulation writes")
+
+    articulation.set_state = unexpected_write
+    with pytest.raises(ValueError, match=rf"drawer\.{field} exceeds"):
+        restore_state(view, saved)
+    assert compare_states(before, capture_state(view)).passed
+    assert all(body.writes == 0 for body in sim.rigid.values())
+    assert sim.syncs == 0 and sim.steps == 0
+
+
+def test_restore_rechecks_limits_changed_since_capture() -> None:
+    sim = Sim()
+    articulation = sim.articulations["drawer"]
+    view = SceneView(sim)
+    saved = capture_state(view)
+    articulation.body_data.qpos_limits[..., 1] = 0.1
+    with pytest.raises(ValueError, match="drawer.qpos exceeds"):
+        restore_state(view, saved)
+    assert compare_states(saved, capture_state(view)).passed
+    assert sim.syncs == 0
+
+
+def test_boundary_positions_round_trip_through_production_articulation_setter() -> None:
+    from types import MethodType, SimpleNamespace
+    from embodichain.lab.sim.objects.articulation import Articulation
+
+    sim = Sim()
+    articulation = sim.articulations["drawer"]
+    articulation.state["qpos"][:] = -1.0
+    articulation.state["target_qpos"][:] = 1.0
+    articulation.device = sim.device
+    articulation._resolve_env_ids = lambda ids: torch.tensor([0])
+    articulation._resolve_joint_ids = lambda ids: torch.tensor([0])
+    articulation._stabilize_newton_mimic_target_write = lambda *args, **kwargs: None
+    articulation._world = SimpleNamespace(update=lambda dt: None)
+    articulation.body_data.is_newton_backend = False
+    port_write = articulation.set_state
+    articulation.body_data.articulation_view = SimpleNamespace(
+        apply_state=lambda rows, columns, **fields: port_write(env_ids=rows, **fields)
+    )
+    articulation._data = articulation.body_data
+    articulation.set_state = MethodType(Articulation.set_state, articulation)
+    view = SceneView(sim)
+    saved = capture_state(view)
+    articulation.state["qpos"][:] = 0.0
+    articulation.state["target_qpos"][:] = 0.0
+    restore_state(view, saved)
+    assert compare_states(saved, capture_state(view)).passed

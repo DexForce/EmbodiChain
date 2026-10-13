@@ -26,6 +26,7 @@ dynamic = ["version"]
 # Core install dependencies (kept from requirements.txt).
 dependencies = [
   "dexsim_engine==0.5.1rc1",
+  "shapely>=2.0",
   "setuptools>=78.1.1",
   "gymnasium>=0.29.1",
   "huggingface_hub>=0.35.3,<1.0",
@@ -55,7 +56,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-scene = ["scipy", "shapely>=2.0", "trimesh"]
 policy-deploy = [
   # ORT 1.27+ defaults to CUDA 13; EmbodiChain's supported stack uses CUDA 12.
   "onnxruntime-gpu>=1.20,<1.27",
@@ -66,10 +66,7 @@ gensim = [
   "pyrender==0.1.45",
   "requests",
   "Pillow",
-  "scipy",
   "matplotlib",
-  "shapely>=2.0",
-  "trimesh",
 ]
 
 [project.scripts]

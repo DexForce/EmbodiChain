@@ -73,7 +73,10 @@ class Articulation:
             "target_qvel": torch.tensor([[0.4]]),
             "qf": torch.tensor([[0.5]]),
         }
-        self.body_data = SimpleNamespace(fetch_state=lambda: self.state)
+        self.body_data = SimpleNamespace(
+            fetch_state=lambda: self.state,
+            qpos_limits=torch.tensor([[[-1.0, 1.0]]]),
+        )
 
     def get_qpos(self, *, target=False):
         return self.state["target_qpos" if target else "qpos"]
