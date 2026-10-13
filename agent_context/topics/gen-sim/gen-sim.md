@@ -153,6 +153,23 @@ unchanged; emitted limits, robot meshes and all approach scene samples are check
 Failed or unavailable qualification stops dispatch, not a fallback to the unsafe
 original. Extra searches restore caller RNG. Explicit, constrained, upright, pour,
 drawer and multi-environment calls retain their prior routes and bundle fingerprints.
+After ordinary Pick path qualification fails, up to four other legally
+prefiltered grasps may be replanned with their own approach directions. Each
+complete plan keeps its attachment proposal coupled to its commands and must
+pass contact FK, emitted-limit and mesh checks; a bound Place continuation must
+also pass its private preview. Successful originals are not reselected.
+Failed ordinary Place may try two elevated approach vias, retaining every
+required release waypoint, its exact terminal pose, source dependencies and
+timing. These candidates require emitted-limit, robot-mesh, held-object scene
+envelope and release-FK qualification. Explicit Cartesian routes, height caps,
+drawer routes and pour/ends grasps do not acquire this recovery. Extra searches
+restore caller RNG; no TCP symmetry is invented to make a target reachable.
+`_task_program/motion.py` owns one bounded seeded-path resolver shared by the
+motion-generator adapter and E6's root-frame IK adapter. Previous-waypoint
+seeding, local perturbations, joint limits and per-step velocity admission live
+there; E6 retains its final FK, complete-plan velocity and collision checks.
+This is greedy local continuation using existing solvers, not a new IK solver,
+global branch search or physical-success certificate.
 Ordinary adjacent typed Pick/inside-Place calls with verified canonical monitors
 may qualify the complete continuation before dispatching Pick. A qualified
 original remains unchanged. Only a failed required-waypoint IK result permits

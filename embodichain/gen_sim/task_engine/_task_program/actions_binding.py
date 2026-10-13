@@ -23,18 +23,21 @@ from typing import Any
 __all__ = ["resolve_bound_resource", "resolve_shared_resource"]
 
 
-def resolve_bound_resource(binding: Any, *, participant: str) -> str:
-    """Resolve and validate one bound primary motion/grasp resource."""
+def resolve_bound_resource(
+    binding: Any, *, participant: str, require_grasp: bool = True
+) -> str:
+    """Resolve one bound resource, optionally without a grasp endpoint."""
     motion = binding.endpoint("primary", "motion")
-    grasp = binding.endpoint("primary", "grasp")
     motion_key = getattr(motion, "task_state_key", None)
-    grasp_key = getattr(grasp, "task_state_key", None)
     if not isinstance(motion_key, str) or not motion_key:
         raise ValueError(f"{participant} requires a non-empty motion resource key.")
-    if motion_key != grasp_key:
-        raise ValueError(
-            f"{participant} requires motion and grasp to share one state resource."
-        )
+    if require_grasp:
+        grasp = binding.endpoint("primary", "grasp")
+        grasp_key = getattr(grasp, "task_state_key", None)
+        if motion_key != grasp_key:
+            raise ValueError(
+                f"{participant} requires motion and grasp to share one state resource."
+            )
     return motion_key
 
 

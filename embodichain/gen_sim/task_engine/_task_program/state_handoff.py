@@ -71,10 +71,17 @@ class GenSimStateHandoff:
 
     @classmethod
     def from_binding(
-        cls, binding: Any, context: PlanningContext, *, participant: str
+        cls,
+        binding: Any,
+        context: PlanningContext,
+        *,
+        participant: str,
+        require_grasp: bool = True,
     ) -> GenSimStateHandoff:
         return cls(
-            resource=resolve_bound_resource(binding, participant=participant),
+            resource=resolve_bound_resource(
+                binding, participant=participant, require_grasp=require_grasp
+            ),
             context=context,
         )
 

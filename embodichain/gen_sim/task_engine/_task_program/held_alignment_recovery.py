@@ -41,7 +41,7 @@ from .articulation_collision import check_robot_motion, robot_collision_scope
 from .motion import (
     _cartesian_samples,
     _joint_velocity_limits,
-    _local_place_ik,
+    resolve_continuous_ik_path,
     _velocity_validity,
 )
 
@@ -399,7 +399,7 @@ def recover(
         calls += 1
         return scope.inspect(scope.full_arm_path(qpos[:, None]))["valid"]
 
-    result = _local_place_ik(
+    result = resolve_continuous_ik_path(
         scope.generator, targets, options, candidate_predicate=predicate
     )
     report["local_fallback"] = {

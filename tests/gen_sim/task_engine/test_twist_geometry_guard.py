@@ -206,6 +206,7 @@ def test_factory_borrows_existing_e8_sensor_without_changing_other_registration(
     factory._drawers = factory._press_routes = ()
     factory._twist_routes = (route,)
     factory._pour_receivers = {}
+    factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = factory._coordinated_motion = False
     factory._pick_purposes = factory._motion_samples = factory._cartesian_calls = ()
     factory._articulation_calls = ()

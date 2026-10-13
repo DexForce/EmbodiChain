@@ -533,7 +533,7 @@ def test_local_place_ik_preserves_targets_limits_and_rng(
         strategy="ik_interp", control_part="arm", start_qpos=seed, interpolation_dt=0.04
     )
     rng = torch.get_rng_state().clone()
-    result = motion._local_place_ik(
+    result = motion.resolve_continuous_ik_path(
         SimpleNamespace(robot=robot),
         [motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=pose)],
         options,
@@ -589,7 +589,7 @@ def test_place_local_ik_only_runs_after_scoped_single_env_failure(
             dt=original.dt,
         )
     )
-    monkeypatch.setattr(motion, "_local_place_ik", local)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
     options = motion.MotionGenOptions(
         strategy="ik_interp",
         control_part="arm",
@@ -652,7 +652,7 @@ def test_place_scope_preserves_noneligible_planning_requests(
     backend = Mock(return_value=original)
     local = Mock()
     monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
-    monkeypatch.setattr(motion, "_local_place_ik", local)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
     options = motion.MotionGenOptions(
         strategy="motion_gen" if case == "non_ik" else "ik_interp",
         control_part="arm",
@@ -696,8 +696,13 @@ def test_place_planning_exception_does_not_leak_recovery_scope(monkeypatch):
     monkeypatch.setattr(Place, "_plan", fail)
     action = GenSimPlace()
     action._planning_services = SimpleNamespace(motion_generator=SimpleNamespace())
+    request = SimpleNamespace(
+        binding=SimpleNamespace(
+            endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+        )
+    )
     with pytest.raises(RuntimeError, match="planner failed"):
-        action._plan(object(), object())
+        action._plan(request, object())
     assert motion._PLACE_IK_RECOVERY.get() is None
 
 
@@ -755,6 +760,7 @@ def test_recovered_place_checks_final_resampled_commands(
         plan_success=torch.tensor([True]),
         segments=(),
         scene_dependencies=(),
+        expected_effects=SimpleNamespace(held_object_updates={"arm": None}),
         joint_trajectory=SimpleNamespace(
             positions=torch.tensor([[[0.0], [0.2 if unsafe else 0.02]]]),
             dt=torch.tensor([[0.0, 0.04]]),
@@ -766,7 +772,12 @@ def test_recovered_place_checks_final_resampled_commands(
         return plan
 
     monkeypatch.setattr(Place, "_plan", generate)
-    result = action._plan(object(), object())
+    request = SimpleNamespace(
+        binding=SimpleNamespace(
+            endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+        )
+    )
+    result = action._plan(request, object())
     assert result is (failed if recovered and unsafe else plan)
     assert motion._PLACE_IK_RECOVERY.get() is None
 
@@ -988,9 +999,10 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
     context = SimpleNamespace(
         batch_size=2,
         task=SimpleNamespace(
+            exclusive_held_object_mask=lambda _: torch.ones(2, dtype=torch.bool),
             get_held_object=lambda key: SimpleNamespace(
                 semantics=SimpleNamespace(entity_id="can")
-            )
+            ),
         ),
         scene=SimpleNamespace(
             entities={"can": SimpleNamespace(pose=poses, confidence=1.0)}
@@ -998,11 +1010,14 @@ def test_current_pose_upright_binding_preserves_each_environments_position(
     )
     bound = SimpleNamespace(
         binding=SimpleNamespace(
+            action_binding=SimpleNamespace(
+                endpoint=lambda *_: SimpleNamespace(task_state_key="left")
+            ),
             resources={
                 "primary": SimpleNamespace(
                     endpoints={"motion": SimpleNamespace(task_state_key="left")}
                 )
-            }
+            },
         )
     )
     result = lowerer.lower(
@@ -1081,13 +1096,19 @@ def test_upright_alignment_lifts_before_rotating(
     context = SimpleNamespace(
         batch_size=1,
         env_ids=torch.tensor([0]),
-        task=SimpleNamespace(get_held_object=lambda key: held),
+        task=SimpleNamespace(
+            get_held_object=lambda key: held,
+            exclusive_held_object_mask=lambda _: torch.ones(1, dtype=torch.bool),
+        ),
         scene=SimpleNamespace(
             entities={"can": SimpleNamespace(pose=pose, confidence=1.0)}
         ),
     )
     bound = SimpleNamespace(
         binding=SimpleNamespace(
+            action_binding=SimpleNamespace(
+                endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+            ),
             resources={
                 "primary": SimpleNamespace(
                     endpoints={
@@ -1097,7 +1118,7 @@ def test_upright_alignment_lifts_before_rotating(
                         )
                     }
                 )
-            }
+            },
         )
     )
     result = lowerer.lower(

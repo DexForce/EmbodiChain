@@ -20,7 +20,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import torch
 
@@ -43,7 +44,7 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     MoveHeldObject,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
-from embodichain.lab.sim.atomic_actions.primitives.place import Place
+from embodichain.lab.sim.atomic_actions.primitives.place import Place, PlaceGoal
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp, PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
 from embodichain.lab.sim.atomic_actions.plans import (
@@ -95,6 +96,9 @@ class _PickSelection:
     trajectory: tuple | None = None
     constrained: bool = False
     candidates: AffordancePoseCandidates | None = None
+    candidate_routes: list[tuple[int, AffordancePoseCandidates, torch.Tensor]] = field(
+        default_factory=list
+    )
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -227,7 +231,12 @@ class GenSimPickUp(PickUp):
                 from .pick_path import eligible as owns_path, rebuild
 
                 if owns_path(self, request, context, selection):
-                    return rebuild(self, request, context, first, selection)
+                    qualified = rebuild(self, request, context, first, selection)
+                    if qualified.plan_success.all():
+                        return qualified
+                    return self._retry_ordinary_pick_candidates(
+                        request, context, qualified, selection
+                    )
                 return (
                     self._recover_constrained_pick_roll(request, context, first)
                     if selection.constrained
@@ -235,6 +244,121 @@ class GenSimPickUp(PickUp):
                 )
         finally:
             _PICK_SELECTION.reset(token)
+
+    def _retry_ordinary_pick_candidates(
+        self, request: Any, context: Any, first: Any, selection: _PickSelection
+    ) -> Any:
+        """Replan at most four already-filtered grasps with their own approach."""
+        if first.plan_success.any() or not selection.candidate_routes:
+            return first
+        from .pick_path import rebuild
+        from .pick_continuation import preview_place
+
+        key = request.binding.endpoint("primary", "motion").task_state_key
+        original = first.expected_effects.held_object_updates.get(key)
+        seen = [] if original is None else [original.grasp_xpos]
+        sampled = first.diagnostics.metadata.get("affordance_sample", {}).get(
+            "grasp", {}
+        )
+        if sampled.get("selected_poses") is not None:
+            seen.append(torch.as_tensor(sampled["selected_poses"], device=self.device))
+        preview = (self.continuation_previews or {}).get(request.invocation_id)
+        state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
+        prior = (selection.request, selection.trajectory, selection.direction)
+        attempts: list[dict[str, Any]] = []
+        chosen = first
+
+        def candidates():
+            for strategy, pool, direction in selection.candidate_routes:
+                order = torch.argsort(
+                    pool.costs[0].masked_fill(~pool.valid[0], torch.inf), stable=True
+                )
+                for index in order[pool.valid[0, order]].tolist():
+                    pose = pool.poses[:, index]
+                    if any(torch.equal(pose, value) for value in seen):
+                        continue
+                    seen.append(pose)
+                    yield strategy, index, pose.clone(), direction.clone()
+
+        try:
+            for strategy, index, pose, direction in candidates():
+                if len(attempts) >= 4:
+                    break
+                state.restore()
+                selected = replace(
+                    request,
+                    goal=replace(request.goal, grasp_xpos=pose),
+                    skill_options=replace(
+                        request.skill_options, approach_direction=direction[0]
+                    ),
+                )
+                selection.request, selection.trajectory, selection.direction = (
+                    selected,
+                    None,
+                    direction,
+                )
+                candidate = super()._plan(selected, context)
+                candidate = rebuild(self, selected, context, candidate, selection)
+                record = {
+                    "strategy": strategy,
+                    "candidate_id": index,
+                    "selected_pose": pose.detach().cpu().tolist(),
+                    "approach_direction": direction.detach().cpu().tolist(),
+                    "path_success": candidate.plan_success.tolist(),
+                    "failure_code": (
+                        None
+                        if candidate.diagnostics.failure is None
+                        else candidate.diagnostics.failure.code
+                    ),
+                }
+                attempts.append(record)
+                if not candidate.plan_success.all():
+                    continue
+                if preview is not None:
+                    record["place_preview"] = preview_place(
+                        self, selected, context, candidate, preview, safety=True
+                    )
+                    if not record["place_preview"]["valid"]:
+                        continue
+                samples = dict(
+                    candidate.diagnostics.metadata.get("affordance_sample", {})
+                )
+                samples["grasp"] = {
+                    "candidate_ids": [index],
+                    "selected_poses": pose.detach().cpu().tolist(),
+                    "adaptive_grasp": {
+                        "strategy_indices": [strategy],
+                        "approach_directions": direction.tolist(),
+                    },
+                }
+                chosen = replace(
+                    candidate,
+                    diagnostics=replace(
+                        candidate.diagnostics,
+                        metadata={
+                            **candidate.diagnostics.metadata,
+                            "affordance_sample": samples,
+                        },
+                    ),
+                )
+                break
+        finally:
+            selection.request, selection.trajectory, selection.direction = prior
+            state.restore()
+        return replace(
+            chosen,
+            diagnostics=replace(
+                chosen.diagnostics,
+                metadata={
+                    **chosen.diagnostics.metadata,
+                    "gen_sim_pick_candidate_retry": {
+                        "budget": 4,
+                        "attempts": attempts,
+                        "accepted": bool(chosen.plan_success.all()),
+                    },
+                },
+            ),
+        )
 
     def _recover_constrained_pick_roll(self, request, context, first):
         """Keep failure-only roll recovery; reject robot-unsafe successful Pick paths."""
@@ -593,13 +717,14 @@ class GenSimPickUp(PickUp):
         full, lengths = None, None
         attempts = []
         for index, choice in enumerate(choices):
-            observe = {}
-            if (self.continuation_previews or {}).get(
-                getattr(request, "invocation_id", None)
-            ) is not None:
-                observe["candidate_observer"] = lambda pool: setattr(
-                    selection, "candidates", pool
-                )
+
+            def observe_pool(pool: AffordancePoseCandidates) -> None:
+                selection.candidates = pool
+                if (self.pick_purposes or {}).get(request.invocation_id) == "ordinary":
+                    selection.candidate_routes.append(
+                        (index, pool, choice.direction.clone())
+                    )
+
             sample, direction = select_grasp(
                 affordance,
                 generator,
@@ -615,7 +740,7 @@ class GenSimPickUp(PickUp):
                     options,
                     approach[:, None, None, :],
                 ),
-                **observe,
+                candidate_observer=observe_pool,
             )
             viable = sample.success & ~success
             attempt = {"strategy": index, "grasp_feasible": sample.success.tolist()}
@@ -668,6 +793,7 @@ class GenSimPickUp(PickUp):
             {
                 "key": sample_key,
                 "candidate_ids": candidate_ids.tolist(),
+                "selected_poses": poses.detach().cpu().tolist(),
                 "adaptive_grasp": {
                     "strategy_indices": strategies.tolist(),
                     "approach_directions": directions.tolist(),
@@ -1050,8 +1176,123 @@ class GenSimPlace(Place):
                     context,
                     message="Recovered Place exceeds final resampled joint velocity limits.",
                 )
+        if not plan.plan_success.any():
+            plan = self._retry_place_routes(request, context, plan)
         return require_release_effect(
             self._with_contact_monitor_boundary(plan), handoff.resource
+        )
+
+    def _retry_place_routes(
+        self, request: Any, context: Any, first: ActionPlan
+    ) -> ActionPlan:
+        """Try two approach vias without changing required release waypoints."""
+        target = request.goal
+        options = request.skill_options
+        from .motion import _CARTESIAN_APPROACH, place_ik_recovery
+        from .place_recovery import inspect
+        from .pick_path import _pose_path_valid
+
+        if (
+            not isinstance(target, PlaceGoal)
+            or first.plan_success.any()
+            or context.batch_size != 1
+            or context.env_ids.tolist() != [0]
+            or not self.recovery_scene_vertices
+            or request.motion_policy.strategy != "ik_interp"
+            or request.motion_policy.dynamic_collision_mode != "off"
+            or options.max_approach_retract_z is not None
+            or target.tcp_symmetry != "none"
+            or _CARTESIAN_APPROACH.get()
+        ):
+            return first
+        endpoint = request.binding.endpoint("primary", "motion")
+        held = context.get_held_object(endpoint.task_state_key)
+        if held is None or held.semantics.affordance.get_custom_config(
+            ADAPTIVE_GRASP
+        ) in {"pour", "ends"}:
+            return first
+        from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+        from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+            resolve_pose_target,
+        )
+
+        xpos = resolve_pose_target(
+            resolve_pose_goal(target.xpos, context, name="place_candidate_xpos"),
+            num_envs=context.batch_size,
+            device=self.device,
+        )
+        if xpos.ndim == 3:
+            xpos = xpos.unsqueeze(1)
+        arm = endpoint.require_target(JointPositionTarget)
+        start = self.robot.compute_fk(
+            qpos=context.robot.qpos[:, list(arm.joint_ids)],
+            name=arm.control_part,
+            to_matrix=True,
+        )
+        if not _inspect_pick_motion(self.robot, context.robot.qpos, arm.control_part)[
+            "valid"
+        ]:
+            return first
+        parameters = self.robot.get_solver(arm.control_part).get_iteration_params()
+        state = _RandomState.capture(
+            _cuda_devices(self.robot.device, context.robot.qpos.device)
+        )
+        attempts = []
+        chosen = first
+        try:
+            for clearance in (0.05, 0.10):
+                state.restore()
+                via = start.clone()
+                via[:, :2, 3] = (start[:, :2, 3] + xpos[:, 0, :2, 3]) / 2
+                via[:, 2, 3] = (
+                    torch.maximum(start[:, 2, 3], xpos[:, :, 2, 3].amax(1)) + clearance
+                )
+                selected = replace(
+                    request,
+                    goal=replace(target, xpos=torch.cat((via[:, None], xpos), dim=1)),
+                )
+                with place_ik_recovery():
+                    candidate = super()._plan(selected, context)
+                acceptance = inspect(self, selected, context, candidate)
+                record = {"clearance_m": clearance, "acceptance": acceptance}
+                attempts.append(record)
+                if not acceptance["valid"]:
+                    continue
+                release = next(s for s in candidate.segments if s.name == "release")
+                actual = self.robot.compute_fk(
+                    qpos=candidate.joint_trajectory.positions[
+                        :, release.start, list(arm.joint_ids)
+                    ],
+                    name=arm.control_part,
+                    to_matrix=True,
+                )
+                record["release_pose_valid"] = _pose_path_valid(
+                    actual, xpos[:, -1], parameters["pos_eps"], parameters["rot_eps"]
+                )
+                if record["release_pose_valid"]:
+                    chosen = replace(
+                        candidate,
+                        scene_dependencies=first.scene_dependencies,
+                        scene_dependency_monitor_until=first.scene_dependency_monitor_until,
+                        scene_dependency_end_segment=first.scene_dependency_end_segment,
+                    )
+                    break
+        finally:
+            state.restore()
+        return replace(
+            chosen,
+            diagnostics=replace(
+                chosen.diagnostics,
+                metadata={
+                    **chosen.diagnostics.metadata,
+                    "gen_sim_place_candidate_retry": {
+                        "budget": 2,
+                        "attempts": attempts,
+                        "accepted": bool(chosen.plan_success.all()),
+                        "release_pose_unchanged": True,
+                    },
+                },
+            ),
         )
 
 

@@ -548,7 +548,7 @@ def test_local_branch_predicate_keeps_targets_timing_and_velocity_limits(
 
     monkeypatch.setattr(MotionGenerator, "generate", generate)
     start = options.start_qpos.clone()
-    result = motion._local_place_ik(
+    result = motion.resolve_continuous_ik_path(
         generator,
         [target],
         options,
@@ -647,7 +647,7 @@ def test_last_allowed_heading_recovery_replays_exact_targets_and_only_once(
 
     monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
     monkeypatch.setattr(recovery, "check_robot_motion", inspect)
-    monkeypatch.setattr(recovery, "_local_place_ik", local)
+    monkeypatch.setattr(recovery, "resolve_continuous_ik_path", local)
     monkeypatch.setattr(
         recovery,
         "qualify_alignment_plan",
@@ -701,7 +701,7 @@ def test_local_recovery_does_not_extend_other_failure_classes(
     )
     monkeypatch.setattr(
         recovery,
-        "_local_place_ik",
+        "resolve_continuous_ik_path",
         lambda *args, **kwargs: pytest.fail("unexpected IK extension"),
     )
     with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
@@ -753,7 +753,7 @@ def test_local_recovery_rejects_observed_start_collision_without_escaping(
     monkeypatch.setattr(recovery, "check_robot_motion", inspect)
     monkeypatch.setattr(
         recovery,
-        "_local_place_ik",
+        "resolve_continuous_ik_path",
         lambda *args, **kwargs: pytest.fail("colliding start must not enter local IK"),
     )
     with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
@@ -845,7 +845,7 @@ def test_all_eight_raw_failures_reuse_existing_last_heading_and_restore_legacy_s
 
     monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
     monkeypatch.setattr(recovery, "check_robot_motion", inspect)
-    monkeypatch.setattr(recovery, "_local_place_ik", local)
+    monkeypatch.setattr(recovery, "resolve_continuous_ik_path", local)
     monkeypatch.setattr(
         recovery,
         "qualify_alignment_plan",
@@ -916,7 +916,7 @@ def test_all_raw_failure_gate_retains_existing_negative_boundaries(
     )
     monkeypatch.setattr(
         recovery,
-        "_local_place_ik",
+        "resolve_continuous_ik_path",
         lambda *args, **kwargs: pytest.fail("negative boundary entered local IK"),
     )
     with recovery.world_yaw_free_collision_scope(robot, request, context) as scope:
@@ -993,7 +993,7 @@ def test_last_raw_success_local_recovery_restores_legacy_random_stop(
 
     monkeypatch.setattr(CheckedMotionGenerator, "_generate_checked", raw)
     monkeypatch.setattr(recovery, "check_robot_motion", inspect)
-    monkeypatch.setattr(recovery, "_local_place_ik", local)
+    monkeypatch.setattr(recovery, "resolve_continuous_ik_path", local)
     try:
         torch.manual_seed(41)
         random.seed(41)

@@ -204,7 +204,9 @@ class _SlideLowerer(RegisteredSemanticLowerer):
     def __init__(self, bindings: dict, robot: Any) -> None:
         self.bindings, self.robot = bindings, robot
 
-    def _selection(self, call: Any, context: Any, bound: Any) -> tuple:
+    def _selection(
+        self, call: Any, context: Any, bound: Any, *, require_grasp: bool = True
+    ) -> tuple:
         args = dict(call.arguments)
         if set(args) not in ({"object", "state"}, {"object", "state", "part"}):
             raise ValueError(
@@ -224,6 +226,7 @@ class _SlideLowerer(RegisteredSemanticLowerer):
             bound.binding.action_binding,
             context,
             participant="Articulation interaction",
+            require_grasp=require_grasp,
         )
         handoff.require_free(participant="Articulation interaction")
         return binding, semantics, art, target, endpoint
@@ -257,7 +260,9 @@ class _WithdrawLowerer(_SlideLowerer):
     ) -> SemanticLowering:
         if type(option_template) is not MoveEndEffectorOptions:
             raise TypeError("Articulation withdrawal requires MoveEndEffectorOptions.")
-        binding, _, art, target, endpoint = self._selection(call, context, bound)
+        binding, _, art, target, endpoint = self._selection(
+            call, context, bound, require_grasp=False
+        )
         qpos = art.get_qpos()[
             context.env_ids.tolist(), art.joint_names.index(binding.joint)
         ]
@@ -268,27 +273,29 @@ class _WithdrawLowerer(_SlideLowerer):
             ).any()
         ):
             raise ValueError("Articulation target was lost before withdrawal.")
-        hand = bound.binding.resources["primary"].endpoints["grasp"]
-        command = hand.commands.get("open")
-        if type(command) is not JointPositionCommand:
-            raise ValueError(
-                "Articulation withdrawal requires a declared hand-open command."
+        primary = getattr(bound.binding, "resources", {}).get("primary")
+        hand = getattr(primary, "endpoints", {}).get("grasp")
+        if hand is not None:
+            command = hand.commands.get("open")
+            if type(command) is not JointPositionCommand:
+                raise ValueError(
+                    "Articulation withdrawal requires a declared hand-open command."
+                )
+            ids = list(hand.runtime_target.joint_ids)
+            observed = context.robot.qpos[:, ids]
+            expected = command.resolve(
+                num_envs=observed.shape[0],
+                control_dof=len(ids),
+                device=observed.device,
+                dtype=observed.dtype,
             )
-        ids = list(hand.runtime_target.joint_ids)
-        observed = context.robot.qpos[:, ids]
-        expected = command.resolve(
-            num_envs=observed.shape[0],
-            control_dof=len(ids),
-            device=observed.device,
-            dtype=observed.dtype,
-        )
-        if (
-            not torch.isfinite(observed).all()
-            or (observed - expected).abs().amax() > 0.08
-        ):
-            raise ValueError(
-                "The hand has not reached its open posture before withdrawal."
-            )
+            if (
+                not torch.isfinite(observed).all()
+                or (observed - expected).abs().amax() > 0.08
+            ):
+                raise ValueError(
+                    "The hand has not reached its open posture before withdrawal."
+                )
         motion = endpoint.require_target(JointPositionTarget)
         current = self.robot.compute_fk(
             qpos=context.robot.qpos[:, list(motion.joint_ids)],

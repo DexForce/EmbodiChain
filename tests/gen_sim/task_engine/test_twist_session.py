@@ -815,6 +815,11 @@ def test_reassembling_engine_allocates_fresh_feedback_state(monkeypatch: Any) ->
     factory._adaptive_pick = False
     factory._pick_purposes = ()
     factory._pour_receivers = {}
+    from embodichain.gen_sim.task_engine._task_program.state_handoff import (
+        StagingContract,
+    )
+
+    factory._staging_contract = StagingContract.empty()
     factory._coordinated_motion = False
     factory._press_routes = ()
     factory._twist_routes = (case.route,)

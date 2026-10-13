@@ -107,9 +107,6 @@ def resolve_continuous_ik_path(
     lower, upper = bounds[..., 0], bounds[..., 1]
     limits = _joint_velocity_limits(robot, options.control_part).to(seed)
     step_dt = options.interpolation_dt
-    allowed = limits * step_dt + 1e-5
-    positions = [seed]
-    repairs = 0
 
     def solve(
         target: PlanState, trial: torch.Tensor
@@ -126,80 +123,130 @@ def resolve_continuous_ik_path(
         )
         return result.success, result.positions[:, -1]
 
-    def feasible(ok: torch.Tensor, qpos: torch.Tensor) -> bool:
-        return bool(
-            ok.all()
-            and torch.isfinite(qpos).all()
-            and (qpos >= lower).all()
-            and (qpos <= upper).all()
-            and ((qpos - seed).abs() <= allowed).all()
-            and (candidate_predicate is None or candidate_predicate(qpos))
-        )
-
     # Failed searches must not perturb the later grasp-candidate random stream.
     devices = [seed.device.index] if seed.is_cuda else []
     with torch.random.fork_rng(devices=devices):
-        for target in targets:
-            ok, qpos = solve(target, seed)
-            qpos = qpos.reshape_as(seed)
-            best = qpos if feasible(ok, qpos) else None
-            margin = (
-                float(torch.minimum(best - lower, upper - best).min())
-                if best is not None
-                else -1.0
-            )
-            if margin < 0.02:
-                # Near a joint stop, global random seeds can miss a nearby
-                # redundant branch. Bias only seeds, never emitted commands.
-                for joint in range(seed.shape[1]):
-                    for offset in (-0.15, 0.15, -0.05, 0.05):
-                        trial = seed.clone()
-                        trial[:, joint] += offset
-                        trial = trial.clamp(lower, upper)
-                        ok, candidate = solve(target, trial)
-                        candidate = candidate.reshape_as(seed)
-                        if feasible(ok, candidate):
-                            candidate_margin = float(
-                                torch.minimum(
-                                    candidate - lower, upper - candidate
-                                ).min()
-                            )
-                            if candidate_margin > margin:
-                                best, margin = candidate, candidate_margin
-                repairs += 1
-            if best is None:
-                return None
-            seed = best
-            positions.append(seed)
-    path = torch.stack(positions, dim=1)
+        points = resolve_seeded_ik_path(
+            targets,
+            seed,
+            solve=solve,
+            lower=lower,
+            upper=upper,
+            limits=limits,
+            dt=step_dt,
+            candidate_predicate=candidate_predicate,
+        )
+    if points is None:
+        return None
+    path = points.unsqueeze(0)
     dt = path.new_full(path.shape[:2], step_dt)
     dt[:, 0] = 0.0
     success = _velocity_validity(path, dt, limits)
     if not success.all():
         return None
     logger.log_info(
-        f"GenSim {operation} local IK recovery accepted: {repairs} local searches, "
+        f"GenSim {operation} continuous IK recovery accepted: "
         f"{path.shape[1]} unchanged-time samples."
     )
     return PlanResult(success=success, positions=path, dt=dt)
 
 
-def _local_place_ik(
-    generator: MotionGenerator,
-    targets: list[PlanState],
-    options: MotionGenOptions,
+def resolve_seeded_ik_path(
+    poses: torch.Tensor | list[PlanState],
+    start: torch.Tensor,
     *,
+    solve: Callable[[Any, torch.Tensor], tuple[torch.Tensor, torch.Tensor]],
+    solve_many: (
+        Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]] | None
+    ) = None,
+    pose_valid: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+    lower: torch.Tensor,
+    upper: torch.Tensor,
+    limits: torch.Tensor,
+    dt: float,
     candidate_predicate: Callable[[torch.Tensor], bool] | None = None,
-    operation: str = "Place",
-) -> PlanResult | None:
-    """Private delegation retained for existing GenSim recovery callers."""
-    return resolve_continuous_ik_path(
-        generator,
-        targets,
-        options,
-        candidate_predicate=candidate_predicate,
-        operation=operation,
-    )
+) -> torch.Tensor | None:
+    """Resolve a Cartesian waypoint path with one shared continuous branch.
+
+    ``solve`` and ``solve_many`` are solver-specific adapters; the branch,
+    joint-step, and joint-limit policy stays GenSim-owned and is shared by
+    contact Pick paths and articulation interaction recovery.
+    """
+    if start.ndim != 2 or start.shape[0] != 1 or not math.isfinite(dt) or dt <= 0:
+        raise ValueError(
+            "Continuous IK requires one environment and a positive timestep."
+        )
+    if not torch.isfinite(limits).all() or (limits <= 0).any():
+        raise ValueError("Continuous IK requires finite positive velocity limits.")
+    seed = start.clone()
+    points = [seed]
+    allowed = limits * dt
+
+    def feasible(ok: torch.Tensor, q: torch.Tensor) -> bool:
+        return bool(
+            ok.all()
+            and torch.isfinite(q).all()
+            and (q >= lower).all()
+            and (q <= upper).all()
+            and ((q - seed).abs() <= allowed + 1e-5).all()
+            and (candidate_predicate is None or candidate_predicate(q))
+        )
+
+    for pose in poses:
+        target = pose[None] if isinstance(pose, torch.Tensor) else pose
+        ok, q = solve(target, seed)
+        q = q.reshape_as(seed)
+        valid = feasible(ok, q)
+        margin = float(torch.minimum(q - lower, upper - q).min()) if valid else -1.0
+        if margin < 0.02:
+            if solve_many is None:
+                best = q if valid else None
+                for joint in range(seed.shape[-1]):
+                    for offset in (-0.15, 0.15, -0.05, 0.05):
+                        trial = seed.clone()
+                        trial[:, joint] += offset
+                        good, candidate = solve(target, trial.clamp(lower, upper))
+                        candidate = candidate.reshape_as(seed)
+                        if feasible(good, candidate):
+                            score = float(
+                                torch.minimum(
+                                    candidate - lower, upper - candidate
+                                ).min()
+                            )
+                            if score > margin:
+                                best, margin = candidate, score
+                if best is None:
+                    return None
+                q = best
+                seed = q
+                points.append(seed)
+                continue
+            trials = [seed[0]]
+            for offset in (-0.05, 0.05, -0.15, 0.15):
+                for joint in range(seed.shape[-1]):
+                    trial = seed[0].clone()
+                    trial[joint] += offset
+                    trials.append(trial.clamp(lower, upper).reshape(-1))
+            good, candidates = solve_many(target, torch.stack(trials))
+            if valid:
+                candidates = torch.cat((q, candidates))
+                good = torch.cat(
+                    (torch.ones(1, dtype=torch.bool, device=good.device), good)
+                )
+            good &= torch.isfinite(candidates).all(-1)
+            good &= ((candidates >= lower) & (candidates <= upper)).all(-1)
+            good &= ((candidates - seed).abs() <= allowed + 1e-5).all(-1)
+            if not good.any():
+                return None
+            margins = torch.minimum(candidates - lower, upper - candidates).amin(-1)
+            index = torch.argmax(torch.where(good, margins, -torch.inf))
+            q = candidates[index : index + 1]
+        seed = q
+        points.append(seed)
+    result = torch.cat(points)
+    if pose_valid is not None and not pose_valid(result[1:], poses).all():
+        return None
+    return result
 
 
 def _velocity_retry_samples(sample_count: int | None) -> tuple[int, ...]:
@@ -470,7 +517,7 @@ def _generate_cartesian_approach(
             and options.interpolation_dt is not None
             and options.interpolation_dt > 0
         ):
-            retry = _local_place_ik(generator, target_states, options)
+            retry = resolve_continuous_ik_path(generator, target_states, options)
             if retry is not None:
                 result = retry
                 recovery.used = True

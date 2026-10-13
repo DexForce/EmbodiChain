@@ -30,6 +30,7 @@ from embodichain.lab.sim.atomic_actions.plans import (
     PlannerDiagnostics,
     TrajectorySegment,
 )
+from embodichain.lab.sim.atomic_actions.effects import StateDelta
 from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
 from embodichain.lab.sim.atomic_actions.primitives.place import Place
 from embodichain.lab.sim.atomic_actions.runtime_commands import (
@@ -40,6 +41,14 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
 )
 from embodichain.lab.sim.atomic_actions.tracking import TrackingPolicy
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg
+
+
+def _request():
+    return SimpleNamespace(
+        binding=SimpleNamespace(
+            endpoint=lambda *_: SimpleNamespace(task_state_key="arm")
+        )
+    )
 
 
 def _place_plan(
@@ -69,6 +78,7 @@ def _place_plan(
         planned_scene_version=0,
         planned_collision_world_revision=(0,),
         diagnostics=PlannerDiagnostics(backend="test"),
+        expected_effects=StateDelta(held_object_updates={"arm": None}),
         segments=(
             (
                 TrajectorySegment("approach", 0, 2),
@@ -98,7 +108,7 @@ def test_gensim_place_restores_v38_contact_boundary_without_changing_shared_plan
         motion_generator=SimpleNamespace(direct_place_planning=direct)
     )
 
-    result = action._plan(object(), object())
+    result = action._plan(_request(), object())
 
     assert result.scene_dependency_monitor_until == {
         "support": 2 if existing_cutoff is None else existing_cutoff,
@@ -141,7 +151,7 @@ def test_gensim_place_leaves_unrelated_plans_unchanged(
     action._planning_services = SimpleNamespace(
         motion_generator=SimpleNamespace(direct_place_planning=True)
     )
-    assert action._plan(object(), object()) is original
+    assert action._plan(_request(), object()) is original
 
 
 @pytest.mark.parametrize("kind", ["place", "transport"])
@@ -162,7 +172,7 @@ def test_explicit_drawer_scope_preserves_its_existing_primitive(kind, monkeypatc
     action._planning_services = SimpleNamespace(
         motion_generator=SimpleNamespace(**{flag: True})
     )
-    request, context, result = object(), object(), _place_plan()
+    request, context, result = _request(), object(), _place_plan()
 
     def delegated(self, actual_request, actual_context):
         assert actual_request is request and actual_context is context
@@ -241,7 +251,7 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
 
     monkeypatch.setattr(motion.MotionGenerator, "generate", plan_native)
     local = Mock(return_value=recovered)
-    monkeypatch.setattr(motion, "_local_place_ik", local)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
 
     def plan_place(self, request, context):
         result = generator.generate(
@@ -256,6 +266,7 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
         )
         return SimpleNamespace(
             plan_success=result.success,
+            expected_effects=StateDelta(held_object_updates={"arm": None}),
             joint_trajectory=SimpleNamespace(positions=result.positions, dt=result.dt),
             segments=(),
             scene_dependencies=(),
@@ -264,7 +275,7 @@ def test_factory_place_recovery_is_independent_of_other_cartesian_calls(
     monkeypatch.setattr(Place, "_plan", plan_place)
     action = GenSimPlace()
     action._planning_services = SimpleNamespace(robot=robot, motion_generator=generator)
-    result = action._plan(object(), object())
+    result = action._plan(_request(), object())
 
     assert result.plan_success.all()
     local.assert_called_once()

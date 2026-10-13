@@ -59,6 +59,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory = object.__new__(_TaskFactory)
     factory._drawers = (object(),) if has_drawers else ()
     factory._pour_receivers = {}
+    factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = False
     factory._pick_purposes = ()
     factory._coordinated_motion = coordinated

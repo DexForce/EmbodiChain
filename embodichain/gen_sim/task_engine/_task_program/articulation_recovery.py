@@ -43,7 +43,12 @@ from embodichain.lab.sim.sim_manager import SimulationManager
 from embodichain.lab.sim.utility.solver_utils import create_pk_serial_chain
 
 from .articulation_collision import check_free_motion
-from .motion import _cartesian_samples, _joint_velocity_limits, _velocity_validity
+from .motion import (
+    _cartesian_samples,
+    _joint_velocity_limits,
+    _velocity_validity,
+    resolve_seeded_ik_path,
+)
 
 __all__: list[str] = []
 ARTICULATION_RECOVERY_REVISION = 1
@@ -230,46 +235,19 @@ class _Search:
         return ok.reshape(-1) & valid & self.pose_valid(q, pose), q
 
     def path(self, poses: torch.Tensor, start: torch.Tensor) -> torch.Tensor | None:
-        seed = start.clone()
-        points = [seed]
-        allowed = self.limits * self.dt
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(0)
-            for pose in poses:
-                ok, q = self.solver.get_ik(pose[None], qpos_seed=seed)
-                q = q.reshape_as(seed)
-                valid = bool(ok.all() and torch.isfinite(q).all())
-                feasible = valid and bool(((q - seed).abs() <= allowed + 1e-5).all())
-                margin = (
-                    float(torch.minimum(q - self.lower, self.upper - q).min())
-                    if valid
-                    else -1
-                )
-                if not feasible or margin < 0.02:
-                    trials = [seed[0]]
-                    for offset in (-0.05, 0.05, -0.15, 0.15):
-                        for joint in range(seed.shape[-1]):
-                            trial = seed[0].clone()
-                            trial[joint] += offset
-                            trials.append(trial.clamp(self.lower, self.upper))
-                    good, candidates = self.solve_seeds(pose[None], torch.stack(trials))
-                    if valid:
-                        candidates = torch.cat((q, candidates))
-                        good = torch.cat((torch.ones(1, dtype=torch.bool), good))
-                    good &= ((candidates - seed).abs() <= allowed + 1e-5).all(-1)
-                    if not good.any():
-                        return None
-                    margins = torch.minimum(
-                        candidates - self.lower, self.upper - candidates
-                    ).amin(-1)
-                    index = torch.argmax(torch.where(good, margins, -torch.inf))
-                    q = candidates[index : index + 1]
-                seed = q
-                points.append(seed)
-        result = torch.cat(points)
-        if not self.pose_valid(result[1:], poses).all():
-            return None
-        return result
+            return resolve_seeded_ik_path(
+                poses,
+                start,
+                solve=lambda pose, seed: self.solver.get_ik(pose, qpos_seed=seed),
+                solve_many=self.solve_seeds,
+                pose_valid=self.pose_valid,
+                lower=self.lower,
+                upper=self.upper,
+                limits=self.limits,
+                dt=self.dt,
+            )
 
     def endpoints(
         self, pose: torch.Tensor, start: torch.Tensor
