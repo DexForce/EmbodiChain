@@ -64,7 +64,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     TrapezoidalPlannerCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg
+from embodichain.lab.sim.robots import FrankaPandaPgiCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -141,12 +141,6 @@ _DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_CONTACT_LINK_PATTERN = (
     r"(?:.*_)?(?:gripper_finger[12]_link_1|"
     r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
-)
-_GRIPPER_TCP = (
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 1.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, _DEFAULT_GRIPPER_TCP_Z),
-    (0.0, 0.0, 0.0, 1.0),
 )
 TOP_DOWN_EEF_ROTATION = (
     (-0.0539, -0.9985, -0.0022),
@@ -2269,12 +2263,13 @@ def create_franka_panda_robot_cfg(
     init_qpos: Sequence[float] | None = None,
     **kwargs,
 ) -> RobotCfg:
-    """Build a Franka arm + PGI gripper configuration for the tutorials.
+    """Build the Franka arm + PGI gripper configuration for the tutorials.
 
-    The shared scenes place manipulation targets on the robot's negative-X
-    side, so the base is rotated 180 degrees. The arm-only Franka URDF is
-    assembled with the same DH_PGI_140_80 component, hand control part, drive
-    properties, open state, and TCP offset used by the UR5 tutorial robot.
+    :class:`~embodichain.lab.sim.robots.FrankaPandaPgiCfg` owns the assembly,
+    control parts, drives, TCP, and gripper contacts. The tutorials only name
+    the robot and choose its placement and initial pose: the shared scenes
+    place manipulation targets on the robot's negative-X side, so the base is
+    rotated 180 degrees.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
@@ -2284,50 +2279,13 @@ def create_franka_panda_robot_cfg(
         A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
     """
     overrides = {
-        "robot_type": "panda",
         "uid": "FrankaPanda",
         "init_pos": init_pos,
         "init_rot": _FRANKA_TUTORIAL_BASE_ROTATION,
-        "urdf_cfg": {
-            "components": [
-                {
-                    "component_type": "arm",
-                    "urdf_path": "Franka/Panda/Panda.urdf",
-                },
-                {
-                    "component_type": "hand",
-                    "urdf_path": GRIPPER_URDF_PATH,
-                },
-            ],
-        },
-        "control_parts": {"eef": [GRIPPER_HAND_JOINT_PATTERN]},
-        "joint_drive_props": {
-            "stiffness": {GRIPPER_HAND_JOINT_PATTERN: 1e3},
-            "damping": {GRIPPER_HAND_JOINT_PATTERN: 1e2},
-            "max_effort": {GRIPPER_HAND_JOINT_PATTERN: 1e4},
-        },
-        "solver_cfg": {
-            "arm": {
-                "end_link_name": "fr3_link8",
-                "tcp": _GRIPPER_TCP,
-            }
-        },
     }
     if init_qpos is not None:
         overrides["init_qpos"] = list(init_qpos)
-    cfg = FrankaPandaCfg.from_dict(overrides)
-    if init_qpos is None:
-        cfg.init_qpos[-2:] = [0.0, 0.0]
-    for drive_values in (
-        cfg.joint_drive_props.stiffness,
-        cfg.joint_drive_props.damping,
-        cfg.joint_drive_props.max_effort,
-    ):
-        drive_values.pop("fr3_finger_joint[1-2]", None)
-    # The stock Franka contact override names the fr3 finger links, which the
-    # PGI assembly replaces; Newton scenes add PGI contacts separately.
-    cfg.link_attrs.pop("newton_gripper_contacts", None)
-    return cfg
+    return FrankaPandaPgiCfg.from_dict(overrides)
 
 
 def create_ur10_robotiq_robot_cfg(

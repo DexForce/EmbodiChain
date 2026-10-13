@@ -19,11 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.robots import FrankaPandaCfg
-from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
-from scripts.tutorials.atomic_action.tutorial_utils import (
-    create_franka_panda_robot_cfg,
-)
+from embodichain.lab.sim.robots import FrankaPandaCfg, FrankaPandaPgiCfg
 
 from ..registry import register_robot_provider
 from .base import RobotProvider
@@ -45,22 +41,21 @@ class FrankaPandaProvider(RobotProvider):
 
 
 class FrankaPgiProvider(RobotProvider):
-    """Build a Franka arm assembled with the tutorial PGI gripper.
+    """Build the library Franka + PGI assembly used by the Atomic Skill suites.
 
-    The configuration mirrors the Franka compatibility in
-    ``scripts/tutorials/atomic_action``: an arm-only Panda URDF, the shared
-    ``DH_PGI_140_80`` component, a 180-degree base rotation, and the PGI TCP.
+    The suites were authored with the base rotated 180 degrees, as in the
+    atomic-action tutorial scenes, so the provider keeps that rotation; suite
+    overrides apply on top.
     """
 
     def build_cfg(self) -> RobotCfg:
         """Build the Franka + PGI benchmark configuration."""
-        cfg = create_franka_panda_robot_cfg()
-        return merge_robot_cfg(
-            cfg,
+        return FrankaPandaPgiCfg.from_dict(
             {
                 "uid": "benchmark_franka_pgi",
+                "init_rot": [0.0, 0.0, 180.0],
                 **dict(self.spec.config),
-            },
+            }
         )
 
 
