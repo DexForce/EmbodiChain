@@ -21,6 +21,7 @@ a synchronized dual-arm robot.
    CobotMagicCfg
    TianjiMarvinCfg
    FrankaPandaCfg
+   FrankaPandaPgiCfg
    URRobotCfg
    DualArmRobotCfg
 
@@ -60,6 +61,15 @@ available through its implementation module:
    :inherited-members:
    :show-inheritance:
    :exclude-members: __init__, copy, replace, to_dict, validate
+
+.. autoclass:: FrankaPandaPgiCfg
+   :members:
+   :inherited-members:
+   :show-inheritance:
+   :exclude-members: __init__, copy, replace, to_dict, validate
+
+See :doc:`/resources/robot/franka_panda` for the PGI assembly and its frame
+contract.
 
 .. autoclass:: URRobotCfg
    :members:

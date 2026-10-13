@@ -1317,6 +1317,7 @@ embodichain.lab.sim.robots.franka_panda
 .. autosummary::
 
    FrankaPandaCfg
+   FrankaPandaPgiCfg
 
 embodichain.lab.sim.robots.ur_robot
 -----------------------------------

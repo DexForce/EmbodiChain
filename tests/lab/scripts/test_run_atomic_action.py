@@ -70,6 +70,26 @@ def sample_franka_cfg(monkeypatch: pytest.MonkeyPatch) -> RobotCfg:
     return create_franka_panda_robot_cfg()
 
 
+def test_franka_sample_fk_matches_assembled_pgi_tool_frame() -> None:
+    pytest.importorskip("pytorch_kinematics")
+    cfg = create_franka_panda_robot_cfg()
+    chain = cfg.build_pk_serial_chain()["arm"]
+    solver_cfg = cfg.solver_cfg["arm"]
+    solver_cfg.urdf_path = cfg.urdf_cfg.assemble_urdf()
+    solver_cfg.joint_names = cfg.control_parts["arm"]
+    solver = solver_cfg.init_solver(device=torch.device("cpu"))
+    # Compare the ready pose and a distinct arm configuration so a mismatched
+    # flange/stock-hand chain cannot be hidden by the sample's TCP calibration.
+    qpos = torch.tensor(
+        [cfg.init_qpos[:7], [0.3, -0.2, 0.1, -2.0, 0.2, 2.5, 0.4]],
+        dtype=torch.float32,
+    )
+    tcp = torch.as_tensor(solver_cfg.tcp, dtype=torch.float32)
+    torch.testing.assert_close(
+        solver.get_fk(qpos), chain.forward_kinematics(qpos).get_matrix() @ tcp
+    )
+
+
 def test_franka_sample_contact_override_matches_replacement_pgi_fingers(
     sample_franka_cfg: RobotCfg,
 ) -> None:

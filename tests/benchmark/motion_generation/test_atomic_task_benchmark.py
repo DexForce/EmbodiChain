@@ -427,14 +427,21 @@ def test_randomization_manifest_records_contract_and_seed():
 
 
 def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
+    from embodichain.lab.sim.robots import FrankaPandaPgiCfg
+
     suite = load_suite("atomic_franka_pgi_curobo")
     cfg = create_robot_provider(suite.robot).build_cfg()
 
+    assert isinstance(cfg, FrankaPandaPgiCfg)
     assert cfg.uid == "benchmark_franka_pgi"
+    # The suites were authored with the tutorial scenes' rotated base.
+    assert list(cfg.init_rot) == [0.0, 0.0, 180.0]
     assert len(cfg.control_parts["arm"]) == 7
     assert cfg.control_parts["eef"] == ["gripper_finger1_joint_1"]
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
+    # Suite overrides still apply on top of the shared configuration.
     assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
+    assert cfg.attrs.material_props.static_friction == pytest.approx(1.0)
     assert len(cfg.init_qpos) == 9
 
 

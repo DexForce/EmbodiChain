@@ -39,11 +39,13 @@ TASK_DIR = (
 )
 
 
-def _load_config(task_dir: Path, backend: str, envs: int, steps: int) -> dict:
+def _load_config(task_dir: Path, backend: str, envs: int | None, steps: int) -> dict:
     import yaml
 
     suffix = ".newton" if backend == "newton" else ""
     config = yaml.safe_load((task_dir / f"agents/ppo{suffix}.yaml").read_text())
+    if envs is None:
+        envs = int(config["trainer"]["num_envs"])
     config["trainer"].update(
         gym_config=str((task_dir / f"env{suffix}.yaml").resolve()),
         num_envs=envs,
@@ -280,7 +282,7 @@ def _run(args: argparse.Namespace, result: dict) -> None:
                 device=device,
                 num_envs=args.envs,
                 headless=True,
-                renderer=config["trainer"]["renderer"],
+                renderer=config["trainer"].get("renderer"),
                 gpu_id=0,
                 seed=args.seed,
                 config_dir=args.task_dir,
@@ -349,7 +351,12 @@ def main() -> None:
     parser.add_argument("--backend", choices=BACKENDS, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--task-dir", type=Path, default=TASK_DIR)
-    parser.add_argument("--envs", type=int, default=4096)
+    parser.add_argument(
+        "--envs",
+        type=int,
+        default=None,
+        help="Parallel environments; defaults to the selected task training config",
+    )
     parser.add_argument("--steps", type=int, default=24)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--updates", type=int, default=10)
@@ -362,6 +369,10 @@ def main() -> None:
         help="Newton solver iteration limit",
     )
     args = parser.parse_args()
+    if args.envs is None:
+        args.envs = _load_config(args.task_dir, args.backend, None, args.steps)[
+            "trainer"
+        ]["num_envs"]
     if (
         min(
             args.envs,

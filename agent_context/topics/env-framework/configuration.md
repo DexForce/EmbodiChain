@@ -82,6 +82,12 @@ typed physics config and rejects fields from the other backend. Launcher
 `--physics` may confirm the declared value but cannot switch the file-owned
 backend. Use separate environment files when one logical task needs both.
 
+`renderer: auto` resolves from environment render demand before World creation.
+For cameras or native visual resources created by custom Python code, select
+an explicit native renderer or extend `BaseEnv._requires_native_renderer()`
+before constructing the environment. See the owning
+[render selection contract](../simulation-system/rendering.md#norender-initialization).
+
 Device selection is one shared runtime value. The typed physics config supplies
 the backend default (`cpu` for Default, `cuda:0` for Newton), an optional
 top-level Gym `device` overrides it, and an explicitly supplied CLI `--device`

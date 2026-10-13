@@ -304,7 +304,10 @@ class SimulationManagerCfg:
     """Maximum scene nodes, or None to retain the DexSim World default.
 
     Large batches of articulated robots may require more nodes than the
-    default 65,536. This changes allocation capacity, not physics settings.
+    default 65,536. NoRender caps larger native-renderer reservations at its
+    131,071-node limit while retaining the authored capacity in this config.
+    Physical scene replication must fit the effective capacity. This changes
+    allocation capacity, not physics settings.
     """
 
     height: int = 1080
@@ -503,9 +506,17 @@ class SimulationManager:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
         defer_startup_summary: Let an owning environment emit one combined table
             after task and manager initialization. Standalone callers keep False.
+        requires_native_renderer: Predeclared native render demand. False permits
+            auto to select NoRender; None preserves standalone GPU selection.
+            Windows, Viser, forced synchronization and renderer overrides retain
+            precedence. The renderer is fixed before the World is constructed.
     """
 
     _instances = {}
+    # World cleanup does not reset DexSim's process-wide renderer.
+    _initialized_process_renderer = False
+    # DexSim NoRender uses the 17-bit EntityManager node allocator.
+    _NO_RENDER_SCENE_NODE_CAPACITY = 131071
 
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
@@ -521,6 +532,7 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ):
         """Create or return the instance based on instance_id."""
         n_instance = 0
@@ -539,8 +551,21 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ) -> None:
+        """Construct the simulation World with a fixed renderer selection.
+
+        Args:
+            sim_config: Simulation, physics and rendering configuration.
+            defer_startup_summary: Let the owning environment emit the summary.
+            requires_native_renderer: Predeclared render demand. ``False`` allows
+                auto to select NoRender when there are no window, browser or
+                forced-sync consumers. ``None`` preserves standalone GPU-based
+                selection. Explicit and global renderer overrides take precedence.
+        """
         self._defer_startup_summary = defer_startup_summary
+        self._requires_native_renderer = requires_native_renderer
+        self._renderer_selection_reason: str | None = None
         self._startup_summary_logged = False
         self._scene_summary_logged = False
         self._requested_renderer = sim_config.render_cfg.renderer
@@ -576,7 +601,11 @@ class SimulationManager:
         # branching on a backend name throughout the manager.
         self.physics = make_physics_backend(sim_config.physics_cfg, self)
 
-        world_config = self._convert_sim_config(sim_config)
+        try:
+            world_config = self._convert_sim_config(sim_config)
+        except Exception:
+            type(self)._instances.pop(instance_id, None)
+            raise
         self._world_config = world_config
         self.profiler = Profiler(sim_config.profiler, self.device)
 
@@ -593,6 +622,7 @@ class SimulationManager:
                     self._render_device_name = render_device.name
                     break
         self._world: dexsim.World = dexsim.World(world_config)
+        SimulationManager._initialized_process_renderer = True
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
 
@@ -838,7 +868,10 @@ class SimulationManager:
     def _require_native_renderer(self, operation: str) -> None:
         if not self.has_native_renderer:
             raise RuntimeError(
-                f"{operation} requires a native renderer; the World uses no-render."
+                f"{operation} requires a native renderer; the World uses no-render. "
+                "Explicitly select renderer='hybrid', 'fast-rt', or 'rt' before "
+                "construction, or override BaseEnv._requires_native_renderer() "
+                "to reserve rendering for custom cameras."
             )
 
     @cached_property
@@ -1136,6 +1169,24 @@ class SimulationManager:
                     cancel("viser:")
             self._visualization_runtime = None
 
+    @staticmethod
+    def _get_process_renderer() -> str | None:
+        """Read the engine configuration, which outlives individual Worlds."""
+        renderer = dexsim.get_world_config().renderer
+        # Before engine initialization get_world_config returns the default
+        # (Hybrid); NoRender therefore also identifies an externally initialized
+        # engine after all of its Worlds have been released.
+        if not (
+            SimulationManager._initialized_process_renderer
+            or dexsim.get_world_num() > 0
+            or renderer == dexsim.types.Renderer.NORENDER
+        ):
+            return None
+        for name in ("no-render", "hybrid", "fast-rt", "rt"):
+            if RenderCfg(renderer=name).to_dexsim_flags() == renderer:
+                return name
+        raise RuntimeError(f"Unsupported DexSim process renderer: {renderer}.")
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
@@ -1154,16 +1205,65 @@ class SimulationManager:
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
 
+        process_renderer = SimulationManager._get_process_renderer()
+
         if sim_config.render_cfg.renderer == "auto":
+            from embodichain.lab.sim import cfg
             from embodichain.lab.sim.utility.render_utils import (
                 select_default_renderer,
             )
 
-            resolved_renderer = select_default_renderer(sim_config.gpu_id)
+            if (
+                cfg.DEFAULT_RENDERER == "auto"
+                and process_renderer is not None
+                and process_renderer != "no-render"
+            ):
+                resolved_renderer = process_renderer
+                self._renderer_selection_reason = "reuse process renderer"
+            elif (
+                cfg.DEFAULT_RENDERER == "auto"
+                and getattr(self, "_requires_native_renderer", None) is False
+                and sim_config.headless
+                and sim_config.visualization.backend == "none"
+                and getattr(sim_config.physics_cfg, "sync_to_renderer", None)
+                is not True
+            ):
+                resolved_renderer = process_renderer or "no-render"
+                self._renderer_selection_reason = (
+                    "reuse process renderer"
+                    if process_renderer
+                    else "no native render consumers"
+                )
+            else:
+                resolved_renderer = select_default_renderer(sim_config.gpu_id)
             logger.log_debug(
                 f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
             )
             sim_config.render_cfg.renderer = resolved_renderer
+
+        if process_renderer is not None and (
+            sim_config.render_cfg.renderer == "no-render"
+        ) != (process_renderer == "no-render"):
+            raise RuntimeError(
+                f"DexSim's process renderer is already '{process_renderer}', but this "
+                f"environment requires '{sim_config.render_cfg.renderer}'. Closing a "
+                "World does not reset the process renderer. Start a new process to "
+                "change renderer. If any environment needs cameras, select a native "
+                "renderer before constructing its first World."
+            )
+
+        if (
+            sim_config.render_cfg.renderer == "no-render"
+            and world_config.scene_node_capacity
+            > SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+        ):
+            world_config.scene_node_capacity = (
+                SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+            )
+            logger.log_debug(
+                f"NoRender limits scene node capacity to {world_config.scene_node_capacity}; "
+                f"native-renderer reservation was {sim_config.scene_node_capacity}."
+            )
 
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
         if sim_config.render_cfg.renderer == "no-render":
