@@ -244,6 +244,211 @@ def _segments(runtime: Mapping[str, Any]) -> dict[str, Any]:
     return records
 
 
+def _side_placement_record(
+    target: Any,
+    deployment: Any,
+    graph: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    predicate: Any,
+    member: Mapping[str, Any],
+    segments: Mapping[str, Any],
+    boundary: Mapping[str, Any],
+    num_envs: int,
+    *,
+    recorded: bool,
+) -> dict[str, Any]:
+    """Observe a qualified link, a real tabletop landing, and measured release."""
+    from .placement_evidence import _native_mesh, _valid_pose
+    from .spatial_reference import measure_relation, resolve_reference
+
+    registration = deployment.integration.registration
+    scene_binding = registration.scene_binding
+    reference = contract["coverage"]["roles"].get(
+        predicate.arguments.get("reference"), []
+    )
+    if len(reference) != 1 or member["object_part_id"] is not None:
+        raise ValueError(
+            "Side placement needs one bound reference and a rigid subject."
+        )
+    reference_uid, part = reference[0]["uid"], reference[0]["part_id"]
+    group = next(g for g in graph["task_groups"] if g["id"] == member["group_id"])
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    candidates = [
+        nodes[key]
+        for key in group["node_ids"]
+        if nodes[key]["call"].get("call_id") == "simulation.place_relative"
+        and nodes[key]["call"]["arguments"].get("object") == member["object_uid"]
+        and nodes[key]["call"]["arguments"].get("reference") == reference_uid
+        and nodes[key]["call"]["arguments"].get("reference_part") == part
+        and nodes[key]["call"]["arguments"].get("relation")
+        == predicate.arguments["relation"]
+    ]
+    if len(candidates) != 1:
+        raise ValueError("Side predicate does not match one bound placement call.")
+    node = candidates[0]
+    stage = node["call"]["arguments"].get("stage_id", node["task_instance_id"])
+    routes = [
+        r
+        for f in registration.registered_semantic_lowerer_factories
+        if f.call_id == "simulation.place_relative"
+        for r in f.routes
+        if r.object_id == member["object_uid"]
+        and r.reference_entity_id == reference_uid
+        and r.reference_part == part
+        and r.relation == predicate.arguments["relation"]
+        and r.stage_id in {"", stage}
+    ]
+    if len(routes) != 1 or routes[0].reference_link_id is None:
+        raise ValueError("Side placement lacks one qualified reference link route.")
+    route = routes[0]
+    preset = f"gen_sim.{node['id']}.stable"
+    constraint = dict(deployment.integration.adapter_factory.constraints)[preset]
+    if (
+        constraint.entity != member["object_uid"]
+        or constraint.reference != route.reference_link_id
+        or constraint.displacement != route.world_displacement
+    ):
+        raise ValueError("Side planning route and acceptance reference disagree.")
+    link = next(
+        b for b in scene_binding.links if b.entity_id == route.reference_link_id
+    )
+    parent = next(
+        b for b in scene_binding.articulations if b.entity_id == reference_uid
+    )
+    if link.articulation_id != reference_uid:
+        raise ValueError("Side reference link belongs to a different articulation.")
+    art = target.sim.get_articulation(parent.simulation_uid)
+    geometry = resolve_reference(
+        {
+            "uid": reference_uid,
+            "fpath": art.cfg.fpath,
+            "body_scale": art.cfg.body_scale,
+            "fix_base": art.cfg.root_props.fixed_base,
+            "init_local_pose": art.cfg.init_local_pose,
+            "init_pos": art.cfg.init_pos,
+            "init_rot": art.cfg.init_rot,
+        },
+        part,
+    )
+    if geometry.link != link.native_link_name:
+        raise ValueError("Side reference native link differs from its qualified part.")
+    bindings = {b.entity_id: b for b in scene_binding.rigid_objects}
+    object_binding, table_binding = bindings[member["object_uid"]], bindings["table"]
+    frames = None
+    if recorded:
+        frames = boundary.get("end_steps")
+        counts = getattr(target, "_traj_steps", None)
+        if (
+            not isinstance(frames, (list, tuple))
+            or len(frames) != num_envs
+            or counts is None
+            or any(
+                type(v) is not int or not 0 < v <= int(counts[i])
+                for i, v in enumerate(frames)
+            )
+        ):
+            raise ValueError("Side milestone requires exact recorded boundary slots.")
+        from embodichain.utils.math import xyz_quat_to_4x4_matrix
+
+        def pose(binding: Any) -> torch.Tensor:
+            values = target._traj_buffer["states"]["rigid_objects"][
+                binding.simulation_uid
+            ]["pose"]
+            if (
+                values.ndim != 3
+                or values.shape[0] != num_envs
+                or values.shape[-1] != 7
+                or any(frame >= values.shape[1] for frame in frames)
+            ):
+                raise ValueError("Side milestone has no recorded native pose slot.")
+            return xyz_quat_to_4x4_matrix(
+                torch.stack([values[i, frame] for i, frame in enumerate(frames)])
+                .detach()
+                .cpu()
+            )
+
+        prefix = boundary["metadata"]["program_segment_source_path"]
+        traces = [
+            p
+            for p in boundary["metadata"]["post_policies"]
+            if p.get("kind") == "wait_stable"
+            and type(p.get("policy_index")) is int
+            and p.get("source_path") == [*prefix, "post", p["policy_index"]]
+            and p.get("result", {}).get("measurements", {}).get("reference")
+            == route.reference_link_id
+            and p["result"]["measurements"].get("entity") == member["object_uid"]
+            and p["result"].get("preset") == preset
+            and p["result"].get("kind") == constraint.kind
+            and p["result"].get("required_seconds") == constraint.duration
+        ]
+        if (
+            len(traces) != 1
+            or traces[0].get("result_mask") != [True] * num_envs
+            or traces[0]["result"].get("accepted_mask") != [True] * num_envs
+            or any(
+                type(v) is not bool
+                for v in traces[0]["result_mask"] + traces[0]["result"]["accepted_mask"]
+            )
+            or len(traces[0]["result"].get("stable_seconds", [])) != num_envs
+            or any(
+                type(v) not in (float, int)
+                or not math.isfinite(v)
+                or v < constraint.duration
+                for v in traces[0]["result"]["stable_seconds"]
+            )
+        ):
+            raise ValueError(
+                "Side milestone lacks its exact accepted link observation."
+            )
+        measurement = traces[0]["result"]["measurements"]
+        reference_pose = torch.tensor(measurement["reference_pose"])
+        _valid_pose(reference_pose, num_envs)
+        observed_object = torch.tensor(measurement["object_pose"])
+        _valid_pose(observed_object, num_envs)
+        if not torch.allclose(observed_object, pose(object_binding), atol=1e-4, rtol=0):
+            raise ValueError(
+                "Side milestone observation differs from its recorded boundary."
+            )
+    else:
+
+        def pose(binding: Any) -> torch.Tensor:
+            return _pose(target.sim, binding)
+
+        reference_pose = (
+            art.get_link_pose(link.native_link_name, to_matrix=True).detach().cpu()
+        )
+    object_pose = pose(object_binding)
+    vertices, _ = _native_mesh(target.sim, object_binding, num_envs)
+    accepted, metrics = measure_relation(
+        vertices, object_pose, geometry.vertices, reference_pose, route.relation
+    )
+    supported, support = measure_planar_placement(
+        target.sim, object_binding, table_binding, object_pose, pose(table_binding)
+    )
+    released = measured_release(
+        node, member["object_uid"], segments, boundary, num_envs
+    )
+    metrics.update(
+        reference_uid=reference_uid,
+        reference_part=part,
+        reference_link_id=route.reference_link_id,
+        relation=route.relation,
+        tabletop=support,
+        released=released,
+    )
+    if recorded:
+        metrics["boundary_frames"] = list(frames)
+    return {
+        "group_id": member["group_id"],
+        "uid": member["object_uid"],
+        "part_id": None,
+        "accepted": [
+            a and b and c for a, b, c in zip(accepted, supported, released, strict=True)
+        ],
+        "measurements": metrics,
+    }
+
+
 def _placement_record(
     target: Any,
     deployment: Any,
@@ -258,6 +463,21 @@ def _placement_record(
     recorded: bool = False,
 ) -> dict[str, Any]:
     registration = deployment.integration.registration
+    from .spatial_reference import SIDE_RELATIONS
+
+    if predicate.arguments.get("relation") in SIDE_RELATIONS:
+        return _side_placement_record(
+            target,
+            deployment,
+            graph,
+            contract,
+            predicate,
+            member,
+            segments,
+            boundary,
+            num_envs,
+            recorded=recorded,
+        )
     scene_binding = registration.scene_binding
     bindings = {v.entity_id: v for v in scene_binding.rigid_objects}
     groups = {v["id"]: v for v in graph["task_groups"]}
@@ -423,11 +643,15 @@ def _placement_measurement_matches(
     metrics = record.get("measurements", {})
     references = roles.get(predicate.arguments.get("reference"), [])
     accepted = record.get("accepted", [])
-    footprint = metrics.get("full_footprint_inside", [])
+    from .spatial_reference import SIDE_RELATIONS
+
+    link_scope = metrics.get("scope") == "bound_link_world_axes"
+    support = metrics.get("tabletop", {}) if link_scope else metrics
+    footprint = support.get("full_footprint_inside", [])
     released = metrics.get("released", [])
-    gaps = metrics.get("support_gap_m", [])
+    gaps = support.get("support_gap_m", [])
     if (
-        metrics.get("scope") != "measured_planar_landing_region"
+        support.get("scope") != "measured_planar_landing_region"
         or len(references) != 1
         or metrics.get("reference_uid") != references[0]["uid"]
         or metrics.get("relation") != predicate.arguments.get("relation")
@@ -443,6 +667,34 @@ def _placement_measurement_matches(
         or any(type(v) not in (float, int) or not math.isfinite(v) for v in gaps)
     ):
         return False
+    side = [True] * num_envs
+    if link_scope:
+        relation = predicate.arguments.get("relation")
+        side_gaps = metrics.get("envelope_gaps_m", [])
+        expected_axes = (
+            2
+            if relation
+            in {"front_left_of", "front_right_of", "back_left_of", "back_right_of"}
+            else 1
+        )
+        if (
+            relation not in SIDE_RELATIONS
+            or metrics.get("reference_part") != references[0]["part_id"]
+            or not isinstance(metrics.get("reference_link_id"), str)
+            or not metrics["reference_link_id"].startswith(f"{references[0]['uid']}__")
+            or not isinstance(side_gaps, list)
+            or len(side_gaps) != expected_axes
+            or any(
+                not isinstance(values, list)
+                or len(values) != num_envs
+                or any(
+                    type(v) not in (float, int) or not math.isfinite(v) for v in values
+                )
+                for values in side_gaps
+            )
+        ):
+            return False
+        side = [all(axis[row] >= 0.0 for axis in side_gaps) for row in range(num_envs)]
     from .placement_evidence import (
         SUPPORT_TOLERANCE_M,
         PENETRATION_TOLERANCE_M,
@@ -450,11 +702,13 @@ def _placement_measurement_matches(
     )
 
     return (
-        metrics.get("support_tolerance_m") == SUPPORT_TOLERANCE_M
-        and metrics.get("penetration_tolerance_m") == PENETRATION_TOLERANCE_M
+        support.get("support_tolerance_m") == SUPPORT_TOLERANCE_M
+        and support.get("penetration_tolerance_m") == PENETRATION_TOLERANCE_M
         and all(
-            a == (f and r and _support_gap_valid(g))
-            for a, f, r, g in zip(accepted, footprint, released, gaps, strict=True)
+            a == (f and r and s and _support_gap_valid(g))
+            for a, f, r, g, s in zip(
+                accepted, footprint, released, gaps, side, strict=True
+            )
         )
     )
 
@@ -733,7 +987,8 @@ def evaluate_runtime_evidence(
                         and isinstance(accepted, list)
                         and len(accepted) == num_envs
                         and all(type(v) is bool for v in accepted)
-                        and metrics.get("scope") == "measured_planar_landing_region"
+                        and metrics.get("scope")
+                        in {"measured_planar_landing_region", "bound_link_world_axes"}
                         and metrics.get("boundary_frames") == segment.get("end_steps")
                     ):
                         measured_placements[group["id"]] = record
@@ -870,7 +1125,7 @@ def evaluate_runtime_evidence(
         )
     return {
         "schema_version": "task_spec_evaluation/v1",
-        "observer_revision": 2,
+        "observer_revision": 3,
         "run_id": run_id,
         "task_spec_digest": contract["task_spec_digest"],
         "task_spec_semantic_hash": spec.semantic_hash,

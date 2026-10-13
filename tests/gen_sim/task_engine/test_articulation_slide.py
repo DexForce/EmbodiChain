@@ -1715,6 +1715,15 @@ def test_articulation_can_be_a_spatial_reference_without_becoming_a_rigid_body(
 ) -> None:
     from embodichain.gen_sim.task_engine.task_program_bundle import _mesh_vertices
 
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    Sdf.CopySpec(
+        stage.GetRootLayer(),
+        "/fixture/drawer/handle",
+        stage.GetRootLayer(),
+        "/fixture/cabinet/body",
+    )
+    stage.GetRootLayer().Save()
+
     mesh = tmp_path / "cup.glb"
     trimesh.creation.box(extents=(0.04, 0.06, 0.04)).export(mesh)
     cup = {
@@ -1800,7 +1809,8 @@ def test_articulation_can_be_a_spatial_reference_without_becoming_a_rigid_body(
         "gen_sim.place.stable"
     ]
     assert (
-        constraint["reference"] == "drawer" and constraint["position_tolerance"] == 0.05
+        constraint["reference"] == "drawer__cabinet"
+        and constraint["position_tolerance"] == 0.05
     )
     expected = (
         read_articulation_geometry(scene.articulations[0]["fpath"]).vertices * 0.5
@@ -1868,7 +1878,7 @@ def test_articulated_reference_cannot_drop_acceptance():
         )
 
 
-def test_spatial_root_reference_rejects_joint_motion_in_the_same_program(scene):
+def test_spatial_root_reference_requires_body_geometry(scene):
     from embodichain.gen_sim.task_engine.task_program_bundle import (
         _relative_place_route_payloads,
     )
@@ -1895,8 +1905,178 @@ def test_spatial_root_reference_rejects_joint_motion_in_the_same_program(scene):
             },
         ]
     }
-    with pytest.raises(ValueError, match="changes joints"):
+    with pytest.raises(ValueError, match="no collision geometry"):
         _relative_place_route_payloads(graph, scene)
+
+
+def test_spatial_reference_rejects_unknown_part(scene):
+    from embodichain.gen_sim.task_engine._task_program.spatial_reference import (
+        resolve_reference,
+    )
+
+    with pytest.raises(ValueError, match="part"):
+        resolve_reference(scene.articulations[0], "part_unknown")
+
+
+def test_spatial_drawer_reference_is_not_its_fixed_child_grasp_frame(scene):
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        inspect_prismatic_part,
+    )
+    from embodichain.gen_sim.task_engine._task_program.spatial_reference import (
+        resolve_reference,
+    )
+
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    grip = UsdGeom.Xform.Define(stage, "/fixture/grip_link")
+    UsdPhysics.RigidBodyAPI.Apply(grip.GetPrim())
+    Sdf.CopySpec(
+        stage.GetRootLayer(),
+        "/fixture/drawer/handle",
+        stage.GetRootLayer(),
+        "/fixture/grip_link/handle",
+    )
+    stage.RemovePrim("/fixture/drawer/handle")
+    fixed = UsdPhysics.FixedJoint.Define(stage, "/fixture/grip_fixed")
+    fixed.CreateBody0Rel().SetTargets(["/fixture/drawer"])
+    fixed.CreateBody1Rel().SetTargets(["/fixture/grip_link"])
+    stage.GetRootLayer().Save()
+    part = discover_prismatic_parts(scene.articulations[0])[0]
+    assert (
+        inspect_prismatic_part(scene.articulations[0], part.part_id).link == "grip_link"
+    )
+    reference = resolve_reference(scene.articulations[0], part.part_id)
+    assert reference.link == "drawer"
+    assert reference.link_id == "drawer__drawer"
+
+
+@pytest.mark.parametrize("moving", [False, True])
+def test_composite_side_place_keeps_body_or_drawer_frame(scene, tmp_path, moving):
+    stage = Usd.Stage.Open(scene.articulations[0]["fpath"])
+    Sdf.CopySpec(
+        stage.GetRootLayer(),
+        "/fixture/drawer/handle",
+        stage.GetRootLayer(),
+        "/fixture/cabinet/body",
+    )
+    stage.GetPrimAtPath("/fixture/slide").CreateAttribute(
+        "gen_sim:closedPosition", Sdf.ValueTypeNames.Double
+    ).Set(0.0)
+    stage.GetRootLayer().Save()
+    mesh = tmp_path / "cup.glb"
+    trimesh.creation.box(extents=(0.04, 0.06, 0.04)).export(mesh)
+    cup = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": str(mesh)},
+        "init_pos": [0.15, -0.2, 0.9],
+        "init_rot": [0.0] * 3,
+    }
+    scene = replace(
+        scene,
+        rigid_objects=(cup,),
+        planner_objects=(
+            *scene.planner_objects,
+            {**cup, "runtime_uid": "cup", "role": "rigid_object"},
+        ),
+        uid_map={**scene.uid_map, "cup": "cup"},
+    )
+    empty = {
+        "kind": "none",
+        "reference": "",
+        "step_id": "",
+        "quantifier": "one",
+        "count": 0,
+    }
+    ref = lambda name: {**empty, "kind": "scene_ref", "reference": name}
+    steps = [
+        {
+            **deepcopy(_INTENT_FIELD_DEFAULTS),
+            "id": "open",
+            "task_type": "E6",
+            "object": ref("drawer"),
+            "target": empty,
+            "target_state": "open",
+            "required_arm": "auto",
+            "depends_on": [],
+        },
+        {
+            **deepcopy(_INTENT_FIELD_DEFAULTS),
+            "id": "move",
+            "task_type": "E1",
+            "object": ref("cup"),
+            "target": ref("drawer" if moving else "cabinet"),
+            "relation": "left_of",
+            "required_arm": "auto",
+            "depends_on": ["open"],
+        },
+        {
+            **deepcopy(_INTENT_FIELD_DEFAULTS),
+            "id": "close",
+            "task_type": "E6",
+            "object": ref("drawer"),
+            "target": empty,
+            "target_state": "closed",
+            "required_arm": "auto",
+            "depends_on": ["move"],
+        },
+    ]
+    candidate = TaskAgent(caller=lambda **kw: {"steps": steps}).generate(
+        "spatial", "open drawer, place cup at its left, close drawer", candidate_count=1
+    )["candidates"][0]
+    part = discover_prismatic_parts(scene.articulations[0])[0].part_id
+    bindings = {
+        "schema_version": ROLE_BINDINGS_SCHEMA,
+        "task_id": "spatial",
+        "candidate_id": candidate["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["drawer"],
+            "step_02.object": ["cup"],
+            "step_02.target": ["drawer"],
+            "step_03.object": ["drawer"],
+        },
+        "role_bindings": {
+            "step_01.object": part,
+            "step_03.object": part,
+            **({"step_02.target": part} if moving else {}),
+        },
+    }
+    graph = SemanticTaskPlanner().plan(candidate, bindings, scene.planner_objects)
+    graph, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    _verify_program_projection(paths.program, graph)
+    integration = load_config(paths.integration)
+    lowerer = next(
+        v
+        for v in integration["runtime_services"]["registered_semantic_lowerers"]
+        if v["kind"] == "place_relative"
+    )
+    route = lowerer["routes"][0]
+    expected = "drawer__drawer" if moving else "drawer__cabinet"
+    assert route["reference_link_id"] == expected
+    assert route.get("reference_part") == (part if moving else None)
+    place = next(
+        n
+        for n in graph["nodes"]
+        if n["call"].get("call_id") == "simulation.place_relative"
+    )
+    assert place["call"]["arguments"].get("reference_part") == (
+        part if moving else None
+    )
+    constraint = load_config(paths.program.parent / "constraints.json")["presets"][
+        f"gen_sim.{place['id']}.stable"
+    ]
+    assert constraint["reference"] == expected
+    assert constraint["displacement"] == route["world_displacement"]
+    assert route["world_displacement"][2] < 0.0
+    assert len({x["entity_id"] for x in integration["scene_binding"]["links"]}) == len(
+        integration["scene_binding"]["links"]
+    )
+    deployment = load_deployment(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.root,
+    )
+    assert deployment.integration.registration.catalog is not None
 
 
 @pytest.mark.parametrize(

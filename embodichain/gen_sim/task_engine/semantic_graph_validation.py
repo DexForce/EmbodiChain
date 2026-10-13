@@ -272,6 +272,12 @@ def validate_graph_coverage(
                     (
                         c.get("arguments", {}).get("reference") in targets
                         and c.get("arguments", {}).get("relation") == step["relation"]
+                        and any(
+                            target["uid"] == c["arguments"]["reference"]
+                            and target["part_id"]
+                            == c["arguments"].get("reference_part")
+                            for target in role_members[target_role]
+                        )
                     )
                     or (
                         step["relation"] == "inside"

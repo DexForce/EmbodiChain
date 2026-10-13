@@ -51,6 +51,7 @@ from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneObjectRef,
     SceneArticulationRef,
+    SceneLinkRef,
     SceneRegistry,
     SemanticEffectKind,
     SemanticPose,
@@ -721,6 +722,8 @@ class _RelativePlaceRoute:
     world_displacement: tuple[float, float, float]
     world_yaw_offset: float = 0.0
     stage_id: str = ""
+    reference_link_id: str | None = None
+    reference_part: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -763,6 +766,13 @@ class _RelativePlaceRoute:
         ):
             raise ValueError("world_yaw_offset must be finite.")
         object.__setattr__(self, "world_yaw_offset", float(self.world_yaw_offset))
+        for name in ("reference_link_id", "reference_part"):
+            if getattr(self, name) is not None:
+                object.__setattr__(
+                    self, name, _identifier(getattr(self, name), field_name=name)
+                )
+        if self.reference_part is not None and self.reference_link_id is None:
+            raise ValueError("A reference part requires its qualified link.")
 
     @property
     def selector(self) -> tuple[str, str, str, str]:
@@ -776,6 +786,19 @@ class _ObservedRelativePlaceLowerer(_RelativePlaceLowerer):
     def __init__(self, routes: tuple[_RelativePlaceRoute, ...], robot: Any) -> None:
         super().__init__(routes)
         self._robot = robot
+
+    def _resolve_route(self, call: RegisteredSemanticCall) -> _RelativePlaceRoute:
+        arguments = dict(call.arguments)
+        part = arguments.pop("reference_part", None)
+        route = super()._resolve_route(replace(call, arguments=arguments))
+        if part != route.reference_part:
+            raise ValueError(
+                "Relative Place reference part differs from its declared route."
+            )
+        return replace(
+            route,
+            reference_entity_id=route.reference_link_id or route.reference_entity_id,
+        )
 
     def lower(
         self,
@@ -879,6 +902,14 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                 raise ValueError(
                     "Articulated supports require qualified link bindings."
                 )
+            if route.reference_link_id is not None:
+                link = scene_registry.lookup(
+                    route.reference_link_id, expected_type=SceneLinkRef
+                )
+                if link.parent != reference_ref:
+                    raise ValueError(
+                        "Relative Place link belongs to a different articulation."
+                    )
             routes.append(
                 _RelativePlaceRoute(
                     object_id=object_ref.entity_id,
@@ -887,6 +918,8 @@ class _RelativePlaceLowererFactory(RegisteredSemanticLowererFactory):
                     world_displacement=route.world_displacement,
                     world_yaw_offset=route.world_yaw_offset,
                     stage_id=route.stage_id,
+                    reference_link_id=route.reference_link_id,
+                    reference_part=route.reference_part,
                 )
             )
         return self.lowerer_type(tuple(routes), robot)

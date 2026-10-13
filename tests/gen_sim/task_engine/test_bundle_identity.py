@@ -177,6 +177,29 @@ def test_bundle_identity_cannot_hide_post_registration_route_drift(
         bundle_registration_fingerprint(registration)
 
 
+def test_explicit_reference_links_remain_in_bundle_identity(deployment):
+    registration = _with_route(
+        deployment.integration.registration, _RelativePlaceLowererFactory
+    )
+    factory = registration.registered_semantic_lowerer_factories[-1]
+    baseline = bundle_registration_fingerprint(registration)
+    identities = []
+    for link in ("anchor__body", "anchor__drawer"):
+        changed = replace(
+            factory, routes=(replace(factory.routes[0], reference_link_id=link),)
+        )
+        bound = replace(
+            registration,
+            registered_semantic_lowerer_factories=(
+                *registration.registered_semantic_lowerer_factories[:-1],
+                changed,
+            ),
+        )
+        identities.append(bundle_registration_fingerprint(bound))
+    assert baseline not in identities
+    assert identities[0] != identities[1]
+
+
 @pytest.mark.parametrize("kind", ["place_relative", "place_upright"])
 @pytest.mark.parametrize("stage_id", [" ", "\t", None, 0, False])
 def test_only_exact_empty_stage_can_use_the_old_default(

@@ -74,4 +74,7 @@ def bundle_registration_fingerprint(
                 fields = route["fields"]
                 if fields.get("stage_id") == "":
                     del fields["stage_id"]
+                for name in ("reference_link_id", "reference_part"):
+                    if fields.get(name) is None:
+                        fields.pop(name, None)
     return canonical_hash(payload)

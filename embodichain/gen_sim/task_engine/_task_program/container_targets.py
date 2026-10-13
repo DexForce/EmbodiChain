@@ -48,7 +48,7 @@ def select_container_landing(
     if measured is None:
         return None
     floor, floor_height = measured
-    margin = 0.035
+    margin = 0.02
     safe = floor.buffer(-margin)
     footprint = MultiPoint(child_vertices[:, :2]).convex_hull
     footprint_radius = float(np.linalg.norm(child_vertices[:, :2], axis=1).max())

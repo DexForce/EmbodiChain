@@ -555,6 +555,11 @@ class SemanticTaskPlanner:
                 )
                 if relation == "inside" and target_part is not None:
                     place_call["inside"] += f"__{target_part}"
+                elif target_part is not None:
+                    from ._task_program.spatial_reference import SIDE_RELATIONS
+
+                    if relation in SIDE_RELATIONS:
+                        place_call["arguments"]["reference_part"] = target_part
                 if (
                     relation in {"on", "above"}
                     and object_id in upright_objects
@@ -1293,6 +1298,10 @@ def _expand_multi_object_steps(
                 expanded_bindings["reference_bindings"][f"{copy_id}.target"] = list(
                     target_uids
                 )
+                if target_id in bindings["role_bindings"]:
+                    expanded_bindings["role_bindings"][f"{copy_id}.target"] = bindings[
+                        "role_bindings"
+                    ][target_id]
             previous_id = copy_id
         changed = True
     if not changed:

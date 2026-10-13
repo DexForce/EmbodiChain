@@ -352,16 +352,20 @@ then transformed by observed poses for vertical gap and projected support-envelo
 checks. It does not impose initial roll or either object's initial up direction.
 Both objects must still remain stable for the declared window. This geometric
 envelope is not contact evidence for arbitrary concave or tilted supports.
-Relative side placement accepts rigid and articulation roots as spatial anchors.
-Articulated anchors keep native USD paths in the planner view; geometry is read
-in the runtime base-link frame with configured scale, never from a preview proxy.
-Binding preserves `SceneArticulationRef` and the shared registry observes its
-live root pose. GenSim stability acceptance reads the same root/displacement and
-retains the position tolerance, replacing only the rigid-only duplicate validator.
-This uses the authored articulation geometry envelope, not a changing-joint
-collision envelope; a reference also actuated by Slide in the same program is
-rejected rather than reusing stale extents. Articulated `on/above/inside` support still requires qualified
-link geometry; spatial-reference support does not authorize joint manipulation.
+Relative side placement binds an articulation body or an explicitly grounded
+prismatic `reference_part` to one native `SceneLinkRef`. Geometry includes only
+the selected link's collision meshes, in its scaled native frame, never a proxy
+or the whole moving articulation envelope. Pick lookahead, Place and stability
+read that same live link and world-axis displacement; landing height comes from
+the measured tabletop. A preceding Slide therefore does not invalidate a
+qualified reference. TaskSpec side acceptance measures the selected link's full
+world-axis envelope, tabletop support and exact release evidence. Historical
+milestones require the matching post-policy link pose and recorded object pose;
+final acceptance observes the current link rather than reusing that receipt.
+Regenerate relative-placement bundles to declare qualified link routes. This is not a
+swept collision certificate. Articulated `on/above/inside` support still requires
+its separate qualified link geometry; spatial references do not authorize
+joint manipulation.
 Explicit upright, oriented hold and stack constraints retain v38's 10-degree
 alignment tolerance. Upright handover-to-stack retains the table restaging,
 regrasp, preserve-yaw alignment and released-hand cleanup route rather than

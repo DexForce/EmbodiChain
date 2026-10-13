@@ -218,6 +218,17 @@ class TaskStabilityPort:
                 for binding in scene_binding.articulations
             },
         }
+        articulation_bindings = {b.entity_id: b for b in scene_binding.articulations}
+        self._link_references = {
+            b.entity_id: (
+                simulation.get_articulation(
+                    articulation_bindings[b.articulation_id].simulation_uid
+                ),
+                b.native_link_name,
+            )
+            for b in getattr(scene_binding, "links", ())
+            if any(c.reference == b.entity_id for c in self._constraints.values())
+        }
         for cfg in self._constraints.values():
             if cfg.entity not in self._objects:
                 raise ValueError(
@@ -225,7 +236,12 @@ class TaskStabilityPort:
                 )
             for entity in (cfg.entity, cfg.reference):
                 if entity is not None and (
-                    entity not in self._references or self._references[entity] is None
+                    entity not in self._references
+                    and entity not in self._link_references
+                    or entity in self._references
+                    and self._references[entity] is None
+                    or entity in self._link_references
+                    and self._link_references[entity][0] is None
                 ):
                     raise ValueError(f"Task stability entity {entity!r} is not bound.")
             if cfg.reference not in self._objects and cfg.kind in {
@@ -272,7 +288,11 @@ class TaskStabilityPort:
             raise ValueError("Task stability declaration and compiled policy disagree.")
 
     def _pose(self, entity: str) -> torch.Tensor:
-        pose = self._references[entity].get_local_pose(to_matrix=True)
+        if entity in self._link_references:
+            articulation, link = self._link_references[entity]
+            pose = articulation.get_link_pose(link, to_matrix=True)
+        else:
+            pose = self._references[entity].get_local_pose(to_matrix=True)
         if (
             not isinstance(pose, torch.Tensor)
             or pose.ndim != 3
@@ -359,6 +379,13 @@ class TaskStabilityPort:
                 error = torch.linalg.vector_norm(pose[:, :3, 3] - target, dim=-1)
                 valid &= error <= cfg.position_tolerance
                 measurements["position_error"] = error.tolist()
+                if cfg.reference in self._link_references:
+                    measurements.update(
+                        entity=cfg.entity,
+                        reference=cfg.reference,
+                        object_pose=pose.tolist(),
+                        reference_pose=reference.tolist(),
+                    )
             if cfg.kind == "stack":
                 assert (
                     reference is not None

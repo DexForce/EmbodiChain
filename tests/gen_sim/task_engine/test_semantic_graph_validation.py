@@ -80,6 +80,45 @@ def test_expansion_preserves_source_spec_and_covers_every_set_member() -> None:
     assert report["runtime_evidence_status"] == "not_run"
 
 
+def test_repeated_side_placements_preserve_target_part_for_every_member() -> None:
+    source = candidate(
+        step(
+            "E1",
+            "cups",
+            object=selector("cups", count=2),
+            target=selector("drawer"),
+            relation="left_of",
+            required_arm="left_arm",
+        )
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": source["draft"]["task_id"],
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {
+            "step_01.object": ["a", "b"],
+            "step_01.target": ["drawer"],
+        },
+        "role_bindings": {"step_01.target": "part_fixture"},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {"runtime_uid": uid, "init_pos": [0.1, -0.2, 0.8], "init_rot": [0.0] * 3}
+            for uid in ("a", "b", "drawer")
+        ],
+    )
+    calls = [
+        n["call"]
+        for n in plan.graph["nodes"]
+        if n["call"].get("call_id") == "simulation.place_relative"
+    ]
+    assert len(calls) == 2
+    assert all(c["arguments"]["reference_part"] == "part_fixture" for c in calls)
+    assert _coverage(plan)["status"] == "covered"
+
+
 @pytest.mark.parametrize(
     "damage",
     [

@@ -986,7 +986,7 @@ def _task_stability_payload(
                 presets[f"gen_sim.{node['id']}.stable"] = {
                     "kind": "placement",
                     "entity": object_id,
-                    "reference": reference_id,
+                    "reference": route.get("reference_link_id", reference_id),
                     "displacement": route["world_displacement"],
                     "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
                 }
@@ -1548,6 +1548,9 @@ def _integration_payload(
     from ._task_program.drawer_binding import drawer_routes, inside_parts
 
     drawers = {route.affordance: route for route in drawer_routes(graph, scene)}
+    from ._task_program.spatial_reference import graph_references
+
+    spatial_references = graph_references(graph, scene)
     drawer_poses: dict[str, list[float]] = {}
     if drawers:
         from ._task_program.drawer_geometry import placement_pose
@@ -2058,6 +2061,15 @@ def _integration_payload(
                 )
             ],
             "links": [
+                *[
+                    r.payload()
+                    for r in spatial_references.values()
+                    if r.link_id
+                    not in (
+                        {b.link_id for b in articulation_bindings.values()}
+                        | {r.link_id for r in (*press_routes, *twist_routes)}
+                    )
+                ],
                 *[
                     {
                         "entity_id": r.link_id,
@@ -2902,6 +2914,9 @@ def _relative_place_route_payloads(
     """Project each release using only orientation changes preceding that call."""
     axis_align_objects: set[str] = set()
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    from ._task_program.spatial_reference import graph_references
+
+    spatial_references = graph_references(graph, scene)
     actuated_references = {
         node["call"].get("arguments", {}).get("object")
         for node in graph["nodes"]
@@ -2951,7 +2966,10 @@ def _relative_place_route_payloads(
             str(arguments["relation"]),
         )
         _, object_id, reference_id, relation = selector
-        if reference_id in actuated_references:
+        spatial_reference = spatial_references.get(
+            (reference_id, arguments.get("reference_part"))
+        )
+        if reference_id in actuated_references and spatial_reference is None:
             raise ValueError(
                 f"Spatial reference {reference_id!r} changes joints in this program; "
                 "use qualified link geometry instead of an authored root envelope."
@@ -2986,10 +3004,29 @@ def _relative_place_route_payloads(
                 relation,
                 object_id=object_id,
                 reference_id=reference_id,
-                scene_objects=scene_objects,
+                scene_objects=(
+                    {**scene_objects, reference_id: spatial_reference.planner_object()}
+                    if spatial_reference is not None
+                    else scene_objects
+                ),
                 axis_align_objects=axis_align_objects,
                 table_top_z=scene.table_top_z,
             )
+            if spatial_reference is not None:
+                if scene.table_top_z is None:
+                    raise ValueError(
+                        "Articulated side placement requires a measured tabletop."
+                    )
+                bottom, _ = _vertical_mesh_bounds(
+                    scene_objects[object_id],
+                    axis_aligned=object_id in axis_align_objects,
+                )
+                displacement[2] = (
+                    float(scene.table_top_z)
+                    - bottom
+                    + _PLACEMENT_CLEARANCE
+                    - float(spatial_reference.initial_pose[2, 3])
+                )
             if settled and (
                 call["call_id"] == _STACK_PLACE_CALL_ID or coordinated_only
             ):
@@ -3000,6 +3037,17 @@ def _relative_place_route_payloads(
             "reference_entity_id": reference_id,
             "relation": relation,
             "world_displacement": displacement,
+            **(
+                {"reference_link_id": spatial_reference.link_id}
+                if spatial_reference is not None
+                else {}
+            ),
+            **(
+                {"reference_part": spatial_reference.part_id}
+                if spatial_reference is not None
+                and spatial_reference.part_id is not None
+                else {}
+            ),
         }
         # Long-horizon programs may place one object/reference pair more than
         # once.  The graph task instance is the occurrence selector; do not
@@ -3321,6 +3369,8 @@ def _vertical_mesh_bounds(
 
 def _mesh_vertices(source: dict[str, Any]) -> np.ndarray:
     """Load native geometry in the configured entity's runtime root frame."""
+    if "_spatial_vertices" in source:
+        return source["_spatial_vertices"]
     if source.get("role") == "articulation":
         from .scene.articulation_geometry import read_articulation_geometry
 
