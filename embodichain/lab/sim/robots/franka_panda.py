@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import numpy as np
 import torch
@@ -257,7 +257,7 @@ class FrankaPandaPgiCfg(RobotCfg):
     robot_type: str = "panda"
 
     @classmethod
-    def from_dict(cls, init_dict):
+    def from_dict(cls, init_dict: dict[str, Any]) -> FrankaPandaPgiCfg:
         """Initialize ``FrankaPandaPgiCfg`` from a dictionary.
 
         Args:
@@ -334,8 +334,8 @@ class FrankaPandaPgiCfg(RobotCfg):
         return get_data_path(f"Franka/{urdf_dir}/{urdf_dir}.urdf")
 
     def build_pk_serial_chain(
-        self, device: torch.device = torch.device("cpu"), **kwargs
-    ) -> Dict[str, "pk.SerialChain"]:
+        self, device: torch.device = torch.device("cpu"), **kwargs: Any
+    ) -> dict[str, pk.SerialChain]:
         """Build the pytorch-kinematics serial chain for the arm.
 
         The chain uses the arm solver's root and end links, so its end pose is
