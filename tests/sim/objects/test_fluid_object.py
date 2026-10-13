@@ -57,7 +57,7 @@ def fluid():
         points,
         np.eye(4, dtype=np.float32),
         torch.device("cpu"),
-        on_write=lambda: None,
+        on_write=lambda ids: None,
     )
     result._initialize_spawn_declaration(2)
     result.attach_spawn_handles(
@@ -124,7 +124,7 @@ def test_integer_initial_velocity_is_normalized():
         points,
         np.eye(4, dtype=np.float32),
         torch.device("cpu"),
-        on_write=lambda: None,
+        on_write=lambda ids: None,
     )
     fluid._initialize_spawn_declaration(1)
     fluid.attach_spawn_handles([SimpleNamespace(index=0, particle_count=1)])
@@ -140,7 +140,7 @@ def test_fluid_write_respects_render_frame_cache_scope(inside_frame):
 
     calls = []
     sim = SimpleNamespace(
-        physics=SimpleNamespace(invalidate_fluid_state=lambda: None),
+        physics=SimpleNamespace(invalidate_fluid_state=lambda **kwargs: None),
         _render_state_published=True if inside_frame else None,
         sync_render_state=lambda: calls.append("publish"),
     )

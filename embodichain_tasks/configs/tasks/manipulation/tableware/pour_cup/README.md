@@ -8,9 +8,33 @@
 离屏相机采集前使用 `sim.sync_render_state()` 发布状态，裁剪仅影响显示副本。
 多子步时杯壁轨迹通过 `register_kinematic_rigid_trajectory()` 在 solver 子步采样。
 
-当前支持单个 Newton CUDA 环境、固定粒子数、单向耦合。场景准备后物理拓扑冻结。
-Gym 批量环境及部分 reset 尚未接入；需先完成当前 demo 的完整效果验收，
-再补齐底层 SPH world 隔离和按环境复位。`IMPLEMENTATION_PLAN.md` 记录进度。
+当前支持 Newton CUDA、固定粒子数和单向耦合。场景准备后物理拓扑冻结。
+多环境要求 DexSim SPH 提供 world 隔离及选择性重置能力；旧运行时仍限制为单环境。
+`IMPLEMENTATION_PLAN.md` 记录分阶段验证结果。
+
+## Task Program → 流体 Gym
+
+```bash
+python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2
+```
+
+默认先在 MuJoCo 中执行现有 Task Program，验证真实杯子抬升、倾倒和放回，
+再启动独立 SPH Gym 回放其关节与杯子实测状态。输出包含源轨迹、源验收报告、
+流体接水量统计和 `fluid_gym.mp4`。复用本工具生成的已验收轨迹可传
+`--trajectory outputs/fluid-task-program/task_program_trajectory.pt`。
+`--renderer no-render --seconds 0.125 --particle-spacing 0.006 --partial-reset-step 1`
+用于低成本双环境局部重置检查；粗粒度检查不代表完整液体效果。
+
+`env.fluid.yaml` 拥有 SPH 参数、刚体边界、初始粒子和流体观测；
+`task.franka.fluid.yaml` 选择环境和机器人组件。粒子文件相对环境配置解析，
+杯子、边界网格和初始粒子随任务包发布。求解器配置直接使用 DexSim SPHSolverCfg。
+
+`FluidReplayEnv` 支持标准 reset/step、按行时钟与流体重置、summary 和区域体积观测。
+它从单行合格源轨迹广播到多个环境，要求固定机器人根位姿和单个 Newton 子步。
+机器人动作由源状态决定，因此拒绝 action manager 和策略 action 数据录制。
+流体不会反向影响机械臂；Task Program 源验收与流体接水效果分别报告。
+本次实测依赖隔离的 DexSim JIT 构建、Newton 1.6 / Warp 1.17；发布 wheel 尚未验收。
+
 
 
 使用真实 Franka Panda 机型的仿真模型，从侧面夹住正常大小的马克杯杯把，
@@ -21,7 +45,7 @@ Gym 批量环境及部分 reset 尚未接入；需先完成当前 demo 的完整
 - **DFSPH 带水演示**：教程脚本回放已验证的 MuJoCo 机械臂和杯子轨迹，
   同时通过 EmbodiChain 的 Newton 后端模拟液体。
 
-这是临时演示，未修改 `embodichain/` 生产代码。液体采用单向耦合：移动杯壁
+原始教程入口保留用于效果对照；生产接入位于 `embodichain/` 生产代码。液体采用单向耦合：移动杯壁
 影响水，水不反作用于机械臂；DFSPH 场景不重新求解夹持接触。
 
 ## 直接运行带水演示

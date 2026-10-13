@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 from typing import TYPE_CHECKING
+from collections.abc import Sequence
 import weakref
 
 import warp as wp
@@ -131,11 +132,26 @@ class NewtonPhysicsBackend(PhysicsBackend):
             simulation_time=backend.sim_time,
         )
 
-    def invalidate_fluid_state(self) -> None:
-        """Invalidate single-world SPH history after an explicit state write.
+    @property
+    def supports_fluid_worlds(self) -> bool:
+        """Whether the loaded SPH artifact supports isolated worlds and reset."""
+        if self.solver_type != "sph":
+            return False
+        from dexsim.engine.newton_physics.solver_runtime import ensure_solver_available
 
-        DFSPH rebuilds neighbors, density and Jacobi scratch on each step.
-        Optional SDF-penalty body history is reset to the current pose.
+        solver = ensure_solver_available("sph")
+        return bool(
+            getattr(solver, "supports_world_isolation", False)
+            and getattr(solver, "supports_world_reset", False)
+        )
+
+    def invalidate_fluid_state(self, env_ids: Sequence[int] | None = None) -> None:
+        """Clear selected SPH history after an explicit state write.
+
+        Args:
+            env_ids: Local worlds to clear, or all local worlds when omitted.
+                Shared boundary history remains unchanged. Legacy single-world
+                artifacts rebaseline their optional SDF history directly.
         """
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
@@ -143,6 +159,15 @@ class NewtonPhysicsBackend(PhysicsBackend):
         if backend is None or backend.solver_type != "sph":
             raise RuntimeError("Prepared SPH backend required.")
         backend.invalidate_cuda_graph("fluid state write")
+        if getattr(backend.solver, "supports_world_reset", False):
+            mask = [
+                env_ids is None or i in env_ids
+                for i in range(backend.model.world_count)
+            ] + [False]
+            backend.clear_solver_state(
+                wp.array(mask, dtype=wp.bool, device=backend.model.device)
+            )
+            return
         boundary = backend.solver.sdf_boundary
         if boundary is not None and boundary._body_q_prev is not None:
             boundary._body_q_prev.assign(backend.state_0.body_q)

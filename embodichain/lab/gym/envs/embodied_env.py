@@ -31,6 +31,8 @@ import torch
 import numpy as np
 import gymnasium as gym
 
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+
 from dataclasses import MISSING
 from typing import (
     TYPE_CHECKING,
@@ -197,6 +199,9 @@ class EmbodiedEnvCfg(EnvCfg):
     rigid_object_group: List[RigidObjectGroupCfg] = []
 
     articulation: List[ArticulationCfg] = []
+
+    fluid_object: list[FluidObjectCfg] = []
+    """Fixed-count fluids owned by the physical environment component."""
 
     events: Union[object, None] = None
     """Event settings. Defaults to None, in which case no events are applied through the event manager.
@@ -2675,6 +2680,9 @@ class EmbodiedEnv(BaseEnv):
 
         for cfg in self.cfg.rigid_object_group:
             self.sim.add_rigid_object_group(cfg=cfg)
+
+        for cfg in self.cfg.fluid_object:
+            self.sim.add_fluid_object(cfg)
 
     def preview_sensor_data(
         self,

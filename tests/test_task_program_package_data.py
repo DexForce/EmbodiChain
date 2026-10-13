@@ -98,6 +98,19 @@ _DEPLOYMENTS = {
 }
 _RESOURCE_PATHS = frozenset(
     {
+        *(
+            Path("tasks/manipulation/tableware/pour_cup/assets") / name
+            for name in (
+                "cup.glb",
+                "fluid_floor.obj",
+                "fluid_table.obj",
+                "mug_wall.obj",
+                "receiver_wall.obj",
+                "water_fill.npz",
+            )
+        ),
+        Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
+        Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         *_PROGRAMS,
         *_DEPLOYMENTS,
         Path("tasks/manipulation/repeated_pick_place/catalog.yaml"),
@@ -233,6 +246,7 @@ def test_setup_stages_all_official_task_programs(
         "**/*.yaml",
         "**/*.yml",
         "**/README.md",
+        "tasks/manipulation/tableware/pour_cup/assets/*",
     ]
     expected_outputs = {
         Path("embodichain_tasks") / "configs" / relative_path

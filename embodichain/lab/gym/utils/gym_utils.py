@@ -737,6 +737,17 @@ def config_to_cfg(
         ]
         env_cfg.light.indirect = config["light"].get("indirect", None)
 
+    # Fluids use one typed declaration path for inline and component scenes.
+    from embodichain.lab.sim.cfg import FluidObjectCfg
+    from embodichain.lab.gym.utils._component_composition import (
+        _resolve_physical_source_paths,
+    )
+
+    config = _resolve_physical_source_paths(config, base_dir)
+    env_cfg.fluid_object = [
+        FluidObjectCfg.from_dict(item) for item in config.get("fluid_object", [])
+    ]
+
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
@@ -885,6 +896,12 @@ def config_to_cfg(
                 )
                 obs_params_modified["params"]["entity_cfg"] = entity_cfg
 
+            if "entity_cfgs" in obs_params_modified["params"]:
+                obs_params_modified["params"]["entity_cfgs"] = [
+                    SceneEntityCfg(**item)
+                    for item in obs_params_modified["params"]["entity_cfgs"]
+                ]
+
             # Find the function from multiple modules using the utility function
             obs_func = find_function_from_modules(
                 obs_params["func"],
@@ -897,6 +914,7 @@ def config_to_cfg(
                 mode=obs_params_modified["mode"],
                 name=obs_params_modified["name"],
                 params=obs_params_modified["params"],
+                extra=deepcopy(obs_params_modified.get("extra", {})),
             )
 
             setattr(env_cfg.observations, obs_name, observation)

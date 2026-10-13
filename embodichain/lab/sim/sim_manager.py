@@ -2731,9 +2731,11 @@ class SimulationManager:
 
         if self.physics.name != "newton" or self.device.type != "cuda":
             raise NotImplementedError("Fluid objects require Newton on CUDA.")
-        if self.num_envs != 1:
+        if self.num_envs != 1 and not getattr(
+            self.physics, "supports_fluid_worlds", False
+        ):
             raise NotImplementedError(
-                "Fluid world isolation is not yet qualified; num_envs must be 1."
+                "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
             )
         if (
             self._active_newton_solver_type != "sph"
@@ -2813,8 +2815,8 @@ class SimulationManager:
         self.notify_visualization_topology_changed()
         return fluid
 
-    def _invalidate_fluid_state(self) -> None:
-        self.physics.invalidate_fluid_state()
+    def _invalidate_fluid_state(self, env_ids: Sequence[int] | None = None) -> None:
+        self.physics.invalidate_fluid_state(env_ids=env_ids)
         if self._render_state_published is not None:
             self._render_state_published = False
 

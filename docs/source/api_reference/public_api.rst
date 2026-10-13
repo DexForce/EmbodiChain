@@ -387,6 +387,22 @@ embodichain.lab.task_program.integrations.simulation.handover
 
    ConfiguredHandOverPoseProvider
 
+embodichain.lab.gym.envs.fluid_replay
+-----------------------------------
+
+.. currentmodule:: embodichain.lab.gym.envs.fluid_replay
+
+One-way evaluation of qualified Task Program recordings with live SPH. Each
+row has an independent replay clock and reset. Policy action recording is
+unsupported because the measured source states drive motion.
+
+.. autosummary::
+
+   FluidReplayEnv
+
+.. autoclass:: FluidReplayEnv
+   :members:
+
 embodichain.lab.gym.envs.managers.action_manager
 ------------------------------------------------
 
@@ -605,6 +621,21 @@ embodichain.lab.scripts.run_env
    generate_function
    main
    preview
+
+embodichain.lab.scripts.run_fluid_task_program
+--------------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.run_fluid_task_program
+
+Generate and qualify the pour-cup Task Program in MuJoCo, then run fluid Gym
+replay in a separate world. The source trajectory and fluid metrics have
+separate acceptance records.
+
+.. autosummary::
+
+   main
+
+.. autofunction:: main
 
 embodichain.lab.sim
 -------------------
@@ -2486,6 +2517,20 @@ kernel policy; callers log and apply that seed to their own generators.
 
 .. autofunction:: resolve_seed
 
+
+embodichain_tasks.manipulation.tableware.pour_cup
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.manipulation.tableware.pour_cup
+
+The registered Franka pouring replay deployment requires a previously
+qualified Task Program trajectory passed to the environment constructor.
+
+.. autosummary::
+
+   PourCupFluidReplayEnv
+
+.. autoclass:: PourCupFluidReplayEnv
 
 .. toctree::
    :hidden:

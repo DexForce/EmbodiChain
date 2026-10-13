@@ -1,0 +1,38 @@
+# Fluid Gym integration
+
+`EmbodiedEnvCfg.fluid_object` owns fixed-count fluid declarations. Physical
+components own these alongside rigid entities; `config_to_cfg()` resolves
+fluid point files and explicit relative rigid/visual mesh paths against the
+owning component. Spawn rigid references are resolved before fluid binding.
+
+`managers/observations.py` provides particle state, summary and volume-in-region
+observations. Particle arrays are world-frame; rigid `get_local_pose()` is
+arena-local. Region measurement and `events.reset_fluid_in_container()` add
+arena offsets before comparing or placing particles. Region volume is particle
+count times nominal spacing cubed, not a reconstructed-surface measurement.
+
+## Two-stage Task Program workflow
+
+`lab/scripts/run_fluid_task_program.py` generates the existing pour-cup Task
+Program in MuJoCo, requires program acceptance and measured cup lift/tilt/return,
+and stores provenance in trajectory metadata. A separate process/world runs
+`gym/envs/fluid_replay.py::FluidReplayEnv` with live SPH. The physical deployments
+remain separate files (`env.newton.yaml` versus `env.fluid.yaml`); the latter
+reuses DexSim's SPH solver configuration directly.
+
+Replay broadcasts one accepted source row across environments. It adopts the
+recorded fixed robot root, checks joint compatibility, interpolates measured
+joints/rigid poses on the physics grid, and publishes kinematic boundary twist.
+Each environment has its own clock and selected reset/refill. Newton substeps
+must be one; control intervals may contain multiple physics steps. Completion
+is truncation; reset is required once every row is exhausted.
+
+This is one-way state replay: policy actions do not drive the robot and fluid
+forces do not affect the recorded motion. Action managers, trajectory recording
+and active policy dataset recorders are rejected. Task Program acceptance is
+source provenance; fluid capture metrics remain separate measured outcomes.
+
+Production configuration/measurement checks are in
+`tests/gym/envs/test_fluid_integration.py`; live isolation checks are in
+`tests/sim/objects/test_fluid_batch_runtime.py`. Generated trajectories/videos
+are local qualification evidence, not packaged task assets.

@@ -26,6 +26,8 @@ Lightweight RL environments have a separate owner in
 
 Read [configuration and registration](configuration.md) for task-first layout,
 component ownership, path resolution, config-owned IDs, and task listing.
+Read [fluid replay](fluid-replay.md) for Task Program generation in MuJoCo followed
+by independent SPH evaluation, fluid configuration and coordinate conventions.
 Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 

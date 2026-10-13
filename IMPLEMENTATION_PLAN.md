@@ -16,7 +16,7 @@ Initial fill, fixed particle counts, Newton CUDA DFSPH, one-way coupling.
    same-environment baseline and migrated short test, then full pouring.
    Compare received/residual/spilled volume, settling, images, runtime and VRAM.
    A short test alone does not pass this gate. Record environment and evidence.
-3. **Gym integration (gated, do not start before gate 2 passes)**: YAML scene
+3. **Gym integration (complete after gate 2)**: YAML scene
    ownership, vectorized observations, partial reset, optional particle records.
    DexSim world-filtered SPH neighborhoods/boundaries and per-world solver reset
    are prerequisites; spacing worlds apart is not isolation.
@@ -47,7 +47,8 @@ will be represented as complete before full demo parity is established.
 - Rigid kinematic pose/twist writes and native PRE_SUBSTEP trajectory controls.
 - Independent rigid visual/collision geometry and pre-baked SDF policy.
 - Native render publication, render-only clipping, and detached Viser points.
-- No Gym modifications. Multi-environment fluid declarations fail explicitly.
+- This first Sim milestone initially rejected multiple environments; the
+  completed Gym phase below lifts that gate only for qualified native artifacts.
 
 ## Current qualification limits
 
@@ -90,12 +91,101 @@ correct particle snapshots but stale offscreen images, fixed by publishing via
 - GPU lifecycle test verifies declaration, state, native substep control,
   selected reset, repeated rollout, endpoint hold and cleanup.
 
-## Next milestone
+## Delivered milestones
 
-Sim and demo parity are the current delivered milestone. Gym remains unimplemented.
-Its next dependency is native world-filtered neighborhoods/boundaries, per-world
-DFSPH convergence and selected-world cache reset, followed by EC YAML/manager
-integration. Do not remove the single-environment gate before that qualification.
+Sim parity and two-stage Task Program -> fluid Gym integration are complete in
+isolated worktrees. Batch support remains gated by loaded native capabilities.
+Published native wheel/AOT qualification is a separate release task; no shared
+runtime or project dependency pin was changed.
 
 GPU memory evidence: `outputs/fluid-memory-comparison.json` (process samples
 at approximately 250 ms cadence; 4981 -> 4985 MiB).
+
+
+## Completed phase: batch SPH, then Task Program -> fluid Gym
+
+User confirmed the execution route: generate and validate a new trajectory with
+Task Program in a MuJoCo Gym environment; replay its recorded robot and cup
+states in a separate fluid Gym environment. This remains one-way coupling;
+there is no online rigid-fluid joint solver or synthetic grasp attachment.
+Generation acceptance and fluid physical metrics are recorded independently.
+
+Dependency worktree: `/home/dex/.codex/worktrees/fluid-sph-worlds/dexsim`,
+branch `codex/fluid-sph-worlds`, base `21bfad162518216fdd9cf313c70b15af94e6fa84`.
+Native implementation commit: `d2d36fbcb`.
+EC worktree remains this checkout, base Sim commit `bbd6928c1`.
+Native modifications belong to the existing SPH solver/kernels and backend reset
+interface. Compare: per-world solver instances (resource overhead), independent
+partition scheduling (larger redesign), or world-filtered batched kernels
+(selected, preserves ownership and batched stepping). No threading changes.
+
+First oracle: coincident replicated worlds must have independent particle
+neighbors, boundaries, gravity and convergence. Establish baseline failures
+before fixing kernels. Then selected-world reset must preserve all other rows.
+On green: enable capability-gated EC batch declaration and integrate Gym YAML,
+fluid observations/reset, and Task Program trajectory generation + fluid replay.
+On red: diagnose the failing kernel/contract in the dependency, without removing
+EC capability guards. Runtime tests must print/verify source package identity;
+the shared installed DexSim build is not modified.
+
+
+## Gym and native qualification results
+
+- Native source: world-filtered neighbors and SDF/volume-map boundaries,
+  per-world gravity and DFSPH convergence; canonical `E+1` selected reset.
+  Pure global legacy single-world particles remain supported. Mixed global/local
+  particles and global particles with multiple worlds fail explicitly.
+- Before fixes, overlapping worlds shared 16 instead of 8 neighbors and gravity;
+  convergence differed by 0.62 m/s and a foreign boundary displaced particles
+  by 0.08 m. New native regressions plus existing boundary checks: **14 passed**.
+- EC YAML declares fluids through physical environment ownership; packaged
+  relative source assets, fluid observations, container refill and capability
+  gated batching are implemented. `FluidReplayEnv` reuses normal Gym lifecycle,
+  with per-row clocks and partial reset. Robot roots/joint order are validated.
+  Action managers and policy dataset/trajectory recording are rejected.
+- Task Program source freshly generated in MuJoCo and accepted: lift
+  **0.1197915 m**, maximum tilt **66.4883 degrees**, return error **0.00223394 m**.
+  Source program hash:
+  `6cc3d7aa5a64c4cc86f8d4f60bf80dbad23fca368785e165164cd39f50b288cb`.
+- Full Gym replay: **2 x 76,538 particles**, **31 s**, **744 video frames** fully
+  decoded and inspected at lift/pour/return. Final received volume:
+  **141.98288 / 140.88261 mL**; all sampled particle states finite. Wall time
+  **905.33 s**. Source motions are measured states with one-way fluid coupling;
+  these results do not claim online robot-fluid force feedback.
+- Focused EC config, objects, packaging, context and docs checker tests:
+  **259 passed**. Later batch-count regression and refill reuse: **11 passed**.
+  Fresh-process live Gym independent completion/reset and Sim selected reset:
+  **2 passed**. Final coarse two-row CLI partial-reset smoke also passed.
+- Independent reviews corrected wheel asset omission, root pose adoption,
+  misleading action recording, dataset mapping compatibility and canonical
+  global reset masks. Real Gym tests additionally caught pre-resolution sim
+  versus env counts; both replay and CLI now use `EnvCfg.num_envs`.
+- API coverage **2503/2503**; source Task Program inspector passed all three
+  calls. A built EC wheel contains all six pour-cup assets. Native validation
+  uses staged JIT source, not a rebuilt release/AOT wheel.
+- Registered `sph_speed_dfsph_4096` benchmark, same RTX 5090 / Newton 1.6 /
+  Warp 1.17 configuration, 20 warmup + 100 measured steps: baseline mean
+  **3.05956 ms**, changed **3.17811 ms** (+3.87%); p95 **3.24373 / 3.38617 ms**.
+  Both runs finite with matching physical summary metrics. Single-run evidence,
+  not a statistical performance guarantee; no claim of multi-world speedup.
+- Runtime: isolated Python 3.11, Torch 2.10, Newton 1.6.0, Warp 1.17.0,
+  MuJoCo/MuJoCo-Warp 3.12.0; DexSim native binaries from local base build and
+  independently staged changed JIT source. Shared build and environments remain
+  unchanged. NoRender robot smoke teardown still logs native entity balance
+  `1024 != 1023`; tests complete, but repeated native resource-leak qualification
+  is not established by these short runs.
+- Context reviewed and revised: fluid lifecycle/capability, Gym replay and
+  native Newton world/reset ownership. Existing Task Program language/semantics
+  guidance remains accurate because those contracts are reused unchanged.
+
+Evidence (ignored local outputs): `outputs/fluid-task-program/`,
+`outputs/fluid-gym-full/fluid_gym.mp4`, `outputs/fluid-gym-full/fluid_gym_result.json`,
+`outputs/fluid-gym-full/contact-sheet.jpg`, `outputs/fluid-gym-final-smoke/`,
+`outputs/fluid-benchmark/`, `outputs/fluid-wheel/asset-validation.json`.
+
+Reproduction in this checkout uses the isolated native JIT runtime and virtual
+Python at `/home/dex/.codex/worktrees/fluid-sph-worlds/venv/bin/python`, with
+`DEXSIM_NEWTON_ARTIFACT_MODE=jit`; `python -m
+embodichain.lab.scripts.run_fluid_task_program --num-envs 2` runs both phases.
+Old pre-recorded tutorial trajectories lack qualification metadata and are
+intentionally rejected by the Gym adapter.

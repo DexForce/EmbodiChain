@@ -77,7 +77,7 @@ class FluidObject:
         pose: np.ndarray,
         device: torch.device,
         *,
-        on_write: Callable[[], None],
+        on_write: Callable[[Sequence[int]], None],
     ) -> None:
         self.cfg = deepcopy(cfg)
         self.uid = cfg.uid
@@ -186,7 +186,7 @@ class FluidObject:
             raise ValueError("Fluid state must be finite.")
         if not ids:
             return
-        self._on_write()
+        self._on_write(ids)
         data._state._apply_nodal_state(state[..., :3], state[..., 3:], ids)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:

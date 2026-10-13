@@ -1,0 +1,12 @@
+id: PourCupFluidReplay-Franka-v1
+seed: 0
+enable_sensor: false
+environment:
+  component: env.fluid.yaml
+embodiment:
+  component: ../../../../components/embodiments/franka_panda_fluid_replay.yaml
+  overrides:
+    init_rot:
+    - 0
+    - 0
+    - 180
