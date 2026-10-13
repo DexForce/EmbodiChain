@@ -990,11 +990,7 @@ def _task_stability_payload(
                     "displacement": route["world_displacement"],
                     "position_tolerance": _RELATIVE_POSITION_TOLERANCE,
                 }
-                if (
-                    node["task_type"] == "E1"
-                    and arguments["relation"] == "on"
-                    and reference_id != "table"
-                ):
+                if node["task_type"] == "E1" and arguments["relation"] == "on":
                     presets[f"gen_sim.{node['id']}.stable"].update(
                         kind="supported_placement",
                     )
@@ -2714,12 +2710,25 @@ def _calibrate_task_gripper_effort(
     payloads and other recipe families retain their declared actuator limits.
     This does not change the imported mechanism or any collision properties.
     """
-    families = {node["task_type"] for node in graph["nodes"]}
-    if not families <= {"E1", "E2", "E5"} or not families & {"E1", "E2"}:
-        return
     picks = []
+    blocked_resources: set[str] = set()
+    carriers: dict[str, set[str]] = {}
     for node in graph["nodes"]:
         call = node["call"]
+        resources = set(call.get("resources", {}).values())
+        if node["task_type"] not in {"E1", "E2", "E5"}:
+            blocked_resources.update(resources)
+            continue
+        if node["task_type"] == "E5":
+            if call.get("call_id") in {
+                _COORDINATED_HOLD_CALL_ID,
+                _COORDINATED_TRANSPORT_CALL_ID,
+            }:
+                for resource in resources:
+                    carriers.setdefault(resource, set()).add(
+                        call["arguments"]["object"]
+                    )
+            continue
         if call["kind"] == "pick":
             object_id = call["object"]
         elif call["kind"] == "registered" and (
@@ -2733,28 +2742,6 @@ def _calibrate_task_gripper_effort(
     if not picks:
         return
     objects = {item["uid"]: item for item in scene.rigid_objects}
-    # A hand shared with E5 must also be qualified for its carried rigid body.
-    payloads = {object_id for object_id, _ in picks}
-    payloads.update(
-        node["call"]["arguments"]["object"]
-        for node in graph["nodes"]
-        if node["call"].get("call_id")
-        in {_COORDINATED_HOLD_CALL_ID, _COORDINATED_TRANSPORT_CALL_ID}
-    )
-    for object_id in payloads:
-        mass = (
-            objects.get(object_id, {})
-            .get("attrs", {})
-            .get("mass_props", {})
-            .get("mass")
-        )
-        if (
-            isinstance(mass, bool)
-            or not isinstance(mass, (int, float))
-            or not math.isfinite(mass)
-            or not 0.0 < mass <= 0.01
-        ):
-            return
     limits = embodiment["simulation"]["joint_drive_props"].get("max_effort")
     if not isinstance(limits, dict):
         return
@@ -2765,6 +2752,23 @@ def _calibrate_task_gripper_effort(
         if endpoint["endpoint_id"] == "grasp"
     }
     for resource in {resource for _, resource in picks}:
+        if resource in blocked_resources:
+            continue
+        payloads = {uid for uid, owner in picks if owner == resource} | carriers.get(
+            resource, set()
+        )
+        masses = [
+            objects.get(uid, {}).get("attrs", {}).get("mass_props", {}).get("mass")
+            for uid in payloads
+        ]
+        if any(
+            isinstance(mass, bool)
+            or not isinstance(mass, (int, float))
+            or not math.isfinite(mass)
+            or not 0.0 < mass <= 0.01
+            for mass in masses
+        ):
+            continue
         part = grasp_parts[resource]
         if part in limits:
             limits[part] = min(float(limits[part]), 0.5)
@@ -3126,11 +3130,14 @@ def _relative_world_displacement(
         ]
         return [components[0][0], components[1][1], components[0][2]]
 
-    object_support_z = _support_origin_z(
-        obj,
-        axis_aligned=object_id in axis_align_objects,
-        table_top_z=table_top_z,
+    if table_top_z is None:
+        raise ValueError(
+            "Lateral placement requires a measured tabletop landing height."
+        )
+    object_bottom, _ = _vertical_mesh_bounds(
+        obj, axis_aligned=object_id in axis_align_objects
     )
+    object_support_z = float(table_top_z) - object_bottom
     reference_support_z = _support_origin_z(
         reference,
         axis_aligned=reference_id in axis_align_objects,

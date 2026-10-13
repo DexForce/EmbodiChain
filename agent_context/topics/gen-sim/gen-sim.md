@@ -154,7 +154,9 @@ Failed or unavailable qualification stops dispatch, not a fallback to the unsafe
 original. Extra searches restore caller RNG. Explicit, constrained, upright, pour,
 drawer and multi-environment calls retain their prior routes and bundle fingerprints.
 After ordinary Pick path qualification fails, up to four other legally
-prefiltered grasps may be replanned with their own approach directions. Each
+prefiltered grasps may be replanned with their own approach directions. Distinct
+wrist orientations are tried before near-identical poses, within the same
+four-plan budget. Each
 complete plan keeps its attachment proposal coupled to its commands and must
 pass contact FK, emitted-limit and mesh checks; a bound Place continuation must
 also pass its private preview. Successful originals are not reselected.
@@ -170,6 +172,14 @@ seeding, local perturbations, joint limits and per-step velocity admission live
 there; E6 retains its final FK, complete-plan velocity and collision checks.
 This is greedy local continuation using existing solvers, not a new IK solver,
 global branch search or physical-success certificate.
+Deployments with an ordinary Pick bind grasp constraint observations to the
+queried object's two native finger-pad contacts on the queried hand. Positive
+impulses and opposing normals qualify acquisition; absent contacts qualify
+release. One-sided, non-opposing, nonfinite or saturated observations remain
+unverified. Shared pose-relation, consecutive-sample, lift and release monitors
+are retained; a wide object does not need an arbitrary minimum closing angle.
+This uses the canonical dual-Franka pad bindings and is not a new executor or
+a certificate of complete-task success. Regenerate affected bundles.
 Ordinary adjacent typed Pick/inside-Place calls with verified canonical monitors
 may qualify the complete continuation before dispatching Pick. A qualified
 original remains unchanged. Only a failed required-waypoint IK result permits
@@ -345,7 +355,10 @@ used by single-arm picks at `max_effort: 0.5` when every picked rigid body and
 E5 carrier has an explicitly declared mass of at most 10 g.
 The full closing range is retained; smaller existing effort limits are not
 increased. Unknown/heavier loads, E5-only programs and other recipe families retain their declared
-controls. Imported mimic behavior and shared robot defaults are unchanged.
+controls. Qualification is per grasp resource: an E6/E8/E9 on the other hand
+does not disable the cap; a hand shared with those operations keeps its authored
+controls. Payload qualification is likewise hand-local. Imported mimic behavior
+and shared robot defaults are unchanged.
 Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,
 then transformed by observed poses for vertical gap and projected support-envelope

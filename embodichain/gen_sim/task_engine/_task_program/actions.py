@@ -269,6 +269,7 @@ class GenSimPickUp(PickUp):
         chosen = first
 
         def candidates():
+            deferred = []
             for strategy, pool, direction in selection.candidate_routes:
                 order = torch.argsort(
                     pool.costs[0].masked_fill(~pool.valid[0], torch.inf), stable=True
@@ -277,8 +278,36 @@ class GenSimPickUp(PickUp):
                     pose = pool.poses[:, index]
                     if any(torch.equal(pose, value) for value in seen):
                         continue
+                    # Spend the bounded retry budget on different wrist branches
+                    # before millimetre perturbations of the same grasp.
+                    similar = any(
+                        bool(
+                            torch.linalg.vector_norm(
+                                pose[:, :3, 3] - value[:, :3, 3], dim=-1
+                            ).amax()
+                            < 0.01
+                        )
+                        and bool(
+                            (
+                                (pose[:, :3, :3].transpose(-1, -2) @ value[:, :3, :3])
+                                .diagonal(dim1=-2, dim2=-1)
+                                .sum(-1)
+                                .amin()
+                                - 1
+                            )
+                            / 2
+                            > 0.9396926208
+                        )
+                        for value in seen
+                    )
+                    if similar:
+                        deferred.append(
+                            (strategy, index, pose.clone(), direction.clone())
+                        )
+                        continue
                     seen.append(pose)
                     yield strategy, index, pose.clone(), direction.clone()
+            yield from deferred
 
         try:
             for strategy, index, pose, direction in candidates():

@@ -168,6 +168,30 @@ def test_safe_pick_never_enumerates_alternatives(monkeypatch):
     assert not data[5]
 
 
+def test_pick_retry_prefers_distinct_wrist_orientations_before_near_duplicates(
+    monkeypatch,
+):
+    action, request, context, first, selection, built = _pick(monkeypatch)
+    pool = selection.candidate_routes[0][1]
+    poses = torch.eye(4)[None, None].repeat(1, 6, 1, 1)
+    for i, angle in enumerate(
+        (0.0, 0.0, 0.001, torch.pi / 2, torch.pi, 3 * torch.pi / 2)
+    ):
+        c, s = torch.cos(torch.tensor(angle)), torch.sin(torch.tensor(angle))
+        poses[0, i, :2, :2] = torch.tensor([[c, -s], [s, c]])
+    selection.candidate_routes = [
+        (
+            0,
+            AffordancePoseCandidates(poses, pool.costs, pool.valid),
+            selection.direction,
+        )
+    ]
+    monkeypatch.setattr(pick_path, "rebuild", lambda *args: first)
+    result = action._retry_ordinary_pick_candidates(request, context, first, selection)
+    attempts = result.diagnostics.metadata["gen_sim_pick_candidate_retry"]["attempts"]
+    assert [a["candidate_id"] for a in attempts] == [1, 3, 4, 5]
+
+
 @pytest.mark.parametrize(
     "damage", [None, "velocity", "release", "explicit_cartesian", "z_cap"]
 )

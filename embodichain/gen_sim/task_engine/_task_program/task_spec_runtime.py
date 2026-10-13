@@ -546,13 +546,63 @@ def _placement_record(
     object_pose, reference_pose = pose(bindings[uid]), pose(bindings[reference_uid])
     if object_pose.shape[0] != num_envs:
         raise ValueError("Placement observation environment count differs.")
-    accepted, metrics = measure_planar_placement(
-        target.sim,
-        bindings[uid],
-        bindings[reference_uid],
-        object_pose,
-        reference_pose,
-    )
+    if predicate.arguments["relation"] == "on":
+        if recorded:
+            prefix = boundary["metadata"]["program_segment_source_path"]
+            traces = [
+                p
+                for p in boundary["metadata"].get("post_policies", [])
+                if p.get("kind") == "wait_stable"
+                and type(p.get("policy_index")) is int
+                and p.get("source_path") == [*prefix, "post", p["policy_index"]]
+                and p.get("result", {})
+                .get("measurements", {})
+                .get("native_support", {})
+                .get("entity")
+                == uid
+                and p["result"]["measurements"]["native_support"].get("reference")
+                == reference_uid
+            ]
+            if len(traces) != 1:
+                raise ValueError(
+                    "Support milestone lacks its exact native observation."
+                )
+            metrics = dict(traces[0]["result"]["measurements"]["native_support"])
+            if not torch.allclose(
+                torch.tensor(metrics["object_pose"]).to(object_pose),
+                object_pose,
+                atol=1e-4,
+                rtol=0,
+            ) or not torch.allclose(
+                torch.tensor(metrics["reference_pose"]).to(reference_pose),
+                reference_pose,
+                atol=1e-4,
+                rtol=0,
+            ):
+                raise ValueError(
+                    "Support observation differs from recorded boundary poses."
+                )
+            accepted = metrics["supported"]
+        else:
+            from .support_evidence import NativeSupportObservation
+
+            observer = NativeSupportObservation(
+                target.sim,
+                target.sim.get_rigid_object(bindings[uid].simulation_uid),
+                target.sim.get_rigid_object(bindings[reference_uid].simulation_uid),
+                entity_id=uid,
+                reference_id=reference_uid,
+            )
+            supported, metrics = observer.observe(object_pose, reference_pose)
+            accepted = supported.tolist()
+    else:
+        accepted, metrics = measure_planar_placement(
+            target.sim,
+            bindings[uid],
+            bindings[reference_uid],
+            object_pose,
+            reference_pose,
+        )
     released = measured_release(node, uid, segments, boundary, num_envs)
     metrics.update(
         reference_uid=reference_uid,
@@ -643,6 +693,25 @@ def _placement_measurement_matches(
     metrics = record.get("measurements", {})
     references = roles.get(predicate.arguments.get("reference"), [])
     accepted = record.get("accepted", [])
+    if metrics.get("scope") == "native_contact_support":
+        supported, released = metrics.get("supported", []), metrics.get("released", [])
+        return bool(
+            predicate.arguments.get("relation") == "on"
+            and len(references) == 1
+            and metrics.get("reference_uid") == references[0]["uid"]
+            and metrics.get("reference") == references[0]["uid"]
+            and metrics.get("env_ids") == list(range(num_envs))
+            and all(
+                isinstance(values, list)
+                and len(values) == num_envs
+                and all(type(v) is bool for v in values)
+                for values in (accepted, supported, released)
+            )
+            and all(
+                a == (s and r)
+                for a, s, r in zip(accepted, supported, released, strict=True)
+            )
+        )
     from .spatial_reference import SIDE_RELATIONS
 
     link_scope = metrics.get("scope") == "bound_link_world_axes"
@@ -988,7 +1057,11 @@ def evaluate_runtime_evidence(
                         and len(accepted) == num_envs
                         and all(type(v) is bool for v in accepted)
                         and metrics.get("scope")
-                        in {"measured_planar_landing_region", "bound_link_world_axes"}
+                        in {
+                            "measured_planar_landing_region",
+                            "bound_link_world_axes",
+                            "native_contact_support",
+                        }
                         and metrics.get("boundary_frames") == segment.get("end_steps")
                     ):
                         measured_placements[group["id"]] = record

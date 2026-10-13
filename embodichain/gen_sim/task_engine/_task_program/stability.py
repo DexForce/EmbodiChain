@@ -200,6 +200,7 @@ class TaskStabilityPort:
         constraints: Mapping[str, StabilityConstraint],
         *,
         step_dt: float,
+        support_observers: Mapping[tuple[str, str], Any] | None = None,
     ) -> None:
         if not math.isfinite(step_dt) or step_dt <= 0:
             raise ValueError("step_dt must be finite and positive.")
@@ -207,6 +208,7 @@ class TaskStabilityPort:
         self._robot = robot
         self._dt = float(step_dt)
         self._constraints = dict(constraints)
+        self._support_observers = dict(support_observers or {})
         self._objects = {
             binding.entity_id: simulation.get_rigid_object(binding.simulation_uid)
             for binding in scene_binding.rigid_objects
@@ -272,6 +274,20 @@ class TaskStabilityPort:
                     )
                 self._support_vertices[entity] = vertices.detach().clone()
         self._results: dict[int, torch.Tensor] = {}
+        from .support_evidence import NativeSupportObservation
+
+        for cfg in self._constraints.values():
+            if cfg.kind not in {"stack", "supported_placement"}:
+                continue
+            key = (cfg.entity, cfg.reference)
+            if key not in self._support_observers:
+                self._support_observers[key] = NativeSupportObservation(
+                    simulation,
+                    self._objects[cfg.entity],
+                    self._objects[cfg.reference],
+                    entity_id=cfg.entity,
+                    reference_id=cfg.reference,
+                )
         self._metadata: dict[int, dict[str, Any]] = {}
 
     def validate_policy(self, policy: Any, *, segment: Any) -> None:
@@ -451,6 +467,12 @@ class TaskStabilityPort:
                     reference_translation_drift=reference_translation.tolist(),
                     reference_rotation_drift=reference_rotation.tolist(),
                 )
+            if cfg.kind in {"stack", "supported_placement"}:
+                supported, support = self._support_observers[
+                    (cfg.entity, cfg.reference)
+                ].observe(pose, reference)
+                valid &= supported
+                measurements["native_support"] = support
             translation, rotation = self._drift(pose, anchor)
             valid &= (translation <= cfg.translation_drift) & (
                 rotation <= cfg.rotation_drift

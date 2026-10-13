@@ -971,14 +971,14 @@ def test_milestone_measurement_cannot_be_misattributed_or_summary_only(
     assert result["certificate_ready"] is False
 
 
-def test_registered_e1_on_uses_same_measured_geometry_not_only_stability(
+def test_registered_e1_on_without_native_contacts_cannot_certify(
     tmp_path,
 ) -> None:
     assert (
         _observe_placement(tmp_path, _placement_evidence(tmp_path, relation="on"))[
             "certificate_ready"
         ]
-        is True
+        is False
     )
 
 

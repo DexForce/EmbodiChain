@@ -312,6 +312,33 @@ def test_handover_minimum_height_preserves_retreat_headroom(
     )
 
 
+@pytest.mark.parametrize("source_height", [0.75, 1.0, 1.5])
+def test_lateral_landing_height_does_not_follow_source_object_height(
+    monkeypatch, source_height
+):
+    objects = {
+        "object": {"init_pos": [0.1, 0.1, source_height]},
+        "reference": {"init_pos": [0.2, 0.2, 0.75]},
+    }
+    monkeypatch.setattr(
+        task_program_bundle, "_vertical_mesh_bounds", lambda *a, **kw: (-0.01, 0.1)
+    )
+    monkeypatch.setattr(
+        task_program_bundle, "_horizontal_relation_distance", lambda *a, **kw: 0.2
+    )
+    result = task_program_bundle._relative_world_displacement(
+        "left_of",
+        object_id="object",
+        reference_id="reference",
+        scene_objects=objects,
+        axis_align_objects=set(),
+        table_top_z=0.75,
+    )
+    assert result[2] + 0.75 == pytest.approx(
+        0.75 + 0.01 + task_program_bundle._PLACEMENT_CLEARANCE
+    )
+
+
 def test_relative_place_geometry_uses_only_preceding_alignment(monkeypatch) -> None:
     place = {
         "id": "place",
@@ -376,7 +403,10 @@ def test_future_upright_does_not_change_earlier_placement_validation(monkeypatch
     monkeypatch.setattr(
         task_program_bundle, "_longest_local_axis", lambda *a: [1, 0, 0]
     )
-    for nodes, expected in (([place, align], "placement"), ([align, place], "upright")):
+    for nodes, expected in (
+        ([place, align], "supported_placement"),
+        ([align, place], "upright"),
+    ):
         graph = {"nodes": nodes, "task_groups": []}
         result = task_program_bundle._task_stability_payload(
             graph, scene, {"skill_profile": {"resources": []}}
