@@ -1,0 +1,439 @@
+{
+  "media": [
+    {
+      "file": "franka_dfsph_pour.mp4",
+      "decoded_frames": 744,
+      "fps": 24.0,
+      "duration_s": 31.0,
+      "width": 1280,
+      "height": 960,
+      "bytes": 15858185
+    },
+    {
+      "file": "water_closeup.mp4",
+      "decoded_frames": 744,
+      "fps": 24.0,
+      "duration_s": 31.0,
+      "width": 960,
+      "height": 720,
+      "bytes": 10542263
+    },
+    {
+      "file": "water_settling_closeup.mp4",
+      "decoded_frames": 432,
+      "fps": 24.0,
+      "duration_s": 18.0,
+      "width": 960,
+      "height": 720,
+      "bytes": 1414937
+    }
+  ],
+  "particle_snapshots": [
+    {
+      "file": "particles_00.npz",
+      "time_s": 0.0006944444444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.06758773326873779,
+        0.06758777797222137,
+        0.079612135887146
+      ]
+    },
+    {
+      "file": "particles_01.npz",
+      "time_s": 1.0006944444444446,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07050073146820068,
+        0.07036252319812775,
+        0.07606256008148193
+      ]
+    },
+    {
+      "file": "particles_02.npz",
+      "time_s": 2.0006944444444446,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07043784856796265,
+        0.07030874490737915,
+        0.07599532604217529
+      ]
+    },
+    {
+      "file": "particles_03.npz",
+      "time_s": 3.0006944444444446,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.070132315158844,
+        0.07034781575202942,
+        0.07612550258636475
+      ]
+    },
+    {
+      "file": "particles_04.npz",
+      "time_s": 4.000694444444444,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07037001848220825,
+        0.07041612267494202,
+        0.07601934671401978
+      ]
+    },
+    {
+      "file": "particles_05.npz",
+      "time_s": 5.000694444444444,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07022804021835327,
+        0.07028070092201233,
+        0.07593178749084473
+      ]
+    },
+    {
+      "file": "particles_06.npz",
+      "time_s": 6.000694444444444,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07039666175842285,
+        0.0702519416809082,
+        0.07624834775924683
+      ]
+    },
+    {
+      "file": "particles_07.npz",
+      "time_s": 7.000694444444444,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.0703204870223999,
+        0.07046424597501755,
+        0.0787353515625
+      ]
+    },
+    {
+      "file": "particles_08.npz",
+      "time_s": 8.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07026660442352295,
+        0.07019989937543869,
+        0.07664531469345093
+      ]
+    },
+    {
+      "file": "particles_09.npz",
+      "time_s": 9.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.0703423023223877,
+        0.07040710002183914,
+        0.07607090473175049
+      ]
+    },
+    {
+      "file": "particles_10.npz",
+      "time_s": 10.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07029205560684204,
+        0.07035775482654572,
+        0.07598388195037842
+      ]
+    },
+    {
+      "file": "particles_11.npz",
+      "time_s": 11.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07019758224487305,
+        0.0703999400138855,
+        0.07822984457015991
+      ]
+    },
+    {
+      "file": "particles_12.npz",
+      "time_s": 12.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07035797834396362,
+        0.08717505633831024,
+        0.08094185590744019
+      ]
+    },
+    {
+      "file": "particles_13.npz",
+      "time_s": 13.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76538,
+      "render_extent_m": [
+        0.07015204429626465,
+        0.1155904233455658,
+        0.07907623052597046
+      ]
+    },
+    {
+      "file": "particles_14.npz",
+      "time_s": 14.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76438,
+      "render_extent_m": [
+        0.47439295053482056,
+        0.6462318301200867,
+        0.1923368275165558
+      ]
+    },
+    {
+      "file": "particles_15.npz",
+      "time_s": 15.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76305,
+      "render_extent_m": [
+        0.42111027240753174,
+        0.6929839849472046,
+        0.17295894026756287
+      ]
+    },
+    {
+      "file": "particles_16.npz",
+      "time_s": 16.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76298,
+      "render_extent_m": [
+        0.4270433783531189,
+        0.5567200779914856,
+        0.1645955741405487
+      ]
+    },
+    {
+      "file": "particles_17.npz",
+      "time_s": 17.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76294,
+      "render_extent_m": [
+        0.4143911600112915,
+        0.5108028054237366,
+        0.1609216332435608
+      ]
+    },
+    {
+      "file": "particles_18.npz",
+      "time_s": 18.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.12039101123809814,
+        0.3402361571788788,
+        0.16038775444030762
+      ]
+    },
+    {
+      "file": "particles_19.npz",
+      "time_s": 19.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.11975020170211792,
+        0.3427199423313141,
+        0.1590532660484314
+      ]
+    },
+    {
+      "file": "particles_20.npz",
+      "time_s": 20.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.1197667121887207,
+        0.34505918622016907,
+        0.1603592038154602
+      ]
+    },
+    {
+      "file": "particles_21.npz",
+      "time_s": 21.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.119770348072052,
+        0.3546363115310669,
+        0.14790821075439453
+      ]
+    },
+    {
+      "file": "particles_22.npz",
+      "time_s": 22.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.12012612819671631,
+        0.3657204508781433,
+        0.14048552513122559
+      ]
+    },
+    {
+      "file": "particles_23.npz",
+      "time_s": 23.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76293,
+      "render_extent_m": [
+        0.11960047483444214,
+        0.3735809028148651,
+        0.10766029357910156
+      ]
+    },
+    {
+      "file": "particles_24.npz",
+      "time_s": 24.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11977654695510864,
+        0.22865375876426697,
+        0.06933766603469849
+      ]
+    },
+    {
+      "file": "particles_25.npz",
+      "time_s": 25.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11963677406311035,
+        0.2291789948940277,
+        0.04043072462081909
+      ]
+    },
+    {
+      "file": "particles_26.npz",
+      "time_s": 26.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.1198657751083374,
+        0.23089130222797394,
+        0.03986603021621704
+      ]
+    },
+    {
+      "file": "particles_27.npz",
+      "time_s": 27.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11958718299865723,
+        0.23116055130958557,
+        0.03968322277069092
+      ]
+    },
+    {
+      "file": "particles_28.npz",
+      "time_s": 28.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11953842639923096,
+        0.23108911514282227,
+        0.03981935977935791
+      ]
+    },
+    {
+      "file": "particles_29.npz",
+      "time_s": 29.000694444444445,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11983293294906616,
+        0.23093032836914062,
+        0.039920032024383545
+      ]
+    },
+    {
+      "file": "particles_30.npz",
+      "time_s": 30.975,
+      "finite": true,
+      "physical_particle_count": 76538,
+      "render_visible_count": 76292,
+      "render_extent_m": [
+        0.11941260099411011,
+        0.2308558225631714,
+        0.03968667984008789
+      ]
+    }
+  ],
+  "all_saved_physics_states_finite": true,
+  "physical_particle_count_conserved": true,
+  "final": {
+    "in_mug": 34698,
+    "in_receiver": 41594,
+    "below_table": 246,
+    "outside_containers": 246,
+    "received_ml": 140.37975,
+    "min_z": -32.62076187133789,
+    "bowl_speed_rms_m_s": 0.004932330921292305,
+    "bowl_speed_p95_m_s": 0.008631683886051178,
+    "bowl_height_p99_m": 0.02318891406059265,
+    "time_s": 30.975,
+    "speed_p99_m_s": 0.016810493543744087,
+    "density_p99_kg_m3": 1008.4481811523438
+  },
+  "final_mug_ml": 117.10575,
+  "final_outside_ml": 0.83025,
+  "final_outside_percent": 0.32140897332044216,
+  "late_window_start_s": 19,
+  "late_bowl_speed_rms_mean_m_s": 0.005049448961821886,
+  "late_bowl_speed_rms_max_m_s": 0.005871022120118141,
+  "late_height_p99_range_mm": 0.07420361042022663,
+  "boundary": {
+    "method": "volume_map",
+    "volume_map_enabled": true,
+    "sdf_penalty_enabled": false,
+    "volume_map_resolution": 192,
+    "boundary_shape_count": 4,
+    "rest_density_kg_m3": 1000.0,
+    "viscosity": 0.0006
+  },
+  "wall_seconds": 363.6709657689935,
+  "excerpt_source_start_s": 12
+}
