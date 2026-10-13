@@ -90,11 +90,80 @@ def _run_rendering_cli(_: argparse.Namespace) -> None:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Dispatch to the appropriate benchmark sub-command CLI."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "rendering-preview":
+        from scripts.benchmark.rendering.preview import main as preview_main
+
+        preview_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "rendering-formal":
+        from scripts.benchmark.rendering.formal_runner import main as formal_main
+
+        formal_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "maniskill-reference":
+        from scripts.benchmark.rendering.maniskill_reference import (
+            main as reference_main,
+        )
+
+        reference_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "camera-pilot":
+        # Keep the offline report path independent of motion/simulator imports.
+        from scripts.benchmark.rendering.run_benchmark import main as camera_main
+
+        camera_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "rendering-suite":
+        # Keep R-series listing and offline reports independent of simulators.
+        from scripts.benchmark.rendering.suite_runner import main as rendering_main
+
+        rendering_main(arguments[1:])
+        return
+    if arguments and arguments[0] == "expert-generation":
+        # Keep the simulator-free G-03 fixture and offline report path light.
+        from scripts.benchmark.expert_generation.run_benchmark import (
+            main as generation_main,
+        )
+
+        generation_main(arguments[1:])
+        return
+
     parser = argparse.ArgumentParser(
         prog="embodichain benchmark",
         description="EmbodiChain benchmark command-line interface.",
     )
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser(
+        "rendering-preview",
+        add_help=False,
+        help="Render matching scenes for visual review without benchmarking.",
+    )
+    subparsers.add_parser(
+        "rendering-formal",
+        add_help=False,
+        help="Run document-aligned v2 rendering experiments from approved scenes.",
+    )
+    subparsers.add_parser(
+        "maniskill-reference",
+        add_help=False,
+        help="Run two separate, unqualified ManiSkill raster reference points.",
+    )
+    subparsers.add_parser(
+        "camera-pilot",
+        add_help=False,
+        help="Run the minimal camera comparison or rebuild its report offline.",
+    )
+    subparsers.add_parser(
+        "rendering-suite",
+        add_help=False,
+        help="Run the legacy v1 rendering pilot matrix or rebuild its report.",
+    )
+    subparsers.add_parser(
+        "expert-generation",
+        add_help=False,
+        help="Run the minimal simulator-free G-03 protocol fixture.",
+    )
 
     # -- rl ------------------------------------------------------------------
     rl_parser = subparsers.add_parser(

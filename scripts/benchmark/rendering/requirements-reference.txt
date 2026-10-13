@@ -1,0 +1,7 @@
+# Optional CPU reference and quality tools; install in an isolated environment.
+# torch, torchvision and NumPy are inherited from the benchmark environment.
+# Official pretrained SqueezeNet weights must be cached separately; evaluation
+# performs no downloads and reports missing weights without qualifying quality.
+mitsuba==3.7.1
+lpips==0.1.4
+scikit-image==0.26.0

@@ -17,6 +17,62 @@ Invoke this skill when:
 
 ## Key Conventions
 
+### Shared technical-report experiments
+
+For experiments using the technical-report framework, reuse
+`scripts/benchmark/core/` for process execution, timing, artifacts and provenance,
+and `scripts/benchmark/reporting/` for aggregation and comparison eligibility.
+Keep scene construction, platform APIs and domain validation in the experiment's
+own directory. Read [the framework entry points](../../../scripts/benchmark/README.md)
+and use `rendering-formal` / `rendering/formal.py` for the version-two rendering
+matrix. `formal_runner.py` freezes all declared cases, explicit selections,
+per-case quality policies and budgets; `formal_worker.py` owns isolated capture.
+The 82 declared cells include unsupported or capacity-limited workloads; a
+matrix entry is not evidence that a backend can execute it. `suite.py` /
+`suite_runner.py` and `camera-pilot` retain their legacy meanings, including the
+pilot's modality R-05; formal R-05 is three-camera scaling and modality costs
+have their own `modality-ablation` track.
+
+Use `rendering-preview` for the common custom scene and camera review. Formal
+execution verifies an approval receipt against the original scene hashes.
+Persist an already authorized review decision without asking again. Layout
+approval never qualifies image quality. Keep Isaac-specific comparison code
+under `scripts/benchmark/`; Isaac Lab is an external frozen source dependency,
+not a reason to add Isaac imports to production `embodichain` modules.
+
+Core/report rebuilds remain independent of simulator imports. Record raw seconds,
+bytes, metric populations and missing-value reasons; keep execution completion
+separate from quality/task/data acceptance. Platform runtimes execute in their
+own Python processes. Domain callbacks supply actual completion synchronization.
+For rendering, reuse `capture.measure_rendering` and its explicit device/host
+delivery contract. Count camera frames as batch steps × environments × cameras;
+modalities do not multiply exposures. Resource sampling separates selected-PID
+NVML graphics/compute memory, device-wide memory, CPU RSS and Torch allocation.
+Install optional `nvidia-ml-py` in each worker environment; retain nulls and
+reasons when counters or GPU identity are unavailable. Do not call CPU callback
+latency native GPU rendering time or infer internal resolution from output size.
+
+Keep quality evaluation, reference rendering, sample persistence and R-09
+traces/overhead diagnostics outside primary performance windows. Use frozen
+`quality_protocol.py` policies and checksummed independent evidence; missing
+calibration, reference noise qualification, requested metrics or temporal
+coverage must not qualify. Normal-specific quality remains unassessed. Reports
+rebuild through `publication_report.py` with standard-library-only CSV/SVG/PDF
+outputs and independent process-repeat uncertainty. Default performance repeats
+are three; `--publication` requires at least ten. A one-repeat smoke preserves
+resolution/workload semantics and cannot substantiate an equal-quality speedup.
+
+For new shared-framework experiments, freeze an `ExperimentDefinition` with a
+parameter matrix, `Budget`, quality protocol and declared comparison invariants.
+Use `build_run_plan`/`run_experiment` for deterministic cases and budgeted
+attempts. Workers may choose `measure_stages`, `measure_loop` or
+`measure_attempts`; persist standard `definition.json`, `effective_config.yaml`,
+`assets_manifest.json`, `raw.jsonl`, `metrics.json`, `quality.json` and
+`artifact_index.json` through the core artifact helpers. Aggregate outputs must
+retain denominator, uncertainty, missing reasons and source run IDs. Use the
+dependency-free reporting table/figure helpers for report rebuilds, and use
+`convert_legacy_rows` before mixing older benchmark records with new ones.
+
 ### File Location
 
 Place benchmark scripts under:
@@ -229,19 +285,31 @@ if __name__ == "__main__":
     run_all_benchmarks()
 ```
 
-### 8. Save Results to One Markdown Report (Required)
+### 8. Select the Report Template (Required)
 
-Every benchmark script must write its final results to **one Markdown file** after execution.
+Each benchmark invocation writes **one Markdown report** and preserves the
+raw inputs needed to rebuild it. Choose the template from the measured domain:
+
+- **Technical-report loading/rendering/observation experiments:** use domain
+  tables for latency/throughput/memory, validation/failures, and grouped repeated
+  measurements. Include only applicable measured quantities; no success-rate
+  or leaderboard table is required when no physical task is evaluated.
+  Preserve structured run files, units, provenance and comparison eligibility.
+- **Generation experiments:** report attempt populations, stage outcomes and
+  validated/persisted yield from the production owner, with failure denominators.
+- **Legacy algorithm benchmarks:** retain the three-table format below for
+  compatibility. Its success ranking applies only to a defined task-success
+  metric and must not be replaced by process completion.
 
 - Output directory recommendation: `outputs/benchmarks/`
 - File naming recommendation: `<benchmark_name>_<YYYYMMDD_HHMMSS>.md`
-- Requirement: output **exactly three Markdown tables** in the report
+- Legacy requirement: output **exactly three Markdown tables** in the report
     1. `Time & Memory` table (cost time + memory columns)
     2. `Success & Other Metrics` table (success rate + quality/accuracy/extra metrics)
     3. `Leaderboard` table (algorithm ranking by overall success rate, descending)
-- `Leaderboard` coverage rule: include **all algorithms evaluated in the current benchmark scope**. If a provided leaderboard artifact is incomplete, backfill missing algorithms from aggregate summaries before rendering.
+- Legacy `Leaderboard` coverage rule: include **all algorithms evaluated in the current benchmark scope**. If a provided leaderboard artifact is incomplete, backfill missing algorithms from aggregate summaries before rendering.
 
-Use this pattern:
+Legacy algorithm-report pattern:
 
 ```python
 from datetime import datetime
@@ -483,12 +551,12 @@ Before finishing a benchmark script:
 - [ ] Accuracy metrics reported alongside timing (for solver benchmarks)
 - [ ] Graceful skip for benchmarks that need unavailable hardware
 - [ ] `run_all_benchmarks()` orchestrator with formatted separators
-- [ ] Results are written to exactly one Markdown report file per run
-- [ ] Report contains exactly three Markdown tables: `Time & Memory`, `Success & Other Metrics`, and `Leaderboard`
-- [ ] `Time & Memory` table includes `cost_time_ms`, `cpu_delta_mb`, `gpu_delta_mb`, `peak_gpu_mb`
-- [ ] `Success & Other Metrics` table includes `success_rate` and domain-specific quality metrics
-- [ ] `Leaderboard` table ranks algorithms by overall success rate in descending order
-- [ ] `Leaderboard` table includes all benchmarked algorithms (missing entries are backfilled from aggregate summaries if needed)
+- [ ] One Markdown report per benchmark invocation, with raw records retained
+- [ ] Template matches the domain; technical-report experiments retain units, populations, failures and comparison eligibility
+- [ ] Legacy algorithm report has `Time & Memory`, `Success & Other Metrics`, and `Leaderboard`
+- [ ] Legacy time/memory columns preserve existing consumer compatibility
+- [ ] Success-rate fields and ranking use an applicable task-success contract
+- [ ] Legacy leaderboards include all evaluated algorithms (backfill from aggregate summaries when needed)
 - [ ] Console log includes final report path
 - [ ] `if __name__ == "__main__":` entry point
 - [ ] `black .` formatting applied
