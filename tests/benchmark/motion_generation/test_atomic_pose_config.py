@@ -105,6 +105,32 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     }
 
 
+def test_spatial_generalization_suite_expands_nominal_and_shifted_populations() -> None:
+    """The shipped baseline resolves into reproducible B=1 and B=8 domains."""
+    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    nominal, shifted = suite.evaluation_tracks()
+
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v1"
+    assert [nominal.id, shifted.id] == [
+        "spatial-push@nominal",
+        "spatial-push@xy_translation_3cm",
+    ]
+    assert nominal.group_id == shifted.group_id == "spatial-push"
+    assert nominal.domain.kind == "nominal"
+    assert shifted.domain.kind == "robustness"
+    assert nominal.domain.applicability == ["push_object"]
+    assert shifted.domain.perturbations["samples_per_seed"] == 8
+    assert resolve_atomic_batch_sizes(nominal) == [1]
+    assert resolve_atomic_batch_sizes(shifted) == [8]
+    randomization = resolve_atomic_pose_randomization(shifted)
+    assert randomization.enabled is True
+    assert randomization.pose_batch_size == 8
+    assert randomization.object_translation_jitter_m == (0.03, 0.03, 0.0)
+    assert randomization.target_translation_jitter_m == (0.02, 0.02, 0.0)
+    assert nominal.config["seeds"] == shifted.config["seeds"] == [11, 23, 47]
+    assert [skill["id"] for skill in shifted.config["skills"]] == ["push_object"]
+
+
 def test_pose_batch_aliases_are_normalized() -> None:
     """Readable aliases work without changing the canonical manifest."""
     track = TrackCfg(

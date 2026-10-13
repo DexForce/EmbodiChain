@@ -25,6 +25,8 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_door_pour_align_push --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_spatial_generalization --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_hand_over --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_coordinated_pickment --device cpu
@@ -71,6 +73,12 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
+- `atomic_franka_pgi_spatial_generalization_v1` is the minimal spatial
+  generalization baseline. It compares a three-seed nominal `PushObject`
+  population with a versioned robustness domain containing eight deterministic
+  XY object/target translations per seed. Domain overrides select `B=1` for
+  nominal cases and `B=8` for shifted cases; generated poses are frozen in the
+  case manifest and restored before every planner replay.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These
@@ -85,8 +93,13 @@ in that run's `videos/` directory.
   in one track cannot change each other's grasps. It succeeds only when both
   grippers end at least `gripper_hold_gap` past open and short of their grasp
   command (a gripper that misses closes to the command) and the object is
-  within its position and full-rotation tolerance. `CoordinatedPlacement` compares the placed
-  object's full rotation relative to its support.
+  within its position and full-rotation tolerance. `CoordinatedPlacement`
+  compares the placed object's full rotation relative to its support. All
+  three providers consume the shared pose-batch object/target translation
+  ranges. Placement randomizes both objects on independent deterministic
+  streams and additionally accepts
+  `support_object_position_jitter_m` and `support_object_yaw_jitter_rad`
+  overrides; its grasp and target transforms are rebuilt per environment row.
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
   cases may keep extra objects in the scene through `scene_object_poses`.
@@ -136,7 +149,7 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   geometry-sampled antipodal candidate selection remains `B=1`; the supplied
   articulated `Slide` case instead shares one target-local candidate across
   translation-only rows.
-- The supplied pose-batch suite covers only Franka + PGI and cuRobo
+- The supplied single-arm pose-batch suites cover only Franka + PGI
 - The v3 suite's Microwave and Drawer are physical simulation articulations,
   but cuRobo still receives an empty external collision world. Contact replay
   validates target-joint actuation; it does not guarantee collision safety

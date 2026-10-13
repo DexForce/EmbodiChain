@@ -226,6 +226,101 @@ def test_control_parts_default_to_left_then_right_and_validate():
         )
 
 
+def test_dual_arm_target_randomization_is_batched_and_deterministic():
+    """HandOver and Pickment receive one stable target sample per env row."""
+    batch_size = 4
+    object_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    config = {
+        "_pose_batch_translation_jitter_m": [0.03, 0.02, 0.01],
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = dual._randomized_target_pose(
+        object_pose,
+        config,
+        default_offset=(0.0, -0.2, 0.1),
+        seed=11,
+        stream=703,
+    )
+    second = dual._randomized_target_pose(
+        object_pose,
+        config,
+        default_offset=(0.0, -0.2, 0.1),
+        seed=11,
+        stream=703,
+    )
+
+    offsets = first[:, :3, 3] - torch.tensor([0.0, -0.2, 0.1])
+    torch.testing.assert_close(first, second)
+    assert torch.unique(offsets, dim=0).shape[0] == batch_size
+    assert torch.all(offsets.abs() <= torch.tensor([0.03, 0.02, 0.01]))
+
+
+def test_coordinated_placement_randomizes_both_objects_before_one_settle():
+    """The placing and support batches share a settle window but separate streams."""
+    batch_size = 4
+    placing_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    support_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    placing = Mock(object_id="bread", entity=Mock())
+    support = Mock(object_id="pan", entity=Mock())
+    placing.entity.get_local_pose.return_value = placing_pose
+    support.entity.get_local_pose.return_value = support_pose
+    scenario = Mock(simulation=Mock())
+    config = {
+        "pre_action_settle_steps": 12,
+        "object_position_jitter_m": [0.01, 0.01, 0.0],
+        "support_object_position_jitter_m": [0.02, 0.03, 0.0],
+        "support_object_yaw_jitter_rad": 0.2,
+        "_pose_batch_object_translation_jitter_m": [0.04, 0.04, 0.0],
+    }
+
+    actual = dual._settled_placement_poses(scenario, placing, support, config, seed=17)
+
+    torch.testing.assert_close(actual[0], placing_pose)
+    torch.testing.assert_close(actual[1], support_pose)
+    assert actual[2] == 12
+    placing_call, support_call = scenario.randomize_object_pose.call_args_list
+    assert placing_call.kwargs == {"seed": 17, "stream": 901, "settle_steps": 0}
+    assert placing_call.args[1] is config
+    assert support_call.kwargs == {"seed": 17, "stream": 903, "settle_steps": 0}
+    assert support_call.args[1]["object_position_jitter_m"] == [0.02, 0.03, 0.0]
+    assert support_call.args[1]["object_yaw_jitter_rad"] == pytest.approx(0.2)
+    scenario.simulation.update.assert_called_once_with(step=12)
+    placing.entity.clear_dynamics.assert_called_once_with()
+    support.entity.clear_dynamics.assert_called_once_with()
+
+
+def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
+    """Placement geometry no longer broadcasts row zero across the pose batch."""
+    batch_size = 4
+    placing_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    support_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    placing_pose[:, 0, 3] = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    support_pose[:, 1, 3] = torch.tensor([-0.1, -0.2, -0.3, -0.4])
+    geometry = (torch.zeros(1, 3),) * 4
+    monkeypatch.setattr(dual, "_placement_geometry", lambda *args: geometry)
+
+    def row_poses(placing, support, *args):
+        del args
+        return {
+            "placing_grasp_pose": placing.clone(),
+            "support_grasp_pose": support.clone(),
+            "placing_target_pose": placing.clone(),
+            "support_target_pose": support.clone(),
+        }
+
+    monkeypatch.setattr(dual, "_placement_pose_row", row_poses)
+
+    poses = dual._placement_poses(
+        Mock(), Mock(), placing_pose, support_pose, {}, seed=11
+    )
+
+    torch.testing.assert_close(poses["placing_grasp_pose"], placing_pose)
+    torch.testing.assert_close(poses["support_grasp_pose"], support_pose)
+    torch.testing.assert_close(poses["placing_target_pose"], placing_pose)
+    torch.testing.assert_close(poses["support_target_pose"], support_pose)
+
+
 def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
     robot = Mock(device=CPU, dof=16)
     robot.control_parts = {
@@ -435,6 +530,37 @@ def test_fixtures_are_static_and_scene_objects_stay_in_the_case():
     assert pan.set_local_pose.call_count == 2
     assert spare.set_local_pose.call_args.args[0][0, 0, 3].item() >= 8.0
     table.set_local_pose.assert_not_called()
+
+
+def test_reset_case_restores_every_row_of_a_frozen_placement_scene():
+    """A replay restores the placing and support pose batches exactly."""
+    batch_size = 4
+    placing_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    support_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    placing_pose[:, 0, 3] = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    support_pose[:, 1, 3] = torch.tensor([-0.1, -0.2, -0.3, -0.4])
+    placing = Mock(object_id="bread", entity=Mock())
+    support = Mock(object_id="pan", entity=Mock())
+    scenario = AtomicTaskScenario()
+    scenario._objects = {"bread": placing, "pan": support}
+    case = Mock(
+        full_start_qpos=torch.zeros(batch_size, 12),
+        object_id="bread",
+        case_parameters={
+            "object_initial_pose": placing_pose.tolist(),
+            "scene_object_poses": {"pan": support_pose.tolist()},
+            "pre_action_settle_steps": 10,
+        },
+    )
+
+    scenario.reset_case(Mock(), Mock(device=CPU), case, "left_arm")
+
+    torch.testing.assert_close(
+        placing.entity.set_local_pose.call_args.args[0], placing_pose
+    )
+    torch.testing.assert_close(
+        support.entity.set_local_pose.call_args.args[0], support_pose
+    )
 
 
 def test_hand_over_scores_delivery_within_the_derived_budget():

@@ -69,6 +69,7 @@ from .atomic_task import (
     _difficulty,
     _float_vector,
     _motion_valid_mask,
+    _randomized_vector_batch,
     _randomization_parameters,
     _snapshot_case_qpos,
     _with_plan_options,
@@ -338,6 +339,83 @@ def _settled_pose(
     return pose, settle_steps
 
 
+def _randomized_target_pose(
+    object_pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    default_offset: Sequence[float],
+    seed: int,
+    stream: int,
+) -> torch.Tensor:
+    """Translate each row by its deterministic target offset."""
+    target_pose = object_pose.clone()
+    target_pose[:, :3, 3] += _randomized_vector_batch(
+        _float_vector(
+            config.get("target_object_offset_m"),
+            name="target_object_offset_m",
+            length=3,
+            default=default_offset,
+        ),
+        config,
+        jitter_name="target_object_offset_jitter_m",
+        seed=seed,
+        stream=stream,
+        batch_size=object_pose.shape[0],
+        device=object_pose.device,
+        dtype=object_pose.dtype,
+    )
+    return target_pose
+
+
+def _support_randomization_config(
+    config: Mapping[str, object],
+) -> dict[str, object]:
+    """Map support-object overrides onto the generic object jitter contract."""
+    support_config = dict(config)
+    support_config.pop("object_position_jitter_m", None)
+    support_config.pop("object_yaw_jitter_rad", None)
+    if "support_object_position_jitter_m" in config:
+        support_config["object_position_jitter_m"] = config[
+            "support_object_position_jitter_m"
+        ]
+    if "support_object_yaw_jitter_rad" in config:
+        support_config["object_yaw_jitter_rad"] = config[
+            "support_object_yaw_jitter_rad"
+        ]
+    return support_config
+
+
+def _settled_placement_poses(
+    scenario: "AtomicTaskScenario",
+    placing: AtomicObjectHandle,
+    support: AtomicObjectHandle,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Install both randomized object batches and settle the pair together."""
+    settle_steps = config.get("pre_action_settle_steps", 50)
+    if type(settle_steps) is not int or settle_steps < 0:
+        raise ValueError("pre_action_settle_steps must be a non-negative integer.")
+    scenario.randomize_object_pose(
+        placing, config, seed=seed, stream=901, settle_steps=0
+    )
+    scenario.randomize_object_pose(
+        support,
+        _support_randomization_config(config),
+        seed=seed,
+        stream=903,
+        settle_steps=0,
+    )
+    if scenario.simulation is not None and settle_steps:
+        scenario.simulation.update(step=settle_steps)
+    placing_pose = placing.entity.get_local_pose(to_matrix=True).clone()
+    support_pose = support.entity.get_local_pose(to_matrix=True).clone()
+    for handle in (placing, support):
+        handle.entity.clear_dynamics()
+    return placing_pose, support_pose, settle_steps
+
+
 def _case(
     provider: AtomicSkillCaseProvider,
     scenario: "AtomicTaskScenario",
@@ -432,16 +510,12 @@ class _HandOverCases(AtomicSkillCaseProvider):
         start_qpos, full_start_qpos = _snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
-        target_pose = object_pose.clone()
-        target_pose[:, :3, 3] += torch.tensor(
-            _float_vector(
-                config.get("target_object_offset_m"),
-                name="target_object_offset_m",
-                length=3,
-                default=(0.0, -0.22, 0.06),
-            ),
-            dtype=object_pose.dtype,
-            device=object_pose.device,
+        target_pose = _randomized_target_pose(
+            object_pose,
+            config,
+            default_offset=(0.0, -0.22, 0.06),
+            seed=seed,
+            stream=703,
         )
         parts = _control_parts(config, ("source", "destination"))
         parameters: dict[str, object] = {
@@ -658,16 +732,12 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
         start_qpos, full_start_qpos = _snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
-        target_pose = object_pose.clone()
-        target_pose[:, :3, 3] += torch.tensor(
-            _float_vector(
-                config.get("target_object_offset_m"),
-                name="target_object_offset_m",
-                length=3,
-                default=(-0.12, -0.03, 0.108),
-            ),
-            dtype=object_pose.dtype,
-            device=object_pose.device,
+        target_pose = _randomized_target_pose(
+            object_pose,
+            config,
+            default_offset=(-0.12, -0.03, 0.108),
+            seed=seed,
+            stream=803,
         )
         parts = _control_parts(config, ("left", "right"))
         parameters: dict[str, object] = {
@@ -817,26 +887,21 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
 # ---------------------------------------------------------------------------
 
 
-def _placement_poses(
-    placing: AtomicObjectHandle,
-    support: AtomicObjectHandle,
+def _placement_pose_row(
     placing_pose: torch.Tensor,
     support_pose: torch.Tensor,
+    placing_vertices: torch.Tensor,
+    support_vertices: torch.Tensor,
+    local_min: torch.Tensor,
+    local_max: torch.Tensor,
     config: Mapping[str, object],
 ) -> dict[str, torch.Tensor]:
-    """Build the tutorial grasps and targets for placing one object on another."""
+    """Build one row of coordinated-placement grasps and targets."""
     from scripts.tutorials.atomic_action import coordinated_placement as tutorial
-    from scripts.tutorials.atomic_action.scenario_utils import (
-        compute_local_bounds,
-        get_local_vertices,
-    )
 
     device = placing_pose.device
-    placing_vertices = get_local_vertices(placing.entity).to(device)
-    support_vertices = get_local_vertices(support.entity).to(device)
-    local_min, local_max = compute_local_bounds(placing_vertices)
     placing_grasp = tutorial.build_flat_object_grasp_pose(
-        placing_pose[0],
+        placing_pose,
         placing_vertices,
         local_min,
         local_max,
@@ -844,29 +909,89 @@ def _placement_poses(
         z_clearance=float(config.get("placing_grasp_z_clearance_m", 0.018)),
     )
     support_grasp = tutorial.build_pan_handle_grasp_pose(
-        support_pose[0],
+        support_pose,
         support_vertices,
         device,
         z_clearance=float(config.get("support_grasp_z_clearance_m", 0.0)),
     )
-    support_target = tutorial.build_support_object_target_pose(support_pose[0], device)
+    support_target = tutorial.build_support_object_target_pose(support_pose, device)
     placing_target = tutorial.build_placing_object_target_pose(
-        placing_pose[0],
+        placing_pose,
         placing_vertices,
         support_vertices,
         support_target,
         device,
     )
-    batch = placing_pose.shape[0]
     return {
-        name: pose.unsqueeze(0).expand(batch, -1, -1).clone()
-        for name, pose in (
-            ("placing_grasp_pose", placing_grasp),
-            ("support_grasp_pose", support_grasp),
-            ("placing_target_pose", placing_target),
-            ("support_target_pose", support_target),
-        )
+        "placing_grasp_pose": placing_grasp,
+        "support_grasp_pose": support_grasp,
+        "placing_target_pose": placing_target,
+        "support_target_pose": support_target,
     }
+
+
+def _placement_geometry(
+    placing: AtomicObjectHandle,
+    support: AtomicObjectHandle,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Load local meshes and bounds used by the tutorial pose builders."""
+    from scripts.tutorials.atomic_action.scenario_utils import (
+        compute_local_bounds,
+        get_local_vertices,
+    )
+
+    placing_vertices = get_local_vertices(placing.entity).to(device)
+    support_vertices = get_local_vertices(support.entity).to(device)
+    local_min, local_max = compute_local_bounds(placing_vertices)
+    return placing_vertices, support_vertices, local_min, local_max
+
+
+def _placement_poses(
+    placing: AtomicObjectHandle,
+    support: AtomicObjectHandle,
+    placing_pose: torch.Tensor,
+    support_pose: torch.Tensor,
+    config: Mapping[str, object],
+    *,
+    seed: int,
+) -> dict[str, torch.Tensor]:
+    """Build row-specific grasps and targets for placing one object on another."""
+    device = placing_pose.device
+    placing_vertices, support_vertices, local_min, local_max = _placement_geometry(
+        placing, support, device
+    )
+    rows = [
+        _placement_pose_row(
+            placing_pose[row],
+            support_pose[row],
+            placing_vertices,
+            support_vertices,
+            local_min,
+            local_max,
+            config,
+        )
+        for row in range(placing_pose.shape[0])
+    ]
+    poses = {name: torch.stack([row[name] for row in rows]) for name in rows[0]}
+    target_offset = _randomized_vector_batch(
+        _float_vector(
+            config.get("target_object_offset_m"),
+            name="target_object_offset_m",
+            length=3,
+            default=(0.0, 0.0, 0.0),
+        ),
+        config,
+        jitter_name="target_object_offset_jitter_m",
+        seed=seed,
+        stream=905,
+        batch_size=placing_pose.shape[0],
+        device=device,
+        dtype=placing_pose.dtype,
+    )
+    poses["placing_target_pose"][:, :3, 3] += target_offset
+    poses["support_target_pose"][:, :3, 3] += target_offset
+    return poses
 
 
 def _pick_invocation(
@@ -968,20 +1093,16 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
             )
         placing, support = scenario.activate_objects((placing_id, support_id))
         scenario.restore_base_robot()
-        settle_steps = int(config.get("pre_action_settle_steps", 50))
-        if settle_steps < 0:
-            raise ValueError("pre_action_settle_steps must be non-negative.")
-        if scenario.simulation is not None and settle_steps:
-            scenario.simulation.update(step=settle_steps)
-        placing_pose = placing.entity.get_local_pose(to_matrix=True).clone()
-        support_pose = support.entity.get_local_pose(to_matrix=True).clone()
-        for handle in (placing, support):
-            handle.entity.clear_dynamics()
+        placing_pose, support_pose, settle_steps = _settled_placement_poses(
+            scenario, placing, support, config, seed=seed
+        )
         scenario.open_grippers()
         start_qpos, full_start_qpos = _snapshot_case_qpos(
             scenario.robot, scenario.control_part
         )
-        poses = _placement_poses(placing, support, placing_pose, support_pose, config)
+        poses = _placement_poses(
+            placing, support, placing_pose, support_pose, config, seed=seed
+        )
         parts = _control_parts(config, ("placing", "support"))
         parameters: dict[str, object] = {
             "sample_count": int(config.get("sample_count", 120)),
