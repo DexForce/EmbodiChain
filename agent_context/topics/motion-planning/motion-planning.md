@@ -77,6 +77,10 @@ encode prepared actions rather than retiming a second time.
 
 ## Trajectory augmentation boundary
 
+Scene layout proposals and their Task Program execution adapter belong to
+[scene expansion](../scene-expansion/scene-expansion.md). The trajectory
+contracts below operate within a specified scene and initial state.
+
 `motion/expansion/` owns callable-free Expansion Profiles, immutable templates
 and candidates, sampled limit checks and coverage. `load_expansion_profile()`
 strictly decodes the task-local resource, separate from environment
