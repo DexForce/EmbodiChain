@@ -282,7 +282,7 @@ def test_proof_selection_requires_original_completed_runs_and_separates_history(
     assert proof_population(root, "routing") == []
 
 
-@pytest.mark.parametrize("failed", [False, True])
+@pytest.mark.parametrize("failed", [False, True, "early_timeout"])
 def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
     tmp_path: Path,
     failed: bool,
@@ -362,6 +362,9 @@ def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
         )
         for record in records:
             record["group"] = groups[0]
+            record["planned_case"] = group["config"]
+        if failed == "early_timeout":
+            groups[0]["config"] = {}
     figures = campaign._campaign_figures(tmp_path, records)
     assert len(figures) == 10
     assert {f["scope"]["phase"] for f in figures} == {"coverage", "publication"}
@@ -377,6 +380,8 @@ def test_campaign_figures_keep_phase_attempt_and_raw_source_identity(
         with (tmp_path / "campaign-figure-data.csv").open() as stream:
             data = list(csv.DictReader(stream))
         assert all(point["y"] == "" and point["mad"] == "" for point in data)
+        if failed == "early_timeout":
+            assert all(point["coordinate_basis"] == "frozen_plan" for point in data)
 
 
 def test_formal_exit_130_harvests_evidence_and_stops_later_jobs(

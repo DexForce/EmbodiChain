@@ -690,7 +690,9 @@ def _campaign_figures(
     points = []
     for record in records:
         group = record["group"]
-        config = group["config"]
+        measured_config = group["config"]
+        planned_config = record.get("planned_case", {})
+        config = {**planned_config, **measured_config}
         experiment = group["experiment_id"]
         if experiment not in ("R-03", "R-04", "R-05", "R-09", "modality-ablation"):
             continue
@@ -761,6 +763,9 @@ def _campaign_figures(
                 "experiment": record["experiment"],
                 "source_artifact_sha256": record["source_artifact_sha256"],
                 "valid_runs": value["valid_runs"],
+                "coordinate_basis": (
+                    "measured_config" if measured_config else "frozen_plan"
+                ),
             }
             groups.setdefault(json.dumps(chart_scope, sort_keys=True), []).append(point)
             points.append(point)
@@ -861,6 +866,7 @@ def rebuild_campaign_report(root: Path) -> Path:
 
     root = Path(root).absolute()
     definition, state = _load(root)
+    cases = {case["case_id"]: case["case"] for case in definition["cases"]}
     reports = []
     coverage = []
     chart_records = []
@@ -893,6 +899,7 @@ def rebuild_campaign_report(root: Path) -> Path:
                                 "source_artifact_sha256": hashlib.sha256(
                                     (experiment / "runs.json").read_bytes()
                                 ).hexdigest(),
+                                "planned_case": cases[job["case_id"]],
                                 "phase": job["phase"],
                                 "attempt": attempt["attempt_id"],
                                 "profile_sha256": (
