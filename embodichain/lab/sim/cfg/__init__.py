@@ -39,6 +39,7 @@ from .articulation import (
     link_attrs_from_dict,
 )
 from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .fluid import FluidObjectCfg, FluidSpawnCfg, FluidRenderCfg
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -86,6 +87,9 @@ DEFAULT_RENDERER: Literal["auto", "no-render", "hybrid", "fast-rt", "rt"] = "aut
 from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 
 __all__ = [
+    "FluidObjectCfg",
+    "FluidSpawnCfg",
+    "FluidRenderCfg",
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
     "DenoisingCfg",

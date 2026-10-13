@@ -16,6 +16,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from embodichain.lab.sim.cfg.fluid import FluidObjectCfg
+from embodichain.lab.sim.objects.fluid import FluidObject
+
 import os
 import gc
 import sys
@@ -680,6 +684,8 @@ class SimulationManager:
         self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
+        self._fluid_objects: dict[str, FluidObject] = {}
+        self._rigid_trajectory_controls: dict[str, tuple] = {}
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 
@@ -957,6 +963,7 @@ class SimulationManager:
         uid_list.extend(list(self._rigid_objects.keys()))
         uid_list.extend(list(self._rigid_object_groups.keys()))
         uid_list.extend(list(self._deformable_objects.keys()))
+        uid_list.extend(list(self._fluid_objects.keys()))
         uid_list.extend(list(self._articulations.keys()))
         return uid_list
 
@@ -1024,6 +1031,7 @@ class SimulationManager:
             getattr(self, "_rigid_objects", {}),
             getattr(self, "_rigid_object_groups", {}),
             getattr(self, "_deformable_objects", {}),
+            getattr(self, "_fluid_objects", {}),
             getattr(self, "_articulations", {}),
             getattr(self, "_robots", {}),
             getattr(self, "_sensors", {}),
@@ -1299,6 +1307,61 @@ class SimulationManager:
         from embodichain.data.assets import SimResources
 
         self._default_resources = SimResources()
+
+    def register_kinematic_rigid_trajectory(
+        self,
+        uid: str,
+        world_poses: torch.Tensor | np.ndarray,
+        *,
+        fps: float,
+    ) -> None:
+        """Drive declared kinematic rigid bodies at each Newton solver substep.
+
+        Args:
+            uid: Previously declared kinematic rigid-object UID.
+            world_poses: Finite unit-quaternion xyz+xyzw tracks, ``(E, frames, 7)``.
+            fps: Positive pose sample frequency in Hz. Positions interpolate
+                linearly, orientations use SLERP, and the last pose is held.
+
+        The host-side control disables CUDA graph replay. Register before
+        prepare; reset_objects_state rewinds only selected instance clocks.
+        """
+        from embodichain.lab.sim._runtime_controls import (
+            _KinematicRigidTrajectoryControl,
+        )
+
+        if not self.is_newton_backend or self._spawn_scene.builder.is_finalized:
+            raise RuntimeError("Register Newton rigid trajectories before prepare().")
+        rigid = self._rigid_objects.get(uid)
+        if rigid is None or rigid.body_type != "kinematic":
+            raise ValueError("uid must name a declared kinematic rigid object.")
+        if uid in self._rigid_trajectory_controls:
+            raise ValueError("A rigid trajectory already controls this object.")
+        poses = (
+            world_poses.detach().cpu().numpy()
+            if isinstance(world_poses, torch.Tensor)
+            else np.asarray(world_poses)
+        )
+        if (
+            poses.ndim != 3
+            or poses.shape[0] != self.num_envs
+            or poses.shape[1] == 0
+            or poses.shape[2] != 7
+        ):
+            raise ValueError("world_poses must have shape (E, frames, 7).")
+        if not np.isfinite(poses).all() or not np.allclose(
+            np.linalg.norm(poses[..., 3:], axis=-1), 1.0, atol=1e-5
+        ):
+            raise ValueError("world_poses must be finite with unit xyzw quaternions.")
+        if not np.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be finite and positive.")
+        controls = tuple(
+            _KinematicRigidTrajectoryControl(f"{arena}/{uid}", poses[i], fps)
+            for i, arena in enumerate(self._spawn_scene.arena_names)
+        )
+        for control in controls:
+            self._spawn_scene.builder.add_runtime_control(control)
+        self._rigid_trajectory_controls[uid] = controls
 
     def register_kinematic_joint_trajectory(
         self,
@@ -2274,6 +2337,7 @@ class SimulationManager:
         | RigidObject
         | RigidObjectGroup
         | DeformableObject
+        | FluidObject
         | Articulation
         | None
     ):
@@ -2300,6 +2364,8 @@ class SimulationManager:
             return self._rigid_object_groups[uid]
         if uid in self._deformable_objects:
             return self._deformable_objects[uid]
+        if uid in self._fluid_objects:
+            return self._fluid_objects[uid]
         if uid in self._articulations:
             return self._articulations[uid]
 
@@ -2650,6 +2716,118 @@ class SimulationManager:
         if was_materialized:
             self.prepare()
         return [item[3] for item in declarations]
+
+    def add_fluid_object(self, cfg: FluidObjectCfg) -> FluidObject:
+        """Declare a fixed-count, single-environment Newton DFSPH fluid.
+
+        Args:
+            cfg: Fluid source, initial state, physical and render properties.
+
+        Returns:
+            A facade bound in place by ``prepare()``.
+        """
+        from dexsim.spawn import FluidDesc, FluidRenderMode, FluidMeshSurfaceRenderDesc
+        from embodichain.lab.sim.spawn.descriptors import _pose_from_cfg
+
+        if self.physics.name != "newton" or self.device.type != "cuda":
+            raise NotImplementedError("Fluid objects require Newton on CUDA.")
+        if self.num_envs != 1:
+            raise NotImplementedError(
+                "Fluid world isolation is not yet qualified; num_envs must be 1."
+            )
+        if (
+            self._active_newton_solver_type != "sph"
+            or self.sim_config.physics_cfg.requires_grad
+        ):
+            raise NotImplementedError("Fluid objects require non-differentiable SPH.")
+        if self.spawn_result is not None:
+            raise NotImplementedError("Declare fluids before prepare().")
+        if not isinstance(cfg, FluidObjectCfg):
+            raise TypeError("Expected FluidObjectCfg.")
+        cfg = cfg.copy()
+        cfg.validate()
+        cfg.__post_init__()
+        if not cfg.uid or cfg.uid in self.asset_uids:
+            raise ValueError(
+                "Fluid uid must be nonempty and unique across scene assets."
+            )
+        for other in self._fluid_objects.values():
+            if (cfg.density, cfg.particle_spacing) != (
+                other.cfg.density,
+                other.cfg.particle_spacing,
+            ):
+                raise ValueError("All fluids must share density and particle_spacing.")
+        configured = self.sim_config.physics_cfg.solver_cfg
+        for key, value in (
+            ("rest_density", cfg.density),
+            ("particle_diameter", cfg.particle_spacing),
+        ):
+            existing = (
+                configured.get(key)
+                if isinstance(configured, Mapping)
+                else getattr(configured, key, None)
+            )
+            if existing is not None and not np.isclose(
+                existing, value, rtol=1e-7, atol=0
+            ):
+                raise ValueError(f"Fluid {key} conflicts with solver_cfg.{key}.")
+        points = cfg.spawn.sample(cfg.particle_spacing)
+        pose = _pose_from_cfg(cfg)
+        if cfg.spawn.reference_uid is not None:
+            reference = self._rigid_objects.get(cfg.spawn.reference_uid)
+            if reference is None:
+                raise ValueError(
+                    "Fluid reference_uid must name an already declared rigid object."
+                )
+            pose = _pose_from_cfg(reference.cfg) @ pose
+        mesh_surface = FluidMeshSurfaceRenderDesc(**cfg.render.mesh_surface)
+        if cfg.render.mode == "none" and self.has_native_renderer:
+            raise NotImplementedError(
+                "Fluid mode='none' currently requires renderer='no-render'."
+            )
+        material = None
+        if self.has_native_renderer and cfg.render.material is not None:
+            material_cfg = cfg.render.material.copy()
+            material_cfg.uid = f"{cfg.uid}_fluid_material"
+            material = self.create_visual_material(material_cfg).inst.mat
+        descriptor = FluidDesc(
+            name=cfg.uid,
+            positions=points,
+            pose=pose,
+            density=cfg.density,
+            particle_spacing=cfg.particle_spacing,
+            particle_radius=cfg.particle_radius,
+            render_radius=cfg.render.render_radius,
+            render_mode=FluidRenderMode(
+                "particles" if cfg.render.mode == "none" else cfg.render.mode
+            ),
+            mesh_surface=mesh_surface,
+            render_material=material,
+            per_env=True,
+        )
+        fluid = FluidObject(
+            cfg, points, pose, self.device, on_write=self._invalidate_fluid_state
+        )
+        self._spawn_scene.declare("fluid_object", cfg.uid, descriptor, facade=fluid)
+        self._fluid_objects[cfg.uid] = fluid
+        self.notify_visualization_topology_changed()
+        return fluid
+
+    def _invalidate_fluid_state(self) -> None:
+        self.physics.invalidate_fluid_state()
+        if self._render_state_published is not None:
+            self._render_state_published = False
+
+    def get_fluid_object(self, uid: str) -> FluidObject | None:
+        """Return the fluid registered under ``uid``, or None."""
+        return self._fluid_objects.get(uid)
+
+    def get_fluid_diagnostics(self, uid: str) -> dict[str, object]:
+        """Return detached diagnostics for a prepared fluid without stepping."""
+        fluid = self._fluid_objects[uid]
+        if fluid.is_declared:
+            raise RuntimeError("Fluid diagnostics require prepare().")
+        return self.physics.fluid_diagnostics(fluid)
 
     def add_deformable_object(self, cfg: DeformableObjectCfg) -> DeformableObject:
         """Declare a volume or surface deformable in the scene.
@@ -4693,6 +4871,13 @@ class SimulationManager:
         for uid, rigid_obj_group in self._rigid_object_groups.items():
             if uid not in excluded_uids:
                 rigid_obj_group.reset(env_ids)
+        for uid, controls in self._rigid_trajectory_controls.items():
+            if uid not in excluded_uids:
+                for index in (range(self.num_envs) if env_ids is None else env_ids):
+                    controls[int(index)].reset()
+        for uid, fluid_obj in self._fluid_objects.items():
+            if uid not in excluded_uids:
+                fluid_obj.reset(env_ids)
         for uid, deformable_obj in self._deformable_objects.items():
             if uid not in excluded_uids:
                 deformable_obj.reset(env_ids)
@@ -4874,6 +5059,7 @@ class SimulationManager:
                 "_rigid_objects",
                 "_rigid_object_groups",
                 "_deformable_objects",
+                "_fluid_objects",
                 "_articulations",
                 "_robots",
             ):
@@ -4889,6 +5075,7 @@ class SimulationManager:
             finally:
                 self._spawn_scene = None
 
+        self._rigid_trajectory_controls.clear()
         self.clean_materials()
 
         if self._env:
@@ -4924,6 +5111,7 @@ class SimulationManager:
         _sever_wrapper_refs("_constraints")
         _sever_wrapper_refs("_rigid_object_groups")
         _sever_wrapper_refs("_deformable_objects")
+        _sever_wrapper_refs("_fluid_objects")
         _sever_wrapper_refs("_articulations")
         _sever_wrapper_refs("_robots")
         _sever_wrapper_refs("_sensors")

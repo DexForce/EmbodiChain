@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     import dexsim
 
     from embodichain.lab.sim.sim_manager import SimulationManagerCfg
+    from embodichain.lab.sim.objects.fluid import FluidObject
 
 __all__ = ["NewtonPhysicsBackend"]
 
@@ -111,7 +112,65 @@ class NewtonPhysicsBackend(PhysicsBackend):
             raise RuntimeError(
                 "Newton backend is unavailable for render-state synchronization."
             )
-        backend.sync_to_dexsim(result.world)
+        fluids = getattr(self._manager, "_fluid_objects", {})
+        clipped = [f for f in fluids.values() if f.cfg.render.clip_below_z is not None]
+        if not clipped:
+            backend.sync_to_dexsim(result.world)
+            return
+        positions = wp.to_torch(backend.state_0.particle_q).clone()
+        for fluid in clipped:
+            for entity in fluid._entities:
+                binding = entity._physics_binding
+                start = binding.particle_start
+                selected = positions[start : start + entity.particle_count]
+                selected[selected[:, 2] < fluid.cfg.render.clip_below_z] = float("nan")
+        backend.render_sync.sync(
+            result.world,
+            backend.state_0.body_q,
+            wp.from_torch(positions, dtype=wp.vec3),
+            simulation_time=backend.sim_time,
+        )
+
+    def invalidate_fluid_state(self) -> None:
+        """Invalidate single-world SPH history after an explicit state write.
+
+        DFSPH rebuilds neighbors, density and Jacobi scratch on each step.
+        Optional SDF-penalty body history is reset to the current pose.
+        """
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+
+        backend = get_newton_backend(self._manager._world)
+        if backend is None or backend.solver_type != "sph":
+            raise RuntimeError("Prepared SPH backend required.")
+        backend.invalidate_cuda_graph("fluid state write")
+        boundary = backend.solver.sdf_boundary
+        if boundary is not None and boundary._body_q_prev is not None:
+            boundary._body_q_prev.assign(backend.state_0.body_q)
+
+    def fluid_diagnostics(self, fluid: FluidObject) -> dict[str, object]:
+        """Read detached native SPH diagnostics without publishing or stepping."""
+        from dexsim.engine.newton_physics.backend_registry import get_newton_backend
+        import torch
+
+        backend = get_newton_backend(self._manager._world)
+        solver = backend.solver
+        density = wp.to_torch(solver.particle_density)
+        values = []
+        for entity in fluid._entities:
+            start = entity._physics_binding.particle_start
+            values.append(density[start : start + entity.particle_count].clone())
+        return {
+            "particle_density": torch.stack(values),
+            "volume_map_enabled": solver.volume_map_boundary is not None,
+            "sdf_penalty_enabled": solver.sdf_boundary is not None,
+            "boundary_shape_count": (
+                0
+                if solver.volume_map_boundary is None
+                else solver.volume_map_boundary.shape_count
+            ),
+            "rest_density_kg_m3": solver.rest_density,
+            "viscosity": solver.viscosity,
+        }
 
     def _step(self, physics_dt: float) -> None:
         """Let the manager batch window and offscreen consumers after stepping."""

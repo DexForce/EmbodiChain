@@ -28,6 +28,7 @@ from .rigid_object_group import (
     RigidBodyGroupData,
     RigidObjectGroupCfg,
 )
+from .fluid import FluidObject, FluidObjectData
 from .deformable import (
     DeformableObject,
     DeformableObjectData,

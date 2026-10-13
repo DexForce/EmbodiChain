@@ -1,5 +1,18 @@
 # Franka 单臂马克杯倒水 demo
 
+## Sim 公共接口接入
+
+当前实现用 `SimulationManager.add_fluid_object(FluidObjectCfg(...))` 声明水体；
+求解器仍直接使用 DexSim 的 `SPHSolverCfg`。杯壁、台面和碗通过刚体配置声明，
+碰撞网格与显示网格可分离。原生 SDF 和液面重建由底层适配负责。
+离屏相机采集前使用 `sim.sync_render_state()` 发布状态，裁剪仅影响显示副本。
+多子步时杯壁轨迹通过 `register_kinematic_rigid_trajectory()` 在 solver 子步采样。
+
+当前支持单个 Newton CUDA 环境、固定粒子数、单向耦合。场景准备后物理拓扑冻结。
+Gym 批量环境及部分 reset 尚未接入；需先完成当前 demo 的完整效果验收，
+再补齐底层 SPH world 隔离和按环境复位。`IMPLEMENTATION_PLAN.md` 记录进度。
+
+
 使用真实 Franka Panda 机型的仿真模型，从侧面夹住正常大小的马克杯杯把，
 抬杯、向碗里倒水、回正并放回。这里包含两个入口：
 
@@ -183,7 +196,7 @@ python .agents/skills/add-task-program/scripts/inspect_deployment.py \
   embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.newton.yaml
 ```
 
-本分支新增任务配置、教程、资产和演示证据，EC 生产代码与公共 API 未变。
+原始 PR #771 新增任务配置、教程、资产和演示证据；当前接入分支另增加了 EC 流体公共 API。
 没有新建教程单元测试；使用部署检查、现有配置/资源测试、语法检查和 GPU
 短测验证。完整演示最初在提交 `3bb2a03c5` 上录制，分支基于 `453675d8a` 整理；
 当前分支的检查结果单独记录在 PR，不能把原录像当作新基线的完整复跑。

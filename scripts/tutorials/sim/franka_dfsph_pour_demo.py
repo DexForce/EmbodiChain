@@ -13,13 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ----------------------------------------------------------------------------
-"""Temporary EmbodiChain pouring demo using DexSim's Newton DFSPH solver.
+"""EmbodiChain pouring demo using the public fluid and rigid-boundary APIs.
 
 The robot and mug replay the recorded MuJoCo grasp trajectory. Water is simulated
 by DFSPH with volume-map boundaries, without reaction forces on the robot.
 Volume maps use baked mesh SDFs; the additional SDF penalty force is disabled.
-The temporary adapter uses the manager's existing Spawn builder and Newton
-render-sync object; it does not add a production fluid facade.
+The manager owns fluid declaration, state binding and render publication.
 """
 
 from __future__ import annotations
@@ -34,16 +33,23 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 import trimesh
-import warp as wp
 from scipy.interpolate import PchipInterpolator
 from scipy.spatial.transform import Rotation, Slerp
 
-from dexsim import spawn
 from dexsim.engine.newton_physics import SPHSolverCfg
-from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import LightCfg, NewtonPhysicsCfg, RenderCfg
+from embodichain.lab.sim.cfg import (
+    LightCfg,
+    NewtonPhysicsCfg,
+    RenderCfg,
+    RigidObjectCfg,
+    FluidObjectCfg,
+    FluidSpawnCfg,
+    FluidRenderCfg,
+)
+from embodichain.lab.sim.material import VisualMaterialCfg
+from embodichain.lab.visualization import VisualizationCfg
 from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
 from embodichain.lab.sim.sensors import CameraCfg
 
@@ -70,29 +76,56 @@ def _pose(position: np.ndarray, rotation: np.ndarray | None = None) -> np.ndarra
     return pose
 
 
-def _mesh_geometry(mesh: trimesh.Trimesh, name: str) -> spawn.GeometryDesc:
-    return spawn.GeometryDesc.mesh(
-        vertices=np.asarray(mesh.vertices, dtype=np.float32),
-        triangles=np.asarray(mesh.faces, dtype=np.int32),
-        segment_name=name,
+def _add_boundary(
+    sim: SimulationManager,
+    name: str,
+    mesh: trimesh.Trimesh,
+    pose: np.ndarray,
+    *,
+    resolution: int = 192,
+    material: VisualMaterialCfg | None = None,
+    visual_asset: Path | None = None,
+    render_enabled: bool = True,
+):
+    if material is not None:
+        material = material.copy()
+        material.uid = f"{name}_material"
+    return sim.add_rigid_object(
+        RigidObjectCfg.from_dict(
+            {
+                "uid": name,
+                "body_type": "kinematic",
+                "init_local_pose": pose,
+                "render_enabled": render_enabled,
+                "shape": {
+                    "shape_type": "Mesh",
+                    "vertices": np.asarray(mesh.vertices, dtype=np.float32),
+                    "triangles": np.asarray(mesh.faces, dtype=np.int32),
+                    "visual_material": None if material is None else material.to_dict(),
+                    "collision": {
+                        "approximation": "sdf",
+                        "force_sdf": False,
+                        "sdf_resolution": resolution,
+                        "sdf_narrow_band_range": [-0.025, 0.025],
+                        "sdf_padding": 0.012,
+                        "sdf_texture_format": "uint16",
+                    },
+                },
+                "visual_shape": (
+                    None
+                    if visual_asset is None
+                    else {"shape_type": "Mesh", "fpath": str(visual_asset)}
+                ),
+                "attrs": {
+                    "collision_props": {
+                        "backend": "newton",
+                        "has_particle_collision": True,
+                    },
+                    "material_props": {"backend": "newton", "dynamic_friction": 0.2},
+                },
+            }
+        )
     )
-
-
-def _sdf(geometry: spawn.GeometryDesc, resolution: int = 192) -> spawn.CollisionDesc:
-    collision = spawn.CollisionDesc.from_geometry(
-        geometry, approximation=spawn.CollisionApproximation.SDF
-    )
-    collision.newton = spawn.NewtonCollisionDesc(
-        has_particle_collision=True,
-        # Bake the mesh SDF eagerly: Newton 1.6 rejects mesh sdf_* shape fields.
-        force_sdf=False,
-        sdf_max_resolution=resolution,
-        sdf_narrow_band_range=(-0.025, 0.025),
-        sdf_padding=0.012,
-        sdf_texture_format="uint16",
-        mu=0.2,
-    )
-    return collision
 
 
 def _particle_summary(
@@ -195,6 +228,7 @@ def main() -> None:
     sim = SimulationManager(
         SimulationManagerCfg(
             headless=True,
+            visualization=VisualizationCfg(),
             width=1280,
             height=960,
             num_envs=1,
@@ -244,51 +278,35 @@ def main() -> None:
             }
         )
         robot = sim.add_robot(robot_cfg)
-        # Temporary adapter: add fluid to the manager's one existing scene.
-        builder = sim._spawn_scene.builder
-        # FluidDesc currently accepts a native material, unlike RenderDesc.
-        water_material = sim.get_env().create_pbr_material("dfsph_water")
-        water_inst = water_material.get_inst()
-        water_inst.set_pbr_param("baseColor", 0.88, 0.96, 1.0)
-        water_inst.set_pbr_param("roughness", 0.025)
-        water_inst.set_pbr_param("metallic", 0.0)
-        water_inst.set_pbr_param("ior", 1.333)
-        water_inst.set_pbr_param("transmission", 0.96)
-        water_inst.set_pbr_param("volume_thickness", 0.04)
-        water_inst.set_pbr_param("volume_attenuation_distance", 0.6)
-        water_inst.set_pbr_param("volume_attenuation_color", 0.80, 0.92, 1.0)
-        builder.materials["ceramic"] = spawn.MaterialDesc(
-            name="ceramic", base_color=(0.82, 0.85, 0.88, 1.0), roughness=0.22
+        # VisualMaterialCfg colors use sRGB; preserve the native demo
+        # linear baseColor [0.88, 0.96, 1.0] after conversion.
+        water_material = VisualMaterialCfg(
+            base_color=[0.9452768, 0.982207, 1.0, 1.0],
+            roughness=0.025,
+            metallic=0.0,
+            ior=1.333,
+            transmission=0.96,
+            volume_thickness=0.04,
+            volume_attenuation_distance=0.6,
+            volume_attenuation_color=(0.80, 0.92, 1.0),
         )
-        builder.materials["table"] = spawn.MaterialDesc(
-            name="table", base_color=(0.23, 0.29, 0.34, 1.0), roughness=0.6
+        _add_boundary(
+            sim,
+            "pour_table",
+            trimesh.creation.box([0.42, 0.70, 0.50]),
+            _pose(np.array([-0.91, -0.08, 0.25])),
+            resolution=96,
+            material=VisualMaterialCfg(
+                base_color=[0.23, 0.29, 0.34, 1.0], roughness=0.6, metallic=0.5, ior=1.0
+            ),
         )
-        table_geometry = _mesh_geometry(
-            trimesh.creation.box([0.42, 0.70, 0.50]), "table"
-        )
-        builder.add_object(
-            spawn.ObjectDesc(
-                name="pour_table",
-                pose=_pose(np.array([-0.91, -0.08, 0.25])),
-                renders=[
-                    spawn.RenderDesc.from_geometry(table_geometry, material_ref="table")
-                ],
-                collisions=[_sdf(table_geometry, 96)],
-                physics=spawn.RigidBodyPhysicsDesc.kinematic(),
-                per_env=False,
-            )
-        )
-        floor_geometry = _mesh_geometry(
-            trimesh.creation.box([2.5, 2.5, 0.10]), "fluid_floor"
-        )
-        builder.add_object(
-            spawn.ObjectDesc(
-                name="fluid_floor",
-                pose=_pose(np.array([-0.5, 0.0, -0.055])),
-                collisions=[_sdf(floor_geometry, 128)],
-                physics=spawn.RigidBodyPhysicsDesc.kinematic(),
-                per_env=False,
-            )
+        _add_boundary(
+            sim,
+            "fluid_floor",
+            trimesh.creation.box([2.5, 2.5, 0.10]),
+            _pose(np.array([-0.5, 0.0, -0.055])),
+            resolution=128,
+            render_enabled=False,
         )
         mug_mesh = trimesh.creation.revolve(
             [
@@ -301,20 +319,28 @@ def main() -> None:
             ],
             sections=128,
         )
-        builder.add_object(
-            spawn.ObjectDesc(
-                name="liquid_mug",
-                pose=initial_pose,
-                renders=[
-                    spawn.RenderDesc.from_geometry(
-                        spawn.GeometryDesc.mesh(str(CUP_ASSET))
-                    )
-                ],
-                collisions=[_sdf(_mesh_geometry(mug_mesh, "mug_wall"))],
-                physics=spawn.RigidBodyPhysicsDesc.kinematic(),
-                per_env=False,
-            )
+        mug = _add_boundary(
+            sim, "liquid_mug", mug_mesh, initial_pose, visual_asset=CUP_ASSET
         )
+        if args.substeps > 1:
+            boundary_times = (
+                np.arange(round(duration / dt) * args.substeps) * dt / args.substeps
+            )
+            source_times = np.clip(
+                args.start_time + (boundary_times - 1.0) * args.speed,
+                args.start_time,
+                recorded_times[-1],
+            )
+            boundary_poses = np.concatenate(
+                (
+                    position_curve(source_times),
+                    orientation_curve(source_times).as_quat(),
+                ),
+                axis=1,
+            )
+            sim.register_kinematic_rigid_trajectory(
+                "liquid_mug", boundary_poses[None], fps=args.physics_hz * args.substeps
+            )
         outer_z = np.linspace(0.0, BOWL_HEIGHT, 64)
         inner_z = np.linspace(BOWL_HEIGHT, BOWL_BOTTOM_Z, 64)
         outer_r = np.sqrt(BOWL_OUTER_RADIUS**2 - (outer_z - BOWL_SPHERE_Z) ** 2)
@@ -328,44 +354,45 @@ def main() -> None:
             ]
         )
         bowl_mesh = trimesh.creation.revolve(bowl_profile, sections=192)
-        bowl_geometry = _mesh_geometry(bowl_mesh, "receiver_wall")
-        builder.add_object(
-            spawn.ObjectDesc(
-                name="receiver",
-                pose=_pose(RECEIVER_CENTER),
-                renders=[
-                    spawn.RenderDesc.from_geometry(
-                        bowl_geometry, material_ref="ceramic"
-                    )
-                ],
-                collisions=[_sdf(bowl_geometry)],
-                physics=spawn.RigidBodyPhysicsDesc.kinematic(),
-                per_env=False,
-            )
-        )
-        builder.add_fluid(
-            "water",
-            points,
-            density=1000.0,
-            particle_spacing=spacing,
-            particle_radius=0.30 * spacing,
-            render_radius=0.30 * spacing,
-            render_mode=spawn.FluidRenderMode.MESH_SURFACE,
-            mesh_surface=spawn.FluidMeshSurfaceRenderDesc(
-                gpu_enabled=True,
-                cell_size=0.54 * spacing,
-                max_res=512,
-                kernel_radius=1.01 * spacing,
-                iso_density=0.57,
-                density_smooth_iters=2,
-                aabb_trim_fraction=0.0,
-                min_component_tris=32,
-                laplacian_iters=4,
-                laplacian_alpha=0.11,
-                update_period=1,
+        _add_boundary(
+            sim,
+            "receiver",
+            bowl_mesh,
+            _pose(RECEIVER_CENTER),
+            material=VisualMaterialCfg(
+                base_color=[0.82, 0.85, 0.88, 1.0],
+                roughness=0.22,
+                metallic=0.5,
+                ior=1.0,
             ),
-            material=water_material,
-            per_env=False,
+        )
+        fluid = sim.add_fluid_object(
+            FluidObjectCfg(
+                uid="water",
+                density=1000.0,
+                particle_spacing=spacing,
+                particle_radius=0.30 * spacing,
+                spawn=FluidSpawnCfg(kind="points", positions=points),
+                render=FluidRenderCfg(
+                    mode="mesh_surface",
+                    render_radius=0.30 * spacing,
+                    material=water_material,
+                    clip_below_z=0.49,
+                    mesh_surface={
+                        "gpu_enabled": True,
+                        "cell_size": 0.54 * spacing,
+                        "max_res": 512,
+                        "kernel_radius": 1.01 * spacing,
+                        "iso_density": 0.57,
+                        "density_smooth_iters": 2,
+                        "aabb_trim_fraction": 0.0,
+                        "min_component_tris": 32,
+                        "laplacian_iters": 4,
+                        "laplacian_alpha": 0.11,
+                        "update_period": 1,
+                    },
+                ),
+            )
         )
         sim.add_light(
             LightCfg(
@@ -384,19 +411,17 @@ def main() -> None:
             )
         )
         sim.prepare()
-        backend = get_newton_backend(sim.get_world())
+        diagnostics = sim.get_fluid_diagnostics("water")
         boundary_info = {
             "method": "volume_map",
-            "volume_map_enabled": backend.solver.volume_map_boundary is not None,
-            "sdf_penalty_enabled": backend.solver.sdf_boundary is not None,
+            "volume_map_enabled": diagnostics["volume_map_enabled"],
+            "sdf_penalty_enabled": diagnostics["sdf_penalty_enabled"],
             "volume_map_resolution": args.volume_map_resolution,
-            "boundary_shape_count": backend.solver.volume_map_boundary.shape_count,
-            "rest_density_kg_m3": backend.solver.rest_density,
-            "viscosity": backend.solver.viscosity,
+            "boundary_shape_count": diagnostics["boundary_shape_count"],
+            "rest_density_kg_m3": diagnostics["rest_density_kg_m3"],
+            "viscosity": diagnostics["viscosity"],
         }
         print(json.dumps(boundary_info), flush=True)
-        mug = sim.spawn_result.get_actor("liquid_mug")
-        fluid = sim.spawn_result.get_fluid_particle_set("water")
         camera = sim.add_sensor(
             CameraCfg(
                 uid="demo_camera",
@@ -465,32 +490,24 @@ def main() -> None:
             cup_pose = _pose(
                 position_curve(source_time), orientation_curve(source_time).as_matrix()
             )
-            mug.set_world_pose(cup_pose)
-            mug.set_linear_velocity((cup_pose[:3, 3] - previous_cup_pose[:3, 3]) / dt)
-            mug.set_angular_velocity(
-                Rotation.from_matrix(
-                    cup_pose[:3, :3] @ previous_cup_pose[:3, :3].T
-                ).as_rotvec()
-                / dt
-            )
+            if args.substeps == 1:
+                mug.set_kinematic_state(
+                    torch.from_numpy(cup_pose).unsqueeze(0),
+                    torch.from_numpy(
+                        (cup_pose[:3, 3] - previous_cup_pose[:3, 3]) / dt
+                    ).unsqueeze(0),
+                    torch.from_numpy(
+                        Rotation.from_matrix(
+                            cup_pose[:3, :3] @ previous_cup_pose[:3, :3].T
+                        ).as_rotvec()
+                        / dt
+                    ).unsqueeze(0),
+                )
             previous_cup_pose = cup_pose
             sim.update(step=1, render_final_step=False)
             if step % frame_stride == 0:
                 with sim.render_frame():
-                    # Cull below-table droplets only in a separate render copy.
-                    # The mesh builder explicitly skips non-finite render points.
-                    # Physics positions, velocities and counts remain untouched.
-                    render_positions = wp.to_torch(
-                        fluid.get_particle_positions()
-                    ).clone()
-                    render_positions[render_positions[:, 2] < 0.49] = float("nan")
-                    render_positions_wp = wp.from_torch(render_positions, dtype=wp.vec3)
-                    backend.render_sync.sync(
-                        sim.get_world(),
-                        backend.state_0.body_q,
-                        render_positions_wp,
-                        simulation_time=backend.sim_time,
-                    )
+                    sim.sync_render_state()
                     camera.update()
                     close_camera.update()
                     rgb = camera.get_data()["color"][0, :, :, :3].cpu().numpy()
@@ -509,14 +526,20 @@ def main() -> None:
                         cv2.cvtColor(close_rgb, cv2.COLOR_RGB2BGR),
                     )
             if step % args.physics_hz == 0 or step == round(duration / dt) - 1:
-                positions = fluid.get_particle_positions().numpy()
+                if args.substeps > 1:
+                    cup_pose = mug.get_local_pose(to_matrix=True)[0].cpu().numpy()
+                positions = fluid.data.particle_pos_w[0].cpu().numpy()
                 if not np.isfinite(positions).all():
                     raise RuntimeError("Non-finite DFSPH particle state")
-                velocities = fluid.get_particle_velocities().numpy()
+                velocities = fluid.data.particle_vel_w[0].cpu().numpy()
                 summary = _particle_summary(positions, cup_pose, spacing, velocities)
                 summary["time_s"] = elapsed + dt
                 speed = np.linalg.norm(velocities, axis=1)
-                density = backend.solver.particle_density.numpy()
+                density = (
+                    sim.get_fluid_diagnostics("water")["particle_density"][0]
+                    .cpu()
+                    .numpy()
+                )
                 summary["speed_p99_m_s"] = float(np.quantile(speed, 0.99))
                 summary["density_p99_kg_m3"] = float(np.quantile(density, 0.99))
                 metrics.append(summary)
@@ -543,8 +566,8 @@ def main() -> None:
             "particle_count": len(points),
             "spacing_m": spacing,
             "source_start_time_s": args.start_time,
-            "rest_density_kg_m3": backend.solver.rest_density,
-            "viscosity": backend.solver.viscosity,
+            "rest_density_kg_m3": diagnostics["rest_density_kg_m3"],
+            "viscosity": diagnostics["viscosity"],
             "surface_tension_coefficient": args.surface_tension,
             "render_aabb_trim_fraction": 0.0,
             "render_only_cull_below_z_m": 0.49,

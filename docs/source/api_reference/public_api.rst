@@ -22,6 +22,17 @@ decoding and compiling the constrained Task Program schema surface.
    compile_mllm_task_program
    decode_mllm_task_program
 
+embodichain.compute.geometry.particles
+-----------------------------------------
+
+Deterministic initial-fill volume sampling without simulation dependencies.
+
+.. currentmodule:: embodichain.compute.geometry.particles
+
+.. autosummary::
+
+   sample_volume_particles
+
 embodichain.data.assets.demo_assets
 -----------------------------------
 
@@ -341,6 +352,31 @@ embodichain.lab.gym.envs.embodied_env
 
    EmbodiedEnvCfg
    EmbodiedEnv
+
+embodichain.lab.sim.cfg.fluid
+--------------------------------
+
+Fixed-count fluid source and render configuration. Numerical solver parameters remain owned by DexSim SPHSolverCfg.
+
+.. currentmodule:: embodichain.lab.sim.cfg.fluid
+
+.. autosummary::
+
+   FluidSpawnCfg
+   FluidRenderCfg
+   FluidObjectCfg
+
+embodichain.lab.sim.objects.fluid
+------------------------------------
+
+Scene-bound fluid state with detached particle snapshots and explicit state writes. Fluid rendering has no fixed mesh-connectivity contract.
+
+.. currentmodule:: embodichain.lab.sim.objects.fluid
+
+.. autosummary::
+
+   FluidObject
+   FluidObjectData
 
 embodichain.lab.task_program.integrations.simulation.handover
 -------------------------------------------------------------
