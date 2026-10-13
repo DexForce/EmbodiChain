@@ -338,6 +338,30 @@ def _robot() -> Mock:
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
     robot.compute_ik.side_effect = compute_ik
+
+    def compute_batch_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Keep the existing geometry/failure hooks in this action test double;
+        # MotionGenerator itself must call the waypoint-batched robot API.
+        results = [
+            robot.compute_ik(
+                pose=pose[:, index],
+                name=name,
+                joint_seed=joint_seed[:, index],
+            )
+            for index in range(pose.shape[1])
+        ]
+        return (
+            torch.stack([valid for valid, _ in results], dim=1),
+            torch.stack([qpos for _, qpos in results], dim=1),
+        )
+
+    robot.get_solver.return_value = SimpleNamespace(supports_continuous_batch_ik=False)
+    robot.compute_batch_ik.side_effect = compute_batch_ik
     robot.compute_fk.side_effect = compute_fk
     robot.compute_batch_fk.side_effect = compute_batch_fk
     return robot
@@ -356,7 +380,19 @@ def _motion_generator() -> MotionGenerator:
     generator.planner.with_motion_context.side_effect = (
         lambda options, *, start_qpos, control_part: options
     )
+    generator._solve_cartesian_waypoints = Mock(
+        wraps=generator._solve_cartesian_waypoints
+    )
     return generator
+
+
+def _cartesian_targets(generator: MotionGenerator) -> list[torch.Tensor]:
+    """Inspect path order independently of batched solver dispatch order."""
+    return [
+        pose
+        for call in generator._solve_cartesian_waypoints.call_args_list
+        for pose in call.args[0].unbind(dim=1)
+    ]
 
 
 def _bind_action(
@@ -625,10 +661,17 @@ def _dual_motion_generator() -> MotionGenerator:
         joint_seed: torch.Tensor,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        offset = 0.1 if name == "left_arm" else 0.2
+        results = [
+            robot.compute_ik(
+                pose=pose[:, index],
+                name=name,
+                joint_seed=joint_seed[:, index],
+            )
+            for index in range(pose.shape[1])
+        ]
         return (
-            torch.ones(pose.shape[:2], dtype=torch.bool),
-            joint_seed + offset,
+            torch.stack([valid for valid, _ in results], dim=1),
+            torch.stack([qpos for _, qpos in results], dim=1),
         )
 
     def compute_fk(
@@ -641,6 +684,7 @@ def _dual_motion_generator() -> MotionGenerator:
 
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
+    robot.get_solver.return_value = SimpleNamespace(supports_continuous_batch_ik=False)
     robot.compute_ik.side_effect = compute_ik
     robot.compute_batch_ik.side_effect = compute_batch_ik
     robot.compute_fk.side_effect = compute_fk
@@ -657,6 +701,9 @@ def _dual_motion_generator() -> MotionGenerator:
     generator.planner.default_plan_options.return_value = PlanOptions()
     generator.planner.with_motion_context.side_effect = (
         lambda options, *, start_qpos, control_part: options
+    )
+    generator._solve_cartesian_waypoints = Mock(
+        wraps=generator._solve_cartesian_waypoints
     )
     return generator
 
@@ -1470,7 +1517,6 @@ def test_move_held_object_yaw_freedom_requires_boolean(value) -> None:
 
 def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
     generator = _motion_generator()
-    solved_poses: list[torch.Tensor] = []
 
     def compute_ik(
         pose: torch.Tensor,
@@ -1478,7 +1524,6 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         joint_seed: torch.Tensor,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        solved_poses.append(pose.clone())
         return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
 
     generator.robot.compute_ik.side_effect = compute_ik
@@ -1516,6 +1561,7 @@ def test_pour_rotates_held_object_about_internal_axis_and_returns() -> None:
         torch.tensor([math.pi / 2.0, 0.0, 0.0])
     )
     trajectory = _joint_trajectory(plan)
+    solved_poses = _cartesian_targets(generator)
     assert plan.plan_success.tolist() == [True, True]
     assert trajectory.velocities is not None
     assert torch.count_nonzero(trajectory.velocities[:, :, ARM_DOF:]) == 0
@@ -1823,7 +1869,6 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
 
 def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
     generator = _motion_generator()
-    solved_poses: list[torch.Tensor] = []
 
     def compute_ik(
         pose: torch.Tensor,
@@ -1831,7 +1876,6 @@ def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
         joint_seed: torch.Tensor,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        solved_poses.append(pose.clone())
         return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
 
     generator.robot.compute_ik.side_effect = compute_ik
@@ -1850,6 +1894,7 @@ def test_move_end_effector_visits_batched_waypoints_in_order() -> None:
         _context(),
     )
 
+    solved_poses = _cartesian_targets(generator)
     assert plan.plan_success.all()
     assert len(solved_poses) == 2
     assert solved_poses[0][:, 0, 3].tolist() == pytest.approx([0.1, 0.1])
@@ -2068,7 +2113,6 @@ def test_pick_fixed_object_to_eef_bypasses_sampling_and_adjustments() -> None:
 def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     generator = _motion_generator()
     generator.generate = Mock(wraps=generator.generate)
-    solved_poses: list[torch.Tensor] = []
 
     def compute_ik(
         pose: torch.Tensor,
@@ -2076,7 +2120,6 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
         joint_seed: torch.Tensor,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        solved_poses.append(pose.clone())
         return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
 
     generator.robot.compute_ik.side_effect = compute_ik
@@ -2119,6 +2162,7 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
     )
 
     trajectory = _joint_trajectory(plan)
+    solved_poses = _cartesian_targets(generator)
     assert plan.plan_success.tolist() == [True, True]
     assert trajectory.positions.shape == (NUM_ENVS, 20, ROBOT_DOF)
     assert torch.equal(trajectory.env_ids, context.env_ids)
@@ -2155,7 +2199,6 @@ def test_axis_align_plans_two_arm_phases_and_aligns_the_object_axis() -> None:
 
 def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> None:
     generator = _motion_generator()
-    solved_poses: list[torch.Tensor] = []
 
     def compute_ik(
         pose: torch.Tensor,
@@ -2163,7 +2206,6 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
         joint_seed: torch.Tensor,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        solved_poses.append(pose.clone())
         return torch.ones(NUM_ENVS, dtype=torch.bool), joint_seed + 0.1
 
     generator.robot.compute_ik.side_effect = compute_ik
@@ -2202,6 +2244,7 @@ def test_axis_align_upright_prefers_perpendicular_grasp_and_pre_rotates() -> Non
         _context(scene=_target_scene(object_pose, timestamp=0.0, version=0)),
     )
 
+    solved_poses = _cartesian_targets(generator)
     assert plan.plan_success.all()
     expected_rotation = (
         axis_angle_to_rotation_matrix(torch.tensor([0.0, math.pi / 4.0, 0.0]))
@@ -3269,9 +3312,7 @@ def test_slide_plans_expected_segments(
         grasp_calls[0][1],
         torch.tensor([0.0, -1.0, 0.0]).expand(NUM_ENVS, -1),
     )
-    planned_targets = [
-        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
-    ]
+    planned_targets = _cartesian_targets(generator)
     expected_axis = torch.tensor([0.0, -1.0, 0.0])
     approach_axis = torch.tensor([0.0, 0.0, 1.0]) if calibrated else expected_axis
     motion_lengths = Slide._motion_segment_lengths(
@@ -3400,7 +3441,7 @@ def test_slide_joint_target_uses_fresh_row_local_motion(
         plan.diagnostics.metadata["affordance_sample"]["grasp"]["key"] == "slide:grasp"
     )
     lengths = Slide._motion_segment_lengths(24, 3, direction=direction)
-    poses = [c.kwargs["pose"] for c in generator.robot.compute_ik.call_args_list]
+    poses = _cartesian_targets(generator)
     endpoint = poses[lengths[1] + lengths[2] - 2]
     active = torch.tensor(positions) != target_position
     assert torch.allclose(
@@ -3740,9 +3781,7 @@ def test_push_object_plans_contact_and_target_directed_planar_motion() -> None:
         trajectory.positions[:, plan.segment("close").stop - 1, ARM_DOF:] == 1.0
     )
 
-    planned_targets = [
-        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
-    ]
+    planned_targets = _cartesian_targets(generator)
     motion_lengths = PushObject._motion_segment_lengths(
         24,
         options.hand_interp_steps,
@@ -3984,9 +4023,7 @@ def test_open_door_plans_approach_grasp_arc_release_and_rotated_retract(
         torch.tensor([0.0, -1.0, 0.0]).expand(NUM_ENVS, -1),
         atol=1.0e-6,
     )
-    planned_targets = [
-        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
-    ]
+    planned_targets = _cartesian_targets(generator)
     assert torch.allclose(
         planned_targets[0][:, :3, 3],
         torch.tensor([1.0, 0.1, 0.0]).expand(NUM_ENVS, -1),
@@ -4367,9 +4404,7 @@ def test_press_plans_close_approach_press_and_retract(
     expected_pressed = (
         contact_pose[:, :3, 3] + contact_pose[:, :3, 2] * options.press_distance
     )
-    planned_targets = [
-        call.kwargs["pose"] for call in generator.robot.compute_ik.call_args_list
-    ]
+    planned_targets = _cartesian_targets(generator)
     motion_lengths = Press._motion_segment_lengths(
         sample_count, options.hand_interp_steps
     )

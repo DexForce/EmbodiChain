@@ -66,7 +66,6 @@ HORIZONTAL_OBJECT_MESH_PATH = get_data_path(
 )
 VERTICAL_OBJECT_SCALE = (0.56, 0.56, 0.56)
 HORIZONTAL_OBJECT_SCALE = (2.0, 2.0, 2.0)
-GRIPPER_TCP_Z = 0.15
 SUPPORT_SURFACE_Z = 0.50
 SUPPORT_SURFACE_SIZE = (0.8, 1.2, 0.02)
 SUPPORT_SURFACE_CENTER = (
@@ -128,7 +127,7 @@ def create_dual_robot(
         robot_type=robot_type,
         uid=f"Dual{robot_type.title()}HandOver",
         urdf_name=f"dual_{robot_type}_hand_over",
-        tcp_z=GRIPPER_TCP_Z,
+        solver="pytorch" if robot_type == "franka" else "ur",
         ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         hand_stiffness=1e3,
         hand_damping=1e2,

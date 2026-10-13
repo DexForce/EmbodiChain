@@ -643,9 +643,10 @@ def _mock_generator(
     robot = Mock()
     robot.device = torch.device("cpu")
     robot.num_instances = batch_size
-    robot.compute_ik.return_value = (
-        torch.ones(batch_size, dtype=torch.bool),
-        torch.zeros(batch_size, controlled_dof),
+    robot.get_solver.return_value = SimpleNamespace(supports_continuous_batch_ik=False)
+    robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        torch.zeros(*pose.shape[:2], controlled_dof),
     )
     planner = Mock()
     planner.cfg.planner_type = "toppra"
@@ -759,9 +760,9 @@ class TestMotionStrategy:
 
     def test_ik_interp_solves_batched_poses_without_calling_backend(self):
         generator = _mock_generator()
-        generator.robot.compute_ik.return_value = (
-            torch.tensor([1, 0], dtype=torch.int64),
-            torch.ones(BATCH_SIZE, CONTROLLED_DOF),
+        generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+            torch.tensor([[1], [0]], dtype=torch.int64).expand(*pose.shape[:2]),
+            torch.ones(*pose.shape[:2], CONTROLLED_DOF),
         )
         start = torch.zeros(BATCH_SIZE, CONTROLLED_DOF)
         start[1] = 0.5
@@ -799,12 +800,13 @@ class TestMotionStrategy:
             pose: torch.Tensor,
             name: str,
             joint_seed: torch.Tensor,
+            continuous: bool = False,
         ) -> tuple[torch.Tensor, torch.Tensor]:
             qpos = joint_seed.clone()
-            qpos[:, :3] = pose[:, :3, 3]
-            return torch.ones(BATCH_SIZE, dtype=torch.bool), qpos
+            qpos[..., :3] = pose[..., :3, 3]
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
 
-        generator.robot.compute_ik.side_effect = encode_position
+        generator.robot.compute_batch_ik.side_effect = encode_position
         weights = torch.linspace(1.0 / (SAMPLE_COUNT - 1), 1.0, SAMPLE_COUNT - 1)
         targets = []
         for weight in weights:
@@ -835,7 +837,10 @@ class TestMotionStrategy:
         assert torch.allclose(
             result.positions[:, :, 0], expected_x.expand(BATCH_SIZE, -1)
         )
-        assert generator.robot.compute_ik.call_count == SAMPLE_COUNT - 1
+        assert generator.robot.compute_batch_ik.call_count == 2
+        calls = generator.robot.compute_batch_ik.call_args_list
+        assert sum(call.kwargs["pose"].shape[1] for call in calls) == SAMPLE_COUNT - 1
+        generator.robot.compute_ik.assert_not_called()
         generator.planner.plan.assert_not_called()
 
     def test_motion_gen_delegates_and_resamples_backend_result(self):
@@ -1045,6 +1050,9 @@ class _CartesianRobot:
     device = torch.device("cpu")
     num_instances = 2
 
+    def get_solver(self, name: str) -> SimpleNamespace:
+        return SimpleNamespace(supports_continuous_batch_ik=False)
+
     def compute_fk(self, *, qpos: torch.Tensor, **kwargs: object) -> torch.Tensor:
         pose = torch.eye(4, device=qpos.device).repeat(qpos.shape[0], 1, 1)
         pose[:, 0, 3] = qpos[:, 0]
@@ -1068,6 +1076,142 @@ class _CartesianRobot:
         valid = torch.ones(pose.shape[:2], dtype=torch.bool)
         valid[1] = pose[1, :, 0, 3] < 0.75
         return valid, pose[..., 0, 3:4].clone()
+
+
+@pytest.mark.parametrize(
+    "batch_size, count", [(1, 1), (1, 7), (1, 65), (2, 9), (16, 65), (64, 65)]
+)
+def test_cartesian_ik_batches_both_environments_and_waypoints(
+    batch_size: int, count: int
+) -> None:
+    generator = _mock_generator(batch_size=batch_size, controlled_dof=1)
+    poses = torch.eye(4).repeat(batch_size, count, 1, 1)
+    poses[..., 0, 3] = torch.linspace(0.1, 0.5, count)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+
+    success, positions = generator._solve_cartesian_waypoints(
+        poses, torch.zeros(batch_size, 1), "arm"
+    )
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert sum(call.kwargs["pose"].shape[1] for call in calls) == count
+    assert all(call.kwargs["pose"].shape[0] == batch_size for call in calls)
+    assert all(call.kwargs["pose"].shape[1] <= 32 for call in calls)
+    assert all(call.kwargs["pose"].numel() // 16 <= 512 for call in calls)
+    if count > 2:
+        assert len(calls) < count
+    generator.robot.compute_ik.assert_not_called()
+
+
+def test_independent_batch_ik_interpolates_seeds_and_carries_chunk_end() -> None:
+    generator = _mock_generator(controlled_dof=1)
+    start = torch.tensor([[0.0], [10.0]])
+    poses = torch.eye(4).repeat(2, 9, 1, 1)
+    poses[..., 0, 3] = start + torch.arange(1, 10)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(poses, start, "arm")
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert [call.kwargs["pose"].shape[1] for call in calls] == [1, 3, 1, 3, 1]
+    torch.testing.assert_close(calls[0].kwargs["joint_seed"], start[:, None])
+    torch.testing.assert_close(calls[1].kwargs["joint_seed"], poses[:, :3, 0, 3:4])
+    torch.testing.assert_close(calls[2].kwargs["joint_seed"], poses[:, 3:4, 0, 3:4])
+    torch.testing.assert_close(calls[3].kwargs["joint_seed"], poses[:, 4:7, 0, 3:4])
+    torch.testing.assert_close(calls[4].kwargs["joint_seed"], poses[:, 7:8, 0, 3:4])
+    assert all(call.kwargs.get("continuous", False) is False for call in calls)
+
+
+def test_continuous_batch_ik_uses_capability_and_path_seed_across_chunks() -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = True
+    poses = torch.eye(4).repeat(2, 9, 1, 1)
+    poses[..., 0, 3] = torch.arange(1, 10)
+    generator.robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
+        torch.ones(pose.shape[:2], dtype=torch.bool),
+        pose[..., 0, 3:4].clone(),
+    )
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(
+            poses, torch.zeros(2, 1), "arm"
+        )
+
+    assert success.all()
+    torch.testing.assert_close(positions, poses[..., 0, 3:4])
+    calls = generator.robot.compute_batch_ik.call_args_list
+    assert [call.kwargs["pose"].shape[1] for call in calls] == [4, 4, 1]
+    assert all(call.kwargs["continuous"] is True for call in calls)
+    assert all(call.kwargs["joint_seed"].shape == (2, 1) for call in calls)
+    torch.testing.assert_close(calls[1].kwargs["joint_seed"], poses[:, 3, 0, 3:4])
+    torch.testing.assert_close(calls[2].kwargs["joint_seed"], poses[:, 7, 0, 3:4])
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_batch_ik_failure_keeps_last_valid_seed_at_chunk_boundary(
+    continuous: bool,
+) -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = continuous
+    poses = torch.eye(4).repeat(2, 8, 1, 1)
+    poses[..., 0, 3] = torch.arange(1, 9)
+
+    def solve(*, pose: torch.Tensor, joint_seed: torch.Tensor, **kwargs: object):
+        assert torch.isfinite(joint_seed).all()
+        qpos = pose[..., 0, 3:4].clone()
+        valid = torch.ones(pose.shape[:2], dtype=torch.bool)
+        valid[1] = qpos[1, :, 0] != 4.0
+        qpos[1, ~valid[1]] = float("nan")
+        return valid, qpos
+
+    generator.robot.compute_batch_ik.side_effect = solve
+    with patch("embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", 8):
+        success, positions = generator._solve_cartesian_waypoints(
+            poses, torch.zeros(2, 1), "arm"
+        )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0], poses[0, :, 0, 3:4])
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+    calls = generator.robot.compute_batch_ik.call_args_list
+    boundary_seed = calls[1 if continuous else 2].kwargs["joint_seed"]
+    torch.testing.assert_close(
+        boundary_seed.reshape(2, 1), torch.tensor([[4.0], [3.0]])
+    )
+
+
+@pytest.mark.parametrize("malformed", ["success_shape", "qpos_shape", "nonbinary_mask"])
+def test_batch_ik_rejects_malformed_solver_results(malformed: str) -> None:
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.compute_batch_ik.side_effect = None
+    valid = torch.ones(2, 1, dtype=torch.bool)
+    qpos = torch.zeros(2, 1, 1)
+    error = ValueError
+    match = "IK success"
+    if malformed == "success_shape":
+        valid = valid[:, 0]
+    elif malformed == "qpos_shape":
+        qpos = qpos[:, 0]
+        match = "IK qpos"
+    else:
+        valid = torch.full((2, 1), 2, dtype=torch.int64)
+        error = TypeError
+        match = "binary integer"
+    generator.robot.compute_batch_ik.return_value = valid, qpos
+    with pytest.raises(error, match=match):
+        generator._solve_cartesian_waypoints(
+            torch.eye(4).repeat(2, 1, 1, 1), torch.zeros(2, 1), "arm"
+        )
+    generator.robot.compute_ik.assert_not_called()
 
 
 @pytest.mark.parametrize("strategy", ["motion_gen", "ik_interp"])
@@ -1225,18 +1369,16 @@ def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
 ) -> None:
     generator = _trapezoidal_generator()
     generator.robot = _CartesianRobot()
-    previous_seed = torch.zeros(2, 1)
+    solved_positions: list[torch.Tensor] = []
 
     def solve(*, pose, joint_seed, **kwargs):
-        nonlocal previous_seed
-        torch.testing.assert_close(joint_seed, previous_seed)
-        qpos = pose[:, 0, 3:4].clone()
-        success = torch.ones(2, dtype=torch.bool)
-        success[1] = not torch.isclose(qpos[1, 0], torch.tensor(0.5))
-        previous_seed = torch.where(success[:, None], qpos, previous_seed)
+        qpos = pose[..., 0, 3:4].clone()
+        solved_positions.append(qpos)
+        success = torch.ones(pose.shape[:2], dtype=torch.bool)
+        success[1] = ~torch.isclose(qpos[1, :, 0], torch.tensor(0.5))
         return success, qpos
 
-    generator.robot.compute_ik = solve
+    generator.robot.compute_batch_ik = solve
     goals = [torch.eye(4).repeat(2, 1, 1) for _ in range(2)]
     for pose, position in zip(goals, (0.5, 1.0)):
         pose[:, 0, 3] = position
@@ -1252,7 +1394,9 @@ def test_intermediate_ik_failure_stays_failed_after_reachable_goal(
             interpolate_position_step=0.25,
         ),
     )
-    torch.testing.assert_close(previous_seed, torch.ones(2, 1))
+    solved_positions = torch.cat(solved_positions, dim=1)
+    assert (solved_positions[1, :, 0] == 0.5).any()
+    assert (solved_positions[1, :, 0] == 1.0).any()
     assert result.success.tolist() == [True, False]
     torch.testing.assert_close(result.positions[0, -1], torch.ones(1))
     torch.testing.assert_close(
@@ -1284,7 +1428,7 @@ def test_public_interpolation_rejects_failed_required_waypoints() -> None:
 def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None:
     generator = _trapezoidal_generator()
     generator.robot = _CartesianRobot()
-    original_ik = generator.robot.compute_ik
+    original_ik = generator.robot.compute_batch_ik
 
     def nonfinite_ik(**kwargs):
         success, qpos = original_ik(**kwargs)
@@ -1292,7 +1436,7 @@ def test_nonfinite_ik_solution_fails_only_its_environment(strategy: str) -> None
         qpos[1] = float("nan")
         return success, qpos
 
-    generator.robot.compute_ik = nonfinite_ik
+    generator.robot.compute_batch_ik = nonfinite_ik
     goal = torch.eye(4).repeat(2, 1, 1)
     goal[:, 0, 3] = 0.5
     result = generator.generate(

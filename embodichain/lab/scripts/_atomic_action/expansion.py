@@ -43,7 +43,10 @@ if TYPE_CHECKING:
 FREE_PHASES = {
     "pick_up": {"approach", "lift"},
     "place": {"approach", "retract"},
-    "pour": {"pour"},
+    # Pour's single segment contains the required rotated target between its
+    # outward and return legs. Protect it until the plan exports that boundary;
+    # preserving only the segment endpoints would change the requested angle.
+    "pour": set(),
     "press": {"approach", "retract"},
     "slide": {"approach", "return"},
     "twist": {"approach", "retract"},
@@ -164,12 +167,17 @@ def _augment(
     rows = []
     records = []
     reference_rows: dict[int, int] = {}
+    row_local_reference = any(
+        plan.skill_id == "slide" for plan in compiled.action_plans
+    )
     for row, (branch, variant_index) in enumerate(args._recipes):
-        # Compile once per physical row for scene-dependent feasibility, then
-        # share one successful reference within each affordance branch. Pure
-        # trajectory recipes must not change grasp when IK rankings differ
-        # slightly between otherwise identical simulation slots.
-        reference_row = reference_rows.setdefault(branch, row)
+        # Slide plans against each row's measured robot and handle state,
+        # including after pull replay. Its branch identity remains shared in
+        # affordance sampling, while geometry, timing and provenance stay local.
+        # Other sample scenes retain one reference within each grasp branch.
+        reference_row = (
+            row if row_local_reference else reference_rows.setdefault(branch, row)
+        )
         record = {
             "row": row,
             "reference_row": reference_row,
@@ -222,7 +230,21 @@ def _augment(
                 raise RuntimeError(
                     "Spatial expansion changed the command-clock horizon"
                 )
-            rows.append(candidate[restore].to(trajectory.positions.device))
+            restored = candidate[restore].to(
+                device=trajectory.positions.device,
+                dtype=trajectory.positions.dtype,
+            )
+            # Canonicalization may merge near-identical zero-time samples.
+            # Restore immutable phases from their actual source indices so
+            # neither that merge nor resampling can alter a required target.
+            for action_index, plan in enumerate(compiled.action_plans):
+                for segment in plan.segments:
+                    if segment.name not in FREE_PHASES[plan.skill_id]:
+                        absolute = compiled.segment(action_index, segment.name)
+                        restored[absolute.start : absolute.stop] = trajectory.positions[
+                            reference_row, absolute.start : absolute.stop
+                        ]
+            rows.append(restored)
             record.update(
                 operator=result.variants[variant_index].spatial_operator,
                 rejected=dict(result.rejected),

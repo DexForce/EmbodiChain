@@ -130,17 +130,41 @@ Projected assurance is not physical task success.
 Use `/add-atomic-action` to extend goals, planners, registration and focused tests.
 Keep planning side-effect-free; actions do not own task sequencing or simulator stepping.
 
-The configured direct-simulation host is `embodichain run-atomic-action --config`:
+The direct-simulation sample host is `embodichain run-atomic-action --skill`:
 `lab/scripts/run_atomic_action.py` owns selection, batching and cleanup;
-`lab/scripts/_atomic_action/` owns the ten example scenes and strict configuration.
+`lab/scripts/_atomic_action/` owns the ten example scenes and internal sample defaults.
+The required skill selects the scene; physics, robot and planner are direct
+selectors. Robot compatibility is checked before scene import or simulator
+construction: Pickup, Place, MoveJoint and Handover accept the three sample
+presets, while the other scenes require UR5. Layouts, skill options and
+expansion settings remain sample-owned rather than externally configurable.
+The dual-arm sample factory in `lab/scripts/_atomic_action/scenario.py` retains
+the arm preset unless Python callers select `solver="pytorch"`. The Handover
+scene currently makes that selection for Franka; UR presets keep analytical UR
+IK. Cartesian preparation uses the shared
+[batched motion facade](../motion-planning/planner-details.md#normalization-and-capabilities).
+Mounted-gripper TCP calibration belongs to `lab/scripts/_atomic_action/tcp_presets.py`.
+The UR5/PGI, Franka/PGI and UR10/Robotiq mounting poses are independent; named
+tool points retain the existing general, grasp and handover calibrations.
+Scene callers select those points, and single/dual robot factories forward full
+poses to their solvers. Explicit Python PGI `tcp_z` overrides affect only local
+Z while preserving rotation and lateral offsets. TCP calibration changes the
+kinematic tool frame, not physical geometry.
 The matching tutorial files are compatibility entry points to those same scenes.
 Affordance branch overrides stay independent of physical slots, then the host
 adapts each compiled reference to `motion.expansion` for spatial variants.
-Contact phases and hand columns stay exact; original action joins and intervals
-are restored before replay so callbacks retain their source indices. Slide
-replans its push from the handle observed after the pull. Output status records
+Contact phases and hand columns stay exact; protected phase samples are copied
+from the source after adaptation, including near-identical zero-time joins.
+Original action joins and intervals are restored before replay so callbacks
+retain their source indices. Pour's single rotation/return segment is protected
+from spatial perturbation because its required interior target has no exported
+waypoint boundary; its preceding PickUp free phases remain editable. Slide
+replans its push from each row's robot/handle observations after pull. Every
+Slide reference remains row-local through expansion and replay, including its
+start, locked contact path, timing and sampling provenance; shared affordance
+branch identity does not imply equivalent measured states. Output status records
 planning/playback completion, with no measured physical-success authority or
-Gym dataset collection. Configurations and usage live in the host's `configs/README.md`.
+Gym dataset collection. Usage lives in the host's `README.md`.
 
 ## Recommended change sites
 

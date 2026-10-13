@@ -19,7 +19,7 @@
 ## Choose the layer
 
 `BasePlanner` consumes waypoints and returns timed trajectories.
-`MotionGenerator` is the stateful facade for strategy selection, sequential IK,
+`MotionGenerator` is the stateful facade for strategy selection, batched IK,
 backend composition, normalization and multi-part coordination. Import it from
 `motion.motion_generator`, not `motion.planners`. Motion siblings and the parent
 namespace remain lazy to protect Robot initialization.

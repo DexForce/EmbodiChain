@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Configured CLI for ten Atomic Skill example scenes and trajectory expansion."""
+"""Run Atomic Skill sample scenes and trajectory expansion from direct arguments."""
 
 from __future__ import annotations
 
@@ -23,15 +23,17 @@ from collections.abc import Sequence
 from copy import deepcopy
 import importlib
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from embodichain.cli.sim import add_sim_args_to_parser
-from embodichain.lab.scripts._atomic_action.config import (
+from embodichain.lab.scripts._atomic_action.defaults import (
+    PLANNERS,
+    ROBOTS,
     SCENES,
-    _load_config,
-    _number,
     _recipes,
+    _sample_defaults,
     _scene_args,
 )
 
@@ -44,22 +46,36 @@ def _create_parser() -> argparse.ArgumentParser:
     parser.set_defaults(
         num_envs=None,
         device=None,
-        headless=None,
         renderer=None,
-        physics=None,
         arena_space=None,
         gpu_id=None,
     )
     parser.add_argument(
-        "--config",
-        "--atomic-config",
-        "--atomic_config",
-        type=Path,
-        help="Atomic scene YAML configuration.",
+        "--skill",
+        required=True,
+        choices=SCENES,
+        help="Atomic Skill sample scene to run.",
     )
     parser.add_argument(
-        "--list-skills", action="store_true", help="List supported scene names."
+        "--robot",
+        choices=ROBOTS,
+        default="ur5",
+        help="Sample robot preset (default: ur5).",
     )
+    parser.add_argument(
+        "--planner",
+        choices=PLANNERS,
+        default="trapezoidal",
+        help="Motion planner backend (default: trapezoidal).",
+    )
+    # The common parser owns --physics; this sample launcher selects it directly.
+    for action in parser._actions:
+        if action.dest == "physics":
+            action.help = "Physics backend for the sample scene (default: default)."
+        elif action.dest == "num_envs":
+            action.help = "Parallel sample capacity; defaults to 16 (4 for move_joint)."
+        elif action.dest == "renderer":
+            action.help = "Renderer backend; omission uses the sample's auto renderer."
     parser.add_argument(
         "--no-expansion",
         action="store_true",
@@ -96,12 +112,10 @@ def _create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_config(args: argparse.Namespace) -> tuple[dict[str, Any], tuple[int, ...]]:
-    cfg = _load_config(args.config.resolve())
-    if args.physics is not None and args.physics != cfg["physics"]:
-        raise ValueError(
-            "--physics may only confirm the config-owned backend; use a separate config to change it"
-        )
+def _resolve_sample(args: argparse.Namespace) -> tuple[dict[str, Any], tuple[int, ...]]:
+    cfg = _sample_defaults(
+        args.skill, physics=args.physics, robot=args.robot, planner=args.planner
+    )
     for key in (
         "num_envs",
         "device",
@@ -119,7 +133,9 @@ def _resolve_config(args: argparse.Namespace) -> tuple[dict[str, Any], tuple[int
     if cfg["runtime"]["gpu_id"] < 0:
         raise ValueError("--gpu-id must be non-negative")
     if cfg["runtime"]["arena_space"] is not None:
-        _number(cfg["runtime"]["arena_space"], "--arena-space", positive=True)
+        spacing = cfg["runtime"]["arena_space"]
+        if not math.isfinite(spacing) or spacing <= 0:
+            raise ValueError("--arena-space must be finite and positive")
     if cfg["runtime"]["device"] == "":
         raise ValueError("--device must be a nonempty device string")
     if args.seed is not None:
@@ -198,21 +214,16 @@ def _run_batch(
 
 
 def cli(argv: Sequence[str] | None = None) -> None:
-    """Run selected Atomic scene recipes from a YAML configuration.
+    """Run selected Atomic scene recipes with internal sample defaults.
 
     Args:
         argv: Arguments excluding the executable and subcommand names.
     """
     parser = _create_parser()
     args = parser.parse_args(argv)
-    if args.list_skills:
-        print("\n".join(SCENES))
-        return
-    if args.config is None:
-        parser.error("--config is required unless --list-skills is selected")
     try:
-        cfg, selected = _resolve_config(args)
-    except (OSError, ValueError) as exc:
+        cfg, selected = _resolve_sample(args)
+    except ValueError as exc:
         parser.error(str(exc))
     directory = Path(cfg["output"]["directory"])
     directory.mkdir(parents=True, exist_ok=True)

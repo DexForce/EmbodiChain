@@ -129,7 +129,7 @@ def run(args: argparse.Namespace) -> None:
         args: Resolved standalone or configured host arguments.
     """
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
+    robot = add_ur5_gripper_robot(sim, tcp_point="grasp")
     obj = create_align_object(
         sim,
         obj_position=OBJ_POSITION,

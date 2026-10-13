@@ -147,7 +147,7 @@ def run(args: argparse.Namespace) -> None:
         args: Resolved standalone or configured host arguments.
     """
     sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
+    robot = add_ur5_gripper_robot(sim, tcp_point="grasp")
     obj = create_align_object(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot)
     initialize_pre_pick_robot_pose(robot, obj, hand_open)

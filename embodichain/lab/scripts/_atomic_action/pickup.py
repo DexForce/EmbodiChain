@@ -132,7 +132,7 @@ def run(args: argparse.Namespace) -> None:
     """
     sampling = create_affordance_sampling_context(args)
     sim = create_tutorial_simulation(args)
-    robot = add_tutorial_robot(sim, args.robot, tcp_z=0.15)
+    robot = add_tutorial_robot(sim, args.robot, tcp_point="grasp")
     obj = create_pick_object(sim)
     sim.prepare()
     hand_open, hand_close = get_hand_open_close_qpos(robot)
@@ -233,7 +233,7 @@ def initialize_simulation(args) -> "SimulationManager":
 
 def create_robot(sim: "SimulationManager") -> "Robot":
     """Add the default PickUp tutorial robot."""
-    robot = add_tutorial_robot(sim, "ur5", tcp_z=0.15)
+    robot = add_tutorial_robot(sim, "ur5", tcp_point="grasp")
     # DexSim binds body_data (and therefore get_qpos) only after prepare().
     sim.prepare()
     return robot

@@ -40,12 +40,12 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.lab.scripts._atomic_action.support import (
-    ROBOTIQ_2F_140_TCP,
     TutorialRobot,
     configure_newton_gripper_contacts,
     create_tutorial_rigid_body_physics,
     create_tutorial_robot_cfg,
 )
+from .tcp_presets import sample_tool_tcp
 
 DUAL_UR5_INIT_POS = (1.95, 0.0, 0.1)
 DUAL_UR5_INIT_ROT = (0.0, 0.0, -90.0)
@@ -90,7 +90,7 @@ def create_dual_tutorial_robot_cfg(
     robot_type: TutorialRobot,
     uid: str,
     urdf_name: str,
-    tcp_z: float,
+    tcp_z: float | None = None,
     solver: Literal["ur", "pytorch"] = "ur",
     ur_ik_nearest_weight: Sequence[float] | None = None,
     pytorch_num_samples: int = 30,
@@ -104,21 +104,24 @@ def create_dual_tutorial_robot_cfg(
 ) -> RobotCfg:
     """Build a dual tutorial robot from the selected arm and hand.
 
-    Franka always uses its PyTorch kinematics solver; ``solver="ur"`` selects
-    the analytical solver for UR5 and UR10. UR5 and Franka use the shared PGI
-    hand, while ``ur10`` uses the six-DOF Robotiq 2F-140 and its
-    rotated 0.23 m TCP. The mounting layout, control-part names, and downstream
-    action bindings stay identical across robot choices.
+    Franka retains its preset FEP analytical solver and redundancy search.
+    ``solver="ur"`` selects the analytical solver for UR5 and UR10, while
+    ``solver="pytorch"`` explicitly selects numerical IK for any preset.
+    UR5 and Franka use the shared PGI hand, while ``ur10`` uses the six-DOF
+    Robotiq 2F-140 and its rotated 0.21 m TCP. The mounting layout, control-part
+    names, and downstream action bindings stay identical across robot choices.
 
     Args:
         robot_type: Arm family to mount on both sides.
         uid: Simulation robot identifier.
         urdf_name: Cache name for the assembled dual-arm URDF.
-        tcp_z: PGI tool-center-point offset along local Z. The UR10/Robotiq
-            variant uses its fixed mounting TCP instead.
-        solver: Preferred UR solver implementation.
+        tcp_z: Optional explicit PGI local-Z override for Python callers.
+            Omission selects the fixture's handover TCP; UR10/Robotiq uses
+            its separate calibrated mounting transform.
+        solver: UR solver selection; Franka retains its preset unless
+            ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
-        pytorch_num_samples: Number of PyTorch IK seed samples.
+        pytorch_num_samples: Seed count when explicitly selecting PyTorch IK.
         init_pos: Root position of the assembled robot.
         init_rot: Root xyz Euler rotation in degrees.
         left_arm_home: Optional left-arm initial configuration.
@@ -131,20 +134,16 @@ def create_dual_tutorial_robot_cfg(
         A dual-arm robot configuration with two matching grippers.
     """
     base_cfg = create_tutorial_robot_cfg(robot_type)
-    tcp = (
-        ROBOTIQ_2F_140_TCP
-        if robot_type == "ur10"
-        else (
-            (1.0, 0.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0, 0.0),
-            (0.0, 0.0, 1.0, tcp_z),
-            (0.0, 0.0, 0.0, 1.0),
-        )
+    tcp = sample_tool_tcp(
+        robot_type,
+        point="handover",
+        tcp_z=tcp_z if robot_type != "ur10" else None,
     )
     base_solver = base_cfg.solver_cfg["arm"]
-    if robot_type in {"ur5", "ur10"} and solver == "ur":
+    if solver == "ur":
         base_solver.tcp = tcp
-        base_solver.ik_nearest_weight = ur_ik_nearest_weight
+        if robot_type in {"ur5", "ur10"}:
+            base_solver.ik_nearest_weight = ur_ik_nearest_weight
     else:
         base_solver = PytorchSolverCfg(
             end_link_name=base_solver.end_link_name,
@@ -223,7 +222,7 @@ def add_dual_tutorial_robot(
     robot_type: TutorialRobot,
     uid: str,
     urdf_name: str,
-    tcp_z: float,
+    tcp_z: float | None = None,
     solver: Literal["ur", "pytorch"] = "ur",
     ur_ik_nearest_weight: Sequence[float] | None = None,
     pytorch_num_samples: int = 30,
@@ -242,11 +241,13 @@ def add_dual_tutorial_robot(
         robot_type: Arm family to mount on both sides.
         uid: Simulation robot identifier.
         urdf_name: Cache name for the assembled dual-arm URDF.
-        tcp_z: PGI tool-center-point offset along local Z. The UR10/Robotiq
-            variant uses its fixed mounting TCP instead.
-        solver: Preferred UR solver implementation.
+        tcp_z: Optional explicit PGI local-Z override for Python callers.
+            Omission selects the fixture's handover TCP; UR10/Robotiq uses
+            its separate calibrated mounting transform.
+        solver: UR solver selection; Franka retains its preset unless
+            ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
-        pytorch_num_samples: Number of PyTorch IK seed samples.
+        pytorch_num_samples: Seed count when explicitly selecting PyTorch IK.
         init_pos: Root position of the assembled robot.
         init_rot: Root xyz Euler rotation in degrees.
         left_arm_home: Optional left-arm initial configuration.

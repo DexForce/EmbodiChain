@@ -194,7 +194,9 @@ def run(args: argparse.Namespace) -> None:
 
     sim = create_tutorial_simulation(args)
     robot = add_ur5_gripper_robot(
-        sim, init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0], tcp_z=0.15
+        sim,
+        init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0],
+        tcp_point="grasp",
     )
     drawer = create_drawer(sim)
     sim.prepare()

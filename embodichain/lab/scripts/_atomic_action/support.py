@@ -74,6 +74,11 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 )
 from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
+from .tcp_presets import (
+    ToolPoint,
+    UR10_ROBOTIQ_2F_140_TCP as ROBOTIQ_2F_140_TCP,
+    sample_tool_tcp,
+)
 
 RECORD_WIDTH = 640
 RECORD_HEIGHT = 480
@@ -93,12 +98,6 @@ GRIPPER_URDF_PATH = "DH_PGI_140_80/DH_PGI_140_80.urdf"
 GRIPPER_HAND_JOINT_PATTERN = "gripper_finger1_joint_1"
 ROBOTIQ_2F_140_URDF_PATH = "Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
 ROBOTIQ_HAND_JOINT_PATTERN = r".*(?:finger|knuckle)_joint"
-ROBOTIQ_2F_140_TCP = (
-    (0.0, -1.0, 0.0, 0.0),
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, 0.21),
-    (0.0, 0.0, 0.0, 1.0),
-)
 # DexSim canonicalizes the UR source URDF's rounded +/-6.2832 limits to +/-2*pi.
 # Configure the solver with that physical range up front to avoid a no-op limit-sync
 # warning during tutorial robot construction.
@@ -138,16 +137,9 @@ DEFAULT_TUTORIAL_LIGHT_POS = (1.0, 0.0, 3.0)
 DEFAULT_TUTORIAL_SUN_DIRECTION = (0.0, 0.0, -1.0)
 DEFAULT_TUTORIAL_SUN_INTENSITY = 5.0
 _FRANKA_TUTORIAL_BASE_ROTATION = (0.0, 0.0, 180.0)
-_DEFAULT_GRIPPER_TCP_Z = 0.17
 _GRIPPER_CONTACT_LINK_PATTERN = (
     r"(?:.*_)?(?:gripper_finger[12]_link_1|"
     r"(?:left|right)_(?:outer|inner)_(?:finger(?:_pad)?|knuckle))"
-)
-_GRIPPER_TCP = (
-    (1.0, 0.0, 0.0, 0.0),
-    (0.0, 1.0, 0.0, 0.0),
-    (0.0, 0.0, 1.0, _DEFAULT_GRIPPER_TCP_Z),
-    (0.0, 0.0, 0.0, 1.0),
 )
 TOP_DOWN_EEF_ROTATION = (
     (-0.0539, -0.9985, -0.0022),
@@ -1284,13 +1276,17 @@ def add_ur5_gripper_robot(
     sim: SimulationManager,
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
-    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    tcp_z: float | None = None,
+    *,
+    tcp_point: ToolPoint = "default",
 ) -> Robot:
     """Add the standard UR5 plus PGI gripper tutorial robot.
 
     Args:
         sim: Simulation manager that owns the robot.
         init_pos: Root position of the robot in its arena.
+        tcp_z: Explicit Python calibration override; omission uses the fixture preset.
+        tcp_point: Named tool point in the UR5/PGI fixture preset.
 
     Returns:
         The added robot instance.
@@ -1299,6 +1295,7 @@ def add_ur5_gripper_robot(
         init_pos=init_pos,
         init_qpos=init_qpos,
         tcp_z=tcp_z,
+        tcp_point=tcp_point,
     )
     configure_newton_gripper_contacts(sim, robot_cfg)
     return sim.add_robot(cfg=robot_cfg)
@@ -2228,7 +2225,9 @@ def clone_local_pose_from_first_env(entity) -> torch.Tensor:
 def create_ur5_gripper_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
-    tcp_z: float = _DEFAULT_GRIPPER_TCP_Z,
+    tcp_z: float | None = None,
+    *,
+    tcp_point: ToolPoint = "default",
     **kwargs,
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
@@ -2250,6 +2249,8 @@ def create_ur5_gripper_robot_cfg(
 
     Args:
         init_pos: Initial root position of the robot in the arena.
+        tcp_z: Explicit local-Z override; omission uses the UR5/PGI preset.
+        tcp_point: Named sample tool point in the fixture preset.
 
     Returns:
         A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
@@ -2290,12 +2291,7 @@ def create_ur5_gripper_robot_cfg(
             },
             "solver_cfg": {
                 "arm": {
-                    "tcp": [
-                        [1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, tcp_z],
-                        [0.0, 0.0, 0.0, 1.0],
-                    ],
+                    "tcp": sample_tool_tcp("ur5", point=tcp_point, tcp_z=tcp_z),
                     "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
                 }
             },
@@ -2308,6 +2304,9 @@ def create_ur5_gripper_robot_cfg(
 def create_franka_panda_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    *,
+    tcp_z: float | None = None,
+    tcp_point: ToolPoint = "default",
     **kwargs,
 ) -> RobotCfg:
     """Build a Franka arm + PGI gripper configuration for the tutorials.
@@ -2315,11 +2314,14 @@ def create_franka_panda_robot_cfg(
     The shared scenes place manipulation targets on the robot's negative-X
     side, so the base is rotated 180 degrees. The arm-only Franka URDF is
     assembled with the same DH_PGI_140_80 component, hand control part, drive
-    properties, open state, and TCP offset used by the UR5 tutorial robot.
+    properties, and open state used by the UR5 sample. Its TCP calibration is
+    owned independently by the Franka/PGI preset in ``tcp_presets.py``.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
         init_qpos: Optional full robot joint configuration.
+        tcp_z: Explicit local-Z override; omission uses the Franka/PGI preset.
+        tcp_point: Named sample tool point in the fixture preset.
 
     Returns:
         A fully populated :class:`~embodichain.lab.sim.cfg.RobotCfg`.
@@ -2350,7 +2352,7 @@ def create_franka_panda_robot_cfg(
         "solver_cfg": {
             "arm": {
                 "end_link_name": "fr3_link8",
-                "tcp": _GRIPPER_TCP,
+                "tcp": sample_tool_tcp("franka", point=tcp_point, tcp_z=tcp_z),
             }
         },
     }
@@ -2365,12 +2367,20 @@ def create_franka_panda_robot_cfg(
         cfg.joint_drive_props.max_effort,
     ):
         drive_values.pop("fr3_finger_joint[1-2]", None)
+    # The sample replaces Franka's native hand with the PGI component. Link
+    # overrides are resolved for both backends, so its inherited contact
+    # profile must follow the replacement fingers even in Default scenes.
+    cfg.link_attrs["newton_gripper_contacts"].link_names_expr = [
+        _GRIPPER_CONTACT_LINK_PATTERN
+    ]
     return cfg
 
 
 def create_ur10_robotiq_robot_cfg(
     init_pos: Sequence[float] = (0.0, 0.0, 0.0),
     init_qpos: Sequence[float] | None = None,
+    *,
+    tcp_point: ToolPoint = "default",
     **kwargs,
 ) -> RobotCfg:
     """Build a UR10 arm with a six-DOF Robotiq 2F-140 gripper.
@@ -2378,11 +2388,13 @@ def create_ur10_robotiq_robot_cfg(
     The hand control part is intentionally expressed as one regular expression.
     Robot materialization expands it over the six active finger/knuckle joints
     while excluding the gripper's fixed joints. The solver TCP includes the
-    Robotiq mounting rotation and its 0.23 m tool offset.
+    Robotiq mounting rotation and its 0.21 m tool offset. Legacy PGI ``tcp_z``
+    arguments do not replace this fixture's full mounting transform.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
         init_qpos: Optional full 12-DOF arm-plus-hand configuration.
+        tcp_point: Named sample tool point; Robotiq uses one calibrated pose.
 
     Returns:
         A UR10/Robotiq configuration exposing ``arm`` and six-joint ``eef``
@@ -2420,7 +2432,7 @@ def create_ur10_robotiq_robot_cfg(
             },
             "solver_cfg": {
                 "arm": {
-                    "tcp": ROBOTIQ_2F_140_TCP,
+                    "tcp": sample_tool_tcp("ur10", point=tcp_point),
                     "user_qpos_limits": _UR_TUTORIAL_QPOS_LIMITS,
                 }
             },

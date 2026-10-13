@@ -143,7 +143,7 @@ def run(args: argparse.Namespace) -> None:
     robot = add_ur5_gripper_robot(
         sim,
         init_qpos=[0.0, -1.57, 1.57, -3.14, -1.57, 0.0, 0.0, 0.0],
-        tcp_z=0.15,
+        tcp_point="grasp",
     )
     microwave = create_microwave(sim)
     hand_open, hand_close = get_hand_open_close_qpos(robot, close_qpos=0.04)
