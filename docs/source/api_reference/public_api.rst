@@ -388,7 +388,7 @@ embodichain.lab.task_program.integrations.simulation.handover
    ConfiguredHandOverPoseProvider
 
 embodichain.lab.gym.envs.fluid_replay
------------------------------------
+-------------------------------------
 
 .. currentmodule:: embodichain.lab.gym.envs.fluid_replay
 
@@ -623,7 +623,7 @@ embodichain.lab.scripts.run_env
    preview
 
 embodichain.lab.scripts.run_fluid_task_program
---------------------------------------------
+----------------------------------------------
 
 .. currentmodule:: embodichain.lab.scripts.run_fluid_task_program
 
@@ -2519,7 +2519,7 @@ kernel policy; callers log and apply that seed to their own generators.
 
 
 embodichain_tasks.manipulation.tableware.pour_cup
-----------------------------------------------
+-------------------------------------------------
 
 .. currentmodule:: embodichain_tasks.manipulation.tableware.pour_cup
 

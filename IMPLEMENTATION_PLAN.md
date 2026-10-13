@@ -155,11 +155,18 @@ the shared installed DexSim build is not modified.
 - Focused EC config, objects, packaging, context and docs checker tests:
   **259 passed**. Later batch-count regression and refill reuse: **11 passed**.
   Fresh-process live Gym independent completion/reset and Sim selected reset:
-  **2 passed**. Final coarse two-row CLI partial-reset smoke also passed.
+  **2 passed**. Final coarse two-row CLI partial-reset and single-row override
+  smoke checks also passed.
 - Independent reviews corrected wheel asset omission, root pose adoption,
   misleading action recording, dataset mapping compatibility and canonical
   global reset masks. Real Gym tests additionally caught pre-resolution sim
   versus env counts; both replay and CLI now use `EnvCfg.num_envs`.
+- Sphinx dummy build succeeded. The full run reported 811 warnings versus
+  the earlier 800: one new duplicate fluid field entry was corrected, and
+  ten additional warnings concern optional Pinocchio/type imports in the
+  isolated environment. The post-fix incremental build also succeeded, with
+  1123 warnings from repeated existing API indexing/type resolution and no
+  fluid-specific warning entries. This is not a warning-free documentation build.
 - API coverage **2503/2503**; source Task Program inspector passed all three
   calls. A built EC wheel contains all six pour-cup assets. Native validation
   uses staged JIT source, not a rebuilt release/AOT wheel.
