@@ -78,6 +78,10 @@ METRIC_COLUMNS = (
     "motion_valid_rate",
     "execution_success_rate",
     "task_success_rate",
+    "physical_skill_success_rate",
+    "end_to_end_success_rate",
+    "evaluation_protocols",
+    "physical_evaluation_coverage_rate",
     "ordered_waypoint_success_rate",
     "waypoint_completion_rate",
     "final_pos_err_mm",
@@ -95,6 +99,7 @@ METRIC_COLUMNS = (
     "articulation_joint_peak_signed_delta",
     "replan_count",
     "stage_success_rates",
+    "stage_counts",
     "top_failure",
 )
 
