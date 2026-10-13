@@ -18,8 +18,8 @@ command reference and :doc:`/guides/robot_catalog` for variant selection.
      - Configuration class
      - Current coverage
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``
-     - Panda arm and gripper with numerical FK/IK.
+     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.

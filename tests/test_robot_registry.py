@@ -317,6 +317,7 @@ def local_robot_assets(monkeypatch, tmp_path):
         "CobotMagic",
         "DexforceW1",
         "FrankaPanda",
+        "FrankaPandaPgi",
         "URRobot",
         "DualArmRobot",
         "ur3",

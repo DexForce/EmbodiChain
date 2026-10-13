@@ -25,6 +25,11 @@ resolver. Selectors use exact registered IDs; old aliases and `Cfg`-suffixed
 spellings are not accepted. UR variants have their own default parameters. After changing
 entry-point metadata, refresh the editable install and restart the process.
 
+`FrankaPandaPgi` selects the bundled `embodichain_robots.FrankaPandaPgiCfg`,
+assembling the Panda arm and DH PGI gripper. Its `eef` group exposes one leader;
+the passive follower remains in `mimic_joints` outside that group. The stock
+`FrankaPanda` catalog entry keeps the Panda hand and its existing defaults.
+
 `resolve_robot_cfg(..., variant=...)` selects a declared profile's defaults
 between catalog defaults and caller overrides. Omitting the variant keeps
 existing construction behavior; `default_variant` remains display metadata.

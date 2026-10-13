@@ -86,6 +86,15 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
 
+.. py:class:: embodichain_robots.FrankaPandaPgiCfg
+
+   Panda arm with the DH Robotics PGI gripper, its TCP and finger contacts.
+
+   Construct with ``from_dict()``. The ``arm`` control part contains seven
+   joints and ``eef`` controls the PGI leader joint. ``build_pk_serial_chain()``
+   returns the flange pose; the configured solver TCP locates the gripper tip.
+   See :doc:`/resources/robot/franka_panda` for the assembly and frame contract.
+
 .. py:class:: embodichain_robots.URRobotCfg
 
    Configuration for the UR family of robots.
@@ -268,6 +277,14 @@ Concrete robot configurations, exposed lazily from the bundled robot package.
    Construct with ``from_dict()``; ``build_pk_serial_chain()`` provides
    the robot-specific differentiable kinematic chains. Generic runtime
    fields and backend selection follow ``RobotCfg``.
+
+
+.. py:class:: embodichain_robots.franka_panda.FrankaPandaPgiCfg
+   :no-index:
+
+   Panda arm with the PGI gripper; available as catalog ID ``FrankaPandaPgi``.
+   The arm chain ends at ``fr3_link8`` and the solver applies the PGI TCP.
+   See :class:`embodichain_robots.FrankaPandaPgiCfg` for the public entry point.
 
 
 embodichain_robots.tianji_marvin

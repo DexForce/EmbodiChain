@@ -115,17 +115,25 @@ def _format_robot_entries(
     ]
     table.align = "l"
     available_width = width - 16
+    robot_id_width = max(12, min(20, max(map(len, families), default=12)))
     parts_width = max(17, int(available_width * 0.24))
     variants_width = max(
         8,
-        min(int(available_width * 0.23), available_width - 12 - 11 - parts_width - 12),
+        min(
+            int(available_width * 0.23),
+            available_width - robot_id_width - 11 - parts_width - 12,
+        ),
     )
     table.max_width = {
-        "Robot ID": 12,
+        "Robot ID": robot_id_width,
         "Variants": variants_width,
         "Control DOF": 11,
         "Control Parts": parts_width,
-        "Mimic Joints": available_width - 12 - 11 - parts_width - variants_width,
+        "Mimic Joints": available_width
+        - robot_id_width
+        - 11
+        - parts_width
+        - variants_width,
     }
     for index, robot_id in enumerate(sorted(families, key=str.casefold)):
         for profile_index, (variants, profile) in enumerate(

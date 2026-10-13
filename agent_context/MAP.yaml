@@ -117,7 +117,7 @@ topics:
   title: Robot System
   aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [RobotCfg, RobotPresetCfg, control_parts, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
-    FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
+    FrankaPandaCfg, FrankaPandaPgiCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
     asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:

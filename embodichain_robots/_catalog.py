@@ -26,6 +26,7 @@ _CONFIG_CLASSES = {
     "DexforceW1": "embodichain_robots.dexforce_w1.cfg:DexforceW1Cfg",
     "CobotMagic": "embodichain_robots.cobotmagic:CobotMagicCfg",
     "FrankaPanda": "embodichain_robots.franka_panda:FrankaPandaCfg",
+    "FrankaPandaPgi": "embodichain_robots.franka_panda:FrankaPandaPgiCfg",
     "URRobot": "embodichain_robots.ur_robot:URRobotCfg",
 }
 
@@ -75,6 +76,10 @@ _DEFAULT_CONTROL_INFO = {
         "dof": 8,
         "control_parts": {"arm": 7, "eef": 2},
     },
+    "FrankaPandaPgi": {
+        "dof": 8,
+        "control_parts": {"arm": 7, "eef": 1},
+    },
     "URRobot": {"dof": 6, "control_parts": {"arm": 6}},
 }
 
@@ -94,6 +99,7 @@ _MIMIC_JOINTS = {
         "right_joint8": "right_joint7",
     },
     "FrankaPanda": {"fr3_finger_joint2": "fr3_finger_joint1"},
+    "FrankaPandaPgi": {"gripper_finger2_joint_1": "gripper_finger1_joint_1"},
     "URRobot": {},
 }
 _CONTROL_PART_MIMICS = {

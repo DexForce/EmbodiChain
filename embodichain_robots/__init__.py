@@ -31,6 +31,7 @@ __all__ = [
     "DexforceW1Cfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",
+    "FrankaPandaPgiCfg",
     "URRobotCfg",
 ]
 
@@ -40,6 +41,7 @@ _EXPORTS = {
     "DexforceW1Cfg": ".dexforce_w1.cfg",
     "CobotMagicCfg": ".cobotmagic",
     "FrankaPandaCfg": ".franka_panda",
+    "FrankaPandaPgiCfg": ".franka_panda",
     "URRobotCfg": ".ur_robot",
 }
 

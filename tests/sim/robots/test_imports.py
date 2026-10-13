@@ -47,6 +47,7 @@ _CONFIG_CLASSES = (
     "TianjiMarvinCfg",
     "CobotMagicCfg",
     "FrankaPandaCfg",
+    "FrankaPandaPgiCfg",
     "URRobotCfg",
     "DexforceW1Cfg",
 )
