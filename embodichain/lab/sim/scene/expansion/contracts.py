@@ -67,6 +67,11 @@ class SceneVariant:
         ``variant_id`` identifies a proposal, not a settled initial state or a
         successful execution. Hosts record those identities and evidence
         separately. Metadata describes provenance, not executable operations.
+        Since ``ordinal`` participates in the hash, consuming the same layout
+        at a different source position changes ``variant_id``. File-backed
+        consumers should retain the original layout identity and proposal
+        ordinal in metadata for provenance across selection orders; this ID
+        is not a geometry-only deduplication key.
     """
 
     parent_scene_id: str

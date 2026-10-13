@@ -59,6 +59,9 @@ metadata does not create a clean recording boundary.
 - Proposal identity includes parent scene, seed, ordinal, geometry and
   provenance. It is independent of physical slots and distinct from actual
   settled initial-state and execution-attempt identities.
+  Ordinal is part of the hash: reordering consumption can change `variant_id`
+  for the same saved layout. File-backed consumers retain original layout
+  identity and proposal ordinal in metadata for cross-run provenance.
 - Only declared movable entity UIDs may change. Candidate and metadata
   containers are owned; duplicate entity IDs and invalid configuration fail
   explicitly rather than becoming ordinary geometric rejections.

@@ -105,6 +105,72 @@ def test_generated_pose_validation_uses_measured_state_and_keepout():
     assert not check_layout(recipe, {}).passed
 
 
+def _group_proxy_recipe() -> SceneRecipe:
+    # Two 0.125 m cubes have a joint center at (0.25, 0.125), offset
+    # from the root origin. Binary-exact bounds lock the target center
+    # at (0.75, 0.125), so the required arena translation is +0.5 m in X.
+    root = _cfg("root", (0.125, 0.125, 0.75))
+    member = _cfg("member", (0.375, 0.125, 0.875))
+    root.shape = CubeCfg(size=[0.125] * 3)
+    member.shape = CubeCfg(size=[0.125] * 3)
+    return SceneRecipe(
+        "group-proxy:v1",
+        SceneFragment([_cfg("support"), root, member]),
+        LayoutProblem(
+            "support",
+            {"root": (0.25, 0.125)},
+            {"root": (0.1875, 0.0625)},
+            {"root": ((0.5625, 0.0625), (0.9375, 0.1875))},
+        ),
+    )
+
+
+def test_group_proxy_displacement_preserves_root_offset_without_moving_members() -> (
+    None
+):
+    from embodichain.lab.sim.scene.composition import _config_pose
+
+    recipe = _group_proxy_recipe()
+    result = generate(recipe, seed=7)
+    assert result.layout.status == "solved"
+    assert result.layout.xy_by_uid["root"] == pytest.approx((0.75, 0.125))
+    poses = {cfg.uid: _config_pose(cfg) for cfg in result.fragment.entities}
+    np.testing.assert_allclose(poses["root"][:3, 3], (0.625, 0.125, 0.75))
+    np.testing.assert_allclose(poses["member"][:3, 3], (0.375, 0.125, 0.875))
+    assert [change.entity_uid for change in result.variant.pose_changes] == ["root"]
+    baseline = {cfg.uid: _config_pose(cfg) for cfg in recipe.fragment.entities}
+    np.testing.assert_allclose(baseline["root"][:3, 3], (0.125, 0.125, 0.75))
+
+
+def test_measured_group_aabb_detects_member_left_behind_by_root_only_application() -> (
+    None
+):
+    from embodichain.lab.sim.scene.composition import _config_pose
+
+    recipe = _group_proxy_recipe()
+    result = generate(recipe, seed=7)
+    assert result.layout.status == "solved"
+    poses = {cfg.uid: _config_pose(cfg) for cfg in result.fragment.entities}
+    # Root-only evidence shifts the entire proxy and cannot detect the member
+    # still at x=0.375. Its actual cube extends outside the allowed region.
+    assert check_layout(recipe, poses).passed
+    report = check_layout(
+        recipe,
+        poses,
+        actual_aabbs_xy_by_uid={"root": ((0.3125, 0.0625), (0.6875, 0.1875))},
+    )
+    assert not report.passed
+    assert report.checks[0].status == "failed"
+    # After the consumer also translates the member to x=0.875, the measured
+    # union matches the solved whole-group bounds and validation passes.
+    poses["member"][0, 3] = 0.875
+    assert check_layout(
+        recipe,
+        poses,
+        actual_aabbs_xy_by_uid={"root": ((0.5625, 0.0625), (0.9375, 0.1875))},
+    ).passed
+
+
 def test_changed_orientation_does_not_reuse_stale_proxy():
     recipe = _recipe()
     result = generate(recipe, seed=7)

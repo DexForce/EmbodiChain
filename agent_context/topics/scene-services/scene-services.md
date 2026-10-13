@@ -44,6 +44,12 @@ of environment slots. Generation changes XY translations only; authored height
 and orientation remain. Virtual fixed entries can represent keep-out regions.
 An unsuccessful layout has no fragment or applicable variant.
 
+For group proxies, the layout UID names a configured root and the AABB covers
+all members. Generation moves only listed movable entities by their solved
+center displacement; consumers expand the root and every member from a common
+baseline and include all changed UIDs in the movable permissions. The shared
+recipe does not traverse a GenSim support graph.
+
 Scene layout uses complete AABB bounds, fixed centers, planar relations and
 weighted displacement preferences. Only `frame="arena"` relations are supported;
 unsupported frames are reported instead of reinterpreted. `solved`,
@@ -100,6 +106,9 @@ support does not enable B>1 physics capture, edits or host stepping.
   Missing poses, changed support, or changed orientation without a measured
   proxy yield unverified evidence. Moving fixed entities fails validation;
   vertical support and task acceptance still need separate measurements.
+  Group consumers supply the union of every member's measured AABB under the
+  root UID and separately verify internal structure and fixed member poses.
+  A root-only pose check cannot establish that the whole group moved correctly.
 
 ## Consumers and change sites
 

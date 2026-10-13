@@ -47,6 +47,12 @@ class SceneRecipe:
     first implementation changes XY translation only; objects retain their
     authored height and rotation. A recipe supplies the physical support height
     rather than inferring it from a filename or semantic category.
+
+    A layout UID may represent a whole-group AABB whose center differs from
+    the configured root origin. Generation translates that root by the solved
+    center displacement; it does not traverse support graphs or move members
+    absent from the layout. The caller must expand group transforms and movable
+    permissions to every member before applying a complete group proposal.
     """
 
     def __init__(
@@ -264,7 +270,12 @@ def check_layout(
         actual_aabbs_xy_by_uid: Optional measured arena-frame AABB minimum and
             maximum XY corners, shaped ``(2, 2)``, for configured entities.
             These update centers and half extents and permit orientation changes
-            of movable objects. The caller owns geometry measurement.
+            of movable objects. For group proxies, supply the union of all
+            members' measured AABBs under the root UID. The caller owns geometry
+            measurement and separately checks member poses, fixed members and
+            preservation of the internal group structure. Without measurements,
+            a root translation only shifts the authored proxy; it cannot prove
+            that every group member followed the root.
 
     Returns:
         Measured layout evidence. Missing poses, changed support or orientation
