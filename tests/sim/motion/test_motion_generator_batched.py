@@ -1097,6 +1097,69 @@ def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> No
     )
 
 
+def test_cartesian_preparation_preserves_fk_confirmed_singular_start() -> None:
+    """An observed start needs no new IK solution, even at a singularity."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    solved_poses = []
+
+    def solve(*, pose, joint_seed, **kwargs):
+        solved_poses.append(pose.clone())
+        qpos = pose[:, 0, 3:4].clone()
+        # Model an analytic solver that fails only at the zero wrist pose.
+        return qpos[:, 0] > 0.0, qpos
+
+    generator.robot.compute_ik = solve
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
+    start = torch.zeros(2, 1)
+    result = generator.generate(
+        [PlanState.from_xpos(goal)],
+        MotionGenOptions(
+            start_qpos=start,
+            control_part="arm",
+            sample_count=20,
+            is_interpolate=True,
+            interpolate_position_step=0.25,
+        ),
+    )
+
+    assert result.success.tolist() == [True, True]
+    assert solved_poses and all(
+        bool((pose[:, 0, 3] > 0.0).all()) for pose in solved_poses
+    )
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(start, torch.zeros_like(start))
+
+
+def test_cartesian_preparation_requires_ik_for_unconfirmed_start_rows() -> None:
+    """Reusing one row's known start cannot hide another row's IK failure."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+
+    def solve(*, pose, joint_seed, **kwargs):
+        qpos = pose[:, 0, 3:4].clone()
+        return qpos[:, 0] > 0.25, qpos
+
+    generator.robot.compute_ik = solve
+    poses = torch.eye(4).repeat(2, 2, 1, 1)
+    poses[1, 0, 0, 3] = 0.25  # This row's first pose differs from its seed FK.
+    poses[:, 1, 0, 3] = 0.5
+    positions, _, success = generator._interpolate_waypoints(
+        control_part="arm",
+        xpos_list=poses,
+        options=MotionGenOptions(
+            start_qpos=torch.zeros(2, 1), interpolate_position_step=0.5
+        ),
+    )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0, 0], torch.zeros(1))
+    torch.testing.assert_close(positions[0, -1], torch.full((1,), 0.5))
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+
+
 def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits() -> (
     None
 ):

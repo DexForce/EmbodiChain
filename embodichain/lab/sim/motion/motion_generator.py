@@ -718,8 +718,10 @@ class MotionGenerator:
         poses: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
+        *,
+        known_start: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Solve required poses in order, retaining every row and IK failure."""
+        """Solve required poses, retaining FK-confirmed starts and IK failures."""
         device = self._runtime_device()
         start_qpos = start_qpos.to(device)
         batch_size, controlled_dof = start_qpos.shape
@@ -729,6 +731,9 @@ class MotionGenerator:
         qpos_seed = start_qpos
         solved_waypoints = []
         for index in range(poses.shape[1]):
+            if index == 0 and known_start is not None and bool(known_start.all()):
+                solved_waypoints.append(start_qpos)
+                continue
             step_success, qpos = self.robot.compute_ik(
                 pose=poses[:, index].to(device),
                 name=control_part,
@@ -747,6 +752,9 @@ class MotionGenerator:
                     f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
                 )
             step_success = step_success & torch.isfinite(qpos).all(dim=1)
+            if index == 0 and known_start is not None:
+                qpos = torch.where(known_start[:, None], start_qpos, qpos)
+                step_success |= known_start
             qpos = torch.where(step_success[:, None], qpos, qpos_seed)
             success &= step_success
             solved_waypoints.append(qpos)
@@ -1394,8 +1402,20 @@ class MotionGenerator:
 
             if control_part is None:
                 raise ValueError("Cartesian interpolation requires control_part.")
+            # The observed start is already grounded by FK. Re-solving it with
+            # analytic IK can fail at a wrist singularity despite later poses
+            # being reachable. Preserve it only for rows whose whole pose agrees.
+            start_pose = self.robot.compute_fk(
+                qpos=qpos_seed, name=control_part, to_matrix=True
+            )
+            known_start = torch.isclose(
+                total_interpolated_poses[:, 0], start_pose, rtol=0.0, atol=1e-6
+            ).all(dim=(-2, -1))
             success, qpos_batch = self._solve_cartesian_waypoints(
-                total_interpolated_poses, qpos_seed, control_part
+                total_interpolated_poses,
+                qpos_seed,
+                control_part,
+                known_start=known_start,
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(
