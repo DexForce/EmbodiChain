@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 
 from .metrics.stats import nearest_rank_percentile
-from .generalization import aggregate_generalization
+from .generalization import aggregate_generalization, spatial_breakdown
 from .models import BenchmarkCase, CaseOutcome, PlannerMetadata, TrialPhase, TrialRecord
 
 __all__ = ["aggregate_generalization", "aggregate_results"]
@@ -869,4 +869,5 @@ def aggregate_results(
         "generalization": aggregate_generalization(
             records, metadata, cases, measured_trials
         ),
+        "spatial_breakdown": spatial_breakdown(records, metadata, cases),
     }

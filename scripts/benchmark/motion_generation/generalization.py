@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from .contracts import EvaluationDomain
 from .models import BenchmarkCase, PlannerMetadata, TrialPhase, TrialRecord
 
-__all__ = ["aggregate_generalization"]
+__all__ = ["aggregate_generalization", "spatial_breakdown"]
+
+_SPLIT_KINDS = ("robustness", "held_out")
 
 
 def _track_group(case: BenchmarkCase) -> str:
@@ -69,12 +71,19 @@ def _case_success(
 
 def _population_stats(
     rows: list[dict[str, object]],
+    kinds: tuple[str, ...] | None = None,
 ) -> tuple[float | None, float | None, float | None, float | None]:
-    """Return mean, worst, population variance and retention over OOD domains."""
+    """Return mean, worst, population variance and retention over OOD domains.
+
+    Args:
+        rows: Domain rows of one track and planner.
+        kinds: Domain kinds to summarize; ``None`` pools every non-nominal kind.
+    """
     non_nominal = [
         float(row["success_rate"])
         for row in rows
         if row["domain_kind"] != "nominal"
+        and (kinds is None or row["domain_kind"] in kinds)
         and row["success_rate"] is not None
         and math.isfinite(float(row["success_rate"]))
     ]
@@ -93,6 +102,27 @@ def _population_stats(
     nominal_rate = sum(nominal) / len(nominal) if nominal else None
     retention = None if nominal_rate in (None, 0.0) else worst / nominal_rate
     return mean, worst, variance, retention
+
+
+def _spatial_feasibility(
+    cases: Iterable[BenchmarkCase],
+) -> tuple[int | None, int | None, float | None]:
+    """Return draws, infeasible draws and their rate for a sampled population.
+
+    Every case of one template carries the same template summary, so each
+    template is counted once.  Populations without spatial sampling return
+    ``None`` values.
+    """
+    templates: dict[str, Mapping[str, object]] = {}
+    for case in cases:
+        summary = case.case_parameters.get("spatial_feasibility")
+        if isinstance(summary, Mapping):
+            templates[str(summary["template"])] = summary
+    if not templates:
+        return None, None, None
+    draws = sum(int(summary["draws"]) for summary in templates.values())
+    infeasible = sum(int(summary["infeasible"]) for summary in templates.values())
+    return draws, infeasible, infeasible / draws if draws else None
 
 
 def aggregate_generalization(
@@ -167,6 +197,7 @@ def aggregate_generalization(
                 )
                 case_rates.append(rate)
             success_rate = sum(case_rates) / len(case_rates) if case_rates else None
+            draws, infeasible, infeasible_rate = _spatial_feasibility(population_cases)
             rows.append(
                 {
                     "track": track,
@@ -189,6 +220,18 @@ def aggregate_generalization(
                     "domain_worst": None,
                     "domain_variance": None,
                     "generalization_eligible": False,
+                    **{
+                        f"{kind}_{field}": None
+                        for kind in _SPLIT_KINDS
+                        for field in (
+                            "mean_success_rate",
+                            "worst_success_rate",
+                            "retention",
+                        )
+                    },
+                    "spatial_draws": draws,
+                    "spatial_infeasible_draws": infeasible,
+                    "spatial_infeasible_rate": infeasible_rate,
                 }
             )
 
@@ -223,4 +266,81 @@ def aggregate_generalization(
             row["domain_worst"] = worst
             row["domain_variance"] = variance
             row["generalization_eligible"] = eligible
+        # Robustness perturbs the nominal domain while held-out domains are new
+        # populations; pooling them would hide which one a planner fails.
+        for kind in _SPLIT_KINDS:
+            kind_mean, kind_worst, _, kind_retention = _population_stats(
+                population_rows, (kind,)
+            )
+            for row in population_rows:
+                row[f"{kind}_mean_success_rate"] = kind_mean
+                row[f"{kind}_worst_success_rate"] = kind_worst
+                row[f"{kind}_retention"] = kind_retention
+    return rows
+
+
+def spatial_breakdown(
+    records: Iterable[TrialRecord],
+    metadata: Iterable[PlannerMetadata],
+    cases: Iterable[BenchmarkCase],
+    *,
+    radius_bin_m: float = 0.05,
+) -> list[dict[str, object]]:
+    """Slice sampled domains by the base-frame radius of each position.
+
+    Reachability changes mostly with distance from the arm base, so success
+    is reported per radius band of every sampled ``cylinder`` parameter.
+
+    Args:
+        records: Raw lifecycle and measured trial records.
+        metadata: Planner metadata for every algorithm in the run.
+        cases: Frozen case manifest; only spatially sampled cases are used.
+        radius_bin_m: Width of each radius band in meters.
+
+    Returns:
+        One row per planner, domain, parameter and radius band.
+    """
+    if not math.isfinite(radius_bin_m) or radius_bin_m <= 0.0:
+        raise ValueError("radius_bin_m must be positive.")
+    by_algorithm_case: dict[tuple[str, str], list[TrialRecord]] = defaultdict(list)
+    for record in records:
+        by_algorithm_case[(record.algorithm_id, record.case_id)].append(record)
+    bands: dict[tuple[str, str, str, int], list[BenchmarkCase]] = defaultdict(list)
+    for case in cases:
+        sample = case.case_parameters.get("spatial_sample")
+        if case.domain is None or not isinstance(sample, Mapping):
+            continue
+        for name, values in sample["parameters"].items():
+            radius = values.get("radius_m")
+            if radius is None:
+                continue
+            band = int(math.floor(float(radius) / radius_bin_m))
+            bands[(_track_group(case), case.domain.id, name, band)].append(case)
+    rows: list[dict[str, object]] = []
+    for planner in metadata:
+        for (track, domain_id, name, band), band_cases in sorted(bands.items()):
+            unsupported = _unsupported_case_ids(
+                record
+                for case in band_cases
+                for record in by_algorithm_case[(planner.algorithm_id, case.case_id)]
+            )
+            rates = [
+                _case_success(
+                    by_algorithm_case[(planner.algorithm_id, case.case_id)], case
+                )[0]
+                for case in band_cases
+                if case.case_id not in unsupported
+            ]
+            rows.append(
+                {
+                    "track": track,
+                    "algorithm": planner.algorithm_id,
+                    "domain_id": domain_id,
+                    "parameter": name,
+                    "radius_low_m": band * radius_bin_m,
+                    "radius_high_m": (band + 1) * radius_bin_m,
+                    "cases": len(band_cases),
+                    "success_rate": sum(rates) / len(rates) if rates else None,
+                }
+            )
     return rows

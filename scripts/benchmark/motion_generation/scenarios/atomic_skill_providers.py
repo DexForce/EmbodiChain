@@ -54,7 +54,14 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-from ..atomic_skill import AtomicSkillCaseProvider
+from ..atomic_skill import AtomicSkillCaseProvider, InfeasibleCaseError
+from ..spatial import (
+    ARTICULATION_POSITION,
+    OBJECT_POSITION,
+    ROBOT_START_OFFSET,
+    TARGET_OFFSET,
+    SpatialParameter,
+)
 from ..config import SuiteCfg, TrackCfg
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_task import (
@@ -170,8 +177,9 @@ def _set_pre_pick_start(
         name=scenario.control_part,
     )
     if not bool(torch.as_tensor(success).all().item()):
-        raise RuntimeError(
-            f"Independent IK rejected the {skill} start {_case_name(config)!r}."
+        raise InfeasibleCaseError(
+            f"Independent IK rejected the {skill} start {_case_name(config)!r}.",
+            reason="ik_unreachable",
         )
     scenario.set_robot_start(_canonical_case_qpos(pre_pick_qpos), open_gripper=True)
 
@@ -385,6 +393,13 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
 
     skill_id = "open_door"
     requires_gripper = True
+    spatial_parameters = (
+        ARTICULATION_POSITION,
+        ROBOT_START_OFFSET,
+        SpatialParameter(
+            "door.open_angle", "task_goal", "uniform", "open_angle_rad", unit="rad"
+        ),
+    )
 
     def generate_case(
         self,
@@ -763,8 +778,9 @@ class _PourCases(AtomicSkillCaseProvider):
             pose=targets[:, 0], joint_seed=screen_start, name=scenario.control_part
         )
         if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected the Pour pre-grasp {_case_name(config)!r}."
+            raise InfeasibleCaseError(
+                f"Independent IK rejected the Pour pre-grasp {_case_name(config)!r}.",
+                reason="ik_unreachable",
             )
         scenario.set_robot_start(_canonical_case_qpos(pre_pick_qpos), open_gripper=True)
         start_qpos, full_start_qpos = _snapshot_case_qpos(
@@ -1305,6 +1321,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
 
     skill_id = "push_object"
     requires_gripper = True
+    spatial_parameters = (OBJECT_POSITION, ROBOT_START_OFFSET, TARGET_OFFSET)
 
     def generate_case(
         self,

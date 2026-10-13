@@ -221,7 +221,42 @@ def write_markdown_report(
                         "domain_worst_success_rate",
                         "domain_success_variance",
                         "domain_retention",
+                        "robustness_worst_success_rate",
+                        "robustness_retention",
+                        "held_out_worst_success_rate",
+                        "held_out_retention",
+                        "spatial_draws",
+                        "spatial_infeasible_rate",
                         "generalization_eligible",
+                    )
+                )
+            )
+    band_rows = aggregates.get("spatial_breakdown", [])
+    if band_rows:
+        lines.extend(
+            [
+                "",
+                "## Success by base-frame radius",
+                "",
+                "Sampled domains only; each band holds the cases whose sampled "
+                "position lies at that distance from the arm base.",
+                "",
+            ]
+        )
+        for row in band_rows:
+            lines.append(
+                "- "
+                + "; ".join(
+                    f"{name}={_format_value(name, row.get(name))}"
+                    for name in (
+                        "track",
+                        "algorithm",
+                        "domain_id",
+                        "parameter",
+                        "radius_low_m",
+                        "radius_high_m",
+                        "cases",
+                        "success_rate",
                     )
                 )
             )

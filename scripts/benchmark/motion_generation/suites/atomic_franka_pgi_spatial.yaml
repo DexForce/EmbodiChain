@@ -1,0 +1,256 @@
+schema_version: 1
+name: atomic_skill_franka_pgi_spatial
+suite_version: atomic_franka_pgi_spatial_v1
+profile: smoke
+
+# Spatial generalization of single-arm Atomic Skills on the Franka + PGI.
+#
+# Each track evaluates the same skills in several domains.  A domain with
+# `perturbations` samples the skills' declared spatial parameters in the robot
+# base frame (radius from the base z axis, azimuth from base +x toward +y),
+# freezes `samples` feasible cases per case template, and replaces draws the
+# task cannot pose (unreachable by independent IK, no reachable grasp, start
+# outside the joint margin).  Interaction geometry (approach direction,
+# pre-grasp and lift distances, contact distances) is not a spatial parameter
+# and stays as configured in every domain.
+#
+# Nominal positions in the base frame (base rotated 180 degrees at the origin):
+#   cube_50mm at arena (-0.42, -0.08)  -> r = 0.428 m, azimuth = 10.8 deg
+#   microwave root at arena (-1.0, 0.10) -> r = 1.005 m, azimuth = -5.7 deg
+robot:
+  id: franka_pgi
+  provider: franka_pgi
+  config:
+    attrs:
+      material_props:
+        static_friction: 1.0
+        dynamic_friction: 1.0
+    solver_cfg:
+      arm:
+        tcp:
+          - [1.0, 0.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0, 0.0]
+          - [0.0, 0.0, 1.0, 0.15]
+          - [0.0, 0.0, 0.0, 1.0]
+
+planners:
+  - id: curobo
+    adapter: curobo
+    role: primary_baseline
+    enabled: true
+    config:
+      max_attempts: 5
+      max_planning_time: null
+      interpolation_dt: 0.025
+      collision_activation_distance: 0.01
+      use_cuda_graph: true
+      cuda_graph_fallback: true
+      warmup_iterations: 1
+      preserve_plan_samples: false
+      world:
+        obstacle_representation: sphere
+        multi_env: false
+      auto_gen:
+        sphere_density: 0.1
+        collision_sphere_buffer: 0.0
+  - id: toppra
+    adapter: toppra
+    role: diagnostic_baseline
+    enabled: true
+    config:
+      velocity: 0.2
+      acceleration: 0.5
+
+protocol:
+  warmup_trials: 1
+  measured_trials: 1
+  sample_interval: 80
+  validation_samples: 512
+  position_threshold_m: 0.01
+  rotation_threshold_rad: 0.1
+  joint_limit_tolerance_rad: 0.00001
+
+tracks:
+  - id: object-skills
+    scenario: atomic_task
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: eef
+        open_qpos: [0.0]
+        grasp_qpos: [0.040]
+      objects:
+        - id: cube_50mm
+          kind: cube
+          size: [0.05, 0.05, 0.05]
+          position: [-0.42, -0.08, 0.05]
+          mass: 0.05
+          dynamic_friction: 0.97
+          static_friction: 0.99
+          contact_offset: 0.003
+          rest_offset: 0.001
+          enable_ccd: true
+          settle_steps: 10
+      skills:
+        - id: pick_up
+          sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hand_interp_steps: 12
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          minimum_object_lift_m: 0.04
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_pick_height_m: 0.36
+          cases:
+            - name: cube_top
+              object: cube_50mm
+              task_difficulty: simple
+        - id: place
+          sample_count: 120
+          pick_sample_count: 120
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          target_object_offset_m: [0.10, 0.10, 0.0]
+          retract_height_m: 0.10
+          approach_direction: [0.0, 0.0, -1.0]
+          pre_grasp_distance_m: 0.15
+          lift_height_m: 0.16
+          hand_interp_steps: 12
+          pre_action_settle_steps: 50
+          object_position_threshold_m: 0.05
+          cases:
+            - name: cube_table_place
+              object: cube_50mm
+              task_difficulty: simple
+        - id: push_object
+          sample_count: 160
+          hand_interp_steps: 12
+          approach_height_m: 0.10
+          retract_height_m: 0.10
+          push_overshoot_m: 0.0
+          object_contact_offset_m: [0.0, 0.0, -0.01]
+          object_position_threshold_m: 0.01
+          object_tilt_threshold_rad: 0.0873
+          cases:
+            - name: cube_push_lateral_10cm
+              object: cube_50mm
+              task_difficulty: simple
+              # Measured for a lateral push; the domains keep the push lateral.
+              contact_distance_m: 0.042
+              target_object_offset_m: [0.0, 0.10, 0.0]
+    domains:
+      - id: nominal
+        version: v1
+        kind: nominal
+      # Small moves around the nominal cube: the same task, perturbed.
+      - id: near_nominal
+        version: v1
+        kind: robustness
+        perturbations:
+          samples: 8
+          seed: 1
+          parameters:
+            object.position:
+              radius_m: [0.40, 0.46]
+              azimuth_deg: [0.0, 20.0]
+      # A region the nominal cases never visit: farther out and to both sides.
+      - id: far_sector
+        version: v1
+        kind: held_out
+        perturbations:
+          samples: 8
+          seed: 2
+          max_attempts: 64
+          parameters:
+            object.position:
+              radius_m: [0.55, 0.65]
+              azimuth_deg: [-30.0, 30.0]
+
+  - id: door
+    scenario: atomic_task
+    enabled: true
+    config:
+      batch_sizes: [1]
+      seeds: [11]
+      physics:
+        steps_per_waypoint: 16
+        hold_steps: 80
+        hold_sim_steps: 2
+        joint_tracking_tolerance_rad: 0.05
+      gripper:
+        control_part: eef
+        open_qpos: [0.0]
+        grasp_qpos: [0.040]
+      articulations:
+        - id: microwave
+          asset_path: Microwave/microwave.urdf
+          position: [-1.0, 0.10, 0.4]
+          rotation_deg: [0.0, 0.0, 90.0]
+          init_qpos: [0.0, 0.0, 0.0, 0.0]
+          drive:
+            drive_type: none
+          attrs:
+            material_props:
+              static_friction: 1.0
+              dynamic_friction: 1.0
+          fix_base: true
+          settle_steps: 10
+      skills:
+        - id: open_door
+          sample_count: 240
+          hand_interp_steps: 12
+          door_waypoint_count: 20
+          approach_distance_m: 0.10
+          retract_distance_m: 0.10
+          articulation: microwave
+          target_link: handle_link
+          target_joint: door_hinge
+          grasp_source: antipodal
+          grasp_sample_count: 10000
+          grasp_max_candidates: 128
+          grasp_alignment_max_angle_deg: 10.0
+          hinge_angle_tolerance_rad: 0.0873
+          cases:
+            - name: microwave_door_60deg
+              task_difficulty: medium
+              open_angle_rad: 1.0472
+    domains:
+      - id: nominal
+        version: v1
+        kind: nominal
+      - id: shifted_microwave
+        version: v1
+        kind: robustness
+        perturbations:
+          samples: 8
+          seed: 3
+          parameters:
+            articulation.position:
+              radius_m: [0.97, 1.03]
+              azimuth_deg: [-8.0, -3.5]
+      # Wider openings from perturbed arm starts at the nominal microwave.
+      - id: wide_opening
+        version: v1
+        kind: held_out
+        perturbations:
+          samples: 8
+          seed: 4
+          parameters:
+            door.open_angle:
+              low: 1.2
+              high: 1.4
+            robot.start_offset:
+              low: [-0.08, -0.08, -0.08, -0.08, -0.08, -0.08, -0.08]
+              high: [0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08]

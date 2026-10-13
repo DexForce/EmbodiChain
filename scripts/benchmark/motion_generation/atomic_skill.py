@@ -35,8 +35,28 @@ if TYPE_CHECKING:
     from .models import BenchmarkCase, CaseOutcome
     from .planners.base import PlannerAdapter
     from .scenarios.atomic_task import AtomicTaskScenario
+    from .spatial import SpatialParameter
 
-__all__ = ["AtomicSkillCaseProvider"]
+__all__ = ["AtomicSkillCaseProvider", "InfeasibleCaseError"]
+
+
+class InfeasibleCaseError(RuntimeError):
+    """The requested task cannot be posed, independently of any planner.
+
+    Case generation raises it when independent IK cannot reach a frozen pose,
+    no reachable grasp exists, or a start state leaves the joint-limit margin.
+    A spatial domain draws another sample instead; a track without spatial
+    sampling still stops, as for any other ``RuntimeError``.
+
+    Args:
+        message: Human-readable description of the rejected case.
+        reason: Short code a spatial domain counts its rejections by:
+            ``ik_unreachable``, ``no_reachable_grasp`` or ``start_joint_margin``.
+    """
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class AtomicSkillCaseProvider(ABC):
@@ -46,6 +66,8 @@ class AtomicSkillCaseProvider(ABC):
     requires_gripper = False
     samples_grasps = False
     """Whether the skill samples grasps itself and needs a grasp generator."""
+    spatial_parameters: tuple["SpatialParameter", ...] = ()
+    """Spatial quantities a domain may sample for this skill's cases."""
 
     @abstractmethod
     def generate_case(

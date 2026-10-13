@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -66,7 +67,7 @@ from embodichain.toolkits.graspkit import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
-from ..atomic_skill import AtomicSkillCaseProvider
+from ..atomic_skill import AtomicSkillCaseProvider, InfeasibleCaseError
 from ..contracts import (
     ExecutionObservation as _ExecutionObservation,
     validate_physical_evaluations,
@@ -80,6 +81,13 @@ from ..config import (
 from ..metrics.trajectory import compute_case_outcomes
 from ..models import BenchmarkCase, CaseOutcome
 from ..registry import register_scenario_provider
+from ..spatial import (
+    OBJECT_POSITION,
+    TARGET_OFFSET,
+    parse_spatial_domain,
+    resolve_parameter_sizes,
+    sample_spatial_parameters,
+)
 from ..video import VideoRecordCfg, build_video_path, record_with_window
 from .atomic_objects import (
     AtomicArticulationHandle,
@@ -1252,6 +1260,7 @@ class _PickUpCases(AtomicSkillCaseProvider):
 
     skill_id = "pick_up"
     requires_gripper = True
+    spatial_parameters = (OBJECT_POSITION,)
 
     def generate_case(
         self,
@@ -1296,8 +1305,9 @@ class _PickUpCases(AtomicSkillCaseProvider):
             name=scenario.control_part,
         )
         if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected PickUp case {_case_name(config)!r}."
+            raise InfeasibleCaseError(
+                f"Independent IK rejected PickUp case {_case_name(config)!r}.",
+                reason="ik_unreachable",
             )
         pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
@@ -1766,8 +1776,9 @@ class _HeldObjectCases(AtomicSkillCaseProvider):
             name=scenario.control_part,
         )
         if not bool(torch.as_tensor(success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected held-object start {_case_name(config)!r}."
+            raise InfeasibleCaseError(
+                f"Independent IK rejected held-object start {_case_name(config)!r}.",
+                reason="ik_unreachable",
             )
         arm_start = _canonical_case_qpos(arm_start)
         scenario.set_robot_start(arm_start, open_gripper=False, grasp_gripper=True)
@@ -1873,9 +1884,10 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             name=scenario.control_part,
         )
         if not bool(torch.as_tensor(ik_success).all().item()):
-            raise RuntimeError(
+            raise InfeasibleCaseError(
                 "Independent IK rejected MoveHeldObject pre-pick pose "
-                f"{_case_name(config)!r}."
+                f"{_case_name(config)!r}.",
+                reason="ik_unreachable",
             )
         pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
@@ -1979,6 +1991,7 @@ class _PlaceCases(_HeldObjectCases):
     """Place an already held rigid object and release it under physics."""
 
     skill_id = "place"
+    spatial_parameters = (OBJECT_POSITION, TARGET_OFFSET)
 
     def generate_case(
         self,
@@ -2036,8 +2049,9 @@ class _PlaceCases(_HeldObjectCases):
             name=scenario.control_part,
         )
         if not bool(torch.as_tensor(ik_success).all().item()):
-            raise RuntimeError(
-                f"Independent IK rejected Place pre-pick pose {_case_name(config)!r}."
+            raise InfeasibleCaseError(
+                f"Independent IK rejected Place pre-pick pose {_case_name(config)!r}.",
+                reason="ik_unreachable",
             )
         pre_pick_qpos = _canonical_case_qpos(pre_pick_qpos)
         scenario.set_robot_start(pre_pick_qpos, open_gripper=True)
@@ -3073,6 +3087,8 @@ class AtomicTaskScenario(ScenarioProvider):
         seeds = [int(value) for value in track.config.get("seeds", [11])]
         if not seeds:
             raise ValueError("atomic-task seeds must not be empty.")
+        # A spatial domain draws its own seeds; ``seeds`` applies otherwise.
+        spatial = {} if track.domain is None else dict(track.domain.perturbations)
 
         cases: list[BenchmarkCase] = []
         for skill_index, skill_value in enumerate(skill_values):
@@ -3098,29 +3114,31 @@ class AtomicTaskScenario(ScenarioProvider):
                     track,
                     batch_size=batch_size,
                 )
-                for seed in seeds:
-                    provider = create_atomic_skill_provider(skill_id)
-                    rng_devices = (
-                        [robot.device]
-                        if torch.device(robot.device).type == "cuda"
-                        else []
+                indices = {"skill_index": skill_index, "case_index": case_index}
+                if spatial:
+                    generated = self._generate_spatial_cases(
+                        suite,
+                        track,
+                        skill_id,
+                        config,
+                        spatial,
+                        batch_size=batch_size,
+                        **indices,
                     )
-                    with torch.random.fork_rng(devices=rng_devices):
-                        torch.manual_seed(
-                            _case_generation_seed(
-                                seed,
-                                skill_index=skill_index,
-                                case_index=case_index,
-                            )
-                        )
-                        case = provider.generate_case(
-                            self,
+                else:
+                    generated = [
+                        self._generate_case(
                             suite,
                             track,
+                            skill_id,
                             config,
                             seed=seed,
                             batch_size=batch_size,
+                            **indices,
                         )
+                        for seed in seeds
+                    ]
+                for provider, case in generated:
                     if case.case_id in self._case_providers:
                         raise ValueError(
                             f"Duplicate Atomic Task case {case.case_id!r}."
@@ -3134,6 +3152,118 @@ class AtomicTaskScenario(ScenarioProvider):
         for index, handle in enumerate(self._articulations.values()):
             handle.park(len(self._objects) + index)
         return cases
+
+    def _generate_case(
+        self,
+        suite: SuiteCfg,
+        track: TrackCfg,
+        skill_id: str,
+        config: Mapping[str, object],
+        *,
+        seed: int,
+        batch_size: int,
+        skill_index: int,
+        case_index: int,
+    ) -> tuple[AtomicSkillCaseProvider, BenchmarkCase]:
+        """Generate one case under its own deterministic RNG state."""
+        provider = create_atomic_skill_provider(skill_id)
+        device = torch.device(self.robot.device)
+        rng_devices = [self.robot.device] if device.type == "cuda" else []
+        with torch.random.fork_rng(devices=rng_devices):
+            torch.manual_seed(
+                _case_generation_seed(
+                    seed, skill_index=skill_index, case_index=case_index
+                )
+            )
+            case = provider.generate_case(
+                self, suite, track, config, seed=seed, batch_size=batch_size
+            )
+        return provider, case
+
+    def _generate_spatial_cases(
+        self,
+        suite: SuiteCfg,
+        track: TrackCfg,
+        skill_id: str,
+        config: Mapping[str, object],
+        perturbations: Mapping[str, object],
+        *,
+        batch_size: int,
+        skill_index: int,
+        case_index: int,
+    ) -> list[tuple[AtomicSkillCaseProvider, BenchmarkCase]]:
+        """Freeze one case template's population for a spatial domain.
+
+        Draw ``k`` writes its sampled values into the template's config and is
+        generated with seed ``domain seed + k``.  A draw the task cannot pose
+        (:class:`InfeasibleCaseError`) is replaced by the next draw, so every
+        template keeps exactly ``samples`` cases; the draws and rejection
+        reasons are recorded on each kept case.
+
+        Raises:
+            ValueError: The domain is invalid for this skill, or fewer than
+                ``samples`` draws were feasible within ``max_attempts``.
+        """
+        provider_type = create_atomic_skill_provider(skill_id)
+        declared = resolve_parameter_sizes(
+            provider_type.spatial_parameters,
+            len(self.robot.get_joint_ids(name=self.control_part)),
+        )
+        domain = parse_spatial_domain(perturbations, declared)
+        assert domain is not None and track.domain is not None
+        kept: list[tuple[AtomicSkillCaseProvider, BenchmarkCase, int, dict]] = []
+        rejections: Counter[str] = Counter()
+        draw = 0
+        while len(kept) < domain.samples:
+            if draw >= domain.max_attempts:
+                raise ValueError(
+                    f"Spatial domain {track.domain.id!r} kept {len(kept)} of "
+                    f"{domain.samples} {skill_id} cases for "
+                    f"{_case_name(config)!r} after {draw} draws; infeasible "
+                    f"draws by reason: {dict(rejections)}."
+                )
+            values, sampled = sample_spatial_parameters(domain, declared, draw)
+            try:
+                provider, case = self._generate_case(
+                    suite,
+                    track,
+                    skill_id,
+                    {**config, **values},
+                    seed=domain.seed + draw,
+                    batch_size=batch_size,
+                    skill_index=skill_index,
+                    case_index=case_index,
+                )
+            except InfeasibleCaseError as error:
+                rejections[error.reason] += 1
+            else:
+                kept.append((provider, case, draw, sampled))
+            draw += 1
+        feasibility = {
+            "template": f"{skill_id}:{_case_name(config)}",
+            "draws": draw,
+            "infeasible": sum(rejections.values()),
+            "infeasible_by_reason": dict(rejections),
+        }
+        return [
+            (
+                provider,
+                replace(
+                    case,
+                    case_parameters={
+                        **case.case_parameters,
+                        "spatial_sample": {
+                            "domain": track.domain.id,
+                            "draw": draw_index,
+                            "frame": "robot_base",
+                            "parameters": sampled,
+                        },
+                        "spatial_feasibility": feasibility,
+                    },
+                ),
+            )
+            for provider, case, draw_index, sampled in kept
+        ]
 
     @staticmethod
     def _prepare_pose_batch_config(
@@ -4185,8 +4315,9 @@ class AtomicTaskScenario(ScenarioProvider):
                 name=self.control_part,
             )
             if not bool(torch.as_tensor(success).all().item()):
-                raise RuntimeError(
-                    f"Independent IK rejected atomic target waypoint {index}."
+                raise InfeasibleCaseError(
+                    f"Independent IK rejected atomic target waypoint {index}.",
+                    reason="ik_unreachable",
                 )
             seed = _canonical_case_qpos(seed)
             references.append(seed.clone())
@@ -4311,13 +4442,15 @@ class AtomicTaskScenario(ScenarioProvider):
                 approach_direction=approach_direction,
             )[0]
         if candidates.shape[0] == 0:
-            raise RuntimeError(
-                f"No antipodal grasp candidates were found for {handle.object_id!r}."
+            raise InfeasibleCaseError(
+                f"No antipodal grasp candidates were found for {handle.object_id!r}.",
+                reason="no_reachable_grasp",
             )
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
-            raise RuntimeError(
-                f"No valid antipodal grasp candidates were found for {handle.object_id!r}."
+            raise InfeasibleCaseError(
+                f"No valid antipodal grasp candidates were found for {handle.object_id!r}.",
+                reason="no_reachable_grasp",
             )
         if rank is None:
             ranked = finite_indices[torch.argsort(costs[finite_indices])]
@@ -4342,9 +4475,10 @@ class AtomicTaskScenario(ScenarioProvider):
                 grasp = variant.unsqueeze(0)
                 if self._ik_chain_feasible(start_qpos, waypoint_poses(grasp)):
                     return grasp
-        raise RuntimeError(
+        raise InfeasibleCaseError(
             f"No independently reachable antipodal grasp remained for "
-            f"{handle.object_id!r} after screening {len(ranked)} candidates."
+            f"{handle.object_id!r} after screening {len(ranked)} candidates.",
+            reason="no_reachable_grasp",
         )
 
     def _ik_chain_feasible(
@@ -4491,8 +4625,9 @@ class AtomicTaskScenario(ScenarioProvider):
             )[0]
         finite_indices = torch.nonzero(torch.isfinite(costs), as_tuple=False).flatten()
         if finite_indices.numel() == 0:
-            raise RuntimeError(
-                "No valid antipodal articulation grasp candidates were found."
+            raise InfeasibleCaseError(
+                "No valid antipodal articulation grasp candidates were found.",
+                reason="no_reachable_grasp",
             )
         ranked = finite_indices[torch.argsort(costs[finite_indices])]
         ranked = ranked[:max_candidates].detach().to("cpu").tolist()
@@ -4517,9 +4652,10 @@ class AtomicTaskScenario(ScenarioProvider):
                     continue
                 if self._ik_chain_feasible(start_qpos, waypoint_poses(variant)):
                     return variant
-        raise RuntimeError(
+        raise InfeasibleCaseError(
             "No independently reachable antipodal articulation grasp remained after "
-            f"screening {len(ranked)} candidates."
+            f"screening {len(ranked)} candidates.",
+            reason="no_reachable_grasp",
         )
 
     def restore_base_robot(self) -> None:
@@ -4529,6 +4665,60 @@ class AtomicTaskScenario(ScenarioProvider):
         for target in (False, True):
             self.robot.set_qpos(self._base_full_qpos, target=target)
         self.robot.clear_dynamics()
+
+    def robot_base_pose(self) -> torch.Tensor:
+        """Return the controlled arm's solver root pose in the arena frame.
+
+        Spatial domains sample positions in this frame.  It is the frame
+        :meth:`Robot.compute_fk` composes the arm's kinematics in, so a
+        position keeps its meaning when the robot is mounted elsewhere.
+
+        Returns:
+            Root poses with shape ``(B, 4, 4)``.
+        """
+        if self.robot is None:
+            raise RuntimeError("Atomic Task runtime is not configured.")
+        root = self.robot.cfg.solver_cfg[self.control_part].root_link_name
+        return self.robot.get_link_pose(link_name=root, to_matrix=True)
+
+    def position_from_base_frame(
+        self,
+        position_in_base: object,
+        nominal: torch.Tensor,
+        *,
+        name: str,
+    ) -> torch.Tensor:
+        """Map one robot-base-frame position to arena positions per environment.
+
+        Args:
+            position_in_base: Two values ``[x, y]`` keep each nominal arena
+                height, so a resting object stays on its support; three values
+                ``[x, y, z]`` also set the base-frame height.
+            nominal: Nominal arena positions with shape ``(B, 3)``.
+            name: Configuration key, for error messages.
+
+        Returns:
+            Arena positions with shape ``(B, 3)``.
+        """
+        if (
+            not isinstance(position_in_base, Sequence)
+            or isinstance(position_in_base, (str, bytes))
+            or len(position_in_base) not in (2, 3)
+        ):
+            raise ValueError(f"{name} must hold [x, y] or [x, y, z] in meters.")
+        values = [float(value) for value in position_in_base]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{name} must be finite.")
+        base = self.robot_base_pose().to(device=nominal.device, dtype=nominal.dtype)
+        point = torch.tensor(
+            [values[0], values[1], values[2] if len(values) == 3 else 0.0, 1.0],
+            dtype=nominal.dtype,
+            device=nominal.device,
+        )
+        position = (base @ point)[:, :3].expand_as(nominal).clone()
+        if len(values) == 2:
+            position[:, 2] = nominal[:, 2]
+        return position
 
     def randomize_robot_start(
         self,
@@ -4549,6 +4739,13 @@ class AtomicTaskScenario(ScenarioProvider):
         )
         if any(value < 0.0 for value in amplitude):
             raise ValueError("start_qpos_jitter_rad values must be non-negative.")
+        offset = _float_vector(
+            config.get("start_qpos_offset_rad"),
+            name="start_qpos_offset_rad",
+            length=start.shape[-1],
+            default=(0.0,) * start.shape[-1],
+        )
+        start = start + torch.tensor(offset, dtype=start.dtype, device=start.device)
         randomized = start + _seeded_jitter(
             amplitude,
             seed=seed,
@@ -4565,8 +4762,9 @@ class AtomicTaskScenario(ScenarioProvider):
         lower = limits[:, 0] + margin
         upper = limits[:, 1] - margin
         if bool(((randomized < lower) | (randomized > upper)).any().item()):
-            raise RuntimeError(
-                "Randomized arm start violates the configured joint-limit margin."
+            raise InfeasibleCaseError(
+                "Randomized arm start violates the configured joint-limit margin.",
+                reason="start_joint_margin",
             )
         self.set_robot_start(
             randomized,
@@ -4603,6 +4801,11 @@ class AtomicTaskScenario(ScenarioProvider):
                 "articulation_position_jitter_m values must be non-negative."
             )
         pose = handle.initial_pose.clone()
+        in_base = config.get("articulation_position_in_base_m")
+        if in_base is not None:
+            pose[:, :3, 3] = self.position_from_base_frame(
+                in_base, pose[:, :3, 3], name="articulation_position_in_base_m"
+            )
         if any(amplitude):
             translation = _seeded_jitter(
                 amplitude,
@@ -4651,6 +4854,11 @@ class AtomicTaskScenario(ScenarioProvider):
         ):
             raise ValueError("settle_steps must be a non-negative integer or None.")
         pose = handle.initial_pose.clone()
+        in_base = config.get("object_position_in_base_m")
+        if in_base is not None:
+            pose[:, :3, 3] = self.position_from_base_frame(
+                in_base, pose[:, :3, 3], name="object_position_in_base_m"
+            )
         position_jitter = config.get("object_position_jitter_m")
         if position_jitter is None:
             position_jitter = config.get("_pose_batch_object_translation_jitter_m")

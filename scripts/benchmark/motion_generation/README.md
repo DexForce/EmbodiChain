@@ -205,6 +205,59 @@ records the resolved embodiment and planner configuration hashes at the run
 level. Each track/batch population is written before any planner evaluates that
 population; later populations extend the manifest.
 
+### Spatial domains
+
+A domain with `perturbations` samples spatial parameters instead of using the
+track's `seeds`. Each skill provider declares the parameters it exposes in
+`spatial_parameters`; a domain may sample only declared parameters, and every
+skill in the track must declare every sampled parameter.
+`atomic_franka_pgi_spatial` is the reference suite.
+
+```yaml
+    domains:
+      - {id: nominal, version: v1, kind: nominal}
+      - id: far_sector
+        version: v1
+        kind: held_out
+        perturbations:
+          samples: 8          # feasible cases kept per case template
+          seed: 2             # draw k uses case seed `seed + k`
+          max_attempts: 64    # default 4 x samples
+          parameters:
+            object.position: {radius_m: [0.55, 0.65], azimuth_deg: [-30, 30]}
+```
+
+| Parameter | Layer | Region | Case config key | Skills |
+|---|---|---|---|---|
+| `object.position` | scene layout | cylinder | `object_position_in_base_m` | pick_up, place, push_object |
+| `articulation.position` | scene layout | cylinder | `articulation_position_in_base_m` | open_door |
+| `robot.start_offset` | robot start | uniform, one per arm joint | `start_qpos_offset_rad` | push_object, open_door |
+| `target.offset` | task goal | uniform, 3 values | `target_object_offset_m` | place, push_object |
+| `door.open_angle` | task goal | uniform | `open_angle_rad` | open_door |
+
+- **Frame.** A `cylinder` region is an annular sector in the controlled arm's
+  solver root frame, the frame `Robot.compute_fk()` composes kinematics in:
+  `radius_m` from its z axis, `azimuth_deg` from +x toward +y, sampled uniformly
+  over the sector's area. Without `height_m` the object keeps its configured
+  height, so it still rests on its support. A `uniform` region takes `low` and
+  `high` in the parameter's own unit.
+- **Interaction geometry is fixed.** Approach direction, pre-grasp, lift and
+  contact distances are not spatial parameters, so a success-rate change is
+  attributable to where the task is.
+- **Feasibility.** A draw the task cannot pose raises `InfeasibleCaseError`
+  during manifest generation: independent IK cannot reach a frozen pose, no
+  reachable grasp remains, or the start leaves the joint-limit margin. The draw
+  is replaced, so each template keeps exactly `samples` cases; fewer than
+  `samples` feasible draws within `max_attempts` rejects the domain. Tracks
+  without `perturbations` still stop on these errors.
+- **Manifest.** Each sampled case records `spatial_sample` (domain, draw,
+  frame, sampled quantities) and `spatial_feasibility` (draws and infeasible
+  draws by reason for its template).
+- **Aggregation.** Domain rows add `robustness_*` and `held_out_*` mean, worst
+  and retention, so the two kinds are not pooled, plus `spatial_draws` and
+  `spatial_infeasible_rate`. `aggregates.json` adds `spatial_breakdown`:
+  success per 5 cm band of base-frame radius for every sampled position.
+
 ### Provider and evaluator interfaces
 
 `atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
