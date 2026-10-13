@@ -37,6 +37,7 @@ from scripts.benchmark.motion_generation.evaluation import (
     STANDARD_VERSION,
     SKILL_CRITERIA,
     StageEvidence,
+    evaluate_skill_stage_batch,
     evaluate_skill_stages,
     validate_standard_evaluation,
 )
@@ -164,6 +165,21 @@ def test_joint_criterion_uses_l2_measurement_not_max_joint_error() -> None:
         env_index=0,
     )
     assert result.failure_code == "task_goal_miss"
+
+
+def test_batched_stage_evidence_preserves_environment_order() -> None:
+    results = evaluate_skill_stage_batch(
+        "move_end_effector",
+        (
+            {"reached": _evidence("terminal_settle", tcp_position_error_m=0.002)},
+            {"reached": _evidence("terminal_settle", tcp_position_error_m=0.004)},
+        ),
+    )
+
+    assert [result.env_index for result in results] == [0, 1]
+    assert [result.task_success for result in results] == [True, False]
+    for result in results:
+        validate_standard_evaluation("move_end_effector", result)
 
 
 def test_lift_then_drop_fails_closing_stage() -> None:

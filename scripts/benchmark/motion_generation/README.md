@@ -208,9 +208,11 @@ population; later populations extend the manifest.
 ### Provider and evaluator interfaces
 
 `atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
-`scenarios.atomic_task` remains available. Existing providers continue to use
-`task_result()`. A migrated provider overrides `physical_evaluator()` to return
-an implementation of `contracts.PhysicalStageEvaluator`:
+`scenarios.atomic_task` remains available. `MoveEndEffector` and `MoveJoints`
+already use v1 physical evaluators over their terminal settled replay state.
+Providers that need intermediate segment or contact observations continue to
+use `task_result()`. A migrated provider overrides `physical_evaluator()` to
+return an implementation of `contracts.PhysicalStageEvaluator`:
 
 ```python
 def evaluate(

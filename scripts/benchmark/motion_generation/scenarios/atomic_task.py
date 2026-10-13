@@ -69,8 +69,10 @@ from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from ..atomic_skill import AtomicSkillCaseProvider
 from ..contracts import (
     ExecutionObservation as _ExecutionObservation,
+    PhysicalEvaluation,
     validate_physical_evaluations,
 )
+from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..config import (
     SuiteCfg,
     TrackCfg,
@@ -587,6 +589,104 @@ def _executed_final_pose_errors(
             f"'half_turn_about_z', got {rotation_symmetry!r}."
         )
     return translation, rotation
+
+
+def _single_stage_evidence_batch(
+    *,
+    stage_id: str,
+    window: str,
+    measurement: str,
+    values: torch.Tensor,
+    method: str,
+) -> tuple[Mapping[str, StageEvidence], ...]:
+    """Convert one measured batch scalar into row-local standard evidence."""
+    if values.dim() != 1:
+        raise ValueError("Stage measurement values must be a one-dimensional batch.")
+    return tuple(
+        {
+            stage_id: StageEvidence(
+                window=window,
+                source="simulation_state",
+                measurements={measurement: float(value.item())},
+                method=method,
+            )
+        }
+        for value in values
+    )
+
+
+class _MoveEndEffectorEvaluator:
+    """Score the physically settled TCP position without planner state."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        final_tcp_pose = observation.final_tcp_pose
+        target = case.target_waypoints[:, -1].to(
+            device=final_tcp_pose.device,
+            dtype=final_tcp_pose.dtype,
+        )
+        if final_tcp_pose.shape != target.shape:
+            raise ValueError(
+                "Final TCP observations must match the batched terminal target pose."
+            )
+        error = torch.linalg.vector_norm(
+            final_tcp_pose[:, :3, 3] - target[:, :3, 3], dim=-1
+        )
+        return evaluate_skill_stage_batch(
+            "move_end_effector",
+            _single_stage_evidence_batch(
+                stage_id="reached",
+                window="terminal_settle",
+                measurement="tcp_position_error_m",
+                values=error,
+                method="terminal_tcp_pose",
+            ),
+        )
+
+
+class _MoveJointsEvaluator:
+    """Score the physically settled arm joints without planner state."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        final_arm_qpos = observation.final_arm_qpos
+        if final_arm_qpos is None:
+            return evaluate_skill_stage_batch(
+                "move_joints", tuple({} for _ in range(case.batch_size))
+            )
+        target = torch.as_tensor(
+            case.case_parameters["target_qpos"],
+            dtype=final_arm_qpos.dtype,
+            device=final_arm_qpos.device,
+        )
+        if target.dim() != 3 or target.shape[0] != case.batch_size:
+            raise ValueError("MoveJoints target_qpos must have shape (B, W, D).")
+        target = target[:, -1]
+        if final_arm_qpos.shape != target.shape:
+            raise ValueError(
+                "Final arm observations must match the batched terminal joint target."
+            )
+        error = torch.linalg.vector_norm(final_arm_qpos - target, dim=-1)
+        return evaluate_skill_stage_batch(
+            "move_joints",
+            _single_stage_evidence_batch(
+                stage_id="reached",
+                window="terminal_settle",
+                measurement="joint_error_l2_rad",
+                values=error,
+                method="terminal_arm_qpos",
+            ),
+        )
 
 
 def _grasp_sample_count(case: BenchmarkCase) -> int:
@@ -1246,6 +1346,10 @@ class _MoveEndEffectorCases(AtomicSkillCaseProvider):
             "task_goal_miss",
         )
 
+    def physical_evaluator(self) -> _MoveEndEffectorEvaluator:
+        """Evaluate the terminal measured TCP position under the v1 standard."""
+        return _MoveEndEffectorEvaluator()
+
 
 class _PickUpCases(AtomicSkillCaseProvider):
     """Explicit-grasp PickUp cases that isolate motion-planner performance."""
@@ -1652,6 +1756,10 @@ class _MoveJointsCases(AtomicSkillCaseProvider):
             & (error <= float(case.case_parameters["joint_threshold_rad"]))
         )
         return success, "joint_goal_miss"
+
+    def physical_evaluator(self) -> _MoveJointsEvaluator:
+        """Evaluate the terminal measured joint state under the v1 standard."""
+        return _MoveJointsEvaluator()
 
 
 class _HeldObjectCases(AtomicSkillCaseProvider):

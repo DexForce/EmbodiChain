@@ -138,6 +138,89 @@ def test_atomic_case_identity_includes_simulator_batch_size() -> None:
     assert case_b1 != case_b8
 
 
+def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None:
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
+    )
+    final_tcp = torch.eye(4).repeat(2, 1, 1)
+    final_tcp[:, 0, 3] = torch.tensor([0.002, 0.004])
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=final_tcp,
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+    )
+    outcomes = (_atomic_outcome(), replace(_atomic_outcome(), env_index=1))
+
+    evaluator = create_atomic_skill_provider("move_end_effector").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, outcomes)
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[0].protocol_version == "atomic-skill-v1"
+    assert results[0].stages[0].evidence_source == (
+        "simulation_state:terminal_tcp_pose"
+    )
+
+
+def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        scenario_id="move_joints",
+        skill_id="move_joints",
+        case_parameters={
+            "sample_count": 80,
+            "target_qpos": [[[0.0, 0.0]], [[0.0, 0.0]]],
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        final_arm_qpos=torch.tensor([[0.003, 0.003], [0.004, 0.004]]),
+    )
+    outcomes = (_atomic_outcome(), replace(_atomic_outcome(), env_index=1))
+
+    evaluator = create_atomic_skill_provider("move_joints").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(case, observation, outcomes)
+
+    assert [result.task_success for result in results] == [True, False]
+    assert results[1].failure_code == "task_goal_miss"
+    assert results[0].stages[0].measurements["joint_error_l2_rad"] == pytest.approx(
+        2**0.5 * 0.003
+    )
+
+
+def test_move_joints_missing_terminal_observation_is_unavailable() -> None:
+    case = replace(
+        _atomic_case(),
+        scenario_id="move_joints",
+        skill_id="move_joints",
+        case_parameters={"target_qpos": [[[0.0, 0.0]]]},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+    )
+
+    evaluator = create_atomic_skill_provider("move_joints").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
+
+    assert result.stages[0].status == "unavailable"
+    assert result.failure_code == "evidence_unavailable"
+
+
 def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:
     """Build non-degenerate link-local geometry for articulation providers."""
     target_points = torch.tensor(
