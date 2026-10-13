@@ -148,6 +148,45 @@ def _runtime_evidence(python: Path) -> dict[str, Any]:
     )
 
 
+def _verify_native_sdk(snapshot: dict[str, Any], python: Path) -> None:
+    """Verify editable SDK bytes and resolution without importing its runtime."""
+    root = Path(snapshot["snapshot"]).resolve()
+    expected = {entry["path"]: entry for entry in snapshot["files"]}
+    if any(
+        path.is_symlink() and not path.resolve().is_relative_to(root)
+        for path in root.rglob("*")
+    ):
+        raise ValueError("Frozen native SDK link escapes its snapshot")
+    actual = {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in (".pyc", ".pyo")
+    }
+    if set(expected) != actual or len(expected) != len(snapshot["files"]):
+        raise ValueError("Frozen native SDK file inventory changed")
+    for relative, entry in expected.items():
+        path = (root / relative).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("Frozen native SDK path escapes its snapshot")
+        if (
+            path.stat().st_size != entry["bytes"]
+            or hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]
+        ):
+            raise ValueError("Frozen native SDK bytes changed: " + relative)
+    origin = subprocess.check_output(
+        [
+            str(python.absolute()),
+            "-c",
+            "import importlib.util; print(importlib.util.find_spec('dexsim').origin)",
+        ],
+        text=True,
+    ).strip()
+    if Path(origin).resolve() != root / "dexsim" / "__init__.py":
+        raise ValueError("Native interpreter does not resolve the frozen SDK")
+
+
 def _source_files(source_root: Path | None = None) -> dict[str, str]:
     source_root = ROOT if source_root is None else source_root
     paths = (
@@ -170,6 +209,7 @@ def initialize_campaign(
     isaaclab_root: Path,
     isaaclab_python: Path,
     evidence_roots: tuple[Path, ...] = (),
+    native_sdk_manifest: Path | None = None,
 ) -> Path:
     """Freeze cases, profiles, runtime identity and all planned phase slots.
 
@@ -180,6 +220,7 @@ def initialize_campaign(
         isaaclab_root: Clean v3.0.0-EA source checkout.
         isaaclab_python: Matching Isaac Sim 6.1 environment.
         evidence_roots: Additional history/reference directories within budget.
+        native_sdk_manifest: Optional file inventory for an isolated editable SDK.
 
     Returns:
         Saved immutable campaign definition. Execution state is separate.
@@ -201,6 +242,9 @@ def initialize_campaign(
     )
     if dirty:
         raise ValueError("Campaign requires clean external Isaac source")
+    sdk = read_json_object(native_sdk_manifest) if native_sdk_manifest else None
+    if sdk is not None:
+        _verify_native_sdk(sdk, embodichain_python)
     isaac = _runtime_evidence(isaaclab_python)
     if (
         isaac["packages"]["isaacsim"] != "6.1.0.0"
@@ -221,6 +265,7 @@ def initialize_campaign(
             "isaaclab": isaac,
             "embodichain": _runtime_evidence(embodichain_python),
         },
+        "native_sdk_snapshot": sdk,
         "scene_root": str(Path(scene_root).absolute()),
         "interpreters": {
             "embodichain": str(embodichain_python.absolute()),
@@ -526,6 +571,11 @@ def run_campaign(
     for backend, interpreter in definition["interpreters"].items():
         if _runtime_evidence(Path(interpreter)) != definition["runtime"][backend]:
             raise ValueError(f"Frozen worker runtime changed: {backend}")
+    if definition.get("native_sdk_snapshot"):
+        _verify_native_sdk(
+            definition["native_sdk_snapshot"],
+            Path(definition["interpreters"]["embodichain"]),
+        )
     validate_approval(Path(definition["scene_root"]))
     cases = {c["case_id"]: c["case"] for c in definition["cases"]}
     if set(case_ids) - cases.keys():
@@ -548,6 +598,18 @@ def run_campaign(
         ):
             continue
         case = cases[job["case_id"]]
+        if definition.get("native_sdk_snapshot"):
+            _verify_native_sdk(
+                definition["native_sdk_snapshot"],
+                Path(definition["interpreters"]["embodichain"]),
+            )
+        # A shared installation can change after initial admission.
+        for backend, interpreter in definition["interpreters"].items():
+            if _runtime_evidence(Path(interpreter)) != definition["runtime"][backend]:
+                job["reason"] = f"frozen_runtime_changed:{backend}"
+                write_json(root / "campaign-state.json", state)
+                rebuild_campaign_report(root)
+                return
         if case["deformation"]:
             job.update(status="blocked", reason="unsupported_frozen_deformation_input")
             write_json(root / "campaign-state.json", state)
@@ -628,6 +690,11 @@ def run_campaign(
             "execution_source_root": str(source),
             "driver_source_commit": git_revision(ROOT),
             "driver_source_files": _source_files(),
+            "native_sdk_snapshot_sha256": (
+                stable_hash(definition["native_sdk_snapshot"])
+                if definition.get("native_sdk_snapshot")
+                else None
+            ),
         }
         state["reserved_worker_runs"] += reservation
         job["attempts"].append(attempt)
@@ -734,6 +801,12 @@ def _campaign_figures(
             attempt=record["attempt"],
             hardware_id=group["hardware_id"],
             experiment=experiment,
+            runtime_scope=(
+                "frozen_baseline"
+                if group.get("frozen_runtime_status_counts")
+                == {"matched": group.get("scheduled")}
+                else group.get("runtime_cohort_id", "unknown")
+            ),
             profile_sha256=record["profile_sha256"],
         )
         for metric in (
@@ -755,6 +828,7 @@ def _campaign_figures(
                 "y": value["median"],
                 "mad": (value.get("uncertainty") or {}).get("value"),
                 "backend": group["backend"],
+                "runtime_cohort_id": group.get("runtime_cohort_id", "unknown"),
                 "case_id": group["case_id"],
                 "source_runs": value.get("source_runs", group["source_runs"]),
                 "config_sha256": group["config_sha256"],
@@ -775,10 +849,18 @@ def _campaign_figures(
     for encoded, members in sorted(groups.items()):
         scope = json.loads(encoded)
         series = []
-        for backend in _BACKENDS:
+        for backend, cohort in sorted(
+            {(p["backend"], p["runtime_cohort_id"]) for p in members}
+        ):
             values = []
             for point in sorted(
-                (p for p in members if p["backend"] == backend and p["y"] is not None),
+                (
+                    p
+                    for p in members
+                    if p["backend"] == backend
+                    and p["runtime_cohort_id"] == cohort
+                    and p["y"] is not None
+                ),
                 key=lambda p: p["x"],
             ):
                 spread = point["mad"] or 0
@@ -795,7 +877,9 @@ def _campaign_figures(
                     }
                 )
             if values:
-                series.append({"label": backend, "points": values})
+                series.append(
+                    {"label": f"{backend} / runtime {cohort[:8]}", "points": values}
+                )
         stem = (
             figure_dir
             / f"{scope['phase']}-{scope['experiment']}-{stable_hash(scope)[:12]}"
@@ -874,10 +958,11 @@ def rebuild_campaign_report(root: Path) -> Path:
         source_runs = []
         counts = Counter()
         qualified = 0
+        runtime_counts = Counter()
         for attempt in job["attempts"]:
             for relative in attempt["experiments"]:
                 experiment = root / relative
-                rebuild_report(experiment)
+                rebuild_report(experiment, frozen_runtimes=definition["runtime"])
                 summary = read_json_object(experiment / "summary.json")
                 for group in summary["groups"]:
                     if group["case_id"] == job["case_id"]:
@@ -885,6 +970,9 @@ def rebuild_campaign_report(root: Path) -> Path:
                             f"{relative}#{run}" for run in group["source_runs"]
                         )
                         qualified += group.get("qualified_runs", 0)
+                        runtime_counts.update(
+                            group.get("frozen_runtime_status_counts", {})
+                        )
                         candidates = [
                             r
                             for r in json.loads((experiment / "runs.json").read_text())
@@ -927,6 +1015,8 @@ def rebuild_campaign_report(root: Path) -> Path:
                 "repeats": job["repeats"],
                 "status_counts": dict(counts),
                 "qualified_runs": qualified,
+                "frozen_runtime_status_counts": dict(runtime_counts),
+                "frozen_baseline_completed_runs": runtime_counts.get("matched", 0),
                 "reason": job.get("reason"),
                 "blocked_backends": job["blocked_backends"],
                 "source_runs": sorted(set(source_runs)),
@@ -965,6 +1055,8 @@ def rebuild_campaign_report(root: Path) -> Path:
             "Status": r["status"],
             "Planned repeats": r["repeats"],
             "Trial statuses": json.dumps(r["status_counts"]),
+            "Frozen baseline completed": r["frozen_baseline_completed_runs"],
+            "Runtime statuses": json.dumps(r["frozen_runtime_status_counts"]),
             "Qualified": r["qualified_runs"],
             "Reason": r["reason"] or json.dumps(r["blocked_backends"]),
         }
@@ -1009,6 +1101,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--phase", choices=("smoke", "coverage", "publication"))
     parser.add_argument("--case-id", action="append", default=[])
     parser.add_argument("--evidence-root", type=Path, action="append", default=[])
+    parser.add_argument("--native-sdk-manifest", type=Path)
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--source-worktree", type=Path)
@@ -1035,6 +1128,7 @@ def main(argv: list[str] | None = None) -> None:
             isaaclab_root=args.isaaclab_root,
             isaaclab_python=args.isaaclab_python,
             evidence_roots=tuple(args.evidence_root),
+            native_sdk_manifest=args.native_sdk_manifest,
         )
     if args.phase:
         run_campaign(

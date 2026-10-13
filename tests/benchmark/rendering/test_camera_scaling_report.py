@@ -275,6 +275,27 @@ def _group(summary: dict[str, Any], n: int = 1) -> dict[str, Any]:
     return next(group for group in summary["groups"] if group["scope"]["num_envs"] == n)
 
 
+def test_camera_scaling_retains_campaign_runtime_gate(tmp_path: Path) -> None:
+    from scripts.benchmark.rendering.publication_report import rebuild_report
+
+    expected = {
+        "embodichain": {"python": "frozen-python", "packages": {"numpy": "1.26.4"}}
+    }
+    for role, directory, numpy in (("R-04", "r04", "1.26.4"), ("R-05", "r05", "2.2.6")):
+        root = tmp_path / directory
+        rows = _freeze(root, role, ns=(1,), qualified=True)
+        for row in rows:
+            row["software"] = {"python": "frozen-python", "packages": {"numpy": numpy}}
+        write_json(root / "runs.json", rows)
+        rebuild_report(root, frozen_runtimes=expected)
+    summary = _report(tmp_path)
+    assert summary["matched_pairs"] == 0
+    assert all(not trial["equivalence_qualified"] for trial in summary["trials"])
+    assert all(
+        "mismatch:runtime_cohort_id" in trial["reasons"] for trial in summary["trials"]
+    )
+
+
 def test_paired_scaling_ratios_deltas_uncertainty_and_vector_traceability(
     tmp_path: Path,
 ) -> None:

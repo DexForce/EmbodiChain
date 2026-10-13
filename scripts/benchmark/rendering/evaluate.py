@@ -168,6 +168,7 @@ def _snapshot(
                     "manifest.json",
                     "assets_manifest.json",
                     "selection.json",
+                    "frozen-runtime.json",
                 )
                 if (root / name).is_file()
             ],
@@ -1272,6 +1273,9 @@ def evaluate_experiment(
     )
     if selected - {row["run_id"] for row in rows}:
         raise ValueError("Unknown requested run_id")
+    from .publication_report import _frozen_runtime_context
+
+    _frozen_runtime_context(root, None)
     baseline, _ = _snapshot(root, rows)
     raw_hash = _sha256(root / "raw.jsonl")
     quality_path = root / "quality.json"
@@ -1432,6 +1436,7 @@ def evaluate_experiment(
             "definition.json",
             "manifest.json",
             "raw.jsonl",
+            "frozen-runtime.json",
         )
         if (root / name).is_file()
     ]

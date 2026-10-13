@@ -713,3 +713,149 @@ def test_quality_policy_must_match_the_frozen_case_assignment(tmp_path: Path) ->
 
     assert comparison["ratio"] is None
     assert "frozen_quality_assignment:protocol_id" in comparison["reasons"]
+
+
+def test_runtime_cohorts_are_separate_and_cannot_mix_frozen_pairs() -> None:
+    from scripts.benchmark.rendering import publication_report as report
+
+    rows = _rows()
+    expected = {}
+    for backend, version in (("embodichain", "1.26.4"), ("isaaclab", "2.3.1")):
+        expected[backend] = {"python": "frozen-python", "packages": {"numpy": version}}
+    for row in rows:
+        row["software"] = {
+            "python": "frozen-python",
+            "packages": {**expected[row["backend"]]["packages"], "pynvml": None},
+        }
+        row["qualified_for_comparison"] = True
+        row["quality_reasons"] = []
+    rows[1]["software"]["packages"]["numpy"] = "2.2.6"
+    report._check_frozen_runtime(rows, expected)
+    assert [row["frozen_runtime_status"] for row in rows] == [
+        "matched",
+        "mismatch",
+        "matched",
+        "matched",
+    ]
+    assert not rows[1]["qualified_for_comparison"]
+    native = [
+        group for group in report._aggregate(rows) if group["backend"] == "embodichain"
+    ]
+    assert len(native) == 2
+    assert sorted(
+        group["metrics"]["batch_steps_per_s"]["median"] for group in native
+    ) == [10, 20]
+    comparisons = report._comparisons(rows, {"comparison_invariants": []})
+    assert all(
+        "mixed_runtime_cohorts:embodichain" in item["reasons"] for item in comparisons
+    )
+
+
+def test_missing_recorded_runtime_never_satisfies_requested_baseline() -> None:
+    from scripts.benchmark.rendering import publication_report as report
+
+    rows = _rows()
+    for row in rows:
+        row["quality_reasons"] = []
+        row["qualified_for_comparison"] = True
+    report._check_frozen_runtime(
+        rows,
+        {
+            "embodichain": {"python": "frozen", "packages": {}},
+            "isaaclab": {"python": "frozen", "packages": {}},
+        },
+    )
+    assert all(row["frozen_runtime_status"] == "missing" for row in rows)
+    assert not any(row["qualified_for_comparison"] for row in rows)
+
+
+def test_campaign_runtime_binding_survives_default_rebuild_and_is_exported(
+    tmp_path: Path,
+) -> None:
+    rows = _rows()
+    expected = {
+        backend: {"python": "frozen-python", "packages": {"numpy": version}}
+        for backend, version in (("embodichain", "1.26.4"), ("isaaclab", "2.3.1"))
+    }
+    for row in rows:
+        row["software"] = deepcopy(expected[row["backend"]])
+    rows[1]["software"]["packages"]["numpy"] = "2.2.6"
+    _freeze(tmp_path, rows)
+    rebuild_report(tmp_path, frozen_runtimes=expected)
+    before = (tmp_path / "summary.json").read_bytes()
+    rebuild_report(tmp_path)
+    assert (tmp_path / "summary.json").read_bytes() == before
+    assert not _comparison(json.loads(before))["eligible"]
+    with (tmp_path / "metrics.csv").open() as stream:
+        trials = list(csv.DictReader(stream))
+    assert [trial["frozen_runtime_status"] for trial in trials] == [
+        "matched",
+        "mismatch",
+        "matched",
+        "matched",
+    ]
+    with (tmp_path / "plot_data.csv").open() as stream:
+        plots = list(csv.DictReader(stream))
+    native = [p for p in plots if p["backend"] == "embodichain"]
+    assert len({p["runtime_cohort_id"] for p in native}) == 2
+    assert all(p["runtime"] and p["frozen_runtime_status_counts"] for p in native)
+    with (tmp_path / "capacity.csv").open() as stream:
+        capacity = list(csv.DictReader(stream))
+    assert (
+        len({p["runtime_scope"] for p in capacity if p["backend"] == "embodichain"})
+        == 2
+    )
+    binding_bytes = (tmp_path / "frozen-runtime.json").read_bytes()
+    (tmp_path / "frozen-runtime.json").unlink()
+    with pytest.raises(ValueError, match="missing or changed"):
+        rebuild_report(tmp_path)
+    (tmp_path / "frozen-runtime.json").write_bytes(binding_bytes)
+    with pytest.raises(ValueError, match="conflicts"):
+        rebuild_report(tmp_path, frozen_runtimes={})
+    binding = json.loads((tmp_path / "frozen-runtime.json").read_text())
+    binding["runtimes"]["embodichain"]["packages"]["numpy"] = "changed"
+    _write(tmp_path / "frozen-runtime.json", binding)
+    with pytest.raises(ValueError, match="missing or changed"):
+        rebuild_report(tmp_path)
+
+
+def test_matching_backend_specific_runtimes_preserve_eligible_pairs(
+    tmp_path: Path,
+) -> None:
+    rows = _rows()
+    expected = {
+        backend: {"python": version, "packages": {"numpy": version}}
+        for backend, version in (("embodichain", "1.26.4"), ("isaaclab", "2.3.1"))
+    }
+    for row in rows:
+        row["software"] = deepcopy(expected[row["backend"]])
+    _freeze(tmp_path, rows)
+    rebuild_report(tmp_path, frozen_runtimes=expected)
+    assert _comparison(_summary(tmp_path))["eligible"]
+
+
+def test_extra_recorded_runtime_cohorts_remain_separate_with_matching_inventory(
+    tmp_path: Path,
+) -> None:
+    rows = _rows()
+    expected = {
+        backend: {"python": "frozen-python", "packages": {"numpy": "frozen-numpy"}}
+        for backend in ("embodichain", "isaaclab")
+    }
+    for row in rows:
+        row["software"] = deepcopy(expected[row["backend"]])
+    rows[1]["software"]["packages"]["pynvml"] = "extra-recorded-package"
+    _freeze(tmp_path, rows)
+    rebuild_report(tmp_path, frozen_runtimes=expected)
+    summary = _summary(tmp_path)
+    capacity = [p for p in summary["capacity"] if p["backend"] == "embodichain"]
+    assert len(capacity) == 2
+    assert len({p["runtime_cohort_id"] for p in capacity}) == 2
+    with (tmp_path / "figure_data.csv").open() as stream:
+        records = list(csv.DictReader(stream))
+    native_series = {
+        p["series"]
+        for p in records
+        if p["kind"] == "scaling" and p["series"].startswith("EC ")
+    }
+    assert len(native_series) == 2

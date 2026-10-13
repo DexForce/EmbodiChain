@@ -38,6 +38,7 @@ from .campaign import (
     selected_case_rows,
     _verify_execution_source,
     _source_files,
+    _verify_native_sdk,
 )
 from scripts.benchmark.core.provenance import git_revision
 
@@ -238,6 +239,11 @@ def run_proofs(
         if kind in ("history", "routing")
         else ROOT
     )
+    if kind in ("history", "routing") and definition.get("native_sdk_snapshot"):
+        _verify_native_sdk(
+            definition["native_sdk_snapshot"],
+            Path(definition["interpreters"]["embodichain"]),
+        )
     requests = proof_population(root, kind)
     if run_ids:
         requests = [r for r in requests if r["run_id"] in run_ids]

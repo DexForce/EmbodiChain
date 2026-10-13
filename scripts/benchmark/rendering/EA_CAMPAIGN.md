@@ -40,6 +40,20 @@ the original source, whose commit and file hashes must match the campaign. Each
 new attempt records both the execution checkout and the corrected driver identity;
 the campaign definition and prior timing records remain unchanged.
 
+Use an isolated worker environment for a new runtime epoch. If a shared installation
+changes, create a new campaign rather than rewriting the frozen inventory. The
+driver checks package versions before every case invocation. Reports preserve
+recorded runtime cohorts in tables, figures and CSVs; missing or changed versions
+cannot count as completed frozen-baseline trials or support its ratios. Linked
+reports persist a checksummed `frozen-runtime.json` binding so subsequent default
+or `python -S` rebuilds retain this gate. Backend inventories may differ from one
+another, but each backend must match its own frozen inventory.
+The binding is registered in the artifact index and frozen quality inputs;
+removing it fails closed. Camera-count comparisons also retain the runtime gate.
+An editable DexSim can use `--native-sdk-manifest` with a snapshot directory and
+its complete file-size/SHA-256 inventory. Admission verifies the SDK bytes and
+the selected interpreter's module origin before timing and GPU proof acquisition.
+
 ## Plan and performance execution
 
 The generated campaign records package/source identity, profiles, the full case

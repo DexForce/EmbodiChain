@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -164,6 +165,94 @@ def test_execution_rejects_source_drift_before_any_worker(
     with pytest.raises(ValueError, match="source changed"):
         campaign.run_campaign(root, phase="coverage")
     assert not (root / "coverage").exists()
+
+
+def test_runtime_drift_between_cases_stops_before_next_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.benchmark.rendering import formal_runner
+
+    root = _campaign(tmp_path, monkeypatch)
+    definition, _ = campaign._load(root)
+    monkeypatch.setattr(campaign, "validate_approval", lambda path: {})
+    monkeypatch.setattr(
+        campaign, "storage_gate", lambda *args, **kwargs: {"passed": True}
+    )
+    monkeypatch.setattr(
+        campaign, "rebuild_campaign_report", lambda root: root / "report.md"
+    )
+    changed = False
+    calls = []
+
+    def runtime(python: Path) -> dict:
+        return (
+            {"packages": {"numpy": "changed"}}
+            if changed
+            else definition["runtime"]["embodichain"]
+        )
+
+    def launch(argv: list[str]) -> None:
+        nonlocal changed
+        calls.append(argv[argv.index("--case-id") + 1])
+        changed = True
+
+    monkeypatch.setattr(campaign, "_runtime_evidence", runtime)
+    monkeypatch.setattr(formal_runner, "main", launch)
+    selected = [
+        r["case_id"]
+        for r in campaign.campaign_cases()
+        if r["case"]["experiment_id"] == "R-04"
+    ][:2]
+    campaign.run_campaign(root, phase="coverage", case_ids=tuple(selected))
+    _, state = campaign._load(root)
+    stopped = next(
+        j
+        for j in state["jobs"]
+        if j["phase"] == "coverage" and j["case_id"] == selected[1]
+    )
+    assert calls == selected[:1]
+    assert stopped["status"] == "not_run"
+    assert stopped["reason"] == "frozen_runtime_changed:embodichain"
+    assert stopped["attempts"] == []
+    assert state["reserved_worker_runs"] == 6
+
+
+@pytest.mark.parametrize("change", ["bytes", "extra_file", "origin", "external_link"])
+def test_native_editable_sdk_binding_checks_bytes_inventory_and_import_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    sdk = tmp_path / "sdk"
+    module = sdk / "dexsim" / "__init__.py"
+    module.parent.mkdir(parents=True)
+    module.write_bytes(b"frozen sdk")
+    snapshot = {
+        "snapshot": str(sdk),
+        "files": [
+            {
+                "path": "dexsim/__init__.py",
+                "bytes": 10,
+                "sha256": hashlib.sha256(module.read_bytes()).hexdigest(),
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        campaign.subprocess, "check_output", lambda *a, **k: str(module)
+    )
+    campaign._verify_native_sdk(snapshot, Path("python"))
+    if change == "bytes":
+        module.write_bytes(b"mutant sdk")
+    elif change == "extra_file":
+        (sdk / "added.py").write_bytes(b"extra")
+    elif change == "external_link":
+        (sdk / "external").symlink_to(tmp_path, target_is_directory=True)
+    else:
+        monkeypatch.setattr(
+            campaign.subprocess,
+            "check_output",
+            lambda *a, **k: str(tmp_path / "user-editable" / "dexsim" / "__init__.py"),
+        )
+    with pytest.raises(ValueError, match="SDK|frozen SDK"):
+        campaign._verify_native_sdk(snapshot, Path("python"))
 
 
 @pytest.mark.parametrize(

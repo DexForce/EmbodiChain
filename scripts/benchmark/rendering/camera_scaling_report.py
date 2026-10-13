@@ -40,6 +40,8 @@ from ._publication_figures import write_chart
 from .formal import view_fingerprint
 from .publication_report import (
     _attach_quality,
+    _check_frozen_runtime,
+    _frozen_runtime_context,
     _field,
     _load_rows,
     _number,
@@ -330,6 +332,8 @@ def _load_input(
                 reasons.append("camera_frame_count_formula")
         row["matching_reasons"] = sorted(set(reasons))
     _attach_quality(root, rows, definition)
+    _check_frozen_runtime(rows, _frozen_runtime_context(root, None))
+    record(root / "frozen-runtime.json")
     for row in rows:
         for artifact in row["_quality"].get("artifacts", []):
             if isinstance(artifact, dict) and isinstance(artifact.get("path"), str):
@@ -344,6 +348,7 @@ def _scope(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "backend": row.get("backend"),
         "hardware_id": row.get("hardware_id"),
+        "runtime_cohort_id": row.get("runtime_cohort_id"),
         "scene_sha256": row.get("scene_sha256"),
         "profile_sha256": row.get("profile_sha256"),
         "front_sha256": row.get("front_sha256"),
@@ -379,6 +384,8 @@ def _trial(
         right[0] if len(right) == 1 else None
     )
     if a is not None and b is not None:
+        if a["runtime_cohort_id"] != b["runtime_cohort_id"]:
+            reasons.append("mismatch:runtime_cohort_id")
         for path in _INVARIANTS:
             av, bv = _field(a, path), _field(b, path)
             if av in (None, "", []):

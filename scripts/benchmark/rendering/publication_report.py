@@ -31,7 +31,12 @@ from pathlib import Path
 import statistics
 from typing import Any
 
-from scripts.benchmark.core.artifacts import read_json, stable_hash, write_json
+from scripts.benchmark.core.artifacts import (
+    ArtifactStore,
+    read_json,
+    stable_hash,
+    write_json,
+)
 from scripts.benchmark.core.contracts import MetricDefinition
 from scripts.benchmark.core.records import validate_run_result
 from scripts.benchmark.reporting.aggregation import aggregate_runs
@@ -749,19 +754,115 @@ def _attach_quality(
         row["qualified_for_comparison"] = not row["quality_reasons"]
 
 
+def _frozen_runtime_context(
+    root: Path, expected: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Persist campaign context so default and CLI rebuilds retain its gate."""
+    path = root / "frozen-runtime.json"
+    index_path = root / "artifact_index.json"
+    bindings = [
+        item
+        for item in (
+            _object(index_path).get("artifacts", []) if index_path.exists() else []
+        )
+        if item.get("path") == path.name
+    ]
+    if bindings and (
+        len(bindings) != 1
+        or not path.is_file()
+        or _sha256(path) != bindings[0]["sha256"]
+    ):
+        raise ValueError("Registered frozen runtime binding is missing or changed")
+    if path.exists():
+        record = _object(path)
+        saved = record["runtimes"]
+        if record.get("schema_version") != 1 or record.get("sha256") != stable_hash(
+            saved
+        ):
+            raise ValueError("Frozen runtime binding checksum mismatch")
+        if expected is not None and saved != expected:
+            raise ValueError("Frozen runtime binding conflicts with the campaign")
+        if not bindings:
+            ArtifactStore(root).register_artifact(path, kind="frozen_runtime_binding")
+        return saved
+    if expected is not None:
+        write_json(
+            path,
+            {
+                "schema_version": 1,
+                "runtimes": expected,
+                "sha256": stable_hash(expected),
+            },
+        )
+        ArtifactStore(root).register_artifact(path, kind="frozen_runtime_binding")
+    return expected
+
+
+def _runtime_identity(row: dict[str, Any]) -> dict[str, Any]:
+    """Return recorded runtime scope without host-specific interpreter paths."""
+    software = row.get("software") or {}
+    return {
+        key: software.get(key)
+        for key in (
+            "python",
+            "packages",
+            "cuda_runtime",
+            "torch_runtime",
+            "isaaclab_commit",
+        )
+    }
+
+
+def _check_frozen_runtime(
+    rows: list[dict[str, Any]], expected: dict[str, Any] | None
+) -> None:
+    """Keep dependency drift outside frozen-baseline comparisons."""
+    for row in rows:
+        row["runtime_cohort_id"] = stable_hash(_runtime_identity(row))
+        row["frozen_runtime_status"] = "not_requested"
+        if expected is None or row["status"] != "completed":
+            continue
+        baseline = expected.get(row["backend"])
+        recorded = row.get("software") or {}
+        packages = recorded.get("packages") or {}
+        if not baseline or not recorded.get("python") or not packages:
+            status = "missing"
+        else:
+            status = (
+                "matched"
+                if recorded["python"] == baseline["python"]
+                and all(
+                    name in packages and packages[name] == version
+                    for name, version in baseline["packages"].items()
+                )
+                else "mismatch"
+            )
+        row["frozen_runtime_status"] = status
+        if status != "matched":
+            row["quality_reasons"].append(f"frozen_runtime_{status}")
+            row["qualified_for_comparison"] = False
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Reuse core aggregation within separate experiment and hardware strata."""
     metrics = tuple(
         MetricDefinition(key, unit, population, "2.0")
         for key, (unit, population) in _METRICS.items()
     )
-    partitions: dict[tuple[str, object, str], list[dict[str, Any]]] = defaultdict(list)
+    partitions: dict[tuple[str, object, str, str], list[dict[str, Any]]] = defaultdict(
+        list
+    )
     for row in rows:
         partitions[
-            (row["experiment_id"], row.get("hardware_id"), _json(row["config"]))
+            (
+                row["experiment_id"],
+                row.get("hardware_id"),
+                _json(row["config"]),
+                stable_hash(_runtime_identity(row)),
+            )
         ].append(row)
     groups = []
-    for (experiment_id, hardware_id, _), members in partitions.items():
+    for (experiment_id, hardware_id, _, runtime_id), members in partitions.items():
         for group in aggregate_runs(members, metrics)["groups"]:
             selected = [
                 row
@@ -785,6 +886,14 @@ def _aggregate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             group.update(
                 experiment_id=experiment_id,
                 hardware_id=hardware_id,
+                runtime_cohort_id=runtime_id,
+                runtime=_runtime_identity(selected[0]) if selected else {},
+                frozen_runtime_status_counts=dict(
+                    Counter(
+                        row.get("frozen_runtime_status", "not_requested")
+                        for row in selected
+                    )
+                ),
                 config=json.loads(next(iter(configs))) if len(configs) == 1 else {},
                 config_consistent=len(configs) == 1,
                 source_runs=[row["run_id"] for row in selected],
@@ -837,6 +946,18 @@ def _comparisons(
                 invariant_paths=invariant_paths,
             )
             reasons = list(result.reasons)
+            for backend in ("embodichain", "isaaclab"):
+                if (
+                    len(
+                        {
+                            stable_hash(_runtime_identity(row))
+                            for row in complete
+                            if row["backend"] == backend
+                        }
+                    )
+                    > 1
+                ):
+                    reasons.append(f"mixed_runtime_cohorts:{backend}")
             reasons += [
                 path
                 for path in invariant_paths
@@ -939,6 +1060,9 @@ def _plot_records(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             "case_id",
                             "backend",
                             "hardware_id",
+                            "runtime_cohort_id",
+                            "frozen_runtime_status_counts",
+                            "runtime",
                             "config_sha256",
                             "scheduled",
                             "completed",
@@ -981,6 +1105,12 @@ def _scope(group: dict[str, Any], *, omit: tuple[str, ...] = ()) -> dict[str, An
     cfg = group["config"]
     return {
         "hardware_id": group.get("hardware_id"),
+        "runtime_scope": (
+            "frozen_baseline"
+            if group.get("frozen_runtime_status_counts")
+            == {"matched": group.get("scheduled")}
+            else group.get("runtime_cohort_id", "unknown")
+        ),
         **{
             key: cfg.get(key)
             for key in _CONFIG_FIELDS
@@ -999,6 +1129,7 @@ def _capacity(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     {
                         **_scope(group),
                         "backend": group["backend"],
+                        "runtime_cohort_id": group.get("runtime_cohort_id"),
                         "experiment_id": group["experiment_id"],
                         "cameras_per_env": group["config"].get("cameras_per_env"),
                     }
@@ -1108,6 +1239,7 @@ def _charts(
             "valid_runs": value["valid_runs"],
             "scheduled": group["scheduled"],
             "metric": metric,
+            "runtime_cohort_id": group.get("runtime_cohort_id"),
         }
 
     specs = (
@@ -1189,7 +1321,7 @@ def _charts(
                         )
                         backend = "EC" if group["backend"] == "embodichain" else "Isaac"
                         series[
-                            f"{backend} {group['experiment_id']} ({group['config'].get('cameras_per_env')} cam){suffix}"
+                            f"{backend} {group['experiment_id']} ({group['config'].get('cameras_per_env')} cam) / runtime {group['runtime_cohort_id'][:8]}{suffix}"
                         ].append(item)
             emit(
                 kind,
@@ -1214,7 +1346,9 @@ def _charts(
                         if row["status"] == "completed"
                         else str(row.get("failure_reason_code") or row["status"])
                     )
-                    series[f"{row['backend']} {row['experiment_id']} / {state}"].append(
+                    series[
+                        f"{row['backend']} {row['experiment_id']} / runtime {group['runtime_cohort_id'][:8]} / {state}"
+                    ].append(
                         {
                             "x": group["config"]["num_envs"],
                             "y": states.get(state, 2),
@@ -1267,7 +1401,7 @@ def _charts(
                 item = point(group, metric, float(index), 1000)
                 if item is not None:
                     series[
-                        f"{group['backend']} / {group['config'].get('delivery')}"
+                        f"{group['backend']} / runtime {group['runtime_cohort_id'][:8]} / {group['config'].get('delivery')}"
                     ].append(item)
         emit(
             "delivery",
@@ -1351,7 +1485,7 @@ def _charts(
             ]
             item["run_ids"] = item["quality_source_runs"]
             quality[_json(scope)][
-                f"{group['backend']} / {group['config'].get('profile')}"
+                f"{group['backend']} / runtime {group['runtime_cohort_id'][:8]} / {group['config'].get('profile')}"
             ].append(item)
     for frozen, series in quality.items():
         scope = json.loads(frozen)
@@ -1438,12 +1572,16 @@ def _selection_coverage(
     }
 
 
-def rebuild_report(root: Path) -> Path:
+def rebuild_report(
+    root: Path, *, frozen_runtimes: dict[str, Any] | None = None
+) -> Path:
     """Rebuild a v2 rendering report entirely from frozen standard artifacts.
 
     Args:
         root: Experiment directory containing ``runs.json`` and optional frozen
             definition, manifest and proof-linked quality records.
+        frozen_runtimes: Optional backend inventories from a campaign. Missing
+            or mismatching runtimes cannot support its frozen-baseline ratios.
 
     Returns:
         The generated ``report.md`` path. CSVs, SVG/PDF figures and aggregate
@@ -1464,6 +1602,7 @@ def rebuild_report(root: Path) -> Path:
         raise ValueError("publication report requires definition_version='2.0'")
     rows = _load_rows(root, definition)
     _attach_quality(root, rows, definition)
+    _check_frozen_runtime(rows, _frozen_runtime_context(root, frozen_runtimes))
     groups = _aggregate(rows)
     comparisons = _comparisons(rows, definition)
     plot_records = _plot_records(groups)
@@ -1471,6 +1610,7 @@ def rebuild_report(root: Path) -> Path:
     sources = [
         {"path": name, "sha256": _sha256(root / name)}
         for name in (
+            "frozen-runtime.json",
             "definition.json",
             "runs.json",
             "manifest.json",
@@ -1526,6 +1666,8 @@ def rebuild_report(root: Path) -> Path:
                     "status",
                     "quality_status",
                     "hardware_id",
+                    "runtime_cohort_id",
+                    "frozen_runtime_status",
                     *_BINDINGS,
                     "failure_reason_code",
                 )
@@ -1560,6 +1702,8 @@ def rebuild_report(root: Path) -> Path:
             "qualified_for_comparison",
             "quality_reasons",
             "hardware_id",
+            "runtime_cohort_id",
+            "frozen_runtime_status",
             *_BINDINGS,
             *_CONFIG_FIELDS,
             *_METRICS,
@@ -1575,6 +1719,9 @@ def rebuild_report(root: Path) -> Path:
             "case_id",
             "backend",
             "hardware_id",
+            "runtime_cohort_id",
+            "frozen_runtime_status_counts",
+            "runtime",
             "config_sha256",
             *_CONFIG_FIELDS,
             "metric",
@@ -1627,6 +1774,8 @@ def rebuild_report(root: Path) -> Path:
             "experiment_id",
             "backend",
             "hardware_id",
+            "runtime_scope",
+            "runtime_cohort_id",
             *_CONFIG_FIELDS,
             "max_observed_completed_num_envs",
             "min_observed_oom_num_envs",
