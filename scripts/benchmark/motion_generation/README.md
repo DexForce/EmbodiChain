@@ -23,6 +23,14 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_franka_pgi_curobo_pose_batch --device cuda
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_franka_pgi_door_pour_align_push --device cuda
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_hand_over --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_pickment --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_placement --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
@@ -57,7 +65,35 @@ in that run's `videos/` directory.
   `articulation_position_jitter_m` bounds translate the actual Microwave/Drawer
   roots for `Press`, `Slide`, and `Twist`. `Slide` samples one PGI grasp in
   target-local coordinates and screens the translated batch together.
-- Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics
+- `atomic_franka_pgi_door_pour_align_push_v1` adds `OpenDoor`, `Pour`,
+  `AxisAlign`, and `PushObject` on the same embodiment, replayed at 16 physics
+  steps per waypoint. Each case freezes its grasp and skill poses; success is
+  read from the replayed scene: the hinge angle at the end of the opening
+  segment, the held object's peak rotation about its own axis while pouring,
+  the held object's axis after alignment, and the pushed object's final pose.
+- Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
+  provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
+  one suite each, reusing each tutorial's robot settings and scene. These
+  skills reject cuRobo, so TOPPRA plans them. Each case compiles the skill
+  once with a reference TOPPRA generator while the manifest is built and
+  freezes every pose the skill requests for each arm; a row is motion-valid
+  only when both arms pass their own frozen poses in order. HandOver's sampled
+  pickup and receiving grasps are frozen from the same compile.
+  `CoordinatedPickment` solves its keyframes with robot IK and never calls the
+  planner, so its trajectory is the same for every planner. It samples its
+  grasps during compilation with the case's own `grasp_sample_count`, so cases
+  in one track cannot change each other's grasps. It succeeds only when both
+  grippers end at least `gripper_hold_gap` past open and short of their grasp
+  command (a gripper that misses closes to the command) and the object is
+  within its position and full-rotation tolerance. `CoordinatedPlacement` compares the placed
+  object's full rotation relative to its support.
+- Track configs may declare `grippers` (one entry per gripper) instead of
+  `gripper`, `fixtures` (static tables and slabs that are never parked), and
+  cases may keep extra objects in the scene through `scene_object_poses`.
+- Default matrix: cuRobo (`primary_baseline`); IK / TOPPRA optional diagnostics.
+  TOPPRA also serves Atomic Skills and joint-space cases; Atomic Skill calls
+  that leave planner options unset receive the suite's TOPPRA limits and
+  sample count.
 - Direct, batched NMG ONNX adapter (`candidate`, enabled when a model path is supplied)
 - Lifecycle timing: construct / prepare / cold / warm
 - Distinct planning, motion-valid, execution, task-success, and physical-effect
@@ -84,7 +120,13 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 - Object: add another `objects` entry for built-in `cube`/`mesh`, or register a
   new object-kind factory.
 - Atomic skill: implement and register an `AtomicSkillCaseProvider`; the runner,
-  artifact schema, aggregation, and report stay unchanged.
+  artifact schema, aggregation, and report stay unchanged. Optional provider
+  hooks cover skills with a precondition or their own sampling:
+  `prefix_invocations()` compiles actions such as the PickUp that a Pour needs,
+  `initial_scene()` supplies observations such as an OpenDoor hinge angle,
+  `frozen_grasps()` makes a skill that samples its own grasp use the manifest
+  grasp, and `object_rotation_segment()` names the window in which the replay
+  measures the held object's peak rotation.
 
 ## Current limits
 
@@ -99,7 +141,8 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
   but cuRobo still receives an empty external collision world. Contact replay
   validates target-joint actuation; it does not guarantee collision safety
   against non-target appliance links or other environment geometry
-- Dual-arm actions and multi-action chains
+- Dual-arm suites run on TOPPRA only; no collision-aware planner currently
+  accepts the coordinated skills
 - Latency-budget Pareto sweeps, confidence intervals, subprocess isolation
 
 
@@ -182,7 +225,10 @@ def evaluate(
 The evaluator receives frozen task inputs, measured replay observations, and
 motion-validation results. It receives neither the scenario/engine nor a
 `CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
-contains the existing measured replay summary. Missing optional measurements
+contains the existing measured replay summary, plus the target joint at the end
+of the declared articulation segment, the held object's peak signed rotation
+in a provider-declared window, and each configured gripper's final joint
+positions. Missing optional measurements
 mean unavailable evidence; the follow-up evaluation work must extend observation
 collection before claiming grasp/release/retention or intermediate-stage success.
 

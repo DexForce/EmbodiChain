@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -185,6 +186,10 @@ class ExecutionObservation:
     articulation_joint_initial: torch.Tensor | None = None
     articulation_joint_final: torch.Tensor | None = None
     articulation_joint_peak_signed_delta: torch.Tensor | None = None
+    articulation_joint_effect_end: torch.Tensor | None = None
+    object_rotation_peak_signed_rad: torch.Tensor | None = None
+    scene_object_final_poses: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    final_gripper_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
 
 
 class PhysicalStageEvaluator(Protocol):

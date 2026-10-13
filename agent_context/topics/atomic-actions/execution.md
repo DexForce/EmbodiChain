@@ -112,8 +112,10 @@ resample fractional durations.
 `MotionPolicy` forwards the explicit strategy unchanged. `ik_interp` rejects
 backend `plan_opts`; `motion_gen` always invokes the backend. Segments requesting
 `cartesian_linear=True` preserve caller-supplied Cartesian samples and currently
-require `ik_interp`, as used by Slide, PushObject and OpenDoor. A planner policy
-for such a segment raises instead of silently bypassing backend timing.
+require `ik_interp`, as used by Slide. A planner policy for such a segment
+raises instead of silently bypassing backend timing. OpenDoor and PushObject
+request straight contact segments only under `ik_interp`; under `motion_gen`
+they send each contact segment's endpoint to the backend.
 Press supports both strategies: `ik_interp` preserves the contact/press/retract
 Cartesian samples; `motion_gen` sends approach/contact/press/retract targets to
 the selected backend in one ordered request, then aligns the three internal

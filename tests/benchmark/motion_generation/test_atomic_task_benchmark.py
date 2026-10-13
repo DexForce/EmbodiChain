@@ -436,6 +436,11 @@ def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_link8"
     assert cfg.solver_cfg["arm"].tcp[2][3] == pytest.approx(0.15)
     assert len(cfg.init_qpos) == 9
+    # The PGI assembly has no fr3 finger links for a stock contact override.
+    assert all(
+        "fr3_leftfinger" not in str(override.link_names_expr)
+        for override in cfg.link_attrs.values()
+    )
 
 
 def test_atomic_invocation_uses_motion_generator_policy():
@@ -456,12 +461,19 @@ def test_atomic_invocation_uses_motion_generator_policy():
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
     assert atomic_skill_provider_names() == (
+        "axis_align",
+        "coordinated_pickment",
+        "coordinated_placement",
+        "hand_over",
         "move_end_effector",
         "move_held_object",
         "move_joints",
+        "open_door",
         "pick_up",
         "place",
+        "pour",
         "press",
+        "push_object",
         "slide",
         "twist",
     )

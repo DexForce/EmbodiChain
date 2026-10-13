@@ -123,6 +123,7 @@ from embodichain.lab.sim.motion.planners import (
     MoveType,
     PlanOptions,
     PlanResult,
+    PlanState,
     TrapezoidalPlanOptions,
     TrapezoidalPlanner,
 )
@@ -7297,3 +7298,138 @@ def test_assemble_place_reports_sampled_symmetry() -> None:
     assert plan.diagnostics.metadata["affordance_sample"]["assembly"][
         "candidate_ids"
     ] == [0, 1]
+
+
+def _record_motion_generation(
+    generator: MotionGenerator,
+) -> list[tuple[list[PlanState], object]]:
+    """Replace backend generation with a successful two-sample recorder."""
+    calls: list[tuple[list[PlanState], object]] = []
+
+    def generate(target_states, options=None) -> PlanResult:
+        calls.append((list(target_states), options))
+        return PlanResult(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            positions=torch.zeros(NUM_ENVS, 2, ARM_DOF),
+            dt=torch.full((NUM_ENVS, 2), CONTROL_DT),
+        )
+
+    generator.generate = Mock(side_effect=generate)
+    return calls
+
+
+def test_open_door_motion_gen_sends_contact_segment_endpoints() -> None:
+    """motion_gen gets each reach/retract endpoint, not exact line samples."""
+    semantics = ObjectSemantics(
+        affordance=_door_affordance(),
+        geometry={},
+        entity_id=DOOR_ENTITY_ID,
+        label="door_handle",
+    )
+    generator = _motion_generator()
+    calls = _record_motion_generation(generator)
+    action = _bind_action(generator, OpenDoor())
+
+    def sample_grasp(*, obj_poses: torch.Tensor, **_: object):
+        grasp_pose = obj_poses.clone()
+        grasp_pose[:, 0, 3] = 1.0
+        return [
+            (grasp_pose[index : index + 1], torch.zeros(1)) for index in range(NUM_ENVS)
+        ]
+
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(side_effect=sample_grasp)
+    options = OpenDoorOptions(
+        hand_interp_steps=3,
+        door_waypoint_count=4,
+        approach_distance=0.1,
+        retract_distance=0.1,
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="open_door",
+            goal=OpenDoorGoal(
+                semantics,
+                SceneEntityPose("target"),
+                open_fraction=1.0 / 3.0,
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=24),
+            skill_options=options,
+        ),
+        _context(scene=_door_scene(torch.eye(4).repeat(NUM_ENVS, 1, 1))),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert [len(states) for states, _ in calls] == [1, 1, 4, 1]
+    assert not any(call_options.is_linear for _, call_options in calls)
+    assert torch.allclose(
+        calls[1][0][0].xpos[:, :3, 3],
+        torch.tensor([1.0, 0.0, 0.0]).expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+    angle = math.pi / 6
+    expected_retract = torch.tensor(
+        [
+            math.cos(angle) - options.retract_distance * math.sin(angle),
+            math.sin(angle) + options.retract_distance * math.cos(angle),
+            0.0,
+        ]
+    )
+    assert torch.allclose(
+        calls[3][0][0].xpos[:, :3, 3],
+        expected_retract.expand(NUM_ENVS, -1),
+        atol=1.0e-6,
+    )
+
+
+def test_push_object_motion_gen_sends_contact_segment_endpoints() -> None:
+    """motion_gen gets the contact, pushed and retract endpoints."""
+    generator = _motion_generator()
+    calls = _record_motion_generation(generator)
+    action = _bind_action(generator, PushObject())
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = torch.tensor([0.4, 0.5])
+    target_pose = object_pose.clone()
+    target_pose[:, 1, 3] += torch.tensor([0.12, -0.12])
+    scene = SceneSnapshot(
+        timestamp=0.0,
+        version=0,
+        entities={
+            "utensil": EntityState(object_pose),
+            "slot": EntityState(target_pose),
+        },
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="push_object",
+            goal=PushObjectGoal(
+                _semantics(entity_id="utensil"),
+                SceneEntityPose("slot"),
+            ),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(strategy="motion_gen", sample_count=24),
+            skill_options=PushObjectOptions(
+                hand_interp_steps=3,
+                approach_height=0.1,
+                retract_height=0.08,
+                contact_distance=0.03,
+            ),
+        ),
+        _context(scene=scene),
+    )
+
+    assert plan.plan_success.tolist() == [True, True]
+    assert [len(states) for states, _ in calls] == [1, 1, 1, 1]
+    assert not any(call_options.is_linear for _, call_options in calls)
+    direction = torch.tensor([[0.0, 1.0, 0.0], [0.0, -1.0, 0.0]])
+    contact = object_pose[:, :3, 3] - direction * 0.03
+    pushed = contact + direction * 0.12
+    goals = [states[0].xpos[:, :3, 3] for states, _ in calls]
+    assert torch.allclose(goals[0], contact + torch.tensor([0.0, 0.0, 0.1]))
+    assert torch.allclose(goals[1], contact)
+    assert torch.allclose(goals[2], pushed)
+    assert torch.allclose(goals[3], pushed + torch.tensor([0.0, 0.0, 0.08]))
