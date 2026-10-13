@@ -110,6 +110,9 @@ def build_app() -> gr.Blocks:
             asset_engine_button = gr.Button("Asset_engine", variant="primary")
             scene_engine_button = gr.Button("Scene_engine", variant="secondary")
             action_engine_button = gr.Button("Action_engine", variant="secondary")
+            gr.Button(
+                "Data analysis ↗", link="http://127.0.0.1:7865", variant="secondary"
+            )
 
         asset_engine = build_asset_engine_panel()
         with gr.Column(visible=False) as scene_engine_panel:

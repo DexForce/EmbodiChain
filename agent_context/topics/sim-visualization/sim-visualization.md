@@ -116,3 +116,9 @@ Relevant tests:
 - `tests/sim/test_sim_manager.py`
 - `tests/gym/utils/test_gym_utils.py`
 - `tests/lab/scripts/test_preview_asset.py`
+
+## Offline dataset replay
+
+Portable episode recording and offline Viser playback are owned by
+[data-analysis](../data-analysis/data-analysis.md). The lab package imports
+submodules lazily so this path does not initialize simulation.
