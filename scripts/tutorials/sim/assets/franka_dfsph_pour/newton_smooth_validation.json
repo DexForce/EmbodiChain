@@ -1,0 +1,97 @@
+{
+  "physics": "newton",
+  "solver_type": "mujoco_warp",
+  "constraint_solver": "newton",
+  "motion_strategy": "ik_interp",
+  "sample_count": 360,
+  "seed": 0,
+  "dt": 0.05,
+  "state_frames": 1160,
+  "video_duration_s": 58.0,
+  "total_joint_travel_rad": 6.027714119190932,
+  "max_abs_joint_velocity_rad_s": 0.16322851181030273,
+  "max_abs_joint_acceleration_rad_s2": 2.548336982727051,
+  "joint_range_rad": [
+    0.2156438254751265,
+    0.22556033730506897,
+    0.20452182507142425,
+    0.4698362350463867,
+    0.09572748839855194,
+    0.360992431640625,
+    1.6373799443244934
+  ],
+  "joint_travel_rad": [
+    0.2819308042526245,
+    0.5596068631857634,
+    0.22512347111478448,
+    0.8122752904891968,
+    0.156102206921787,
+    0.9088325500488281,
+    3.083842933177948
+  ],
+  "cup_max_lift_m": 0.1197892427444458,
+  "cup_peak_tilt_deg": 66.08651109736965,
+  "cup_final_tilt_deg": 0.27595202615867453,
+  "cup_final_position_m": [
+    -0.7506415843963623,
+    0.001970036420971155,
+    0.5517045855522156
+  ],
+  "cup_target_position_m": [
+    -0.75,
+    0,
+    0.552
+  ],
+  "cup_final_position_error_m": 0.002092831511031938,
+  "baseline": {
+    "dt": 0.05,
+    "frames": 801,
+    "total_joint_travel_rad": 19.233531315715496,
+    "max_abs_joint_velocity_rad_s": 0.47287464141845703,
+    "max_abs_joint_acceleration_rad_s2": 4.917716979980469,
+    "joint_range_rad": [
+      1.2071502591889072,
+      1.1729130148887634,
+      2.4732320864168287,
+      0.32526111602783203,
+      2.794564709169208,
+      0.8155205249786377,
+      2.991017162799835
+    ],
+    "joint_travel_rad": [
+      1.595887460879581,
+      2.411954939365387,
+      4.470568950888264,
+      1.107144832611084,
+      3.77971409271413,
+      1.0105910301208496,
+      4.8576700091362
+    ]
+  },
+  "episodes": [
+    {
+      "attempt_id": 0,
+      "length": 1160,
+      "completed": true,
+      "success": true,
+      "terminal_reason": "success"
+    }
+  ],
+  "total_joint_travel_rad_reduction_percent": 68.66038783909767,
+  "max_abs_joint_velocity_rad_s_reduction_percent": 65.48165253254545,
+  "max_abs_joint_acceleration_rad_s2_reduction_percent": 48.18048714269092,
+  "video": {
+    "path": "/home/oem/EmbodiChain/outputs/franka_pour_cup/videos/episode_0_franka_newton_smooth_pour_mug.mp4",
+    "frames": 1160,
+    "fps": 20.0,
+    "width": 1280,
+    "height": 960
+  },
+  "keyframes": {
+    "start": 0,
+    "grasp": 230,
+    "lift": 380,
+    "pour": 570,
+    "return": 1159
+  }
+}

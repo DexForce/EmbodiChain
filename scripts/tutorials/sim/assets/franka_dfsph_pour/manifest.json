@@ -1,0 +1,54 @@
+{
+  "close_23.png": {
+    "bytes": 421745,
+    "sha256": "98e537c101484bd94babde41bf5445f78a192df3be354cc21407235692615b9d"
+  },
+  "environment.json": {
+    "bytes": 982,
+    "sha256": "5cf20ec2bc5f783b4513dea509a4503d0f1cebb0edd182ff4bf00d51741224bc"
+  },
+  "frame_15.png": {
+    "bytes": 750331,
+    "sha256": "b7cfa004fbc55df3596c18c60fdeab511c56999ded657d51cbb31910d406c349"
+  },
+  "franka_dfsph_pour.mp4": {
+    "bytes": 15858185,
+    "sha256": "87d373792ae70a588191d69b67e00ef19439c91cab7624ac26675a0c0f7cf76b"
+  },
+  "media_validation.json": {
+    "bytes": 11096,
+    "sha256": "5070fae5bb45ed235df649a9bbb4414bb64f8703fb4ca4486653ce99efefc0a0"
+  },
+  "newton_smooth_validation.json": {
+    "bytes": 2454,
+    "sha256": "587801be3462db200c502b6f49526d515c64c1ed449e98fd87b5f0100aba06c4"
+  },
+  "particles_30.npz": {
+    "bytes": 1655413,
+    "sha256": "3da37cec6ed887538a790fdd8cb7b2017905e7574c0cbd25c0cc005608f6c21c"
+  },
+  "pr_smoke_validation.json": {
+    "bytes": 2080,
+    "sha256": "6906e04f2df11f053ac2879ac438b476fae30745c092060ebab8bd5f44957bd7"
+  },
+  "settling_comparison.json": {
+    "bytes": 1403,
+    "sha256": "f02f1718841e914a2a0567e067a27b97ff7a88b10f33e11ecfd4112a76a2e025"
+  },
+  "trajectory.pt": {
+    "bytes": 301077,
+    "sha256": "5d489fdb0b1b073c6b16987ae6d02ee83e326b04b98ce658118c20b301a3430d"
+  },
+  "validation.json": {
+    "bytes": 13755,
+    "sha256": "a235f66ed2f7dfa3ce1b5460f37d1b2b7f266447e101420aef43207c27150619"
+  },
+  "water_closeup.mp4": {
+    "bytes": 10542263,
+    "sha256": "2045ce47c9c3bf94da7e8b4ce8f6c5319c0ff04ef1c8a42b01562342d2a99bdd"
+  },
+  "water_settling_closeup.mp4": {
+    "bytes": 1414937,
+    "sha256": "4b028a041dbde3ef1f43f311edc24e3359fa55fa9054ca8ee4f3c9e2bf140676"
+  }
+}
