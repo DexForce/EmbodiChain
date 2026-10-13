@@ -1,11 +1,11 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v1
+suite_version: atomic_franka_pgi_spatial_generalization_v2
 profile: coverage
 
-# Minimal nominal-versus-spatial-shift population for validating the benchmark
-# generalization pipeline.  The robustness domain maps one deterministic pose
-# sample to each simulator row; changing the seed reproduces a new frozen batch.
+# Strict spatial-generalization populations. Each robustness domain changes
+# exactly one spatial factor while assets, physics, robot, and task semantics
+# stay fixed. One deterministic pose sample maps to each simulator row.
 robot:
   id: franka_pgi
   provider: franka_pgi
@@ -72,8 +72,9 @@ tracks:
         case_generator: fixed_scene
         perturbations:
           object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
           target_translation_jitter_m: [0.0, 0.0, 0.0]
-      - id: xy_translation_3cm
+      - id: object_xy
         version: v1
         kind: robustness
         applicability: [push_object]
@@ -82,7 +83,8 @@ tracks:
         perturbations:
           distribution: uniform
           object_translation_jitter_m: [0.03, 0.03, 0.0]
-          target_translation_jitter_m: [0.02, 0.02, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
           samples_per_seed: 8
         overrides:
           batch_sizes: [8]
@@ -91,6 +93,51 @@ tracks:
             mode: translation
             pose_batch_size: 8
             object_translation_jitter_m: [0.03, 0.03, 0.0]
+            object_yaw_jitter_rad: 0.0
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            seed_stride: 1
+      - id: object_yaw
+        version: v1
+        kind: robustness
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.523599
+          target_translation_jitter_m: [0.0, 0.0, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.523599
+            target_translation_jitter_m: [0.0, 0.0, 0.0]
+            seed_stride: 1
+      - id: target_relative_pose
+        version: v1
+        kind: robustness
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+        case_generator: deterministic_uniform_pose_batch
+        perturbations:
+          distribution: uniform
+          object_translation_jitter_m: [0.0, 0.0, 0.0]
+          object_yaw_jitter_rad: 0.0
+          target_translation_jitter_m: [0.02, 0.02, 0.0]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.0, 0.0, 0.0]
+            object_yaw_jitter_rad: 0.0
             target_translation_jitter_m: [0.02, 0.02, 0.0]
             seed_stride: 1
     config:

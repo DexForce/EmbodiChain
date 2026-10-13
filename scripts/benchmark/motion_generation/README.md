@@ -73,12 +73,14 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
-- `atomic_franka_pgi_spatial_generalization_v1` is the minimal spatial
+- `atomic_franka_pgi_spatial_generalization_v2` is the strict spatial
   generalization baseline. It compares a three-seed nominal `PushObject`
-  population with a versioned robustness domain containing eight deterministic
-  XY object/target translations per seed. Domain overrides select `B=1` for
-  nominal cases and `B=8` for shifted cases; generated poses are frozen in the
-  case manifest and restored before every planner replay.
+  population with three isolated robustness domains: object XY translation,
+  object yaw, and target translation relative to the object. Each domain keeps
+  assets, physics, robot, and task semantics fixed and contains eight
+  deterministic samples per seed. Domain overrides select `B=1` for nominal
+  cases and `B=8` for shifted cases; generated poses are frozen in the case
+  manifest and restored before every planner replay.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These

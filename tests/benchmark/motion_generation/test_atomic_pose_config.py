@@ -105,30 +105,64 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     }
 
 
-def test_spatial_generalization_suite_expands_nominal_and_shifted_populations() -> None:
-    """The shipped baseline resolves into reproducible B=1 and B=8 domains."""
+def test_spatial_generalization_suite_isolates_three_spatial_populations() -> None:
+    """The shipped baseline changes one strict spatial factor per domain."""
     suite = load_suite("atomic_franka_pgi_spatial_generalization")
-    nominal, shifted = suite.evaluation_tracks()
+    nominal, object_xy, object_yaw, target_relative_pose = suite.evaluation_tracks()
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v1"
-    assert [nominal.id, shifted.id] == [
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v2"
+    assert [
+        nominal.id,
+        object_xy.id,
+        object_yaw.id,
+        target_relative_pose.id,
+    ] == [
         "spatial-push@nominal",
-        "spatial-push@xy_translation_3cm",
+        "spatial-push@object_xy",
+        "spatial-push@object_yaw",
+        "spatial-push@target_relative_pose",
     ]
-    assert nominal.group_id == shifted.group_id == "spatial-push"
+    assert {
+        track.group_id
+        for track in (nominal, object_xy, object_yaw, target_relative_pose)
+    } == {"spatial-push"}
     assert nominal.domain.kind == "nominal"
-    assert shifted.domain.kind == "robustness"
+    assert all(
+        track.domain.kind == "robustness"
+        for track in (object_xy, object_yaw, target_relative_pose)
+    )
     assert nominal.domain.applicability == ["push_object"]
-    assert shifted.domain.perturbations["samples_per_seed"] == 8
+    assert all(
+        track.domain.perturbations["samples_per_seed"] == 8
+        for track in (object_xy, object_yaw, target_relative_pose)
+    )
     assert resolve_atomic_batch_sizes(nominal) == [1]
-    assert resolve_atomic_batch_sizes(shifted) == [8]
-    randomization = resolve_atomic_pose_randomization(shifted)
-    assert randomization.enabled is True
-    assert randomization.pose_batch_size == 8
-    assert randomization.object_translation_jitter_m == (0.03, 0.03, 0.0)
-    assert randomization.target_translation_jitter_m == (0.02, 0.02, 0.0)
-    assert nominal.config["seeds"] == shifted.config["seeds"] == [11, 23, 47]
-    assert [skill["id"] for skill in shifted.config["skills"]] == ["push_object"]
+    assert all(
+        resolve_atomic_batch_sizes(track) == [8]
+        for track in (object_xy, object_yaw, target_relative_pose)
+    )
+
+    xy_settings = resolve_atomic_pose_randomization(object_xy)
+    yaw_settings = resolve_atomic_pose_randomization(object_yaw)
+    target_settings = resolve_atomic_pose_randomization(target_relative_pose)
+    assert xy_settings.object_translation_jitter_m == (0.03, 0.03, 0.0)
+    assert xy_settings.object_yaw_jitter_rad == 0.0
+    assert xy_settings.target_translation_jitter_m == (0.0, 0.0, 0.0)
+    assert yaw_settings.mode == "planar_pose"
+    assert yaw_settings.object_translation_jitter_m == (0.0, 0.0, 0.0)
+    assert yaw_settings.object_yaw_jitter_rad == pytest.approx(0.523599)
+    assert yaw_settings.target_translation_jitter_m == (0.0, 0.0, 0.0)
+    assert target_settings.object_translation_jitter_m == (0.0, 0.0, 0.0)
+    assert target_settings.object_yaw_jitter_rad == 0.0
+    assert target_settings.target_translation_jitter_m == (0.02, 0.02, 0.0)
+    assert all(
+        track.config["seeds"] == [11, 23, 47]
+        for track in (nominal, object_xy, object_yaw, target_relative_pose)
+    )
+    assert all(
+        [skill["id"] for skill in track.config["skills"]] == ["push_object"]
+        for track in (nominal, object_xy, object_yaw, target_relative_pose)
+    )
 
 
 def test_pose_batch_aliases_are_normalized() -> None:
@@ -154,6 +188,48 @@ def test_pose_batch_aliases_are_normalized() -> None:
     assert resolve_atomic_batch_sizes(track) == [4]
 
 
+def test_planar_pose_mode_injects_track_level_object_yaw() -> None:
+    """The planar-pose mode exposes object yaw without changing translations."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "mode": "planar_pose",
+                "pose_batch_size": 4,
+                "object_yaw_jitter_rad": 0.5,
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+
+    assert settings.enabled is True
+    assert settings.object_yaw_jitter_rad == pytest.approx(0.5)
+    assert prepared["_pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)
+    assert prepared["_pose_batch_object_translation_jitter_m"] == [0.0, 0.0, 0.0]
+    assert prepared["_pose_batch_translation_jitter_m"] == [0.0, 0.0, 0.0]
+
+
+def test_translation_mode_rejects_object_yaw() -> None:
+    """A translation-only domain cannot silently include orientation shift."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "object_yaw_jitter_rad": 0.5,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="mode='translation'"):
+        resolve_atomic_pose_randomization(track)
+
+
 def test_atomic_pose_config_rejects_null_track_mapping() -> None:
     """Report malformed YAML track entries with a useful type error."""
     track = TrackCfg(id="atomic-task", scenario="atomic_task", config=None)
@@ -167,6 +243,7 @@ def test_atomic_pose_config_rejects_null_track_mapping() -> None:
         ("pose_batch_size", 0, "pose_batch_size"),
         ("pose_batch_size", -2, "pose_batch_size"),
         ("object_translation_jitter_m", [0.01, -0.01, 0.0], "object_translation"),
+        ("object_yaw_jitter_rad", -0.1, "object_yaw"),
         ("target_translation_jitter_m", [0.01, 0.0], "target_translation"),
     ],
 )
@@ -330,6 +407,28 @@ def test_randomize_object_pose_returns_live_pose_after_optional_settle() -> None
     entity.get_local_pose.assert_called_once_with(to_matrix=True)
     torch.testing.assert_close(result, settled)
     torch.testing.assert_close(entity.set_local_pose.call_args.args[0], pose)
+
+
+def test_track_level_object_yaw_is_batched_and_deterministic() -> None:
+    """Each environment gets a reproducible yaw while translation stays fixed."""
+    batch_size = 4
+    initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    initial_pose[:, :3, 3] = torch.tensor([-0.42, -0.08, 0.05])
+    handle = Mock(initial_pose=initial_pose, entity=Mock())
+    scenario = AtomicTaskScenario()
+    config = {
+        "_pose_batch_object_yaw_jitter_rad": 0.5,
+        "_pose_batch_seed_stride": 1,
+    }
+
+    first = scenario.randomize_object_pose(handle, config, seed=11, stream=201)
+    second = scenario.randomize_object_pose(handle, config, seed=11, stream=201)
+
+    yaw = torch.atan2(first[:, 1, 0], first[:, 0, 0])
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(first[:, :3, 3], initial_pose[:, :3, 3])
+    assert torch.all(yaw.abs() <= 0.5)
+    assert torch.unique(yaw).numel() == batch_size
 
 
 def test_randomize_articulation_root_translation_is_deterministic() -> None:
@@ -605,9 +704,11 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
             "_pose_batch_seed_stride": 1,
             "_pose_batch_translation_jitter_m": [0.1, 0.1, 0.0],
             "_pose_batch_object_translation_jitter_m": [0.2, 0.2, 0.0],
+            "_pose_batch_object_yaw_jitter_rad": 0.5,
             "target_offset_jitter_m": [0.1, 0.1, 0.0],
         },
         seed=11,
     )
     assert all(not key.startswith("_pose_batch_") for key in parameters["ranges"])
     assert parameters["pose_batch"] is True
+    assert parameters["pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)

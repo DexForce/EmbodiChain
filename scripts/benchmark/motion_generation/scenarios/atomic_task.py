@@ -414,6 +414,9 @@ def _randomization_parameters(
                         (0.0, 0.0, 0.0),
                     )
                 ),
+                "pose_batch_object_yaw_jitter_rad": float(
+                    config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+                ),
                 "batch_semantics": "one_pose_per_environment_row",
             }
         )
@@ -3145,9 +3148,9 @@ class AtomicTaskScenario(ScenarioProvider):
         """Inject shared pose-batch controls into one skill configuration.
 
         Skill-specific jitter keys remain authoritative.  The track-level
-        translation range is only a fallback, allowing a compact YAML block
-        to drive all object and target pose variants.  No randomization is
-        applied when the track does not opt in.
+        translation and yaw ranges are only fallbacks, allowing a compact
+        YAML block to drive object and target pose variants.  No randomization
+        is applied when the track does not opt in.
         """
         randomization = resolve_atomic_pose_randomization(track)
         if randomization.enabled:
@@ -3156,12 +3159,16 @@ class AtomicTaskScenario(ScenarioProvider):
                     "Atomic pose-batch size must match the simulator batch: "
                     f"{randomization.pose_batch_size} != {batch_size}."
                 )
-            if randomization.mode == "translation":
+            if randomization.mode in {"translation", "planar_pose"}:
                 config["_pose_batch_translation_jitter_m"] = list(
                     randomization.target_translation_jitter_m
                 )
                 config["_pose_batch_object_translation_jitter_m"] = list(
                     randomization.object_translation_jitter_m
+                )
+            if randomization.mode == "planar_pose":
+                config["_pose_batch_object_yaw_jitter_rad"] = (
+                    randomization.object_yaw_jitter_rad
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
             config["_pose_batch_enabled"] = True
@@ -4672,7 +4679,10 @@ class AtomicTaskScenario(ScenarioProvider):
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
 
-        yaw_amplitude = float(config.get("object_yaw_jitter_rad", 0.0))
+        yaw_jitter = config.get("object_yaw_jitter_rad")
+        if yaw_jitter is None:
+            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+        yaw_amplitude = float(yaw_jitter)
         if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
             raise ValueError("object_yaw_jitter_rad must be finite and non-negative.")
         yaw = _seeded_jitter(

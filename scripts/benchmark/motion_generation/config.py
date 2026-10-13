@@ -78,8 +78,8 @@ class AtomicPoseRandomizationCfg:
     perturbed poses sent to a batched Atomic Action goal and the default
     simulator batch size when a track does not declare ``batch_sizes``.
 
-    The nested ``randomization`` mapping is intentionally small and
-    translation-first.  Skill-level legacy keys such as
+    The nested ``randomization`` mapping is intentionally small and limited
+    to strict pose changes.  Skill-level legacy keys such as
     ``object_position_jitter_m`` remain supported by the scenario provider;
     this object only normalizes track-level controls shared by all skills.
     """
@@ -88,6 +88,7 @@ class AtomicPoseRandomizationCfg:
     pose_batch_size: int = 1
     mode: str = "translation"
     object_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    object_yaw_jitter_rad: float = 0.0
     target_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     seed_stride: int = 1
 
@@ -533,6 +534,14 @@ def _finite_nonnegative_vector(
     return values
 
 
+def _finite_nonnegative_scalar(value: object, *, name: str, default: float) -> float:
+    """Normalize one finite non-negative scalar perturbation bound."""
+    resolved = default if value is None else float(value)
+    if not math.isfinite(resolved) or resolved < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative.")
+    return resolved
+
+
 def _positive_int(value: object, *, name: str, default: int) -> int:
     """Normalize one strict positive integer configuration value."""
     resolved = default if value is None else value
@@ -562,9 +571,10 @@ def resolve_atomic_pose_randomization(
 
        randomization:
          enabled: true
-         mode: translation
+         mode: planar_pose
          pose_batch_size: 8
          object_translation_jitter_m: [0.03, 0.03, 0.0]
+         object_yaw_jitter_rad: 0.5236
          target_translation_jitter_m: [0.03, 0.03, 0.02]
          seed_stride: 1
 
@@ -602,9 +612,10 @@ def resolve_atomic_pose_randomization(
     mode = str(
         randomization.get("mode", config.get("randomization_mode", "translation"))
     )
-    if mode not in {"translation", "none"}:
+    if mode not in {"translation", "planar_pose", "none"}:
         raise ValueError(
-            "atomic-task randomization.mode must be 'translation' or 'none'."
+            "atomic-task randomization.mode must be 'translation', "
+            "'planar_pose', or 'none'."
         )
 
     object_jitter_value = randomization.get("object_translation_jitter_m")
@@ -618,6 +629,15 @@ def resolve_atomic_pose_randomization(
         object_jitter_value,
         name="atomic-task randomization.object_translation_jitter_m",
         default=(0.0, 0.0, 0.0),
+    )
+
+    object_yaw_jitter = _finite_nonnegative_scalar(
+        randomization.get(
+            "object_yaw_jitter_rad",
+            config.get("object_yaw_jitter_rad"),
+        ),
+        name="atomic-task randomization.object_yaw_jitter_rad",
+        default=0.0,
     )
 
     target_jitter_value = randomization.get("target_translation_jitter_m")
@@ -641,7 +661,7 @@ def resolve_atomic_pose_randomization(
     enabled_value = randomization.get("enabled")
     if enabled_value is None:
         enabled = pose_batch_size > 1 or any(
-            value > 0.0 for value in (*object_jitter, *target_jitter)
+            value > 0.0 for value in (*object_jitter, object_yaw_jitter, *target_jitter)
         )
     elif isinstance(enabled_value, bool):
         enabled = enabled_value
@@ -652,17 +672,24 @@ def resolve_atomic_pose_randomization(
         and enabled
         and (
             any(value > 0.0 for value in object_jitter)
+            or object_yaw_jitter > 0.0
             or any(value > 0.0 for value in target_jitter)
         )
     ):
         raise ValueError(
             "atomic-task randomization.mode='none' cannot specify non-zero jitter."
         )
+    if mode == "translation" and enabled and object_yaw_jitter > 0.0:
+        raise ValueError(
+            "atomic-task randomization.mode='translation' cannot specify "
+            "object_yaw_jitter_rad."
+        )
     return AtomicPoseRandomizationCfg(
         enabled=enabled,
         pose_batch_size=pose_batch_size,
         mode=mode,
         object_translation_jitter_m=object_jitter,
+        object_yaw_jitter_rad=object_yaw_jitter,
         target_translation_jitter_m=target_jitter,
         seed_stride=stride,
     )
