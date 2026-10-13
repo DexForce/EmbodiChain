@@ -11,6 +11,7 @@ Practical guides for common tasks in EmbodiChain.
    agent_skills
    add_robot
    preview_asset
+   preview_robot
    run_env
    expert_task_language
    offline_expert_datasets

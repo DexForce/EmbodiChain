@@ -74,6 +74,23 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-preview-robot)=
+## Preview Robot
+
+List exact robot and variant IDs, then preview the selected configuration:
+
+```bash
+embodichain list-robot
+embodichain preview-robot --robot FrankaPanda
+embodichain preview-robot --robot DexforceW1 --variant v025/DH_PGC --viser
+```
+
+The native window uses I to activate or toggle configured control-part IK
+Gizmos. Viser supports Gizmo dragging, joint controls, and pose reset.
+See {doc}`preview_robot` for robot files, overrides, and bounded headless runs.
+
+---
+
 (cli-list-tasks)=
 ## List Tasks
 

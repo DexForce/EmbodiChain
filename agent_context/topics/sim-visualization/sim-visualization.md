@@ -21,6 +21,8 @@
 | `embodichain/lab/gym/utils/gym_utils.py` | Gym config parsing, common launcher arguments, and CLI overrides |
 | `embodichain/lab/gym/envs/base_env.py` | Environment scene setup, post-setup start, and forced reset capture |
 | `embodichain/lab/scripts/preview_asset.py` | Standalone rigid-object and articulation browser preview |
+| `embodichain/lab/scripts/preview_robot.py` | Catalog/file robot preview with managed IK Gizmos and joint controls |
+| `embodichain/lab/scripts/_preview.py`, `preview_joint_control.py` | Shared preview stepping, frontend setup, and simulation-thread joint controls |
 
 Human-facing behavior and usage are documented in
 `docs/source/overview/sim/viser_visualization.md`.
@@ -116,3 +118,5 @@ Relevant tests:
 - `tests/sim/test_sim_manager.py`
 - `tests/gym/utils/test_gym_utils.py`
 - `tests/lab/scripts/test_preview_asset.py`
+- `tests/lab/scripts/test_preview_robot.py`
+- `tests/lab/scripts/test_preview_joint_control.py`

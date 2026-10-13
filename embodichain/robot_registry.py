@@ -40,6 +40,8 @@ __all__ = ["list_robot_cfgs", "resolve_robot_cfg"]
 
 def _validate_control_metadata(name: str, spec: Mapping[str, Any]) -> None:
     """Validate optional display metadata before exposing it to CLI consumers."""
+    if "defaults" in spec and not isinstance(spec["defaults"], Mapping):
+        raise TypeError(f"Robot {name!r} defaults must be a mapping.")
     dof = spec.get("dof")
     if dof is not None and (
         not isinstance(dof, int) or isinstance(dof, bool) or dof < 0
@@ -230,20 +232,28 @@ def list_robot_cfgs() -> tuple[str, ...]:
 
 
 def resolve_robot_cfg(
-    name: str, overrides: Mapping[str, Any] | None = None
+    name: str,
+    overrides: Mapping[str, Any] | None = None,
+    *,
+    variant: str | None = None,
 ) -> RobotCfg:
     """Construct a robot config using catalog defaults and caller overrides.
 
     Args:
         name: Exact registered robot ID.
         overrides: Robot-specific configuration fields. Caller values take
-            precedence over catalog defaults; neither input mapping is mutated.
+            precedence over catalog and variant defaults. Input mappings are
+            not mutated; nested values follow the existing top-level merge.
+        variant: Exact declared variant ID. When omitted, the existing catalog
+            and configuration-class defaults apply; ``default_variant`` is
+            display metadata and does not implicitly select a profile.
 
     Returns:
         The selected ``RobotCfg`` subclass decoded through its ``from_dict``.
 
     Raises:
-        ValueError: If the robot ID is unknown or registered more than once.
+        ValueError: If the robot or variant ID is unknown, or an ID is
+            registered more than once.
         TypeError: If a catalog or its selected class violates the contract.
     """
     specs = _robot_specs()
@@ -256,6 +266,17 @@ def resolve_robot_cfg(
             "Install the robot provider or refresh the EmbodiChain editable install."
         )
     spec = specs[key]
+    if overrides is not None and not isinstance(overrides, Mapping):
+        raise TypeError("Robot overrides must be a mapping.")
+    variant_defaults: Mapping[str, Any] = {}
+    if variant is not None:
+        variants = spec.get("variants") or {}
+        if not isinstance(variant, str) or not variant or variant not in variants:
+            raise ValueError(
+                f"Unknown variant {variant!r} for robot {name!r}. "
+                f"Available variants: {tuple(variants)}."
+            )
+        variant_defaults = variants[variant].get("defaults", {})
     module_name, separator, class_name = spec["class_path"].partition(":")
     if not separator or not module_name or not class_name:
         raise ValueError(
@@ -266,5 +287,7 @@ def resolve_robot_cfg(
 
     if not isinstance(cfg_cls, type) or not issubclass(cfg_cls, RobotCfg):
         raise TypeError(f"Robot {key!r} must resolve to a RobotCfg subclass.")
-    params = deepcopy({**spec.get("defaults", {}), **(overrides or {})})
+    params = deepcopy(
+        {**spec.get("defaults", {}), **variant_defaults, **(overrides or {})}
+    )
     return cfg_cls.from_dict(params)

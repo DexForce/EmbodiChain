@@ -43,6 +43,7 @@ EXPECTED_COMMANDS = {
     "list-task",
     "show-task",
     "preview-asset",
+    "preview-robot",
     "preview_lerobot_data",
     "run-env",
     "scene-engine",

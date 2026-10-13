@@ -557,6 +557,27 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
+embodichain.lab.scripts.preview_robot
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_robot
+
+Load a catalog robot or a standalone configuration and run a native or Viser
+preview with managed control-part Gizmos and optional joint controls.
+
+.. autosummary::
+
+   build_robot_cfg
+   cli
+   main
+
+.. autofunction:: build_robot_cfg
+
+.. autofunction:: cli
+
+.. autofunction:: main
+
+
 embodichain.lab.scripts.run_env
 -------------------------------
 

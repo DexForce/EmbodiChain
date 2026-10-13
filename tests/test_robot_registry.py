@@ -36,7 +36,14 @@ pytestmark = pytest.mark.no_sim
 def catalogs(monkeypatch):
     entries = []
     registry._robot_specs.cache_clear()
-    monkeypatch.setattr(registry.metadata, "entry_points", lambda **_: entries)
+    original_entry_points = registry.metadata.entry_points
+
+    def entry_points(**kwargs):
+        if kwargs.get("group") == "embodichain.robots":
+            return entries
+        return original_entry_points(**kwargs)
+
+    monkeypatch.setattr(registry.metadata, "entry_points", entry_points)
     yield entries
     registry._robot_specs.cache_clear()
 
@@ -112,6 +119,83 @@ def test_resolver_merges_defaults_without_mutating_inputs(external_robot):
 def test_resolver_unknown_robot_has_actionable_error(catalogs):
     with pytest.raises(ValueError, match="Unknown robot.*missing"):
         registry.resolve_robot_cfg("missing")
+
+
+def test_explicit_variant_preserves_defaults_and_isolates_overrides(external_robot):
+    cfg_cls, spec = external_robot
+    spec["variants"] = {
+        "alternate": {"defaults": {"uid": "variant", "init_qpos": [0.6]}}
+    }
+    spec["default_variant"] = "alternate"
+    original = deepcopy(spec)
+    overrides = {"uid": "caller"}
+
+    selected = registry.resolve_robot_cfg("vendor.arm", overrides, variant="alternate")
+    selected.init_qpos.append(0.9)
+
+    assert isinstance(selected, cfg_cls)
+    assert selected.uid == "caller"
+    assert selected.init_qpos == [0.6, 0.9]
+    assert registry.resolve_robot_cfg("vendor.arm").init_qpos == [0.2]
+    assert registry.resolve_robot_cfg("vendor.arm", variant="alternate").init_qpos == [
+        0.6
+    ]
+    assert spec == original
+    assert overrides == {"uid": "caller"}
+
+
+@pytest.mark.parametrize("variant", ["missing", "", 1])
+def test_variant_is_validated_before_loading_robot_implementation(catalogs, variant):
+    catalogs.append(
+        _entry(
+            "external",
+            {
+                "vendor.arm": {
+                    "class_path": "uninstalled_robot:RobotCfg",
+                    "variants": {"standard": {"defaults": {}}},
+                }
+            },
+        )
+    )
+
+    with pytest.raises(ValueError, match="Unknown variant.*Available variants"):
+        registry.resolve_robot_cfg("vendor.arm", variant=variant)
+    assert "uninstalled_robot" not in sys.modules
+
+
+def test_variant_defaults_require_a_mapping(catalogs):
+    catalogs.append(
+        _entry(
+            "external",
+            {
+                "vendor.arm": {
+                    "class_path": "uninstalled_robot:RobotCfg",
+                    "variants": {"standard": {"defaults": []}},
+                }
+            },
+        )
+    )
+    with pytest.raises(TypeError, match="defaults must be a mapping"):
+        registry.list_robot_cfgs()
+
+
+@pytest.mark.parametrize(
+    "name, variant, field",
+    [
+        ("URRobot", "ur5e", "robot_type"),
+        ("DualArmRobot", "ur5", "base_robot"),
+    ],
+)
+def test_named_official_variant_selects_its_model(
+    catalogs, local_robot_assets, name, variant, field
+):
+    from embodichain_robots._catalog import ROBOT_CONFIGS
+
+    catalogs.append(_entry("official", ROBOT_CONFIGS))
+
+    cfg = registry.resolve_robot_cfg(name, variant=variant)
+
+    assert getattr(cfg, field) == variant
 
 
 def test_resolver_rejects_unregistered_configuration_class_spelling(external_robot):
@@ -309,7 +393,7 @@ def test_w1_variant_metadata_matches_config(catalogs, local_robot_assets, varian
 
     catalogs.append(_entry("official", ROBOT_CONFIGS))
     profile = ROBOT_CONFIGS["DexforceW1"]["variants"][variant]
-    cfg = registry.resolve_robot_cfg("DexforceW1", profile["defaults"])
+    cfg = registry.resolve_robot_cfg("DexforceW1", variant=variant)
     joints = {joint for names in cfg.control_parts.values() for joint in names}
 
     assert cfg.version.value == variant.split("/")[0]

@@ -64,6 +64,11 @@ COMMANDS = (
         help="Preview a USD, URDF, or mesh asset in simulation.",
     ),
     Command(
+        name="preview-robot",
+        target="embodichain.lab.scripts.preview_robot:cli",
+        help="Preview a robot with control-part Gizmos and Viser joint controls.",
+    ),
+    Command(
         name="run-env",
         target="embodichain.lab.scripts.run_env:cli",
         help="Run an environment for data generation or preview.",

@@ -9,6 +9,7 @@
 | Available robot configs and variants | `embodichain_robots/_catalog.py`; `embodichain_robots/__init__.py` owns lazy exports |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
+| Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
 | W1 variants and serialization | `embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
@@ -25,26 +26,19 @@ package, bundled in the main wheel with the core version. Generic `Robot`,
 Concrete presets import from `embodichain_robots`. The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
 
-The `embodichain.robots` entry points provide lightweight catalog mappings from
-IDs to `class_path: module:Class` and optional `defaults`. Catalogs/package
-initializers defer robot implementation imports. `embodichain list-robot`
-reads only catalogs and prints robot families, supported variants, independent
-control DOFs/parts, and mimic followers without constructing configs or
-downloading assets. `dof` excludes mimic followers and overlapping groups count
-once; `control_parts` records raw per-part counts, with `control_part_mimics`
-marking follower membership. `mimic_joints` maps URDF followers to leaders,
-including passive followers outside control groups. Missing summaries stay
-unknown. UR presets use `variant_of` to share a family row; DualArmRobot summaries
-are derived from catalog bases explicitly declaring `supports_dual_arm`.
-W1 variants advertise body releases with dual BrainCo, DH/DH-M pairings,
-and `with_default_eef=False`, omitting dexterous/gripper mixtures; hand release versions remain independent
-of body release versions. Tests compare each declared profile with config defaults.
-Resolution imports the selected `RobotCfg` subclass and calls `from_dict()`
-with isolated defaults/overrides. Duplicate IDs fail explicitly. Gym
-`robot.class_type`, workspace `--robot`, and dual-arm `base_robot` share this
-resolver. Selectors use exact registered IDs; old aliases and `Cfg`-suffixed
-spellings are not accepted. UR variants have their own default parameters. After changing
-entry-point metadata, refresh the editable install and restart the process.
+Catalog listing defers robot classes and asset downloads; resolution imports
+one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
+analysis, dual-arm composition, and preview share `embodichain/robot_registry.py`.
+Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
+An explicit `variant` applies profile defaults before caller overrides, while
+omission preserves existing construction behavior. See
+[catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+`preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
+File `class_type` optionally selects the catalog; local asset paths resolve
+from the file directory. Configuration decoding and validation precede World
+creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
+cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
 
 ## Configuration resolution
 
@@ -136,6 +130,7 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 | Changed boundary | Existing coverage |
 |---|---|
 | Robot catalogs, third-party selection across consumers | `tests/test_robot_registry.py` |
+| Robot preview inputs, initialization, and cleanup | `tests/lab/scripts/test_preview_robot.py` |
 | Robot CLI metadata, table formatting, and deferred imports | `tests/cli/test_list_robot.py`, `tests/test_main.py` |
 | Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
 | Bundled robot package discovery/staging | `tests/test_robot_package.py` |

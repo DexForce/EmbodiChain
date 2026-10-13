@@ -30,6 +30,10 @@ embodichain.robot_registry
 --------------------------
 
 Discover installed robot IDs or construct the selected configuration with caller overrides.
+An explicit ``variant`` selects its catalog profile defaults before caller
+overrides are applied. Omitting it preserves existing resolution defaults.
+The profile's display-only ``default_variant`` does not implicitly select a
+variant. All merges preserve the catalog and caller mappings.
 
 .. autofunction:: embodichain.robot_registry.list_robot_cfgs
 

@@ -115,22 +115,24 @@ topics:
   status: active
 - id: robot-system
   title: Robot System
-  aliases: [robot system, robot config, robot catalog, list robot, 机器人配置, 机器人系统, 机型解析, 列出机器人]
+  aliases: [robot system, robot config, robot catalog, list robot, robot preview, 机器人配置, 机器人系统, 机型解析, 列出机器人, 机器人预览]
   keywords: [RobotCfg, RobotPresetCfg, control_parts, build_pk_serial_chain, DexforceW1Cfg, CobotMagicCfg,
     FrankaPandaCfg, URRobotCfg, DualArmRobotCfg, merge_robot_cfg, JointDrivePropertiesCfg,
-    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot]
+    asset_physics_mode, target_mode, mimic joint, quaternion, xyzw, embodichain_robots, resolve_robot_cfg, list-robot, preview-robot]
   paths: [topics/robot-system/robot-system.md]
   source_of_truth:
   - embodichain/lab/sim/objects/robot.py
   - embodichain/lab/sim/robots/
   - embodichain/robot_registry.py
   - embodichain/cli/list_robot.py
+  - embodichain/lab/scripts/preview_robot.py
   - embodichain_robots/
   - embodichain/lab/sim/cfg/
   - embodichain/lab/gym/envs/embodied_env.py
   watch_paths: [embodichain/lab/sim/robots/, embodichain_robots/, embodichain/lab/sim/objects/robot.py,
     embodichain/robot_registry.py, embodichain/lab/sim/cfg/, tests/sim/robots/, tests/test_robot_registry.py,
-    embodichain/cli/list_robot.py, tests/cli/test_list_robot.py]
+    embodichain/cli/list_robot.py, tests/cli/test_list_robot.py, embodichain/lab/scripts/preview_robot.py,
+    tests/lab/scripts/test_preview_robot.py]
   related_topics: [simulation-system, ik-solvers, motion-planning, sensor-system, sim-visualization, robot-workspace]
   status: active
 - id: sensor-system
@@ -164,8 +166,12 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/sim/objects/deformable/
   - embodichain/lab/scripts/preview_asset.py
+  - embodichain/lab/scripts/_preview.py
+  - embodichain/lab/scripts/preview_joint_control.py
   watch_paths: [embodichain/lab/visualization/, embodichain/lab/sim/objects/gizmo.py, embodichain/lab/sim/sim_manager.py,
-    tests/visualization/]
+    tests/visualization/, embodichain/lab/scripts/_preview.py, embodichain/lab/scripts/preview_asset.py,
+    embodichain/lab/scripts/preview_joint_control.py, tests/lab/scripts/test_preview_asset.py,
+    tests/lab/scripts/test_preview_joint_control.py]
   related_topics: [simulation-system, env-framework, sensor-system, robot-system, configclass-pattern]
   status: active
 - id: motion-planning
