@@ -291,7 +291,7 @@ def test_coordinated_placement_randomizes_both_objects_before_one_settle():
 
 
 def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
-    """Placement geometry no longer broadcasts row zero across the pose batch."""
+    """Placement keeps row geometry and applies one shared target shift per row."""
     batch_size = 4
     placing_pose = torch.eye(4).repeat(batch_size, 1, 1)
     support_pose = torch.eye(4).repeat(batch_size, 1, 1)
@@ -311,14 +311,26 @@ def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
 
     monkeypatch.setattr(dual, "_placement_pose_row", row_poses)
 
+    config = {
+        "target_object_offset_jitter_m": [0.03, 0.02, 0.01],
+        "_pose_batch_seed_stride": 1,
+    }
     poses = dual._placement_poses(
-        Mock(), Mock(), placing_pose, support_pose, {}, seed=11
+        Mock(), Mock(), placing_pose, support_pose, config, seed=11
+    )
+    repeated = dual._placement_poses(
+        Mock(), Mock(), placing_pose, support_pose, config, seed=11
     )
 
     torch.testing.assert_close(poses["placing_grasp_pose"], placing_pose)
     torch.testing.assert_close(poses["support_grasp_pose"], support_pose)
-    torch.testing.assert_close(poses["placing_target_pose"], placing_pose)
-    torch.testing.assert_close(poses["support_target_pose"], support_pose)
+    placing_shift = poses["placing_target_pose"][:, :3, 3] - placing_pose[:, :3, 3]
+    support_shift = poses["support_target_pose"][:, :3, 3] - support_pose[:, :3, 3]
+    torch.testing.assert_close(placing_shift, support_shift)
+    assert torch.unique(placing_shift, dim=0).shape[0] == batch_size
+    assert torch.all(placing_shift.abs() <= torch.tensor([0.03, 0.02, 0.01]))
+    for name, pose in poses.items():
+        torch.testing.assert_close(pose, repeated[name])
 
 
 def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():

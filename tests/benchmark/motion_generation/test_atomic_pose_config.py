@@ -431,8 +431,8 @@ def test_track_level_object_yaw_is_batched_and_deterministic() -> None:
     assert torch.unique(yaw).numel() == batch_size
 
 
-def test_randomize_articulation_root_translation_is_deterministic() -> None:
-    """Articulation pose batches vary only in translation and remain replayable."""
+def test_randomize_articulation_root_pose_is_deterministic() -> None:
+    """Articulation pose batches vary in translation and yaw reproducibly."""
     batch_size = 4
     initial_pose = torch.eye(4).repeat(batch_size, 1, 1)
     initial_pose[:, :3, 3] = torch.tensor([-1.0, -0.3, 0.4])
@@ -456,6 +456,7 @@ def test_randomize_articulation_root_translation_is_deterministic() -> None:
     scenario.simulation = Mock()
     config = {
         "articulation_position_jitter_m": [0.03, 0.02, 0.0],
+        "_pose_batch_object_yaw_jitter_rad": 0.4,
         "_pose_batch_seed_stride": 1,
     }
 
@@ -473,12 +474,14 @@ def test_randomize_articulation_root_translation_is_deterministic() -> None:
     )
 
     offsets = first[:, :3, 3] - initial_pose[:, :3, 3]
+    yaw = torch.atan2(first[:, 1, 0], first[:, 0, 0])
     torch.testing.assert_close(first, second)
-    torch.testing.assert_close(first[:, :3, :3], initial_pose[:, :3, :3])
     assert torch.all(offsets[:, 0].abs() <= 0.03)
     assert torch.all(offsets[:, 1].abs() <= 0.02)
     assert torch.equal(offsets[:, 2], torch.zeros(batch_size))
     assert torch.unique(offsets[:, :2], dim=0).shape[0] == batch_size
+    assert torch.all(yaw.abs() <= 0.4)
+    assert torch.unique(yaw).numel() == batch_size
     assert scenario.simulation.update.call_count == 2
     scenario.simulation.update.assert_called_with(step=1)
 

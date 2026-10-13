@@ -277,6 +277,44 @@ def _seeded_jitter(
     return values[0] if batch_size == 1 else values
 
 
+def _apply_seeded_yaw_jitter(
+    pose: torch.Tensor,
+    amplitude: object,
+    *,
+    name: str,
+    seed: int,
+    stream: int,
+    seed_stride: int,
+) -> None:
+    """Rotate every pose row about world Z by deterministic yaw jitter."""
+    yaw_amplitude = float(amplitude)
+    if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
+        raise ValueError(f"{name} must be finite and non-negative.")
+    yaw = _seeded_jitter(
+        (yaw_amplitude,),
+        seed=seed,
+        stream=stream,
+        dtype=pose.dtype,
+        device=pose.device,
+        batch_size=pose.shape[0],
+        seed_stride=seed_stride,
+    )
+    if yaw.dim() == 1:
+        yaw = yaw[:1]
+    else:
+        yaw = yaw[:, 0]
+    cosine = torch.cos(yaw)
+    sine = torch.sin(yaw)
+    yaw_rotation = torch.eye(3, dtype=pose.dtype, device=pose.device).repeat(
+        pose.shape[0], 1, 1
+    )
+    yaw_rotation[:, 0, 0] = cosine
+    yaw_rotation[:, 0, 1] = -sine
+    yaw_rotation[:, 1, 0] = sine
+    yaw_rotation[:, 1, 1] = cosine
+    pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
+
+
 def _case_generation_seed(seed: int, *, skill_index: int, case_index: int) -> int:
     """Derive one stable RNG seed for all stochastic IK work in a case."""
     return (
@@ -4595,11 +4633,10 @@ class AtomicTaskScenario(ScenarioProvider):
         seed: int,
         stream: int,
     ) -> torch.Tensor:
-        """Translate an articulation root independently in every environment.
+        """Translate and yaw an articulation root in every environment.
 
-        The articulation orientation and joint state stay frozen.  A
-        skill-local ``articulation_position_jitter_m`` range overrides the
-        pose-batch track's object-translation range.
+        The articulation joint state stays frozen.  Skill-local position and
+        yaw ranges override the pose-batch track's object-pose ranges.
         """
         configured = config.get("articulation_position_jitter_m")
         if configured is None:
@@ -4628,6 +4665,17 @@ class AtomicTaskScenario(ScenarioProvider):
             if translation.dim() == 1:
                 translation = translation.unsqueeze(0)
             pose[:, :3, 3] += translation
+        yaw_jitter = config.get("articulation_yaw_jitter_rad")
+        if yaw_jitter is None:
+            yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
+        _apply_seeded_yaw_jitter(
+            pose,
+            yaw_jitter,
+            name="articulation_yaw_jitter_rad",
+            seed=seed,
+            stream=stream + 1,
+            seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        )
         handle.reset(pose=pose, qpos=handle.initial_qpos)
 
         update_steps = handle.config.get("reset_settle_steps", 10)
@@ -4687,32 +4735,14 @@ class AtomicTaskScenario(ScenarioProvider):
         yaw_jitter = config.get("object_yaw_jitter_rad")
         if yaw_jitter is None:
             yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
-        yaw_amplitude = float(yaw_jitter)
-        if not math.isfinite(yaw_amplitude) or yaw_amplitude < 0.0:
-            raise ValueError("object_yaw_jitter_rad must be finite and non-negative.")
-        yaw = _seeded_jitter(
-            (yaw_amplitude,),
+        _apply_seeded_yaw_jitter(
+            pose,
+            yaw_jitter,
+            name="object_yaw_jitter_rad",
             seed=seed,
             stream=stream + 1,
-            dtype=pose.dtype,
-            device=pose.device,
-            batch_size=pose.shape[0],
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
-        if yaw.dim() == 1:
-            yaw = yaw[:1]
-        else:
-            yaw = yaw[:, 0]
-        cosine = torch.cos(yaw)
-        sine = torch.sin(yaw)
-        yaw_rotation = torch.eye(3, dtype=pose.dtype, device=pose.device).repeat(
-            pose.shape[0], 1, 1
-        )
-        yaw_rotation[:, 0, 0] = cosine
-        yaw_rotation[:, 0, 1] = -sine
-        yaw_rotation[:, 1, 0] = sine
-        yaw_rotation[:, 1, 1] = cosine
-        pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
 
         handle.entity.set_local_pose(pose)
         handle.entity.clear_dynamics()
