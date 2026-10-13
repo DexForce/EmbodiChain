@@ -46,11 +46,24 @@ def catalogs(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Any]]:
     registry._robot_specs.cache_clear()
 
 
+def _column_text(output: str, column: int) -> str:
+    """Reassemble column contents across wrapped table lines."""
+    return "".join(
+        cells[column].strip()
+        for cells in (line.split("│") for line in output.splitlines())
+        if len(cells) == 7
+    )
+
+
+@pytest.mark.parametrize("terminal_width", [80, 120])
 def test_list_robot_dispatch_reads_installed_catalogs(
     catalogs: list[Any],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_width: int,
 ) -> None:
     """The dispatcher lists canonical IDs and the distinct UR variant presets."""
+    monkeypatch.setenv("COLUMNS", str(terminal_width))
     catalogs.append(
         metadata.EntryPoint(
             name="embodichain_robots",
@@ -103,14 +116,18 @@ def test_list_robot_dispatch_reads_installed_catalogs(
     for model in ("ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e"):
         assert model in output
     assert "eef (1+1m)" in output
-    assert "fr3_finger_joint2" in output
+    assert "fr3_finger_joint2" in _column_text(output, 5)
 
 
+@pytest.mark.parametrize("terminal_width", [80, 120])
 def test_list_robot_lists_external_metadata_without_importing_configuration(
     catalogs: list[Any],
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_width: int,
 ) -> None:
     """Provider classes need not be importable to list their catalog records."""
+    monkeypatch.setenv("COLUMNS", str(terminal_width))
     spec = {
         "class_path": "absent_robots.arm:ArmCfg",
         "defaults": {"with_gripper": False, "variant": "standard"},
@@ -123,8 +140,9 @@ def test_list_robot_lists_external_metadata_without_importing_configuration(
     output = capsys.readouterr().out
     assert "vendor.arm" in output
     assert "absent_robots.arm:ArmCfg" not in output
-    assert "variant='standard'" in output
-    assert "with_gripper=False" in output
+    variants = _column_text(output, 2)
+    assert "variant='standard'" in variants
+    assert "with_gripper=False" in variants
     assert "absent_robots" not in sys.modules
     assert spec == original
 
