@@ -16,6 +16,7 @@ Work through the categories in order when you are new to EmbodiChain:
    Program, and generate demonstration data.
 3. :doc:`learning/index` — train reinforcement-learning policies.
 
+
 To add a new robot after completing the core tutorials, continue with
 :doc:`/guides/add_robot`.
 

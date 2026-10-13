@@ -19,3 +19,4 @@ Practical guides for common tasks in EmbodiChain.
    policy_evaluation
    rlinf
    cli
+   mcp
