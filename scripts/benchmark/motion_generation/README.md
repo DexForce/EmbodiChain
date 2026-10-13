@@ -239,9 +239,11 @@ population; later populations extend the manifest.
 ### Provider and evaluator interfaces
 
 `atomic_skill.py` owns `AtomicSkillCaseProvider`; the previous import from
-`scenarios.atomic_task` remains available. Existing providers continue to use
-`task_result()`. A migrated provider overrides `physical_evaluator()` to return
-an implementation of `contracts.PhysicalStageEvaluator`:
+`scenarios.atomic_task` remains available. All 15 registered Atomic Skills use
+v1 physical evaluators. Terminal skills score settled replay state; staged
+skills declare compiled-coordinate replay windows and score the resulting raw
+simulator traces. Providers override `physical_evaluator()` to return an
+implementation of `contracts.PhysicalStageEvaluator`:
 
 ```python
 def evaluate(
@@ -255,13 +257,14 @@ def evaluate(
 
 The evaluator receives frozen task inputs, measured replay observations, and
 motion-validation results. It receives neither the scenario/engine nor a
-`CompiledTrajectory` or `projected_context`. `ExecutionObservation` currently
-contains the existing measured replay summary, plus the target joint at the end
-of the declared articulation segment, the held object's peak signed rotation
-in a provider-declared window, and each configured gripper's final joint
-positions. Missing optional measurements
-mean unavailable evidence; the follow-up evaluation work must extend observation
-collection before claiming grasp/release/retention or intermediate-stage success.
+`CompiledTrajectory` or `projected_context`. A provider instead implements
+`replay_observation_windows()` while it still has the compiled segment map. Each
+window selects raw TCP pose, active-object pose, named scene-object poses,
+articulation-joint, or gripper-joint channels and may include terminal settle.
+`ExecutionObservation` carries the sampled traces plus configured gripper
+commands; missing optional measurements remain unavailable evidence rather than
+successful effects. Push contact uses an explicitly labeled measured object-
+motion proxy; it is not reported as contact-sensor evidence.
 
 ### Atomic Action runtime evidence
 
@@ -301,9 +304,9 @@ variance, retention, and eligibility.
 - **Embodiment and case integration:** build against `AtomicSkillCaseProvider`,
   reuse official component loading, and keep case generation independent of
   planner outcomes. Do not duplicate the runner lifecycle or artifact writers.
-- **Physical evaluation:** extend `ExecutionObservation` with measured segment
-  and contact evidence, implement evaluators and counterexample tests, then opt
-  providers into `physical_evaluator()` individually.
+- **Physical evaluation:** add provider-declared replay windows and measured
+  contact evidence when a new stage needs them, implement counterexample tests,
+  then opt the provider into `physical_evaluator()` individually.
 - **Framework and statistics:** add domain generators, physical observation
   collection, and richer confidence intervals on top of the current domain
   identity and aggregation contracts.

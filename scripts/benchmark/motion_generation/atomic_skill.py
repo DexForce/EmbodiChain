@@ -31,7 +31,11 @@ if TYPE_CHECKING:
     )
     from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory
     from .config import SuiteCfg, TrackCfg
-    from .contracts import ExecutionObservation, PhysicalStageEvaluator
+    from .contracts import (
+        ExecutionObservation,
+        PhysicalStageEvaluator,
+        ReplayObservationWindow,
+    )
     from .models import BenchmarkCase, CaseOutcome
     from .planners.base import PlannerAdapter
     from .scenarios.atomic_task import AtomicTaskScenario
@@ -142,6 +146,18 @@ class AtomicSkillCaseProvider(ABC):
         """
         del compiled
         return None
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Declare raw simulator traces required by the physical evaluator.
+
+        Providers resolve semantic action segments here. The replay adapter
+        stores only measured tensors, so the evaluator remains independent of
+        compiled planning state and the live simulator.
+        """
+        del compiled, case
+        return ()
 
     def physical_evaluator(self) -> PhysicalStageEvaluator | None:
         """Return a measured-stage evaluator, or use legacy task_result.

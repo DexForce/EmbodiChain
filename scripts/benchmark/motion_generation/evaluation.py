@@ -22,7 +22,7 @@ Observation adapters own contact interpretation, geometry and segment sampling.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
@@ -37,6 +37,7 @@ __all__ = [
     "Criterion",
     "StageCriterion",
     "StageEvidence",
+    "evaluate_skill_stage_batch",
     "evaluate_skill_stages",
     "validate_standard_evaluation",
 ]
@@ -343,8 +344,8 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 "released",
                 "release_end",
                 "release_failure",
-                _bool("left_release_established"),
-                _bool("right_release_established"),
+                _bool("placing_release_established"),
+                _bool("support_retained"),
             ),
             _STABLE,
         ),
@@ -442,6 +443,30 @@ def evaluate_skill_stages(
         results.append(stage)
         stopped = stage.status != "passed"
     return PhysicalEvaluation(env_index, tuple(results), STANDARD_VERSION)
+
+
+def evaluate_skill_stage_batch(
+    skill_id: str,
+    evidence_by_env: Sequence[Mapping[str, StageEvidence]],
+) -> tuple[PhysicalEvaluation, ...]:
+    """Evaluate row-local stage evidence in stable environment order.
+
+    This is the bridge between batched replay observations and the standard's
+    deliberately row-local evaluator. Observation adapters remain responsible
+    for sampling physical state and naming the measurement method; this helper
+    only assigns environment indices and applies the frozen criteria.
+
+    Args:
+        skill_id: Canonical snake-case Atomic Skill identifier.
+        evidence_by_env: One stage-evidence mapping per environment row.
+
+    Returns:
+        Physical evaluations ordered by environment index.
+    """
+    return tuple(
+        evaluate_skill_stages(skill_id, evidence, env_index=env_index)
+        for env_index, evidence in enumerate(evidence_by_env)
+    )
 
 
 def validate_standard_evaluation(skill_id: str, result: PhysicalEvaluation) -> None:

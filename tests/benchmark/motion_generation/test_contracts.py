@@ -301,3 +301,54 @@ def test_batch_results_require_the_same_stage_order() -> None:
     )
     with pytest.raises(ValueError):
         contracts.validate_physical_evaluations(rows, batch_size=2)
+
+
+def test_replay_observation_window_accepts_segments_and_terminal_settle() -> None:
+    segment = contracts.ReplayObservationWindow(
+        "actuation", 3, 7, frozenset({"object_pose", "gripper_qpos"})
+    )
+    settle = contracts.ReplayObservationWindow(
+        "settle",
+        9,
+        9,
+        frozenset({"object_pose"}),
+        include_settle=True,
+    )
+    scene = contracts.ReplayObservationWindow(
+        "relative",
+        4,
+        8,
+        frozenset({"object_pose", "scene_object_pose"}),
+        scene_object_ids=("support",),
+    )
+
+    assert segment.stop == 7
+    assert settle.include_settle
+    assert scene.scene_object_ids == ("support",)
+    with pytest.raises(ValueError, match="empty waypoint window"):
+        contracts.ReplayObservationWindow("invalid", 2, 2, frozenset({"tcp_pose"}))
+    with pytest.raises(ValueError, match="channels"):
+        contracts.ReplayObservationWindow(
+            "invalid", 0, 1, frozenset({"projected_effect"})
+        )
+    with pytest.raises(ValueError, match="scene_object_pose"):
+        contracts.ReplayObservationWindow(
+            "invalid", 0, 1, frozenset({"scene_object_pose"})
+        )
+
+
+def test_replay_observation_trace_requires_synchronized_batch_axes() -> None:
+    trace = contracts.ReplayObservationTrace(
+        object_pose=torch.eye(4).repeat(5, 2, 1, 1),
+        gripper_qpos={"hand": torch.zeros(5, 2, 2)},
+        scene_object_poses={"support": torch.eye(4).repeat(5, 2, 1, 1)},
+    )
+
+    assert trace.object_pose is not None
+    assert trace.object_pose.shape == (5, 2, 4, 4)
+    assert trace.scene_object_poses["support"].shape == (5, 2, 4, 4)
+    with pytest.raises(ValueError, match="share sample and environment axes"):
+        contracts.ReplayObservationTrace(
+            object_pose=torch.eye(4).repeat(5, 2, 1, 1),
+            gripper_qpos={"hand": torch.zeros(4, 2, 2)},
+        )

@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol
 
 import torch
@@ -34,9 +35,157 @@ __all__ = [
     "ExecutionObservation",
     "PhysicalEvaluation",
     "PhysicalStageEvaluator",
+    "ReplayObservationTrace",
+    "ReplayObservationWindow",
     "StageOutcome",
     "validate_physical_evaluations",
 ]
+
+
+_REPLAY_CHANNELS = frozenset(
+    {
+        "tcp_pose",
+        "object_pose",
+        "scene_object_pose",
+        "articulation_joint",
+        "gripper_qpos",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ReplayObservationWindow:
+    """One compiled-coordinate window requested by a physical evaluator.
+
+    ``start`` and ``stop`` are half-open waypoint indices. A terminal-settle
+    request uses ``start == stop`` at the trajectory boundary together with
+    ``include_settle=True``. Providers resolve semantic segment names while
+    they still have the compiled trajectory; evaluators receive only the
+    measured trace identified by ``observation_id``.
+    """
+
+    observation_id: str
+    start: int
+    stop: int
+    channels: frozenset[str]
+    include_settle: bool = False
+    scene_object_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.observation_id, str) or not self.observation_id.strip():
+            raise ValueError("observation_id must be a non-empty string.")
+        if type(self.start) is not int or type(self.stop) is not int:
+            raise TypeError("Replay observation bounds must be integers.")
+        if self.start < 0 or self.stop < self.start:
+            raise ValueError(
+                "Replay observation bounds must be ordered and non-negative."
+            )
+        channels = frozenset(self.channels)
+        if not channels or not channels <= _REPLAY_CHANNELS:
+            raise ValueError(
+                "Replay observation channels must be a non-empty subset of "
+                f"{sorted(_REPLAY_CHANNELS)}."
+            )
+        if self.start == self.stop and not self.include_settle:
+            raise ValueError("An empty waypoint window must include terminal settle.")
+        scene_object_ids = tuple(self.scene_object_ids)
+        if any(
+            not isinstance(object_id, str) or not object_id.strip()
+            for object_id in scene_object_ids
+        ):
+            raise ValueError("scene_object_ids must contain non-empty strings.")
+        if len(scene_object_ids) != len(set(scene_object_ids)):
+            raise ValueError("scene_object_ids must be unique.")
+        if ("scene_object_pose" in channels) != bool(scene_object_ids):
+            raise ValueError(
+                "scene_object_pose windows must declare scene_object_ids, and "
+                "scene_object_ids require the scene_object_pose channel."
+            )
+        object.__setattr__(self, "channels", channels)
+        object.__setattr__(self, "scene_object_ids", scene_object_ids)
+
+
+@dataclass(frozen=True)
+class ReplayObservationTrace:
+    """Raw synchronized simulator samples for one requested replay window.
+
+    Every tensor starts with ``(sample, environment)``. Optional channels are
+    absent evidence; gripper tensors additionally retain their joint axis.
+    """
+
+    tcp_pose: torch.Tensor | None = None
+    object_pose: torch.Tensor | None = None
+    articulation_joint: torch.Tensor | None = None
+    gripper_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    scene_object_poses: Mapping[str, torch.Tensor] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        tensors = [
+            value
+            for value in (self.tcp_pose, self.object_pose, self.articulation_joint)
+            if value is not None
+        ]
+        grippers = dict(self.gripper_qpos)
+        scene_objects = dict(self.scene_object_poses)
+        tensors.extend(grippers.values())
+        tensors.extend(scene_objects.values())
+        if not tensors:
+            raise ValueError(
+                "A replay observation trace requires at least one channel."
+            )
+        if any(not isinstance(value, torch.Tensor) for value in tensors):
+            raise TypeError("Replay observation channels must be torch tensors.")
+        shape = tensors[0].shape[:2]
+        if len(shape) != 2 or shape[0] < 1 or shape[1] < 1:
+            raise ValueError(
+                "Replay observation channels must start with non-empty sample and "
+                "environment dimensions."
+            )
+        if any(value.dim() < 2 or value.shape[:2] != shape for value in tensors):
+            raise ValueError(
+                "Replay observation channels must share sample and environment axes."
+            )
+        if self.tcp_pose is not None and self.tcp_pose.shape[2:] != (4, 4):
+            raise ValueError("tcp_pose trace must have shape (S, B, 4, 4).")
+        if self.object_pose is not None and self.object_pose.shape[2:] != (4, 4):
+            raise ValueError("object_pose trace must have shape (S, B, 4, 4).")
+        if self.articulation_joint is not None and self.articulation_joint.dim() != 2:
+            raise ValueError("articulation_joint trace must have shape (S, B).")
+        if any(not part for part in grippers):
+            raise ValueError("Gripper trace keys must be non-empty strings.")
+        if any(not object_id for object_id in scene_objects):
+            raise ValueError("Scene-object trace keys must be non-empty strings.")
+        if any(value.shape[2:] != (4, 4) for value in scene_objects.values()):
+            raise ValueError("scene_object_poses traces must have shape (S, B, 4, 4).")
+        object.__setattr__(
+            self, "tcp_pose", None if self.tcp_pose is None else self.tcp_pose.clone()
+        )
+        object.__setattr__(
+            self,
+            "object_pose",
+            None if self.object_pose is None else self.object_pose.clone(),
+        )
+        object.__setattr__(
+            self,
+            "articulation_joint",
+            (
+                None
+                if self.articulation_joint is None
+                else self.articulation_joint.clone()
+            ),
+        )
+        object.__setattr__(
+            self,
+            "gripper_qpos",
+            MappingProxyType({part: value.clone() for part, value in grippers.items()}),
+        )
+        object.__setattr__(
+            self,
+            "scene_object_poses",
+            MappingProxyType(
+                {object_id: value.clone() for object_id, value in scene_objects.items()}
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -199,9 +348,9 @@ class PhysicalEvaluation:
 class ExecutionObservation:
     """Measured execution summary shared with physical evaluators.
 
-    Optional values are unavailable evidence, not successful effects. Segment
-    sampling and skill-specific contact evidence can extend this contract in
-    the physical-evaluation follow-up; no projected context is carried here.
+    Optional values and missing replay channels are unavailable evidence, not
+    successful effects. Provider-declared traces carry raw segment samples;
+    no compiled trajectory or projected task context is carried here.
     """
 
     execution_success: torch.Tensor
@@ -219,6 +368,9 @@ class ExecutionObservation:
     object_rotation_peak_signed_rad: torch.Tensor | None = None
     scene_object_final_poses: Mapping[str, torch.Tensor] = field(default_factory=dict)
     final_gripper_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    gripper_open_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    gripper_grasp_qpos: Mapping[str, torch.Tensor] = field(default_factory=dict)
+    replay_traces: Mapping[str, ReplayObservationTrace] = field(default_factory=dict)
 
 
 class PhysicalStageEvaluator(Protocol):

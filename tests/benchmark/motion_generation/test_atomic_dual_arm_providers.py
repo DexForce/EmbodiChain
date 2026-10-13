@@ -33,6 +33,10 @@ from embodichain.toolkits.graspkit import (
 )
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from scripts.benchmark.motion_generation.config import load_suite
+from scripts.benchmark.motion_generation.contracts import (
+    ReplayObservationTrace,
+    ReplayObservationWindow,
+)
 from scripts.benchmark.motion_generation.models import BenchmarkCase, CaseOutcome
 from scripts.benchmark.motion_generation import robots as _robots  # noqa: F401
 from scripts.benchmark.motion_generation.registry import create_robot_provider
@@ -113,6 +117,229 @@ def _observation(**values: object) -> _ExecutionObservation:
         execution_time_ms=1.0,
         task_completion_time_s=0.1,
         **values,
+    )
+
+
+def test_hand_over_physical_evaluator_uses_phase_local_observations() -> None:
+    target = _pose(0.2, -0.1, 0.1).unsqueeze(0)
+    initial = _pose(0.0).unsqueeze(0)
+    object_trace = torch.stack((target, target))
+    case = _case(
+        "hand_over",
+        control_parts={
+            "source": {"motion": "left_arm", "grasp": "left_hand"},
+            "destination": {"motion": "right_arm", "grasp": "right_hand"},
+        },
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+    )
+    holding = torch.full((2, 1, 1), 0.5)
+    released = torch.zeros(2, 1, 1)
+    observation = _observation(
+        gripper_open_qpos={
+            "left_hand": torch.tensor([0.0]),
+            "right_hand": torch.tensor([0.0]),
+        },
+        gripper_grasp_qpos={
+            "left_hand": torch.tensor([1.0]),
+            "right_hand": torch.tensor([1.0]),
+        },
+        replay_traces={
+            "handover_pickup": ReplayObservationTrace(
+                gripper_qpos={"left_hand": holding, "right_hand": released}
+            ),
+            "handover_transfer": ReplayObservationTrace(
+                object_pose=object_trace,
+                gripper_qpos={"left_hand": holding, "right_hand": holding},
+            ),
+            "handover_exchange": ReplayObservationTrace(
+                object_pose=object_trace,
+                gripper_qpos={"left_hand": released, "right_hand": holding},
+            ),
+            "handover_settle": ReplayObservationTrace(object_pose=object_trace),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("hand_over").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_outcome(),))[0]
+
+    assert result.task_success
+    assert [stage.stage_id for stage in result.stages] == [
+        "grasped",
+        "transferred",
+        "handed_over",
+        "placed",
+    ]
+
+
+def test_coordinated_pickment_evaluator_uses_all_four_physical_stages() -> None:
+    initial = _pose(0.0).unsqueeze(0)
+    target = _pose(0.1, 0.0, 0.1).unsqueeze(0)
+    lift = torch.stack((initial, _pose(0.0, 0.0, 0.05).unsqueeze(0)))
+    move = torch.stack((lift[-1], target))
+    holding = torch.full((2, 1, 1), 0.5)
+    case = _case(
+        "coordinated_pickment",
+        control_parts={
+            "left": {"motion": "left_arm", "grasp": "left_hand"},
+            "right": {"motion": "right_arm", "grasp": "right_hand"},
+        },
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+    )
+    observation = _observation(
+        gripper_open_qpos={
+            "left_hand": torch.tensor([0.0]),
+            "right_hand": torch.tensor([0.0]),
+        },
+        gripper_grasp_qpos={
+            "left_hand": torch.tensor([1.0]),
+            "right_hand": torch.tensor([1.0]),
+        },
+        replay_traces={
+            "dual_pick_grasp": ReplayObservationTrace(
+                gripper_qpos={"left_hand": holding, "right_hand": holding}
+            ),
+            "dual_pick_lift": ReplayObservationTrace(object_pose=lift),
+            "dual_pick_move": ReplayObservationTrace(object_pose=move),
+            "dual_pick_settle": ReplayObservationTrace(
+                object_pose=target.unsqueeze(0).repeat(2, 1, 1, 1),
+                gripper_qpos={"left_hand": holding, "right_hand": holding},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider(
+        "coordinated_pickment"
+    ).physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_outcome(),))[0]
+
+    assert result.task_success
+    assert [stage.stage_id for stage in result.stages] == [
+        "dual_grasped",
+        "lifted",
+        "moved",
+        "held",
+    ]
+
+
+def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None:
+    pose = _pose(0.0).unsqueeze(0)
+    pose_trace = pose.unsqueeze(0).repeat(2, 1, 1, 1)
+    placing_released = torch.zeros(2, 1, 1)
+    support_held = torch.full((2, 1, 1), 0.5)
+    case = _case(
+        "coordinated_placement",
+        control_parts={
+            "placing": {"motion": "left_arm", "grasp": "left_hand"},
+            "support": {"motion": "right_arm", "grasp": "right_hand"},
+        },
+        support_object_id="support",
+        object_initial_pose=pose.tolist(),
+        placing_relative_target_pose=pose.tolist(),
+    )
+    observation = _observation(
+        gripper_open_qpos={
+            "left_hand": torch.tensor([0.0]),
+            "right_hand": torch.tensor([0.0]),
+        },
+        gripper_grasp_qpos={
+            "left_hand": torch.tensor([1.0]),
+            "right_hand": torch.tensor([1.0]),
+        },
+        replay_traces={
+            "coordinated_place_alignment": ReplayObservationTrace(
+                object_pose=pose_trace,
+                scene_object_poses={"support": pose_trace},
+            ),
+            "coordinated_place_release": ReplayObservationTrace(
+                gripper_qpos={
+                    "left_hand": placing_released,
+                    "right_hand": support_held,
+                }
+            ),
+            "coordinated_place_settle": ReplayObservationTrace(
+                object_pose=pose_trace,
+                scene_object_poses={"support": pose_trace},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider(
+        "coordinated_placement"
+    ).physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_outcome(),))[0]
+
+    assert result.task_success
+    assert result.stages[1].measurements == {
+        "placing_release_established": True,
+        "support_retained": True,
+    }
+
+
+def test_replay_collects_named_scene_object_poses_in_sync() -> None:
+    state = {"step": 0}
+    scenario = AtomicTaskScenario()
+    scenario.simulation = Mock()
+    scenario.simulation.update.side_effect = lambda step: state.update(
+        step=state["step"] + step
+    )
+    scenario.robot = Mock()
+    scenario.robot.get_qpos.side_effect = lambda: torch.zeros(1, 6)
+    scenario.track = Mock(
+        config={
+            "physics": {
+                "steps_per_waypoint": 1,
+                "hold_steps": 0,
+                "hold_sim_steps": 1,
+            }
+        }
+    )
+
+    def moving_pose(to_matrix: bool) -> torch.Tensor:
+        del to_matrix
+        pose = torch.eye(4).unsqueeze(0)
+        pose[:, 0, 3] = 0.01 * state["step"]
+        return pose
+
+    placing = Mock()
+    placing.entity.get_local_pose.side_effect = moving_pose
+    support = Mock()
+    support.entity.get_local_pose.return_value = _pose(0.2).unsqueeze(0)
+    scenario._objects = {"placing": placing, "support": support}
+    compiled = SimpleNamespace(
+        trajectory=SimpleNamespace(positions=torch.zeros(1, 3, 6)),
+        plan_success=torch.tensor([True]),
+    )
+    provider = Mock()
+    provider.lift_segment_start.return_value = None
+    provider.object_rotation_segment.return_value = None
+    provider.replay_observation_windows.return_value = (
+        ReplayObservationWindow(
+            "relative",
+            0,
+            2,
+            frozenset({"object_pose", "scene_object_pose"}),
+            scene_object_ids=("support",),
+        ),
+    )
+    case = replace(
+        _case("coordinated_placement", support_object_id="support"),
+        object_id="placing",
+    )
+
+    metrics = scenario._replay_physics(compiled, case, provider, collect_metrics=True)
+
+    assert metrics is not None
+    trace = metrics.replay_traces["relative"]
+    assert trace.object_pose is not None
+    assert trace.object_pose.shape == (3, 1, 4, 4)
+    assert trace.scene_object_poses["support"].shape == (3, 1, 4, 4)
+    torch.testing.assert_close(
+        trace.scene_object_poses["support"][:, 0, 0, 3], torch.full((3,), 0.2)
     )
 
 

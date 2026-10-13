@@ -60,6 +60,8 @@ from embodichain.utils.math import pose_inv
 
 from ..atomic_skill import AtomicSkillCaseProvider
 from ..config import SuiteCfg, TrackCfg
+from ..contracts import PhysicalEvaluation, ReplayObservationWindow
+from ..evaluation import StageEvidence, evaluate_skill_stage_batch
 from ..models import BenchmarkCase, CaseOutcome
 from .atomic_task import (
     _ExecutionObservation,
@@ -69,10 +71,16 @@ from .atomic_task import (
     _case_pose,
     _difficulty,
     _float_vector,
+    _gripper_holding,
+    _gripper_released,
+    _merge_stage_evidence_batches,
+    _minimum_height_above_initial_support,
     _motion_valid_mask,
     _randomized_vector_batch,
     _randomization_parameters,
+    _replay_trace,
     _snapshot_case_qpos,
+    _stage_evidence_batch,
     _with_plan_options,
     register_atomic_skill_provider,
 )
@@ -91,6 +99,116 @@ _TASK_ROTATION_TOLERANCE_RAD = math.radians(5.0)
 # tray stops about 3.4 mm short of its 0.026 command and reaches the command
 # within 0.1 mm when it closes on nothing.
 _GRIPPER_HOLD_GAP = 0.001
+
+
+class _HandOverEvaluator:
+    """Evaluate measured pickup, transfer, handover, and placement stages."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        parameters = case.case_parameters
+        parts = dict(parameters["control_parts"])
+        source = str(parts["source"]["grasp"])
+        destination = str(parts["destination"]["grasp"])
+        pickup = _replay_trace(observation, "handover_pickup")
+        transfer = _replay_trace(observation, "handover_transfer")
+        exchange = _replay_trace(observation, "handover_exchange")
+        settle = _replay_trace(observation, "handover_settle")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if pickup is not None:
+            grasped = _gripper_holding(
+                pickup, observation, source, gap=_GRIPPER_HOLD_GAP
+            )
+            if grasped is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="grasped",
+                        window="grasp_end",
+                        measurements={"grasp_established": grasped},
+                        method="source_gripper_joint_state",
+                    )
+                )
+        if transfer is not None:
+            source_held = _gripper_holding(
+                transfer, observation, source, gap=_GRIPPER_HOLD_GAP
+            )
+            destination_held = _gripper_holding(
+                transfer, observation, destination, gap=_GRIPPER_HOLD_GAP
+            )
+            min_height = _minimum_height_above_initial_support(transfer, case)
+            if (
+                source_held is not None
+                and destination_held is not None
+                and min_height is not None
+            ):
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="transferred",
+                        window="transfer_end",
+                        measurements={
+                            "both_grasps_established": source_held & destination_held,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="dual_gripper_and_object_trace",
+                    )
+                )
+        if exchange is not None:
+            giver_released = _gripper_released(exchange, observation, source)
+            receiver_retained = _gripper_holding(
+                exchange, observation, destination, gap=_GRIPPER_HOLD_GAP
+            )
+            min_height = _minimum_height_above_initial_support(exchange, case)
+            if (
+                giver_released is not None
+                and receiver_retained is not None
+                and min_height is not None
+            ):
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="handed_over",
+                        window="handover_end",
+                        measurements={
+                            "giver_released": giver_released,
+                            "receiver_retained": receiver_retained,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="dual_gripper_and_object_trace",
+                    )
+                )
+        if settle is not None and settle.object_pose is not None:
+            target = _case_pose(
+                case, "target_object_pose", device=settle.object_pose.device
+            ).to(dtype=settle.object_pose.dtype)
+            final = settle.object_pose[-1]
+            xy_error = torch.linalg.vector_norm(
+                final[:, :2, 3] - target[:, :2, 3], dim=-1
+            )
+            signed_z_error = final[:, 2, 3] - target[:, 2, 3]
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="placed",
+                        window="terminal_settle",
+                        measurements={
+                            "xy_error_m": xy_error,
+                            "signed_z_error_m": signed_z_error,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="terminal_object_pose_trace",
+                    )
+                )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("hand_over", evidence)
 
 
 def _rotation_error(actual: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -131,6 +249,224 @@ def _grippers_holding(
             device=held.device
         )
     return held
+
+
+class _CoordinatedPickmentEvaluator:
+    """Evaluate dual grasp, lift, synchronized move, and retention."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        parts = dict(case.case_parameters["control_parts"])
+        left = str(parts["left"]["grasp"])
+        right = str(parts["right"]["grasp"])
+        grasp = _replay_trace(observation, "dual_pick_grasp")
+        lift = _replay_trace(observation, "dual_pick_lift")
+        move = _replay_trace(observation, "dual_pick_move")
+        settle = _replay_trace(observation, "dual_pick_settle")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if grasp is not None:
+            left_held = _gripper_holding(
+                grasp, observation, left, gap=_GRIPPER_HOLD_GAP
+            )
+            right_held = _gripper_holding(
+                grasp, observation, right, gap=_GRIPPER_HOLD_GAP
+            )
+            if left_held is not None and right_held is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="dual_grasped",
+                        window="grasp_end",
+                        measurements={
+                            "left_grasp_established": left_held,
+                            "right_grasp_established": right_held,
+                        },
+                        method="dual_gripper_joint_state",
+                    )
+                )
+        if lift is not None and lift.object_pose is not None:
+            initial = torch.as_tensor(
+                case.case_parameters["object_initial_pose"],
+                dtype=lift.object_pose.dtype,
+                device=lift.object_pose.device,
+            )
+            min_height = _minimum_height_above_initial_support(lift, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="lifted",
+                        window="lift_end",
+                        measurements={
+                            "lift_delta_m": lift.object_pose[-1, :, 2, 3]
+                            - initial[:, 2, 3],
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="object_lift_trace",
+                    )
+                )
+        if move is not None and move.object_pose is not None:
+            final = move.object_pose[-1]
+            target = _case_pose(case, "target_object_pose", device=final.device).to(
+                dtype=final.dtype
+            )
+            min_height = _minimum_height_above_initial_support(move, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="moved",
+                        window="actuation_end",
+                        measurements={
+                            "position_error_m": torch.linalg.vector_norm(
+                                final[:, :3, 3] - target[:, :3, 3], dim=-1
+                            ),
+                            "rotation_error_rad": _rotation_error(final, target),
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="object_move_trace",
+                    )
+                )
+        if settle is not None:
+            left_held = _gripper_holding(
+                settle, observation, left, gap=_GRIPPER_HOLD_GAP
+            )
+            right_held = _gripper_holding(
+                settle, observation, right, gap=_GRIPPER_HOLD_GAP
+            )
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if (
+                left_held is not None
+                and right_held is not None
+                and min_height is not None
+            ):
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="held",
+                        window="terminal_settle",
+                        measurements={
+                            "object_retained": left_held & right_held,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="dual_gripper_and_object_settle_trace",
+                    )
+                )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("coordinated_pickment", evidence)
+
+
+class _CoordinatedPlacementEvaluator:
+    """Evaluate relative alignment, role-aware release, and settled stability."""
+
+    def evaluate(
+        self,
+        case: BenchmarkCase,
+        observation: _ExecutionObservation,
+        motion_outcomes: tuple[CaseOutcome, ...],
+    ) -> tuple[PhysicalEvaluation, ...]:
+        del motion_outcomes
+        parameters = case.case_parameters
+        parts = dict(parameters["control_parts"])
+        placing_part = str(parts["placing"]["grasp"])
+        support_part = str(parts["support"]["grasp"])
+        support_id = str(parameters["support_object_id"])
+        target = _case_pose(
+            case,
+            "placing_relative_target_pose",
+            device=observation.execution_success.device,
+        )
+        aligned = _replay_trace(observation, "coordinated_place_alignment")
+        release = _replay_trace(observation, "coordinated_place_release")
+        settle = _replay_trace(observation, "coordinated_place_settle")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if (
+            aligned is not None
+            and aligned.object_pose is not None
+            and support_id in aligned.scene_object_poses
+        ):
+            placing = aligned.object_pose[-1]
+            support = aligned.scene_object_poses[support_id][-1]
+            relative = torch.bmm(pose_inv(support), placing)
+            local_target = target.to(device=relative.device, dtype=relative.dtype)
+            min_height = _minimum_height_above_initial_support(aligned, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="aligned",
+                        window="actuation_end",
+                        measurements={
+                            "relative_position_error_m": torch.linalg.vector_norm(
+                                relative[:, :3, 3] - local_target[:, :3, 3], dim=-1
+                            ),
+                            "relative_rotation_error_rad": _rotation_error(
+                                relative, local_target
+                            ),
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="relative_object_pose_trace",
+                    )
+                )
+        if release is not None:
+            placing_released = _gripper_released(release, observation, placing_part)
+            support_retained = _gripper_holding(
+                release, observation, support_part, gap=_GRIPPER_HOLD_GAP
+            )
+            if placing_released is not None and support_retained is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="released",
+                        window="release_end",
+                        measurements={
+                            "placing_release_established": placing_released,
+                            "support_retained": support_retained,
+                        },
+                        method="role_gripper_joint_state",
+                    )
+                )
+        if (
+            settle is not None
+            and settle.object_pose is not None
+            and support_id in settle.scene_object_poses
+            and settle.object_pose.shape[0] >= 2
+        ):
+            relative = torch.matmul(
+                pose_inv(settle.scene_object_poses[support_id]), settle.object_pose
+            )
+            relative_start = relative[:1].expand_as(relative)
+            min_height = _minimum_height_above_initial_support(settle, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="stable",
+                        window="settle_interval",
+                        measurements={
+                            "position_drift_m": torch.linalg.vector_norm(
+                                relative[:, :, :3, 3] - relative_start[:, :, :3, 3],
+                                dim=-1,
+                            ).amax(dim=0),
+                            "rotation_drift_rad": _rotation_error(
+                                relative.flatten(0, 1),
+                                relative_start.flatten(0, 1),
+                            )
+                            .reshape(relative.shape[:2])
+                            .amax(dim=0),
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="relative_object_settle_drift_trace",
+                    )
+                )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
+        )
+        return evaluate_skill_stage_batch("coordinated_placement", evidence)
 
 
 # ---------------------------------------------------------------------------
@@ -651,6 +987,48 @@ class _HandOverCases(AtomicSkillCaseProvider):
             ).items()
         }
 
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect each physical handover phase and terminal settle."""
+        del case
+        pickup = compiled.segment(0, "pickup_close")
+        transfer_start = compiled.segment(0, "pickup_transport")
+        transfer_end = compiled.segment(0, "receive_close")
+        exchange = compiled.segment(0, "handover_release")
+        waypoint_count = compiled.trajectory.waypoint_count
+        return (
+            ReplayObservationWindow(
+                "handover_pickup",
+                pickup.start,
+                pickup.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "handover_transfer",
+                transfer_start.start,
+                transfer_end.stop,
+                frozenset({"object_pose", "gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "handover_exchange",
+                exchange.start,
+                exchange.stop,
+                frozenset({"object_pose", "gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "handover_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose"}),
+                include_settle=True,
+            ),
+        )
+
+    def physical_evaluator(self) -> _HandOverEvaluator:
+        """Return the v1 HandOver evaluator."""
+        return _HandOverEvaluator()
+
     def task_result(
         self,
         scenario: "AtomicTaskScenario",
@@ -860,6 +1238,47 @@ class _CoordinatedPickmentCases(AtomicSkillCaseProvider):
             ),
             skill_options=_pickment_options(case.case_parameters, device),
         )
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect dual-grasp, lift, move, and terminal retention evidence."""
+        del case
+        close = compiled.segment(0, "close")
+        lift = compiled.segment(0, "lift")
+        move = compiled.segment(0, "move")
+        waypoint_count = compiled.trajectory.waypoint_count
+        return (
+            ReplayObservationWindow(
+                "dual_pick_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "dual_pick_lift",
+                lift.start,
+                lift.stop,
+                frozenset({"object_pose"}),
+            ),
+            ReplayObservationWindow(
+                "dual_pick_move",
+                move.start,
+                move.stop,
+                frozenset({"object_pose"}),
+            ),
+            ReplayObservationWindow(
+                "dual_pick_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose", "gripper_qpos"}),
+                include_settle=True,
+            ),
+        )
+
+    def physical_evaluator(self) -> _CoordinatedPickmentEvaluator:
+        """Return the v1 CoordinatedPickment evaluator."""
+        return _CoordinatedPickmentEvaluator()
 
     def task_result(
         self,
@@ -1291,6 +1710,43 @@ class _CoordinatedPlacementCases(AtomicSkillCaseProvider):
     def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
         """Release residual contact impulses once the first PickUp lifts."""
         return compiled.segment(0, "lift").start
+
+    def replay_observation_windows(
+        self, compiled: CompiledTrajectory, case: BenchmarkCase
+    ) -> tuple[ReplayObservationWindow, ...]:
+        """Collect relative alignment, release, and stability evidence."""
+        support_id = str(case.case_parameters["support_object_id"])
+        alignment = compiled.segment(2, "approach")
+        release = compiled.segment(2, "release")
+        waypoint_count = compiled.trajectory.waypoint_count
+        pose_channels = frozenset({"object_pose", "scene_object_pose"})
+        return (
+            ReplayObservationWindow(
+                "coordinated_place_alignment",
+                alignment.start,
+                alignment.stop,
+                pose_channels,
+                scene_object_ids=(support_id,),
+            ),
+            ReplayObservationWindow(
+                "coordinated_place_release",
+                release.start,
+                release.stop,
+                frozenset({"gripper_qpos"}),
+            ),
+            ReplayObservationWindow(
+                "coordinated_place_settle",
+                waypoint_count,
+                waypoint_count,
+                pose_channels,
+                include_settle=True,
+                scene_object_ids=(support_id,),
+            ),
+        )
+
+    def physical_evaluator(self) -> _CoordinatedPlacementEvaluator:
+        """Return the v1 CoordinatedPlacement evaluator."""
+        return _CoordinatedPlacementEvaluator()
 
     def task_result(
         self,
