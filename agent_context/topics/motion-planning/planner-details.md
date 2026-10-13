@@ -9,7 +9,9 @@ Read when changing a backend or the facade. Entry points and validation are in
 `MotionGenerator` prepares Cartesian targets with sequential seeded IK. Required
 IK/FK-consistency failures fail the environment. For each row, an initial pose
 whose full transform agrees with the seed FK retains the known starting joints;
-it needs no fresh IK solution at a singularity. Unconfirmed starts and later
+the comparison aligns dtype/device with the interpolated poses, since FK may
+use float32 buffers for float64 Cartesian inputs. It needs no fresh IK solution
+at a singularity. Unconfirmed starts and later
 poses still require successful IK and FK consistency. `interpolate_trajectory()` raises
 on any failed row; `generate()` carries per-row success in a normalized
 `PlanResult`. Fixed Cartesian sample preservation requires explicit `ik_interp`;

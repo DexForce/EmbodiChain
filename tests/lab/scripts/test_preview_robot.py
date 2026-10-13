@@ -22,9 +22,11 @@ from copy import deepcopy
 import gc
 import json
 from pathlib import Path
+import queue
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 import weakref
 import xml.etree.ElementTree as ET
 
@@ -468,19 +470,107 @@ def test_unwound_native_views_are_released_before_deferred_cleanup(
         preview_robot.main(_args("--robot", "ur5"))
 
 
-def test_constructor_failure_drains_its_queued_cleanup(
-    fake_simulation, monkeypatch
+@pytest.mark.parametrize(
+    "stage",
+    ["config", "registry_reassignment", "manual_update", "activate", "spawn", "viser"],
+)
+def test_constructor_failure_releases_only_the_preview_world(
+    monkeypatch: pytest.MonkeyPatch, robot_asset: Path, stage: str
 ) -> None:
-    events, _captured, manager = fake_simulation
+    """The real constructor queues its partial state before unwinding."""
+    from embodichain.lab.sim import sim_manager
+    from embodichain.lab.sim.cfg import RobotCfg
+    from embodichain.lab import visualization
 
-    def fail_constructor(self, cfg):
-        events.append("queued-constructor-cleanup")
-        raise RuntimeError("constructor failure")
+    manager = sim_manager.SimulationManager
+    live = SimpleNamespace(_world=MagicMock())
+    replacement = SimpleNamespace(_world=MagicMock())
+    instances = {0: live}
+    cleanup_queue = queue.Queue()
+    monkeypatch.setattr(manager, "_instances", instances)
+    monkeypatch.setattr(manager, "_cleanup_queue", cleanup_queue)
+    monkeypatch.setattr(manager, "_initialized_process_renderer", False)
+    monkeypatch.setattr(manager, "has_native_renderer", property(lambda self: False))
+    monkeypatch.setattr(sim_manager.os, "makedirs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sim_manager, "_initialize_warp_runtime", lambda *args: None)
+    monkeypatch.setattr(manager, "enable_physics", lambda *args: None)
+    monkeypatch.setattr(manager, "_declare_spawn_default_plane", lambda *args: None)
+    monkeypatch.setattr(manager, "wait_scene_destruction", MagicMock())
+    monkeypatch.setattr(
+        preview_robot, "build_robot_cfg", lambda args: RobotCfg(fpath=str(robot_asset))
+    )
+    failure = RuntimeError(f"constructor {stage} failed")
+    views = []
+    created = []
+    world = MagicMock()
+    scene = MagicMock()
+    scene.builder.prepare_arenas.return_value = []
+    physics = MagicMock()
 
-    monkeypatch.setattr(manager, "__init__", fail_constructor)
-    with pytest.raises(RuntimeError, match="constructor failure"):
-        preview_robot.main(_args("--robot", "ur5"))
-    assert events == ["queued-constructor-cleanup", "flush"]
+    class NativeView:
+        pass
+
+    def fail(*args, **kwargs):
+        view = NativeView()
+        views.append(weakref.ref(view))
+        raise failure
+
+    def make_world(cfg):
+        created.append(manager._instances[1])
+        return world
+
+    runtime = MagicMock()
+    if stage in ("config", "registry_reassignment"):
+
+        def fail_config(*args):
+            if stage == "registry_reassignment":
+                instances[1] = replacement
+            fail()
+
+        monkeypatch.setattr(manager, "_convert_sim_config", fail_config)
+    else:
+        monkeypatch.setattr(manager, "_convert_sim_config", lambda *args: object())
+    if stage == "manual_update":
+        world.set_manual_update.side_effect = fail
+    elif stage == "activate":
+        physics.activate.side_effect = fail
+    elif stage == "spawn":
+        scene.builder.prepare_arenas.side_effect = fail
+    elif stage == "viser":
+        runtime.start.side_effect = fail
+    monkeypatch.setattr(sim_manager, "make_physics_backend", lambda *args: physics)
+    monkeypatch.setattr(sim_manager.dexsim, "World", make_world)
+    monkeypatch.setattr(sim_manager, "SpawnScene", lambda *args, **kwargs: scene)
+    monkeypatch.setattr(visualization, "SceneExporter", lambda *args: object())
+    monkeypatch.setattr(visualization, "VisualizationRuntime", lambda *args: runtime)
+
+    def quit_world():
+        gc.collect()
+        assert views[0]() is None, "Constructor frame still owns a native view"
+
+    world.quit.side_effect = quit_world
+    with pytest.raises(RuntimeError) as error:
+        preview_robot.main(_args("--robot", "ur5", "--viser", "--headless"))
+
+    assert error.value is failure
+    assert instances == (
+        {0: live, 1: replacement} if stage == "registry_reassignment" else {0: live}
+    )
+    assert cleanup_queue.empty()
+    live._world.quit.assert_not_called()
+    replacement._world.quit.assert_not_called()
+    manager.wait_scene_destruction.assert_not_called()
+    if stage in ("config", "registry_reassignment"):
+        world.quit.assert_not_called()
+        assert not created
+    else:
+        world.quit.assert_called_once_with()
+        assert created[0]._world is None
+        assert created[0]._env is None
+    if stage in ("spawn", "viser"):
+        scene.close.assert_called_once_with()
+    if stage == "viser":
+        runtime.stop.assert_called_once_with()
 
 
 def test_cleanup_error_does_not_replace_original_runtime_error(

@@ -1409,7 +1409,10 @@ class MotionGenerator:
                 qpos=qpos_seed, name=control_part, to_matrix=True
             )
             known_start = torch.isclose(
-                total_interpolated_poses[:, 0], start_pose, rtol=0.0, atol=1e-6
+                total_interpolated_poses[:, 0],
+                start_pose.to(total_interpolated_poses),
+                rtol=0.0,
+                atol=1e-6,
             ).all(dim=(-2, -1))
             success, qpos_batch = self._solve_cartesian_waypoints(
                 total_interpolated_poses,

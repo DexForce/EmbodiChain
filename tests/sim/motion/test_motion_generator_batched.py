@@ -1097,6 +1097,42 @@ def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> No
     )
 
 
+@pytest.mark.parametrize("pose_dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("entry_point", ["generate", "interpolate_trajectory"])
+def test_cartesian_preparation_accepts_mixed_pose_and_fk_precision(
+    pose_dtype: torch.dtype, entry_point: str
+) -> None:
+    """Cartesian input precision may differ from the robot's FK buffers."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    poses = torch.eye(4, dtype=pose_dtype).repeat(2, 2, 1, 1)
+    poses[:, 1, 0, 3] = 0.5
+    original_poses = poses.clone()
+    start = torch.zeros(2, 1, dtype=torch.float32)
+    options = MotionGenOptions(
+        start_qpos=start,
+        control_part="arm",
+        sample_count=20,
+        is_interpolate=True,
+        interpolate_position_step=0.25,
+    )
+
+    if entry_point == "generate":
+        result = generator.generate([PlanState.from_xpos(poses[:, 1])], options)
+        assert result.success.tolist() == [True, True]
+        positions = result.positions
+    else:
+        positions, targets = generator.interpolate_trajectory(
+            control_part="arm", xpos_list=poses, options=options
+        )
+        assert targets.dtype == pose_dtype
+
+    assert positions.dtype == start.dtype
+    torch.testing.assert_close(positions[:, 0], start)
+    torch.testing.assert_close(positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(poses, original_poses)
+
+
 def test_cartesian_preparation_preserves_fk_confirmed_singular_start() -> None:
     """An observed start needs no new IK solution, even at a singularity."""
     generator = _trapezoidal_generator()
