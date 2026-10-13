@@ -140,13 +140,16 @@ def test_restore_rechecks_limits_changed_since_capture() -> None:
     assert sim.syncs == 0
 
 
-def test_boundary_positions_round_trip_through_production_articulation_setter() -> None:
+@pytest.mark.parametrize("position,tolerance", [(-1.0, 0.0), (-1.00005, 1e-4)])
+def test_boundary_positions_round_trip_through_production_articulation_setter(
+    position: float, tolerance: float
+) -> None:
     from types import MethodType, SimpleNamespace
     from embodichain.lab.sim.objects.articulation import Articulation
 
     sim = Sim()
     articulation = sim.articulations["drawer"]
-    articulation.state["qpos"][:] = -1.0
+    articulation.state["qpos"][:] = position
     articulation.state["target_qpos"][:] = 1.0
     articulation.device = sim.device
     articulation._resolve_env_ids = lambda ids: torch.tensor([0])
@@ -164,5 +167,16 @@ def test_boundary_positions_round_trip_through_production_articulation_setter() 
     saved = capture_state(view)
     articulation.state["qpos"][:] = 0.0
     articulation.state["target_qpos"][:] = 0.0
-    restore_state(view, saved)
+    restore_state(view, saved, qpos_tolerance=tolerance)
     assert compare_states(saved, capture_state(view)).passed
+
+
+@pytest.mark.parametrize("tolerance", [True, -1.0, float("nan"), float("inf")])
+def test_invalid_qpos_tolerance_rejected_before_writes(tolerance: object) -> None:
+    sim = Sim()
+    view = SceneView(sim)
+    saved = capture_state(view)
+    with pytest.raises(ValueError, match="qpos_tolerance"):
+        restore_state(view, saved, qpos_tolerance=tolerance)
+    assert all(body.writes == 0 for body in sim.rigid.values())
+    assert sim.syncs == 0

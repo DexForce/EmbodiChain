@@ -9,7 +9,8 @@ physical preparation and the Task Program attempt boundary. Its
 `RobotSceneWorkspace` adapter in
 `embodichain/lab/task_program/integrations/simulation/workspace.py` converts
 valid current-base TCP samples through object-local grasp geometry and checks
-actual targets with pose IK. Cache sampling alone does not certify support,
+actual targets with pose IK, current joint limits and full-pose FK residuals.
+Cache sampling alone does not certify support,
 collision-free motion or task success.
 
 ## Entry points

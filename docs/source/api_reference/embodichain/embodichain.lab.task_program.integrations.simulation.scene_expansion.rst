@@ -23,13 +23,16 @@ events, before physical-objective initialization and the final observation.
 ``EmbodiedEnv.reset`` then clears the old bridge and seeds recording from that
 observation. The hook is removed from forwarded options, so it does not become
 an observation or event-functor argument. A preparation hook requires a complete
-B=1 reset.
+B=1 reset. Callback signatures are checked before seeding or resetting state.
 
 The host preflights entity identity and state capture, applies arena-local rigid
 poses, clears moved-body dynamics, and advances the configured number of physics
 substeps for settling. Settling is preparation rather than a recorded expert
 action. Sensors and observation history are reset again after state changes;
-the initial validator then checks the actual settled scene. Subsequent Task
+current contact samples are refreshed without advancing physics or contact
+history. The initial validator then checks the actual settled scene. Empty
+initial checks remain unavailable even when restoration or convergence checks
+pass. Subsequent Task
 Program bridge creation constructs fresh providers and a fresh motion generator
 with current collision bindings, including when the new episode starts at the
 same clock value as the previous one.
@@ -47,14 +50,22 @@ their ownership token is part of restoration validation.
 The content-derived ``initial_state_id`` excludes temporary physical slots.
 ``to_metadata`` exports the state into JSON-compatible episode provenance.
 Asset contents and physical parameters must remain fixed for the host lifetime.
+The host measures mass, inertia, local COM, rigid friction/damping and
+articulation drive/limit fields at construction. It checks them before capture
+and restoration, and after reset events. Drift beyond absolute/relative
+``1e-6`` is rejected. Reset-time parameter randomization requires independent
+initial-state preparation and a new host with those fixed parameters.
 Entity replacement, changed joint names/body types, incompatible backend/control
 period, and foreign-host snapshots are rejected before restoration writes.
 Rigid groups, deformables, and explicit rigid constraints are unsupported.
 
 ``restore_initial_state`` uses the same reset hook, restores saved physical and
 controller values. Measured joint positions use absolute tolerance ``1e-4``
-because the public state setter clamps small native joint-limit excursions;
-poses, velocities, controller targets, and efforts retain tolerance ``1e-5``.
+because the public state setter clamps small native joint-limit excursions.
+The host explicitly passes this allowance to the shared restoration service.
+The shared service's default remains strict, controller position targets remain
+strict, and larger excursions fail before reset writes.
+Poses, velocities, controller targets, and efforts retain tolerance ``1e-5``.
 Quaternion signs are treated as equivalent. It resets sensor/observation
 history and runs the initial validator again. Restoration does not settle a
 second time. The mandatory ``scene.restore_state`` check records round-trip

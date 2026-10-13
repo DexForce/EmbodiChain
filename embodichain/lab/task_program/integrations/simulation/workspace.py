@@ -99,16 +99,36 @@ class RobotSceneWorkspace:
     Args:
         robot: Live robot with workspace sampling and IK support.
         control_part: Explicit solver/workspace control-part name.
+        position_tolerance_m: Maximum FK position residual for pose acceptance.
+        orientation_tolerance_rad: Maximum FK orientation residual in radians.
 
     The initial integration supports B=1. All transforms use the local arena
     frame; replication offsets must not be added to Robot FK/IK or object poses.
     """
 
-    def __init__(self, robot: Robot, *, control_part: str) -> None:
+    def __init__(
+        self,
+        robot: Robot,
+        *,
+        control_part: str,
+        position_tolerance_m: float = 1e-3,
+        orientation_tolerance_rad: float = 1e-2,
+    ) -> None:
         if type(control_part) is not str or not control_part.strip():
             raise ValueError("control_part must be an explicit nonempty name")
         if control_part != control_part.strip():
             raise ValueError("control_part must not have outer whitespace")
+        for name, value in (
+            ("position_tolerance_m", position_tolerance_m),
+            ("orientation_tolerance_rad", orientation_tolerance_rad),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be finite and positive")
         qpos = robot.get_qpos()
         if not isinstance(qpos, torch.Tensor) or qpos.ndim != 2 or qpos.shape[0] != 1:
             raise ValueError("scene workspace currently requires B=1")
@@ -119,6 +139,8 @@ class RobotSceneWorkspace:
         self._control_part = control_part
         self._dof = solver.dof
         self._device = torch.device(robot.device)
+        self._position_tolerance_m = position_tolerance_m
+        self._orientation_tolerance_rad = orientation_tolerance_rad
 
     def sample_object_poses(
         self,
@@ -200,11 +222,7 @@ class RobotSceneWorkspace:
                 raise ValueError(
                     "valid workspace samples must have nonnegative cache indices"
                 )
-            pose = objects[index]
-            if bounds is not None and not bool(
-                ((pose[:3, 3] >= bounds[0]) & (pose[:3, 3] <= bounds[1])).all()
-            ):
-                continue
+            pose = _pose_matrix(objects[index], device=self._device)
             seed_values = samples.qpos[0, index]
             if not bool(torch.isfinite(seed_values).all()):
                 raise ValueError("valid workspace qpos samples must be finite")
@@ -213,6 +231,10 @@ class RobotSceneWorkspace:
             )
             if score is not None and not math.isfinite(score):
                 raise ValueError("valid workspace scores must be finite")
+            if bounds is not None and not bool(
+                ((pose[:3, 3] >= bounds[0]) & (pose[:3, 3] <= bounds[1])).all()
+            ):
+                continue
             candidates.append(
                 SceneWorkspaceCandidate(
                     pose_change=ScenePoseChange(
@@ -234,7 +256,7 @@ class RobotSceneWorkspace:
         *,
         joint_seed: Sequence[float] | torch.Tensor | None = None,
     ) -> ValidationResult:
-        """Run actual pose IK, including targets absent from a sparse cache.
+        """Run actual pose IK and verify joint limits and full-pose FK residuals.
 
         Args:
             pose_change: Actual or proposed local-arena object pose.
@@ -260,8 +282,9 @@ class RobotSceneWorkspace:
                 raise ValueError(
                     "joint_seed must contain finite values of selected control-part width"
                 )
+        target = object_pose @ grasp
         result = self._robot.compute_ik(
-            pose=(object_pose @ grasp).unsqueeze(0),
+            pose=target.unsqueeze(0),
             joint_seed=seed,
             name=self._control_part,
             env_ids=[0],
@@ -276,12 +299,44 @@ class RobotSceneWorkspace:
         ):
             raise ValueError("IK returned an invalid success mask or joint shape")
         passed = bool(success[0]) and bool(torch.isfinite(qpos).all())
+        metrics = {}
+        if passed:
+            limits = self._robot.get_qpos_limits(name=self._control_part, env_ids=[0])
+            if (
+                limits.shape != (1, self._dof, 2)
+                or bool(torch.isnan(limits).any())
+                or bool((limits[..., 0] > limits[..., 1]).any())
+            ):
+                raise ValueError("Selected control-part joint limits are invalid")
+            passed = bool(((qpos >= limits[..., 0]) & (qpos <= limits[..., 1])).all())
+        if passed:
+            fk = self._robot.compute_fk(
+                qpos=qpos, name=self._control_part, env_ids=[0], to_matrix=True
+            )
+            if not isinstance(fk, torch.Tensor) or fk.shape != (1, 4, 4):
+                raise ValueError("FK returned an invalid pose shape")
+            actual = _pose_matrix(fk[0], device=self._device)
+            position_error = float(
+                torch.linalg.vector_norm(actual[:3, 3] - target[:3, 3])
+            )
+            relative_rotation = actual[:3, :3].T @ target[:3, :3]
+            cosine = ((torch.trace(relative_rotation) - 1) / 2).clamp(-1.0, 1.0)
+            orientation_error = float(torch.acos(cosine))
+            metrics = {
+                "position_error_m": position_error,
+                "orientation_error_rad": orientation_error,
+            }
+            passed = (
+                position_error <= self._position_tolerance_m
+                and orientation_error <= self._orientation_tolerance_rad
+            )
         return ValidationResult(
             (
                 ValidationCheck(
                     "workspace.pose_ik",
                     "passed" if passed else "failed",
                     f"Pose IK for {pose_change.entity_uid!r} using {self._control_part!r}; motion remains unverified",
+                    metrics=metrics,
                 ),
             )
         )

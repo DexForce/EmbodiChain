@@ -264,7 +264,7 @@ A view reads existing physical bindings and cloned poses while retaining the env
 embodichain.lab.sim.scene.state
 -------------------------------
 
-Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. Saved joint positions or targets outside those limits are rejected rather than silently clipped. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
+Snapshots own immutable arena-local physical state, including velocities, joints, controller targets and efforts. Restore preflights ownership, backend, binding, topology and current joint limits before writes. By default saved joint positions or targets outside those limits are rejected. Callers may explicitly pass ``qpos_tolerance`` to allow small measured-position excursions to be clipped and then verify the actual round trip; controller targets remain strict. Restore does not step and cannot be used as a full backend checkpoint. Native failures may leave partial writes.
 
 .. currentmodule:: embodichain.lab.sim.scene.state
 

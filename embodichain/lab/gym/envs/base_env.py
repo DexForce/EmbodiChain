@@ -19,6 +19,7 @@ from __future__ import annotations
 import zlib
 
 import math
+import inspect
 from copy import deepcopy
 from collections.abc import Mapping
 from numbers import Integral, Real
@@ -955,6 +956,12 @@ class BaseEnv(gym.Env):
         if scene_prepare is not None:
             if not callable(scene_prepare):
                 raise TypeError("scene_expansion_prepare must be callable.")
+            try:
+                inspect.signature(scene_prepare).bind()
+            except (TypeError, ValueError) as error:
+                raise TypeError(
+                    "scene_expansion_prepare must accept zero arguments."
+                ) from error
             reset_selection = torch.as_tensor(options.get("reset_ids", [0]))
             if (
                 self.num_envs != 1

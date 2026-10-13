@@ -40,7 +40,8 @@ legacy segment overrides from changing the selected source.
 
 `SimulationSceneExpansionHost` implements the preparation callback for a fixed
 B=1 scene: preflight topology and capture, apply existing-rigid-object changes,
-settle, reset sensor/observation history, capture the actual state and run explicit
+settle, reset sensor/observation history, refresh current contacts without stepping,
+capture the actual state and run explicit
 initial checks. Its trusted reset hook runs after ordinary reset events and
 before physical objectives, final observations and recording seeding. A new
 Task Program bridge creates fresh providers and motion generators, preventing
@@ -56,9 +57,13 @@ persistence writer is introduced.
 period around the shared scene physical-state representation. Numeric capture,
 restore, rigid-pose application and state comparison delegate to
 [scene services](../scene-services/scene-services.md). Restoration requires the owning host, unchanged bindings,
-topology, assets/physical parameters, backend and control period. It restores
+topology, assets/physical parameters, backend and control period. The host measures
+mass properties, rigid friction/damping and articulation drives/limits before and
+after reset events and rejects parameter drift. It restores
 without settling again, reruns initial validation and records a mandatory
-numeric round-trip check with quaternion-sign equivalence. Actual hashes can
+numeric round-trip check with quaternion-sign equivalence. Only measured qpos
+receives the explicit `1e-4` limit excursion allowance; targets remain strict.
+Empty initial validation remains unavailable despite passing auxiliary checks. Actual hashes can
 differ within tolerance. Solver history/external forces are cleared; this is
 episode restoration, not a complete backend checkpoint. Rigid groups,
 deformables and explicit rigid constraints are rejected.
@@ -67,7 +72,7 @@ deformables and explicit rigid constraints are rejected.
 current-arena TCP samples, and derives object poses by inverting the object-local
 grasp transform. Optional bounds apply to object origins. Sampling supplies
 joint seeds and scores; actual pose IK also checks targets absent from the
-cache. Recheck settled or modified poses. Support, collision planning between
+cache and verifies joint limits and full-pose FK residuals. Recheck settled or modified poses. Support, collision planning between
 phases and measured success remain separate gates.
 
 The attempt guard spans preparation, execution and measurement. It suppresses

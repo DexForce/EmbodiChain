@@ -44,7 +44,13 @@ this method does not rank or certify the proposals. Sampling does not establish
 support, stable placement, or collision-free motion.
 
 ``check_object_pose`` composes the actual object and local grasp transforms,
-then calls the selected control part's pose IK. It also works for poses absent
+then calls the selected control part's pose IK. A successful solver flag also
+requires finite joints within the selected part's current limits and FK matching
+the requested position and orientation. This includes position-only solvers.
+``position_tolerance_m`` defaults to ``1e-3`` and
+``orientation_tolerance_rad`` to ``1e-2``; both must be finite and positive.
+Measured residuals are included in passing and FK-rejected checks.
+It also works for poses absent
 from the sparse cache. The returned mandatory ``workspace.pose_ik`` check applies
 to this manipulation target only. Changing an object's height, orientation, or
 settled position requires another check, and grasp/pre-grasp/lift/place/retreat

@@ -23,8 +23,13 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
+import inspect
 from numbers import Real
 from typing import TYPE_CHECKING
+
+import torch
+
+from embodichain.lab.sim.sensors import ContactSensor
 
 from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
 from embodichain.lab.sim.scene.expansion import SceneVariant
@@ -177,6 +182,10 @@ class SimulationSceneExpansionHost:
             raise ValueError("scene expansion currently requires B=1")
         if not callable(initial_validator):
             raise TypeError("initial_validator must be callable")
+        try:
+            inspect.signature(initial_validator).bind()
+        except (TypeError, ValueError) as error:
+            raise TypeError("initial_validator must accept zero arguments") from error
         if type(settle_steps) is not int or settle_steps < 0:
             raise ValueError("settle_steps must be a nonnegative integer")
         if not math.isfinite(self._env.step_dt) or self._env.step_dt <= 0:
@@ -195,6 +204,7 @@ class SimulationSceneExpansionHost:
         self._owner = object()
         self._initial_state: SimulationSceneInitialState | None = None
         self._topology = self._describe_entities()
+        self._physical_properties = self._measure_physical_properties()
 
     @property
     def initial_state(self) -> SimulationSceneInitialState | None:
@@ -213,6 +223,60 @@ class SimulationSceneExpansionHost:
 
     def _check_topology(self) -> None:
         self._view.check_topology()
+
+    def _measure_physical_properties(self) -> dict[str, torch.Tensor]:
+        """Own the live physical parameters that must stay fixed across resets."""
+        properties = {}
+        for kind, uid, entity in self._entities():
+            values = {
+                name: getattr(entity.body_data, name)
+                for name in ("mass", "inertia", "com_pose")
+            }
+            if kind == "rigid_object":
+                values.update(
+                    friction=entity.get_friction(env_ids=[0]),
+                    damping=entity.get_damping(env_ids=[0]),
+                )
+            else:
+                values.update(
+                    {
+                        name: getattr(entity.body_data, name)
+                        for name in (
+                            "joint_stiffness",
+                            "joint_damping",
+                            "joint_friction",
+                            "joint_armature",
+                            "qpos_limits",
+                            "qvel_limits",
+                        )
+                    }
+                )
+            for name, value in values.items():
+                if (
+                    not isinstance(value, torch.Tensor)
+                    or not value.is_floating_point()
+                    or value.ndim == 0
+                    or value.shape[0] != 1
+                    or bool(torch.isnan(value).any())
+                    or (
+                        not name.endswith("limits")
+                        and not bool(torch.isfinite(value).all())
+                    )
+                ):
+                    raise ValueError(f"Cannot measure physical parameter {uid}.{name}")
+                properties[f"{uid}.{name}"] = value.detach().clone()
+        return properties
+
+    def _check_physical_properties(self) -> None:
+        actual = self._measure_physical_properties()
+        if any(
+            actual[name].shape != expected.shape
+            or not torch.allclose(actual[name], expected, atol=1e-6, rtol=1e-6)
+            for name, expected in self._physical_properties.items()
+        ):
+            raise ValueError(
+                "Scene physical parameters changed; reconstruct the scene host"
+            )
 
     def _physical_state(self, snapshot: SimulationSceneInitialState) -> SceneState:
         return SceneState(
@@ -244,6 +308,7 @@ class SimulationSceneExpansionHost:
         ):
             raise ValueError("parent_scene_id must be a nonempty stripped string")
         self._check_topology()
+        self._check_physical_properties()
         physical = capture_state(self._view)
         snapshot = SimulationSceneInitialState(
             parent_scene_id,
@@ -260,6 +325,9 @@ class SimulationSceneExpansionHost:
         # Settling is preparation, not a recorded policy/expert control action.
         for sensor in self._env.sensors.values():
             sensor.reset(env_ids=[0])
+            if isinstance(sensor, ContactSensor):
+                # Refresh current evidence without advancing physics or history.
+                sensor.update()
         observation_manager = getattr(self._env, "observation_manager", None)
         if observation_manager is not None:
             observation_manager.reset(env_ids=[0])
@@ -292,6 +360,16 @@ class SimulationSceneExpansionHost:
         validation = self._validator()
         if not isinstance(validation, ValidationResult):
             raise TypeError("initial_validator must return a ValidationResult")
+        if not validation.checks:
+            validation = ValidationResult(
+                (
+                    ValidationCheck(
+                        "scene.initial_checks",
+                        "unavailable",
+                        "No initial checks were provided",
+                    ),
+                )
+            )
         metadata = {
             "initial_state": snapshot.to_metadata(),
             "settle_steps": self._settle_steps if restored_from is None else 0,
@@ -345,6 +423,7 @@ class SimulationSceneExpansionHost:
 
         def prepare() -> ScenePreparationResult:
             self._check_topology()
+            self._check_physical_properties()
             apply_changes(self._view, changes)
             self._settling_report = None
             if self._settling is not None:
@@ -396,10 +475,12 @@ class SimulationSceneExpansionHost:
                 "Snapshot backend/control period differs from the environment"
             )
         physical = self._physical_state(snapshot)
-        _preflight_restore(self._view, physical)
+        self._check_physical_properties()
+        _preflight_restore(self._view, physical, qpos_tolerance=1e-4)
 
         def prepare() -> ScenePreparationResult:
-            restore_state(self._view, physical)
+            self._check_physical_properties()
+            restore_state(self._view, physical, qpos_tolerance=1e-4)
             self._after_state_write()
             actual = self.capture_initial_state(
                 parent_scene_id=snapshot.parent_scene_id

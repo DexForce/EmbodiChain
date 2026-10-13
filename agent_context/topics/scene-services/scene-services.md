@@ -93,7 +93,8 @@ support does not enable B>1 physics capture, edits or host stepping.
   restore solver internals, task progress or a full backend checkpoint. Host
   integrations retain control-period and episode identity contracts.
   Restoration rejects saved joint positions or targets outside current limits
-  during preflight, before any writes; the articulation writer would clip them.
+  by default. An explicit `qpos_tolerance` allows bounded measured-position
+  clipping followed by caller-owned round-trip validation; targets remain strict.
 - Change sets preflight all UIDs and movable permissions, apply rigid poses,
   clear dynamics and publish render state without stepping. Native write errors
   propagate without guaranteed rollback. The host handles reported planner and

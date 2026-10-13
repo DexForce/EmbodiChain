@@ -42,6 +42,7 @@ class _Robot:
         self.calls = []
         self.invalidate_last = False
         self.base_x = 3.0
+        self.last_ik_pose = torch.eye(4).unsqueeze(0)
 
     def get_qpos(self) -> torch.Tensor:
         return torch.zeros(1, _DOF)
@@ -72,9 +73,21 @@ class _Robot:
 
     def compute_ik(self, **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
         self.calls.append(("ik", kwargs))
+        self.last_ik_pose = kwargs["pose"].clone()
         # Orientation matters even when the object's center is reachable.
         success = kwargs["pose"][:, 0, 0] > 0.5
         return success, torch.zeros(1, _DOF)
+
+    def get_qpos_limits(self, *, name, env_ids):
+        assert name == _PART and env_ids == [0]
+        return torch.tensor([[[-2.0, 2.0], [-2.0, 2.0]]])
+
+    def compute_fk(self, **kwargs):
+        self.calls.append(("fk", kwargs))
+        assert (
+            kwargs["name"] == _PART and kwargs["env_ids"] == [0] and kwargs["to_matrix"]
+        )
+        return self.last_ik_pose.clone()
 
 
 def _grasp() -> torch.Tensor:
@@ -154,7 +167,7 @@ def test_actual_pose_ik_checks_grasp_orientation_with_no_cache_lookup() -> None:
     grasp = _grasp()
     grasp[:3, :3] = torch.tensor([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     assert not workspace.check_object_pose(change, grasp).accepted
-    assert all(call[0] == "ik" for call in robot.calls)
+    assert [call[0] for call in robot.calls] == ["ik", "fk", "ik"]
     kwargs = robot.calls[0][1]
     assert torch.allclose(kwargs["pose"][0], pose @ _grasp())
     assert kwargs["name"] == _PART
@@ -246,3 +259,67 @@ def test_sampling_rejects_nonfinite_valid_workspace_score() -> None:
     workspace = RobotSceneWorkspace(robot, control_part=_PART)
     with pytest.raises(ValueError, match="scores must be finite"):
         workspace.sample_object_poses("cube", _grasp(), num_samples=1, seed=0)
+
+
+@pytest.mark.parametrize("joint", [(-2.001, 0.0), (2.001, 0.0), (0.0, float("nan"))])
+def test_successful_ik_cannot_accept_invalid_joint_solution(joint) -> None:
+    robot = _Robot()
+    robot.compute_ik = lambda **kwargs: (torch.tensor([True]), torch.tensor([joint]))
+    robot.compute_fk = lambda **kwargs: pytest.fail(
+        "Invalid IK joints must not reach FK"
+    )
+    workspace = RobotSceneWorkspace(robot, control_part=_PART)
+    change = ScenePoseChange("cube", torch.eye(4).tolist())
+    assert not workspace.check_object_pose(change, torch.eye(4)).accepted
+
+
+@pytest.mark.parametrize("mismatch", ["position", "orientation"])
+def test_successful_ik_requires_full_pose_fk_agreement(mismatch: str) -> None:
+    robot = _Robot()
+    fk = torch.eye(4).unsqueeze(0)
+    if mismatch == "position":
+        fk[0, 0, 3] = 0.1
+    else:
+        fk[0, :3, :3] = torch.diag(torch.tensor([-1.0, -1.0, 1.0]))
+    robot.compute_fk = lambda **kwargs: fk
+    workspace = RobotSceneWorkspace(robot, control_part=_PART)
+    change = ScenePoseChange("cube", torch.eye(4).tolist())
+    result = workspace.check_object_pose(change, torch.eye(4))
+    assert not result.accepted
+    assert (
+        result.checks[0].metrics[
+            "position_error_m" if mismatch == "position" else "orientation_error_rad"
+        ]
+        > 0.05
+    )
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf"), True])
+@pytest.mark.parametrize("name", ["position_tolerance_m", "orientation_tolerance_rad"])
+def test_invalid_pose_verification_tolerance_rejected(name: str, value: object) -> None:
+    with pytest.raises(ValueError, match=name):
+        RobotSceneWorkspace(_Robot(), control_part=_PART, **{name: value})
+
+
+@pytest.mark.parametrize("field", ["qpos", "score"])
+def test_bounds_filter_cannot_hide_invalid_valid_workspace_data(field: str) -> None:
+    robot = _Robot()
+    sample = robot.sample_reachable_pose
+
+    def corrupted(**kwargs):
+        result = sample(**kwargs)
+        value = torch.full(
+            result.qpos.shape if field == "qpos" else result.indices.shape, float("nan")
+        )
+        return replace(result, **{field: value})
+
+    robot.sample_reachable_pose = corrupted
+    workspace = RobotSceneWorkspace(robot, control_part=_PART)
+    with pytest.raises(ValueError, match="finite"):
+        workspace.sample_object_poses(
+            "cube",
+            _grasp(),
+            num_samples=1,
+            seed=0,
+            position_bounds=((-10.0, -10.0, -10.0), (-9.0, -9.0, -9.0)),
+        )
