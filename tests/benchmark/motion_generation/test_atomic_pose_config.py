@@ -33,6 +33,7 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     AtomicTaskScenario,
     _randomization_parameters,
     _randomized_vector_batch,
+    atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
 
@@ -105,64 +106,126 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
     }
 
 
-def test_spatial_generalization_suite_isolates_three_spatial_populations() -> None:
-    """The shipped baseline changes one strict spatial factor per domain."""
+def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
+    """Every Franka task skill gets only its meaningful spatial domains."""
     suite = load_suite("atomic_franka_pgi_spatial_generalization")
-    nominal, object_xy, object_yaw, target_relative_pose = suite.evaluation_tracks()
+    expected = {
+        "spatial-rigid-object": (
+            {"pick_up", "pour", "axis_align"},
+            {"nominal", "object_xy", "object_yaw"},
+        ),
+        "spatial-rigid-object-target": (
+            {"move_held_object", "place", "push_object"},
+            {"nominal", "object_xy", "object_yaw", "target_relative_pose"},
+        ),
+        "spatial-microwave-controls": (
+            {"press", "twist"},
+            {"nominal", "object_xy", "object_yaw"},
+        ),
+        "spatial-drawer": ({"slide"}, {"nominal", "object_xy", "object_yaw"}),
+        "spatial-door": (
+            {"open_door"},
+            {"nominal", "object_xy", "object_yaw"},
+        ),
+    }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v2"
-    assert [
-        nominal.id,
-        object_xy.id,
-        object_yaw.id,
-        target_relative_pose.id,
-    ] == [
-        "spatial-push@nominal",
-        "spatial-push@object_xy",
-        "spatial-push@object_yaw",
-        "spatial-push@target_relative_pose",
-    ]
-    assert {
-        track.group_id
-        for track in (nominal, object_xy, object_yaw, target_relative_pose)
-    } == {"spatial-push"}
-    assert nominal.domain.kind == "nominal"
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v3"
+    assert len(suite.evaluation_tracks()) == 16
+    assert set(expected) == {track.id for track in suite.tracks}
+    for track in suite.tracks:
+        skills, domain_ids = expected[track.id]
+        assert {entry["id"] for entry in track.config["skills"]} == skills
+        assert {domain.id for domain in track.domains} == domain_ids
+        assert all(set(domain.applicability) == skills for domain in track.domains)
+
+
+@pytest.mark.parametrize(
+    ("suite_name", "skill_id"),
+    [
+        (
+            "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+            "hand_over",
+        ),
+        (
+            "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+            "coordinated_pickment",
+        ),
+        (
+            "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+            "coordinated_placement",
+        ),
+    ],
+)
+def test_dual_arm_spatial_suites_cover_all_three_domains(
+    suite_name: str, skill_id: str
+) -> None:
+    """Each dual-arm task receives the same three isolated spatial shifts."""
+    suite = load_suite(suite_name)
+    tracks = suite.evaluation_tracks()
+
+    assert {track.domain.id for track in tracks} == {
+        "nominal",
+        "object_xy",
+        "object_yaw",
+        "target_relative_pose",
+    }
+    assert all(track.domain.applicability == [skill_id] for track in tracks)
     assert all(
-        track.domain.kind == "robustness"
-        for track in (object_xy, object_yaw, target_relative_pose)
-    )
-    assert nominal.domain.applicability == ["push_object"]
-    assert all(
-        track.domain.perturbations["samples_per_seed"] == 8
-        for track in (object_xy, object_yaw, target_relative_pose)
-    )
-    assert resolve_atomic_batch_sizes(nominal) == [1]
-    assert all(
-        resolve_atomic_batch_sizes(track) == [8]
-        for track in (object_xy, object_yaw, target_relative_pose)
+        [entry["id"] for entry in track.config["skills"]] == [skill_id]
+        for track in tracks
     )
 
-    xy_settings = resolve_atomic_pose_randomization(object_xy)
-    yaw_settings = resolve_atomic_pose_randomization(object_yaw)
-    target_settings = resolve_atomic_pose_randomization(target_relative_pose)
-    assert xy_settings.object_translation_jitter_m == (0.03, 0.03, 0.0)
-    assert xy_settings.object_yaw_jitter_rad == 0.0
-    assert xy_settings.target_translation_jitter_m == (0.0, 0.0, 0.0)
-    assert yaw_settings.mode == "planar_pose"
-    assert yaw_settings.object_translation_jitter_m == (0.0, 0.0, 0.0)
-    assert yaw_settings.object_yaw_jitter_rad == pytest.approx(0.523599)
-    assert yaw_settings.target_translation_jitter_m == (0.0, 0.0, 0.0)
-    assert target_settings.object_translation_jitter_m == (0.0, 0.0, 0.0)
-    assert target_settings.object_yaw_jitter_rad == 0.0
-    assert target_settings.target_translation_jitter_m == (0.02, 0.02, 0.0)
-    assert all(
-        track.config["seeds"] == [11, 23, 47]
-        for track in (nominal, object_xy, object_yaw, target_relative_pose)
+
+def test_spatial_suites_cover_every_non_motion_atomic_skill() -> None:
+    """Only pure joint and end-effector moves are outside spatial evaluation."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
     )
-    assert all(
-        [skill["id"] for skill in track.config["skills"]] == ["push_object"]
-        for track in (nominal, object_xy, object_yaw, target_relative_pose)
+    configured = {
+        skill["id"]
+        for suite_name in suite_names
+        for track in load_suite(suite_name).tracks
+        for skill in track.config["skills"]
+    }
+
+    expected = set(atomic_skill_provider_names()) - {
+        "move_end_effector",
+        "move_joints",
+    }
+    assert configured == expected
+
+
+def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
+    """Declared domain provenance and executable overrides cannot drift."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
     )
+    for suite_name in suite_names:
+        for track in load_suite(suite_name).evaluation_tracks():
+            settings = resolve_atomic_pose_randomization(track)
+            perturbations = track.domain.perturbations
+            assert track.config["seeds"] == [11, 23, 47]
+            if track.domain.kind == "nominal":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                continue
+            assert settings.enabled is True
+            assert resolve_atomic_batch_sizes(track) == [8]
+            assert settings.object_translation_jitter_m == tuple(
+                perturbations["object_translation_jitter_m"]
+            )
+            assert settings.object_yaw_jitter_rad == pytest.approx(
+                perturbations["object_yaw_jitter_rad"]
+            )
+            assert settings.target_translation_jitter_m == tuple(
+                perturbations["target_translation_jitter_m"]
+            )
 
 
 def test_pose_batch_aliases_are_normalized() -> None:

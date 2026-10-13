@@ -33,6 +33,12 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 python -m scripts.benchmark.motion_generation.run_benchmark \
   --suite atomic_dual_ur5_pgi_coordinated_placement --device cpu
 python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_hand_over_spatial_generalization --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization --device cpu
+python -m scripts.benchmark.motion_generation.run_benchmark \
   --extra-baselines ik_interpolate toppra
 ```
 
@@ -73,14 +79,20 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
-- `atomic_franka_pgi_spatial_generalization_v2` is the strict spatial
-  generalization baseline. It compares a three-seed nominal `PushObject`
-  population with three isolated robustness domains: object XY translation,
-  object yaw, and target translation relative to the object. Each domain keeps
-  assets, physics, robot, and task semantics fixed and contains eight
-  deterministic samples per seed. Domain overrides select `B=1` for nominal
-  cases and `B=8` for shifted cases; generated poses are frozen in the case
-  manifest and restored before every planner replay.
+- `atomic_franka_pgi_spatial_generalization_v3` is the strict spatial
+  generalization baseline for all ten task-level Franka skills: `PickUp`,
+  `MoveHeldObject`, `Place`, `Press`, `Slide`, `Twist`, `OpenDoor`, `Pour`,
+  `AxisAlign`, and `PushObject`. Tracks group only skills with the same spatial
+  contract, so object-only skills are never mislabeled as target-shift tests.
+  The three isolated robustness domains are object XY translation, object yaw,
+  and, where the skill has a Cartesian object goal, target translation relative
+  to the object. Each domain keeps assets, physics, robot, and task semantics
+  fixed and contains eight deterministic samples per seed. Domain overrides
+  select `B=1` for nominal cases and `B=8` for shifted cases; generated poses
+  are frozen in the case manifest and restored before every planner replay.
+  Pure `MoveEndEffector` and `MoveJoints` primitives are intentionally excluded:
+  they have no task object, and joint-space targets are not strict spatial
+  generalization.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These
@@ -102,6 +114,9 @@ in that run's `videos/` directory.
   streams and additionally accepts
   `support_object_position_jitter_m` and `support_object_yaw_jitter_rad`
   overrides; its grasp and target transforms are rebuilt per environment row.
+  The three corresponding `*_spatial_generalization` suites add three-seed
+  nominal, object-XY, object-yaw, and target-relative-pose populations for all
+  dual-arm task skills.
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
   cases may keep extra objects in the scene through `scene_object_poses`.
