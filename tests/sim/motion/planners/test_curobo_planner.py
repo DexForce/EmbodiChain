@@ -1582,7 +1582,12 @@ def test_dynamic_update_uses_registry_id_in_curobo_backend():
     assert [(name, env_idx) for name, _, env_idx in updates] == [("registry_cube", 0)]
 
 
-def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
+@pytest.mark.parametrize("create_checker", [False, True])
+@pytest.mark.parametrize("with_world", [False, True])
+@pytest.mark.parametrize("cached_backend", [False, True])
+def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order(
+    tmp_path, create_checker, with_world, cached_backend
+):
     """The collision gate preserves samples and maps simulator joint order."""
     planner = object.__new__(CuroboPlanner)
     planner.cfg = CuroboPlannerCfg(
@@ -1592,26 +1597,67 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
     planner._curobo_device = torch.device("cpu")
     joint_states = []
     collision_queries = []
+    sphere_updates = []
+    checker_configs = []
+    config_path = tmp_path / "robot.yml"
+    config_path.write_text(yaml.safe_dump({"robot_cfg": {"kinematics": {}}}))
 
     def from_position(position, *, joint_names):
         joint_states.append((position.clone(), tuple(joint_names)))
         return SimpleNamespace(position=position)
 
-    def validate(sample, *, env_query_idx):
+    def collision_cost(state, *, idxs_env_query):
+        sample = state.position
+        env_query_idx = idxs_env_query
         collision_queries.append((sample.clone(), env_query_idx.clone()))
-        validity = torch.ones(sample.shape[:2], dtype=torch.bool)
+        cost = torch.zeros((*sample.shape[:2], 3))
         if len(collision_queries) == 2:
-            validity[1, 0] = False
-        return validity
+            cost[1, 0, 2] = 0.1
+        return cost
+
+    def kinematics(sample):
+        assert sample.is_contiguous()
+        return SimpleNamespace(
+            position=sample, robot_spheres=torch.zeros((*sample.shape[:2], 3, 4))
+        )
+
+    def update_spheres(count, *, batch_size, horizon):
+        sphere_updates.append((count, batch_size, horizon))
+
+    def make_checker(cfg=None):
+        if cfg is not None:
+            assert cfg.self_collision_cost is None
+        return SimpleNamespace(
+            get_kinematics=kinematics,
+            get_bound=lambda sample: torch.where(sample > 3.1, 0.1, 0.0),
+            collision_constraint=(
+                SimpleNamespace(
+                    forward=collision_cost, update_num_spheres=update_spheres
+                )
+                if with_world
+                else None
+            ),
+        )
+
+    def load_checker_config(**kwargs):
+        checker_configs.append(kwargs)
+        kinematics = kwargs["robot_config"]["robot_cfg"]["kinematics"]
+        assert kinematics["self_collision_buffer"] == {}
+        assert kinematics["self_collision_ignore"] == {}
+        return SimpleNamespace(**kwargs, self_collision_cost=object())
 
     planner._bindings = SimpleNamespace(
         JointState=SimpleNamespace(from_position=from_position),
+        RobotCollisionCheckerCfg=SimpleNamespace(load_from_config=load_checker_config),
+        RobotCollisionChecker=make_checker,
+        DeviceCfg=lambda **kwargs: kwargs,
     )
     backend = SimpleNamespace(
         sim_joint_names=["sim_left", "sim_right"],
         sim_to_curobo_col_idx=None,
-        collision_checker=SimpleNamespace(validate=validate),
+        collision_checker=None if create_checker else make_checker(),
         profile=SimpleNamespace(
+            robot_config_path=str(config_path),
             sim_to_curobo_joint_names={
                 "sim_left": "curobo_left",
                 "sim_right": "curobo_right",
@@ -1619,9 +1665,23 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
         ),
         planner=SimpleNamespace(
             joint_names=["curobo_right", "curobo_left"],
+            scene_collision_checker=object(),
         ),
     )
-    planner._get_backend = lambda control_part, batch_size, move_type: backend
+    planner._backend_cache = (
+        {("dual_arm", 2, False, MoveType.EEF_MOVE): backend} if cached_backend else {}
+    )
+
+    def get_backend(control_part, batch_size, move_type):
+        assert not cached_backend
+        assert (control_part, batch_size, move_type) == (
+            "dual_arm",
+            2,
+            MoveType.JOINT_MOVE,
+        )
+        return backend
+
+    planner._get_backend = get_backend
     trajectory = torch.tensor(
         (
             ((0.0, 1.0), (0.1, 1.1), (0.2, 1.2)),
@@ -1637,9 +1697,10 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
 
     assert torch.equal(
         validity,
-        torch.tensor(((True, True, True), (True, False, True))),
+        torch.tensor(((True, True, True), (True, not with_world, False))),
     )
-    assert len(collision_queries) == trajectory.shape[1]
+    assert len(collision_queries) == (trajectory.shape[1] if with_world else 0)
+    assert sphere_updates == ([(3, 2, 1)] if with_world else [])
     for sample_index, (sample, env_query_idx) in enumerate(collision_queries):
         torch.testing.assert_close(
             sample[:, 0],
@@ -1648,6 +1709,16 @@ def test_validate_joint_trajectory_checks_every_exact_sample_in_curobo_order():
         assert torch.equal(env_query_idx, torch.tensor((0, 1), dtype=torch.int32))
     torch.testing.assert_close(joint_states[0][0], trajectory[:, 0].flip(dims=(-1,)))
     assert joint_states[0][1] == ("curobo_right", "curobo_left")
+    assert len(checker_configs) == int(create_checker)
+    if create_checker:
+        assert (
+            checker_configs[0]["scene_collision_checker"]
+            is backend.planner.scene_collision_checker
+        )
+        assert checker_configs[0]["num_envs"] == 2
+        planner.validate_joint_trajectory(trajectory, control_part="dual_arm")
+        assert len(checker_configs) == 1
+    assert yaml.safe_load(config_path.read_text())["robot_cfg"]["kinematics"] == {}
 
 
 def test_generate_world_scene_rejects_direct_mesh_representation():

@@ -26,6 +26,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 import weakref
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -139,16 +140,20 @@ def test_standalone_config_resolves_relative_assets_and_cli_overrides(
     assert args.robot_params == {"uid": "caller"}
 
 
-def test_component_asset_paths_resolve_from_config_directory(robot_asset) -> None:
+@pytest.mark.parametrize("sensors", [None, [], {}])
+def test_component_asset_paths_resolve_from_config_directory(
+    robot_asset, sensors
+) -> None:
     path = robot_asset.parent / "assembled.json"
     path.write_text(
         json.dumps(
             {
                 "uid": "assembly",
                 "urdf_cfg": {
+                    "sensors": sensors,
                     "components": [
                         {"component_type": "arm", "urdf_path": robot_asset.name}
-                    ]
+                    ],
                 },
                 "control_parts": {"custom_arm": ["joint"]},
             }
@@ -168,6 +173,74 @@ def test_registered_asset_ids_are_not_rewritten(robot_asset) -> None:
     preview_robot._resolve_local_assets(fields, robot_asset.parent)
     assert fields["fpath"] == "Franka/panda/pandaWithHand.urdf"
     assert fields["solver_cfg"]["custom_arm"]["urdf_path"] == str(robot_asset)
+
+
+@pytest.mark.parametrize("sensor_format", ["list", "mapping"])
+def test_relative_sensor_urdf_is_included_from_another_working_directory(
+    robot_asset: Path, monkeypatch: pytest.MonkeyPatch, sensor_format: str
+) -> None:
+    hand = robot_asset.parent / "hand.urdf"
+    hand.write_text('<robot name="hand"><link name="hand_base"/></robot>')
+    sensor = robot_asset.parent / "sensor.urdf"
+    sensor.write_text('<robot name="sensor"><link name="sensor_link"/></robot>')
+    sensor_cfg = {
+        "sensor_name": "camera",
+        "sensor_source": sensor.name,
+        "parent_component": "arm",
+        "parent_link": "tip",
+    }
+    path = robot_asset.parent / "assembled.json"
+    path.write_text(
+        json.dumps(
+            {
+                "uid": "assembly",
+                "urdf_cfg": {
+                    "components": [
+                        {"component_type": "arm", "urdf_path": robot_asset.name},
+                        {"component_type": "hand", "urdf_path": hand.name},
+                    ],
+                    "sensors": (
+                        [sensor_cfg]
+                        if sensor_format == "list"
+                        else {"camera": sensor_cfg}
+                    ),
+                    "fpath": "output/assembled.urdf",
+                },
+                "control_parts": {"custom_arm": ["joint"]},
+            }
+        )
+    )
+    original = path.read_bytes()
+    working_dir = robot_asset.parent / "other"
+    working_dir.mkdir()
+    monkeypatch.chdir(working_dir)
+
+    cfg = preview_robot.build_robot_cfg(_args("--robot-config", str(path)))
+    assembled = ET.parse(cfg.urdf_cfg.assemble_urdf())
+
+    assert cfg.urdf_cfg.sensors[0]["sensor_source"] == str(sensor)
+    links = {link.get("name") for link in assembled.findall("link")}
+    assert "camera_sensor_link" in links
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        {"type": "camera", "name": "camera_link"},
+        ET.fromstring('<robot name="sensor"><link name="camera_link"/></robot>'),
+        ([ET.Element("link", name="camera_link")], []),
+        "VendorSensors/camera.urdf",
+    ],
+)
+def test_sensor_sources_keep_inline_definitions_and_registry_references(
+    tmp_path: Path, source
+) -> None:
+    config = {"urdf_cfg": {"sensors": [{"sensor_source": source}]}}
+
+    preview_robot._resolve_local_assets(config, tmp_path)
+
+    assert config["urdf_cfg"]["sensors"][0]["sensor_source"] is source
 
 
 @pytest.mark.parametrize("source", ["catalog", "file"])

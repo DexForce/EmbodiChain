@@ -135,6 +135,12 @@ def _resolve_local_assets(config: dict[str, Any], base_dir: Path) -> None:
         for component in components:
             if isinstance(component, dict) and "urdf_path" in component:
                 component["urdf_path"] = local_path(component["urdf_path"])
+        sensors = urdf.get("sensors") or []
+        if isinstance(sensors, Mapping):
+            sensors = sensors.values()
+        for sensor in sensors:
+            if isinstance(sensor, dict) and "sensor_source" in sensor:
+                sensor["sensor_source"] = local_path(sensor["sensor_source"])
         for field in ("fpath", "fpath_prefix"):
             if isinstance(urdf.get(field), str):
                 urdf[field] = str((base_dir / Path(urdf[field]).expanduser()).resolve())

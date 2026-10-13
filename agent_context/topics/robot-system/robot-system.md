@@ -35,8 +35,10 @@ omission preserves existing construction behavior. See
 [catalog contracts](catalogs.md) for entry points, metadata and model profiles.
 
 `preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
-File `class_type` optionally selects the catalog; local asset paths resolve
-from the file directory. Configuration decoding and validation precede World
+File `class_type` optionally selects the catalog; local asset paths, including
+`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
+from the file directory. Inline sensor definitions and data IDs are preserved.
+Configuration decoding and validation precede World
 creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
 cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
 
