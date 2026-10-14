@@ -70,6 +70,9 @@ these boundaries; its schemas, predicate rules, and cache behavior are owned by
 [GenSim/TaskSpec design](../../../docs/architecture/gen-sim-taskspec-design.md).
 Long-horizon specifications keep the terminal state in `goal` and represent
 ordered intermediate achievements as acyclic `milestones`.
+Interpretation checks explicit held-resource conflicts before grounding using
+the existing bounded repair. Only `step_result` proves cross-step identity;
+unknown scene aliases remain uncertain, not an identity or resource certificate.
 Completion evaluation requires trajectory evidence for those achievements and
 their predecessor order; incomplete `always` windows cannot certify success.
 Scene output is a scene-binding and measured-state input to that protocol; it
@@ -91,10 +94,18 @@ milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported
 observers, incomplete `all` selector universes and sparse temporal/invariant
 windows remain unavailable, not certified. Historical reports are not rewritten.
+The isolated bundle runner uses one PyTorch intraop thread during a single CPU
+episode or initial planning probe, restoring the caller's setting on exit.
+Within that scope, GenSim Pick batches of at least 100 CPU PyTorch IK candidates
+temporarily reuse the original thread budget, capped at eight, and restore the
+single-thread setting afterward. Candidate poses, seeds and counts are unchanged.
+GPU and multi-environment execution retain their existing thread policy. This
+reduces small-tensor thread-pool overhead; it does not change physics, solver
+tolerances, motion timing or recovery budgets.
 Supported E1 placement allows up to 50 mm positive floor clearance while retaining
 the 10 mm penetration limit. Full-footprint coverage, exact released-state receipts
 and the other physical gates remain required; execution evidence records both limits.
-Rigid-reference E1 `inside`/`on` observations qualify the full projected object
+Rigid-reference E1 `inside` observations qualify the full projected object
 footprint against actual planar-floor triangles (including holes), resting height,
 and exact measured terminal release receipts. Milestones read the recorder's
 post-segment `end_steps` slots, independently of fresh final poses; later motion
@@ -133,14 +144,38 @@ the existing runtime alignment and upright checks still execute without goal-bas
 E2 checks its final yaw-free alignment at release height before Place preserves
 that heading. Alignment staging never descends below the current height before
 the planner can choose the final orientation.
-Ordinary GenSim Place retains its qualified Cartesian result. Only after its
-existing density/local-IK recovery exhausts, an unowned-Cartesian, single-row
-preserve-orientation call may reuse shared waypoint IK/joint interpolation.
+Ordinary GenSim Place retains its qualified initial Cartesian result. On initial
+failure, an unowned-Cartesian, single-row preserve-orientation call may probe
+shared waypoint IK/joint interpolation before density/local-IK recovery. Only
+a fully qualified plan with at most 45 degrees of intermediate rotation skips
+that repeated work; otherwise the pre-probe RNG is restored and the complete
+original recovery runs. Safe early large-turn plans remain available if later
+searches fail or produce worse waypoint plans; 45 degrees is a scheduling
+criterion, not a safety threshold or rejection of the large-turn fallback.
 Every required waypoint and the exact release pose remain unchanged. Acceptance
 checks final emitted velocity/joint limits, discrete robot meshes, and the held
 object's conservative scene envelopes through approach. Explicit Cartesian
 routes, dynamic collision policies, drawer routes and E2 z caps are not overridden.
 Missing bound rigid geometry or bound articulation obstacles disable this fallback.
+Ordinary held transport in `held_path.py` first measures exact required endpoints.
+Only qualified free-space endpoints own its discrete carried-mesh sweep and
+bounded continuous-path recovery; external transforms recheck final samples.
+Support-contact endpoints, missing geometry and direct-transport routes remain
+unmigrated. Bound-rigid envelopes are not full-world or continuous-contact proof.
+Bare `table/on` targets retain legal source XY; only occupied landings select a
+measured free tabletop region. Fixed-base prismatic travel envelopes qualify
+endpoints only. Named regions, explicit poses and E2 in-place goals do not move.
+The bare E1 table route uses a `supported_region` preset: its planning point is
+a proposal, not a normative coordinate goal. Live stability and TaskSpec join
+exact native support, full measured planar footprint, contact height and release
+evidence. Point/upright/named targets retain their prior constraints. Episode
+geometry caches remove only exactly duplicated payload points; poses, contact
+and acceptance are freshly measured on the unchanged stability cadence.
+Up to three shared waypoint plans may be compared for the same acquired grasp
+and unchanged targets. Each must pass every existing safety gate. FK records
+maximum/intermediate rotation, not just final heading; a low-rotation plan is
+preferred, while the best qualified large-rotation plan remains the fallback.
+Extra path searches restore the caller RNG and do not reselect a successful Pick.
 Successful paths and failed-search random streams remain unchanged. This is not
 continuous collision/contact qualification or a remedy for unreachable waypoints.
 Ordinary, factory-marked single-environment GenSim Pick qualifies every contact
@@ -363,8 +398,14 @@ Ordinary E1 placement on another object retains its position tolerance and uses
 `supported_placement`: scaled local mesh vertices are cached per environment,
 then transformed by observed poses for vertical gap and projected support-envelope
 checks. It does not impose initial roll or either object's initial up direction.
-Both objects must still remain stable for the declared window. This geometric
-envelope is not contact evidence for arbitrary concave or tilted supports.
+Both objects must still remain stable for the declared window. `on` additionally
+requires native upward contact between the exact object pair supporting the COM,
+plus measured release; it does not require whole-silhouette containment. Support
+sensors are registered in the environment's physics-substep registry. A sleeping
+contact witness survives only unchanged body poses, is invalidated by overflow
+or movement, and is cleared for reset environment rows. Final support is measured
+again; milestones retain their exact observed boundary receipt. This is not
+arbitrary concave/tilted-support or three-dimensional cavity qualification.
 Relative side placement binds an articulation body or an explicitly grounded
 prismatic `reference_part` to one native `SceneLinkRef`. Geometry includes only
 the selected link's collision meshes, in its scaled native frame, never a proxy
