@@ -1075,6 +1075,7 @@ def test_motion_diagnostics_preserve_the_underlying_result(
     assert generator.generate(targets, options) is result
     backend.assert_called_once_with(targets, options=options)
     record = json.loads(log.call_args.args[0].removeprefix("GenSim motion plan: "))
+    assert record.pop("elapsed_seconds") >= 0
     assert record == {
         "control_part": "left_arm",
         "input_target_count": 1,

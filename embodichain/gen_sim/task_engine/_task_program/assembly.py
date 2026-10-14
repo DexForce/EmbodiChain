@@ -233,9 +233,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
         pick.pick_purposes = dict(self._pick_purposes)
-        if not self._drawers:
-            pick.path_simulation = getattr(self, "_simulation", None)
-            pick.path_excluded_invocations = frozenset(self._cartesian_calls)
+        pick.path_simulation = getattr(self, "_simulation", None)
+        pick.path_excluded_invocations = frozenset(self._cartesian_calls)
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
         transport = GenSimMoveHeldObject(staging_contract=self._staging_contract)
@@ -513,7 +512,7 @@ class TaskAdapterFactory:
                 ),
             )
         pick_continuations = ()
-        if self.adaptive_pick and not self.drawer_routes:
+        if self.adaptive_pick:
             from embodichain.lab.task_program.language import TaskProgramCfg
             from .pick_continuation import bind_calls
 

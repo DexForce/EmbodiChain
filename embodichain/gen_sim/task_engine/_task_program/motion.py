@@ -23,6 +23,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 import json
 import math
+import time
 from typing import Any, Callable, Iterator
 import xml.etree.ElementTree as ET
 
@@ -186,6 +187,7 @@ def resolve_seeded_ik_path(
     seed = start.clone()
     points = [seed]
     allowed = limits * dt
+    from ._search_cost import record_search
 
     def feasible(ok: torch.Tensor, q: torch.Tensor) -> bool:
         return bool(
@@ -199,6 +201,7 @@ def resolve_seeded_ik_path(
 
     for pose in poses:
         target = pose[None] if isinstance(pose, torch.Tensor) else pose
+        record_search("ik_solve")
         ok, q = solve(target, seed)
         q = q.reshape_as(seed)
         valid = feasible(ok, q)
@@ -210,6 +213,7 @@ def resolve_seeded_ik_path(
                     for offset in (-0.15, 0.15, -0.05, 0.05):
                         trial = seed.clone()
                         trial[:, joint] += offset
+                        record_search("ik_solve")
                         good, candidate = solve(target, trial.clamp(lower, upper))
                         candidate = candidate.reshape_as(seed)
                         if feasible(good, candidate):
@@ -232,6 +236,8 @@ def resolve_seeded_ik_path(
                     trial = seed[0].clone()
                     trial[joint] += offset
                     trials.append(trial.clamp(lower, upper).reshape(-1))
+            record_search("ik_batch_solve")
+            record_search("ik_seed", count=len(trials))
             good, candidates = solve_many(target, torch.stack(trials))
             if valid:
                 candidates = torch.cat((q, candidates))
@@ -445,6 +451,7 @@ def _generate_cartesian_approach(
     options: MotionGenOptions | None = None,
 ) -> PlanResult:
     """Share one policy between Place-scoped and legacy Cartesian requests."""
+    started = time.perf_counter()
     input_target_count = len(target_states)
     original_targets = target_states
     original_options = options
@@ -534,6 +541,7 @@ def _generate_cartesian_approach(
                 "control_part": None if options is None else options.control_part,
                 "input_target_count": input_target_count,
                 "planned_target_count": len(target_states),
+                "elapsed_seconds": round(time.perf_counter() - started, 3),
                 "input_poses": input_poses,
                 "success": (
                     result.success.detach().cpu().tolist()

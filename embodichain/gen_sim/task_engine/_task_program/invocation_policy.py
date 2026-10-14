@@ -396,6 +396,31 @@ class GenSimActionEngine(AtomicActionEngine):
         *,
         plan_transform: PlanTransform | None = None,
     ) -> Any:
+        from ._search_cost import measure_search, search_cost_scope
+
+        with search_cost_scope() as cost:
+            with measure_search("complete_plan_request"):
+                plan = self._plan_request_impl(
+                    request, context, plan_transform=plan_transform
+                )
+            return replace(
+                plan,
+                diagnostics=replace(
+                    plan.diagnostics,
+                    metadata={
+                        **plan.diagnostics.metadata,
+                        "gen_sim_search_cost": cost.snapshot(),
+                    },
+                ),
+            )
+
+    def _plan_request_impl(
+        self,
+        request: ResolvedActionRequest,
+        context: Any = None,
+        *,
+        plan_transform: PlanTransform | None = None,
+    ) -> Any:
         from .motion import cartesian_approach_scope
         from .motion import _velocity_retry_samples
         from .planning_probe import initial_plan_capture
