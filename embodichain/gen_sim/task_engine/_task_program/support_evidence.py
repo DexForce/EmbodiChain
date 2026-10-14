@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 from shapely.geometry import MultiPoint, Point
@@ -61,6 +61,13 @@ class ContactWitness:
 
 
 class SupportContactSensor(ContactSensor):
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        super().reset(env_ids)
+        if hasattr(self, "support_reader"):
+            witnesses = self.support_reader.witnesses
+            for row in range(len(witnesses)) if env_ids is None else env_ids:
+                witnesses[row].value = None
+
     @property
     def requires_substep_update(self) -> bool:
         return hasattr(self, "support_reader")

@@ -19,11 +19,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 import math
 from typing import Any
 
 import numpy as np
 from shapely.geometry import MultiPoint
+from shapely.geometry.base import BaseGeometry
 import torch
 import trimesh
 
@@ -88,12 +90,54 @@ def _valid_pose(pose: torch.Tensor, batch_size: int) -> None:
         raise ValueError("Placement requires rigid, non-reflected native transforms.")
 
 
+@dataclass(frozen=True)
+class _PlacementGeometry:
+    simulation: Any
+    object_uid: str
+    reference_uid: str
+    object_native: Any
+    reference_native: Any
+    vertices: torch.Tensor
+    floors: tuple[tuple[BaseGeometry, float], ...]
+
+
+def _prepare_placement_geometry(
+    simulation: Any, object_binding: Any, reference_binding: Any, batch_size: int
+) -> _PlacementGeometry:
+    """Cache immutable native geometry, never dynamic poses or acceptance."""
+    vertices, _ = _native_mesh(simulation, object_binding, batch_size)
+    # Exact duplicate payload points do not affect any projected hull or min-Z.
+    vertices = torch.unique(vertices, dim=1)
+    reference_vertices, faces = _native_mesh(simulation, reference_binding, batch_size)
+    floors = []
+    for row in range(batch_size):
+        floor = _floor_region(
+            trimesh.Trimesh(reference_vertices[row].numpy(), faces[row].numpy())
+        )
+        if floor is None:
+            raise ValueError(
+                "Placement reference has no measured planar landing region."
+            )
+        floors.append(floor)
+    return _PlacementGeometry(
+        simulation,
+        object_binding.simulation_uid,
+        reference_binding.simulation_uid,
+        simulation.get_rigid_object(object_binding.simulation_uid),
+        simulation.get_rigid_object(reference_binding.simulation_uid),
+        vertices.clone(),
+        tuple(floors),
+    )
+
+
 def measure_planar_placement(
     simulation: Any,
     object_binding: Any,
     reference_binding: Any,
     object_pose: torch.Tensor,
     reference_pose: torch.Tensor,
+    *,
+    _geometry: _PlacementGeometry | None = None,
 ) -> tuple[list[bool], dict[str, Any]]:
     """Check the full footprint against actual floor triangles, including holes.
 
@@ -103,8 +147,24 @@ def measure_planar_placement(
     batch_size = object_pose.shape[0]
     _valid_pose(object_pose, batch_size)
     _valid_pose(reference_pose, batch_size)
-    vertices, _ = _native_mesh(simulation, object_binding, batch_size)
-    reference_vertices, faces = _native_mesh(simulation, reference_binding, batch_size)
+    geometry = _geometry or _prepare_placement_geometry(
+        simulation, object_binding, reference_binding, batch_size
+    )
+    if (
+        geometry.simulation is not simulation
+        or geometry.object_uid != object_binding.simulation_uid
+        or geometry.reference_uid != reference_binding.simulation_uid
+        or geometry.object_native
+        is not simulation.get_rigid_object(object_binding.simulation_uid)
+        or geometry.reference_native
+        is not simulation.get_rigid_object(reference_binding.simulation_uid)
+        or geometry.vertices.shape[0] != batch_size
+        or len(geometry.floors) != batch_size
+    ):
+        raise ValueError(
+            "Placement geometry cache differs from its native bindings or batch."
+        )
+    vertices = geometry.vertices
     relative = torch.linalg.solve(reference_pose, object_pose)
     local = (
         vertices.to(relative) @ relative[:, :3, :3].transpose(-1, -2)
@@ -114,13 +174,7 @@ def measure_planar_placement(
     for row in range(batch_size):
         if reference_pose[row, 2, 2] < math.cos(math.radians(5.0)):
             raise ValueError("Placement reference lacks a qualified near-level floor.")
-        mesh = trimesh.Trimesh(reference_vertices[row].numpy(), faces[row].numpy())
-        floor = _floor_region(mesh)
-        if floor is None:
-            raise ValueError(
-                "Placement reference has no measured planar landing region."
-            )
-        polygon, height = floor
+        polygon, height = geometry.floors[row]
         points = local[row].numpy()
         footprint = MultiPoint(points[:, :2]).convex_hull
         if footprint.is_empty or footprint.area <= 0:

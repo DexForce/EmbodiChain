@@ -123,6 +123,7 @@ def _evaluate(data):
 
 def test_real_producer_keys_measured_milestone_and_final_snapshot_certify() -> None:
     evaluation = _evaluate(_evidence())
+    assert evaluation["observer_revision"] == 4
     assert evaluation["environments"][0]["certificate_ready"] is True
     assert evaluation["environments"][0]["milestones"][0]["status"] == "satisfied"
 
@@ -577,7 +578,15 @@ def test_e6_receipt_masks_are_evaluated_per_environment(identities) -> None:
     assert rows[1]["certificate_ready"] is False
 
 
-def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="inside"):
+def _placement_evidence(
+    tmp_path,
+    *,
+    x=0.0,
+    z=0.045,
+    hole=False,
+    relation="inside",
+    reference_uid="region",
+):
     import numpy as np
     import trimesh
     from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
@@ -587,7 +596,7 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
         step(
             "E1",
             "cube",
-            target=selector("region"),
+            target=selector(reference_uid),
             relation=relation,
             required_arm="left_arm",
         )
@@ -598,7 +607,7 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
         "candidate_id": source["candidate_id"],
         "reference_bindings": {
             "step_01.object": ["cube"],
-            "step_01.target": ["region"],
+            "step_01.target": [reference_uid],
         },
         "role_bindings": {},
     }
@@ -607,7 +616,7 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
         bindings,
         [
             {"runtime_uid": uid, "init_pos": [0.0, 0.0, 0.7], "init_rot": [0.0] * 3}
-            for uid in ("cube", "region")
+            for uid in ("cube", reference_uid)
         ],
     )
     coverage = _coverage(plan)
@@ -734,9 +743,12 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
             )[None],
         )
 
-    objects = {"cube": native(child, pose), "region": native(reference, reference_pose)}
+    objects = {
+        "cube": native(child, pose),
+        reference_uid: native(reference, reference_pose),
+    }
     records = {uid: {"pose": torch.zeros(1, len(nodes) + 1, 7)} for uid in objects}
-    for uid, value in (("cube", pose), ("region", reference_pose)):
+    for uid, value in (("cube", pose), (reference_uid, reference_pose)):
         records[uid]["pose"][..., :3] = value[:, None, :3, 3]
         records[uid]["pose"][..., 6] = 1.0
     env = SimpleNamespace(
@@ -752,7 +764,7 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
             containers=(
                 (
                     SimpleNamespace(
-                        entity_id=placement["call"]["inside"], parent_id="region"
+                        entity_id=placement["call"]["inside"], parent_id=reference_uid
                     ),
                 )
                 if relation == "inside"
@@ -767,6 +779,298 @@ def _placement_evidence(tmp_path, *, x=0.0, z=0.045, hole=False, relation="insid
     path.parent.mkdir(exist_ok=True)
     save_config(path, constraints)
     return plan, contract, runtime, program, constraints, env, deployment
+
+
+def _table_region_evidence(tmp_path, monkeypatch, *, contact=True, **kwargs):
+    from embodichain.gen_sim.task_engine._task_program import support_evidence
+    from embodichain.gen_sim.task_engine._task_program.placement_evidence import (
+        measure_planar_placement,
+    )
+    import numpy as np
+
+    data = _placement_evidence(tmp_path, relation="on", reference_uid="table", **kwargs)
+    plan, contract, runtime, program, constraints, env, deployment = data
+    placement = next(
+        node
+        for node in plan.graph["nodes"]
+        if node["call"].get("call_id") == "simulation.place_relative"
+    )
+    preset = f"gen_sim.{placement['id']}.stable"
+    cfg = {
+        "kind": "supported_region",
+        "entity": "cube",
+        "reference": "table",
+        "duration": 0.08,
+        "support_tolerance": 0.01,
+    }
+    constraints["presets"][preset] = cfg
+    deployment.integration.adapter_factory = SimpleNamespace(
+        constraints=((preset, SimpleNamespace(**cfg)),)
+    )
+    terminal = runtime["segments"][-1]
+    terminal_index = len(program["program"]["items"]) - 1
+    program["program"]["items"][-1]["post"] = [
+        {"kind": "wait_stable", "entity": "cube", "preset": preset}
+    ]
+    prefix = ["program", "items", terminal_index]
+    terminal["metadata"]["program_segment_source_path"] = prefix
+
+    def observe(object_pose, reference_pose):
+        positions = np.array(
+            [[-0.02, -0.02, 0.005], [0.02, -0.02, 0.005], [0.0, 0.02, 0.005]]
+        )
+        positions[:, :2] += object_pose[0, :2, 3].numpy()
+        accepted, row = support_evidence.support_from_contacts(
+            np.tile([11, 22], (len(positions), 1)),
+            positions,
+            np.tile([0.0, 0.0, 1.0], (len(positions), 1)),
+            np.full(len(positions), 0.01 if contact else 0.0),
+            object_pose[0, :3, 3].numpy(),
+            object_actor=22,
+            reference_actor=11,
+            tolerance=0.003,
+        )
+        return torch.tensor([accepted]), {
+            "scope": "native_contact_support",
+            "entity": "cube",
+            "reference": "table",
+            "env_ids": [0],
+            "supported": [accepted],
+            "rows": [row],
+            "object_pose": object_pose.tolist(),
+            "reference_pose": reference_pose.tolist(),
+        }
+
+    monkeypatch.setattr(
+        support_evidence,
+        "NativeSupportObservation",
+        lambda *args, **kwargs: SimpleNamespace(observe=observe),
+    )
+    object_pose = env.sim.get_rigid_object("cube").get_local_pose()
+    reference_pose = env.sim.get_rigid_object("table").get_local_pose()
+    _, native = observe(object_pose, reference_pose)
+    _, region = measure_planar_placement(
+        env.sim,
+        SimpleNamespace(simulation_uid="cube"),
+        SimpleNamespace(simulation_uid="table"),
+        object_pose,
+        reference_pose,
+    )
+    terminal["metadata"]["post_policies"] = [
+        {
+            "kind": "wait_stable",
+            "policy_index": 0,
+            "source_path": [*prefix, "post", 0],
+            "result_mask": [True],
+            "result": {
+                "kind": "supported_region",
+                "preset": preset,
+                "accepted_mask": [True],
+                "required_seconds": cfg["duration"],
+                "stable_seconds": [cfg["duration"]],
+                "measurements": {
+                    "native_support": native,
+                    "landing_region": region,
+                    "support_gap": [float(object_pose[0, 2, 3]) - 0.045],
+                },
+            },
+        }
+    ]
+    for segment in runtime["segments"]:
+        for call in segment["metadata"]["runtime"]["calls"]:
+            call["plan_attempts"] = [{"planned_at": 0.04}]
+            call["events"] = [
+                {
+                    "kind": "action_completed",
+                    "invocation_id": call["invocation_id"],
+                    "invocation_revision": call["invocation_revision"],
+                    "timestamp": 0.08,
+                }
+            ]
+    contract["program_digest"] = canonical_hash(program)
+    contract["constraints_digest"] = canonical_hash(constraints)
+    save_config(tmp_path / "task_program/constraints.json", constraints)
+    return data
+
+
+@pytest.mark.parametrize("changes", [{"x": 0.24}, {"hole": True}])
+def test_table_contact_and_origin_bounds_cannot_replace_full_region(
+    tmp_path, monkeypatch, changes
+):
+    data = _table_region_evidence(tmp_path, monkeypatch, **changes)
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is False
+    assert result["goal"][0]["status"] == "failed"
+    assert result["milestones"][0]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "damage", ["no_contact", "no_release", "future", "before_plan"]
+)
+def test_table_region_requires_exact_contact_release_and_time_window(
+    tmp_path, monkeypatch, damage
+):
+    data = _table_region_evidence(tmp_path, monkeypatch, contact=damage != "no_contact")
+    call = next(
+        segment["metadata"]["runtime"]["calls"][0]
+        for segment in data[2]["segments"]
+        if segment["metadata"]["runtime"]["calls"]
+    )
+    if damage == "no_release":
+        call["effects"] = []
+    elif damage in {"future", "before_plan"}:
+        timestamp = 0.12 if damage == "future" else 0.0
+        proof = call["effects"][0]
+        proof["timestamp"] = timestamp
+        for evidence in proof["evidence"].values():
+            evidence["timestamp"] = timestamp
+    assert _observe_placement(tmp_path, data)["certificate_ready"] is False
+
+
+def test_table_region_measurements_retain_native_and_complete_geometry(
+    tmp_path, monkeypatch
+):
+    data = _table_region_evidence(tmp_path, monkeypatch)
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is True
+    record = next(iter(result["final_measurements"].values()))["members"][0]
+    metrics = record["measurements"]
+    assert metrics["scope"] == "native_supported_landing_region"
+    assert metrics["landing_region"]["full_footprint_inside"] == [True]
+    assert metrics["native_support"]["supported"] == [True]
+
+
+@pytest.mark.parametrize("target", ["final", "milestone"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_region",
+        "legacy_scope",
+        "footprint",
+        "gap",
+        "no_contact",
+        "no_load",
+        "node",
+        "reference",
+        "poses",
+        "release",
+        "window",
+    ],
+)
+def test_table_region_matcher_rejects_incomplete_or_foreign_physical_records(
+    tmp_path, monkeypatch, target, damage
+):
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        capture_final_goals,
+        capture_placement_milestones,
+    )
+
+    data = _table_region_evidence(tmp_path, monkeypatch)
+    plan, contract, runtime, program, constraints, env, deployment = data
+    final = capture_final_goals(
+        env, deployment, tmp_path, plan.graph, contract, 1, runtime=runtime
+    )
+    milestones = capture_placement_milestones(
+        env, deployment, plan.graph, contract, runtime, 1, spec=plan.task_spec
+    )
+    record = (
+        next(iter(final.values()))["members"][0]
+        if target == "final"
+        else next(iter(milestones.values()))
+    )
+    metrics = record["measurements"]
+    if damage == "missing_region":
+        metrics.pop("landing_region")
+    elif damage == "legacy_scope":
+        record["measurements"] = {
+            **metrics["native_support"],
+            "reference_uid": "table",
+            "relation": "on",
+            "released": [True],
+        }
+    elif damage == "footprint":
+        metrics["landing_region"]["full_footprint_inside"] = [False]
+    elif damage == "gap":
+        metrics["landing_region"]["support_gap_m"] = [0.12]
+    elif damage == "no_contact":
+        metrics["native_support"]["supported"] = [False]
+    elif damage == "no_load":
+        metrics["native_support"]["rows"][0]["upward_impulse"] = 0.0
+    elif damage == "node":
+        metrics["placement_node_id"] = "other"
+    elif damage == "reference":
+        metrics["native_support"]["reference"] = "other"
+    elif damage == "poses":
+        metrics["native_support"]["object_pose"][0][0][3] += 0.02
+    elif damage == "release":
+        metrics["released"] = [False]
+    else:
+        metrics["release_window"]["timestamp"] = 0.04
+    result = evaluate_runtime_evidence(
+        plan.task_spec,
+        contract,
+        plan.graph,
+        runtime,
+        final,
+        num_envs=1,
+        run_id="invalid-region",
+        program=program,
+        constraints=constraints,
+        placement_milestones=milestones,
+    )["environments"][0]
+    assert result["certificate_ready"] is False
+
+
+@pytest.mark.parametrize("damage", ["frames", "coherent_pose", "policy", "duration"])
+def test_table_region_milestone_stays_at_its_exact_recorded_boundary(
+    tmp_path, monkeypatch, damage
+):
+    data = _table_region_evidence(tmp_path, monkeypatch)
+    terminal = data[2]["segments"][-1]
+    if damage == "frames":
+        terminal["end_steps"] = [0]
+    elif damage == "policy":
+        terminal["metadata"]["post_policies"][0]["source_path"] = [
+            "program",
+            "items",
+            0,
+            "post",
+            0,
+        ]
+    elif damage == "duration":
+        terminal["metadata"]["post_policies"][0]["result"]["stable_seconds"] = [0.0]
+    else:
+        trace = terminal["metadata"]["post_policies"][0]["result"]["measurements"]
+        for key in ("native_support", "landing_region"):
+            trace[key]["object_pose"][0][0][3] += 0.02
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is False
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["milestones"][0]["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("legacy_kind", ["upright", "supported_placement"])
+def test_inherited_legacy_table_presets_do_not_acquire_region_semantics(
+    tmp_path, monkeypatch, legacy_kind
+):
+    data = _table_region_evidence(tmp_path, monkeypatch)
+    constraints = data[4]
+    preset, cfg = next(iter(constraints["presets"].items()))
+    cfg["kind"] = legacy_kind
+    data[6].integration.adapter_factory.constraints = (
+        (preset, SimpleNamespace(**cfg)),
+    )
+    data[2]["segments"][-1]["metadata"]["post_policies"][0]["result"][
+        "kind"
+    ] = legacy_kind
+    data[1]["constraints_digest"] = canonical_hash(constraints)
+    save_config(tmp_path / "task_program/constraints.json", constraints)
+    result = _observe_placement(tmp_path, data)
+    assert result["certificate_ready"] is True
+    metrics = next(iter(result["final_measurements"].values()))["members"][0][
+        "measurements"
+    ]
+    assert metrics["scope"] == "native_contact_support"
 
 
 def _observe_placement(tmp_path, data):

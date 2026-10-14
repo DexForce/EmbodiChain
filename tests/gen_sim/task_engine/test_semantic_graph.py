@@ -404,7 +404,7 @@ def test_future_upright_does_not_change_earlier_placement_validation(monkeypatch
         task_program_bundle, "_longest_local_axis", lambda *a: [1, 0, 0]
     )
     for nodes, expected in (
-        ([place, align], "supported_placement"),
+        ([place, align], "supported_region"),
         ([align, place], "upright"),
     ):
         graph = {"nodes": nodes, "task_groups": []}
@@ -1750,7 +1750,8 @@ def test_unified_bundle_identity_accepts_old_defaults_and_rejects_contract_drift
     elif change == "constraints":
         path = paths.program.parent / "constraints.json"
         constraints = load_config(path)
-        next(iter(constraints["presets"].values()))["position_tolerance"] *= 2
+        preset = next(iter(constraints["presets"].values()))
+        preset["duration"] = preset.get("duration", 3.0) * 2
         save_config(path, constraints)
     elif change == "runtime_revision":
         monkeypatch.setattr(

@@ -555,6 +555,22 @@ class TaskAdapterFactory:
             pick_continuations=pick_continuations,
             twist_routes=self.twist_routes,
         )
+        support = [
+            cfg
+            for _, cfg in self.constraints
+            if cfg.kind in {"stack", "supported_placement", "supported_region"}
+        ]
+        if support:
+            native_ids = {
+                b.entity_id: b.simulation_uid
+                for b in self.registration.scene_binding.rigid_objects
+            }
+            for cfg in support:
+                uid = f"gen_sim_support__{native_ids[cfg.entity]}__{native_ids[cfg.reference]}"
+                sensor = environment.sim.get_sensor(uid)
+                if sensor is None:
+                    raise ValueError(f"Declared support sensor {uid!r} is absent.")
+                environment.sensors[uid] = sensor
         return factory.create_adapter()
 
 

@@ -106,11 +106,97 @@ def test_sleeping_contact_witness_is_invalidated_by_either_body_moving():
     assert witness.update(obj, ref, None, invalid=True) is None
 
 
+@pytest.mark.parametrize("env_ids", [None, [1], []])
+def test_support_sensor_reset_clears_only_selected_episode_witnesses(
+    monkeypatch, env_ids
+):
+    from types import SimpleNamespace
+    import torch
+    from embodichain.gen_sim.task_engine._task_program.support_evidence import (
+        ContactSensor,
+        ContactWitness,
+        SupportContactSensor,
+    )
+
+    resets = []
+    monkeypatch.setattr(ContactSensor, "reset", lambda self, ids: resets.append(ids))
+    sensor = object.__new__(SupportContactSensor)
+    witnesses = [ContactWitness(), ContactWitness()]
+    pose = torch.eye(4)
+    sample = (np.ones((1, 2)),)
+    for witness in witnesses:
+        witness.update(pose, pose, sample)
+    sensor.support_reader = SimpleNamespace(witnesses=witnesses)
+
+    sensor.reset(env_ids)
+
+    assert resets == [env_ids]
+    selected = range(2) if env_ids is None else env_ids
+    for row, witness in enumerate(witnesses):
+        assert (witness.update(pose, pose, None) is None) == (row in selected)
+
+
+@pytest.mark.parametrize("kind", ["supported_placement", "supported_region", "stack"])
+def test_adapter_registers_native_support_sensor_for_physics_substeps(
+    monkeypatch, kind
+):
+    from types import SimpleNamespace as NS
+    from embodichain.gen_sim.task_engine._task_program import assembly
+    from embodichain.gen_sim.task_engine._task_program.stability import (
+        StabilityConstraint,
+    )
+
+    uid = "gen_sim_support__native_item__native_support"
+    sensor = NS(uid=uid, requires_substep_update=True)
+    registration = NS(
+        assert_unchanged=lambda: None,
+        scene_binding=NS(
+            rigid_objects=(
+                NS(entity_id="item", simulation_uid="native_item"),
+                NS(entity_id="support", simulation_uid="native_support"),
+            )
+        ),
+        robot_profile_binding=NS(presets=()),
+    )
+    environment = NS(
+        robot=object(),
+        sim=NS(get_sensor=lambda requested: sensor if requested == uid else None),
+        sensors={},
+        step_dt=0.04,
+    )
+    monkeypatch.setattr(assembly, "install_grasp_filters", lambda *_: {})
+    monkeypatch.setattr(
+        assembly, "_TaskFactory", lambda *_a, **_kw: NS(create_adapter=lambda: object())
+    )
+    constraint = StabilityConstraint(
+        entity="item",
+        reference="support",
+        kind=kind,
+        **(
+            {"displacement": (0, 0, 0.1)}
+            if kind == "supported_placement"
+            else (
+                {
+                    "local_axis": (0, 0, 1),
+                    "reference_axis": (0, 0, 1),
+                    "reference_half_extents": (0.1, 0.1),
+                }
+                if kind == "stack"
+                else {}
+            )
+        ),
+    )
+    assembly.TaskAdapterFactory(
+        registration, "test", (("support", constraint),), ()
+    ).create_adapter(environment)
+
+    assert environment.sensors == {uid: sensor}
+
+
 def test_on_capture_uses_native_current_support_and_exact_past_receipt(
     tmp_path, monkeypatch
 ):
     import torch
-    from copy import deepcopy
     from .test_task_spec_runtime import _placement_evidence, _observe_placement
     from embodichain.gen_sim.task_engine._task_program import support_evidence
     from embodichain.gen_sim.task_engine.contracts import canonical_hash

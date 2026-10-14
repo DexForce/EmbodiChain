@@ -613,7 +613,7 @@ def generate_task_program_bundle(
             selected_graph,
             program_id,
             scene,
-            stability_presets=set(stability["presets"]),
+            stability_presets=stability["presets"],
         ),
     )
     _write_json(
@@ -994,6 +994,18 @@ def _task_stability_payload(
                     presets[f"gen_sim.{node['id']}.stable"].update(
                         kind="supported_placement",
                     )
+                    if (
+                        reference_id == "table"
+                        and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+                        and set(arguments).issubset(
+                            {"object", "reference", "relation", "stage_id"}
+                        )
+                    ):
+                        presets[f"gen_sim.{node['id']}.stable"] = {
+                            "kind": "supported_region",
+                            "entity": object_id,
+                            "reference": reference_id,
+                        }
         elif (
             call["call_id"] == _ALIGN_HELD_CALL_ID
             and node["task_type"] == "E4"
@@ -1088,7 +1100,7 @@ def _program_payload(
     program_id: str,
     scene: Any | None = None,
     *,
-    stability_presets: set[str] | None = None,
+    stability_presets: set[str] | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     axis_by_object = (
         {}
@@ -1132,6 +1144,19 @@ def _program_payload(
             axis_by_object=axis_by_object,
             task_stability=f"gen_sim.{node['id']}.stable"
             in (stability_presets or set()),
+            task_stability_kind=(
+                stability_presets.get(f"gen_sim.{node['id']}.stable", {}).get("kind")
+                if isinstance(stability_presets, Mapping)
+                and stability_presets.get(f"gen_sim.{node['id']}.stable", {}).get(
+                    "entity"
+                )
+                == node["call"].get("arguments", {}).get("object")
+                and stability_presets.get(f"gen_sim.{node['id']}.stable", {}).get(
+                    "reference"
+                )
+                == node["call"].get("arguments", {}).get("reference")
+                else None
+            ),
             articulated_reference=node["call"].get("arguments", {}).get("reference")
             in articulated_references,
         )
@@ -1375,6 +1400,7 @@ def _program_node(
     relative_routes: dict[tuple[str, str, str, str], dict[str, Any]] | None = None,
     axis_by_object: dict[str, list[float]] | None = None,
     task_stability: bool = False,
+    task_stability_kind: str | None = None,
     articulated_reference: bool = False,
 ) -> dict[str, Any]:
     """Materialize one task node as one canonical runtime segment."""
@@ -1466,7 +1492,15 @@ def _program_node(
                 raise ValueError(
                     "Articulated references require task stability acceptance."
                 )
-        else:
+        elif not (
+            task_stability
+            and task_stability_kind == "supported_region"
+            and node.get("task_type") == "E1"
+            and call["call_id"] == _PLACE_RELATIVE_CALL_ID
+            and arguments.get("reference") == "table"
+            and arguments.get("relation") == "on"
+            and set(arguments).issubset({"object", "reference", "relation", "stage_id"})
+        ):
             segment["validators"] = [
                 {
                     "kind": "object_near_relative_target",
@@ -3028,14 +3062,33 @@ def _relative_place_route_payloads(
                 # Release clearance is a command target, not a resting height.
                 displacement[2] -= _upright_release_clearance(scene_objects[object_id])
         else:
+            placement_objects = scene_objects
+            if reference_id == "table" and relation == "on":
+                # The planner view omits fixed-base and joint configuration.
+                # Endpoint clearance needs the actual authored mechanisms.
+                placement_objects = {
+                    **scene_objects,
+                    **{
+                        str(config["uid"]): {
+                            **scene_objects.get(str(config["uid"]), {}),
+                            **config,
+                            "runtime_uid": str(config["uid"]),
+                            "role": "articulation",
+                        }
+                        for config in getattr(scene, "articulations", ())
+                    },
+                }
             displacement = _relative_world_displacement(
                 relation,
                 object_id=object_id,
                 reference_id=reference_id,
                 scene_objects=(
-                    {**scene_objects, reference_id: spatial_reference.planner_object()}
+                    {
+                        **placement_objects,
+                        reference_id: spatial_reference.planner_object(),
+                    }
                     if spatial_reference is not None
-                    else scene_objects
+                    else placement_objects
                 ),
                 axis_align_objects=axis_align_objects,
                 table_top_z=scene.table_top_z,
@@ -3119,6 +3172,13 @@ def _relative_world_displacement(
             reference_position = _position(reference)
             reference_top = float(table_top_z) - reference_position[2]
             object_position = _position(obj)
+            if relation == "on":
+                object_position = _table_landing_position(
+                    object_id,
+                    scene_objects,
+                    axis_aligned=object_id in axis_align_objects,
+                    table_top_z=float(table_top_z),
+                )
             x_offset = object_position[0] - reference_position[0]
             y_offset = object_position[1] - reference_position[1]
         else:
@@ -3213,6 +3273,212 @@ def _relative_world_displacement(
     else:
         raise ValueError(f"Unsupported relative placement relation {relation!r}.")
     return displacement
+
+
+def _table_world_vertices(source: dict[str, Any]) -> np.ndarray:
+    """Measure a finite native envelope without guessing missing geometry."""
+    from .scene.articulation_geometry import _root_pose
+
+    _position(source)
+    pose = _root_pose(source)
+    scale = np.asarray(source.get("body_scale", [1.0] * 3), dtype=float)
+    if scale.shape != (3,) or not np.isfinite(scale).all() or (scale <= 0).any():
+        raise ValueError("Table landing geometry requires finite positive scale.")
+    if source.get("shape", {}).get("shape_type") == "Cube":
+        import trimesh
+
+        bounds = _local_bounds(source)
+        if bounds is None:
+            raise ValueError("Table landing requires measured primitive geometry.")
+        points = (
+            np.asarray(
+                trimesh.creation.box(extents=np.subtract(bounds[1], bounds[0])).vertices
+            )
+            * scale
+        )
+    else:
+        points = _mesh_vertices(source)
+    if (
+        points.ndim != 2
+        or points.shape[1] != 3
+        or not len(points)
+        or not np.isfinite(points).all()
+    ):
+        raise ValueError("Table landing requires finite mesh geometry.")
+    return points @ pose[:3, :3].T + pose[:3, 3]
+
+
+def _table_obstacle_bounds(source: dict[str, Any]) -> np.ndarray:
+    """Bound fixed rigid geometry and the full travel of qualified sliders.
+
+    Expanding the aggregate by every slider's maximum authored displacement
+    deliberately overestimates fixed links and independent drawers. Revolute,
+    floating and unqualified mechanisms are not assumed static. This envelope
+    certifies neither the robot's approach path nor runtime contact.
+    """
+    points = _table_world_vertices(source)
+    bounds = np.stack((points.min(0), points.max(0)))
+    if source.get("role") != "articulation":
+        return bounds
+    from pxr import Gf, UsdPhysics
+
+    from ._task_program.articulation_binding import _fixed_base, _stage
+    from .scene.articulation_geometry import read_articulation_geometry
+
+    if not _fixed_base(source):
+        raise ValueError("Table landing requires a fixed articulation obstacle base.")
+    stage = _stage(source["fpath"])
+    joints = [
+        prim
+        for prim in stage.Traverse()
+        if prim.IsA(UsdPhysics.Joint)
+        and UsdPhysics.Joint(prim).GetJointEnabledAttr().Get() is not False
+    ]
+    if any(
+        not prim.IsA(UsdPhysics.FixedJoint) and not prim.IsA(UsdPhysics.PrismaticJoint)
+        for prim in joints
+    ):
+        raise ValueError(
+            "Table landing cannot qualify non-prismatic articulation joints."
+        )
+    if not any(prim.IsA(UsdPhysics.PrismaticJoint) for prim in joints):
+        return bounds
+    geometry = read_articulation_geometry(source["fpath"])
+    scale = np.asarray(source.get("body_scale", [1.0] * 3), dtype=float)
+    if not np.allclose(scale, scale[0], atol=1e-6, rtol=1e-6):
+        raise ValueError("Table landing slider geometry requires uniform scale.")
+    expansion = np.zeros(3)
+    for prim in joints:
+        if not prim.IsA(UsdPhysics.PrismaticJoint):
+            continue
+        joint = UsdPhysics.PrismaticJoint(prim)
+        parent, child = (
+            geometry.link_poses[stage.GetPrimAtPath(targets[0]).GetName()]
+            for targets in (
+                joint.GetBody0Rel().GetTargets(),
+                joint.GetBody1Rel().GetTargets(),
+            )
+        )
+        anchor0 = parent[:3, 3] + parent[:3, :3] @ np.asarray(
+            joint.GetLocalPos0Attr().Get(), dtype=float
+        )
+        anchor1 = child[:3, 3] + child[:3, :3] @ np.asarray(
+            joint.GetLocalPos1Attr().Get(), dtype=float
+        )
+        axis_name = str(joint.GetAxisAttr().Get())
+        if axis_name not in {"X", "Y", "Z"}:
+            raise ValueError("Table landing slider requires an explicit XYZ axis.")
+        quaternion = joint.GetLocalRot1Attr().Get()
+        joint_rotation = np.asarray(
+            Gf.Matrix3d(
+                Gf.Quatd(quaternion.GetReal(), Gf.Vec3d(quaternion.GetImaginary()))
+            )
+        ).T
+        axis = child[:3, :3] @ joint_rotation @ np.eye(3)["XYZ".index(axis_name)]
+        limits = (
+            np.asarray(
+                [joint.GetLowerLimitAttr().Get(), joint.GetUpperLimitAttr().Get()],
+                dtype=float,
+            )
+            * scale[0]
+        )
+        if (
+            not np.isfinite(axis).all()
+            or not np.isclose(np.linalg.norm(axis), 1.0, atol=1e-6)
+            or not np.isfinite(limits).all()
+            or limits[0] >= limits[1]
+        ):
+            raise ValueError(
+                "Table landing slider requires finite axis and joint limits."
+            )
+        authored_position = float(np.dot(anchor1 - anchor0, axis)) * scale[0]
+        travel = float(np.max(np.abs(limits - authored_position)))
+        expansion += np.abs(_initial_rotation(source) @ axis) * travel
+    if not np.isfinite(expansion).all():
+        raise ValueError("Table landing articulation travel is not finite.")
+    return bounds + np.stack((-expansion, expansion))
+
+
+def _table_landing_position(
+    object_id: str,
+    scene_objects: dict[str, Any],
+    *,
+    axis_aligned: bool,
+    table_top_z: float,
+) -> tuple[float, float, float]:
+    """Keep a legal original XY; replace only an occupied bare-table landing.
+
+    The measured triangle union retains holes. Relocations use an origin-centred
+    conservative footprint radius; existing legal full-footprint placements do
+    not acquire that extra support margin. Static rigid snapshots and qualified
+    prismatic full-travel envelopes are endpoint evidence only.
+    """
+    import trimesh
+    from shapely.affinity import translate
+    from shapely.geometry import MultiPoint, Point, box
+    from shapely.ops import nearest_points, unary_union
+
+    from ._task_program.container_targets import _floor_region
+
+    obj, table = scene_objects[object_id], scene_objects["table"]
+    table_points = _table_world_vertices(table)
+    if table["shape"].get("shape_type") == "Cube":
+        loaded = trimesh.creation.box(extents=table["shape"]["size"])
+    else:
+        loaded = trimesh.load(str(table["shape"]["fpath"]), force="scene").to_geometry()
+    loaded.vertices = table_points
+    measured = _floor_region(loaded)
+    if (
+        measured is None
+        or abs(float(table_points[:, 2].max()) - table_top_z) > 1e-4
+        or abs(measured[1] - table_top_z) > _PLACEMENT_CLEARANCE
+    ):
+        raise ValueError("Table landing requires a measured matching planar support.")
+    floor = measured[0]
+    vertices = _mesh_vertices(obj)
+    if axis_aligned:
+        major = int(np.argmax(_dominant_local_axis(obj)))
+        radius = float(np.linalg.norm(np.delete(vertices, major, axis=1), axis=1).max())
+        footprint = box(-radius, -radius, radius, radius)
+    else:
+        vertices = vertices @ _initial_rotation(obj).T
+        footprint = MultiPoint(vertices[:, :2]).convex_hull
+    if footprint.is_empty or footprint.area <= 0 or not np.isfinite(vertices).all():
+        raise ValueError("Table landing requires a finite full object footprint.")
+    position = _position(obj)
+    original = translate(footprint, xoff=position[0], yoff=position[1])
+    if not floor.buffer(1e-9).covers(original):
+        raise ValueError(
+            "Original table landing footprint lacks full measured support."
+        )
+    bottom, top = _vertical_mesh_bounds(obj, axis_aligned=axis_aligned)
+    release_top = table_top_z + top - bottom + _PLACEMENT_CLEARANCE
+    excluded = []
+    footprint_points = np.asarray(footprint.exterior.coords[:-1])
+    for uid, obstacle in sorted(scene_objects.items()):
+        if uid in {object_id, "table"}:
+            continue
+        bounds = _table_obstacle_bounds(obstacle)
+        if bounds[1, 2] < table_top_z or bounds[0, 2] > release_top:
+            continue
+        corners = np.asarray(box(*bounds[0, :2], *bounds[1, :2]).exterior.coords[:-1])
+        # Minkowski difference: every full payload footprint must clear the
+        # measured obstacle envelope, not merely its origin or source support.
+        forbidden = MultiPoint(
+            (corners[:, None, :] - footprint_points[None, :, :]).reshape(-1, 2)
+        ).convex_hull.buffer(_RELATION_CLEARANCE + 1e-6, join_style=2)
+        excluded.append(forbidden)
+    occupied = unary_union(excluded)
+    if occupied.is_empty or not occupied.covers(Point(position[:2])):
+        return position
+    radius = float(np.linalg.norm(footprint_points, axis=1).max())
+    available = floor.buffer(-radius - _RELATION_CLEARANCE).difference(occupied)
+    if available.is_empty or available.area <= 1e-8:
+        raise ValueError("Table support has no remaining legal landing space.")
+    point = nearest_points(available, Point(position[:2]))[0]
+    if not floor.covers(translate(footprint, xoff=point.x, yoff=point.y)):
+        raise ValueError("Selected table landing lacks full measured support.")
+    return float(point.x), float(point.y), position[2]
 
 
 def _horizontal_relation_distance(
