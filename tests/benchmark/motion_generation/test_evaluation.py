@@ -37,6 +37,7 @@ from scripts.benchmark.motion_generation.evaluation import (
     STANDARD_VERSION,
     SKILL_CRITERIA,
     StageEvidence,
+    evaluate_skill_stage_batch,
     evaluate_skill_stages,
     validate_standard_evaluation,
 )
@@ -59,7 +60,13 @@ def _evidence(window: str, **measurements: float | bool) -> StageEvidence:
 def _primitive(error: float, env_index: int = 0) -> PhysicalEvaluation:
     return evaluate_skill_stages(
         "move_end_effector",
-        {"reached": _evidence("terminal_settle", tcp_position_error_m=error)},
+        {
+            "reached": _evidence(
+                "terminal_settle",
+                tcp_position_error_m=error,
+                tcp_rotation_error_rad=0.0,
+            )
+        },
         env_index=env_index,
     )
 
@@ -166,6 +173,33 @@ def test_joint_criterion_uses_l2_measurement_not_max_joint_error() -> None:
     assert result.failure_code == "task_goal_miss"
 
 
+def test_batched_stage_evidence_preserves_environment_order() -> None:
+    results = evaluate_skill_stage_batch(
+        "move_end_effector",
+        (
+            {
+                "reached": _evidence(
+                    "terminal_settle",
+                    tcp_position_error_m=0.002,
+                    tcp_rotation_error_rad=0.0,
+                )
+            },
+            {
+                "reached": _evidence(
+                    "terminal_settle",
+                    tcp_position_error_m=0.004,
+                    tcp_rotation_error_rad=0.0,
+                )
+            },
+        ),
+    )
+
+    assert [result.env_index for result in results] == [0, 1]
+    assert [result.task_success for result in results] == [True, False]
+    for result in results:
+        validate_standard_evaluation("move_end_effector", result)
+
+
 def test_lift_then_drop_fails_closing_stage() -> None:
     result = evaluate_skill_stages(
         "pick_up",
@@ -193,7 +227,10 @@ def test_later_observations_do_not_repair_failed_release() -> None:
         {
             "released": _evidence("release_end", release_established=False),
             "placed": _evidence(
-                "terminal_settle", xy_error_m=0.0, min_height_above_support_m=0.0
+                "terminal_settle",
+                position_error_m=0.0,
+                orientation_error_rad=0.0,
+                min_height_above_support_m=0.0,
             ),
             "stable": _evidence(
                 "settle_interval",
@@ -286,6 +323,7 @@ def test_handover_signed_height_bounds(height: float, passed: bool) -> None:
                 receiver_retained=True,
                 min_height_above_support_m=0.0,
             ),
+            "receiver_released": _evidence("terminal_settle", release_established=True),
             "placed": _evidence(
                 "terminal_settle",
                 xy_error_m=0.03,
@@ -466,12 +504,13 @@ def test_unknown_skill_and_projected_evidence_are_rejected() -> None:
         )
 
 
-def test_catalog_preserves_unimplemented_skills_as_declarations() -> None:
+def test_catalog_preserves_full_skill_stage_declarations() -> None:
     assert len(SKILL_CRITERIA) == 15
     assert tuple(s.stage_id for s in SKILL_CRITERIA["coordinated_pickment"]) == (
         "dual_grasped",
         "lifted",
         "moved",
+        "settled",
         "held",
     )
 
