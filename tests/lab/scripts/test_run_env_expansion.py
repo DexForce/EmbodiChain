@@ -54,6 +54,13 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     assert profile.source.call_count == 6
     assert profile.scene_randomization.reference_family_count == 4
     assert profile.trajectory.spatial.joint_offset_scale == 0.005
+    # Without a smaller tolerance the declared amplitude would measure as a
+    # duplicate of the reference and the variants would collapse into nominal.
+    assert profile.trajectory.spatial.dedup_tolerance == 0.002
+    assert (
+        profile.trajectory.spatial.dedup_tolerance
+        < profile.trajectory.spatial.joint_offset_scale
+    )
     assert candidate_indices == ()
     assert collection["target_episodes"] == 64
     plan = resolve_collection_plan(
@@ -78,6 +85,10 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
     assert profile.source.call_count == 1
     assert profile.source.phase_permissions["pull"] == ("joint_residual",)
     assert profile.visual.enabled is False
+    assert (
+        profile.trajectory.spatial.dedup_tolerance
+        < profile.trajectory.spatial.joint_offset_scale
+    )
     assert candidate_indices == ()
     assert collection["target_episodes"] == 3
 

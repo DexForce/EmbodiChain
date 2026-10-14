@@ -371,3 +371,8 @@ Existing dataset files are not rewritten. Check each old dataset's schema and
 annotations before combining it with new recordings. This language contract
 uses the existing LeRobot 0.4.x dependency and does not require LeRobot 0.6.1 or
 a change to EmbodiChain's supported Python versions.
+
+For file-only validation, quality partitions and source identities, continue
+with {doc}`offline_expert_datasets`. To export these language levels through
+official LeRobot 0.6.1 `language_persistent` annotations and a training recipe,
+use {doc}`lerobot_export` in its independent Python 3.12 environment.

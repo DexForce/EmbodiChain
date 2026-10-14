@@ -14,13 +14,31 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Online data streaming and recording for live-simulation training.
+"""Online streaming, recording, and offline dataset tools.
 
-Exposes online datasets/samplers, a process-safe trajectory engine, and compressed depth-sidecar storage for LeRobot datasets.
+Subpackages load on first access so offline inspection does not initialize the
+simulation, PyTorch, or video-encoding stacks.
 """
 
-from . import datasets
-from . import depth_video
-from . import engine
+from __future__ import annotations
 
-__all__ = ["datasets", "depth_video", "engine"]
+from importlib import import_module
+from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import datasets, depth_video, engine, recording
+
+__all__ = ["datasets", "depth_video", "engine", "recording"]
+
+
+def __getattr__(name: str) -> ModuleType:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = import_module(f"{__name__}.{name}")
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

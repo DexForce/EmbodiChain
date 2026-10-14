@@ -20,7 +20,7 @@ for using cached results in task environments.
 import torch
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain_robots import DexforceW1Cfg
 from embodichain.lab.sim.motion.workspace import (
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,
@@ -163,7 +163,7 @@ config = WorkspaceAnalyzerConfig(
 import torch
 import numpy as np
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain_robots import DexforceW1Cfg
 from embodichain.lab.sim.motion.workspace import (
     WorkspaceAnalyzer, WorkspaceAnalyzerConfig, AnalysisMode
 )

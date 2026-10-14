@@ -87,6 +87,11 @@ class RobotCfg(ArticulationCfg):
     For example, {'left_arm': ['joint1', 'joint2'], 'right_arm': ['joint3', 'joint4']}
     If no control part is specified, the robot will use all joints as a single control part.
 
+    Official defaults use ``arm`` / ``eef`` for single-arm robots and
+    ``left_arm``, ``right_arm``, ``left_eef``, ``right_eef`` for dual-arm robots.
+    These are naming conventions only: caller-defined part names are preserved
+    without reserved names, automatic aliases, or inferred capabilities.
+
     Note:
         - if `control_parts` is specified, `solver_cfg` must be a dict with part names as
             keys corresponding to the control parts name.

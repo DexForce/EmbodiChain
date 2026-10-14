@@ -405,7 +405,7 @@ def train_from_config(
     num_eval_episodes = int(trainer_cfg.get("num_eval_episodes", 5))
     eval_seed = int(trainer_cfg.get("eval_seed", seed + 10_000))
     headless = bool(trainer_cfg.get("headless", True))
-    renderer = trainer_cfg.get("renderer", "hybrid")
+    renderer = trainer_cfg.get("renderer")
     gpu_id = int(trainer_cfg.get("gpu_id", 0))
     num_envs = trainer_cfg.get("num_envs", None)
     wandb_project_name = trainer_cfg.get("wandb_project_name", "embodichain-generic")
@@ -484,6 +484,48 @@ def train_from_config(
         if profile
         else None
     )
+    # Resolve active event callables before constructing the first World.
+    event_modules = [
+        "embodichain.lab.gym.envs.managers.randomization",
+        "embodichain.lab.gym.envs.managers.record",
+        "embodichain.lab.gym.envs.managers.events",
+    ]
+    events_dict = trainer_cfg.get("events", {})
+    train_event_cfg = {}
+    eval_event_cfg = {}
+    # Parse train events
+    for event_name, event_info in events_dict.get("train", {}).items():
+        event_func_str = event_info.get("func")
+        mode = event_info.get("mode", "interval")
+        params = _event_params(event_info, run_base=run_base, phase="train")
+        interval_step = event_info.get("interval_step", 1)
+        event_func = find_function_from_modules(
+            event_func_str, event_modules, raise_if_not_found=True
+        )
+        train_event_cfg[event_name] = EventCfg(
+            func=event_func,
+            mode=mode,
+            params=params,
+            interval_step=interval_step,
+            is_global=event_info.get("is_global", False),
+        )
+    # Parse eval events (only if evaluation is enabled)
+    if enable_eval and rank == 0:
+        for event_name, event_info in events_dict.get("eval", {}).items():
+            event_func_str = event_info.get("func")
+            mode = event_info.get("mode", "interval")
+            params = _event_params(event_info, run_base=run_base, phase="eval")
+            interval_step = event_info.get("interval_step", 1)
+            event_func = find_function_from_modules(
+                event_func_str, event_modules, raise_if_not_found=True
+            )
+            eval_event_cfg[event_name] = EventCfg(
+                func=event_func,
+                mode=mode,
+                params=params,
+                interval_step=interval_step,
+                is_global=event_info.get("is_global", False),
+            )
     runtime = build_gym_policy_runtime(
         cfg_data,
         device=device,
@@ -494,6 +536,7 @@ def train_from_config(
         seed=effective_seed,
         config_dir=Path(config_path).expanduser().resolve().parent,
         profiler=profiler,
+        trainer_events=(*train_event_cfg.values(), *eval_event_cfg.values()),
     )
     env = runtime.env
     policy = runtime.policy
@@ -544,47 +587,6 @@ def train_from_config(
         )
 
     # Build Trainer
-    event_modules = [
-        "embodichain.lab.gym.envs.managers.randomization",
-        "embodichain.lab.gym.envs.managers.record",
-        "embodichain.lab.gym.envs.managers.events",
-    ]
-    events_dict = trainer_cfg.get("events", {})
-    train_event_cfg = {}
-    eval_event_cfg = {}
-    # Parse train events
-    for event_name, event_info in events_dict.get("train", {}).items():
-        event_func_str = event_info.get("func")
-        mode = event_info.get("mode", "interval")
-        params = _event_params(event_info, run_base=run_base, phase="train")
-        interval_step = event_info.get("interval_step", 1)
-        event_func = find_function_from_modules(
-            event_func_str, event_modules, raise_if_not_found=True
-        )
-        train_event_cfg[event_name] = EventCfg(
-            func=event_func,
-            mode=mode,
-            params=params,
-            interval_step=interval_step,
-            is_global=event_info.get("is_global", False),
-        )
-    # Parse eval events (only if evaluation is enabled)
-    if enable_eval:
-        for event_name, event_info in events_dict.get("eval", {}).items():
-            event_func_str = event_info.get("func")
-            mode = event_info.get("mode", "interval")
-            params = _event_params(event_info, run_base=run_base, phase="eval")
-            interval_step = event_info.get("interval_step", 1)
-            event_func = find_function_from_modules(
-                event_func_str, event_modules, raise_if_not_found=True
-            )
-            eval_event_cfg[event_name] = EventCfg(
-                func=event_func,
-                mode=mode,
-                params=params,
-                interval_step=interval_step,
-                is_global=event_info.get("is_global", False),
-            )
     trainer = Trainer(
         policy=policy,
         env=env,

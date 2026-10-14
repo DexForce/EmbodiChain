@@ -45,6 +45,10 @@ overrides:
       enabled: true
       operators: [joint_residual, via_points]
       joint_offset_scale: 0.005
+      # Has to stay below joint_offset_scale: at or above it every proposal
+      # measures as a duplicate of the reference, and the requested trajectory
+      # variants silently collapse into the unmodified nominal one.
+      dedup_tolerance: 0.002
   visual:
     enabled: true
     profiles: [rgb_canonical, rgb_material_01, rgb_camera_01, rgb_light_01]

@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from scripts.tutorials.atomic_action.tutorial_utils import create_ur5_gripper_robot_cfg
 

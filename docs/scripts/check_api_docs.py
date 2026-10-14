@@ -55,7 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 API_REFERENCE_ROOT = REPO_ROOT / "docs" / "source" / "api_reference"
 
 _DIRECTIVE_RE = re.compile(
-    r"^(?P<indent>[ \t]*)\.\.\s+(?P<name>[\w-]+)::\s*(?P<argument>.*?)\s*$"
+    r"^(?P<indent>[ \t]*)\.\.\s+(?P<name>[\w-]+(?::[\w-]+)?)::\s*(?P<argument>.*?)\s*$"
 )
 _OPTION_RE = re.compile(r"^:(?P<name>[\w-]+):\s*(?P<value>.*)$")
 _OBJECT_DIRECTIVES = frozenset(
@@ -66,6 +66,7 @@ _OBJECT_DIRECTIVES = frozenset(
         "autoexception",
         "autofunction",
         "automethod",
+        "py:class",
     }
 )
 
@@ -125,6 +126,7 @@ class CheckResult:
 
 DEFAULT_PACKAGE_ROOTS = (
     PackageRoot("embodichain", REPO_ROOT / "embodichain"),
+    PackageRoot("embodichain_robots", REPO_ROOT / "embodichain_robots"),
     PackageRoot(
         "embodichain_tasks",
         REPO_ROOT / "embodichain_tasks" / "embodichain_tasks",

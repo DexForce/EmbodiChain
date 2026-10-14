@@ -195,13 +195,13 @@ def _prepare_held_state(
     atomic_engine = AtomicActionEngine(
         motion_generator=motion_gen,
         control_profiles={
-            "hand": ControlPartCommandProfile.joint_positions(
+            "eef": ControlPartCommandProfile.joint_positions(
                 open=hand_open,
                 grasp=hand_close,
             )
         },
         grasp_pose_generators={
-            "hand": create_benchmark_grasp_pose_generator(pickup_args)
+            "eef": create_benchmark_grasp_pose_generator(pickup_args)
         },
     )
     semantics = create_antipodal_object_semantics(
@@ -215,7 +215,7 @@ def _prepare_held_state(
                 goal=GraspGoal(semantics=semantics),
                 binding=atomic_engine.bind_control_parts(
                     "pick_up",
-                    {"primary": {"motion": "arm", "grasp": "hand"}},
+                    {"primary": {"motion": "arm", "grasp": "eef"}},
                 ),
                 motion_policy=MotionPolicy(sample_count=PICK_SAMPLE_INTERVAL),
                 skill_options=PickUpOptions(
@@ -309,7 +309,7 @@ def _run_case(
         atomic_engine = AtomicActionEngine(
             motion_generator=motion_gen,
             control_profiles={
-                "hand": ControlPartCommandProfile.joint_positions(
+                "eef": ControlPartCommandProfile.joint_positions(
                     open=hand_open,
                     grasp=hand_close,
                 )
@@ -318,7 +318,7 @@ def _run_case(
         place_pose = _make_place_pose(sim.device, case.xyz)
         binding = atomic_engine.bind_control_parts(
             "place",
-            {"primary": {"motion": "arm", "grasp": "hand"}},
+            {"primary": {"motion": "arm", "grasp": "eef"}},
         )
         elapsed, mem_delta, peak_gpu, result = timed_call(
             lambda: atomic_engine.compile(

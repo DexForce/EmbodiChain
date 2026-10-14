@@ -100,6 +100,28 @@ def test_combined_profile_rejects_capacity_and_environment_mismatch() -> None:
         profile.validate_for_num_envs(8)
 
 
+def test_spatial_dedup_tolerance_travels_with_the_offset_scale() -> None:
+    profile = _profile()
+    assert isinstance(profile, CombinedExpansionProfile)
+    spatial = profile.trajectory.spatial
+    # The packaged task binds a conservative amplitude, so its deduplication
+    # tolerance has to name a smaller number explicitly.
+    assert spatial.joint_offset_scale == 0.005
+    assert spatial.dedup_tolerance == 0.002
+
+    payload = profile.to_dict()
+    payload["trajectory"]["spatial"]["dedup_tolerance"] = 0.005
+    with pytest.raises(ValueError, match="must stay below"):
+        CombinedExpansionProfile.from_mapping(payload)
+
+
+def test_spatial_dedup_tolerance_defaults_to_the_contract_tolerance() -> None:
+    profile = CombinedExpansionProfile.from_mapping(
+        {"trajectory": {"spatial": {"enabled": True, "joint_offset_scale": 0.05}}}
+    )
+    assert profile.trajectory.spatial.dedup_tolerance is None
+
+
 def test_recipe_schedule_is_complete_nominal_and_stable() -> None:
     profile = _profile()
     assert isinstance(profile, CombinedExpansionProfile)

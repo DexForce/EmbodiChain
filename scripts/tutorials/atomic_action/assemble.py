@@ -275,7 +275,7 @@ def run_assemble_demo(
         planner=getattr(args, "planner", "trapezoidal"),
     )
     left_open, left_close = get_hand_open_close_qpos(
-        robot, hand_control_part="left_hand", close_qpos=HAND_CLOSE_QPOS
+        robot, hand_control_part="left_eef", close_qpos=HAND_CLOSE_QPOS
     )
 
     cube_pose = cube.get_local_pose(to_matrix=True)
@@ -314,13 +314,13 @@ def run_assemble_demo(
         motion_generator=motion_gen,
         scene_entities=(can, cube),
         control_profiles={
-            "left_hand": ControlPartCommandProfile.joint_positions(
+            "left_eef": ControlPartCommandProfile.joint_positions(
                 open=left_open,
                 grasp=left_close,
             )
         },
         grasp_pose_generators={
-            "left_hand": create_parallel_jaw_grasp_pose_generator(
+            "left_eef": create_parallel_jaw_grasp_pose_generator(
                 n_sample=args.n_sample,
                 force_refresh=args.force_reannotate,
             )
@@ -336,7 +336,7 @@ def run_assemble_demo(
     assemble_affordance = AssembleAffordance(
         assemble_to_base_pose=assemble_to_base,
     )
-    endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_hand"}}
+    endpoint_mapping = {"primary": {"motion": "left_arm", "grasp": "left_eef"}}
     compiled = engine.compile(
         (
             engine.make_invocation(

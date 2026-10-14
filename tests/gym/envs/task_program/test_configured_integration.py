@@ -67,7 +67,7 @@ from embodichain.lab.sim.atomic_actions.runtime_commands import (
     RuntimeCommandFrame,
 )
 from embodichain.lab.sim.sensors import CameraCfg
-from embodichain.lab.sim.robots import TianjiMarvinCfg
+from embodichain_robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneObjectRef,
@@ -350,8 +350,8 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     repeated = _integration_payload("repeated_pick_place")
     drawer = _integration_payload("open_drawer")
 
-    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["hand"]
-    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["hand"]
+    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["eef"]
+    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["eef"]
 
     repeated_embodiment = repeated_config["embodiment"]
     drawer_embodiment = drawer_config["embodiment"]
@@ -906,11 +906,11 @@ def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
     [
         (
             "repeated_pick_place/task.franka.yaml",
-            "hand",
+            "eef",
             "franka_panda_hand",
             0.01,
         ),
-        ("open_drawer/task.franka.yaml", "hand", "franka_panda_hand", 0.03),
+        ("open_drawer/task.franka.yaml", "eef", "franka_panda_hand", 0.03),
         (
             "tableware/pour_water/task.cobotmagic.yaml",
             "right_eef",
@@ -950,7 +950,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
 ) -> None:
     """Both Marvin hands use source joint commands and toolkit policy defaults."""
     monkeypatch.setattr(
-        "embodichain.lab.sim.robots.tianji_marvin.get_data_path", lambda value: value
+        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
     )
     path = _config_path("hand_over")
     config = _gym_config("hand_over")
@@ -963,22 +963,29 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     robot = TianjiMarvinCfg.from_dict(robot_values)
     assert robot.with_gripper is True
     assert len(robot.control_parts[f"{side}_arm"]) == 7
-    assert len(robot.control_parts[f"{side}_hand"]) == 2
+    assert len(robot.control_parts[f"{side}_eef"]) == 2
     assert physical.config["sensor"] == []
 
     profile = physical.embodiment_skill_profile
     assert profile is not None
     assert profile["profile_id"] == "tianji_marvin"
+    resource = next(
+        resource for resource in profile["resources"] if resource["resource_id"] == side
+    )
+    assert {
+        endpoint["endpoint_id"]: endpoint["control_part"]
+        for endpoint in resource["endpoints"]
+    } == {"motion": f"{side}_arm", "grasp": f"{side}_eef"}
     commands = next(
         preset["commands"]
         for preset in profile["command_presets"]
-        if preset["control_part"] == f"{side}_hand"
+        if preset["control_part"] == f"{side}_eef"
     )
     # Both source prismatic joints span [-0.05, 0]; decreasing qpos closes.
     assert commands == {"open": [0.0, 0.0], "grasp": [-0.05, -0.05]}
     services = profile["runtime_services"]["grasp_pose_generators"]
-    assert set(services) == {"left_hand", "right_hand"}
-    assert services[f"{side}_hand"] == {
+    assert set(services) == {"left_eef", "right_eef"}
+    assert services[f"{side}_eef"] == {
         "kind": "antipodal_parallel_jaw",
         "model": "tianji_marvin_gripper",
     }
@@ -995,7 +1002,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     )
     registration.catalog.preflight(program)
     delegate = deployment.integration.adapter_factory.delegate
-    factory = delegate._grasp_pose_generator_factories[f"{side}_hand"]
+    factory = delegate._grasp_pose_generator_factories[f"{side}_eef"]
     generator = factory()
     assert generator.gripper_model.model_id == "tianji_marvin_gripper"
     assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()

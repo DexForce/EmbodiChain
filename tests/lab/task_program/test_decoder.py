@@ -333,6 +333,36 @@ def test_every_union_rejects_unknown_discriminator_at_exact_path(
     assert render_config_path(error.value.path) == expected_path
 
 
+@pytest.mark.parametrize("scope", ["program", "segment"])
+@pytest.mark.parametrize(
+    "instruction",
+    ["From the table, pick up the cube.", "Import the box from the next station."],
+)
+def test_decoder_accepts_natural_language_instruction(
+    scope: str, instruction: str
+) -> None:
+    data = _program_data()
+    owner = data if scope == "program" else data["program"]["body"]
+    owner["instruction"] = instruction
+    config = decode_task_program(data)
+    decoded = config if scope == "program" else config.program.body
+    assert decoded.instruction == instruction
+
+
+def test_registered_instruction_argument_still_rejects_executable_payload() -> None:
+    data = _program_data()
+    data["program"] = _invoke(
+        {
+            "kind": "registered",
+            "call_id": "example.inspect",
+            "arguments": {"instruction": "eval(1 + 1)"},
+        }
+    )
+    with pytest.raises(TaskProgramDecodeError) as error:
+        decode_task_program(data)
+    assert error.value.code == "executable_expression"
+
+
 def test_decoder_rejects_removed_top_level_schema_version() -> None:
     data = _program_data()
     data["schema_version"] = 2

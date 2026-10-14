@@ -69,7 +69,7 @@ def main() -> None:
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
-    from embodichain.lab.sim.robots import FrankaPandaCfg
+    from embodichain_robots import FrankaPandaCfg
     from embodichain.lab.visualization import visualization_cfg_from_args
     from embodichain.lab.visualization.protocol import SceneOverlays, TrajectoryOverlay
 

@@ -80,8 +80,10 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
-The current configured transform is B=1 and accepts neither timing nor
-Affordance expansion. Generic profile decoding, source adapters, candidate
+The configured combined transform supports batches and Pick Affordance
+expansion; timing expansion is not connected to this transform. Batch expansion
+records retain the stable environment IDs from the planning context, including
+reordered batches. Generic profile decoding, source adapters, candidate
 identity and coordination are owned by the
 [Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
 not by Task Program or Gym.
@@ -91,6 +93,8 @@ not by Task Program or Gym.
 - [Language and semantic integration](configuration.md): strict decoding, scene/profile contracts, component ownership and service allowlists.
 - [Assurance and execution](execution.md): measured/projected effects, acceptance, parallel calls and MLLM boundaries.
 - [Dataset persistence](../data-pipeline/data-pipeline.md): recorder commits, fragments, failures and finalization.
+- [Scene services](../scene-services/scene-services.md): shared layout, physical state, deterministic changes and measured checks; Task Program retains semantics and execution lifecycle.
+- [Scene expansion](../scene-expansion/scene-expansion.md): fixed scene proposals, injected preparation, independent measured acceptance and reset-time persistence gates.
 
 ## Reference integrations
 

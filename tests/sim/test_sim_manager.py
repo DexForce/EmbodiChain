@@ -68,6 +68,85 @@ DEFAULT_LOOK_AT = (
 pytestmark = pytest.mark.no_sim
 
 
+@pytest.mark.parametrize(
+    ("requested", "override", "demand", "consumer", "expected"),
+    [
+        ("auto", "auto", False, None, "no-render"),
+        ("auto", "auto", True, None, "hybrid"),
+        ("auto", "auto", None, None, "hybrid"),
+        ("auto", "auto", False, "window", "hybrid"),
+        ("auto", "auto", False, "viser", "hybrid"),
+        ("auto", "auto", False, "sync", "hybrid"),
+        ("auto", "fast-rt", False, None, "fast-rt"),
+        ("auto", "no-render", True, None, "no-render"),
+        ("hybrid", "auto", False, None, "hybrid"),
+        ("fast-rt", "auto", False, None, "fast-rt"),
+        ("rt", "auto", False, None, "rt"),
+        ("no-render", "hybrid", True, None, "no-render"),
+    ],
+)
+def test_auto_renderer_respects_demand_and_overrides(
+    requested, override, demand, consumer, expected, monkeypatch, tmp_path
+) -> None:
+    from embodichain.lab.sim import cfg
+
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(cfg, "DEFAULT_RENDERER", override)
+    selector = MagicMock(return_value=override if override != "auto" else "hybrid")
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer", selector
+    )
+    config = SimulationManagerCfg(
+        headless=consumer != "window",
+        render_cfg=RenderCfg(renderer=requested),
+        physics_cfg=NewtonPhysicsCfg(sync_to_renderer=consumer == "sync"),
+        visualization=VisualizationCfg(
+            backend="viser" if consumer == "viser" else "none"
+        ),
+    )
+    manager = SimpleNamespace(
+        _requires_native_renderer=demand,
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    world = SimulationManager._convert_sim_config(manager, config)
+    assert config.render_cfg.renderer == expected
+    assert world.renderer == RenderCfg(renderer=expected).to_dexsim_flags()
+    auto_no_render = requested == override == "auto" and expected == "no-render"
+    assert selector.call_count == int(requested == "auto" and not auto_no_render)
+    assert cfg.DEFAULT_RENDERER == override
+    if auto_no_render:
+        assert manager._renderer_selection_reason == "no native render consumers"
+
+
+def test_auto_no_render_is_resolved_before_world_construction(monkeypatch) -> None:
+    from embodichain.lab.sim import cfg
+
+    monkeypatch.setattr(cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
+    monkeypatch.setattr(SimulationManager, "_instances", {})
+    monkeypatch.setattr(sim_manager_module, "_initialize_warp_runtime", lambda _: None)
+
+    def fail_world(_config):
+        assert SimulationManager._instances[0]._requested_renderer == "auto"
+        raise RuntimeError("stop before native initialization")
+
+    create_world = MagicMock(side_effect=fail_world)
+    monkeypatch.setattr(dexsim, "World", create_world)
+    config = SimulationManagerCfg(headless=True, startup_summary="off")
+    with pytest.raises(RuntimeError, match="stop before native initialization"):
+        SimulationManager(config, requires_native_renderer=False)
+    world_config = create_world.call_args.args[0]
+    assert world_config.renderer == dexsim.types.Renderer.NORENDER
+    assert SimulationManager._instances == {}
+
+
+def test_undeclared_camera_error_explains_how_to_reserve_rendering() -> None:
+    manager = SimpleNamespace(has_native_renderer=False)
+    with pytest.raises(RuntimeError, match="Explicitly select renderer='hybrid'"):
+        SimulationManager._require_native_renderer(manager, "Native cameras")
+
+
 @pytest.mark.parametrize("renderer", ["hybrid", "fast-rt", "rt", "auto"])
 @pytest.mark.parametrize("headless", [False, True])
 @pytest.mark.parametrize("denoising_mode", ["optix", "dlss"])
@@ -79,6 +158,7 @@ def test_convert_sim_config_applies_render_pipeline_for_all_startup_modes(
     tmp_path: Path,
 ) -> None:
     """Headless and auto-selected renderers retain explicit pipeline settings."""
+    monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer",
         lambda _gpu_id: "hybrid",
@@ -449,8 +529,10 @@ def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     wait.assert_not_called()
 
 
+@pytest.mark.parametrize("owns_registry_entry", [False, True])
 def test_deferred_destroy_prepares_backend_before_releasing_world(
     monkeypatch: pytest.MonkeyPatch,
+    owns_registry_entry: bool,
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
@@ -484,11 +566,15 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim.clean_materials = lambda: events.append("material_clean")
     sim.is_window_opened = False
 
-    monkeypatch.setattr(
-        SimulationManager,
-        "reset",
-        lambda _instance_id: events.append("manager_reset"),
-    )
+    replacement = SimpleNamespace(_world=MagicMock())
+    instances = {0: sim if owns_registry_entry else replacement}
+    monkeypatch.setattr(SimulationManager, "_instances", instances)
+
+    def reset(instance_id):
+        events.append("manager_reset")
+        instances.pop(instance_id)
+
+    monkeypatch.setattr(SimulationManager, "reset", reset)
     monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
 
     sim._deferred_destroy()
@@ -496,6 +582,9 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     assert events.index("backend_prepare") < events.index("gc_collect")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
+    assert instances == ({} if owns_registry_entry else {0: replacement})
+    assert events.count("manager_reset") == int(owns_registry_entry)
+    replacement._world.quit.assert_not_called()
 
 
 def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:
@@ -2832,3 +2921,46 @@ def test_after_substep_observer_preserves_manager_and_camera_boundaries(
     ] * max(0, steps - 1) + ([True] if steps else [])
     sim.update(0.01, 1)
     assert len(observed) == steps  # The observer is not retained for later calls.
+
+
+@pytest.mark.parametrize("process_renderer", ["no-render", "hybrid", "fast-rt", "rt"])
+@pytest.mark.parametrize("demand", [False, True])
+def test_auto_renderer_uses_process_backend_or_rejects_incompatible_demand(
+    monkeypatch, tmp_path, process_renderer, demand
+) -> None:
+    from embodichain.lab.sim import cfg
+
+    monkeypatch.setattr(cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", lambda: process_renderer
+    )
+    probe = MagicMock(side_effect=AssertionError("unexpected GPU probe"))
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer", probe
+    )
+    config = SimulationManagerCfg(headless=True)
+    manager = SimpleNamespace(
+        _requires_native_renderer=demand,
+        _material_cache_dir=tmp_path,
+        physics=SimpleNamespace(configure_world=lambda *_: None),
+    )
+    if process_renderer == "no-render" and demand:
+        probe.side_effect = None
+        probe.return_value = "hybrid"
+        with pytest.raises(RuntimeError, match="Start a new process"):
+            SimulationManager._convert_sim_config(manager, config)
+    else:
+        world = SimulationManager._convert_sim_config(manager, config)
+        assert world.renderer == RenderCfg(renderer=process_renderer).to_dexsim_flags()
+        probe.assert_not_called()
+
+
+def test_process_no_render_is_detected_after_world_cleanup(monkeypatch) -> None:
+    monkeypatch.setattr(SimulationManager, "_initialized_process_renderer", False)
+    monkeypatch.setattr(dexsim, "get_world_num", lambda: 0)
+    monkeypatch.setattr(
+        dexsim,
+        "get_world_config",
+        lambda: SimpleNamespace(renderer=dexsim.types.Renderer.NORENDER),
+    )
+    assert SimulationManager._get_process_renderer() == "no-render"

@@ -41,7 +41,7 @@ from embodichain.lab.gym.utils.gym_utils import (
     merge_args_with_gym_config,
     init_rollout_buffer_from_config,
 )
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.lab.sim.cfg import DefaultPhysicsCfg, NewtonPhysicsCfg
 from embodichain.lab.sim.sensors import CameraCfg
 from embodichain.utils.utility import load_config, save_config
@@ -383,7 +383,7 @@ class TestInitRolloutBufferFromConfig:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "embodichain.lab.sim.robots.cobotmagic.get_data_path", lambda value: value
+            "embodichain_robots.cobotmagic.get_data_path", lambda value: value
         )
         config = {
             "embodiment": {

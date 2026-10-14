@@ -285,7 +285,7 @@ def test_franka_robot_ik_shapes_frames_and_limit_sync(
     from types import SimpleNamespace
 
     from embodichain.lab.sim.objects.robot import Robot
-    from embodichain.lab.sim.robots import FrankaPandaCfg
+    from embodichain_robots import FrankaPandaCfg
 
     cfg = FrankaPandaCfg.from_dict({})
     assert isinstance(cfg.solver_cfg["arm"], FEPSolverCfg)

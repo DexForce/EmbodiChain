@@ -64,7 +64,7 @@ from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg, MeshCollisionCfg
 from embodichain.data import get_data_path
 from embodichain.utils import logger
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 
 
 def initialize_simulation(args):
@@ -163,7 +163,7 @@ def create_robot(sim):
                 ]
             },
             "control_parts": {
-                "hand": [
+                "eef": [
                     "LEFT_HAND_THUMB1",
                     "LEFT_HAND_THUMB2",
                     "LEFT_HAND_INDEX",
@@ -386,7 +386,7 @@ def scoop_grasp(
     """
     rest_qpos = robot.get_qpos()
     arm_ids = robot.get_joint_ids("arm")
-    hand_ids = robot.get_joint_ids("hand")
+    hand_ids = robot.get_joint_ids("eef")
     hand_open_qpos = torch.tensor([0.0, 1.5, 0.4, 0.4, 0.4, 0.4])
     hand_close_qpos = torch.tensor([0.4, 1.5, 1.0, 1.1, 1.1, 0.9])
     arm_rest_qpos = rest_qpos[:, arm_ids]

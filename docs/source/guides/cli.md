@@ -74,6 +74,23 @@ joint controls, the interactive terminal, and worked examples.
 
 ---
 
+(cli-preview-robot)=
+## Preview Robot
+
+List exact robot and variant IDs, then preview the selected configuration:
+
+```bash
+embodichain list-robot
+embodichain preview-robot --robot FrankaPanda
+embodichain preview-robot --robot DexforceW1 --variant v025/DH_PGC --viser
+```
+
+The native window uses I to activate or toggle configured control-part IK
+Gizmos. Viser supports Gizmo dragging, joint controls, and pose reset.
+See {doc}`preview_robot` for robot files, overrides, and bounded headless runs.
+
+---
+
 (cli-list-tasks)=
 ## List Tasks
 
@@ -91,6 +108,43 @@ available validation records. `list-task --export-html task-gallery.html`
 exports the same catalog as a static gallery. For simulator-free discovery,
 pass `--config-root PACKAGE=PATH` with a `configs/tasks` directory.
 See {doc}`task_catalog` for catalog authoring and gallery export.
+
+---
+
+(cli-list-robots)=
+## List Robots
+
+Discover installed robot families and their supported configurations:
+
+```bash
+embodichain list-robot
+python -m embodichain list-robot
+embodichain list-robot --help
+```
+
+The command reads lightweight catalog metadata without constructing robot
+configurations, initializing simulation, or downloading assets.
+
+| Column | Meaning |
+|---|---|
+| `Robot ID` | Registered family ID, such as `FrankaPanda`, `URRobot`, or `DexforceW1` |
+| `Variants` | Supported models or configuration profiles; `*` marks the default |
+| `Control DOF` | Unique independent joints in the default control parts; mimic followers are excluded and overlapping groups count once |
+| `Control Parts` | Default group names and joint counts; `eef (1+1m)` means one independent joint and one mimic follower |
+| `Mimic Joints` | Follower joint names from the default URDF, including passive followers outside the control parts |
+
+`-` means unavailable metadata. `None` in the mimic column means that the
+catalog declares no mimic joints. A count marked `total` includes all joints
+in that part when mimic membership is unknown.
+
+UR models share one family row. Dual-arm variants show the DOFs of each base
+robot, and W1 variants show body releases and hand combinations. Equivalent
+profiles are grouped together. Long values wrap to fit the terminal, and
+the table width is bounded between 80 and 120 columns.
+`NO_COLOR=1 embodichain list-robot` disables terminal colors.
+
+See {doc}`robot_catalog` for variant selection, DOF examples, third-party
+catalog registration, and the current import paths.
 
 ---
 
@@ -360,6 +414,39 @@ returns status 0 when all checks pass, 1 for a validation mismatch, and 2 when
 the path, episode, or dataset cannot be loaded. For the complete validation
 contract and a comparison with LeRobot's official Rerun visualization, see
 {ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>`.
+
+---
+
+(cli-dataset-tools)=
+## Offline Dataset Tools
+
+Use an exact finalized dataset root containing `meta/info.json`:
+
+```bash
+embodichain dataset validate /absolute/path/to/dataset \
+    --media-frame-counts --output /tmp/validation.json
+embodichain dataset split /absolute/path/to/dataset /tmp/split.json \
+    --fractions 0.8 0.1 0.1 --seed 42 --success-only
+embodichain dataset recover /absolute/path/to/dataset
+embodichain dataset recover /absolute/path/to/dataset --repair
+```
+
+| Command | Purpose |
+| --- | --- |
+| `dataset validate` | Check frames, timing, action/language references, segments, provenance and optional media |
+| `dataset split` | Write a quality-filtered manifest that keeps source episodes and derivatives together |
+| `dataset recover` | Diagnose commit evidence; `--repair` can restore missing sidecars after disk verification |
+
+These commands operate without simulation. Stop writers before inspection or
+repair. They use an exact root and do not support preview's `--latest` option.
+Validation/recovery returns `1` for errors or unresolved evidence; successful
+operations return `0`, and invalid requests return `2`. Run each subcommand
+with `--help` for arguments. See {doc}`offline_expert_datasets` for complete
+parameters, report fields, quality/grouping rules, and recovery boundaries.
+
+The separate `embodichain-lerobot-export SOURCE DESTINATION` command runs in a
+Python 3.12 environment pinned to LeRobot 0.6.1. Installation, official language
+recipes, and depth units are covered in {doc}`lerobot_export`.
 
 ---
 

@@ -1,4 +1,4 @@
-﻿embodichain.lab.sim
+embodichain.lab.sim
 =====================
 
 .. automodule:: embodichain.lab.sim
@@ -129,6 +129,22 @@ Atomic Actions
    :maxdepth: 1
 
    embodichain.lab.sim.atomic_actions
+
+Scene Services
+--------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene
+
+Scene Expansion Compatibility
+-----------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene_expansion
 
 Shared Types
 ------------

@@ -215,6 +215,15 @@ def _clone_untrusted_value(
             raise _error("non_finite_number", path, "Floats must be finite.")
         return value
     if type(value) is str:
+        # Instructions are inert text. A registered call's arguments remain
+        # subject to the executable-payload checks even if a key has this name.
+        if path == ("instruction",) or (
+            path
+            and path[0] == "program"
+            and path[-1] == "instruction"
+            and "call" not in path
+        ):
+            return value
         stripped = value.strip()
         lowered = stripped.lower()
         if lowered.startswith(("__import__(", "eval(", "exec(", "import ", "from ")):

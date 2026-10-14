@@ -433,10 +433,9 @@ def _robot_cfg_from_dict(config: dict) -> RobotCfg:
     if robot_class_type is None and "robot_type" in robot_config:
         robot_class_type = robot_config.pop("robot_type")
     if robot_class_type is not None:
-        robot_class = get_class_instance(
-            "embodichain.lab.sim.robots", robot_class_type + "Cfg"
-        )
-        return robot_class.from_dict(robot_config)
+        from embodichain.robot_registry import resolve_robot_cfg
+
+        return resolve_robot_cfg(robot_class_type, robot_config)
     return RobotCfg.from_dict(robot_config)
 
 

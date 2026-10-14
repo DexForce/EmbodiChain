@@ -25,6 +25,14 @@ Keep these boundaries separate:
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
 
+Sequential segments reuse one static workflow analysis per uninterrupted
+sequential stretch; parallel barriers stop this reuse across branches. Each
+executed call still grounds from a fresh observation and checks compiler/catalog
+ownership. Runtime results capture an append-only history prefix and materialize
+independent history tuples when read or serialized, keeping history copying out
+of status-only control steps. Synchronous observer or clock failures abort through
+the runner's cancel-then-hold boundary and retain any safe-stop failure details.
+
 The environment-owned expert `joint_command_mode` is propagated through the
 simulation factory and adapter into `RuntimeCommandFrameEncoder`. Position mode
 retains the tensor qpos action. Position-velocity mode emits structured qpos and

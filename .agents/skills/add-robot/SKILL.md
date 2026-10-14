@@ -33,6 +33,10 @@ return merge_robot_cfg(cfg, init_dict)
 
 ## Two Layouts
 
+Concrete configs live in the `embodichain_robots/` import package, bundled
+with the core distribution/version. Generic robot runtime, configuration,
+solvers, and composition stay in `embodichain/lab/sim/`.
+
 | Layout | When | Files |
 |--------|------|-------|
 | Single-file | Variant-less robot | `my_robot.py` |
@@ -48,6 +52,12 @@ A cfg's `_build_defaults` must populate:
 - `solver_cfg` (Dict[str, SolverCfg]; keys match `control_parts`)
 - `joint_drive_props` (JointDrivePropertiesCfg)
 - `attrs` (RigidBodyPhysicsCfg)
+
+Use `arm` / `eef` for default single-arm control groups and `left_arm`,
+`right_arm`, `left_eef`, `right_eef` for dual-arm defaults. Add an EEF group
+only when the robot has controllable end-effector joints. These names are a
+convention: user-defined names remain valid, without automatic aliases or a
+reserved-name validator. Keep asset component, link and joint identifiers intact.
 
 `build_pk_serial_chain` must read from `_pk_urdf_path` (a property for
 constant-path robots, a method for variant-dependent paths). The PK chain's DOF
@@ -98,12 +108,27 @@ must match the matching `control_parts` entry (the test stub asserts this).
    ```
 
 5. **Keep `from_dict` as the 3-line template** — do not reimplement it.
-6. **Add `__all__` and register** in `embodichain/lab/sim/robots/__init__.py`:
+6. **Add `__all__` and register** the class in
+   `embodichain_robots/_catalog.py`, then add its lazy export to
+   `embodichain_robots/__init__.py` (`_EXPORTS` and `__all__`):
 
    ```python
-   from .my_robot import MyRobotCfg
-   __all__ = ["MyRobotCfg"]
+   # Catalog entry; importing the catalog must not import the robot module.
+   "MyRobot": {"class_path": "embodichain_robots.my_robot:MyRobotCfg"}
    ```
+
+   The main wheel already advertises this catalog through `embodichain.robots`.
+   Gym, workspace CLI, and dual-arm composition use its shared resolver.
+   Variant defaults belong in the catalog. Concrete robots use only the
+   canonical package; no core compatibility module or CLI class map is needed.
+   Supply optional control metadata when known: `dof` counts unique independent
+   default control joints, excluding mimic followers; `control_parts` records
+   raw per-part counts. `mimic_joints` maps followers to leaders, and
+   `control_part_mimics` records follower membership by group. Overlapping groups
+   must not inflate DOF. Declare `supports_dual_arm` only for a compatible default
+   single-arm URDF/control-part/solver contract. Families may declare `variants`
+   with control profiles and a `default_variant`; flat preset IDs use `variant_of`.
+   Keep the catalog free of robot/configuration imports.
 
 7. **Add documentation:** create `docs/source/resources/robot/<name>.md` and add
    it to `docs/source/resources/robot/index.rst`.
@@ -160,8 +185,9 @@ Do not copy those semantic declarations into the robot class.
 
 **File locations:**
 
-- Config: `embodichain/lab/sim/robots/<name>.py` or `embodichain/lab/sim/robots/<name>/`
-- Registry: `embodichain/lab/sim/robots/__init__.py`
+- Config: `embodichain_robots/<name>.py` or `embodichain_robots/<name>/`
+- Catalog / lazy exports: `embodichain_robots/_catalog.py`, `embodichain_robots/__init__.py`
+- Shared resolver: `embodichain/robot_registry.py`
 - Docs: `docs/source/resources/robot/<name>.md`
 - Tests: `tests/sim/objects/test_robot_cfg.py`
 - Base class: `embodichain/lab/sim/cfg/robot.py` (`RobotCfg`)

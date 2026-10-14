@@ -20,7 +20,7 @@ skill_profile:
             - motion.cartesian_pose
             - kinematics.forward
         - endpoint_id: grasp
-          control_part: left_hand
+          control_part: left_eef
           capabilities: [interaction.grasp]
           command_preset: left_parallel_gripper
     - resource_id: right
@@ -32,25 +32,25 @@ skill_profile:
             - motion.cartesian_pose
             - kinematics.forward
         - endpoint_id: grasp
-          control_part: right_hand
+          control_part: right_eef
           capabilities: [interaction.grasp]
           command_preset: right_parallel_gripper
   command_presets:
     - preset_id: left_parallel_gripper
-      control_part: left_hand
+      control_part: left_eef
       commands:
         open: [0.0, 0.0]
         grasp: [-0.05, -0.05]
     - preset_id: right_parallel_gripper
-      control_part: right_hand
+      control_part: right_eef
       commands:
         open: [0.0, 0.0]
         grasp: [-0.05, -0.05]
   runtime_services:
     grasp_pose_generators:
-      left_hand:
+      left_eef:
         kind: antipodal_parallel_jaw
         model: tianji_marvin_gripper
-      right_hand:
+      right_eef:
         kind: antipodal_parallel_jaw
         model: tianji_marvin_gripper

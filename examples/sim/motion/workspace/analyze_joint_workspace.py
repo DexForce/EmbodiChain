@@ -24,7 +24,7 @@ import numpy as np
 import torch
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain_robots import DexforceW1Cfg
 from embodichain.lab.sim.motion.workspace import (
     WorkspaceAnalyzer,
     WorkspaceAnalyzerConfig,

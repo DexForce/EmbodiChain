@@ -293,9 +293,9 @@ def test_parse_args_preview_cache_requires_robot_source():
     """--preview-cache is combined with the robot source for in-sim preview."""
     from embodichain.lab.scripts.analyze_workspace import parse_args
 
-    a = parse_args(["--robot", "franka_panda", "--preview-cache", "/tmp/foo"])
+    a = parse_args(["--robot", "FrankaPanda", "--preview-cache", "/tmp/foo"])
     assert a.preview_cache == "/tmp/foo"
-    assert a.asset is None and a.robot == "franka_panda"
+    assert a.asset is None and a.robot == "FrankaPanda"
 
     with pytest.raises(SystemExit):
         parse_args(["--preview-cache", "/tmp/foo"])
@@ -312,7 +312,7 @@ def test_parse_args_and_sim_cfg_enable_viser_workspace():
     args = parse_args(
         [
             "--robot",
-            "franka_panda",
+            "FrankaPanda",
             "--viser",
             "--viser-port",
             "9000",
@@ -601,21 +601,21 @@ def test_build_robot_cfg_asset_control_part_defaults_to_arm():
 
 
 def test_build_preset_robot_cfg_franka():
-    """--robot franka_panda loads the preset control parts (no ee-link/joints)."""
+    """--robot FrankaPanda loads the preset control parts (no ee-link/joints)."""
     from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
-    from embodichain.lab.sim.robots import FrankaPandaCfg
+    from embodichain_robots import FrankaPandaCfg
 
     cfg, part, urdf = build_robot_cfg(
         _robot_ns(
             asset=None,
-            robot="franka_panda",
+            robot="FrankaPanda",
             ee_link=None,
             joints=None,
             control_part=None,
         )
     )
     assert isinstance(cfg, FrankaPandaCfg)
-    assert "arm" in cfg.control_parts and "hand" in cfg.control_parts
+    assert "arm" in cfg.control_parts and "eef" in cfg.control_parts
     # Solver + ee-link come from the preset, not the CLI.
     assert cfg.solver_cfg["arm"].end_link_name == "fr3_hand_tcp"
     assert part is None  # auto-resolved later by _resolve_control_part
@@ -623,14 +623,14 @@ def test_build_preset_robot_cfg_franka():
 
 
 def test_build_preset_robot_cfg_cobotmagic_control_part_and_params():
-    """--robot cobotmagic honors --control-part and --robot-params overrides."""
+    """--robot CobotMagic honors --control-part and --robot-params overrides."""
     from embodichain.lab.scripts.analyze_workspace import build_robot_cfg
-    from embodichain.lab.sim.robots import CobotMagicCfg
+    from embodichain_robots import CobotMagicCfg
 
     cfg, part, _urdf = build_robot_cfg(
         _robot_ns(
             asset=None,
-            robot="cobotmagic",
+            robot="CobotMagic",
             ee_link=None,
             joints=None,
             control_part="right_arm",
@@ -651,7 +651,7 @@ def test_build_preset_robot_cfg_invalid_control_part():
     with pytest.raises(ValueError, match="not a control part of robot"):
         build_robot_cfg(
             _robot_ns(
-                asset=None, robot="franka_panda", ee_link=None, control_part="nope"
+                asset=None, robot="FrankaPanda", ee_link=None, control_part="nope"
             )
         )
 
@@ -695,7 +695,7 @@ def test_build_analyzer_config_plane_sets_plane_params():
 def _make_cobotmagic_sim(tmp_path):
     """Build a headless sim + CobotMagic robot for integration tests."""
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-    from embodichain.lab.sim.robots import CobotMagicCfg
+    from embodichain_robots import CobotMagicCfg
 
     config = SimulationManagerCfg(headless=True, sim_device="cpu")
     sim = SimulationManager(config)
@@ -888,7 +888,7 @@ def test_main_robot_preset_runs_and_caches(tmp_path):
     args = parse_args(
         [
             "--robot",
-            "cobotmagic",
+            "CobotMagic",
             "--control-part",
             "left_arm",
             "--mode",

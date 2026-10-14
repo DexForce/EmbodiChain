@@ -17,7 +17,8 @@ Canonical skills live under `.agents/skills/`. `.claude/skills/` and
 
 The distribution and primary import package are **`embodichain`**, lowercase
 and one word. The repository directory is `EmbodiChain`; the same wheel
-bundles official tasks as the **`embodichain_tasks`** import package.
+bundles official tasks as **`embodichain_tasks`** and concrete robot presets as
+**`embodichain_robots`**, with the same version and distribution metadata.
 
 | Area | Owner |
 |---|---|
@@ -34,6 +35,14 @@ bundles official tasks as the **`embodichain_tasks`** import package.
 | Real-device controllers / standalone tools | `embodichain/lab/devices/`, `embodichain/toolkits/` |
 | Shared config and math utilities | `embodichain/utils/` |
 | Official task entry points / components / deployments | `embodichain_tasks/` |
+| Concrete robot configurations / hardware revisions / calibrated defaults | `embodichain_robots/` |
+
+Generic robot runtime/configuration and dual-arm composition remain in
+`embodichain/lab/sim/`; lightweight catalog resolution lives in
+`embodichain/robot_registry.py`. Concrete robot presets register
+through the `embodichain.robots` catalog entry point. Concrete presets import
+from `embodichain_robots`; `embodichain.lab.sim.robots` owns only generic
+dual-arm composition.
 
 Shared numerical algorithms belong to `compute/<domain>/`, with Warp kernels
 under private `_warp/` packages. Compute must not import `lab`, simulation
@@ -50,6 +59,13 @@ initialization. Trajectory augmentation owns candidates, operators, coverage and
 generation bookkeeping; execution, reset and persistence belong to host integrations.
 
 ## Task ownership
+
+Official robot defaults and examples name end-effector control groups `eef`
+(single arm) or `left_eef` / `right_eef` (dual arm), alongside `arm` or
+`left_arm` / `right_arm`. This is a naming convention, not a schema restriction:
+custom control-part names remain valid and must not be automatically rewritten.
+URDF component, link and joint names are separate identifiers and retain their
+asset-defined spelling. Capabilities come from explicit configuration, not names.
 
 Organize official tasks by family, optional subdomain and task identity.
 Keep import registration in the task-named module at

@@ -6,8 +6,19 @@ Read when changing a backend or the facade. Entry points and validation are in
 
 ## Normalization and capabilities
 
-`MotionGenerator` prepares Cartesian targets with sequential seeded IK. Required
-IK/FK-consistency failures fail the environment. `interpolate_trajectory()` raises
+`MotionGenerator` prepares Cartesian targets through `Robot.compute_batch_ik`,
+batching environments and waypoints in bounded chunks. Solvers advertising
+continuous batch selection receive a path seed carried between chunks. Other
+solvers first solve each chunk's endpoint and interpolate joint seeds for its
+interior batch; this encourages consistent branches without guaranteeing
+continuous selection. Failed samples retain the last valid seed across chunks.
+Required IK/FK-consistency failures fail the environment. For each row, an initial pose
+whose full transform agrees with the seed FK retains the known starting joints;
+the comparison aligns dtype/device with the interpolated poses, since FK may
+use float32 buffers for float64 Cartesian inputs. It needs no fresh IK solution
+at a singularity; an entirely confirmed starting batch is omitted from IK.
+Unconfirmed starts and later poses still require successful IK and FK consistency.
+`interpolate_trajectory()` raises
 on any failed row; `generate()` carries per-row success in a normalized
 `PlanResult`. Fixed Cartesian sample preservation requires explicit `ik_interp`;
 it is not an implicit fallback from backend planning.

@@ -71,16 +71,14 @@ def test_package_discovery_includes_only_runtime_trees() -> None:
     packages = get_packages()
     package_dir = get_package_dir()
 
-    assert {"embodichain", "embodichain_tasks", "embodichain_tasks.configs"} <= set(
-        packages
-    )
+    runtime_roots = {"embodichain", "embodichain_tasks", "embodichain_robots"}
+    assert runtime_roots | {
+        "embodichain_tasks.configs",
+        "embodichain_robots.dexforce_w1",
+    } <= set(packages)
     assert "embodichain_tasks.manipulation.tableware" in packages
     assert "embodichain_tasks.tableware" not in packages
-    assert all(
-        package in {"embodichain", "embodichain_tasks"}
-        or package.startswith(("embodichain.", "embodichain_tasks."))
-        for package in packages
-    )
+    assert all(package.partition(".")[0] in runtime_roots for package in packages)
     assert package_dir == {
         "embodichain_tasks": "embodichain_tasks/embodichain_tasks",
         "embodichain_tasks.configs": "embodichain_tasks/configs",

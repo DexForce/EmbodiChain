@@ -19,7 +19,7 @@
 ## Choose the layer
 
 `BasePlanner` consumes waypoints and returns timed trajectories.
-`MotionGenerator` is the stateful facade for strategy selection, sequential IK,
+`MotionGenerator` is the stateful facade for strategy selection, batched IK,
 backend composition, normalization and multi-part coordination. Import it from
 `motion.motion_generator`, not `motion.planners`. Motion siblings and the parent
 namespace remain lazy to protect Robot initialization.
@@ -77,6 +77,10 @@ encode prepared actions rather than retiming a second time.
 
 ## Trajectory augmentation boundary
 
+Scene layout proposals and their Task Program execution adapter belong to
+[scene expansion](../scene-expansion/scene-expansion.md). The trajectory
+contracts below operate within a specified scene and initial state.
+
 `motion/expansion/` owns callable-free Expansion Profiles, immutable templates
 and candidates, sampled limit checks and coverage. `load_expansion_profile()`
 strictly decodes the task-local resource, separate from environment
@@ -92,7 +96,11 @@ expansion: they decode the combined profile, enumerate reference-family,
 affordance and trajectory recipes, assign one visual profile per episode, and
 reserve generic compatible slots. `schedule_digest` provides deterministic
 rerun identity; restoration, measured acceptance, and artifact writing remain
-host responsibilities.
+host responsibilities. A profile that declares a conservative
+`trajectory.spatial.joint_offset_scale` also names a smaller
+`trajectory.spatial.dedup_tolerance`, which the Task Program integration
+forwards as the augmentation coverage tolerance; omitting it keeps the contract
+default.
 
 The generic B=1 host orchestration and its restore/executor/sink ports live in
 `motion/execution.py`, alongside standalone playback. The runner drives injected
@@ -131,7 +139,8 @@ standoff poses the caller must replan. The resolved config is reported on the re
 
 `scripts/tutorials/atomic_action/place.py` is the demonstration host, hooked
 the way the Affordance sampling tutorials are: shared helpers live in
-`tutorial_utils.py`, the tutorial declares only which named segments may move,
+`lab/scripts/_atomic_action/support.py` through the `tutorial_utils.py` adapter;
+the tutorial declares only which named segments may move,
 and one variant replays per simulation row. Phases come from the action's own
 `TrajectorySegment` ranges; only motion at or after the lift is retimed so the
 shared `clear_dynamics()` step stays aligned. `--variant_plot_dir` writes a
@@ -139,7 +148,14 @@ joint-trajectory figure and a tool-path figure with waypoint markers. Task
 Program, Gym lifecycle, dataset persistence and `ExpansionSession` collection
 bookkeeping are deliberately out of scope; this is a direct-simulation
 contract. Keep `joint_dedup_normalized_tol` below `joint_offset_scale`, or
-genuinely different variants are discarded as duplicates.
+genuinely different variants are discarded as duplicates; an enabled spatial
+factor at or below the tolerance now fails configuration decoding instead of
+silently keeping the nominal variant alone.
+
+The configured ten-scene CLI uses the same variant operators and owns its
+compiled-plan adaptation and replay provenance; see the
+[Atomic host boundary](../atomic-actions/atomic-actions.md). It does not extend
+the Gym Task Program collection lifecycle.
 
 `expansion/manipulability.py` profiles posture conditioning through
 `embodichain.compute.kinematics.yoshikawa_manipulability`. Callers supply the
