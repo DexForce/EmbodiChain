@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -149,13 +150,17 @@ def test_atomic_case_identity_includes_simulator_batch_size() -> None:
             {},
             ("pickup_grasp", "pickup_lift", "pickup_settle"),
         ),
-        ("move_held_object", {}, ("held_object_transport",)),
+        (
+            "move_held_object",
+            {},
+            ("held_object_transport", "held_object_settle"),
+        ),
         ("place", {}, ("place_release", "place_settle")),
         ("press", {}, ("press_actuation",)),
         ("slide", {"direction": "pull"}, ("slide_actuation", "slide_release")),
         ("twist", {}, ("twist_actuation", "twist_release")),
         ("open_door", {}, ("door_actuation", "door_release")),
-        ("pour", {}, ("pour_actuation",)),
+        ("pour", {}, ("pour_actuation", "pour_settle")),
         (
             "axis_align",
             {},
@@ -278,6 +283,59 @@ def test_move_end_effector_provider_uses_settled_tcp_standard_evidence() -> None
     )
 
 
+def test_move_end_effector_rejects_wrong_terminal_orientation() -> None:
+    case = replace(
+        _atomic_case(),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4),
+    )
+    final_tcp = torch.eye(4).reshape(1, 4, 4)
+    final_tcp[:, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[0.0, 0.0, math.pi]])
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=final_tcp,
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+    )
+
+    evaluator = create_atomic_skill_provider("move_end_effector").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
+
+    assert not result.task_success
+    assert result.failure_stage == "reached"
+
+
+def test_move_end_effector_keeps_non_finite_failures_row_local() -> None:
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        target_waypoints=torch.eye(4).repeat(2, 1, 1, 1),
+    )
+    final_tcp = torch.eye(4).repeat(2, 1, 1)
+    final_tcp[1, 0, 3] = torch.nan
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=final_tcp,
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+    )
+
+    evaluator = create_atomic_skill_provider("move_end_effector").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(
+        case,
+        observation,
+        (_atomic_outcome(), replace(_atomic_outcome(), env_index=1)),
+    )
+
+    assert results[0].task_success
+    assert results[1].failure_code == "evidence_unavailable"
+
+
 def test_move_joints_provider_uses_l2_settled_joint_error() -> None:
     case = replace(
         _atomic_case(),
@@ -372,11 +430,15 @@ def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
 
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_stage == "lifted"
+    assert results[0].stages[0].evidence_source == (
+        "measured_proxy:gripper_joint_state"
+    )
 
 
 def test_move_held_object_provider_uses_measured_transport_pose() -> None:
     target = torch.eye(4).repeat(2, 1, 1)
     target[:, 2, 3] = 0.1
+    transport = target.unsqueeze(0).repeat(2, 1, 1, 1)
     poses = target.unsqueeze(0).repeat(2, 1, 1, 1)
     poses[-1, :, 0, 3] = torch.tensor([0.005, 0.02])
     case = replace(
@@ -395,8 +457,14 @@ def test_move_held_object_provider_uses_measured_transport_pose() -> None:
         joint_tracking_rmse_rad=torch.zeros(2),
         execution_time_ms=1.0,
         task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
-            "held_object_transport": ReplayObservationTrace(object_pose=poses)
+            "held_object_transport": ReplayObservationTrace(object_pose=transport),
+            "held_object_settle": ReplayObservationTrace(
+                object_pose=poses,
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
         },
     )
 
@@ -409,13 +477,52 @@ def test_move_held_object_provider_uses_measured_transport_pose() -> None:
     )
 
     assert [result.task_success for result in results] == [True, False]
-    assert results[1].failure_stage == "transported"
+    assert results[1].failure_stage == "settled"
+
+
+def test_move_held_object_requires_terminal_retention() -> None:
+    target = torch.eye(4).reshape(1, 4, 4)
+    target[:, 2, 3] = 0.1
+    poses = target.unsqueeze(0).repeat(2, 1, 1, 1)
+    case = replace(
+        _atomic_case(),
+        scenario_id="move_held_object",
+        skill_id="move_held_object",
+        case_parameters={
+            "object_initial_pose": torch.eye(4).reshape(1, 4, 4).tolist(),
+            "target_object_pose": target.tolist(),
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "held_object_transport": ReplayObservationTrace(object_pose=poses),
+            "held_object_settle": ReplayObservationTrace(
+                object_pose=poses,
+                gripper_qpos={"hand": torch.ones(2, 1, 1)},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("move_held_object").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
+
+    assert not result.task_success
+    assert result.failure_stage == "held"
+    assert result.failure_code == "object_dropped"
 
 
 def test_place_provider_separates_release_goal_and_stability() -> None:
     target = torch.eye(4).repeat(2, 1, 1)
+    target[:, 2, 3] = 0.02
     settle = target.unsqueeze(0).repeat(3, 1, 1, 1)
-    settle[:, :, 2, 3] = 0.02
     settle[-1, :, 0, 3] = torch.tensor([0.005, 0.02])
     released = torch.zeros(2, 2, 1)
     case = replace(
@@ -452,6 +559,50 @@ def test_place_provider_separates_release_goal_and_stability() -> None:
 
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_stage == "placed"
+
+
+def test_place_rejects_wrong_terminal_height_and_orientation() -> None:
+    target = torch.eye(4).repeat(2, 1, 1)
+    settle = target.unsqueeze(0).repeat(2, 1, 1, 1)
+    settle[:, 0, 2, 3] = 0.1
+    settle[:, 1, :3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([[math.pi / 2, 0.0, 0.0]])
+    )
+    released = torch.zeros(2, 2, 1)
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        scenario_id="place",
+        skill_id="place",
+        case_parameters={
+            "object_initial_pose": torch.eye(4).repeat(2, 1, 1).tolist(),
+            "target_object_pose": target.tolist(),
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "place_release": ReplayObservationTrace(gripper_qpos={"hand": released}),
+            "place_settle": ReplayObservationTrace(object_pose=settle),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("place").physical_evaluator()
+    assert evaluator is not None
+    results = evaluator.evaluate(
+        case,
+        observation,
+        (_atomic_outcome(), replace(_atomic_outcome(), env_index=1)),
+    )
+
+    assert [result.task_success for result in results] == [False, False]
+    assert [result.failure_stage for result in results] == ["placed", "placed"]
 
 
 def test_press_provider_scores_only_the_requested_actuation_trace() -> None:
@@ -495,7 +646,11 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
         batch_size=2,
         scenario_id="slide",
         skill_id="slide",
-        case_parameters={"translation_distance_m": 0.1, "direction": "pull"},
+        case_parameters={
+            "translation_distance_m": 0.1,
+            "direction": "pull",
+            "effect_joint_sign": 1.0,
+        },
     )
     observation = _ExecutionObservation(
         execution_success=torch.ones(2, dtype=torch.bool),
@@ -507,7 +662,7 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "slide_actuation": ReplayObservationTrace(
-                articulation_joint=torch.tensor([[0.0, 0.0], [-0.1, -0.07]])
+                articulation_joint=torch.tensor([[0.0, 0.0], [0.1, 0.07]])
             ),
             "slide_release": ReplayObservationTrace(
                 gripper_qpos={"hand": torch.tensor([[[1.0], [1.0]], [[0.0], [0.0]]])}
@@ -523,6 +678,43 @@ def test_slide_provider_uses_actuation_and_release_windows() -> None:
     assert [result.task_success for result in results] == [True, False]
     assert results[0].stages[-1].stage_id == "released"
     assert results[1].failure_stage == "slid"
+
+
+def test_slide_rejects_opposite_joint_direction() -> None:
+    case = replace(
+        _atomic_case(),
+        scenario_id="slide",
+        skill_id="slide",
+        case_parameters={
+            "translation_distance_m": 0.1,
+            "direction": "pull",
+            "effect_joint_sign": 1.0,
+        },
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "slide_actuation": ReplayObservationTrace(
+                articulation_joint=torch.tensor([[0.0], [-0.1]])
+            ),
+            "slide_release": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.tensor([[[1.0]], [[0.0]]])}
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("slide").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
+
+    assert not result.task_success
+    assert result.failure_stage == "grasped"
 
 
 def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
@@ -567,6 +759,46 @@ def test_twist_provider_scores_executed_tcp_rotation_not_knob_angle() -> None:
 
     assert [result.task_success for result in results] == [True, False]
     assert results[1].failure_stage == "twisted"
+
+
+def test_twist_rejects_opposite_tcp_rotation() -> None:
+    case = replace(
+        _atomic_case(),
+        scenario_id="twist",
+        skill_id="twist",
+        case_parameters={
+            "twist_target_pose": torch.eye(4).reshape(1, 4, 4).tolist(),
+            "twist_axis": [0.0, 0.0, 1.0],
+            "twist_angle_rad": -0.5,
+        },
+    )
+    tcp = torch.eye(4).repeat(2, 1, 1, 1)
+    tcp[-1, :, :3, :3] = axis_angle_to_rotation_matrix(torch.tensor([[0.0, 0.0, 0.5]]))
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).reshape(1, 4, 4),
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "twist_actuation": ReplayObservationTrace(
+                tcp_pose=tcp,
+                articulation_joint=torch.tensor([[0.0], [0.1]]),
+            ),
+            "twist_release": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.tensor([[[1.0]], [[0.0]]])}
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider("twist").physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_atomic_outcome(),))[0]
+
+    assert not result.task_success
+    assert result.failure_stage == "twisted"
 
 
 def _fake_articulation_geometry(*, joint_type: str) -> dict[str, torch.Tensor]:

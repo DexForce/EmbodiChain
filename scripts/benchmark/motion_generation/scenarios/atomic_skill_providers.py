@@ -143,6 +143,7 @@ class _OpenDoorEvaluator:
                         window="release_end",
                         measurements={"release_established": released},
                         method="gripper_joint_state",
+                        source="measured_proxy",
                     )
                 )
         return evaluate_skill_stage_batch(
@@ -151,7 +152,7 @@ class _OpenDoorEvaluator:
 
 
 class _PourEvaluator:
-    """Evaluate peak signed object rotation and support-plane clearance."""
+    """Evaluate the pour rotation plus settled lift and retention."""
 
     def evaluate(
         self,
@@ -160,46 +161,83 @@ class _PourEvaluator:
         motion_outcomes: tuple[CaseOutcome, ...],
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
-        trace = _replay_trace(observation, "pour_actuation")
-        if trace is None or trace.object_pose is None:
-            return evaluate_skill_stage_batch(
-                "pour", tuple({} for _ in range(case.batch_size))
+        actuation = _replay_trace(observation, "pour_actuation")
+        settle = _replay_trace(observation, "pour_settle")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if actuation is not None and actuation.object_pose is not None:
+            poses = actuation.object_pose
+            axis = torch.as_tensor(
+                case.case_parameters["object_rotation_axis"],
+                dtype=poses.dtype,
+                device=poses.device,
             )
-        poses = trace.object_pose
-        axis = torch.as_tensor(
-            case.case_parameters["object_rotation_axis"],
-            dtype=poses.dtype,
-            device=poses.device,
-        )
-        axis = axis / torch.linalg.vector_norm(axis)
-        reference = poses[0, :, :3, :3]
-        world_axis = reference @ axis
-        angles = torch.stack(
-            [
-                _signed_rotation_about_axis(reference, pose[:, :3, :3], world_axis)
-                for pose in poses
-            ]
-        )
-        sign = float(case.case_parameters.get("object_rotation_sign", 1.0))
-        peak = (angles * sign).amax(dim=0)
-        error = (peak - abs(float(case.case_parameters["rotate_angle_rad"]))).abs()
-        min_height = _minimum_height_above_initial_support(trace, case)
-        if min_height is None:
-            return evaluate_skill_stage_batch(
-                "pour", tuple({} for _ in range(case.batch_size))
+            axis = axis / torch.linalg.vector_norm(axis)
+            reference = poses[0, :, :3, :3]
+            world_axis = reference @ axis
+            angles = torch.stack(
+                [
+                    _signed_rotation_about_axis(reference, pose[:, :3, :3], world_axis)
+                    for pose in poses
+                ]
             )
-        return evaluate_skill_stage_batch(
-            "pour",
-            _stage_evidence_batch(
-                stage_id="poured",
-                window="actuation_interval",
-                measurements={
-                    "peak_signed_axis_angle_error_rad": error,
-                    "min_height_above_support_m": min_height,
-                },
-                method="object_pose_trace",
-            ),
+            sign = float(case.case_parameters.get("object_rotation_sign", 1.0))
+            peak = (angles * sign).amax(dim=0)
+            error = (peak - abs(float(case.case_parameters["rotate_angle_rad"]))).abs()
+            min_height = _minimum_height_above_initial_support(actuation, case)
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="poured",
+                        window="actuation_interval",
+                        measurements={
+                            "peak_signed_axis_angle_error_rad": error,
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="object_pose_trace",
+                    )
+                )
+        if settle is not None and settle.object_pose is not None:
+            part = next(iter(observation.gripper_open_qpos), "")
+            retained = _gripper_holding(settle, observation, part)
+            min_height = _minimum_height_above_initial_support(settle, case)
+            initial = torch.as_tensor(
+                case.case_parameters["object_initial_pose"],
+                dtype=settle.object_pose.dtype,
+                device=settle.object_pose.device,
+            )
+            if min_height is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        stage_id="settled",
+                        window="terminal_settle",
+                        measurements={
+                            "lift_delta_m": (
+                                settle.object_pose[-1, :, 2, 3] - initial[:, 2, 3]
+                            ),
+                            "min_height_above_support_m": min_height,
+                        },
+                        method="terminal_object_pose_trace",
+                    )
+                )
+                if retained is not None:
+                    batches.append(
+                        _stage_evidence_batch(
+                            stage_id="held",
+                            window="terminal_settle",
+                            measurements={
+                                "object_retained": retained,
+                                "min_height_above_support_m": min_height,
+                            },
+                            method="gripper_and_object_settle_trace",
+                            source="measured_proxy",
+                        )
+                    )
+        evidence = (
+            _merge_stage_evidence_batches(*batches)
+            if batches
+            else tuple({} for _ in range(case.batch_size))
         )
+        return evaluate_skill_stage_batch("pour", evidence)
 
 
 class _AxisAlignEvaluator:
@@ -244,6 +282,11 @@ class _AxisAlignEvaluator:
             return evaluate_skill_stage_batch(
                 "axis_align", tuple({} for _ in range(case.batch_size))
             )
+        initial = torch.as_tensor(
+            case.case_parameters["object_initial_pose"],
+            dtype=poses.dtype,
+            device=poses.device,
+        )
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
             _stage_evidence_batch(
                 stage_id="grasped",
@@ -257,6 +300,7 @@ class _AxisAlignEvaluator:
                 window="actuation_end",
                 measurements={
                     "axis_angle_error_rad": aligned_error,
+                    "lift_delta_m": poses[-1, :, 2, 3] - initial[:, 2, 3],
                     "min_height_above_support_m": actuation_height,
                 },
                 method="object_pose_trace",
@@ -266,18 +310,44 @@ class _AxisAlignEvaluator:
             min_height = _minimum_height_above_initial_support(settle, case)
             part = next(iter(observation.gripper_open_qpos), "")
             retained = _gripper_holding(settle, observation, part)
-            if min_height is not None and retained is not None:
+            if settle.object_pose is not None and min_height is not None:
+                final_pose = settle.object_pose[-1]
+                final_axis = torch.nn.functional.normalize(
+                    final_pose[:, :3, :3] @ internal, dim=-1
+                )
+                terminal_error = torch.arccos(
+                    torch.clamp(final_axis @ target, -1.0, 1.0)
+                )
+                settle_initial = initial.to(
+                    device=final_pose.device, dtype=final_pose.dtype
+                )
                 batches.append(
                     _stage_evidence_batch(
-                        stage_id="held",
+                        stage_id="settled",
                         window="terminal_settle",
                         measurements={
-                            "object_retained": retained,
+                            "axis_angle_error_rad": terminal_error,
+                            "lift_delta_m": (
+                                final_pose[:, 2, 3] - settle_initial[:, 2, 3]
+                            ),
                             "min_height_above_support_m": min_height,
                         },
-                        method="object_and_gripper_settle_trace",
+                        method="terminal_object_pose_trace",
                     )
                 )
+                if retained is not None:
+                    batches.append(
+                        _stage_evidence_batch(
+                            stage_id="held",
+                            window="terminal_settle",
+                            measurements={
+                                "object_retained": retained,
+                                "min_height_above_support_m": min_height,
+                            },
+                            method="gripper_and_object_settle_trace",
+                            source="measured_proxy",
+                        )
+                    )
         return evaluate_skill_stage_batch(
             "axis_align", _merge_stage_evidence_batches(*batches)
         )
@@ -1118,15 +1188,23 @@ class _PourCases(AtomicSkillCaseProvider):
     def replay_observation_windows(
         self, compiled: CompiledTrajectory, case: BenchmarkCase
     ) -> tuple[ReplayObservationWindow, ...]:
-        """Collect held-object poses only within the pour interval."""
+        """Collect pour motion plus terminal lift and retention evidence."""
         del case
         segment = compiled.segment(1, "pour")
+        waypoint_count = compiled.trajectory.waypoint_count
         return (
             ReplayObservationWindow(
                 "pour_actuation",
                 segment.start,
                 segment.stop,
                 frozenset({"object_pose"}),
+            ),
+            ReplayObservationWindow(
+                "pour_settle",
+                waypoint_count,
+                waypoint_count,
+                frozenset({"object_pose", "gripper_qpos"}),
+                include_settle=True,
             ),
         )
 
@@ -1604,6 +1682,8 @@ class _PushObjectEvaluator:
             support_error = (
                 ((final[:, :3, 3] - target[:, :3, 3]) * normal).sum(dim=-1).abs()
             )
+            residual = target[:, :3, 3] - final[:, :3, 3]
+            residual -= (residual * normal).sum(dim=-1, keepdim=True) * normal
             batches.append(
                 _stage_evidence_batch(
                     stage_id="on_support_plane",
@@ -1616,6 +1696,7 @@ class _PushObjectEvaluator:
                                 _TASK_POSITION_TOLERANCE_M,
                             )
                         ),
+                        "in_plane_error_m": torch.linalg.vector_norm(residual, dim=-1),
                         "tilt_error_rad": torch.arccos(
                             torch.clamp((final_normal * normal).sum(dim=-1), -1.0, 1.0)
                         ),

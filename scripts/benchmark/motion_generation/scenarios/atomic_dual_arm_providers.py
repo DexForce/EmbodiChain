@@ -131,6 +131,7 @@ class _HandOverEvaluator:
                         window="grasp_end",
                         measurements={"grasp_established": grasped},
                         method="source_gripper_joint_state",
+                        source="measured_proxy",
                     )
                 )
         if transfer is not None:
@@ -155,6 +156,7 @@ class _HandOverEvaluator:
                             "min_height_above_support_m": min_height,
                         },
                         method="dual_gripper_and_object_trace",
+                        source="measured_proxy",
                     )
                 )
         if exchange is not None:
@@ -178,6 +180,7 @@ class _HandOverEvaluator:
                             "min_height_above_support_m": min_height,
                         },
                         method="dual_gripper_and_object_trace",
+                        source="measured_proxy",
                     )
                 )
         if settle is not None and settle.object_pose is not None:
@@ -191,6 +194,17 @@ class _HandOverEvaluator:
             signed_z_error = final[:, 2, 3] - target[:, 2, 3]
             min_height = _minimum_height_above_initial_support(settle, case)
             if min_height is not None:
+                receiver_released = _gripper_released(settle, observation, destination)
+                if receiver_released is not None:
+                    batches.append(
+                        _stage_evidence_batch(
+                            stage_id="receiver_released",
+                            window="terminal_settle",
+                            measurements={"release_established": receiver_released},
+                            method="receiver_gripper_joint_state",
+                            source="measured_proxy",
+                        )
+                    )
                 batches.append(
                     _stage_evidence_batch(
                         stage_id="placed",
@@ -286,6 +300,7 @@ class _CoordinatedPickmentEvaluator:
                             "right_grasp_established": right_held,
                         },
                         method="dual_gripper_joint_state",
+                        source="measured_proxy",
                     )
                 )
         if lift is not None and lift.object_pose is not None:
@@ -329,7 +344,7 @@ class _CoordinatedPickmentEvaluator:
                         method="object_move_trace",
                     )
                 )
-        if settle is not None:
+        if settle is not None and settle.object_pose is not None:
             left_held = _gripper_holding(
                 settle, observation, left, gap=_GRIPPER_HOLD_GAP
             )
@@ -337,22 +352,38 @@ class _CoordinatedPickmentEvaluator:
                 settle, observation, right, gap=_GRIPPER_HOLD_GAP
             )
             min_height = _minimum_height_above_initial_support(settle, case)
-            if (
-                left_held is not None
-                and right_held is not None
-                and min_height is not None
-            ):
+            final = settle.object_pose[-1]
+            target = _case_pose(case, "target_object_pose", device=final.device).to(
+                dtype=final.dtype
+            )
+            if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
-                        stage_id="held",
+                        stage_id="settled",
                         window="terminal_settle",
                         measurements={
-                            "object_retained": left_held & right_held,
+                            "position_error_m": torch.linalg.vector_norm(
+                                final[:, :3, 3] - target[:, :3, 3], dim=-1
+                            ),
+                            "rotation_error_rad": _rotation_error(final, target),
                             "min_height_above_support_m": min_height,
                         },
-                        method="dual_gripper_and_object_settle_trace",
+                        method="terminal_object_pose_trace",
                     )
                 )
+                if left_held is not None and right_held is not None:
+                    batches.append(
+                        _stage_evidence_batch(
+                            stage_id="held",
+                            window="terminal_settle",
+                            measurements={
+                                "object_retained": left_held & right_held,
+                                "min_height_above_support_m": min_height,
+                            },
+                            method="dual_gripper_and_object_settle_trace",
+                            source="measured_proxy",
+                        )
+                    )
         evidence = (
             _merge_stage_evidence_batches(*batches)
             if batches
@@ -427,6 +458,7 @@ class _CoordinatedPlacementEvaluator:
                             "support_retained": support_retained,
                         },
                         method="role_gripper_joint_state",
+                        source="measured_proxy",
                     )
                 )
         if (
@@ -439,6 +471,10 @@ class _CoordinatedPlacementEvaluator:
                 pose_inv(settle.scene_object_poses[support_id]), settle.object_pose
             )
             relative_start = relative[:1].expand_as(relative)
+            final_relative = relative[-1]
+            local_target = target.to(
+                device=final_relative.device, dtype=final_relative.dtype
+            )
             min_height = _minimum_height_above_initial_support(settle, case)
             if min_height is not None:
                 batches.append(
@@ -446,6 +482,13 @@ class _CoordinatedPlacementEvaluator:
                         stage_id="stable",
                         window="settle_interval",
                         measurements={
+                            "relative_position_error_m": torch.linalg.vector_norm(
+                                final_relative[:, :3, 3] - local_target[:, :3, 3],
+                                dim=-1,
+                            ),
+                            "relative_rotation_error_rad": _rotation_error(
+                                final_relative, local_target
+                            ),
                             "position_drift_m": torch.linalg.vector_norm(
                                 relative[:, :, :3, 3] - relative_start[:, :, :3, 3],
                                 dim=-1,
@@ -1020,7 +1063,7 @@ class _HandOverCases(AtomicSkillCaseProvider):
                 "handover_settle",
                 waypoint_count,
                 waypoint_count,
-                frozenset({"object_pose"}),
+                frozenset({"object_pose", "gripper_qpos"}),
                 include_settle=True,
             ),
         )

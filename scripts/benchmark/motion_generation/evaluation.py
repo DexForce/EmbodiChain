@@ -191,6 +191,7 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 Criterion(
                     "tcp_position_error_m", "le", TOLERANCES["primitive_position_m"]
                 ),
+                _rotation("tcp_rotation_error_rad"),
             ),
         ),
         "move_joints": (
@@ -211,6 +212,15 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 "actuation_end",
                 "task_goal_miss",
                 _rotation("axis_angle_error_rad"),
+                Criterion("lift_delta_m", "ge", TOLERANCES["pick_min_lift_m"]),
+                _NO_DROP,
+            ),
+            _stage(
+                "settled",
+                "terminal_settle",
+                "task_goal_miss",
+                _rotation("axis_angle_error_rad"),
+                Criterion("lift_delta_m", "ge", TOLERANCES["pick_min_lift_m"]),
                 _NO_DROP,
             ),
             _HELD,
@@ -224,6 +234,15 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 _rotation(),
                 _NO_DROP,
             ),
+            _stage(
+                "settled",
+                "terminal_settle",
+                "task_goal_miss",
+                _position(),
+                _rotation(),
+                _NO_DROP,
+            ),
+            _HELD,
         ),
         "place": (
             _RELEASE,
@@ -231,7 +250,8 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 "placed",
                 "terminal_settle",
                 "task_goal_miss",
-                _position("xy_error_m"),
+                _position(),
+                _rotation("orientation_error_rad"),
                 _NO_DROP,
             ),
             _STABLE,
@@ -244,6 +264,14 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 _rotation("peak_signed_axis_angle_error_rad"),
                 _NO_DROP,
             ),
+            _stage(
+                "settled",
+                "terminal_settle",
+                "task_goal_miss",
+                Criterion("lift_delta_m", "ge", TOLERANCES["pick_min_lift_m"]),
+                _NO_DROP,
+            ),
+            _HELD,
         ),
         "push_object": (
             _stage(
@@ -264,6 +292,7 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 "terminal_settle",
                 "task_goal_miss",
                 _bool("on_support_plane"),
+                _position("in_plane_error_m"),
                 _rotation("tilt_error_rad"),
             ),
         ),
@@ -329,6 +358,14 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 _rotation(),
                 _NO_DROP,
             ),
+            _stage(
+                "settled",
+                "terminal_settle",
+                "task_goal_miss",
+                _position(),
+                _rotation(),
+                _NO_DROP,
+            ),
             _HELD,
         ),
         "coordinated_placement": (
@@ -347,7 +384,16 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 _bool("placing_release_established"),
                 _bool("support_retained"),
             ),
-            _STABLE,
+            _stage(
+                "stable",
+                "settle_interval",
+                "task_goal_miss",
+                _position("relative_position_error_m"),
+                _rotation("relative_rotation_error_rad"),
+                _position("position_drift_m"),
+                _rotation("rotation_drift_rad"),
+                _NO_DROP,
+            ),
         ),
         "hand_over": (
             _GRASP,
@@ -365,6 +411,12 @@ SKILL_CRITERIA: Mapping[str, tuple[StageCriterion, ...]] = MappingProxyType(
                 _bool("giver_released"),
                 _bool("receiver_retained"),
                 _NO_DROP,
+            ),
+            _stage(
+                "receiver_released",
+                "terminal_settle",
+                "release_failure",
+                _bool("release_established"),
             ),
             _stage(
                 "placed",
