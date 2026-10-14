@@ -24,7 +24,7 @@ from typing import Any
 import torch
 
 from embodichain.lab.sim.atomic_actions import JointPositionTarget
-from embodichain.utils.math import pose_inv
+from embodichain.utils.math import pose_inv, quat_error_magnitude, quat_from_matrix
 from .motion import _CARTESIAN_APPROACH, _WAYPOINT_KINEMATICS
 from .pick_safety import _inspect_pick_motion
 from .planning_probe import _validate_final_plan_velocity
@@ -100,6 +100,13 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     fk = action.robot.compute_batch_fk(
         qpos=values[:, :end], name=arm.control_part, to_matrix=True
     )
+    rotations = quat_from_matrix(fk[:, :, :3, :3]).reshape(-1, 4)
+    reference = rotations[:1].expand_as(rotations)
+    rotation_max = float(quat_error_magnitude(rotations, reference).max())
+    rotation_path = float(quat_error_magnitude(rotations[1:], rotations[:-1]).sum())
+    rot_eps = action.robot.get_solver(arm.control_part).get_iteration_params()[
+        "rot_eps"
+    ]
     poses = fk @ pose_inv(held.object_to_eef)[:, None]
     vertices = meshes[held.semantics.entity_id].to(poses)
     world = (
@@ -134,25 +141,27 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
         "valid": True,
         "scope": "discrete_robot_self_meshes_and_bound_rigid_envelopes",
         "minimum_table_gap_m": minimum_gap,
+        "rotation_max_rad": rotation_max,
+        "rotation_path_rad": rotation_path,
+        "orientation_preserved": rotation_max <= rot_eps,
     }
 
 
-def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> Any:
-    """Keep every successful path and all explicitly Cartesian contracts intact."""
+def eligible(action: Any, request: Any, context: Any) -> bool:
+    """Limit the cheap waypoint probe to its existing ordinary Place boundary."""
     if (
-        first.plan_success.any()
-        or context.batch_size != 1
+        context.batch_size != 1
         or context.env_ids.tolist() != [0]
         or _CARTESIAN_APPROACH.get()
     ):
-        return first
+        return False
     if (
         request.motion_policy.strategy != "ik_interp"
         or request.motion_policy.dynamic_collision_mode != "off"
         or not request.skill_options.preserve_current_object_orientation
         or request.skill_options.max_approach_retract_z is not None
     ):
-        return first
+        return False
     held = context.get_held_object(
         request.binding.endpoint("primary", "motion").task_state_key
     )
@@ -161,6 +170,13 @@ def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> 
         "pour",
         "ends",
     }:
+        return False
+    return True
+
+
+def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> Any:
+    """Keep every successful path and all explicitly Cartesian contracts intact."""
+    if first.plan_success.any() or not eligible(action, request, context):
         return first
     state = _RandomState.capture(
         _cuda_devices(action.robot.device, context.robot.qpos.device)
@@ -168,9 +184,23 @@ def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> 
     evidence: list[torch.Tensor] = []
     token = _WAYPOINT_KINEMATICS.set(evidence)
     try:
-        alternative = build(request, context)
-        acceptance = inspect(action, request, context, alternative)
-        if not acceptance["valid"]:
+        chosen, acceptance = None, None
+        attempts = []
+        for _ in range(3):
+            alternative = build(request, context)
+            measured = inspect(action, request, context, alternative)
+            attempts.append(measured)
+            if not measured["valid"]:
+                continue
+            score = (measured["rotation_max_rad"], measured["rotation_path_rad"])
+            if acceptance is None or score < (
+                acceptance["rotation_max_rad"],
+                acceptance["rotation_path_rad"],
+            ):
+                chosen, acceptance = alternative, measured
+            if measured["orientation_preserved"]:
+                break
+        if chosen is None:
             if not evidence:
                 return first
             return replace(
@@ -180,19 +210,23 @@ def recover(action: Any, request: Any, context: Any, first: Any, build: Any) -> 
                     metadata={
                         **first.diagnostics.metadata,
                         "gen_sim_place_waypoint_probe": {
-                            "kinematic_valid": bool(evidence[0].all()),
-                            "acceptance": acceptance,
+                            "kinematic_valid": any(bool(v.all()) for v in evidence),
+                            "acceptance": attempts[-1],
+                            "attempts": attempts,
                         },
                     },
                 ),
             )
         return replace(
-            alternative,
+            chosen,
             diagnostics=replace(
-                alternative.diagnostics,
+                chosen.diagnostics,
                 metadata={
-                    **alternative.diagnostics.metadata,
-                    "gen_sim_place_waypoint_recovery": acceptance,
+                    **chosen.diagnostics.metadata,
+                    "gen_sim_place_waypoint_recovery": {
+                        **acceptance,
+                        "attempts": attempts,
+                    },
                 },
             ),
         )

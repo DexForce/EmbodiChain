@@ -770,6 +770,47 @@ def test_place_planning_exception_does_not_leak_recovery_scope(monkeypatch):
     assert motion._PLACE_IK_RECOVERY.get() is None
 
 
+def test_deferred_place_probe_keeps_complete_retry_route_available(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import motion
+
+    generator = object.__new__(motion.ApproachMotionGenerator)
+    generator.robot = SimpleNamespace(compute_fk=lambda **kw: torch.eye(4)[None])
+    monkeypatch.setattr(motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 1))
+    failed = motion.PlanResult(
+        success=torch.tensor([False]),
+        positions=torch.zeros(1, 5, 1),
+        dt=torch.full((1, 5), 0.04),
+    )
+    backend = Mock(return_value=failed)
+    local = Mock(return_value=None)
+    monkeypatch.setattr(motion.MotionGenerator, "generate", backend)
+    monkeypatch.setattr(motion, "resolve_continuous_ik_path", local)
+    options = motion.MotionGenOptions(
+        strategy="ik_interp",
+        control_part="arm",
+        start_qpos=torch.zeros(1, 1),
+        sample_count=5,
+        interpolation_dt=0.04,
+    )
+    targets = [
+        motion.PlanState(move_type=motion.MoveType.EEF_MOVE, xpos=torch.eye(4)[None])
+    ]
+    with motion.place_ik_recovery(defer_retries=True):
+        assert generator.generate(targets, options) is failed
+    assert [c.kwargs["options"].sample_count for c in backend.call_args_list] == [5]
+    local.assert_not_called()
+    backend.reset_mock()
+    with motion.place_ik_recovery():
+        assert generator.generate(targets, options) is failed
+    assert [c.kwargs["options"].sample_count for c in backend.call_args_list] == [
+        5,
+        260,
+        320,
+    ]
+    local.assert_called_once()
+    assert motion._PLACE_IK_RECOVERY.get() is None
+
+
 def test_stack_place_allows_equivalent_tcp_roll_without_moving_release(
     monkeypatch,
 ) -> None:

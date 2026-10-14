@@ -42,7 +42,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 6
+MOTION_VALIDATION_REVISION = 9
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 _CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(
@@ -53,6 +53,7 @@ _CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(
 @dataclass
 class _PlaceIKRecovery:
     used: bool = False
+    defer_retries: bool = False
 
 
 _PLACE_IK_RECOVERY: ContextVar[_PlaceIKRecovery | None] = ContextVar(
@@ -80,9 +81,9 @@ def cartesian_approach_scope(enabled: bool) -> Iterator[None]:
 
 
 @contextmanager
-def place_ik_recovery() -> Iterator[_PlaceIKRecovery]:
+def place_ik_recovery(*, defer_retries: bool = False) -> Iterator[_PlaceIKRecovery]:
     """Scope the bounded fallback to one GenSim Place planning call."""
-    state = _PlaceIKRecovery()
+    state = _PlaceIKRecovery(defer_retries=defer_retries)
     token = _PLACE_IK_RECOVERY.set(state)
     try:
         yield state
@@ -486,6 +487,7 @@ def _generate_cartesian_approach(
         )
         target_states, options = build_samples(options.sample_count)
     result = generator._generate_checked(target_states, options=options)
+    recovery = _PLACE_IK_RECOVERY.get()
     if (
         isinstance(result.success, torch.Tensor)
         and not result.success.any()
@@ -496,6 +498,7 @@ def _generate_cartesian_approach(
         and original_options.control_part is not None
         and not original_options.preserve_cartesian_samples
         and all(state.move_type is MoveType.EEF_MOVE for state in original_targets)
+        and (recovery is None or not recovery.defer_retries)
     ):
         # A coarse IK interpolation can violate a real URDF/runtime limit
         # even when the geometric path is valid. Retry with denser samples
@@ -513,7 +516,6 @@ def _generate_cartesian_approach(
                     f"GenSim adaptive velocity retime accepted sample_count={sample_count}."
                 )
                 break
-        recovery = _PLACE_IK_RECOVERY.get()
         if (
             recovery is not None
             and not result.success.any()

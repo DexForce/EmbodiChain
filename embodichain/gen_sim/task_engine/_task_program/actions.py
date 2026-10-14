@@ -1209,34 +1209,68 @@ class GenSimPlace(Place):
             _velocity_validity,
             place_ik_recovery,
         )
+        from .place_recovery import eligible, recover
 
-        with place_ik_recovery() as recovery:
-            plan = super()._plan(request, context)
-        if not plan.plan_success.any() and self.recovery_scene_vertices:
-            from .place_recovery import recover
-
-            plan = recover(
-                self,
-                request,
-                context,
-                plan,
-                lambda selected, current: super(GenSimPlace, self)._plan(
-                    selected, current
-                ),
+        early = bool(self.recovery_scene_vertices) and eligible(self, request, context)
+        before = (
+            _RandomState.capture(
+                _cuda_devices(self.robot.device, context.robot.qpos.device)
             )
+            if early
+            else None
+        )
+        build = lambda selected, current: super(GenSimPlace, self)._plan(
+            selected, current
+        )
+        with place_ik_recovery(defer_retries=early) as recovery:
+            plan = super()._plan(request, context)
+        early_fallback = None
+        if early and not plan.plan_success.any():
+            candidate = recover(self, request, context, plan, build)
+            if candidate.plan_success.all():
+                early_fallback = candidate
+            acceptance = candidate.diagnostics.metadata.get(
+                "gen_sim_place_waypoint_recovery", {}
+            )
+            # Large turns retain the complete Cartesian search before fallback.
+            if (
+                candidate.plan_success.all()
+                and acceptance["rotation_max_rad"] <= torch.pi / 4
+            ):
+                plan = candidate
+            else:
+                before.restore()
+                with place_ik_recovery() as recovery:
+                    plan = super()._plan(request, context)
+        if not plan.plan_success.any() and self.recovery_scene_vertices:
+            plan = recover(self, request, context, plan, build)
         if recovery.used and plan.plan_success.any():
             trajectory = plan.joint_trajectory
             limits = _joint_velocity_limits(self.robot, None).to(trajectory.positions)
             if not _velocity_validity(
                 trajectory.positions, trajectory.dt, limits
             ).all():
-                return self.failed_plan(
-                    request,
-                    context,
-                    message="Recovered Place exceeds final resampled joint velocity limits.",
-                )
+                if early_fallback is not None:
+                    plan = early_fallback
+                else:
+                    return self.failed_plan(
+                        request,
+                        context,
+                        message="Recovered Place exceeds final resampled joint velocity limits.",
+                    )
         if not plan.plan_success.any():
             plan = self._retry_place_routes(request, context, plan)
+        if early_fallback is not None:
+            measured = plan.diagnostics.metadata.get("gen_sim_place_waypoint_recovery")
+            earlier = early_fallback.diagnostics.metadata[
+                "gen_sim_place_waypoint_recovery"
+            ]
+            keys = ("rotation_max_rad", "rotation_path_rad")
+            if not plan.plan_success.any() or (
+                measured is not None
+                and tuple(measured[k] for k in keys) > tuple(earlier[k] for k in keys)
+            ):
+                plan = early_fallback
         return require_release_effect(
             self._with_contact_monitor_boundary(plan), handoff.resource
         )

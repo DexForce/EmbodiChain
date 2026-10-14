@@ -78,6 +78,9 @@ def _fixture(monkeypatch):
     robot = SimpleNamespace(
         device=torch.device("cpu"),
         compute_batch_fk=fk,
+        get_solver=lambda _: SimpleNamespace(
+            get_iteration_params=lambda: {"rot_eps": 0.0005}
+        ),
         get_qpos_limits=lambda **_kwargs: torch.tensor([[[-1.0, 1.0], [-1.0, 1.0]]]),
     )
     action = SimpleNamespace(
@@ -85,7 +88,9 @@ def _fixture(monkeypatch):
     )
     plan = Plan(
         torch.tensor([True]),
-        SimpleNamespace(positions=torch.zeros(1, 3, 2)),
+        SimpleNamespace(
+            positions=torch.zeros(1, 3, 2), dt=torch.tensor([[0.0, 0.04, 0.04]])
+        ),
         (SimpleNamespace(name="approach", stop=2),),
         PlannerDiagnostics(backend="test"),
     )
@@ -125,6 +130,130 @@ def test_waypoint_recovery_retains_request_start_and_rng_without_committing_effe
     assert context.last_qpos.tolist() == [[0.0, 0.0]]
     assert torch.equal(before.cpu, torch.random.get_rng_state())
     assert before.python == random.getstate()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "coarse_success",
+        "small_turn",
+        "large_turn",
+        "unsafe",
+        "full_exhausted",
+        "full_velocity",
+        "boundary",
+        "above_boundary",
+        "worse_late_turn",
+    ],
+)
+def test_early_waypoint_probe_replays_original_rng_and_retains_big_flip(
+    monkeypatch, case
+):
+    from dataclasses import replace
+    from embodichain.gen_sim.task_engine._task_program import actions, motion
+    from embodichain.lab.sim.atomic_actions.primitives.place import Place
+
+    source, request, context, good = _fixture(monkeypatch)
+    action = actions.GenSimPlace()
+    action._planning_services = SimpleNamespace(
+        robot=source.robot, motion_generator=SimpleNamespace()
+    )
+    action.recovery_scene_vertices = source.recovery_scene_vertices
+    monkeypatch.setattr(
+        actions.GenSimStateHandoff,
+        "from_request",
+        lambda *a, **kw: SimpleNamespace(resource="held"),
+    )
+    monkeypatch.setattr(actions, "require_release_effect", lambda p, _: p)
+    monkeypatch.setattr(action, "_with_contact_monitor_boundary", lambda p: p)
+    failed = replace(good, plan_success=torch.tensor([False]))
+    late = replace(good, diagnostics=PlannerDiagnostics(backend="late"))
+    monkeypatch.setattr(action, "failed_plan", lambda *a, **kw: failed)
+    routes = Mock(return_value=failed)
+    monkeypatch.setattr(action, "_retry_place_routes", routes)
+    if case == "full_velocity":
+        monkeypatch.setattr(
+            motion, "_joint_velocity_limits", lambda *a: torch.ones(1, 2)
+        )
+        monkeypatch.setattr(
+            motion, "_velocity_validity", lambda *a: torch.tensor([False])
+        )
+    calls = []
+    before = gate._RandomState.capture(set())
+
+    def build(_action, selected, observed):
+        assert selected is request and observed is context
+        scope = motion._PLACE_IK_RECOVERY.get()
+        kind = (
+            "waypoint"
+            if motion._WAYPOINT_KINEMATICS.get() is not None
+            else ("coarse" if scope.defer_retries else "full")
+        )
+        if kind == "full":
+            assert torch.equal(torch.random.get_rng_state(), before.cpu)
+            assert random.getstate() == before.python
+            assert np.array_equal(np.random.get_state()[1], before.numpy[1])
+        calls.append(kind)
+        torch.rand(1)
+        random.random()
+        np.random.rand()
+        if kind == "coarse" and case != "coarse_success":
+            return failed
+        if kind == "full" and case == "full_velocity":
+            scope.used = True
+            return late
+        if kind == "full" and case in {
+            "large_turn",
+            "full_exhausted",
+            "worse_late_turn",
+        }:
+            return failed
+        if kind == "waypoint" and case == "full_exhausted" and "full" in calls:
+            return failed
+        return good
+
+    def inspect(_action, _request, _context, plan):
+        valid = bool(plan.plan_success.all()) and (case != "unsafe" or "full" in calls)
+        rotation = {
+            "small_turn": 0.5,
+            "boundary": torch.pi / 4,
+            "above_boundary": torch.pi / 4 + 1e-4,
+            "worse_late_turn": torch.pi if "full" in calls else 1.0,
+        }.get(case, torch.pi)
+        return {
+            "valid": valid,
+            "orientation_preserved": False,
+            "rotation_max_rad": rotation,
+            "rotation_path_rad": 1.0,
+        }
+
+    monkeypatch.setattr(Place, "_plan", build)
+    monkeypatch.setattr(gate, "inspect", inspect)
+    result = action._plan(request, context)
+    assert result.plan_success.all()
+    assert motion._PLACE_IK_RECOVERY.get() is None
+    assert motion._WAYPOINT_KINEMATICS.get() is None
+    if case == "coarse_success":
+        assert calls == ["coarse"]
+        assert result is good
+    elif case in {"small_turn", "boundary"}:
+        assert calls == ["coarse", "waypoint", "waypoint", "waypoint"]
+    else:
+        assert calls[:5] == ["coarse", "waypoint", "waypoint", "waypoint", "full"]
+        if case == "large_turn":
+            assert calls[5:] == ["waypoint", "waypoint", "waypoint"]
+        elif case == "full_exhausted":
+            routes.assert_called_once()
+        elif case == "full_velocity":
+            routes.assert_not_called()
+            assert result.diagnostics.backend == good.diagnostics.backend
+        elif case == "worse_late_turn":
+            assert (
+                result.diagnostics.metadata["gen_sim_place_waypoint_recovery"][
+                    "rotation_max_rad"
+                ]
+                == 1.0
+            )
 
 
 @pytest.mark.parametrize(
@@ -199,6 +328,65 @@ def test_unsafe_recovery_is_never_accepted(monkeypatch, damage) -> None:
         torch.tensor([False]), plan.joint_trajectory, plan.segments, plan.diagnostics
     )
     assert gate.recover(action, request, context, first, lambda *_a: plan) is first
+
+
+@pytest.mark.parametrize("smooth", [False, True])
+def test_same_grasp_search_prefers_smooth_but_never_discards_safe_flip(
+    monkeypatch, smooth
+):
+    from dataclasses import replace
+
+    action, request, context, plan = _fixture(monkeypatch)
+    first = replace(plan, plan_success=torch.tensor([False]))
+    alternate = replace(plan, diagnostics=PlannerDiagnostics("alternative"))
+    calls = []
+
+    def build(selected, observed):
+        assert selected is request and observed is context
+        calls.append(len(calls))
+        torch.rand(1)
+        return plan if len(calls) == 1 else alternate
+
+    def inspect(*_):
+        if len(calls) == 1:
+            return {
+                "valid": True,
+                "orientation_preserved": False,
+                "rotation_max_rad": torch.pi,
+                "rotation_path_rad": 2 * torch.pi,
+            }
+        if smooth:
+            return {
+                "valid": True,
+                "orientation_preserved": True,
+                "rotation_max_rad": 0.0,
+                "rotation_path_rad": 0.0,
+            }
+        return {"valid": False, "reason": "collision"}
+
+    monkeypatch.setattr(gate, "inspect", inspect)
+    rng = torch.get_rng_state().clone()
+    result = gate.recover(action, request, context, first, build)
+    assert result.plan_success.all()
+    assert result.diagnostics.backend == ("alternative" if smooth else "test")
+    assert len(calls) == (2 if smooth else 3)
+    assert torch.equal(torch.get_rng_state(), rng)
+
+
+def test_large_intermediate_rotation_is_reported_not_rejected(monkeypatch):
+    action, request, context, plan = _fixture(monkeypatch)
+    original_fk = action.robot.compute_batch_fk
+
+    def turning(qpos, **kwargs):
+        poses = original_fk(qpos, **kwargs)
+        poses[0, 1, :2, :2] = -torch.eye(2)
+        return poses
+
+    action.robot.compute_batch_fk = turning
+    evidence = gate.inspect(action, request, context, plan)
+    assert evidence["valid"] is True
+    assert evidence["orientation_preserved"] is False
+    assert evidence["rotation_max_rad"] == pytest.approx(torch.pi)
 
 
 @pytest.mark.parametrize("damage", [None, "missing", "invalid", "articulation"])
