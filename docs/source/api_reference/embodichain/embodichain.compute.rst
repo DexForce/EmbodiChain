@@ -127,3 +127,11 @@ Pure trajectory functions formerly defined in
 compatibility. New consumers should import from ``compute.trajectory``.
 ``get_trajectory_object_offset_qpos`` remains in the simulation utility module
 because it calls a stateful solver's FK and IK interfaces.
+
+Geometry tensor kernels
+-----------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.compute.scene_geometry

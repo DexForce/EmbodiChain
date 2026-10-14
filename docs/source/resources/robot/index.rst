@@ -5,6 +5,11 @@ EmbodiChain provides configuration classes for the robot families and composed
 layouts below. Each page documents construction, control parts, kinematics, and
 the currently supported variants.
 
+Run ``embodichain list-robot`` to discover installed families, variants,
+independent control DOFs, default control parts, and mimic followers without
+loading simulation or downloading assets. See :ref:`cli-list-robots` for the
+command reference and :doc:`/guides/robot_catalog` for variant selection.
+
 .. list-table::
    :header-rows: 1
    :widths: 24 25 51
@@ -13,8 +18,8 @@ the currently supported variants.
      - Configuration class
      - Current coverage
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``
-     - Panda arm and gripper with numerical FK/IK.
+     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.

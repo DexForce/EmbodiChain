@@ -162,8 +162,8 @@ test('large neighbourhoods keep the selected module readable above the fold', as
   };
   await expect.poll(titleIsInsideCanvas).toBe(true);
   await page.getByRole('button', { name: 'Direct neighbours only', exact: true }).click();
-  // The expanded overview includes DatasetManager as a direct neighbour.
-  await expect(page.locator('.react-flow__node-module')).toHaveCount(13);
+  // Scene expansion adds another caller of EmbodiedEnv to the overview.
+  await expect(page.locator('.react-flow__node-module')).toHaveCount(14);
   await expect.poll(titleIsInsideCanvas).toBe(true);
 });
 

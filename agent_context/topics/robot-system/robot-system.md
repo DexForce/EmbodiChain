@@ -6,8 +6,11 @@
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs | `embodichain/lab/sim/robots/__init__.py` |
-| W1 variants and serialization | `embodichain/lab/sim/robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| Available robot configs and variants | `embodichain_robots/_catalog.py`; `embodichain_robots/__init__.py` owns lazy exports |
+| Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
+| Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
+| Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
+| W1 variants and serialization | `embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -16,6 +19,28 @@ runtime workspace access. Robot configs own asset/kinematic assembly; the
 manager owns creation and backend binding. For a new config use
 [add-robot](../../../.agents/skills/add-robot/SKILL.md); for reusable robot/sensor
 suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
+
+Concrete robot definitions live in the separate `embodichain_robots` import
+package, bundled in the main wheel with the core version. Generic `Robot`,
+`RobotCfg`, `RobotPresetCfg`, and dual-arm composition remain in the core.
+Concrete presets import from `embodichain_robots`. The core
+`embodichain.lab.sim.robots` package exposes only generic dual-arm composition.
+
+Catalog listing defers robot classes and asset downloads; resolution imports
+one `RobotCfg` subclass and isolates its defaults/overrides. Gym, workspace
+analysis, dual-arm composition, and preview share `embodichain/robot_registry.py`.
+Selectors use exact registered IDs; aliases and `Cfg` suffixes are not accepted.
+An explicit `variant` applies profile defaults before caller overrides, while
+omission preserves existing construction behavior. See
+[catalog contracts](catalogs.md) for entry points, metadata and model profiles.
+
+`preview-robot` accepts a catalog ID or a standalone JSON/YAML RobotCfg file.
+File `class_type` optionally selects the catalog; local asset paths, including
+`urdf_cfg.sensors[*].sensor_source` URDF files in lists or mappings, resolve
+from the file directory. Inline sensor definitions and data IDs are preserved.
+Configuration decoding and validation precede World
+creation. Native and Viser lifecycle, Gizmo/slider target coordination, and
+cleanup belong to [preview activation](../sim-visualization/configuration.md#robot-preview).
 
 ## Configuration resolution
 
@@ -106,6 +131,11 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 
 | Changed boundary | Existing coverage |
 |---|---|
+| Robot catalogs, third-party selection across consumers | `tests/test_robot_registry.py` |
+| Robot preview inputs, initialization, and cleanup | `tests/lab/scripts/test_preview_robot.py` |
+| Robot CLI metadata, table formatting, and deferred imports | `tests/cli/test_list_robot.py`, `tests/test_main.py` |
+| Removed legacy imports and lazy canonical robot imports | `tests/sim/robots/test_imports.py` |
+| Bundled robot package discovery/staging | `tests/test_robot_package.py` |
 | Config merge, W1 versions/TCP round-trips, chain DOFs | `tests/sim/objects/test_robot_cfg.py` |
 | Dual-arm source/assembled frames and properties | `tests/sim/objects/test_dual_arm.py` |
 | Runtime part/joint/frame behavior | `tests/sim/objects/test_robot.py` |

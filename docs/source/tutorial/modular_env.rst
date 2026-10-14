@@ -95,7 +95,7 @@ The main environment configuration inherits from :class:`envs.EmbodiedEnvCfg` an
 
 **Robot Configuration**
 
-.. currentmodule:: embodichain.lab.sim.robots
+.. currentmodule:: embodichain_robots
 
 .. literalinclude:: ../../../scripts/tutorials/gym/modular_env.py
    :language: python

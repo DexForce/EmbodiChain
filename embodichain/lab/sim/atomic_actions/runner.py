@@ -960,8 +960,15 @@ class ExecutionRunner:
         self,
         *,
         effect_verifier: EffectVerifier | None = None,
+        physical_effect_verifier: PhysicalEffectVerifier | None = None,
         phase_effect_gate_verifier: PhaseEffectGateVerifier | None = None,
+        physical_phase_effect_gate_verifier: (
+            PhysicalPhaseEffectGateVerifier | None
+        ) = None,
         held_object_guard_verifier: HeldObjectGuardVerifier | None = None,
+        physical_held_object_guard_verifier: (
+            PhysicalHeldObjectGuardVerifier | None
+        ) = None,
         on_step: RunnerStepCallback | None = None,
         max_steps: int = 100_000,
     ) -> RunnerStep:
@@ -972,10 +979,16 @@ class ExecutionRunner:
                 due-cycle observations while effect verification is pending.
                 Without one, the method returns the running boundary so the
                 caller can verify externally.
+            physical_effect_verifier: Evidence-aware alternative to
+                ``effect_verifier``, receiving the synchronized evidence frame.
             phase_effect_gate_verifier: Optional synchronous callback used on
                 fresh observations while a trajectory-segment entry is gated.
+            physical_phase_effect_gate_verifier: Evidence-aware alternative to
+                ``phase_effect_gate_verifier``.
             held_object_guard_verifier: Optional synchronous phase-aware
                 held-object verifier used before every due command cycle.
+            physical_held_object_guard_verifier: Evidence-aware alternative to
+                ``held_object_guard_verifier``.
             on_step: Optional callback for tracing or tutorial visualization.
             max_steps: Hard bound on loop iterations.
 
@@ -991,13 +1004,20 @@ class ExecutionRunner:
             context=self._effect_context,
             tick=self._effect_tick,
         )
-        if self.effect_verification_pending and effect_verifier is None:
+        if (
+            self.effect_verification_pending
+            and effect_verifier is None
+            and physical_effect_verifier is None
+        ):
             return last_result
         for _ in range(max_steps):
             result = self.step(
                 effect_verifier=effect_verifier,
+                physical_effect_verifier=physical_effect_verifier,
                 phase_effect_gate_verifier=phase_effect_gate_verifier,
+                physical_phase_effect_gate_verifier=physical_phase_effect_gate_verifier,
                 held_object_guard_verifier=held_object_guard_verifier,
+                physical_held_object_guard_verifier=physical_held_object_guard_verifier,
             )
             if on_step is not None:
                 try:
@@ -1015,13 +1035,21 @@ class ExecutionRunner:
             verification_required = (
                 result.tick is not None and result.tick.pending_effect is not None
             )
-            if verification_required and effect_verifier is None:
+            if (
+                verification_required
+                and effect_verifier is None
+                and physical_effect_verifier is None
+            ):
                 return result
             gate_required = (
                 result.tick is not None
                 and result.tick.pending_phase_effect_gate is not None
             )
-            if gate_required and phase_effect_gate_verifier is None:
+            if (
+                gate_required
+                and phase_effect_gate_verifier is None
+                and physical_phase_effect_gate_verifier is None
+            ):
                 return result
             if result.wait_duration > 0.0:
                 try:

@@ -40,7 +40,7 @@ import torch
 import warp as wp
 
 from embodichain.lab.sim.objects.robot import Robot
-from embodichain.lab.sim.robots import CobotMagicCfg, URRobotCfg
+from embodichain_robots import CobotMagicCfg, URRobotCfg
 from embodichain.lab.sim.motion.workspace.analyzer import (
     AnalysisMode,
     WorkspaceAnalyzer,

@@ -287,7 +287,7 @@ if __name__ == "__main__":
 
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg, physics_cfg_for_backend
-    from embodichain.lab.sim.robots import CobotMagicCfg
+    from embodichain_robots import CobotMagicCfg
 
     parser = argparse.ArgumentParser(description="Launch the CobotMagic robot")
     parser.add_argument(

@@ -58,7 +58,7 @@ from embodichain.lab.sim.cfg import (
     VolumeDeformableMeshingCfg,
 )
 from embodichain.lab.sim.objects import Robot, VolumeDeformableObject
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.compute.trajectory import interpolate_with_nums
 from embodichain.lab.visualization import visualization_cfg_from_args

@@ -96,7 +96,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlanOptions,
     TrajectorySampleMethod,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg
+from embodichain_robots import FrankaPandaCfg
 from embodichain.lab.visualization import visualization_cfg_from_args
 
 __all__ = [

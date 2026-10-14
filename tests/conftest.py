@@ -205,6 +205,16 @@ def pytest_collection_modifyitems(config, items):
             )
 
 
+def pytest_runtest_setup(item):
+    """Select the renderer after skip checks, before class-scoped scenes.
+
+    Conftest setup hooks run before the runner's fixture setup. Keep default
+    priority so pytest's tryfirst skip checks can avoid native initialization.
+    """
+    if _requires_real_sim(item):
+        _initialize_sim_engine(item.config.getoption("--renderer"))
+
+
 @pytest.fixture(autouse=True, scope="function")
 def wait_scene_destruction_after_test(request):
     """Ensure C++ engine scenes are fully destructed globally after each test exits."""
@@ -212,7 +222,6 @@ def wait_scene_destruction_after_test(request):
         yield
         return
 
-    _initialize_sim_engine(request.config.getoption("--renderer"))
     yield
 
     # [Improvement - delayed destruction]: top-level dequeue and traceback cleanup.

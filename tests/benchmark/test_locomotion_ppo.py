@@ -220,8 +220,9 @@ def test_resource_sample_resolves_one_provider_pid(
 
 
 @pytest.mark.no_sim
+@pytest.mark.parametrize("renderer", [None, "auto", "no-render", "hybrid"])
 def test_creation_failure_retains_resource_samples(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, renderer: str | None
 ) -> None:
     """Write failure reports with samples taken before runtime construction."""
     from embodichain.lab.gym.utils import registration
@@ -234,13 +235,24 @@ def test_creation_failure_retains_resource_samples(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["locomotion_ppo", "--backend", "newton", "--output", str(output)],
+        [
+            "locomotion_ppo",
+            "--backend",
+            "newton",
+            "--output",
+            str(output),
+            "--envs",
+            "32",
+        ],
     )
+    trainer_cfg = {"gym_config": str(env_config)}
+    if renderer is not None:
+        trainer_cfg["renderer"] = renderer
     monkeypatch.setattr(
         benchmark,
         "_load_config",
         lambda *args: {
-            "trainer": {"gym_config": str(env_config), "renderer": "hybrid"},
+            "trainer": trainer_cfg,
             "policy": {},
             "algorithm": {},
         },
@@ -268,6 +280,7 @@ def test_creation_failure_retains_resource_samples(
     failure = RuntimeError("runtime construction failed")
 
     def fail_creation(*args, **kwargs):
+        assert kwargs["renderer"] == renderer
         raise failure
 
     monkeypatch.setattr(policy_runtime, "build_gym_policy_runtime", fail_creation)
@@ -282,3 +295,25 @@ def test_creation_failure_retains_resource_samples(
     assert (
         "| Dexsim Newton/MJWarp CUDA | failed |" in (output / "report.md").read_text()
     )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend,expected_envs", [("default", 2048), ("newton", 4096)])
+def test_default_benchmark_workload_uses_the_task_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str, expected_envs: int
+) -> None:
+    """The default batch fits the packaged task's renderer node budget."""
+    output = tmp_path / backend
+    monkeypatch.setattr(
+        sys, "argv", ["locomotion_ppo", "--backend", backend, "--output", str(output)]
+    )
+
+    def run(args, result):
+        assert args.envs == expected_envs
+        config = _load_config(args.task_dir, args.backend, None, args.steps)
+        assert config["trainer"]["num_envs"] == args.envs
+        assert config["algorithm"]["cfg"]["batch_size"] == args.envs * args.steps // 4
+
+    monkeypatch.setattr(benchmark, "_run", run)
+    benchmark.main()
+    assert json.loads((output / "result.json").read_text())["num_envs"] == expected_envs

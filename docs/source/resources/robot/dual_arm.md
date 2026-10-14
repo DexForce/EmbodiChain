@@ -94,6 +94,11 @@ cfg = DualArmRobotCfg.from_dict(
 | `arm_part` | Base robot manipulator control part name. Default: `"arm"`. |
 | `dual_part` | Whether to emit the concatenated `dual_arm` control part. Default: `True`. |
 
+`embodichain list-robot` advertises the six UR bases and `FrankaPanda` under
+`DualArmRobot`. The default `ur10` pair has 12 independent control DOFs. A Panda
+pair has 16, including one independent gripper command per side, plus two mimic
+followers. The overlapping `dual_arm` group counts the arm joints once.
+
 ## Derived Control Parts
 
 For a UR5 base robot with the default preserved joint casing, `DualArmRobotCfg`
@@ -111,7 +116,8 @@ applies the `left_` / `right_` prefixes consistently with the assembled URDF.
 ## Programmatic Build Path
 
 ```python
-from embodichain.lab.sim.robots import URRobotCfg, build_dual_arm_cfg, resolve_mounts
+from embodichain_robots import URRobotCfg
+from embodichain.lab.sim.robots.dual_arm import build_dual_arm_cfg, resolve_mounts
 
 base = URRobotCfg.from_dict({"robot_type": "ur5"})
 mounts = resolve_mounts({"preset": "facing_inward", "separation": 0.6})
@@ -124,7 +130,10 @@ A single-arm robot becomes dual-arm-ready by:
 
 1. following the existing `"arm"` convention in its single-arm cfg,
 2. exposing `control_parts["arm"]` and `solver_cfg["arm"]`,
-3. adding one registry entry in `embodichain/lab/sim/robots/dual_arm.py`.
+3. registering its ID in `embodichain_robots/_catalog.py` or an installed
+   `embodichain.robots` catalog,
+4. declaring `supports_dual_arm=True` in its catalog metadata to advertise the
+   base in `list-robot`.
 
 That keeps the dual-arm path generic: no extra mixin or robot-specific dual-arm
 class is required.
