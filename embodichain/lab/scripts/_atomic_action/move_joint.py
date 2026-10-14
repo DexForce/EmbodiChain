@@ -100,28 +100,22 @@ def run(args: argparse.Namespace) -> None:
         sim, args, "Inspect the robot, then press Enter to plan MoveJoints..."
     )
 
-    waypoints = (
-        torch.stack([mid, home]).unsqueeze(0).repeat(robot.get_qpos().shape[0], 1, 1)
-    )
     control_parts = {"primary": {"motion": "arm"}}
     policy = MotionPolicy(
         strategy="motion_gen",
         sample_count=MOVE_JOINTS_SAMPLE_INTERVAL,
     )
     compiled = engine.compile(
-        (
+        # Required targets must be action boundaries before control-grid
+        # retiming and spatial expansion, which preserve phase endpoints.
+        tuple(
             engine.make_invocation(
                 "move_joints",
-                JointPositionGoal("ready"),
+                JointPositionGoal(target),
                 control_parts=control_parts,
                 motion_policy=policy,
-            ),
-            engine.make_invocation(
-                "move_joints",
-                JointPositionGoal(waypoints),
-                control_parts=control_parts,
-                motion_policy=policy,
-            ),
+            )
+            for target in ("ready", mid, home)
         ),
         engine.initial_context(
             control_dt=sim.sim_config.physics_dt,

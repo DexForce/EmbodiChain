@@ -84,6 +84,10 @@ transitions, phase endpoints, and hand joint columns stay exact. Motion phases
 may change between their endpoints; no timing factor changes the replay
 callbacks or control clock.
 
+MoveJoint compiles `ready`, `mid`, and `home` as separate invocations. Each
+required joint target is an action boundary preserved by control-grid retiming
+and both spatial operators; motion between these targets remains editable.
+
 Pour's complete rotation-and-return phase stays exact, including the interior
 rotated target. Its plan exposes both legs as one segment without an interior
 waypoint boundary, so spatial operators are withheld from that segment.

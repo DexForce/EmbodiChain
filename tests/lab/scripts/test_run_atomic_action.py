@@ -57,6 +57,8 @@ from embodichain.lab.scripts._atomic_action.support import (
     create_ur10_robotiq_robot_cfg,
 )
 from embodichain.lab.sim.motion.solvers import FEPSolverCfg, PytorchSolverCfg
+from embodichain.lab.sim.motion.motion_generator import MotionGenerator
+from embodichain.lab.sim.motion.planners import TrapezoidalPlanner
 
 MULTI_ROBOT_SCENES = {"pickup", "place", "move_joint", "handover"}
 PGI_FINGER_LINKS = ("gripper_finger1_link_1", "gripper_finger2_link_1")
@@ -661,6 +663,107 @@ def test_both_spatial_operators_keep_contacts_hands_clock_and_action_joins() -> 
     assert not torch.equal(
         expanded.positions[2, :25, :2], compiled.trajectory.positions[2, :25, :2]
     )
+
+
+@pytest.mark.parametrize("robot_type", ("ur5", "franka", "ur10"))
+def test_move_joint_expansion_preserves_required_mid_waypoint(
+    monkeypatch: pytest.MonkeyPatch, robot_type: str
+) -> None:
+    """Compile the sample with real planning/retiming before applying both operators."""
+    from embodichain.lab.scripts._atomic_action import move_joint
+
+    cfg = _sample_defaults("move_joint", robot=robot_type)
+    args = _scene_args(cfg, (0, 1, 2), 0)
+    args.no_vis_eef_axis = True
+    args.num_envs = len(args._recipes)
+    robot_cfg = create_tutorial_robot_cfg(robot_type)
+    arm_dof = len(robot_cfg.control_parts["arm"])
+    qpos = torch.tensor(robot_cfg.init_qpos).repeat(args.num_envs, 1)
+    limits = torch.tensor([-2 * torch.pi, 2 * torch.pi]).expand(
+        args.num_envs, qpos.shape[1], 2
+    )
+    robot = SimpleNamespace(
+        device=torch.device("cpu"),
+        dof=qpos.shape[1],
+        num_instances=args.num_envs,
+        control_parts=robot_cfg.control_parts,
+        joint_names=tuple(f"joint_{index}" for index in range(qpos.shape[1])),
+        get_qpos=lambda name=None: qpos[:, :arm_dof] if name == "arm" else qpos,
+        get_joint_ids=lambda name: list(range(arm_dof)),
+        get_qpos_limits=lambda name=None: (
+            limits[:, :arm_dof] if name == "arm" else limits
+        ),
+    )
+    planner = object.__new__(TrapezoidalPlanner)
+    planner.device = robot.device
+    planner.robot = robot
+    planner.cfg = SimpleNamespace(planner_type="trapezoidal")
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.robot = robot
+    generator.device = robot.device
+    sim = SimpleNamespace(
+        sim_config=SimpleNamespace(physics_dt=0.01), prepare=lambda: None
+    )
+    monkeypatch.setattr(move_joint, "create_tutorial_simulation", lambda args: sim)
+    monkeypatch.setattr(move_joint, "add_tutorial_robot", lambda *args: robot)
+    monkeypatch.setattr(
+        move_joint, "create_curobo_motion_generator", lambda *args, **kwargs: generator
+    )
+    monkeypatch.setattr(move_joint, "prepare_tutorial_scene", lambda *args: False)
+    compiled_plans = []
+    monkeypatch.setattr(
+        move_joint,
+        "replay_trajectory",
+        lambda *args, **kwargs: compiled_plans.append(kwargs["compiled"]),
+    )
+    move_joint.run(args)
+    compiled = compiled_plans[0]
+    assert compiled.plan_success.all()
+    expanded, records = _augment(compiled, robot, args)
+    assert [record["operator"] for record in records] == [
+        "none",
+        "joint_residual",
+        "via_points",
+    ]
+    home = qpos[0, :arm_dof]
+    mid = home.clone()
+    # The sample's explicit UR5 offsets also apply to the first six joints of
+    # the Franka and UR10 presets; any remaining arm joint keeps its home value.
+    mid[:6] += torch.tensor([0.15, 0.17, -0.12, -0.03, 0.0, 0.10])
+    distances = torch.linalg.vector_norm(
+        expanded.positions[:, :, :arm_dof] - mid, dim=2
+    )
+    torch.testing.assert_close(
+        distances[1:].min(dim=1).values, torch.zeros(2), rtol=0, atol=1e-7
+    )
+    assert len(compiled.action_plans) == 3
+    mid_segment = compiled.segment(1, "move_joints")
+    home_segment = compiled.segment(2, "move_joints")
+    assert torch.equal(
+        expanded.positions[:, mid_segment.stop - 1, :arm_dof],
+        mid.expand(args.num_envs, -1),
+    )
+    assert torch.equal(
+        expanded.positions[:, home_segment.start, :arm_dof],
+        mid.expand(args.num_envs, -1),
+    )
+    assert torch.equal(
+        expanded.positions[:, -1, :arm_dof], home.expand(args.num_envs, -1)
+    )
+    assert torch.equal(expanded.dt, compiled.trajectory.dt)
+    assert torch.equal(
+        expanded.positions[:, :, arm_dof:],
+        compiled.trajectory.positions[:, :, arm_dof:],
+    )
+    assert torch.equal(expanded.positions[0], compiled.trajectory.positions[0])
+    for row in (1, 2):
+        assert not torch.equal(
+            expanded.positions[row, mid_segment.start : mid_segment.stop, :arm_dof],
+            compiled.trajectory.positions[
+                0, mid_segment.start : mid_segment.stop, :arm_dof
+            ],
+        )
 
 
 @pytest.mark.parametrize("join_dt", [0.0, 0.01])

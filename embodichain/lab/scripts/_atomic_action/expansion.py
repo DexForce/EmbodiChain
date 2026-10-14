@@ -57,6 +57,8 @@ FREE_PHASES = {
         "source_retreat",
         "place",
     },
+    # The sample makes each required joint target a separate invocation, so
+    # every required waypoint is an endpoint of its editable motion phase.
     "move_joints": {"move_joints"},
     "axis_align": {"approach", "manipulate"},
     "open_door": {"approach", "retract"},
