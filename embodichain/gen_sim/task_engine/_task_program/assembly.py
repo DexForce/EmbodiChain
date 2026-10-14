@@ -112,6 +112,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         press_routes: tuple = (),
         pick_continuations: tuple = (),
         twist_routes: tuple = (),
+        pick_contact_revision: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -129,6 +130,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
         self._twist_routes = twist_routes
+        self._pick_contact_revision = pick_contact_revision
         self._task_post_port = TaskStabilityPort(
             self.segment_policy_port,
             self._simulation,
@@ -239,6 +241,17 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
+        if self._pick_contact_revision == 1:
+            from .pick_contact import build_closing_contact_screen
+
+            pick.closing_geometry_factory = (
+                lambda request, context: build_closing_contact_screen(
+                    self._robot,
+                    self._simulation,
+                    self.task_program_registration.scene_binding,
+                    request,
+                )
+            )
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
         transport = GenSimMoveHeldObject(staging_contract=self._staging_contract)
@@ -399,6 +412,7 @@ class TaskAdapterFactory:
     press_routes: tuple = ()
     twist_routes: tuple = ()
     support_contract_revision: int | None = None
+    pick_contact_revision: int | None = None
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -570,6 +584,7 @@ class TaskAdapterFactory:
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
             twist_routes=self.twist_routes,
+            pick_contact_revision=self.pick_contact_revision,
         )
         support = [
             cfg
@@ -629,6 +644,7 @@ def load_deployment(
             "staging_calls",
             "staging_retention_sources",
             "support_contract_revision",
+            "pick_contact_revision",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -637,6 +653,11 @@ def load_deployment(
         )
     presets = payload["presets"]
     support_revision = payload.get("support_contract_revision")
+    pick_contact_revision = payload.get("pick_contact_revision")
+    if pick_contact_revision is not None and (
+        type(pick_contact_revision) is not int or pick_contact_revision != 1
+    ):
+        raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_revision is not None and (
         type(support_revision) is not int or support_revision != 1
     ):
@@ -1001,6 +1022,7 @@ def load_deployment(
         press_routes=press_routes,
         twist_routes=twist_routes,
         support_contract_revision=support_revision,
+        pick_contact_revision=pick_contact_revision,
     )
     integration = replace(
         base.integration,

@@ -438,12 +438,17 @@ class GenSimActionEngine(AtomicActionEngine):
             and not getattr(self.motion_generator, "direct_transport_planning", False)
         )
         pick_transform = False
+        closing_transform = False
         held_transform = False
         if plan_transform is not None:
             from .actions import GenSimMoveHeldObject, GenSimPickUp
             from .pick_safety import _owns_constrained_pick
 
             transformed_action = getattr(self, "_actions", {}).get(request.skill_id)
+            closing_transform = (
+                isinstance(transformed_action, GenSimPickUp)
+                and transformed_action.closing_geometry_factory is not None
+            )
             pick_transform = isinstance(
                 transformed_action, GenSimPickUp
             ) and _owns_constrained_pick(request, context, self.motion_generator)
@@ -457,6 +462,7 @@ class GenSimActionEngine(AtomicActionEngine):
         if context is None and (
             alignment
             or pick_transform
+            or closing_transform
             or held_transform
             or request.invocation_id in getattr(self, "_clearance_requests", {})
             or request.invocation_id in getattr(self, "_clearance_parks", ())
@@ -798,6 +804,53 @@ class GenSimActionEngine(AtomicActionEngine):
                                 if acceptance["valid"]
                                 else PlanningFailure(
                                     "pick_robot_safety_failed", retryable=False
+                                )
+                            ),
+                        ),
+                    )
+                if closing_transform and plan.plan_success.any():
+                    from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
+                    from .articulation_collision import robot_collision_scope
+                    from .pick_safety import _inspect_pick_plan
+
+                    try:
+                        with robot_collision_scope():
+                            commands = _inspect_pick_plan(
+                                self.robot, selected_request, context, plan
+                            )
+                        acceptance = (
+                            transformed_action.inspect_closing_plan(
+                                selected_request, context, plan
+                            )
+                            if commands["valid"]
+                            else {"valid": False, "command_validation": commands}
+                        )
+                    except (
+                        ValueError,
+                        RuntimeError,
+                        AttributeError,
+                        KeyError,
+                        TypeError,
+                    ) as error:
+                        acceptance = {"valid": False, "unavailable": str(error)}
+                    plan = replace(
+                        plan,
+                        plan_success=(
+                            plan.plan_success
+                            if acceptance["valid"]
+                            else torch.zeros_like(plan.plan_success)
+                        ),
+                        diagnostics=replace(
+                            plan.diagnostics,
+                            metadata={
+                                **plan.diagnostics.metadata,
+                                "gen_sim_pick_final_contact_check": acceptance,
+                            },
+                            failure=(
+                                plan.diagnostics.failure
+                                if acceptance["valid"]
+                                else PlanningFailure(
+                                    "pick_contact_geometry_failed", retryable=False
                                 )
                             ),
                         ),

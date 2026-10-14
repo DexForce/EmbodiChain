@@ -193,6 +193,7 @@ def generate_task_program_bundle(
     twist_contact_feedback: bool = False,
     twist_mass_source: bool = False,
     support_contract_revision: int | None = None,
+    pick_contact_revision: int | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -217,6 +218,8 @@ def generate_task_program_bundle(
             unmodified Lab loader does not expose the mass policy capability.
         support_contract_revision: Explicit native E1 support contract; None
             preserves legacy bundles, while 1 requires scoped physical evidence.
+        pick_contact_revision: Explicit native rigid Pick closing screen. None
+            preserves legacy sampling; 1 rejects nonpad-first nominal closure.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -594,6 +597,7 @@ def generate_task_program_bundle(
         scene,
         embodiment_payload,
         support_contract_revision=support_contract_revision,
+        pick_contact_revision=pick_contact_revision,
     )
     drawer_targets = {route.affordance for route in drawers}
     drawer_groups = frozenset(
@@ -832,9 +836,14 @@ def _task_stability_payload(
     embodiment: dict[str, Any],
     *,
     support_contract_revision: int | None = None,
+    pick_contact_revision: int | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    if pick_contact_revision is not None and (
+        type(pick_contact_revision) is not int or pick_contact_revision != 1
+    ):
+        raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_contract_revision is not None and (
         type(support_contract_revision) is not int or support_contract_revision != 1
     ):
@@ -1137,6 +1146,8 @@ def _task_stability_payload(
     }
     if support_contract_revision is not None:
         result["support_contract_revision"] = support_contract_revision
+    if pick_contact_revision is not None:
+        result["pick_contact_revision"] = pick_contact_revision
     return result
 
 

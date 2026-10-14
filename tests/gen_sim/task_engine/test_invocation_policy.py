@@ -569,6 +569,79 @@ def test_pick_without_transform_does_not_repeat_robotproxy_inspection(
     probe.engine.initial_context.assert_not_called()
 
 
+@pytest.mark.parametrize("valid", [False, True])
+@pytest.mark.parametrize("implicit_context", [False, True])
+def test_explicit_native_closing_contract_rechecks_transformed_ordinary_pick(
+    monkeypatch, pick_transform_inputs, valid, implicit_context
+):
+    probe = pick_transform_inputs
+    probe.request.goal.semantics.affordance.custom_config.clear()
+    action = probe.engine._actions["pick_up"]
+    action.closing_geometry_factory = object()
+    inspection = Mock(return_value={"valid": valid, "scope": "exact_close_tcp"})
+    monkeypatch.setattr(action, "inspect_closing_plan", inspection)
+    positions = probe.first.joint_trajectory.positions.clone()
+    positions[:, 1:, 0] = 0.001
+    transformed = probe.make_plan(positions)
+    probe.collision.side_effect = None
+    probe.collision.return_value = {"valid": True}
+    result = probe.engine._plan_request(
+        probe.request,
+        None if implicit_context else probe.context,
+        plan_transform=lambda *args: transformed,
+    )
+    inspection.assert_called_once()
+    request, context, inspected = inspection.call_args.args
+    assert request is probe.request and context is probe.context
+    assert inspected.joint_trajectory is transformed.joint_trajectory
+    assert result.plan_success.tolist() == [valid]
+    assert probe.engine.initial_context.call_count == int(implicit_context)
+    assert (
+        result.diagnostics.metadata["gen_sim_pick_final_contact_check"]["valid"]
+        is valid
+    )
+    if not valid:
+        assert result.diagnostics.failure.code == "pick_contact_geometry_failed"
+        assert result.diagnostics.failure.retryable is False
+
+
+def test_native_closing_transform_rejects_command_trajectory_mismatch(
+    monkeypatch, pick_transform_inputs
+):
+    probe = pick_transform_inputs
+    probe.request.goal.semantics.affordance.custom_config.clear()
+    action = probe.engine._actions["pick_up"]
+    action.closing_geometry_factory = object()
+    inspection = Mock(
+        side_effect=AssertionError("mismatched commands reached geometry")
+    )
+    monkeypatch.setattr(action, "inspect_closing_plan", inspection)
+    frames = list(probe.first.commands.frames)
+    commands = list(frames[1].commands)
+    commands[1] = replace(
+        commands[1],
+        payload=replace(
+            commands[1].payload, positions=commands[1].payload.positions + 0.01
+        ),
+    )
+    frames[1] = replace(frames[1], commands=tuple(commands))
+    transformed = replace(
+        probe.first, commands=replace(probe.first.commands, frames=tuple(frames))
+    )
+    result = probe.engine._plan_request(
+        probe.request, probe.context, plan_transform=lambda *args: transformed
+    )
+    inspection.assert_not_called()
+    assert result.plan_success.tolist() == [False]
+    assert result.diagnostics.failure.code == "pick_contact_geometry_failed"
+    assert (
+        result.diagnostics.metadata["gen_sim_pick_final_contact_check"][
+            "command_validation"
+        ]["valid"]
+        is False
+    )
+
+
 @pytest.mark.parametrize(
     "exemption",
     [

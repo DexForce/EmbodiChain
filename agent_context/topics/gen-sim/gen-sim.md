@@ -112,8 +112,17 @@ post-segment `end_steps` slots, independently of fresh final poses; later motion
 cannot erase or falsely establish an earlier milestone. This uses the existing
 runner and unchanged bundle declarations/fingerprints, not a second executor.
 Curved/unmeasured floors and articulated reference parts remain unavailable;
-the planar landing-region certificate is not contact-force or arbitrary 3D-cavity
-qualification. Non-E1 and legacy bundles without TaskSpec retain their prior gates.
+the legacy planar landing-region certificate is not contact-force or arbitrary
+3D-cavity qualification. Explicit `support_contract_revision=1` instead requires
+release-scoped native support samples at historical and final boundaries.
+An independent `pick_contact_revision=1` opts rigid Pick into a Default/B1 native
+cooked-shape screen: complete named hand commands and actual rest offsets qualify
+sampled nominal closure only until bilateral pad contact. It screens final TCP
+rolls and emitted close commands, including after plan transforms; it neither
+changes proposals/RNG nor replaces native acquisition/retention evidence. Both
+markers default to absent for legacy equivalence and are independent of recipe
+composition. Neither discrete screen proves continuous collision freedom.
+Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote

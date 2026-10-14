@@ -95,6 +95,8 @@ class _PickSelection:
     request: object = None
     trajectory: tuple | None = None
     constrained: bool = False
+    closing_geometry: Any = None
+    object_pose: torch.Tensor | None = None
     candidates: AffordancePoseCandidates | None = None
     candidate_routes: list[tuple[int, AffordancePoseCandidates, torch.Tensor]] = field(
         default_factory=list
@@ -134,6 +136,131 @@ class GenSimPickUp(PickUp):
     continuation_previews: dict | None = None
     path_simulation: object | None = None
     path_excluded_invocations: frozenset[str] = frozenset()
+    closing_geometry_factory: Any = None
+
+    def _approach_alignment_mask(self, grasp_poses, options, approach_direction):
+        aligned = super()._approach_alignment_mask(
+            grasp_poses, options, approach_direction
+        )
+        selection = _PICK_SELECTION.get()
+        if selection is not None and selection.closing_geometry is not None:
+            if selection.object_pose is None:
+                raise ValueError("Pick closing screen has no exact object reference.")
+            aligned = aligned & selection.closing_geometry.mask(
+                grasp_poses, selection.object_pose
+            )
+        return aligned
+
+    def inspect_closing_plan(
+        self, request: Any, context: Any, plan: Any, *, screen: Any = None
+    ) -> dict[str, Any]:
+        """Screen actual close TCP samples, including a transformed plan's poses."""
+        from embodichain.lab.sim.atomic_actions.goals import (
+            _resolve_object_pose,
+            resolve_pose_goal,
+        )
+        from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+            resolve_pose_target,
+        )
+
+        if screen is None:
+            screen = self.closing_geometry_factory(request, context)
+        if screen is None:
+            return {"valid": True, "scope": "not_a_bound_rigid_pick"}
+        close = next(
+            (segment for segment in plan.segments if segment.name == "close"), None
+        )
+        if close is None or close.stop <= close.start:
+            raise ValueError("Pick closing requires its actual emitted close phase.")
+        from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+            interpolate_hand_qpos,
+        )
+
+        hand_endpoint = request.binding.endpoint("primary", "grasp")
+        hand = hand_endpoint.require_target(JointPositionTarget)
+        hand_commands = plan.joint_trajectory.positions[
+            :, close.start : close.stop, list(hand.joint_ids)
+        ]
+        opened, closed = (
+            hand_endpoint.joint_positions(
+                command,
+                num_envs=context.batch_size,
+                device=hand_commands.device,
+                dtype=hand_commands.dtype,
+            )
+            for command in ("open", "grasp")
+        )
+        options = request.skill_options
+        expected = torch.cat(
+            (
+                interpolate_hand_qpos(
+                    opened, closed, n_waypoints=options.hand_interp_steps
+                ),
+                closed[:, None].expand(-1, options.grasp_settle_steps, -1),
+            ),
+            dim=1,
+        )
+        if not torch.equal(hand_commands, expected):
+            return {"valid": False, "reason": "emitted_hand_closing_commands_changed"}
+        endpoint = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        positions = plan.joint_trajectory.positions[
+            :, close.start : close.stop, list(endpoint.joint_ids)
+        ]
+        poses = self.robot.compute_batch_fk(
+            qpos=positions, name=endpoint.control_part, to_matrix=True
+        )
+        goal = request.goal
+        object_pose = (
+            _resolve_object_pose(goal.semantics, context, name="pickup_object_pose")
+            if goal.object_pose is None
+            else resolve_pose_target(
+                resolve_pose_goal(goal.object_pose, context, name="object_pose"),
+                num_envs=context.batch_size,
+                device=poses.device,
+            )
+        )
+        valid = bool(screen.mask(poses, object_pose).all())
+        return {
+            "valid": valid,
+            "emitted_close_samples": poses.shape[1],
+            **screen.report(),
+        }
+
+    def _qualify_closing_plan(self, request: Any, context: Any, plan: Any) -> Any:
+        selection = _PICK_SELECTION.get()
+        screen = None if selection is None else selection.closing_geometry
+        if screen is None:
+            return plan
+        acceptance = (
+            self.inspect_closing_plan(request, context, plan, screen=screen)
+            if plan.plan_success.any()
+            else {"valid": False, **screen.report()}
+        )
+        metadata = {
+            **plan.diagnostics.metadata,
+            "gen_sim_pick_contact_geometry": acceptance,
+        }
+        return replace(
+            plan,
+            plan_success=(
+                plan.plan_success
+                if acceptance["valid"]
+                else torch.zeros_like(plan.plan_success)
+            ),
+            diagnostics=replace(
+                plan.diagnostics,
+                metadata=metadata,
+                failure=(
+                    plan.diagnostics.failure
+                    if acceptance["valid"] or not plan.plan_success.any()
+                    else PlanningFailure(
+                        "gen_sim_pick_contact_unqualified", retryable=False
+                    )
+                ),
+            ),
+        )
 
     def _compute_batch_candidate_ik(
         self,
@@ -175,6 +302,9 @@ class GenSimPickUp(PickUp):
         approach_direction: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Prefilter grasp columns, leaving IK and roll selection to shared PickUp."""
+        selection = _PICK_SELECTION.get()
+        if selection is not None:
+            selection.object_pose = object_poses
         if (
             options.rotate_upright is not None
             or options.approach_alignment_max_angle is None
@@ -193,7 +323,9 @@ class GenSimPickUp(PickUp):
         eef_variants = variants @ options.grasp_frame_to_eef.to(
             device=self.device, dtype=grasp_xpos.dtype
         )
-        aligned = self._approach_alignment_mask(
+        # Preserve the original IK population and RNG draws; closing geometry
+        # masks final roll variants in the shared selector after its IK calls.
+        aligned = super()._approach_alignment_mask(
             eef_variants, options, approach_direction
         )
         # Keep the full environment axis and both roll variants of a retained
@@ -247,10 +379,16 @@ class GenSimPickUp(PickUp):
                 semantics.affordance.set_custom_config(ADAPTIVE_GRASP, purpose)
                 request = replace(request, goal=replace(goal, semantics=semantics))
         selection = _PickSelection(request=request)
+        if self.closing_geometry_factory is not None:
+            selection.closing_geometry = self.closing_geometry_factory(request, context)
+
+        def finish(plan):
+            return self._qualify_closing_plan(request, context, plan)
+
         token = _PICK_SELECTION.set(selection)
         try:
             with robot_collision_scope():
-                first = super()._plan(request, context)
+                first = finish(super()._plan(request, context))
                 preview = (self.continuation_previews or {}).get(
                     getattr(request, "invocation_id", None)
                 )
@@ -258,15 +396,17 @@ class GenSimPickUp(PickUp):
                     from .pick_continuation import eligible, recover
 
                     if eligible(self, request, context, selection, preview):
-                        first = recover(
-                            self, request, context, first, selection, preview
+                        first = finish(
+                            recover(self, request, context, first, selection, preview)
                         )
                 from .pick_path import eligible as owns_path, rebuild
 
                 if owns_path(self, request, context, selection):
-                    qualified = rebuild(self, request, context, first, selection)
+                    qualified = finish(
+                        rebuild(self, request, context, first, selection)
+                    )
                     if qualified.plan_success.all():
-                        return qualified
+                        return finish(qualified)
                     first = self._retry_ordinary_pick_candidates(
                         request, context, qualified, selection
                     )
@@ -280,8 +420,8 @@ class GenSimPickUp(PickUp):
                             request, context, first, selection
                         )
                         if first.plan_success.all():
-                            return first
-                return first
+                            return finish(first)
+                return finish(first)
         finally:
             _PICK_SELECTION.reset(token)
 
@@ -386,7 +526,9 @@ class GenSimPickUp(PickUp):
                     )
                     # Shared PickUp builds commands/effects from the screened
                     # trajectory; do not lose its accepted IK branch by replanning.
-                    candidate = super()._plan(selected, context)
+                    candidate = self._qualify_closing_plan(
+                        selected, context, super()._plan(selected, context)
+                    )
                     record["emitted_plan"] = _inspect_pick_plan(
                         self.robot, selected, context, candidate
                     )
@@ -554,8 +696,11 @@ class GenSimPickUp(PickUp):
                     None,
                     direction,
                 )
-                candidate = super()._plan(selected, context)
+                candidate = self._qualify_closing_plan(
+                    selected, context, super()._plan(selected, context)
+                )
                 candidate = rebuild(self, selected, context, candidate, selection)
+                candidate = self._qualify_closing_plan(selected, context, candidate)
                 record = {
                     "strategy": strategy,
                     "candidate_id": index,
@@ -776,9 +921,11 @@ class GenSimPickUp(PickUp):
                     if self._approach_alignment_mask(
                         alternate[:, None, None], options, direction
                     ).all():
-                        second = super()._plan(
-                            replace(request, goal=replace(goal, grasp_xpos=alternate)),
-                            context,
+                        selected = replace(
+                            request, goal=replace(goal, grasp_xpos=alternate)
+                        )
+                        second = self._qualify_closing_plan(
+                            selected, context, super()._plan(selected, context)
                         )
                         certificate = (
                             _inspect_pick_plan(self.robot, request, context, second)

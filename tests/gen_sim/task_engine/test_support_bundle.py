@@ -328,6 +328,40 @@ def test_strong_bundle_round_trips_through_production_loader(
     assert len(load_config(paths.program)["program"]["items"][-1]["post"]) == 1
 
 
+@pytest.mark.parametrize("revision", [None, 1])
+def test_pick_contact_contract_is_explicit_and_independent_of_support(
+    support_scene: PreparedScene, tmp_path: Path, revision: int | None
+) -> None:
+    _, paths = bundle.generate_task_program_bundle(
+        _placement_graph(reference="tray"),
+        support_scene,
+        tmp_path / "pick_contact",
+        robot_profile="dual_franka",
+        pick_contact_revision=revision,
+    )
+    constraints = load_config(paths.root / "task_program/constraints.json")
+    assert constraints.get("pick_contact_revision") == revision
+    assert "support_contract_revision" not in constraints
+    assert (
+        _load_bundle(paths).integration.adapter_factory.pick_contact_revision
+        == revision
+    )
+
+
+@pytest.mark.parametrize("revision", [True, 0, 2, "1"])
+def test_pick_contact_contract_rejects_unknown_revisions(
+    support_scene: PreparedScene, tmp_path: Path, revision: object
+) -> None:
+    with pytest.raises(ValueError, match="Pick contact revision"):
+        bundle.generate_task_program_bundle(
+            _placement_graph(reference="tray"),
+            support_scene,
+            tmp_path / "invalid_pick_contact",
+            robot_profile="dual_franka",
+            pick_contact_revision=revision,
+        )
+
+
 def _articulation_bundles(
     support_scene: PreparedScene,
     control_scene: PreparedScene,
