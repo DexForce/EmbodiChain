@@ -302,7 +302,11 @@ def retime_joint_paths(
         from embodichain.compute.trajectory._toppra_warp import _retime_toppra_warp
 
         quantity = sample_method == TrajectorySampleMethod.QUANTITY
-        waypoints = positions if positions.is_floating_point() else positions.double()
+        waypoints = (
+            positions
+            if positions.dtype in (torch.float32, torch.float64)
+            else positions.float()
+        )
         try:
             result = _retime_toppra_warp(
                 waypoints,

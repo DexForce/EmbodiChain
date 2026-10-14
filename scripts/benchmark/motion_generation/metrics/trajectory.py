@@ -538,7 +538,10 @@ def _trajectory_derivatives(
     velocity = positions.diff(dim=0) / steps.unsqueeze(-1)
     midpoint_gaps = 0.5 * (steps[1:] + steps[:-1])
     acceleration = velocity.diff(dim=0) / midpoint_gaps.unsqueeze(-1)
-    centre_gaps = 0.5 * (midpoint_gaps[1:] + midpoint_gaps[:-1])
+    # A compact acceleration estimate is located at the mean of its three
+    # position-sample times. Consecutive estimates are therefore separated by
+    # one third of the three intervening step lengths.
+    centre_gaps = (steps[:-2] + steps[1:-1] + steps[2:]) / 3.0
     jerk = acceleration.diff(dim=0) / centre_gaps.unsqueeze(-1)
     return velocity, acceleration, jerk
 
@@ -551,7 +554,7 @@ def _dynamic_limit_metrics(
     qjerk_limits: torch.Tensor | None,
     tolerance: float,
     timing_is_solved: bool = True,
-) -> dict[str, float | bool | None]:
+) -> dict[str, float | bool | str | None]:
     """Return peak dynamics, limit utilization, and violation per derivative.
 
     Every entry is ``None`` when the trajectory is unusable or the matching
@@ -590,6 +593,7 @@ def _dynamic_limit_metrics(
             "max_joint_jerk_rad_s3": math.inf,
             "jerk_utilization": math.inf if limited[2] else None,
             "jerk_limit_violation": True if limited[2] else None,
+            "dynamic_measurement_status": "unbounded",
             "dynamic_limits_satisfied": (
                 False if (any(limited) and timing_is_solved) else None
             ),
@@ -620,6 +624,9 @@ def _dynamic_limit_metrics(
         "max_joint_jerk_rad_s3": peak_jerk,
         "jerk_utilization": jerk_utilization,
         "jerk_limit_violation": jerk_violation,
+        "dynamic_measurement_status": (
+            "finite" if velocity is not None else "unavailable"
+        ),
         "dynamic_limits_satisfied": (
             (not any(checks)) if (checks and timing_is_solved) else None
         ),

@@ -96,6 +96,7 @@ METRIC_COLUMNS = (
     "velocity_utilization",
     "acceleration_utilization",
     "jerk_utilization",
+    "dynamic_measurement_status",
     "max_joint_velocity_rad_s",
     "max_joint_acceleration_rad_s2",
     "max_joint_jerk_rad_s3",

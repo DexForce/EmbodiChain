@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import cast
@@ -39,6 +40,8 @@ __all__ = [
 
 def _json_value(value: object) -> object:
     """Convert nested benchmark values into deterministic JSON values."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, frozenset):
@@ -181,6 +184,8 @@ class CaseOutcome:
     max_joint_jerk_rad_s3: float | None = None
     jerk_utilization: float | None = None
     jerk_limit_violation: bool | None = None
+    dynamic_measurement_status: str | None = None
+    """Whether trajectory dynamics were ``finite``, ``unbounded``, or unavailable."""
     dynamic_limits_satisfied: bool | None = None
     """Whether every applicable dynamic limit holds, or ``None`` when none apply.
 

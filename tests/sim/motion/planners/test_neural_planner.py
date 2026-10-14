@@ -528,6 +528,19 @@ def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
         )
 
 
+def test_retime_joint_paths_promotes_half_precision_before_warp():
+    paths = torch.zeros(2, 6, NUM_ARM_JOINTS, dtype=torch.float16)
+    paths[:, :, 0] = torch.linspace(0.0, 1.0, 6, dtype=torch.float16)
+
+    result = retime_joint_paths(
+        paths,
+        constraints={"velocity": 1.0, "acceleration": 2.0},
+    )
+
+    assert result.success.tolist() == [True, True]
+    assert result.positions.dtype == torch.float32
+
+
 def test_retiming_samples_on_the_control_period_not_the_rollout_step_count(
     tmp_path, monkeypatch
 ):
@@ -620,6 +633,47 @@ def test_retimed_waypoint_check_keeps_order_and_runs_once_per_waypoint(
     assert reached.tolist() == [True, False, False]
     # One batched test per waypoint, independent of the sample count.
     assert len(calls) == 2
+
+
+def test_retimed_waypoint_check_allows_repeated_stationary_targets(
+    tmp_path, monkeypatch
+):
+    model_path = _create_fake_onnx_model(tmp_path)
+    fake_sim = FakeSimulationManager()
+    monkeypatch.setattr(
+        SimulationManager,
+        "get_instance",
+        classmethod(lambda cls, instance_id=0: fake_sim),
+    )
+    planner = NeuralPlanner(
+        NeuralPlannerCfg(
+            robot_uid="fake_robot",
+            onnx_model_path=model_path,
+            control_part="main_arm",
+        )
+    )
+    waypoints_joint = torch.zeros(1, NUM_WAYPOINTS, NUM_ARM_JOINTS)
+    waypoints_joint[:, :3, 0] = 0.5
+    joint_mask = torch.zeros(1, NUM_WAYPOINTS)
+    joint_mask[:, :3] = 1.0
+    waypoints_quat = torch.zeros(1, NUM_WAYPOINTS, 4)
+    waypoints_quat[..., 3] = 1.0
+    no_mask = torch.zeros(1, NUM_WAYPOINTS)
+    waypoints = (
+        torch.zeros(1, NUM_WAYPOINTS, 3),
+        waypoints_quat,
+        waypoints_joint,
+        no_mask,
+        no_mask,
+        joint_mask,
+    )
+    positions = torch.zeros(1, 2, NUM_ARM_JOINTS)
+    positions[:, 1, 0] = 0.5
+    poses = torch.eye(4).repeat(1, 2, 1, 1)
+
+    reached = planner._retimed_reaches_waypoints(positions, poses, waypoints, 3)
+
+    assert reached.tolist() == [True]
 
 
 def test_neural_planner_disables_grad_for_all_fk_calls(tmp_path, monkeypatch):

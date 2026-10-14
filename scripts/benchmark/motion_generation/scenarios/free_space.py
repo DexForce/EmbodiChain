@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from ..config import SuiteCfg, TrackCfg, stable_hash
+from ..config import FreeSpaceTrackCfg, SuiteCfg, TrackCfg, stable_hash
 from ..models import BenchmarkCase
 from ..registry import register_scenario_provider
 from .base import ScenarioProvider
@@ -206,10 +206,15 @@ def _build_case(
 class FreeSpaceScenario(ScenarioProvider):
     required_capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
 
-    def batch_sizes(
-        self, suite: SuiteCfg, track: TrackCfg
-    ) -> list[int]:  # noqa: ARG002
-        return list(suite.free_space.batch_sizes)
+    @staticmethod
+    def _case_matrix(suite: SuiteCfg, track: TrackCfg) -> FreeSpaceTrackCfg:
+        """Resolve the case matrix for one expanded evaluation track."""
+        if track.domain is None:
+            return suite.free_space
+        return FreeSpaceTrackCfg(**track.config)
+
+    def batch_sizes(self, suite: SuiteCfg, track: TrackCfg) -> list[int]:
+        return list(self._case_matrix(suite, track).batch_sizes)
 
     def generate_cases(
         self,
@@ -219,12 +224,13 @@ class FreeSpaceScenario(ScenarioProvider):
         control_part: str,
         batch_size: int,
     ) -> list[BenchmarkCase]:
+        case_matrix = self._case_matrix(suite, track)
         cases: list[BenchmarkCase] = []
-        for seed in suite.free_space.seeds:
-            for num_waypoints in suite.free_space.waypoint_counts:
-                for path_shape in suite.free_space.path_shapes:
+        for seed in case_matrix.seeds:
+            for num_waypoints in case_matrix.waypoint_counts:
+                for path_shape in case_matrix.path_shapes:
                     for bin_index, start_state_bin in enumerate(
-                        suite.free_space.start_state_bins
+                        case_matrix.start_state_bins
                     ):
                         cases.append(
                             _build_case(

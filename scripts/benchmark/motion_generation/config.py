@@ -312,11 +312,14 @@ class SuiteCfg:
                 effective_id = track.id
                 if len(domains) > 1:
                     effective_id = f"{track.id}@{domain.id}"
+                config = _merge_mappings(track.config, domain.overrides)
+                if track.scenario == _FREE_SPACE_SCENARIO:
+                    _validate_free_space(FreeSpaceTrackCfg(**config))
                 expanded.append(
                     replace(
                         track,
                         id=effective_id,
-                        config=_merge_mappings(track.config, domain.overrides),
+                        config=config,
                         domain=domain,
                         domains=[],
                         group_id=group_id,

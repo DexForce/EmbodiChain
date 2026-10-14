@@ -745,8 +745,8 @@ class NeuralPlanner(BasePlanner):
         The test runs once per waypoint over every sample at once rather than
         once per sample, so its cost does not grow with the solved duration
         and nothing synchronizes with the host inside the loop. Order follows
-        the rollout: waypoint ``k + 1`` counts only at a sample strictly after
-        the one where waypoint ``k`` was first reached.
+        the rollout with nondecreasing arrival indices, so targets independently
+        satisfied by one stationary sample do not require duplicate output.
         """
         (
             waypoints_pos,
@@ -782,7 +782,7 @@ class NeuralPlanner(BasePlanner):
             reached = self._is_active_reached(
                 flat_joint, flat_pose, *targets, active
             ).view(batch, samples)
-            eligible = reached & (sample_index > reached_at.unsqueeze(-1))
+            eligible = reached & (sample_index >= reached_at.unsqueeze(-1))
             reached_at = torch.where(
                 eligible, sample_index, torch.full_like(sample_index, samples)
             ).amin(dim=-1)

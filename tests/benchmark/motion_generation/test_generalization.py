@@ -178,3 +178,29 @@ def test_generalization_excludes_unsupported_cases_but_reports_coverage() -> Non
     assert held_out_row["success_rate"] is None
     assert held_out_row["unsupported_cases"] == 1
     assert held_out_row["generalization_eligible"] is False
+
+
+def test_generalization_counts_missing_repeats_as_failures() -> None:
+    domain = EvaluationDomain(id="objects", version="v1", kind="held_out")
+    case = _case("held-out-case", domain)
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    rows = aggregate_generalization(
+        [_record(case, _outcome(True))],
+        metadata,
+        [case],
+        measured_trials=2,
+    )
+
+    assert rows[0]["coverage_rate"] == pytest.approx(0.5)
+    assert rows[0]["success_rate"] == pytest.approx(0.5)
+    assert rows[0]["domain_mean_success_rate"] == pytest.approx(0.5)
+    assert rows[0]["domain_worst_success_rate"] == pytest.approx(0.5)

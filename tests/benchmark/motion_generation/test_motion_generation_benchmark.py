@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 from unittest.mock import Mock
@@ -42,8 +43,9 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlan
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import load_suite
+from scripts.benchmark.motion_generation.config import DomainCfg, load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
+    _trajectory_derivatives,
     compute_case_outcomes,
     compute_waypoint_errors,
     match_ordered_joint_waypoints,
@@ -380,6 +382,16 @@ def test_dynamics_are_not_smoothed_across_a_reversing_path():
     assert outcome.max_joint_jerk_rad_s3 == pytest.approx(25600.0)
 
 
+def test_jerk_uses_the_effective_spacing_for_unequal_intervals():
+    times = torch.tensor([0.0, 1.0, 3.0, 4.0], dtype=torch.float64)
+    positions = (0.001 * times.pow(3)).unsqueeze(-1)
+    dt = torch.tensor([0.0, 1.0, 2.0, 1.0], dtype=torch.float64)
+
+    _, _, jerk = _trajectory_derivatives(positions, dt)
+
+    assert jerk.item() == pytest.approx(0.006)
+
+
 def test_zero_interval_duplicates_do_not_change_the_dynamics():
     # A junction sample repeated at zero elapsed time adds no motion.
     case, _ = _valid_motion_case_and_positions()
@@ -464,7 +476,12 @@ def _dynamic_trial(outcomes) -> TrialRecord:
     )
 
 
-def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation():
+def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
+    from scripts.benchmark.motion_generation.artifacts import (
+        TrialJsonlWriter,
+        write_json,
+    )
+
     case, positions = _valid_motion_case_and_positions()
     dt = torch.zeros(positions.shape[:2], device=positions.device)
     outcome = compute_case_outcomes(
@@ -479,8 +496,37 @@ def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation():
     )[0]
     assert outcome.velocity_limit_violation is True
     assert outcome.max_joint_velocity_rad_s == math.inf
+    assert outcome.dynamic_measurement_status == "unbounded"
     assert outcome.dynamic_limits_satisfied is False
     assert outcome.failure_code == "dynamic_limit_violation"
+
+    raw_path = tmp_path / "trials.jsonl"
+    TrialJsonlWriter(raw_path).append(_dynamic_trial((outcome,)))
+    raw = json.loads(
+        raw_path.read_text(),
+        parse_constant=lambda value: pytest.fail(f"non-standard JSON: {value}"),
+    )
+    assert raw["outcomes"][0]["max_joint_velocity_rad_s"] is None
+    assert raw["outcomes"][0]["dynamic_measurement_status"] == "unbounded"
+    assert raw["outcomes"][0]["velocity_limit_violation"] is True
+
+    aggregate_path = write_json(
+        tmp_path / "aggregate.json",
+        {
+            "max_joint_velocity_rad_s": math.inf,
+            "velocity_limit_violation": True,
+            "dynamic_measurement_status": "unbounded",
+        },
+    )
+    aggregate = json.loads(
+        aggregate_path.read_text(),
+        parse_constant=lambda value: pytest.fail(f"non-standard JSON: {value}"),
+    )
+    assert aggregate == {
+        "max_joint_velocity_rad_s": None,
+        "velocity_limit_violation": True,
+        "dynamic_measurement_status": "unbounded",
+    }
 
 
 class _PlaceholderLimitRobot(_MetricRobot):
@@ -786,6 +832,7 @@ def test_an_unbounded_peak_is_not_averaged_away():
     ][0]
     assert row["max_joint_velocity_rad_s"] == math.inf
     assert row["velocity_utilization"] == math.inf
+    assert row["dynamic_measurement_status"] == "unbounded"
 
 
 @pytest.mark.parametrize("tolerance", [math.nan, math.inf, -0.1])
@@ -1843,6 +1890,37 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
     suite.free_space.batch_sizes = [1, 8]
     suite.validate_benchmark()
     assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
+
+
+def test_free_space_domain_overrides_change_the_generated_case_matrix():
+    suite = load_suite("smoke")
+    suite.enabled_tracks()[0].domains = [
+        DomainCfg(
+            id="shifted",
+            version="v1",
+            kind="held_out",
+            overrides={
+                "batch_sizes": [2],
+                "waypoint_counts": [1],
+                "path_shapes": ["orientation_only"],
+                "start_state_bins": ["near_limit"],
+                "seeds": [23],
+            },
+        )
+    ]
+    suite.validate_benchmark()
+    track = suite.evaluation_tracks()[0]
+    provider = create_scenario_provider("free_space")
+
+    assert provider.batch_sizes(suite, track) == [2]
+    cases = provider.generate_cases(
+        suite, track, _FrankaLimitRobot(), "arm", batch_size=2
+    )
+    assert len(cases) == 1
+    assert cases[0].seed == 23
+    assert cases[0].num_waypoints == 1
+    assert cases[0].path_shape == "orientation_only"
+    assert cases[0].start_state_bin == "near_limit"
 
 
 def test_free_space_manifest_is_seed_stable_and_algorithm_independent():

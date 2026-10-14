@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
+import math
 import platform
 import subprocess
 from collections.abc import Mapping
@@ -100,7 +101,14 @@ def write_json(path: str | Path, value: object) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, default=str)
+        json.dumps(
+            _to_json_value(value),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+            default=str,
+            allow_nan=False,
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -174,8 +182,10 @@ def _domain_to_dict(domain: object) -> dict[str, object] | None:
 
 def _to_json_value(value: object) -> object:
     """Recursively preserve tensors and numeric case configuration values."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, torch.Tensor):
-        return value.detach().cpu().tolist()
+        return _to_json_value(value.detach().cpu().tolist())
     if isinstance(value, dict):
         return {str(key): _to_json_value(item) for key, item in value.items()}
     if isinstance(value, (set, frozenset)):
@@ -232,5 +242,11 @@ class TrialJsonlWriter:
         """Append one record and flush it immediately for recoverability."""
         with self.path.open("a", encoding="utf-8") as file:
             file.write(
-                json.dumps(record.to_dict(), ensure_ascii=False, default=str) + "\n"
+                json.dumps(
+                    record.to_dict(),
+                    ensure_ascii=False,
+                    default=str,
+                    allow_nan=False,
+                )
+                + "\n"
             )

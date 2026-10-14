@@ -59,6 +59,35 @@ def _mean_unbounded(values: Iterable[float | None]) -> float | None:
     return sum(measured) / len(measured)
 
 
+def _dynamic_measurement_status(outcomes: Iterable[CaseOutcome]) -> str:
+    """Summarize whether dynamic measurements are finite or unbounded."""
+    rows = list(outcomes)
+    numeric_fields = (
+        "max_joint_velocity_rad_s",
+        "max_joint_acceleration_rad_s2",
+        "max_joint_jerk_rad_s3",
+        "velocity_utilization",
+        "acceleration_utilization",
+        "jerk_utilization",
+    )
+    if any(
+        outcome.dynamic_measurement_status == "unbounded"
+        or any(
+            value is not None and math.isinf(float(value))
+            for value in (getattr(outcome, field) for field in numeric_fields)
+        )
+        for outcome in rows
+    ):
+        return "unbounded"
+    if any(
+        outcome.dynamic_measurement_status == "finite"
+        or any(getattr(outcome, field) is not None for field in numeric_fields)
+        for outcome in rows
+    ):
+        return "finite"
+    return "unavailable"
+
+
 def _case_macro_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
@@ -880,6 +909,7 @@ def _metric_rows(
                     "jerk_utilization": _mean_unbounded(
                         outcome.jerk_utilization for outcome in outcomes
                     ),
+                    "dynamic_measurement_status": _dynamic_measurement_status(outcomes),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes
                     ),
