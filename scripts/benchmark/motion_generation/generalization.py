@@ -67,6 +67,54 @@ def _case_success(
     return sum(values) / len(values), len(outcomes)
 
 
+def _spatial_bucket_statistics(
+    cases: Iterable[BenchmarkCase],
+    records_by_case: dict[str, list[TrialRecord]],
+) -> tuple[dict[str, float], dict[str, int], dict[str, dict[str, int]]]:
+    """Aggregate row-level success and failure stages for spatial buckets."""
+    successes: dict[str, int] = defaultdict(int)
+    counts: dict[str, int] = defaultdict(int)
+    failures: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for case in cases:
+        randomization = case.case_parameters.get("randomization", {})
+        if not isinstance(randomization, dict):
+            continue
+        buckets = randomization.get("spatial_buckets")
+        if buckets is None:
+            continue
+        if not isinstance(buckets, list) or len(buckets) != case.batch_size:
+            raise ValueError(
+                f"Case {case.case_id!r} spatial_buckets must match batch_size."
+            )
+        for record in records_by_case.get(case.case_id, []):
+            if record.phase is not TrialPhase.MEASURED:
+                continue
+            for outcome in record.outcomes:
+                if not 0 <= outcome.env_index < len(buckets):
+                    raise ValueError(
+                        f"Case {case.case_id!r} outcome env_index is outside "
+                        "spatial_buckets."
+                    )
+                bucket = str(buckets[outcome.env_index])
+                counts[bucket] += 1
+                succeeded = bool(getattr(outcome, case.primary_success, False))
+                successes[bucket] += int(succeeded)
+                if not succeeded:
+                    stage = outcome.failure_stage or outcome.failure_code or "unknown"
+                    failures[bucket][stage] += 1
+    rates = {
+        bucket: successes[bucket] / count for bucket, count in sorted(counts.items())
+    }
+    return (
+        rates,
+        dict(sorted(counts.items())),
+        {
+            bucket: dict(sorted(stage_counts.items()))
+            for bucket, stage_counts in sorted(failures.items())
+        },
+    )
+
+
 def _population_stats(
     rows: list[dict[str, object]],
 ) -> tuple[float | None, float | None, float | None, float | None]:
@@ -167,6 +215,15 @@ def aggregate_generalization(
                 )
                 case_rates.append(rate)
             success_rate = sum(case_rates) / len(case_rates) if case_rates else None
+            bucket_rates, bucket_counts, bucket_failures = _spatial_bucket_statistics(
+                applicable_cases,
+                {
+                    case.case_id: by_algorithm_case[
+                        (planner.algorithm_id, case.case_id)
+                    ]
+                    for case in applicable_cases
+                },
+            )
             rows.append(
                 {
                     "track": track,
@@ -180,6 +237,9 @@ def aggregate_generalization(
                     "unsupported_cases": len(unsupported),
                     "coverage_rate": min(1.0, observed_rows / max(expected_rows, 1)),
                     "success_rate": success_rate,
+                    "spatial_bucket_success_rates": bucket_rates,
+                    "spatial_bucket_counts": bucket_counts,
+                    "spatial_bucket_failure_stages": bucket_failures,
                     "nominal_success_rate": None,
                     "domain_mean_success_rate": None,
                     "domain_worst_success_rate": None,

@@ -35,6 +35,7 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     _randomization_parameters,
     _randomized_vector_batch,
     _seeded_jitter,
+    _workspace_shell_profile,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -123,6 +124,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_yaw",
                 "task_frame_planar",
                 "object_planar_pose",
+                "object_workspace_shell",
             },
         ),
         "spatial-rigid-object-held-pose-target": (
@@ -137,6 +139,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_roll_pitch",
                 "task_frame_planar",
                 "object_target_spatial_pose",
+                "target_relative_shell",
             },
         ),
         "spatial-rigid-object-place-target": (
@@ -149,6 +152,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_yaw",
                 "task_frame_planar",
                 "object_target_planar_pose",
+                "target_relative_shell",
             },
         ),
         "spatial-rigid-object-position-target": (
@@ -160,6 +164,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_relative_pose",
                 "task_frame_planar",
                 "object_target_position",
+                "target_relative_shell",
             },
         ),
         "spatial-microwave-controls": (
@@ -172,6 +177,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_roll_pitch",
                 "task_frame_planar",
                 "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
         "spatial-drawer": (
@@ -184,6 +190,7 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_roll_pitch",
                 "task_frame_planar",
                 "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
         "spatial-door": (
@@ -196,12 +203,13 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_roll_pitch",
                 "task_frame_planar",
                 "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v6"
-    assert len(suite.evaluation_tracks()) == 48
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v7"
+    assert len(suite.evaluation_tracks()) == 55
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
         skills, domain_ids = expected[track.id]
@@ -223,6 +231,8 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_relative_pose",
                 "task_frame_planar",
                 "object_target_position",
+                "target_relative_shell",
+                "bilateral_role_mirror",
             },
         ),
         (
@@ -238,6 +248,8 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_roll_pitch",
                 "task_frame_planar",
                 "object_target_spatial_pose",
+                "target_relative_shell",
+                "bilateral_role_mirror",
             },
         ),
         (
@@ -256,6 +268,8 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "task_frame_yaw",
                 "task_frame_planar",
                 "object_support_target_task_frame_pose",
+                "support_relative_shell",
+                "bilateral_role_mirror",
             },
         ),
     ],
@@ -330,6 +344,11 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
                 assert settings.enabled is False
                 assert resolve_atomic_batch_sizes(track) == [1]
                 continue
+            if track.domain.case_generator == "mirrored_control_assignment":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                assert "control_parts" in track.config
+                continue
             assert settings.enabled is True
             assert resolve_atomic_batch_sizes(track) == [8]
             for field, attribute in perturbation_fields.items():
@@ -378,6 +397,68 @@ def test_composed_spatial_domains_use_stratified_boundary_sampling() -> None:
             assert track.domain.perturbations["distribution"] == "stratified"
             assert settings.sampling_pattern == "stratified"
     assert seen == composed_domain_ids
+
+
+def test_workspace_shell_domains_declare_radial_buckets() -> None:
+    """Every shell domain uses the executable radial sampler and three buckets."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    )
+    shell_ids = {
+        "object_workspace_shell",
+        "target_relative_shell",
+        "articulation_workspace_shell",
+        "support_relative_shell",
+    }
+    seen: set[str] = set()
+    for suite_name in suite_names:
+        for track in load_suite(suite_name).evaluation_tracks():
+            if track.domain.id not in shell_ids:
+                continue
+            seen.add(track.domain.id)
+            settings = resolve_atomic_pose_randomization(track)
+            assert track.domain.case_generator == "deterministic_workspace_shell_batch"
+            assert track.domain.perturbations["distribution"] == "workspace_shell"
+            assert track.domain.perturbations["workspace_buckets"] == [
+                "near",
+                "mid",
+                "far",
+            ]
+            assert settings.sampling_pattern == "workspace_shell"
+            assert resolve_atomic_batch_sizes(track) == [8]
+    assert seen == shell_ids
+
+
+def test_dual_arm_mirror_domains_swap_spatial_roles() -> None:
+    """Mirrored domains route each semantic slot to the opposite physical arm."""
+    expected = {
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization": {
+            "source": {"motion": "right_arm", "grasp": "right_eef"},
+            "destination": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization": {
+            "left": {"motion": "right_arm", "grasp": "right_eef"},
+            "right": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization": {
+            "placing": {"motion": "right_arm", "grasp": "right_eef"},
+            "support": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+    }
+    for suite_name, control_parts in expected.items():
+        mirror = next(
+            track
+            for track in load_suite(suite_name).evaluation_tracks()
+            if track.domain.id == "bilateral_role_mirror"
+        )
+        prepared = AtomicTaskScenario._prepare_pose_batch_config(
+            {}, mirror, batch_size=1
+        )
+        assert prepared["control_parts"] == control_parts
+        assert mirror.domain.perturbations["mirror_axis"] == "y"
 
 
 def test_pose_batch_aliases_are_normalized() -> None:
@@ -506,6 +587,35 @@ def test_stratified_pose_sampling_is_deterministic_and_covers_bounds() -> None:
         first[:, 0] / kwargs["amplitude"][0],
         first[:, 1] / kwargs["amplitude"][1],
     )
+
+
+def test_workspace_shell_sampling_covers_radius_buckets_and_height() -> None:
+    """Workspace shells cover near/mid/far XY radii and the configured Z range."""
+    amplitude = (0.04, 0.02, 0.03)
+    kwargs = {
+        "amplitude": amplitude,
+        "seed": 47,
+        "stream": 203,
+        "dtype": torch.float32,
+        "device": torch.device("cpu"),
+        "batch_size": 8,
+        "seed_stride": 1,
+        "sampling_pattern": "workspace_shell",
+    }
+    first = _seeded_jitter(**kwargs)
+    second = _seeded_jitter(**kwargs)
+    radii, labels = _workspace_shell_profile(8)
+    realized_radii = torch.sqrt(
+        (first[:, 0] / amplitude[0]).square() + (first[:, 1] / amplitude[1]).square()
+    )
+
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(realized_radii, radii)
+    torch.testing.assert_close(
+        torch.sort(first[:, 2]).values,
+        torch.linspace(-amplitude[2], amplitude[2], 8),
+    )
+    assert set(labels) == {"near", "mid", "far"}
 
 
 def test_pose_sampling_pattern_is_validated_and_injected() -> None:
@@ -1211,3 +1321,32 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
     ]
     assert parameters["pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.2)
     assert parameters["pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]
+
+
+def test_workspace_shell_manifest_records_row_buckets() -> None:
+    """Case metadata maps every shell row to its normalized radial bucket."""
+    parameters = _randomization_parameters(
+        {
+            "_pose_batch_enabled": True,
+            "_pose_batch_size": 8,
+            "_pose_batch_seed_stride": 1,
+            "_pose_batch_sampling_pattern": "workspace_shell",
+        },
+        seed=23,
+    )
+
+    assert parameters["distribution"] == "deterministic_workspace_shell"
+    assert parameters["spatial_bucket_axis"] == "normalized_xy_offset_radius"
+    assert parameters["spatial_buckets"] == [
+        "near",
+        "near",
+        "mid",
+        "mid",
+        "mid",
+        "far",
+        "far",
+        "far",
+    ]
+    assert parameters["spatial_bucket_radii"] == pytest.approx(
+        [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
+    )

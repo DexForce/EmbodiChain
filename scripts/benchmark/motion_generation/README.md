@@ -79,7 +79,7 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
-- `atomic_franka_pgi_spatial_generalization_v6` is the strict spatial
+- `atomic_franka_pgi_spatial_generalization_v7` is the strict spatial
   generalization baseline for all ten task-level Franka skills: `PickUp`,
   `MoveHeldObject`, `Place`, `Press`, `Slide`, `Twist`, `OpenDoor`, `Pour`,
   `AxisAlign`, and `PushObject`. Tracks group only skills with the same spatial
@@ -94,9 +94,13 @@ in that run's `videos/` directory.
   deterministic per-dimension stratification, including both configured
   interval bounds, so object, target, support, and task-frame changes are
   evaluated together without replacing the isolated-factor populations.
-  Domain overrides
-  select `B=1` for nominal cases and `B=8` for shifted cases; generated poses
-  are frozen in the case manifest and restored before every planner replay.
+  Workspace-shell domains sample normalized XY offset radii from the nominal
+  task pose toward the configured boundary and record each row as `near`,
+  `mid`, or `far` in the case manifest. The generalization summary reports
+  bucket-level success rates, sample counts, and failure-stage counts. Domain
+  overrides select `B=1` for nominal cases and `B=8` for shifted cases;
+  generated poses are frozen in the case manifest and restored before every
+  planner replay.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These
@@ -128,16 +132,16 @@ in that run's `videos/` directory.
   delivery height; Coordinated Placement combines subject, support, target,
   and task-frame pose changes in one domain.
 
-  | Atomic Skill | Shared workspace domain | Composed domain | Simultaneously varied dimensions |
-  | --- | --- | --- | --- |
-  | `PickUp`, `Pour`, `AxisAlign` | `task_frame_planar` | `object_planar_pose` | subject XY + subject yaw |
-  | `MoveHeldObject` | `task_frame_planar` | `object_target_spatial_pose` | subject XY/yaw + target XYZ/yaw/roll/pitch |
-  | `Place` | `task_frame_planar` | `object_target_planar_pose` | subject XY/yaw + target XY/yaw |
-  | `PushObject` | `task_frame_planar` | `object_target_position` | subject XY/yaw + target XY |
-  | `Press`, `Twist`, `Slide`, `OpenDoor` | `task_frame_planar` | `articulation_spatial_pose` | articulation XYZ/yaw/roll/pitch |
-  | `HandOver` | `task_frame_planar` | `object_target_position` | subject XY/yaw + delivery XYZ |
-  | `CoordinatedPickment` | `task_frame_planar` | `object_target_spatial_pose` | subject XY/yaw + target XYZ/yaw/roll/pitch |
-  | `CoordinatedPlacement` | `task_frame_planar` | `object_support_target_task_frame_pose` | subject XY/yaw + support XY/yaw + target XYZ/yaw + task-frame XY/yaw |
+  | Atomic Skill | Workspace/relative shell | Shared workspace domain | Composed domain | Bilateral mirror | Simultaneously varied dimensions |
+  | --- | --- | --- | --- | :---: | --- |
+  | `PickUp`, `Pour`, `AxisAlign` | `object_workspace_shell` | `task_frame_planar` | `object_planar_pose` |  | subject XY + subject yaw |
+  | `MoveHeldObject` | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` |  | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `Place` | `target_relative_shell` | `task_frame_planar` | `object_target_planar_pose` |  | subject XY/yaw + target XY/yaw |
+  | `PushObject` | `target_relative_shell` | `task_frame_planar` | `object_target_position` |  | subject XY/yaw + target XY |
+  | `Press`, `Twist`, `Slide`, `OpenDoor` | `articulation_workspace_shell` | `task_frame_planar` | `articulation_spatial_pose` |  | articulation XYZ/yaw/roll/pitch |
+  | `HandOver` | `target_relative_shell` | `task_frame_planar` | `object_target_position` | ✓ | subject XY/yaw + delivery XYZ |
+  | `CoordinatedPickment` | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` | ✓ | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `CoordinatedPlacement` | `support_relative_shell` | `task_frame_planar` | `object_support_target_task_frame_pose` | ✓ | subject XY/yaw + support XY/yaw + target XYZ/yaw + task-frame XY/yaw |
 
   | Atomic Skill | Subject XY | Subject Z | Subject yaw | Subject roll/pitch | Target XY | Target Z | Target yaw | Target roll/pitch | Support XY/yaw | Task-frame XY/yaw |
   | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |

@@ -1948,6 +1948,20 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
         "time_and_memory": [],
         "success_and_metrics": [],
         "leaderboard": [],
+        "generalization": [
+            {
+                "track": "pick",
+                "algorithm": "baseline",
+                "domain_id": "workspace_shell",
+                "domain_version": "v1",
+                "domain_kind": "robustness",
+                "coverage_rate": 1.0,
+                "success_rate": 0.5,
+                "spatial_bucket_success_rates": {"near": 1.0, "far": 0.0},
+                "spatial_bucket_counts": {"near": 1, "far": 1},
+                "spatial_bucket_failure_stages": {"far": {"physical": 1}},
+            }
+        ],
     }
 
     report = write_markdown_report(tmp_path / "report.md", suite, aggregates)
@@ -1959,6 +1973,8 @@ def test_report_contains_exactly_three_markdown_tables(tmp_path):
     assert text.count("## Leaderboard") == 1
     assert "motion-validity gate" in text
     assert "n_valid" in text
+    assert 'spatial_bucket_success_rates={"far":0.0,"near":1.0}' in text
+    assert 'spatial_bucket_failure_stages={"far":{"physical":1}}' in text
 
 
 def test_curobo_prepare_backend_exposes_actual_graph_mode():

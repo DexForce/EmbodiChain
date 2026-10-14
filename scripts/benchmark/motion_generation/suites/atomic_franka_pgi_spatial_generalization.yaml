@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v6
+suite_version: atomic_franka_pgi_spatial_generalization_v7
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -323,6 +323,66 @@ x-domain-articulation-spatial-pose: &domain_articulation_spatial_pose
       object_translation_jitter_m: [0.03, 0.03, 0.02]
       object_yaw_jitter_rad: 0.523599
       object_roll_pitch_jitter_rad: [0.174533, 0.174533]
+      seed_stride: 1
+
+x-domain-object-workspace-shell: &domain_object_workspace_shell
+  id: object_workspace_shell
+  version: v1
+  kind: robustness
+  case_generator: deterministic_workspace_shell_batch
+  perturbations:
+    distribution: workspace_shell
+    object_translation_jitter_m: [0.05, 0.05, 0.0]
+    workspace_buckets: [near, mid, far]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: translation
+      sampling_pattern: workspace_shell
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.05, 0.05, 0.0]
+      seed_stride: 1
+
+x-domain-target-relative-shell: &domain_target_relative_shell
+  id: target_relative_shell
+  version: v1
+  kind: robustness
+  case_generator: deterministic_workspace_shell_batch
+  perturbations:
+    distribution: workspace_shell
+    target_translation_jitter_m: [0.04, 0.04, 0.0]
+    workspace_buckets: [near, mid, far]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: translation
+      sampling_pattern: workspace_shell
+      pose_batch_size: 8
+      target_translation_jitter_m: [0.04, 0.04, 0.0]
+      seed_stride: 1
+
+x-domain-articulation-workspace-shell: &domain_articulation_workspace_shell
+  id: articulation_workspace_shell
+  version: v1
+  kind: robustness
+  case_generator: deterministic_workspace_shell_batch
+  perturbations:
+    distribution: workspace_shell
+    object_translation_jitter_m: [0.05, 0.05, 0.02]
+    workspace_buckets: [near, mid, far]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: translation
+      sampling_pattern: workspace_shell
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.05, 0.05, 0.02]
       seed_stride: 1
 
 x-physics: &physics
@@ -679,6 +739,9 @@ tracks:
       - <<: *domain_object_planar_pose
         applicability: [pick_up, pour, axis_align]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_workspace_shell
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -718,6 +781,9 @@ tracks:
       - <<: *domain_object_target_spatial_pose
         applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_relative_shell
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -751,6 +817,9 @@ tracks:
       - <<: *domain_object_target_planar_pose
         applicability: [place]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_relative_shell
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -779,6 +848,9 @@ tracks:
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_object_target_position
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_relative_shell
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
     config:
@@ -814,6 +886,9 @@ tracks:
       - <<: *domain_articulation_spatial_pose
         applicability: [press, twist]
         scene_layout: franka_pgi_microwave_controls_v1
+      - <<: *domain_articulation_workspace_shell
+        applicability: [press, twist]
+        scene_layout: franka_pgi_microwave_controls_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -847,6 +922,9 @@ tracks:
       - <<: *domain_articulation_spatial_pose
         applicability: [slide]
         scene_layout: franka_pgi_drawer_v1
+      - <<: *domain_articulation_workspace_shell
+        applicability: [slide]
+        scene_layout: franka_pgi_drawer_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -878,6 +956,9 @@ tracks:
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
       - <<: *domain_articulation_spatial_pose
+        applicability: [open_door]
+        scene_layout: franka_pgi_microwave_door_v1
+      - <<: *domain_articulation_workspace_shell
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
     config:

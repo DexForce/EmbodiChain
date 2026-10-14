@@ -623,6 +623,9 @@ def resolve_atomic_pose_randomization(
     ``random_pose_count`` is accepted as a readable alias for
     ``pose_batch_size``.  The helper does not mutate the track mapping, so the
     resolved suite and case manifest remain faithful to the source YAML.
+    ``workspace_shell`` assigns ordered normalized XY offset radii to rows;
+    three-dimensional translation vectors use those radii while scalar and
+    rotation ranges retain deterministic stratification.
     """
     if track.scenario != "atomic_task":
         raise ValueError(
@@ -666,10 +669,10 @@ def resolve_atomic_pose_randomization(
             config.get("pose_sampling_pattern", "uniform"),
         )
     )
-    if sampling_pattern not in {"uniform", "stratified"}:
+    if sampling_pattern not in {"uniform", "stratified", "workspace_shell"}:
         raise ValueError(
             "atomic-task randomization.sampling_pattern must be "
-            "'uniform' or 'stratified'."
+            "'uniform', 'stratified', or 'workspace_shell'."
         )
 
     object_jitter_value = randomization.get("object_translation_jitter_m")

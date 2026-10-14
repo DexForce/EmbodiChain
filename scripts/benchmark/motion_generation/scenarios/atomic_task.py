@@ -292,20 +292,21 @@ def _seeded_jitter(
     """Sample deterministic jitter, optionally one row per environment.
 
     The legacy ``batch_size=1`` result remains a one-dimensional vector.  For
-    a pose-batch benchmark the returned tensor has shape ``(B, D)``; each row
-    gets its own deterministic CPU generator so values are stable across
-    devices and independent of planner execution order.
+    a pose-batch benchmark the returned tensor has shape ``(B, D)``. Sampling
+    is stable across devices and independent of planner execution order.
     """
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("batch_size must be a positive integer.")
     if type(seed_stride) is not int or seed_stride < 1:
         raise ValueError("seed_stride must be a positive integer.")
-    if sampling_pattern not in {"uniform", "stratified"}:
-        raise ValueError("sampling_pattern must be 'uniform' or 'stratified'.")
+    if sampling_pattern not in {"uniform", "stratified", "workspace_shell"}:
+        raise ValueError(
+            "sampling_pattern must be 'uniform', 'stratified', or " "'workspace_shell'."
+        )
     base_seed = (int(seed) * 1_000_003 + int(stream) * 97_409) % (2**63 - 1)
-    # Keep the historical B=1 sequence byte-for-byte stable.  For a pose
-    # batch, derive a separate deterministic CPU stream per row; this makes
-    # adding/removing a neighboring skill unable to change an existing row.
+    # Keep the historical uniform sequence byte-for-byte stable.  Structured
+    # patterns use deterministic CPU streams so device and planner order do
+    # not change the generated population.
     if sampling_pattern == "uniform":
         rows: list[torch.Tensor] = []
         for row in range(batch_size):
@@ -316,7 +317,11 @@ def _seeded_jitter(
             )
         unit = torch.stack(rows, dim=0)
         normalized = 2.0 * unit - 1.0
-    else:
+    elif (
+        sampling_pattern == "stratified"
+        or len(amplitude) != 3
+        or not any(float(value) > 0.0 for value in amplitude[:2])
+    ):
         # Each active dimension visits every stratum exactly once.  Inclusive
         # endpoints deliberately exercise both configured workspace bounds;
         # independent seeded permutations avoid coupling dimensions along one
@@ -334,9 +339,52 @@ def _seeded_jitter(
             )
             columns.append(levels[torch.randperm(batch_size, generator=generator)])
         normalized = torch.stack(columns, dim=1)
+    else:
+        radii, _ = _workspace_shell_profile(batch_size)
+        angle_generator = torch.Generator(device="cpu")
+        angle_generator.manual_seed((base_seed + 1_000_033 * seed_stride) % (2**63 - 1))
+        angle_order = torch.randperm(batch_size, generator=angle_generator)
+        phase = (
+            2.0
+            * math.pi
+            * torch.rand(1, generator=angle_generator, dtype=torch.float32)[0]
+        )
+        angles = 2.0 * math.pi * angle_order.to(torch.float32) / batch_size + phase
+        z_levels = (
+            torch.zeros(1, dtype=torch.float32)
+            if batch_size == 1
+            else torch.linspace(-1.0, 1.0, batch_size, dtype=torch.float32)
+        )
+        z_generator = torch.Generator(device="cpu")
+        z_generator.manual_seed((base_seed + 2_000_066 * seed_stride) % (2**63 - 1))
+        normalized = torch.stack(
+            (
+                radii * torch.cos(angles),
+                radii * torch.sin(angles),
+                z_levels[torch.randperm(batch_size, generator=z_generator)],
+            ),
+            dim=1,
+        )
     values = normalized * torch.tensor(amplitude, dtype=torch.float32)
     values = values.to(dtype=dtype, device=device)
     return values[0] if batch_size == 1 else values
+
+
+def _workspace_shell_profile(batch_size: int) -> tuple[torch.Tensor, list[str]]:
+    """Return ordered normalized radii and near/mid/far workspace labels."""
+    if type(batch_size) is not int or batch_size < 1:
+        raise ValueError("batch_size must be a positive integer.")
+    radii = torch.linspace(
+        1.0 / batch_size,
+        1.0,
+        batch_size,
+        dtype=torch.float32,
+    )
+    labels = [
+        "near" if radius <= 1.0 / 3.0 else "mid" if radius <= 2.0 / 3.0 else "far"
+        for radius in radii.tolist()
+    ]
+    return radii, labels
 
 
 def _seeded_yaw_rotation(
@@ -730,7 +778,11 @@ def _randomization_parameters(
         "distribution": (
             "deterministic_stratified"
             if config.get("_pose_batch_sampling_pattern") == "stratified"
-            else "independent_uniform"
+            else (
+                "deterministic_workspace_shell"
+                if config.get("_pose_batch_sampling_pattern") == "workspace_shell"
+                else "independent_uniform"
+            )
         ),
         "ranges": ranges,
     }
@@ -742,6 +794,7 @@ def _randomization_parameters(
                 "pose_batch_sampling_pattern": str(
                     config.get("_pose_batch_sampling_pattern", "uniform")
                 ),
+                "pose_batch_size": int(config.get("_pose_batch_size", 1)),
                 "pose_batch_translation_jitter_m": list(
                     config.get("_pose_batch_translation_jitter_m", (0.0, 0.0, 0.0))
                 ),
@@ -796,6 +849,17 @@ def _randomization_parameters(
                 "batch_semantics": "one_pose_per_environment_row",
             }
         )
+        if config.get("_pose_batch_sampling_pattern") == "workspace_shell":
+            radii, labels = _workspace_shell_profile(
+                int(config.get("_pose_batch_size", 1))
+            )
+            parameters.update(
+                {
+                    "spatial_bucket_axis": "normalized_xy_offset_radius",
+                    "spatial_bucket_radii": radii.tolist(),
+                    "spatial_buckets": labels,
+                }
+            )
     return parameters
 
 
@@ -4441,6 +4505,18 @@ class AtomicTaskScenario(ScenarioProvider):
         YAML block to drive object and target pose variants.  No randomization
         is applied when the track does not opt in.
         """
+        control_parts = track.config.get("control_parts")
+        if control_parts is not None:
+            if not isinstance(control_parts, Mapping):
+                raise TypeError("atomic-task control_parts must be a mapping.")
+            config["control_parts"] = {
+                str(slot): dict(parts)
+                for slot, parts in control_parts.items()
+                if isinstance(parts, Mapping)
+            }
+            if len(config["control_parts"]) != len(control_parts):
+                raise TypeError("atomic-task control_parts entries must be mappings.")
+
         randomization = resolve_atomic_pose_randomization(track)
         if randomization.enabled:
             if batch_size != randomization.pose_batch_size:
@@ -4489,6 +4565,7 @@ class AtomicTaskScenario(ScenarioProvider):
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
             config["_pose_batch_sampling_pattern"] = randomization.sampling_pattern
+            config["_pose_batch_size"] = randomization.pose_batch_size
             config["_pose_batch_enabled"] = True
         return config
 

@@ -57,7 +57,11 @@ def _case(case_id: str, domain: EvaluationDomain) -> BenchmarkCase:
     )
 
 
-def _outcome(success: bool) -> CaseOutcome:
+def _outcome(
+    success: bool,
+    *,
+    failure_stage: str | None = None,
+) -> CaseOutcome:
     return CaseOutcome(
         env_index=0,
         planning_success=True,
@@ -80,6 +84,7 @@ def _outcome(success: bool) -> CaseOutcome:
         path_efficiency=1.0,
         execution_success=True,
         task_success=success,
+        failure_stage=failure_stage,
     )
 
 
@@ -178,3 +183,45 @@ def test_generalization_excludes_unsupported_cases_but_reports_coverage() -> Non
     assert held_out_row["success_rate"] is None
     assert held_out_row["unsupported_cases"] == 1
     assert held_out_row["generalization_eligible"] is False
+
+
+def test_generalization_reports_row_level_spatial_bucket_rates() -> None:
+    """Near/mid/far shell rows retain independent success summaries."""
+    domain = EvaluationDomain(id="workspace_shell", version="v1", kind="robustness")
+    case = replace(
+        _case("shell-case", domain),
+        track="pick@workspace_shell",
+        batch_size=3,
+        start_qpos=torch.zeros(3, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(3, 1, 1, 1),
+        reference_qpos=torch.zeros(3, 1, 7),
+        case_parameters={"randomization": {"spatial_buckets": ["near", "mid", "far"]}},
+    )
+    record = replace(
+        _record(case, _outcome(True)),
+        batch_size=3,
+        outcomes=(
+            replace(_outcome(True), env_index=0),
+            replace(_outcome(False, failure_stage="physical_release"), env_index=1),
+            replace(_outcome(True), env_index=2),
+        ),
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    row = aggregate_generalization([record], metadata, [case], measured_trials=1)[0]
+
+    assert row["spatial_bucket_success_rates"] == {
+        "far": 1.0,
+        "mid": 0.0,
+        "near": 1.0,
+    }
+    assert row["spatial_bucket_counts"] == {"far": 1, "mid": 1, "near": 1}
+    assert row["spatial_bucket_failure_stages"] == {"mid": {"physical_release": 1}}

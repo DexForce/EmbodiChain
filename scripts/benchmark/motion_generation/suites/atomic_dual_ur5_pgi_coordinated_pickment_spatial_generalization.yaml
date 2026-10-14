@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_dual_ur5_pgi_coordinated_pickment_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization_v4
+suite_version: atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization_v5
 profile: coverage
 
 robot:
@@ -224,6 +224,41 @@ tracks:
             target_yaw_jitter_rad: 0.523599
             target_roll_pitch_jitter_rad: [0.174533, 0.174533]
             seed_stride: 1
+      - id: target_relative_shell
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: deterministic_workspace_shell_batch
+        perturbations:
+          distribution: workspace_shell
+          target_translation_jitter_m: [0.04, 0.04, 0.02]
+          workspace_buckets: [near, mid, far]
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: translation
+            sampling_pattern: workspace_shell
+            pose_batch_size: 8
+            target_translation_jitter_m: [0.04, 0.04, 0.02]
+            seed_stride: 1
+      - id: bilateral_role_mirror
+        version: v1
+        kind: robustness
+        applicability: [coordinated_pickment]
+        scene_layout: dual_ur5_pgi_plastic_tray_v1
+        case_generator: mirrored_control_assignment
+        perturbations:
+          mirror_axis: y
+          left_slot_arm: right
+          right_slot_arm: left
+        overrides:
+          batch_sizes: [1]
+          control_parts:
+            left: {motion: right_arm, grasp: right_eef}
+            right: {motion: left_arm, grasp: left_eef}
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
