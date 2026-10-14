@@ -44,7 +44,7 @@ def _resolve(path: str):
 
 def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     request = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     assert request is not None
@@ -76,7 +76,8 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
 
 def test_open_drawer_policy_component_merges_phase_binding() -> None:
     request = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/open_drawer/" "task.ur5.yaml"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/"
+        "task.ur5.yaml"
     )
     assert request is not None
     profile, candidate_indices, _, collection = request
@@ -95,7 +96,7 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
 
 def test_task_expansion_config_accepts_local_candidate_override() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     config = load_config(task_path)
@@ -250,7 +251,7 @@ def test_collection_plan_maps_legacy_max_episodes_as_fallback() -> None:
 
 def test_task_expansion_config_applies_runtime_overlay() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     with pytest.raises(ValueError, match="unsupported fields.*simulation"):
@@ -288,11 +289,11 @@ def test_task_expansion_config_applies_runtime_overlay() -> None:
 
 def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     policy_path = resolve_config_path(
-        "embodichain_tasks/configs/components/expansion_policies/"
+        "extensions/embodichain_tasks/configs/components/expansion_policies/"
         "task_program_episode.yaml"
     )
     args = _create_parser().parse_args(

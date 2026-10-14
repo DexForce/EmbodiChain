@@ -99,7 +99,7 @@ def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/"
         "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 

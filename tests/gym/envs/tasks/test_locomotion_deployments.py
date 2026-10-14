@@ -52,7 +52,7 @@ def test_packaged_deployment_and_agent_config_agree(
 ) -> None:
     """Real config decoding must work without smoke-script backend overrides."""
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    directory = Path("embodichain_tasks/configs/tasks") / task
+    directory = Path("extensions/embodichain_tasks/configs/tasks") / task
     suffix = "" if backend == "default" else ".newton"
     path = directory / f"env{suffix}.yaml"
     raw = load_config(str(path))
@@ -190,7 +190,7 @@ def _verify_native_no_render(task: str, backend: str, report_path: Path) -> None
     importlib.import_module(
         f"embodichain_tasks.locomotion.velocity.{task.rsplit('/', 1)[-1]}"
     )
-    directory = Path("embodichain_tasks/configs/tasks") / task
+    directory = Path("extensions/embodichain_tasks/configs/tasks") / task
     suffix = "" if backend == "default" else ".newton"
     agent_path = directory / f"agents/ppo{suffix}.yaml"
     agent = load_config(agent_path)

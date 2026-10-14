@@ -10,7 +10,7 @@ only the surrounding task/environment decisions.
 ## Canonical layout
 
 ```text
-embodichain_tasks/configs/tasks/<category_path>/<task_name>/
+extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/
 ├── env.yaml
 ├── task.<embodiment>.yaml
 └── task_program/

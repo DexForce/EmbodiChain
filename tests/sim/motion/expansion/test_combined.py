@@ -35,7 +35,8 @@ from embodichain.utils.utility import load_config
 from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
 
 _TASK_CONFIG = Path(__file__).parents[4] / (
-    "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/" "task.ur5.yaml"
+    "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+    "task.ur5.yaml"
 )
 
 

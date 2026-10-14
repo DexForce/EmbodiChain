@@ -13,7 +13,7 @@
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
-| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official configs | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The compatibility module entry point is:
 
@@ -103,7 +103,7 @@ but currently rejects distributed training and environment profiling.
 
 ### Native locomotion tasks
 
-Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Official velocity tasks live in `extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
 Humanoid Run lives under `classic_control/humanoid/`. Matching task config
 directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity

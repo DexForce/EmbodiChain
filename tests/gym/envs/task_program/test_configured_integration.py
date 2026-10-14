@@ -82,7 +82,9 @@ from embodichain.toolkits.graspkit.pg_grasp import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
+_CONFIG_DIRECTORY = (
+    _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
+)
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
     "rubiks_cube_pick_place": (

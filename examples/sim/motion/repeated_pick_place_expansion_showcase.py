@@ -56,7 +56,7 @@ from embodichain.utils.config_paths import resolve_config_path
 
 _TASK_ROOT = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
 )
 _DEFAULT_TASK_CONFIG = _TASK_ROOT / "task.ur5.yaml"
 _DEFAULT_GENERATION_PROFILE = None

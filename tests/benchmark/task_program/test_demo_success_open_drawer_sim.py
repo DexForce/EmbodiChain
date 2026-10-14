@@ -31,7 +31,7 @@ from scripts.benchmark.task_program.demo_success import (
 )
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs"
+_TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs"
 _OPEN_DRAWER_GYM_CONFIG = (
     _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task.ur5.yaml"
 )

@@ -641,11 +641,7 @@ def _resolve_expansion_resource(anchor: Path, value: str) -> Path:
     from embodichain.utils.config_paths import resolve_config_path
 
     path = Path(value).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    if path.parts[:2] == ("embodichain_tasks", "configs"):
-        return resolve_config_path(path)
-    return (anchor.parent / path).resolve()
+    return resolve_config_path(path, base_dir=anchor.parent).resolve()
 
 
 def _load_expansion_collection(path: Path) -> Mapping[str, Any]:

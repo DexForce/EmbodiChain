@@ -6,11 +6,11 @@
 |---|---|
 | Runtime control parts, FK/IK adaptation, joint ordering | `embodichain/lab/sim/objects/robot.py` → `Robot` |
 | Config decoding, construction hooks, backend alternatives | `embodichain/lab/sim/cfg/robot.py` → `RobotCfg`, `RobotPresetCfg` |
-| Available robot configs and variants | `embodichain_robots/_catalog.py`; `embodichain_robots/__init__.py` owns lazy exports |
+| Available robot configs and variants | `extensions/embodichain_robots/_catalog.py`; `extensions/embodichain_robots/__init__.py` owns lazy exports |
 | Shared Gym/CLI/dual-arm selection | `embodichain/robot_registry.py` → `list_robot_cfgs`, `resolve_robot_cfg` |
 | Robot listing CLI | `embodichain/cli/list_robot.py` → `embodichain list-robot` |
 | Generic robot preview and standalone RobotCfg files | `embodichain/lab/scripts/preview_robot.py` → `embodichain preview-robot` |
-| W1 variants and serialization | `embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
+| W1 variants and serialization | `extensions/embodichain_robots/dexforce_w1/` → `cfg.py`, `specs.py`, `hand_specs.py` |
 | Composed robot frames and joint-name mapping | `embodichain/lab/sim/robots/dual_arm.py` |
 | Shared articulation state and drive properties | `embodichain/lab/sim/objects/articulation.py`, `embodichain/lab/sim/cfg/articulation.py` |
 
@@ -22,7 +22,9 @@ binding. For a new config use
 suites use [add-embodiment-component](../../../.agents/skills/add-embodiment-component/SKILL.md).
 
 Concrete robot definitions live in the separate `embodichain_robots` import
-package, bundled in the main wheel with the core version. Generic `Robot`,
+package under `extensions/embodichain_robots/`, bundled in the main wheel with
+the core version. `extensions/` is only a source container; imports keep the
+`embodichain_` prefix. Generic `Robot`,
 `RobotCfg`, `RobotPresetCfg`, and dual-arm composition remain in the core.
 Concrete presets import from `embodichain_robots`. The core
 `embodichain.lab.sim.robots` package exposes only generic dual-arm composition.

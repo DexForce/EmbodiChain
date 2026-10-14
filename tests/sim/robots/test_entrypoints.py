@@ -28,11 +28,11 @@ from embodichain.lab.sim.cfg import NewtonPhysicsCfg
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _ROBOT_ENTRYPOINTS = (
-    "embodichain_robots/cobotmagic.py",
-    "embodichain_robots/franka_panda.py",
-    "embodichain_robots/ur_robot.py",
+    "extensions/embodichain_robots/cobotmagic.py",
+    "extensions/embodichain_robots/franka_panda.py",
+    "extensions/embodichain_robots/ur_robot.py",
     "embodichain/lab/sim/robots/dual_arm.py",
-    "embodichain_robots/dexforce_w1/cfg.py",
+    "extensions/embodichain_robots/dexforce_w1/cfg.py",
 )
 
 

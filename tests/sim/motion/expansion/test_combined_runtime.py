@@ -40,7 +40,10 @@ from embodichain.utils.utility import load_config
 from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
 
 _ROOT = Path(__file__).parents[4]
-_TASK_ROOT = _ROOT / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+_TASK_ROOT = (
+    _ROOT
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
+)
 
 
 def _profile() -> CombinedExpansionProfile:

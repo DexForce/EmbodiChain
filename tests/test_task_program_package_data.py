@@ -36,7 +36,7 @@ from setup import get_package_dir
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
-_CONFIG_SOURCE = _REPOSITORY_ROOT / "embodichain_tasks" / "configs"
+_CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = {
     Path(
         "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
@@ -227,7 +227,7 @@ def test_setup_stages_all_official_task_programs(
 ) -> None:
     """The actual setup patterns put nested Task Programs in wheel staging."""
     assert staged_config_package.include_package_data is False
-    assert get_package_dir()[_CONFIG_PACKAGE] == "embodichain_tasks/configs"
+    assert get_package_dir()[_CONFIG_PACKAGE] == "extensions/embodichain_tasks/configs"
     assert staged_config_package.package_data[_CONFIG_PACKAGE] == [
         "**/*.json",
         "**/*.yaml",

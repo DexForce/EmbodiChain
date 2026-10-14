@@ -1365,12 +1365,7 @@ def _resolve_expansion_config_path(value: object, *, base_dir: Path) -> Path:
     if type(value) is not str or not value.strip() or value != value.strip():
         raise ValueError("expansion.config must be a nonempty path")
     path = Path(value).expanduser()
-    if path.is_absolute():
-        resolved = path.resolve()
-    elif path.parts[:2] == ("embodichain_tasks", "configs"):
-        resolved = resolve_config_path(path).resolve()
-    else:
-        resolved = (base_dir / path).resolve()
+    resolved = resolve_config_path(path, base_dir=base_dir).resolve()
     if resolved.suffix.lower() not in {".yaml", ".yml", ".json"}:
         raise ValueError(f"expansion.config must be a YAML or JSON file: {resolved}")
     if not resolved.is_file():
