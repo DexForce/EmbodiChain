@@ -78,14 +78,15 @@ def descriptor_collision_meshes(
         load_obj_as_convex_parts,
     )
 
-    if scene.backend != "dexsim" or len(scene.arenas.names) != 1:
+    # The SDK also retains a global arena, not an extra episode environment.
+    if scene.backend != "dexsim" or simulation.num_envs != 1:
         raise ValueError("scene_collision_descriptor_backend_or_batch_unavailable")
     matches = [
         (path, handle)
         for path in scene.get_paths()
         if isinstance(handle := scene.get(path), SpawnedArticulation)
         and handle.get_name() == simulation_uid
-        and handle.arena_name == scene.arenas.names[0]
+        and handle.arena_name in scene.arenas.names
     ]
     if len(matches) != 1:
         raise ValueError(

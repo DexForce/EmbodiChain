@@ -66,7 +66,7 @@ def _fixture(monkeypatch, approximation="convexDecomposition", scale=2.0):
 
     class Scene:
         backend = "dexsim"
-        arenas = SimpleNamespace(names=["env0"])
+        arenas = SimpleNamespace(names=["default", "env0"])
 
         def get_paths(self):
             return list(self.handles)
@@ -83,7 +83,7 @@ def _fixture(monkeypatch, approximation="convexDecomposition", scale=2.0):
         articulation_desc=desc,
         render_articulation=object(),
         _physics_binding=SimpleNamespace(get_link_names=lambda _order: ["base"]),
-        _arena_index=0,
+        _arena_index=1,
     )
     scene.handles = {handle.path: handle}
     handle._result_ref = weakref.ref(scene)
@@ -93,6 +93,7 @@ def _fixture(monkeypatch, approximation="convexDecomposition", scale=2.0):
     simulation = SimpleNamespace(
         spawn_result=scene,
         physics_backend="default",
+        num_envs=1,
         get_articulation=lambda _uid: native,
     )
     bindings = SimpleNamespace(
@@ -181,6 +182,7 @@ def test_convex_hull_uses_whole_collider_semantics(monkeypatch):
         "source",
         "provenance",
         "no_scene",
+        "multi_env",
         "invalid",
         "file",
         "primitive",
@@ -209,6 +211,8 @@ def test_descriptor_failure_never_falls_back_to_raw_source(monkeypatch, damage):
         desc.usd = None
     elif damage == "no_scene":
         simulation.spawn_result = None
+    elif damage == "multi_env":
+        simulation.num_envs = 2
     elif damage == "invalid":
         collider.vertices[0, 0] = np.nan
     elif damage == "file":
