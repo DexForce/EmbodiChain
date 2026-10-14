@@ -779,10 +779,9 @@ def load_deployment(
     from .release_clearance import with_release_clearance
 
     registration = with_release_clearance(registration, program=program)
-    if "ordinary" in payload.get("pick_purposes", {}).values():
-        from .grip_evidence import with_native_grip_evidence
+    from .grip_evidence import with_native_grip_evidence
 
-        registration = with_native_grip_evidence(registration)
+    registration = with_native_grip_evidence(registration)
     if any(cfg.kind == "stack" for cfg in constraints.values()):
         from .stack_place import with_stack_placement
 

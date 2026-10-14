@@ -126,6 +126,7 @@ def execute_bundle(
     failure: dict[str, Any] | None = None
     feedback_evidence: dict[str, Any] = {}
     control_evidence: list[dict[str, Any]] = []
+    grip_evidence: dict[str, Any] | None = None
     env: Any = None
     probe: dict[str, Any] | None = None
     try:
@@ -220,6 +221,7 @@ def execute_bundle(
                     _isolated_initial_probe(env, deployment, env_cfg.task_program)
                 )
             _write_terminal_robot_state(env, output)
+            grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
         else:
             from ._task_program.planning_probe import capture_initial_plan
 
@@ -325,6 +327,7 @@ def execute_bundle(
                         terminal_reasons[index] = "cargo_envelope_failed"
             feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             control_evidence = _snapshot_control_evidence(env, deployment)
+            grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
             if result.completed and all(row_success):
                 env.reset()
             else:
@@ -335,6 +338,8 @@ def execute_bundle(
     except Exception as exc:
         failure = _exception_metadata(exc)
         if env is not None:
+            if grip_evidence is None:
+                grip_evidence = _snapshot_grip_contact_evidence(env, deployment)
             if not feedback_evidence:
                 feedback_evidence = _snapshot_twist_feedback_audit(env, deployment)
             try:
@@ -357,6 +362,27 @@ def execute_bundle(
                 failure["abort_error"] = _exception_metadata(abort_error)
     finally:
         if env is not None:
+            if grip_evidence is not None:
+                try:
+                    (output / "grip_contact_evidence.json").write_text(
+                        json.dumps(
+                            {
+                                **grip_evidence,
+                                "integration_fingerprint": graph[
+                                    "integration_fingerprint"
+                                ],
+                            },
+                            indent=2,
+                            allow_nan=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                except (OSError, TypeError, ValueError) as evidence_error:
+                    print(
+                        f"[Task Engine] Grip trace sidecar unavailable: {evidence_error}",
+                        file=sys.stderr,
+                    )
             try:
                 if control_evidence:
                     (output / "control_operations.json").write_text(
@@ -458,6 +484,16 @@ def execute_bundle(
         for row in report["environments"]:
             row["terminal_reason"] = "initial_plan_rejected"
     write_execution_report(output, report)
+    try:
+        (output / "recovery_summary.json").write_text(
+            json.dumps(_recovery_summary(report), indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as evidence_error:
+        print(
+            f"[Task Engine] Recovery summary unavailable: {evidence_error}",
+            file=sys.stderr,
+        )
     if task_spec_contract is not None:
         from .semantic_graph_html import write_semantic_task_graph_html
 
@@ -604,6 +640,195 @@ def _apply_task_spec_verdict(
                 else "task_spec_unverified"
             )
     return success, reasons
+
+
+def _snapshot_grip_contact_evidence(env: Any, deployment: Any) -> dict[str, Any] | None:
+    """Copy the registered native observer's trace without creating or sampling it."""
+    from ._task_program.grip_evidence import (
+        NativeGripEvidenceFactory,
+        NativeGripObserver,
+        SENSOR_UID,
+    )
+
+    registration = getattr(
+        getattr(deployment, "integration", None), "registration", None
+    )
+    if not isinstance(
+        getattr(registration, "control_part_evidence_factory", None),
+        NativeGripEvidenceFactory,
+    ):
+        return None
+    try:
+        sensor = getattr(env, "unwrapped", env).sim.get_sensor(SENSOR_UID)
+        observer = getattr(sensor, "_gen_sim_grip_observer", None)
+        if not isinstance(observer, NativeGripObserver):
+            raise ValueError("Registered native grip observer is unavailable.")
+        return observer.snapshot_trace()
+    except Exception as error:
+        return {
+            "schema_version": "gen_sim.grip-contact-evidence/v1",
+            "source": "native_contact_sensor",
+            "observed": False,
+            "status": "unavailable",
+            "snapshot_error": _exception_metadata(error),
+        }
+
+
+def _recovery_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Classify real workflow recovery independently of the unchanged verdict."""
+    rows = report["environments"]
+    count = len(rows)
+    result = report.get("runtime_result") or {}
+    if not isinstance(result, dict):
+        result = {}
+    successes = result.get("program_success", result.get("success"))
+    if (
+        not isinstance(successes, list)
+        or len(successes) != count
+        or any(type(value) is not bool for value in successes)
+    ):
+        successes = [None] * count
+    segments = result.get("segments", [])
+    if not isinstance(segments, list):
+        segments = []
+    known = [bool(segments)] * count
+    covered = [False] * count
+    attempts, recovered, reacquired = [0] * count, [0] * count, [0] * count
+    traces = []
+    roles = {"retry_retained", "reacquire", "retry_reacquired"}
+    for segment in segments:
+        if not isinstance(segment, dict):
+            known = [False] * count
+            continue
+        active = segment.get("active")
+        if (
+            not isinstance(active, list)
+            or len(active) != count
+            or any(type(value) is not bool for value in active)
+        ):
+            known = [False] * count
+            continue
+        active_ids = [index for index, value in enumerate(active) if value]
+        metadata = segment.get("metadata")
+        runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
+        if not isinstance(runtime, dict):
+            for env_id in active_ids:
+                known[env_id] = False
+            continue
+        env_ids = runtime.get("env_ids", [])
+        ledger = runtime.get("workflow_recoveries")
+        if (
+            runtime.get("kind") != "skill_result"
+            or runtime.get("schema_version") != 2
+            or not isinstance(env_ids, list)
+            or any(
+                type(value) is not int or value < 0 or value >= count
+                for value in env_ids
+            )
+            or len(set(env_ids)) != len(env_ids)
+            or not isinstance(ledger, list)
+        ):
+            for env_id in active_ids:
+                known[env_id] = False
+            continue
+        for env_id in active_ids:
+            covered[env_id] |= env_id in env_ids
+            known[env_id] &= env_id in env_ids
+        # Core recovery is not silently reclassified from an empty workflow ledger.
+        events, failures = runtime.get("events"), runtime.get("failures")
+        if (
+            not isinstance(events, list)
+            or not isinstance(failures, list)
+            or failures
+            or any(
+                not isinstance(event, dict)
+                or type(event.get("kind")) is not str
+                or event.get("kind")
+                in {"replanned", "recovery_required", "recovery_exhausted"}
+                for event in events or []
+            )
+        ):
+            for env_id in active_ids:
+                known[env_id] = False
+        for trace in ledger:
+            traces.append(
+                {
+                    "segment": segment.get("name"),
+                    "env_ids": list(env_ids),
+                    "trace": deepcopy(trace),
+                }
+            )
+            if not isinstance(trace, dict):
+                for env_id in active_ids:
+                    known[env_id] = False
+                continue
+            masks = trace.get("masks", {})
+            valid = (
+                type(trace.get("role")) is str
+                and trace["role"] in roles
+                and isinstance(masks, dict)
+                and all(
+                    isinstance(masks.get(name), list)
+                    and len(masks[name]) == len(env_ids)
+                    and all(type(value) is bool for value in masks[name])
+                    for name in ("entered", "completed", "failed")
+                )
+            )
+            if not valid:
+                for env_id in active_ids:
+                    known[env_id] = False
+                continue
+            for index, env_id in enumerate(env_ids):
+                entered, completed, failed = (
+                    masks[name][index] for name in ("entered", "completed", "failed")
+                )
+                if (completed or failed) and not entered or completed and failed:
+                    known[env_id] = False
+                    continue
+                if not entered:
+                    continue
+                attempts[env_id] += 1
+                call = trace.get("call")
+                commands = call.get("command_count") if isinstance(call, dict) else None
+                if completed and type(commands) is int and commands > 0:
+                    recovered[env_id] += 1
+                    reacquired[env_id] += int(trace["role"] == "reacquire")
+                else:
+                    known[env_id] = False
+    return {
+        "schema_version": "gen_sim.recovery-summary/v1",
+        "source": "runtime.workflow_recoveries",
+        "scope": "program_completion_not_taskspec_verdict",
+        "original_failure_source": "execution_report.json:runtime_result.segments[].metadata.runtime",
+        "environments": [
+            {
+                "env_id": row["env_id"],
+                "program_success": successes[index],
+                "certified_success": row["success"],
+                "completion_kind": (
+                    "not_completed"
+                    if successes[index] is False
+                    else (
+                        "recovered_completion"
+                        if successes[index] is True and recovered[index]
+                        else (
+                            "first_pass_completion"
+                            if successes[index] is True
+                            and known[index]
+                            and covered[index]
+                            and attempts[index] == 0
+                            else "unknown"
+                        )
+                    )
+                ),
+                "workflow_recovery_attempt_count": attempts[index],
+                "completed_recovery_call_count": recovered[index],
+                "completed_reacquisition_call_count": reacquired[index],
+            }
+            for index, row in enumerate(rows)
+        ],
+        "workflow_recoveries": traces,
+    }
 
 
 def _snapshot_control_evidence(env: Any, deployment: Any) -> list[dict[str, Any]]:

@@ -112,6 +112,166 @@ def test_default_feedback_snapshot_does_not_lookup_sensor_or_add_keys(routes):
     lookup.assert_not_called()
 
 
+@pytest.mark.parametrize("factory", [None, object()])
+def test_legacy_grip_capture_never_looks_up_or_samples_sensor(factory) -> None:
+    lookup = Mock(
+        side_effect=AssertionError("Legacy provider must not add sensor reads")
+    )
+    env = SimpleNamespace(sim=SimpleNamespace(get_sensor=lookup))
+    deployment = SimpleNamespace(
+        integration=SimpleNamespace(
+            registration=SimpleNamespace(control_part_evidence_factory=factory)
+        )
+    )
+    assert _bundle_runner._snapshot_grip_contact_evidence(env, deployment) is None
+    lookup.assert_not_called()
+
+
+@pytest.mark.parametrize("has_recovery", [False, True])
+def test_recovery_summary_separates_real_completion_without_changing_verdict(
+    has_recovery,
+) -> None:
+    recovery = {
+        "role": "reacquire",
+        "masks": {"entered": [True], "completed": [True], "failed": [False]},
+        "call": {"command_count": 3},
+        "message": "Original hold was lost before this real pickup.",
+    }
+    runtime = {
+        "success": [True],
+        "task_spec_evaluation": {"environments": [{"status": "failed"}]},
+        "segments": [
+            {
+                "name": "original_step",
+                "active": [True],
+                "metadata": {
+                    "runtime": {
+                        "kind": "skill_result",
+                        "schema_version": 2,
+                        "env_ids": [0],
+                        "workflow_recoveries": [recovery] if has_recovery else [],
+                        "events": [],
+                        "failures": [],
+                    }
+                },
+            }
+        ],
+    }
+    report = {
+        "environments": [{"env_id": 0, "success": False}],
+        "runtime_result": runtime,
+    }
+    snapshot = json.loads(json.dumps(report))
+    summary = _bundle_runner._recovery_summary(report)
+    row = summary["environments"][0]
+    assert row["completion_kind"] == (
+        "recovered_completion" if has_recovery else "first_pass_completion"
+    )
+    assert row["program_success"] is True and row["certified_success"] is False
+    assert report == snapshot
+    if has_recovery:
+        assert (
+            summary["workflow_recoveries"][0]["trace"]["message"] == recovery["message"]
+        )
+
+
+@pytest.mark.parametrize(
+    "damage", ["missing", "mask", "core_recovery", "prepared_only"]
+)
+def test_unknown_or_incomplete_recovery_history_is_not_called_first_pass(
+    damage,
+) -> None:
+    runtime = {
+        "kind": "skill_result",
+        "schema_version": 2,
+        "env_ids": [0],
+        "workflow_recoveries": [],
+        "events": [],
+        "failures": [],
+    }
+    if damage == "missing":
+        runtime.pop("workflow_recoveries")
+    elif damage == "mask":
+        runtime["workflow_recoveries"] = [
+            {"role": "reacquire", "masks": {"entered": [True, False]}}
+        ]
+    elif damage == "core_recovery":
+        runtime["events"] = [{"kind": "replanned", "env_mask": [True]}]
+    else:
+        runtime["workflow_recoveries"] = [
+            {
+                "role": "reacquire",
+                "masks": {"entered": [True], "completed": [False], "failed": [True]},
+                "call": None,
+            }
+        ]
+    report = {
+        "environments": [{"env_id": 0, "success": True}],
+        "runtime_result": {
+            "success": [True],
+            "segments": [{"active": [True], "metadata": {"runtime": runtime}}],
+        },
+    }
+    assert (
+        _bundle_runner._recovery_summary(report)["environments"][0]["completion_kind"]
+        == "unknown"
+    )
+
+
+@pytest.mark.parametrize("metadata", [None, [], {"runtime": None}, {"runtime": []}])
+def test_malformed_runtime_snapshot_still_publishes_unknown_summary(metadata) -> None:
+    report = {
+        "environments": [{"env_id": 0, "success": True}],
+        "runtime_result": {
+            "success": [True],
+            "segments": [{"active": [True], "metadata": metadata}],
+        },
+    }
+    summary = _bundle_runner._recovery_summary(report)
+    assert summary["environments"][0]["completion_kind"] == "unknown"
+    json.dumps(summary, allow_nan=False)
+
+
+def test_recovery_summary_uses_runtime_env_identity_not_mask_position() -> None:
+    report = {
+        "environments": [
+            {"env_id": 0, "success": True},
+            {"env_id": 1, "success": True},
+        ],
+        "runtime_result": {
+            "success": [True, True],
+            "segments": [
+                {
+                    "active": [True, True],
+                    "metadata": {
+                        "runtime": {
+                            "kind": "skill_result",
+                            "schema_version": 2,
+                            "env_ids": [1, 0],
+                            "events": [],
+                            "failures": [],
+                            "workflow_recoveries": [
+                                {
+                                    "role": "reacquire",
+                                    "masks": {
+                                        "entered": [True, False],
+                                        "completed": [True, False],
+                                        "failed": [False, False],
+                                    },
+                                    "call": {"command_count": 3},
+                                }
+                            ],
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    rows = _bundle_runner._recovery_summary(report)["environments"]
+    assert rows[0]["completion_kind"] == "first_pass_completion"
+    assert rows[1]["completion_kind"] == "recovered_completion"
+
+
 @pytest.mark.parametrize(
     "targets, expected",
     [
@@ -300,6 +460,9 @@ def test_initial_capture_counts_sequential_workflows_not_segments():
         (False, "exception", "twist_feedback"),
         (False, "success", "twist_audit_error"),
         (False, "exception", "twist_audit_error"),
+        (False, "success", "grip"),
+        (False, "exception", "grip"),
+        (False, "success", "grip_nonfinite"),
     ],
 )
 def test_bundle_plans_initial_call_once(
@@ -414,7 +577,36 @@ def test_bundle_plans_initial_call_once(
         "window_timestamps": [1.0, 1.01, 1.02],
     }
     feedback = None
-    if evidence_mode != "none":
+    grip_observer = None
+    if evidence_mode in {"grip", "grip_nonfinite"}:
+        from embodichain.gen_sim.task_engine._task_program.grip_evidence import (
+            NativeGripObserver,
+            NativeGripEvidenceFactory,
+        )
+
+        sensor = SimpleNamespace(
+            update=Mock(),
+            get_data=Mock(
+                return_value={
+                    "is_valid": torch.tensor([[True, True]]),
+                    "user_ids": torch.tensor([[[1, 9], [2, 9]]]),
+                    "normal": torch.tensor([[[1.0, 0, 0], [-1.0, 0, 0]]]),
+                    "impulse": torch.tensor([[0.02, 0.03]]),
+                }
+            ),
+            dropped_contacts=0,
+        )
+        grip_observer = NativeGripObserver(
+            sensor, {"item": torch.tensor([[9]])}, {"left_eef": torch.tensor([[1, 2]])}
+        )
+        if evidence_mode == "grip_nonfinite":
+            sensor.get_data.return_value["normal"][0, 0, 0] = float("nan")
+        deployment.integration.registration.control_part_evidence_factory = (
+            NativeGripEvidenceFactory(source=object(), object_bindings=())
+        )
+        env.sim = SimpleNamespace(get_sensor=Mock(return_value=sensor))
+        env.reset.side_effect = lambda *a, **kw: grip_observer.trace.clear()
+    elif evidence_mode != "none":
         from embodichain.gen_sim.task_engine._task_program.press_runtime import (
             PressContactSensor,
         )
@@ -507,6 +699,19 @@ def test_bundle_plans_initial_call_once(
         assert torch.get_num_threads() == 1
         if feedback is not None:
             feedback.audit.append(audit_record)
+        if grip_observer is not None:
+            grip_observer(
+                SimpleNamespace(
+                    expectation=SimpleNamespace(object_id="item"),
+                    source=SimpleNamespace(
+                        address=SimpleNamespace(control_part="left_eef")
+                    ),
+                    clause=SimpleNamespace(expected=True),
+                ),
+                SimpleNamespace(
+                    env_ids=torch.tensor([0]), timestamp=0.25, observation_revision=1
+                ),
+            )
         plan = engine._plan_request(request)
         if plan.plan_success.any():
             dispatched.append(plan)
@@ -560,7 +765,23 @@ def test_bundle_plans_initial_call_once(
         )
     if outcome == "exception":
         assert report["failure"]["message"] == "fixture planning exception"
-    if evidence_mode != "none":
+    if evidence_mode in {"grip", "grip_nonfinite"}:
+        evidence = json.loads(
+            (tmp_path / "execution/grip_contact_evidence.json").read_text()
+        )
+        assert evidence["source"] == "native_contact_sensor"
+        assert (
+            evidence["retained_query_count"] == evidence["cumulative_query_count"] == 1
+        )
+        assert evidence["trace"][0]["rows"][0]["valid"] is (evidence_mode == "grip")
+        if evidence_mode == "grip_nonfinite":
+            assert evidence["finite_audit"]["valid"] is False
+            assert evidence["trace"][0]["rows"][0]["raw_contacts"]["normals"][0][0] == {
+                "nonfinite": "NaN"
+            }
+        assert not grip_observer.trace
+        assert sensor.update.call_count == sensor.get_data.call_count == 1
+    elif evidence_mode != "none":
         evidence = json.loads((tmp_path / "execution/twist_evidence.json").read_text())
         if evidence_mode == "twist_default":
             assert (
