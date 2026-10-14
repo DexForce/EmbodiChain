@@ -80,6 +80,7 @@ from .atomic_task import (
     _signed_rotation_about_axis,
     _snapshot_case_qpos,
     _stage_evidence_batch,
+    _trace_validity,
     register_atomic_skill_provider,
 )
 
@@ -120,6 +121,7 @@ class _OpenDoorEvaluator:
         ).abs()
         batches: list[Sequence[Mapping[str, StageEvidence]]] = [
             _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
                 stage_id="grasped",
                 window="grasp_end",
                 measurements={"grasp_established": grasped},
@@ -127,6 +129,7 @@ class _OpenDoorEvaluator:
                 source="measured_proxy",
             ),
             _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
                 stage_id="opened",
                 window="actuation_end",
                 measurements={"hinge_angle_error_rad": opened_error},
@@ -139,6 +142,7 @@ class _OpenDoorEvaluator:
             if released is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(release, observation=observation),
                         stage_id="released",
                         window="release_end",
                         measurements={"release_established": released},
@@ -187,6 +191,7 @@ class _PourEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(actuation, observation=observation),
                         stage_id="poured",
                         window="actuation_interval",
                         measurements={
@@ -208,6 +213,7 @@ class _PourEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
                         stage_id="settled",
                         window="terminal_settle",
                         measurements={
@@ -222,6 +228,7 @@ class _PourEvaluator:
                 if retained is not None:
                     batches.append(
                         _stage_evidence_batch(
+                            valid_mask=_trace_validity(settle, observation=observation),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
@@ -251,6 +258,7 @@ class _AxisAlignEvaluator:
     ) -> tuple[PhysicalEvaluation, ...]:
         del motion_outcomes
         actuation = _replay_trace(observation, "axis_align_actuation")
+        grasp = _replay_trace(observation, "axis_align_grasp")
         settle = _replay_trace(observation, "axis_align_settle")
         if actuation is None or actuation.object_pose is None:
             return evaluate_skill_stage_batch(
@@ -267,14 +275,8 @@ class _AxisAlignEvaluator:
             dtype=poses.dtype,
             device=poses.device,
         )
-        initial_axis = torch.nn.functional.normalize(
-            poses[0, :, :3, :3] @ internal, dim=-1
-        )
         final_axis = torch.nn.functional.normalize(
             poses[-1, :, :3, :3] @ internal, dim=-1
-        )
-        moved = torch.arccos(
-            torch.clamp((initial_axis * final_axis).sum(dim=-1), -1.0, 1.0)
         )
         aligned_error = torch.arccos(torch.clamp(final_axis @ target, -1.0, 1.0))
         actuation_height = _minimum_height_above_initial_support(actuation, case)
@@ -287,15 +289,24 @@ class _AxisAlignEvaluator:
             dtype=poses.dtype,
             device=poses.device,
         )
-        batches: list[Sequence[Mapping[str, StageEvidence]]] = [
+        part = next(iter(observation.gripper_open_qpos), "")
+        batches: list[Sequence[Mapping[str, StageEvidence]]] = []
+        if grasp is not None:
+            established = _gripper_holding(grasp, observation, part)
+            if established is not None:
+                batches.append(
+                    _stage_evidence_batch(
+                        valid_mask=_trace_validity(grasp, observation=observation),
+                        stage_id="grasped",
+                        window="grasp_end",
+                        measurements={"grasp_established": established},
+                        method="gripper_joint_state",
+                        source="measured_proxy",
+                    )
+                )
+        batches.append(
             _stage_evidence_batch(
-                stage_id="grasped",
-                window="grasp_end",
-                measurements={"grasp_established": moved > 1.0e-5},
-                method="object_axis_motion_proxy",
-                source="measured_proxy",
-            ),
-            _stage_evidence_batch(
+                valid_mask=_trace_validity(actuation, observation=observation),
                 stage_id="aligned",
                 window="actuation_end",
                 measurements={
@@ -305,7 +316,7 @@ class _AxisAlignEvaluator:
                 },
                 method="object_pose_trace",
             ),
-        ]
+        )
         if settle is not None:
             min_height = _minimum_height_above_initial_support(settle, case)
             part = next(iter(observation.gripper_open_qpos), "")
@@ -323,6 +334,7 @@ class _AxisAlignEvaluator:
                 )
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
                         stage_id="settled",
                         window="terminal_settle",
                         measurements={
@@ -338,6 +350,7 @@ class _AxisAlignEvaluator:
                 if retained is not None:
                     batches.append(
                         _stage_evidence_batch(
+                            valid_mask=_trace_validity(settle, observation=observation),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
@@ -1542,11 +1555,18 @@ class _AxisAlignCases(AtomicSkillCaseProvider):
     def replay_observation_windows(
         self, compiled: CompiledTrajectory, case: BenchmarkCase
     ) -> tuple[ReplayObservationWindow, ...]:
-        """Collect alignment motion and the terminal settle interval."""
+        """Collect grasp state, alignment motion and terminal retention."""
         del case
+        close = compiled.segment(0, "close")
         segment = compiled.segment(0, "manipulate")
         waypoint_count = compiled.trajectory.waypoint_count
         return (
+            ReplayObservationWindow(
+                "axis_align_grasp",
+                close.start,
+                close.stop,
+                frozenset({"gripper_qpos"}),
+            ),
             ReplayObservationWindow(
                 "axis_align_actuation",
                 segment.start,
@@ -1630,6 +1650,7 @@ class _PushObjectEvaluator:
             )
             batches.append(
                 _stage_evidence_batch(
+                    valid_mask=_trace_validity(contact, observation=observation),
                     stage_id="contacted",
                     window="contact_end",
                     measurements={
@@ -1663,6 +1684,7 @@ class _PushObjectEvaluator:
             residual -= (residual * normal).sum(dim=-1, keepdim=True) * normal
             batches.append(
                 _stage_evidence_batch(
+                    valid_mask=_trace_validity(actuation, observation=observation),
                     stage_id="pushed",
                     window="actuation_end",
                     measurements={
@@ -1686,6 +1708,7 @@ class _PushObjectEvaluator:
             residual -= (residual * normal).sum(dim=-1, keepdim=True) * normal
             batches.append(
                 _stage_evidence_batch(
+                    valid_mask=_trace_validity(settle, observation=observation),
                     stage_id="on_support_plane",
                     window="terminal_settle",
                     measurements={
@@ -1940,7 +1963,7 @@ class _PushObjectCases(AtomicSkillCaseProvider):
             ReplayObservationWindow(
                 "push_contact",
                 contact.start,
-                contact.stop,
+                push.stop,
                 frozenset({"object_pose"}),
             ),
             ReplayObservationWindow(

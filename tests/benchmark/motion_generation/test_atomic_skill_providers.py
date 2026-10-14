@@ -253,6 +253,9 @@ def test_axis_align_physical_evaluator_keeps_terminal_retention_separate() -> No
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
             "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
             "axis_align_settle": ReplayObservationTrace(
                 object_pose=settle,
@@ -291,6 +294,9 @@ def test_axis_align_requires_lift_and_terminal_alignment() -> None:
         gripper_open_qpos={"hand": torch.tensor([0.0])},
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(
+                gripper_qpos={"hand": torch.full((2, 2, 1), 0.5)},
+            ),
             "axis_align_actuation": ReplayObservationTrace(object_pose=actuation),
             "axis_align_settle": ReplayObservationTrace(
                 object_pose=settle,
@@ -921,3 +927,71 @@ def test_door_pour_align_push_suite_declares_the_four_skills() -> None:
     assert all(
         "fit_type" not in spec.config.get("auto_gen", {}) for spec in suite.planners
     )
+
+
+def test_axis_align_accepts_already_aligned_measured_grasp() -> None:
+    """A correctly grasped/lifted object need not rotate to be aligned."""
+    initial = torch.eye(4).reshape(1, 4, 4)
+    lifted = initial.clone()
+    lifted[:, 2, 3] = 0.1
+    poses = lifted.unsqueeze(0).repeat(2, 1, 1, 1)
+    holding = torch.full((2, 1, 1), 0.5)
+    case = _case(
+        "axis_align",
+        1,
+        object_initial_pose=initial.tolist(),
+        internal_axis=[1.0, 0.0, 0.0],
+        target_axis=[1.0, 0.0, 0.0],
+    )
+    observation = _observation(
+        1,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "axis_align_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "axis_align_actuation": ReplayObservationTrace(object_pose=poses),
+            "axis_align_settle": ReplayObservationTrace(
+                object_pose=poses, gripper_qpos={"hand": holding}
+            ),
+        },
+    )
+    result = (
+        create_atomic_skill_provider("axis_align")
+        .physical_evaluator()
+        .evaluate(case, observation, ())[0]
+    )
+    assert result.task_success
+    assert result.stages[0].measurements["grasp_established"] is True
+
+
+def test_push_succeeds_when_contact_starts_during_planar_motion() -> None:
+    """The clearance/descent prefix can leave the object stationary."""
+    initial = torch.eye(4).reshape(1, 4, 4)
+    target = initial.clone()
+    target[:, 1, 3] = 0.1
+    case = _case(
+        "push_object",
+        1,
+        object_initial_pose=initial.tolist(),
+        target_object_pose=target.tolist(),
+    )
+    observation = _observation(
+        1,
+        replay_traces={
+            "push_contact": ReplayObservationTrace(
+                object_pose=torch.stack((initial, initial, target))
+            ),
+            "push_actuation": ReplayObservationTrace(
+                object_pose=torch.stack((initial, target))
+            ),
+            "push_settle": ReplayObservationTrace(
+                object_pose=torch.stack((target, target))
+            ),
+        },
+    )
+    result = (
+        create_atomic_skill_provider("push_object")
+        .physical_evaluator()
+        .evaluate(case, observation, ())[0]
+    )
+    assert result.task_success

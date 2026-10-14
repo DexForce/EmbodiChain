@@ -81,6 +81,7 @@ from .atomic_task import (
     _replay_trace,
     _snapshot_case_qpos,
     _stage_evidence_batch,
+    _trace_validity,
     _with_plan_options,
     register_atomic_skill_provider,
 )
@@ -127,6 +128,7 @@ class _HandOverEvaluator:
             if grasped is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(pickup, observation=observation),
                         stage_id="grasped",
                         window="grasp_end",
                         measurements={"grasp_established": grasped},
@@ -149,6 +151,7 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(transfer, observation=observation),
                         stage_id="transferred",
                         window="transfer_end",
                         measurements={
@@ -172,6 +175,7 @@ class _HandOverEvaluator:
             ):
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(exchange, observation=observation),
                         stage_id="handed_over",
                         window="handover_end",
                         measurements={
@@ -198,6 +202,7 @@ class _HandOverEvaluator:
                 if receiver_released is not None:
                     batches.append(
                         _stage_evidence_batch(
+                            valid_mask=_trace_validity(settle, observation=observation),
                             stage_id="receiver_released",
                             window="terminal_settle",
                             measurements={"release_established": receiver_released},
@@ -207,6 +212,7 @@ class _HandOverEvaluator:
                     )
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
                         stage_id="placed",
                         window="terminal_settle",
                         measurements={
@@ -293,6 +299,7 @@ class _CoordinatedPickmentEvaluator:
             if left_held is not None and right_held is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(grasp, observation=observation),
                         stage_id="dual_grasped",
                         window="grasp_end",
                         measurements={
@@ -313,6 +320,7 @@ class _CoordinatedPickmentEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(lift, observation=observation),
                         stage_id="lifted",
                         window="lift_end",
                         measurements={
@@ -332,6 +340,7 @@ class _CoordinatedPickmentEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(move, observation=observation),
                         stage_id="moved",
                         window="actuation_end",
                         measurements={
@@ -359,6 +368,7 @@ class _CoordinatedPickmentEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
                         stage_id="settled",
                         window="terminal_settle",
                         measurements={
@@ -374,6 +384,7 @@ class _CoordinatedPickmentEvaluator:
                 if left_held is not None and right_held is not None:
                     batches.append(
                         _stage_evidence_batch(
+                            valid_mask=_trace_validity(settle, observation=observation),
                             stage_id="held",
                             window="terminal_settle",
                             measurements={
@@ -429,6 +440,7 @@ class _CoordinatedPlacementEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(aligned, observation=observation),
                         stage_id="aligned",
                         window="actuation_end",
                         measurements={
@@ -451,6 +463,7 @@ class _CoordinatedPlacementEvaluator:
             if placing_released is not None and support_retained is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(release, observation=observation),
                         stage_id="released",
                         window="release_end",
                         measurements={
@@ -479,6 +492,7 @@ class _CoordinatedPlacementEvaluator:
             if min_height is not None:
                 batches.append(
                     _stage_evidence_batch(
+                        valid_mask=_trace_validity(settle, observation=observation),
                         stage_id="stable",
                         window="settle_interval",
                         measurements={

@@ -164,7 +164,7 @@ def test_atomic_case_identity_includes_simulator_batch_size() -> None:
         (
             "axis_align",
             {},
-            ("axis_align_actuation", "axis_align_settle"),
+            ("axis_align_grasp", "axis_align_actuation", "axis_align_settle"),
         ),
         (
             "hand_over",
@@ -412,9 +412,10 @@ def test_pick_up_provider_uses_grasp_lift_and_retention_windows() -> None:
         gripper_grasp_qpos={"hand": torch.tensor([1.0])},
         replay_traces={
             "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": held}),
-            "pickup_lift": ReplayObservationTrace(object_pose=lift),
+            "pickup_lift": ReplayObservationTrace(object_pose=lift, tcp_pose=lift),
             "pickup_settle": ReplayObservationTrace(
                 object_pose=lift[-1:].repeat(2, 1, 1, 1),
+                tcp_pose=lift[-1:].repeat(2, 1, 1, 1),
                 gripper_qpos={"hand": held},
             ),
         },
@@ -2188,3 +2189,161 @@ def test_move_joints_case_uses_canonical_snapshot_for_targets(tmp_path: Path) ->
         manifest = write_case_manifest(tmp_path / f"case-{index}.json", [case])
         manifests.append(json.loads(manifest.read_text()))
     assert manifests[0] == manifests[1]
+
+
+@pytest.mark.parametrize(
+    ("object_x", "object_z", "tcp_x", "expected"),
+    [(0.0, 0.0, 0.0, False), (0.03, 0.1, 0.0, False), (0.03, 0.1, 0.03, True)],
+)
+def test_pickup_retention_tracks_the_target_object(
+    object_x: float,
+    object_z: float,
+    tcp_x: float,
+    expected: bool,
+) -> None:
+    """Reject falling/slipping objects, while allowing rigid hand/object motion."""
+    initial = torch.eye(4).reshape(1, 4, 4)
+    lifted = initial.clone()
+    lifted[:, 2, 3] = 0.1
+    final = lifted.clone()
+    final[:, 0, 3], final[:, 2, 3] = object_x, object_z
+    final_tcp = lifted.clone()
+    final_tcp[:, 0, 3] = tcp_x
+    holding = torch.full((2, 1, 1), 0.5)
+    case = replace(
+        _atomic_case(),
+        skill_id="pick_up",
+        case_parameters={"object_initial_pose": initial.tolist()},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(1, dtype=torch.bool),
+        final_tcp_pose=final_tcp,
+        joint_tracking_rmse_rad=torch.zeros(1),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": torch.tensor([0.0])},
+        gripper_grasp_qpos={"hand": torch.tensor([1.0])},
+        replay_traces={
+            "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "pickup_lift": ReplayObservationTrace(
+                object_pose=torch.stack((initial, lifted)),
+                tcp_pose=torch.stack((initial, lifted)),
+            ),
+            "pickup_settle": ReplayObservationTrace(
+                object_pose=torch.stack((lifted, final)),
+                tcp_pose=torch.stack((lifted, final_tcp)),
+                gripper_qpos={"hand": holding},
+            ),
+        },
+    )
+    result = (
+        create_atomic_skill_provider("pick_up")
+        .physical_evaluator()
+        .evaluate(case, observation, ())[0]
+    )
+    assert result.task_success is expected
+    if not expected:
+        assert result.failure_stage == "held"
+        assert result.failure_code == "object_dropped"
+
+
+@pytest.mark.parametrize(
+    "invalid_channel", ["gripper", "open_command", "grasp_command"]
+)
+def test_nonfinite_grasp_evidence_is_unavailable_per_row(invalid_channel: str) -> None:
+    """Invalid raw measurements must not become a measured grasp failure."""
+    initial = torch.eye(4).repeat(2, 1, 1)
+    lifted = initial.clone()
+    lifted[:, 2, 3] = 0.1
+    holding = torch.full((2, 2, 1), 0.5)
+    opened = torch.zeros(2, 1)
+    grasped = torch.ones(2, 1)
+    if invalid_channel == "gripper":
+        holding[-1, 1, 0] = torch.nan
+    elif invalid_channel == "open_command":
+        opened[1, 0] = torch.inf
+    else:
+        grasped[1, 0] = torch.nan
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        skill_id="pick_up",
+        case_parameters={"object_initial_pose": initial.tolist()},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=lifted,
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        gripper_open_qpos={"hand": opened},
+        gripper_grasp_qpos={"hand": grasped},
+        replay_traces={
+            "pickup_grasp": ReplayObservationTrace(gripper_qpos={"hand": holding}),
+            "pickup_lift": ReplayObservationTrace(
+                object_pose=torch.stack((initial, lifted)),
+                tcp_pose=torch.stack((initial, lifted)),
+            ),
+            "pickup_settle": ReplayObservationTrace(
+                object_pose=torch.stack((lifted, lifted)),
+                tcp_pose=torch.stack((lifted, lifted)),
+                gripper_qpos={"hand": holding},
+            ),
+        },
+    )
+    results = (
+        create_atomic_skill_provider("pick_up")
+        .physical_evaluator()
+        .evaluate(case, observation, ())
+    )
+    assert results[0].task_success
+    assert results[1].stages[0].status == "unavailable"
+    assert results[1].failure_code == "evidence_unavailable"
+
+
+def test_push_contact_window_includes_contact_made_during_push() -> None:
+    provider = create_atomic_skill_provider("push_object")
+    compiled = Mock(trajectory=SimpleNamespace(waypoint_count=30))
+    segments = {
+        "contact": SimpleNamespace(start=5, stop=10),
+        "push": SimpleNamespace(start=10, stop=20),
+    }
+    compiled.segment.side_effect = lambda index, name: segments[name]
+    window = provider.replay_observation_windows(compiled, _atomic_case())[0]
+    assert (window.start, window.stop) == (5, 20)
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_nonfinite_press_joint_evidence_does_not_count_as_contact_failure(
+    invalid_value: float,
+) -> None:
+    """A corrupt sample in one environment cannot become a false contact label."""
+    case = replace(
+        _atomic_case(),
+        batch_size=2,
+        skill_id="press",
+        case_parameters={"articulation_joint_stroke": 0.006},
+    )
+    observation = _ExecutionObservation(
+        execution_success=torch.ones(2, dtype=torch.bool),
+        final_tcp_pose=torch.eye(4).repeat(2, 1, 1),
+        joint_tracking_rmse_rad=torch.zeros(2),
+        execution_time_ms=1.0,
+        task_completion_time_s=0.5,
+        replay_traces={
+            "press_actuation": ReplayObservationTrace(
+                articulation_joint=torch.tensor(
+                    [[0.0, 0.0], [0.003, invalid_value], [0.006, 0.006]]
+                )
+            ),
+        },
+    )
+    results = (
+        create_atomic_skill_provider("press")
+        .physical_evaluator()
+        .evaluate(case, observation, ())
+    )
+    assert results[0].task_success
+    assert results[1].stages[0].status == "unavailable"
+    assert results[1].stages[1].status == "not_reached"
+    assert results[1].failure_code == "evidence_unavailable"
