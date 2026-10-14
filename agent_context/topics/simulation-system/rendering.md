@@ -21,10 +21,12 @@ disabled-sensor filtering run before the World is constructed.
 `SimulationManager(..., requires_native_renderer=...)` before Gym temporarily
 sets headless for scene setup. With auto, no global default override and demand
 explicitly false, the manager selects NoRender without probing the GPU. Explicit
-renderer selections and global defaults retain precedence. The default demand
-`None` preserves standalone GPU selection. Custom camera/visual code, including
-cameras added after startup, must reserve rendering before construction; no
-runtime renderer switching or speculative constructors are used.
+renderer selections and global defaults retain precedence. Native auto selection
+uses `utility/render_utils.py:select_default_renderer()` without hardware probing;
+the same policy applies to standalone simulations with demand `None`. Custom
+camera/visual code, including cameras added after startup, must reserve rendering
+before construction; no runtime renderer switching or speculative constructors
+are used.
 
 DexSim keeps its process renderer after World cleanup. Subsequent auto Worlds
 reuse an initialized native renderer, including camera-free Worlds. A process

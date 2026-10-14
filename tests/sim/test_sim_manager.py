@@ -72,11 +72,11 @@ pytestmark = pytest.mark.no_sim
     ("requested", "override", "demand", "consumer", "expected"),
     [
         ("auto", "auto", False, None, "no-render"),
-        ("auto", "auto", True, None, "hybrid"),
-        ("auto", "auto", None, None, "hybrid"),
-        ("auto", "auto", False, "window", "hybrid"),
-        ("auto", "auto", False, "viser", "hybrid"),
-        ("auto", "auto", False, "sync", "hybrid"),
+        ("auto", "auto", True, None, "fast-rt"),
+        ("auto", "auto", None, None, "fast-rt"),
+        ("auto", "auto", False, "window", "fast-rt"),
+        ("auto", "auto", False, "viser", "fast-rt"),
+        ("auto", "auto", False, "sync", "fast-rt"),
         ("auto", "fast-rt", False, None, "fast-rt"),
         ("auto", "no-render", True, None, "no-render"),
         ("hybrid", "auto", False, None, "hybrid"),
@@ -89,10 +89,12 @@ def test_auto_renderer_respects_demand_and_overrides(
     requested, override, demand, consumer, expected, monkeypatch, tmp_path
 ) -> None:
     from embodichain.lab.sim import cfg
+    from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(cfg, "DEFAULT_RENDERER", override)
-    selector = MagicMock(return_value=override if override != "auto" else "hybrid")
+
+    selector = MagicMock(wraps=select_default_renderer)
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer", selector
     )
