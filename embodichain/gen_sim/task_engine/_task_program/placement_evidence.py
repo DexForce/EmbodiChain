@@ -204,6 +204,8 @@ def placement_node(
     member: Mapping[str, Any],
     roles: Mapping[str, Any],
     scene_binding: Any,
+    *,
+    support_contract_revision: int | None = None,
 ) -> tuple[Mapping[str, Any], str]:
     """Resolve only the graph's exact object/reference and declared E1 relation."""
     if (
@@ -236,7 +238,16 @@ def placement_node(
                 placements.append(node)
         elif (
             relation == "on"
-            and call.get("call_id") == "simulation.place_relative"
+            and call.get("call_id")
+            in (
+                {
+                    "simulation.place_relative",
+                    "gen_sim.place_upright",
+                    "gen_sim.stack_place",
+                }
+                if support_contract_revision == 1
+                else {"simulation.place_relative"}
+            )
             and call["arguments"].get("object") == member["object_uid"]
             and call["arguments"].get("reference") == reference_uid
             and call["arguments"].get("relation") == "on"
@@ -253,7 +264,9 @@ def measured_release(
     segments: Mapping[str, Any],
     boundary: Mapping[str, Any],
     num_envs: int,
-) -> list[bool]:
+    *,
+    with_receipt: bool = False,
+) -> list[bool] | tuple[list[bool], Mapping[str, Any], Mapping[str, Any]]:
     """Require exact terminal release receipts and no held state at the boundary."""
     runtime = segments[node["id"]]["metadata"]["runtime"]
     identities = runtime["env_ids"]
@@ -268,6 +281,7 @@ def measured_release(
     resource = node["call"]["resources"]["primary"]
     result = [False] * num_envs
     found = False
+    verified_receipt = verified_call = None
     for call in runtime.get("calls", []):
         if call.get("status") != "completed":
             continue
@@ -333,6 +347,7 @@ def measured_release(
             relative = torch.tensor(samples[1]["object_to_endpoint"])
             _valid_pose(relative, num_envs)
             found = True
+            verified_receipt, verified_call = receipt, call
             result = [
                 ok and a and b and value is False
                 for ok, a, b, value in zip(
@@ -363,4 +378,7 @@ def measured_release(
         if len(mask) != num_envs or any(type(v) is not bool for v in mask):
             raise ValueError("Placement held-state mask is invalid.")
         result = [ok and not active for ok, active in zip(result, mask, strict=True)]
+    if with_receipt:
+        assert verified_receipt is not None and verified_call is not None
+        return result, verified_receipt, verified_call
     return result
