@@ -126,16 +126,19 @@ def test_auto_no_render_is_resolved_before_world_construction(monkeypatch) -> No
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(SimulationManager, "_instances", {})
     monkeypatch.setattr(sim_manager_module, "_initialize_warp_runtime", lambda _: None)
-    create_world = MagicMock(
-        side_effect=RuntimeError("stop before native initialization")
-    )
+
+    def fail_world(_config):
+        assert SimulationManager._instances[0]._requested_renderer == "auto"
+        raise RuntimeError("stop before native initialization")
+
+    create_world = MagicMock(side_effect=fail_world)
     monkeypatch.setattr(dexsim, "World", create_world)
     config = SimulationManagerCfg(headless=True, startup_summary="off")
     with pytest.raises(RuntimeError, match="stop before native initialization"):
         SimulationManager(config, requires_native_renderer=False)
     world_config = create_world.call_args.args[0]
     assert world_config.renderer == dexsim.types.Renderer.NORENDER
-    assert SimulationManager._instances[0]._requested_renderer == "auto"
+    assert SimulationManager._instances == {}
 
 
 def test_undeclared_camera_error_explains_how_to_reserve_rendering() -> None:
@@ -526,8 +529,10 @@ def test_flush_cleanup_queue_preserves_other_live_managers(monkeypatch):
     wait.assert_not_called()
 
 
+@pytest.mark.parametrize("owns_registry_entry", [False, True])
 def test_deferred_destroy_prepares_backend_before_releasing_world(
     monkeypatch: pytest.MonkeyPatch,
+    owns_registry_entry: bool,
 ) -> None:
     """Backend-owned views are released before Spawn and World resources."""
     events: list[str] = []
@@ -561,11 +566,15 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     sim.clean_materials = lambda: events.append("material_clean")
     sim.is_window_opened = False
 
-    monkeypatch.setattr(
-        SimulationManager,
-        "reset",
-        lambda _instance_id: events.append("manager_reset"),
-    )
+    replacement = SimpleNamespace(_world=MagicMock())
+    instances = {0: sim if owns_registry_entry else replacement}
+    monkeypatch.setattr(SimulationManager, "_instances", instances)
+
+    def reset(instance_id):
+        events.append("manager_reset")
+        instances.pop(instance_id)
+
+    monkeypatch.setattr(SimulationManager, "reset", reset)
     monkeypatch.setattr(gc, "collect", lambda: events.append("gc_collect"))
 
     sim._deferred_destroy()
@@ -573,6 +582,9 @@ def test_deferred_destroy_prepares_backend_before_releasing_world(
     assert events.index("backend_prepare") < events.index("gc_collect")
     assert events.index("backend_prepare") < events.index("spawn_close")
     assert events.index("backend_prepare") < events.index("world_quit")
+    assert instances == ({} if owns_registry_entry else {0: replacement})
+    assert events.count("manager_reset") == int(owns_registry_entry)
+    replacement._world.quit.assert_not_called()
 
 
 def test_sim_update_refreshes_dirty_visualization_and_captures_current_state() -> None:

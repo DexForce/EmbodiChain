@@ -17,13 +17,13 @@ finger joints in one URDF.
 - **Numerical forward and inverse kinematics** through `PytorchSolverCfg` and
   `pytorch-kinematics`.
 - **Multi-environment simulation support** through `SimulationManager`.
-- **Dual-arm composition support** through the `"franka"` base-robot key.
+- **Dual-arm composition support** through the `"FrankaPanda"` base-robot key.
 
 ## Usage
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import FrankaPandaCfg
+from embodichain_robots import FrankaPandaCfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
 cfg = FrankaPandaCfg.from_dict({"robot_type": "panda"})
@@ -61,10 +61,12 @@ The configuration exposes two independently addressable control parts:
 
 ```python
 arm_joint_ids = robot.get_joint_ids("arm")
-hand_joint_ids = robot.get_joint_ids("hand")
+eef_joint_ids = robot.get_joint_ids("eef")
 ```
 
 The hand's second finger joint is a mimic of the first in the bundled URDF.
+`embodichain list-robot` therefore reports eight independent control DOFs and
+marks the gripper as `eef (1+1m)`.
 
 ## Default Joint State
 
@@ -88,8 +90,10 @@ The default state places the arm in a neutral ready pose and opens both fingers:
 `DH_PGI_140_80` parallel gripper on the `fr3_link8` flange. It owns the whole
 assembly, so none of the Panda-hand defaults above apply.
 
+Preview this catalog entry with `embodichain preview-robot --robot FrankaPandaPgi --viser`.
+
 ```python
-from embodichain.lab.sim.robots import FrankaPandaPgiCfg
+from embodichain_robots import FrankaPandaPgiCfg
 
 cfg = FrankaPandaPgiCfg.from_dict({"init_pos": [0.5, 0.0, 0.0]})
 robot = sim.add_robot(cfg=cfg)
@@ -113,7 +117,7 @@ the solver plans for.
 
 ## Dual-Arm Composition
 
-Use `DualArmRobotCfg` with `base_robot="franka"` to create a pair of Panda
+Use `DualArmRobotCfg` with `base_robot="FrankaPanda"` to create a pair of Panda
 arms. The dual-arm builder prefixes the generated joints, control parts, and
 solver links with `left_` and `right_`.
 
@@ -122,7 +126,7 @@ from embodichain.lab.sim.robots import DualArmRobotCfg
 
 cfg = DualArmRobotCfg.from_dict(
     {
-        "base_robot": "franka",
+        "base_robot": "FrankaPanda",
         "mount": {"preset": "side_by_side", "separation": 0.6},
     }
 )

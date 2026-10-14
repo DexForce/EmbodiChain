@@ -14,7 +14,7 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 - **Configurable gripper models** (V70/V100) and material types (NORMAL/NEW_UV/NO_MATERIAL)
 - **Flexible URDF assembly** and simulation parameter configuration
 - **Compatible with SimulationManager**, supporting multi-arena parallel simulation
-- **High degree of freedom**: 16 axes (dual arms + grippers, each gripper includes 1 mimic joint)
+- **Control DOF**: 14 independent joints across 16 arm/gripper joints, including two mimic followers
 - **Customizable control groups** for flexible task decomposition and extension
 
 ---
@@ -24,6 +24,7 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 | Parameter             | Description                                                      |
 |-----------------------|------------------------------------------------------------------|
 | Number of joints      | 16 (dual arms + grippers, each gripper includes a mimic joint)   |
+| Independent control DOF | 14 (six arm joints and one gripper command per side) |
 | Gripper models        | V70 / V100                                                       |
 | Layout types          | NORMAL (standard) / FACE_TO_FACE / CUSTOM                        |
 | Initial base height   | 0.7775m (adjustable)                                             |
@@ -37,7 +38,7 @@ CobotMagic is a versatile dual-arm collaborative robot developed by AgileX Robot
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 
 config = SimulationManagerCfg(headless=False, device="cpu", num_envs=2)
 sim = SimulationManager(config)
@@ -64,7 +65,7 @@ sim.update(step=1)
 ### 2. Custom Usage Example
 
 ```python
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 
 custom_cfg = {
     "init_pos": [0.0, 0.0, 1.0],  # Initial position
@@ -78,10 +79,10 @@ robot = sim.add_robot(cfg=cfg)
 
 ```python
 control_parts = {
-    "left_arm": ["LEFT_JOINT1", ..., "LEFT_JOINT6"],
-    "left_eef": ["LEFT_JOINT7", "LEFT_JOINT8"],
-    "right_arm": ["RIGHT_JOINT1", ..., "RIGHT_JOINT6"],
-    "right_eef": ["RIGHT_JOINT7", "RIGHT_JOINT8"],
+    "left_arm": [f"left_joint{i}" for i in range(1, 7)],
+    "left_eef": ["left_joint7", "left_joint8"],
+    "right_arm": [f"right_joint{i}" for i in range(1, 7)],
+    "right_eef": ["right_joint7", "right_joint8"],
 }
 ```
 

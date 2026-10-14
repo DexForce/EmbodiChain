@@ -527,6 +527,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          from configparser import ConfigParser
           from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
@@ -542,10 +543,14 @@ jobs:
               "embodichain/gen_sim/simready_pipeline/configs/gen_config.json",
               "embodichain_tasks/__init__.py",
               "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml",
+              "embodichain_robots/__init__.py",
+              "embodichain_robots/_catalog.py",
           }
           with ZipFile(wheels[0]) as wheel:
               members = set(wheel.namelist())
               entry_points = wheel.read(f"{dist_info}entry_points.txt").decode()
+              entry_point_config = ConfigParser()
+              entry_point_config.read_string(entry_points)
               metadata = Parser().parsestr(wheel.read(f"{dist_info}METADATA").decode())
               runtime_version = wheel.read("embodichain/VERSION").decode().strip()
               if metadata["Version"] != version or runtime_version != version:
@@ -569,7 +574,7 @@ jobs:
               member
               for member in members
               if not member.startswith(
-                  ("embodichain/", "embodichain_tasks/", dist_info)
+                  ("embodichain/", "embodichain_tasks/", "embodichain_robots/", dist_info)
               )
               or "__pycache__" in member
               or member.endswith((".pyc", ".pyo"))
@@ -578,19 +583,24 @@ jobs:
           missing_task_configs = sorted(source_task_configs - wheel_task_configs)
           unexpected_task_configs = sorted(wheel_task_configs - source_task_configs)
           task_entry_point = "embodichain_tasks = embodichain_tasks"
+          robot_entry_point = entry_point_config.get(
+              "embodichain.robots", "official", fallback=None
+          ) == "embodichain_robots._catalog:ROBOT_CONFIGS"
           if (
               unexpected
               or missing
               or missing_task_configs
               or unexpected_task_configs
               or task_entry_point not in entry_points
+              or not robot_entry_point
           ):
               raise SystemExit(
                   "Invalid wheel contents; "
                   f"unexpected={unexpected}, missing={missing}, "
                   f"missing_task_configs={missing_task_configs}, "
                   f"unexpected_task_configs={unexpected_task_configs}, "
-                  f"task_entry_point={task_entry_point in entry_points}"
+                  f"task_entry_point={task_entry_point in entry_points}, "
+                  f"robot_entry_point={robot_entry_point}"
               )
           PY
 

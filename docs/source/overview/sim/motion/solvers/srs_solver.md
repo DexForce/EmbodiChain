@@ -14,11 +14,11 @@ SRSSolver is configured via the `SRSSolverCfg` class, allowing detailed control 
 
 ```python
 from embodichain.data import get_data_path
-from embodichain.lab.sim.robots.dexforce_w1.types import (
+from embodichain_robots.dexforce_w1.types import (
     DexforceW1ArmSide,
     DexforceW1Version,
 )
-from embodichain.lab.sim.robots.dexforce_w1.params import (
+from embodichain_robots.dexforce_w1.params import (
     W1ArmKineParams,
 )
 from embodichain.lab.sim.motion.solvers.srs_solver import SRSSolver, SRSSolverCfg

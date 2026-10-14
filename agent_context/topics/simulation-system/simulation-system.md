@@ -32,6 +32,11 @@ to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
 
+[Scene services](../scene-services/scene-services.md) compose existing configs,
+propose layouts and read/change physical state through these owners. They do
+not add a registry or commit topology. Runtime scene services currently accept
+only B=1 selections; Spawn still owns replication and isolation.
+
 ## Lifecycle
 
 ```text

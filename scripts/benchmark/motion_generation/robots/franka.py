@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from embodichain.lab.sim.cfg import RobotCfg
-from embodichain.lab.sim.robots import FrankaPandaCfg, FrankaPandaPgiCfg
+from embodichain_robots import FrankaPandaCfg, FrankaPandaPgiCfg
 
 from ..registry import register_robot_provider
 from .base import RobotProvider

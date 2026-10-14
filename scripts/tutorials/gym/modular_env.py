@@ -55,7 +55,7 @@ from embodichain.lab.gym.envs.managers import (
 )
 from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
 from embodichain.lab.gym.utils.registration import register_env
-from embodichain.lab.sim.robots import DexforceW1Cfg
+from embodichain_robots import DexforceW1Cfg
 from embodichain.lab.sim.sensors import StereoCameraCfg, SensorCfg
 from embodichain.lab.sim.shapes import MeshCfg
 from embodichain.lab.sim.cfg import (

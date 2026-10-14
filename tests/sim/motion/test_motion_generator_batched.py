@@ -1241,6 +1241,141 @@ def test_cartesian_ik_failure_holds_only_failed_environment(strategy: str) -> No
     )
 
 
+@pytest.mark.parametrize("pose_dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("entry_point", ["generate", "interpolate_trajectory"])
+def test_cartesian_preparation_accepts_mixed_pose_and_fk_precision(
+    pose_dtype: torch.dtype, entry_point: str
+) -> None:
+    """Cartesian input precision may differ from the robot's FK buffers."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    poses = torch.eye(4, dtype=pose_dtype).repeat(2, 2, 1, 1)
+    poses[:, 1, 0, 3] = 0.5
+    original_poses = poses.clone()
+    start = torch.zeros(2, 1, dtype=torch.float32)
+    options = MotionGenOptions(
+        start_qpos=start,
+        control_part="arm",
+        sample_count=20,
+        is_interpolate=True,
+        interpolate_position_step=0.25,
+    )
+
+    if entry_point == "generate":
+        result = generator.generate([PlanState.from_xpos(poses[:, 1])], options)
+        assert result.success.tolist() == [True, True]
+        positions = result.positions
+    else:
+        positions, targets = generator.interpolate_trajectory(
+            control_part="arm", xpos_list=poses, options=options
+        )
+        assert targets.dtype == pose_dtype
+
+    assert positions.dtype == start.dtype
+    torch.testing.assert_close(positions[:, 0], start)
+    torch.testing.assert_close(positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(poses, original_poses)
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_cartesian_preparation_preserves_fk_confirmed_singular_start(
+    continuous: bool,
+) -> None:
+    """An observed start needs no new IK solution, even at a singularity."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    generator.robot.get_solver = lambda name: SimpleNamespace(
+        supports_continuous_batch_ik=continuous
+    )
+    solved_poses = []
+
+    def solve(*, pose, joint_seed, **kwargs):
+        solved_poses.append(pose.clone())
+        qpos = pose[..., 0, 3:4].clone()
+        # Model an analytic solver that fails only at the zero wrist pose.
+        return qpos[..., 0] > 0.0, qpos
+
+    generator.robot.compute_batch_ik = solve
+    goal = torch.eye(4).repeat(2, 1, 1)
+    goal[:, 0, 3] = 0.5
+    start = torch.zeros(2, 1)
+    result = generator.generate(
+        [PlanState.from_xpos(goal)],
+        MotionGenOptions(
+            start_qpos=start,
+            control_part="arm",
+            sample_count=20,
+            is_interpolate=True,
+            interpolate_position_step=0.25,
+        ),
+    )
+
+    assert result.success.tolist() == [True, True]
+    assert solved_poses and all(
+        bool((pose[..., 0, 3] > 0.0).all()) for pose in solved_poses
+    )
+    torch.testing.assert_close(result.positions[:, 0], start)
+    torch.testing.assert_close(result.positions[:, -1], torch.full((2, 1), 0.5))
+    torch.testing.assert_close(start, torch.zeros_like(start))
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+@pytest.mark.parametrize("max_targets", [2, 512])
+def test_cartesian_preparation_requires_ik_for_unconfirmed_start_rows(
+    continuous: bool, max_targets: int
+) -> None:
+    """Reusing one row's known start cannot hide another row's IK failure."""
+    generator = _trapezoidal_generator()
+    generator.robot = _CartesianRobot()
+    generator.robot.get_solver = lambda name: SimpleNamespace(
+        supports_continuous_batch_ik=continuous
+    )
+
+    def solve(*, pose, joint_seed, **kwargs):
+        qpos = pose[..., 0, 3:4].clone()
+        return qpos[..., 0] > 0.25, qpos
+
+    generator.robot.compute_batch_ik = solve
+    poses = torch.eye(4).repeat(2, 2, 1, 1)
+    poses[1, 0, 0, 3] = 0.25  # This row's first pose differs from its seed FK.
+    poses[:, 1, 0, 3] = 0.5
+    with patch(
+        "embodichain.lab.sim.motion.motion_generator._MAX_IK_BATCH_TARGETS", max_targets
+    ):
+        positions, _, success = generator._interpolate_waypoints(
+            control_part="arm",
+            xpos_list=poses,
+            options=MotionGenOptions(
+                start_qpos=torch.zeros(2, 1), interpolate_position_step=0.5
+            ),
+        )
+
+    assert success.tolist() == [True, False]
+    torch.testing.assert_close(positions[0, 0], torch.zeros(1))
+    torch.testing.assert_close(positions[0, -1], torch.full((1,), 0.5))
+    torch.testing.assert_close(positions[1], torch.zeros_like(positions[1]))
+
+
+@pytest.mark.parametrize("continuous", [False, True])
+def test_batch_ik_accepts_fk_confirmed_only_waypoint(continuous: bool) -> None:
+    """A path containing only its observed start does not dispatch IK."""
+    generator = _mock_generator(controlled_dof=1)
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = continuous
+    generator.robot.compute_batch_ik.side_effect = AssertionError(
+        "An FK-confirmed start must not require IK"
+    )
+    start = torch.tensor([[0.2], [0.4]])
+    poses = torch.eye(4).repeat(2, 1, 1, 1)
+    poses[:, 0, 0, 3] = start[:, 0]
+    success, positions = generator._solve_cartesian_waypoints(
+        poses, start, "arm", known_start=torch.ones(2, dtype=torch.bool)
+    )
+    assert success.all()
+    torch.testing.assert_close(positions, start[:, None, :])
+    generator.robot.compute_batch_ik.assert_not_called()
+    generator.robot.compute_ik.assert_not_called()
+
+
 def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits() -> (
     None
 ):

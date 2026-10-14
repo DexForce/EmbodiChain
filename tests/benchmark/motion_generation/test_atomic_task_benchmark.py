@@ -427,7 +427,7 @@ def test_randomization_manifest_records_contract_and_seed():
 
 
 def test_franka_pgi_robot_provider_exposes_arm_hand_and_tcp():
-    from embodichain.lab.sim.robots import FrankaPandaPgiCfg
+    from embodichain_robots import FrankaPandaPgiCfg
 
     suite = load_suite("atomic_franka_pgi_curobo")
     cfg = create_robot_provider(suite.robot).build_cfg()

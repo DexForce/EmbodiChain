@@ -724,8 +724,10 @@ class MotionGenerator:
         poses: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
+        *,
+        known_start: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Batch required poses while retaining every row and IK failure.
+        """Batch required poses, retaining FK-confirmed starts and IK failures.
 
         Solvers with continuous candidate selection receive an initial path
         seed. Other solvers first solve each chunk's endpoint from the preceding
@@ -749,7 +751,15 @@ class MotionGenerator:
         success = torch.ones(batch_size, dtype=torch.bool, device=device)
         qpos_seed = start_qpos
         solved_waypoints: list[torch.Tensor] = []
-        for offset in range(0, poses.shape[1], chunk_size):
+        first_index = 0
+        if known_start is not None:
+            known_start = known_start.to(device)
+            if bool(known_start.all()):
+                # FK already grounded this pose, including at singularities
+                # where IK may fail. Keep it outside the solver batches.
+                solved_waypoints.append(start_qpos[:, None, :])
+                first_index = 1
+        for offset in range(first_index, poses.shape[1], chunk_size):
             chunk = poses[:, offset : offset + chunk_size]
             count = chunk.shape[1]
             if continuous:
@@ -778,6 +788,14 @@ class MotionGenerator:
                     )
                     valid = torch.cat((inner_valid, end_valid), dim=1)
                     qpos = torch.cat((inner_qpos, end_qpos), dim=1)
+
+            if offset == 0 and known_start is not None:
+                # Mixed rows still solve the unconfirmed first poses. Only
+                # confirmed rows may disregard that first sample's IK failure.
+                qpos = qpos.clone()
+                valid = valid.clone()
+                qpos[:, 0] = torch.where(known_start[:, None], start_qpos, qpos[:, 0])
+                valid[:, 0] |= known_start
 
             # Invalid/nonfinite solutions hold the preceding valid seed, even
             # across chunks. A later reachable pose never rescues a failed row.
@@ -1468,8 +1486,23 @@ class MotionGenerator:
 
             if control_part is None:
                 raise ValueError("Cartesian interpolation requires control_part.")
+            # The observed start is already grounded by FK. Re-solving it with
+            # analytic IK can fail at a wrist singularity despite later poses
+            # being reachable. Preserve it only for rows whose whole pose agrees.
+            start_pose = self.robot.compute_fk(
+                qpos=qpos_seed, name=control_part, to_matrix=True
+            )
+            known_start = torch.isclose(
+                total_interpolated_poses[:, 0],
+                start_pose.to(total_interpolated_poses),
+                rtol=0.0,
+                atol=1e-6,
+            ).all(dim=(-2, -1))
             success, qpos_batch = self._solve_cartesian_waypoints(
-                total_interpolated_poses, qpos_seed, control_part
+                total_interpolated_poses,
+                qpos_seed,
+                control_part,
+                known_start=known_start,
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(

@@ -65,7 +65,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
     TrapezoidalPlannerCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaPgiCfg, URRobotCfg
+from embodichain_robots import FrankaPandaPgiCfg, URRobotCfg
 from embodichain.toolkits.graspkit.pg_grasp import (
     AntipodalGraspPoseGenerator,
     AntipodalGraspPoseGeneratorCfg,
@@ -2232,7 +2232,7 @@ def create_ur5_gripper_robot_cfg(
 ) -> RobotCfg:
     """Build a UR5 arm + DH_PGI_140_80 gripper robot configuration.
 
-    The arm is taken from :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`
+    The arm is taken from :class:`~embodichain_robots.ur_robot.URRobotCfg`
     so the URDF, joint names and drive defaults match the canonical UR family
     config. The gripper and tool-center-point offset are added on top to match
     the existing atomic-action tutorial setups.
@@ -2245,7 +2245,7 @@ def create_ur5_gripper_robot_cfg(
         assembled robot keeps the source URDF's lowercase joint names
         (``joint1``..``joint6`` and ``gripper_finger1_joint_1``), matching the
         control parts produced by
-        :class:`~embodichain.lab.sim.robots.ur_robot.URRobotCfg`.
+        :class:`~embodichain_robots.ur_robot.URRobotCfg`.
 
     Args:
         init_pos: Initial root position of the robot in the arena.
@@ -2311,7 +2311,7 @@ def create_franka_panda_robot_cfg(
 ) -> RobotCfg:
     """Build the Franka arm + PGI gripper configuration for the tutorials.
 
-    :class:`~embodichain.lab.sim.robots.FrankaPandaPgiCfg` owns the assembly,
+    :class:`~embodichain_robots.FrankaPandaPgiCfg` owns the assembly,
     control parts, drives, gripper contacts, and flange kinematic chain. The
     sample owns its placement, initial pose, and TCP calibration in
     ``tcp_presets.py``. The shared scenes place manipulation targets on the

@@ -5,6 +5,11 @@ EmbodiChain provides configuration classes for the robot families and composed
 layouts below. Each page documents construction, control parts, kinematics, and
 the currently supported variants.
 
+Run ``embodichain list-robot`` to discover installed families, variants,
+independent control DOFs, default control parts, and mimic followers without
+loading simulation or downloading assets. See :ref:`cli-list-robots` for the
+command reference and :doc:`/guides/robot_catalog` for variant selection.
+
 .. list-table::
    :header-rows: 1
    :widths: 24 25 51
