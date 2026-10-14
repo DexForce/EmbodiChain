@@ -407,6 +407,8 @@ class SharedTickSceneProvider(SceneProvider):
 class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
     """Gym planning observations backed by live robot and shared scene state."""
 
+    _capture_root_pose = False
+
     def __init__(
         self,
         robot: Robot,
@@ -527,12 +529,24 @@ class SimulationPlanningObservationProvider(GymPlanningObservationProvider):
             timestamp=timestamp,
             env_ids=self._env_ids.clone(),
         )
+        root_pose = None
+        if self._capture_root_pose:
+            reader = getattr(self._robot, "get_local_pose", None)
+            if not callable(reader):
+                raise ValueError(
+                    "Snapshot collision qualification requires a robot base pose."
+                )
+            root_pose = reader(to_matrix=True)
+            if not isinstance(root_pose, torch.Tensor):
+                raise ValueError("Robot base observation must be a tensor.")
+            root_pose = root_pose.to(qpos)
         return PlanningContext(
             robot=RobotObservation(
                 timestamp=timestamp,
                 qpos=qpos,
                 qvel=qvel,
                 qeffort=qeffort,
+                root_pose=root_pose,
             ),
             task=task_state,
             scene=scene,

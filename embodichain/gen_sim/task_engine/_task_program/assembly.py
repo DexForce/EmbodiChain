@@ -292,6 +292,16 @@ class _TaskFactory(SimulationTaskProgramFactory):
             engine._clearance_profile = profile
         return engine
 
+    def create_planning_observation_provider(
+        self, *, scene_registry: Any, engine: Any, clock: Any
+    ) -> Any:
+        provider = super().create_planning_observation_provider(
+            scene_registry=scene_registry, engine=engine, clock=clock
+        )
+        # GenSim snapshot collision qualification needs the same-tick base frame.
+        provider._capture_root_pose = True
+        return provider
+
     def create_registered_semantic_lowerers(
         self, *, scene_registry: Any, engine: Any
     ) -> tuple[Any, ...]:
