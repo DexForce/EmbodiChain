@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v4
+suite_version: atomic_franka_pgi_spatial_generalization_v5
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -59,6 +59,46 @@ x-domain-object-yaw: &domain_object_yaw
       target_translation_jitter_m: [0.0, 0.0, 0.0]
       seed_stride: 1
 
+x-domain-object-z: &domain_object_z
+  id: object_z
+  version: v1
+  kind: robustness
+  case_generator: deterministic_uniform_pose_batch
+  perturbations:
+    distribution: uniform
+    object_translation_jitter_m: [0.0, 0.0, 0.02]
+    object_yaw_jitter_rad: 0.0
+    object_roll_pitch_jitter_rad: [0.0, 0.0]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: translation
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.0, 0.0, 0.02]
+      seed_stride: 1
+
+x-domain-object-roll-pitch: &domain_object_roll_pitch
+  id: object_roll_pitch
+  version: v1
+  kind: robustness
+  case_generator: deterministic_uniform_pose_batch
+  perturbations:
+    distribution: uniform
+    object_translation_jitter_m: [0.0, 0.0, 0.0]
+    object_yaw_jitter_rad: 0.0
+    object_roll_pitch_jitter_rad: [0.174533, 0.174533]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: spatial_pose
+      pose_batch_size: 8
+      object_roll_pitch_jitter_rad: [0.174533, 0.174533]
+      seed_stride: 1
+
 x-domain-target-relative-pose: &domain_target_relative_pose
   id: target_relative_pose
   version: v1
@@ -103,6 +143,46 @@ x-domain-target-yaw: &domain_target_yaw
       object_yaw_jitter_rad: 0.0
       target_translation_jitter_m: [0.0, 0.0, 0.0]
       target_yaw_jitter_rad: 0.523599
+      seed_stride: 1
+
+x-domain-target-z: &domain_target_z
+  id: target_z
+  version: v1
+  kind: robustness
+  case_generator: deterministic_uniform_pose_batch
+  perturbations:
+    distribution: uniform
+    target_translation_jitter_m: [0.0, 0.0, 0.02]
+    target_yaw_jitter_rad: 0.0
+    target_roll_pitch_jitter_rad: [0.0, 0.0]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: translation
+      pose_batch_size: 8
+      target_translation_jitter_m: [0.0, 0.0, 0.02]
+      seed_stride: 1
+
+x-domain-target-roll-pitch: &domain_target_roll_pitch
+  id: target_roll_pitch
+  version: v1
+  kind: robustness
+  case_generator: deterministic_uniform_pose_batch
+  perturbations:
+    distribution: uniform
+    target_translation_jitter_m: [0.0, 0.0, 0.0]
+    target_yaw_jitter_rad: 0.0
+    target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: spatial_pose
+      pose_batch_size: 8
+      target_roll_pitch_jitter_rad: [0.174533, 0.174533]
       seed_stride: 1
 
 x-physics: &physics
@@ -461,24 +541,30 @@ tracks:
       objects: [*cube]
       skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
 
-  - id: spatial-rigid-object-pose-target
+  - id: spatial-rigid-object-held-pose-target
     scenario: atomic_task
     enabled: true
     domains:
       - <<: *domain_nominal
-        applicability: [move_held_object, place]
+        applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_object_xy
-        applicability: [move_held_object, place]
+        applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_object_yaw
-        applicability: [move_held_object, place]
+        applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_target_relative_pose
-        applicability: [move_held_object, place]
+        applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_target_yaw
-        applicability: [move_held_object, place]
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_z
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_roll_pitch
+        applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
@@ -486,7 +572,34 @@ tracks:
       physics: *physics
       gripper: *gripper_cube
       objects: [*cube]
-      skills: [*skill_move_held_object, *skill_place]
+      skills: [*skill_move_held_object]
+
+  - id: spatial-rigid-object-place-target
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_nominal
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_xy
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_yaw
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_relative_pose
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_target_yaw
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_cube
+      objects: [*cube]
+      skills: [*skill_place]
 
   - id: spatial-rigid-object-position-target
     scenario: atomic_task
@@ -525,6 +638,12 @@ tracks:
       - <<: *domain_object_yaw
         applicability: [press, twist]
         scene_layout: franka_pgi_microwave_controls_v1
+      - <<: *domain_object_z
+        applicability: [press, twist]
+        scene_layout: franka_pgi_microwave_controls_v1
+      - <<: *domain_object_roll_pitch
+        applicability: [press, twist]
+        scene_layout: franka_pgi_microwave_controls_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -546,6 +665,12 @@ tracks:
       - <<: *domain_object_yaw
         applicability: [slide]
         scene_layout: franka_pgi_drawer_v1
+      - <<: *domain_object_z
+        applicability: [slide]
+        scene_layout: franka_pgi_drawer_v1
+      - <<: *domain_object_roll_pitch
+        applicability: [slide]
+        scene_layout: franka_pgi_drawer_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -565,6 +690,12 @@ tracks:
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
       - <<: *domain_object_yaw
+        applicability: [open_door]
+        scene_layout: franka_pgi_microwave_door_v1
+      - <<: *domain_object_z
+        applicability: [open_door]
+        scene_layout: franka_pgi_microwave_door_v1
+      - <<: *domain_object_roll_pitch
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
     config:

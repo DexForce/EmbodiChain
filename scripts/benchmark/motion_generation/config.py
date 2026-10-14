@@ -89,16 +89,20 @@ class AtomicPoseRandomizationCfg:
     mode: str = "translation"
     object_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     object_yaw_jitter_rad: float = 0.0
+    object_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
     target_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     target_yaw_jitter_rad: float = 0.0
+    target_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
     support_object_translation_jitter_m: tuple[float, float, float] = (
         0.0,
         0.0,
         0.0,
     )
     support_object_yaw_jitter_rad: float = 0.0
+    support_object_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
     task_frame_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     task_frame_yaw_jitter_rad: float = 0.0
+    task_frame_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
     seed_stride: int = 1
 
 
@@ -551,6 +555,24 @@ def _finite_nonnegative_scalar(value: object, *, name: str, default: float) -> f
     return resolved
 
 
+def _finite_nonnegative_pair(
+    value: object,
+    *,
+    name: str,
+    default: tuple[float, float] = (0.0, 0.0),
+) -> tuple[float, float]:
+    """Normalize one finite non-negative roll/pitch perturbation pair."""
+    resolved = default if value is None else value
+    if not isinstance(resolved, Sequence) or isinstance(resolved, (str, bytes)):
+        raise TypeError(f"{name} must be a sequence of two numbers.")
+    values = tuple(float(item) for item in resolved)
+    if len(values) != 2 or not all(math.isfinite(item) for item in values):
+        raise ValueError(f"{name} must contain two finite values.")
+    if any(item < 0.0 for item in values):
+        raise ValueError(f"{name} values must be non-negative.")
+    return values
+
+
 def _positive_int(value: object, *, name: str, default: int) -> int:
     """Normalize one strict positive integer configuration value."""
     resolved = default if value is None else value
@@ -584,12 +606,16 @@ def resolve_atomic_pose_randomization(
          pose_batch_size: 8
          object_translation_jitter_m: [0.03, 0.03, 0.0]
          object_yaw_jitter_rad: 0.5236
+         object_roll_pitch_jitter_rad: [0.1745, 0.1745]
          target_translation_jitter_m: [0.03, 0.03, 0.02]
          target_yaw_jitter_rad: 0.5236
+         target_roll_pitch_jitter_rad: [0.1745, 0.1745]
          support_object_translation_jitter_m: [0.03, 0.03, 0.0]
          support_object_yaw_jitter_rad: 0.5236
+         support_object_roll_pitch_jitter_rad: [0.1745, 0.1745]
          task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
          task_frame_yaw_jitter_rad: 0.1745
+         task_frame_roll_pitch_jitter_rad: [0.0873, 0.0873]
          seed_stride: 1
 
     ``random_pose_count`` is accepted as a readable alias for
@@ -626,10 +652,10 @@ def resolve_atomic_pose_randomization(
     mode = str(
         randomization.get("mode", config.get("randomization_mode", "translation"))
     )
-    if mode not in {"translation", "planar_pose", "none"}:
+    if mode not in {"translation", "planar_pose", "spatial_pose", "none"}:
         raise ValueError(
             "atomic-task randomization.mode must be 'translation', "
-            "'planar_pose', or 'none'."
+            "'planar_pose', 'spatial_pose', or 'none'."
         )
 
     object_jitter_value = randomization.get("object_translation_jitter_m")
@@ -653,6 +679,13 @@ def resolve_atomic_pose_randomization(
         name="atomic-task randomization.object_yaw_jitter_rad",
         default=0.0,
     )
+    object_roll_pitch_jitter = _finite_nonnegative_pair(
+        randomization.get(
+            "object_roll_pitch_jitter_rad",
+            config.get("object_roll_pitch_jitter_rad"),
+        ),
+        name="atomic-task randomization.object_roll_pitch_jitter_rad",
+    )
 
     target_jitter_value = randomization.get("target_translation_jitter_m")
     if target_jitter_value is None:
@@ -674,6 +707,13 @@ def resolve_atomic_pose_randomization(
         ),
         name="atomic-task randomization.target_yaw_jitter_rad",
         default=0.0,
+    )
+    target_roll_pitch_jitter = _finite_nonnegative_pair(
+        randomization.get(
+            "target_roll_pitch_jitter_rad",
+            config.get("target_roll_pitch_jitter_rad"),
+        ),
+        name="atomic-task randomization.target_roll_pitch_jitter_rad",
     )
 
     support_jitter_value = randomization.get("support_object_translation_jitter_m")
@@ -697,6 +737,13 @@ def resolve_atomic_pose_randomization(
         name="atomic-task randomization.support_object_yaw_jitter_rad",
         default=0.0,
     )
+    support_roll_pitch_jitter = _finite_nonnegative_pair(
+        randomization.get(
+            "support_object_roll_pitch_jitter_rad",
+            config.get("support_object_roll_pitch_jitter_rad"),
+        ),
+        name="atomic-task randomization.support_object_roll_pitch_jitter_rad",
+    )
 
     task_frame_jitter_value = randomization.get("task_frame_translation_jitter_m")
     if task_frame_jitter_value is None:
@@ -715,6 +762,13 @@ def resolve_atomic_pose_randomization(
         name="atomic-task randomization.task_frame_yaw_jitter_rad",
         default=0.0,
     )
+    task_frame_roll_pitch_jitter = _finite_nonnegative_pair(
+        randomization.get(
+            "task_frame_roll_pitch_jitter_rad",
+            config.get("task_frame_roll_pitch_jitter_rad"),
+        ),
+        name="atomic-task randomization.task_frame_roll_pitch_jitter_rad",
+    )
 
     stride = _positive_int(
         randomization.get("seed_stride", config.get("randomization_seed_stride")),
@@ -728,12 +782,16 @@ def resolve_atomic_pose_randomization(
             for value in (
                 *object_jitter,
                 object_yaw_jitter,
+                *object_roll_pitch_jitter,
                 *target_jitter,
                 target_yaw_jitter,
+                *target_roll_pitch_jitter,
                 *support_jitter,
                 support_yaw_jitter,
+                *support_roll_pitch_jitter,
                 *task_frame_jitter,
                 task_frame_yaw_jitter,
+                *task_frame_roll_pitch_jitter,
             )
         )
     elif isinstance(enabled_value, bool):
@@ -746,12 +804,16 @@ def resolve_atomic_pose_randomization(
         and (
             any(value > 0.0 for value in object_jitter)
             or object_yaw_jitter > 0.0
+            or any(value > 0.0 for value in object_roll_pitch_jitter)
             or any(value > 0.0 for value in target_jitter)
             or target_yaw_jitter > 0.0
+            or any(value > 0.0 for value in target_roll_pitch_jitter)
             or any(value > 0.0 for value in support_jitter)
             or support_yaw_jitter > 0.0
+            or any(value > 0.0 for value in support_roll_pitch_jitter)
             or any(value > 0.0 for value in task_frame_jitter)
             or task_frame_yaw_jitter > 0.0
+            or any(value > 0.0 for value in task_frame_roll_pitch_jitter)
         )
     ):
         raise ValueError(
@@ -764,10 +826,25 @@ def resolve_atomic_pose_randomization(
         "task_frame_yaw_jitter_rad": task_frame_yaw_jitter,
     }
     nonzero_yaw = [name for name, value in yaw_jitters.items() if value > 0.0]
-    if mode == "translation" and enabled and nonzero_yaw:
+    roll_pitch_jitters = {
+        "object_roll_pitch_jitter_rad": object_roll_pitch_jitter,
+        "target_roll_pitch_jitter_rad": target_roll_pitch_jitter,
+        "support_object_roll_pitch_jitter_rad": support_roll_pitch_jitter,
+        "task_frame_roll_pitch_jitter_rad": task_frame_roll_pitch_jitter,
+    }
+    nonzero_roll_pitch = [
+        name for name, values in roll_pitch_jitters.items() if any(values)
+    ]
+    nonzero_rotation = [*nonzero_yaw, *nonzero_roll_pitch]
+    if mode == "translation" and enabled and nonzero_rotation:
         raise ValueError(
             "atomic-task randomization.mode='translation' cannot specify "
-            f"{', '.join(nonzero_yaw)}."
+            f"{', '.join(nonzero_rotation)}."
+        )
+    if mode == "planar_pose" and enabled and nonzero_roll_pitch:
+        raise ValueError(
+            "atomic-task randomization.mode='planar_pose' cannot specify "
+            f"{', '.join(nonzero_roll_pitch)}."
         )
     return AtomicPoseRandomizationCfg(
         enabled=enabled,
@@ -775,12 +852,16 @@ def resolve_atomic_pose_randomization(
         mode=mode,
         object_translation_jitter_m=object_jitter,
         object_yaw_jitter_rad=object_yaw_jitter,
+        object_roll_pitch_jitter_rad=object_roll_pitch_jitter,
         target_translation_jitter_m=target_jitter,
         target_yaw_jitter_rad=target_yaw_jitter,
+        target_roll_pitch_jitter_rad=target_roll_pitch_jitter,
         support_object_translation_jitter_m=support_jitter,
         support_object_yaw_jitter_rad=support_yaw_jitter,
+        support_object_roll_pitch_jitter_rad=support_roll_pitch_jitter,
         task_frame_translation_jitter_m=task_frame_jitter,
         task_frame_yaw_jitter_rad=task_frame_yaw_jitter,
+        task_frame_roll_pitch_jitter_rad=task_frame_roll_pitch_jitter,
         seed_stride=stride,
     )
 

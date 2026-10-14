@@ -115,6 +115,7 @@ _TOP_DOWN_ROTATION = (
 _TASK_DIFFICULTIES = {"simple", "medium", "hard"}
 _TASK_FRAME_TRANSLATION_STREAM = 90_001
 _TASK_FRAME_YAW_STREAM = 90_002
+_TASK_FRAME_ROLL_PITCH_STREAM = 90_003
 _GRIPPER_SKILLS = {
     "pick_up",
     "move_held_object",
@@ -353,27 +354,143 @@ def _seeded_yaw_rotation(
     return yaw_rotation
 
 
-def _apply_seeded_yaw_jitter(
-    pose: torch.Tensor,
-    amplitude: object,
+def _seeded_roll_pitch_rotation(
     *,
+    batch_size: int,
+    amplitude: object,
     name: str,
     seed: int,
     stream: int,
     seed_stride: int,
-) -> None:
-    """Rotate every pose row about world Z by deterministic yaw jitter."""
-    yaw_rotation = _seeded_yaw_rotation(
-        batch_size=pose.shape[0],
-        amplitude=amplitude,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic ``Ry(pitch) @ Rx(roll)`` rotations."""
+    roll_pitch_amplitude = _float_vector(
+        amplitude,
         name=name,
+        length=2,
+        default=(0.0, 0.0),
+    )
+    if any(value < 0.0 for value in roll_pitch_amplitude):
+        raise ValueError(f"{name} values must be non-negative.")
+    angles = _seeded_jitter(
+        roll_pitch_amplitude,
         seed=seed,
         stream=stream,
+        dtype=dtype,
+        device=device,
+        batch_size=batch_size,
+        seed_stride=seed_stride,
+    )
+    if angles.dim() == 1:
+        angles = angles.unsqueeze(0)
+    roll = angles[:, 0]
+    pitch = angles[:, 1]
+    roll_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    roll_rotation[:, 1, 1] = torch.cos(roll)
+    roll_rotation[:, 1, 2] = -torch.sin(roll)
+    roll_rotation[:, 2, 1] = torch.sin(roll)
+    roll_rotation[:, 2, 2] = torch.cos(roll)
+    pitch_rotation = torch.eye(3, dtype=dtype, device=device).repeat(batch_size, 1, 1)
+    pitch_rotation[:, 0, 0] = torch.cos(pitch)
+    pitch_rotation[:, 0, 2] = torch.sin(pitch)
+    pitch_rotation[:, 2, 0] = -torch.sin(pitch)
+    pitch_rotation[:, 2, 2] = torch.cos(pitch)
+    return pitch_rotation @ roll_rotation
+
+
+def _seeded_spatial_rotation(
+    *,
+    batch_size: int,
+    roll_pitch_amplitude: object,
+    yaw_amplitude: object,
+    roll_pitch_name: str,
+    yaw_name: str,
+    seed: int,
+    roll_pitch_stream: int,
+    yaw_stream: int,
+    seed_stride: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return deterministic world-frame ``Rz @ Ry @ Rx`` rotations."""
+    roll_pitch = _seeded_roll_pitch_rotation(
+        batch_size=batch_size,
+        amplitude=roll_pitch_amplitude,
+        name=roll_pitch_name,
+        seed=seed,
+        stream=roll_pitch_stream,
+        seed_stride=seed_stride,
+        dtype=dtype,
+        device=device,
+    )
+    yaw = _seeded_yaw_rotation(
+        batch_size=batch_size,
+        amplitude=yaw_amplitude,
+        name=yaw_name,
+        seed=seed,
+        stream=yaw_stream,
+        seed_stride=seed_stride,
+        dtype=dtype,
+        device=device,
+    )
+    return yaw @ roll_pitch
+
+
+def _apply_seeded_spatial_rotation(
+    pose: torch.Tensor,
+    *,
+    roll_pitch_amplitude: object,
+    yaw_amplitude: object,
+    roll_pitch_name: str,
+    yaw_name: str,
+    seed: int,
+    roll_pitch_stream: int,
+    yaw_stream: int,
+    seed_stride: int,
+) -> None:
+    """Pre-multiply each pose by a deterministic world-frame rotation."""
+    rotation = _seeded_spatial_rotation(
+        batch_size=pose.shape[0],
+        roll_pitch_amplitude=roll_pitch_amplitude,
+        yaw_amplitude=yaw_amplitude,
+        roll_pitch_name=roll_pitch_name,
+        yaw_name=yaw_name,
+        seed=seed,
+        roll_pitch_stream=roll_pitch_stream,
+        yaw_stream=yaw_stream,
         seed_stride=seed_stride,
         dtype=pose.dtype,
         device=pose.device,
     )
-    pose[:, :3, :3] = yaw_rotation @ pose[:, :3, :3]
+    pose[:, :3, :3] = rotation @ pose[:, :3, :3]
+
+
+def _task_frame_rotation(
+    config: Mapping[str, object],
+    *,
+    seed: int,
+    batch_size: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Resolve the shared deterministic 3D task-frame rotation."""
+    return _seeded_spatial_rotation(
+        batch_size=batch_size,
+        roll_pitch_amplitude=config.get(
+            "_pose_batch_task_frame_roll_pitch_jitter_rad", (0.0, 0.0)
+        ),
+        yaw_amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
+        roll_pitch_name="task_frame_roll_pitch_jitter_rad",
+        yaw_name="task_frame_yaw_jitter_rad",
+        seed=seed,
+        roll_pitch_stream=_TASK_FRAME_ROLL_PITCH_STREAM,
+        yaw_stream=_TASK_FRAME_YAW_STREAM,
+        seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        dtype=dtype,
+        device=device,
+    )
 
 
 def _apply_task_frame_randomization(
@@ -382,7 +499,7 @@ def _apply_task_frame_randomization(
     *,
     seed: int,
 ) -> None:
-    """Apply one shared planar task-frame transform to every scene entity."""
+    """Apply one shared 3D task-frame transform to every scene entity."""
     stride = int(config.get("_pose_batch_seed_stride", 1))
     translation_amplitude = _float_vector(
         config.get("_pose_batch_task_frame_translation_jitter_m"),
@@ -392,13 +509,10 @@ def _apply_task_frame_randomization(
     )
     if any(value < 0.0 for value in translation_amplitude):
         raise ValueError("task_frame_translation_jitter_m values must be non-negative.")
-    rotation = _seeded_yaw_rotation(
-        batch_size=pose.shape[0],
-        amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
-        name="task_frame_yaw_jitter_rad",
+    rotation = _task_frame_rotation(
+        config,
         seed=seed,
-        stream=_TASK_FRAME_YAW_STREAM,
-        seed_stride=stride,
+        batch_size=pose.shape[0],
         dtype=pose.dtype,
         device=pose.device,
     )
@@ -521,13 +635,10 @@ def _randomized_vector_batch(
     )
     randomized = base_tensor + jitter
     if jitter_name in {"target_offset_jitter_m", "target_object_offset_jitter_m"}:
-        task_frame_rotation = _seeded_yaw_rotation(
-            batch_size=batch_size,
-            amplitude=config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0),
-            name="task_frame_yaw_jitter_rad",
+        task_frame_rotation = _task_frame_rotation(
+            config,
             seed=seed,
-            stream=_TASK_FRAME_YAW_STREAM,
-            seed_stride=stride,
+            batch_size=batch_size,
             dtype=dtype,
             device=device,
         )
@@ -535,33 +646,33 @@ def _randomized_vector_batch(
     return randomized
 
 
-def _apply_target_yaw_randomization(
+def _apply_target_rotation_randomization(
     pose: torch.Tensor,
     config: Mapping[str, object],
     *,
     seed: int,
     stream: int,
 ) -> None:
-    """Apply the configured goal-relative yaw to a target object pose."""
+    """Apply configured goal-relative roll, pitch, and yaw to a target pose."""
     amplitude = config.get("target_yaw_jitter_rad")
     if amplitude is None:
         amplitude = config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
-    _apply_seeded_yaw_jitter(
+    roll_pitch_amplitude = config.get("target_roll_pitch_jitter_rad")
+    if roll_pitch_amplitude is None:
+        roll_pitch_amplitude = config.get(
+            "_pose_batch_target_roll_pitch_jitter_rad", (0.0, 0.0)
+        )
+    _apply_seeded_spatial_rotation(
         pose,
-        amplitude,
-        name="target_yaw_jitter_rad",
+        roll_pitch_amplitude=roll_pitch_amplitude,
+        yaw_amplitude=amplitude,
+        roll_pitch_name="target_roll_pitch_jitter_rad",
+        yaw_name="target_yaw_jitter_rad",
         seed=seed,
-        stream=stream,
+        roll_pitch_stream=stream + 1,
+        yaw_stream=stream,
         seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
     )
-
-
-def _target_yaw_is_enabled(config: Mapping[str, object]) -> bool:
-    """Return whether a case requests a non-zero goal-relative yaw range."""
-    amplitude = config.get("target_yaw_jitter_rad")
-    if amplitude is None:
-        amplitude = config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
-    return float(amplitude) > 0.0
 
 
 def _randomization_parameters(
@@ -600,8 +711,14 @@ def _randomization_parameters(
                 "pose_batch_object_yaw_jitter_rad": float(
                     config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
                 ),
+                "pose_batch_object_roll_pitch_jitter_rad": list(
+                    config.get("_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0))
+                ),
                 "pose_batch_target_yaw_jitter_rad": float(
                     config.get("_pose_batch_target_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_target_roll_pitch_jitter_rad": list(
+                    config.get("_pose_batch_target_roll_pitch_jitter_rad", (0.0, 0.0))
                 ),
                 "pose_batch_support_object_translation_jitter_m": list(
                     config.get(
@@ -612,6 +729,12 @@ def _randomization_parameters(
                 "pose_batch_support_object_yaw_jitter_rad": float(
                     config.get("_pose_batch_support_object_yaw_jitter_rad", 0.0)
                 ),
+                "pose_batch_support_object_roll_pitch_jitter_rad": list(
+                    config.get(
+                        "_pose_batch_support_object_roll_pitch_jitter_rad",
+                        (0.0, 0.0),
+                    )
+                ),
                 "pose_batch_task_frame_translation_jitter_m": list(
                     config.get(
                         "_pose_batch_task_frame_translation_jitter_m",
@@ -620,6 +743,12 @@ def _randomization_parameters(
                 ),
                 "pose_batch_task_frame_yaw_jitter_rad": float(
                     config.get("_pose_batch_task_frame_yaw_jitter_rad", 0.0)
+                ),
+                "pose_batch_task_frame_roll_pitch_jitter_rad": list(
+                    config.get(
+                        "_pose_batch_task_frame_roll_pitch_jitter_rad",
+                        (0.0, 0.0),
+                    )
                 ),
                 "batch_semantics": "one_pose_per_environment_row",
             }
@@ -2716,7 +2845,7 @@ class _MoveHeldObjectCases(_HeldObjectCases):
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
-        _apply_target_yaw_randomization(
+        _apply_target_rotation_randomization(
             target_object,
             config,
             seed=seed,
@@ -2802,17 +2931,11 @@ class _MoveHeldObjectCases(_HeldObjectCases):
                         suite.protocol.rotation_threshold_rad,
                     )
                 ),
-                **(
-                    {
-                        "object_rotation_threshold_rad": float(
-                            config.get(
-                                "object_rotation_threshold_rad",
-                                suite.protocol.rotation_threshold_rad,
-                            )
-                        )
-                    }
-                    if _target_yaw_is_enabled(config)
-                    else {}
+                "object_rotation_threshold_rad": float(
+                    config.get(
+                        "object_rotation_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
                 ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
@@ -2923,7 +3046,7 @@ class _PlaceCases(_HeldObjectCases):
             dtype=object_pose.dtype,
             device=object_pose.device,
         )
-        _apply_target_yaw_randomization(
+        _apply_target_rotation_randomization(
             target_object,
             config,
             seed=seed,
@@ -3014,17 +3137,11 @@ class _PlaceCases(_HeldObjectCases):
                         suite.protocol.rotation_threshold_rad,
                     )
                 ),
-                **(
-                    {
-                        "object_rotation_threshold_rad": float(
-                            config.get(
-                                "object_rotation_threshold_rad",
-                                suite.protocol.rotation_threshold_rad,
-                            )
-                        )
-                    }
-                    if _target_yaw_is_enabled(config)
-                    else {}
+                "object_rotation_threshold_rad": float(
+                    config.get(
+                        "object_rotation_threshold_rad",
+                        suite.protocol.rotation_threshold_rad,
+                    )
                 ),
                 "randomization": _randomization_parameters(config, seed=seed),
                 "difficulty_factors": dict(config.get("difficulty_factors", {})),
@@ -4195,7 +4312,7 @@ class AtomicTaskScenario(ScenarioProvider):
                     "Atomic pose-batch size must match the simulator batch: "
                     f"{randomization.pose_batch_size} != {batch_size}."
                 )
-            if randomization.mode in {"translation", "planar_pose"}:
+            if randomization.mode in {"translation", "planar_pose", "spatial_pose"}:
                 config["_pose_batch_translation_jitter_m"] = list(
                     randomization.target_translation_jitter_m
                 )
@@ -4208,7 +4325,7 @@ class AtomicTaskScenario(ScenarioProvider):
                 config["_pose_batch_task_frame_translation_jitter_m"] = list(
                     randomization.task_frame_translation_jitter_m
                 )
-            if randomization.mode == "planar_pose":
+            if randomization.mode in {"planar_pose", "spatial_pose"}:
                 config["_pose_batch_object_yaw_jitter_rad"] = (
                     randomization.object_yaw_jitter_rad
                 )
@@ -4220,6 +4337,19 @@ class AtomicTaskScenario(ScenarioProvider):
                 )
                 config["_pose_batch_task_frame_yaw_jitter_rad"] = (
                     randomization.task_frame_yaw_jitter_rad
+                )
+            if randomization.mode == "spatial_pose":
+                config["_pose_batch_object_roll_pitch_jitter_rad"] = list(
+                    randomization.object_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_target_roll_pitch_jitter_rad"] = list(
+                    randomization.target_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_support_object_roll_pitch_jitter_rad"] = list(
+                    randomization.support_object_roll_pitch_jitter_rad
+                )
+                config["_pose_batch_task_frame_roll_pitch_jitter_rad"] = list(
+                    randomization.task_frame_roll_pitch_jitter_rad
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
             config["_pose_batch_enabled"] = True
@@ -5854,12 +5984,20 @@ class AtomicTaskScenario(ScenarioProvider):
         yaw_jitter = config.get("articulation_yaw_jitter_rad")
         if yaw_jitter is None:
             yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
-        _apply_seeded_yaw_jitter(
+        roll_pitch_jitter = config.get("articulation_roll_pitch_jitter_rad")
+        if roll_pitch_jitter is None:
+            roll_pitch_jitter = config.get(
+                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
+            )
+        _apply_seeded_spatial_rotation(
             pose,
-            yaw_jitter,
-            name="articulation_yaw_jitter_rad",
+            roll_pitch_amplitude=roll_pitch_jitter,
+            yaw_amplitude=yaw_jitter,
+            roll_pitch_name="articulation_roll_pitch_jitter_rad",
+            yaw_name="articulation_yaw_jitter_rad",
             seed=seed,
-            stream=stream + 1,
+            roll_pitch_stream=stream + 2,
+            yaw_stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
         _apply_task_frame_randomization(pose, config, seed=seed)
@@ -5922,12 +6060,20 @@ class AtomicTaskScenario(ScenarioProvider):
         yaw_jitter = config.get("object_yaw_jitter_rad")
         if yaw_jitter is None:
             yaw_jitter = config.get("_pose_batch_object_yaw_jitter_rad", 0.0)
-        _apply_seeded_yaw_jitter(
+        roll_pitch_jitter = config.get("object_roll_pitch_jitter_rad")
+        if roll_pitch_jitter is None:
+            roll_pitch_jitter = config.get(
+                "_pose_batch_object_roll_pitch_jitter_rad", (0.0, 0.0)
+            )
+        _apply_seeded_spatial_rotation(
             pose,
-            yaw_jitter,
-            name="object_yaw_jitter_rad",
+            roll_pitch_amplitude=roll_pitch_jitter,
+            yaw_amplitude=yaw_jitter,
+            roll_pitch_name="object_roll_pitch_jitter_rad",
+            yaw_name="object_yaw_jitter_rad",
             seed=seed,
-            stream=stream + 1,
+            roll_pitch_stream=stream + 2,
+            yaw_stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
         )
         _apply_task_frame_randomization(pose, config, seed=seed)
