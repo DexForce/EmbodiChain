@@ -87,6 +87,7 @@ class AtomicPoseRandomizationCfg:
     enabled: bool = False
     pose_batch_size: int = 1
     mode: str = "translation"
+    sampling_pattern: str = "uniform"
     object_translation_jitter_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
     object_yaw_jitter_rad: float = 0.0
     object_roll_pitch_jitter_rad: tuple[float, float] = (0.0, 0.0)
@@ -603,6 +604,7 @@ def resolve_atomic_pose_randomization(
        randomization:
          enabled: true
          mode: spatial_pose
+         sampling_pattern: stratified
          pose_batch_size: 8
          object_translation_jitter_m: [0.03, 0.03, 0.0]
          object_yaw_jitter_rad: 0.5236
@@ -656,6 +658,18 @@ def resolve_atomic_pose_randomization(
         raise ValueError(
             "atomic-task randomization.mode must be 'translation', "
             "'planar_pose', 'spatial_pose', or 'none'."
+        )
+
+    sampling_pattern = str(
+        randomization.get(
+            "sampling_pattern",
+            config.get("pose_sampling_pattern", "uniform"),
+        )
+    )
+    if sampling_pattern not in {"uniform", "stratified"}:
+        raise ValueError(
+            "atomic-task randomization.sampling_pattern must be "
+            "'uniform' or 'stratified'."
         )
 
     object_jitter_value = randomization.get("object_translation_jitter_m")
@@ -850,6 +864,7 @@ def resolve_atomic_pose_randomization(
         enabled=enabled,
         pose_batch_size=pose_batch_size,
         mode=mode,
+        sampling_pattern=sampling_pattern,
         object_translation_jitter_m=object_jitter,
         object_yaw_jitter_rad=object_yaw_jitter,
         object_roll_pitch_jitter_rad=object_roll_pitch_jitter,

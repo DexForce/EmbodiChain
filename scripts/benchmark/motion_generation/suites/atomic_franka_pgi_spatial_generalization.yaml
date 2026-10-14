@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v5
+suite_version: atomic_franka_pgi_spatial_generalization_v6
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -183,6 +183,146 @@ x-domain-target-roll-pitch: &domain_target_roll_pitch
       mode: spatial_pose
       pose_batch_size: 8
       target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+      seed_stride: 1
+
+x-domain-task-frame-planar: &domain_task_frame_planar
+  id: task_frame_planar
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+    task_frame_yaw_jitter_rad: 0.174533
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: planar_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+      task_frame_yaw_jitter_rad: 0.174533
+      seed_stride: 1
+
+x-domain-object-planar-pose: &domain_object_planar_pose
+  id: object_planar_pose
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    object_translation_jitter_m: [0.03, 0.03, 0.0]
+    object_yaw_jitter_rad: 0.523599
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: planar_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.03, 0.03, 0.0]
+      object_yaw_jitter_rad: 0.523599
+      seed_stride: 1
+
+x-domain-object-target-planar-pose: &domain_object_target_planar_pose
+  id: object_target_planar_pose
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    object_translation_jitter_m: [0.03, 0.03, 0.0]
+    object_yaw_jitter_rad: 0.523599
+    target_translation_jitter_m: [0.02, 0.02, 0.0]
+    target_yaw_jitter_rad: 0.523599
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: planar_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.03, 0.03, 0.0]
+      object_yaw_jitter_rad: 0.523599
+      target_translation_jitter_m: [0.02, 0.02, 0.0]
+      target_yaw_jitter_rad: 0.523599
+      seed_stride: 1
+
+x-domain-object-target-position: &domain_object_target_position
+  id: object_target_position
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    object_translation_jitter_m: [0.03, 0.03, 0.0]
+    object_yaw_jitter_rad: 0.523599
+    target_translation_jitter_m: [0.02, 0.02, 0.0]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: planar_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.03, 0.03, 0.0]
+      object_yaw_jitter_rad: 0.523599
+      target_translation_jitter_m: [0.02, 0.02, 0.0]
+      seed_stride: 1
+
+x-domain-object-target-spatial-pose: &domain_object_target_spatial_pose
+  id: object_target_spatial_pose
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    object_translation_jitter_m: [0.03, 0.03, 0.0]
+    object_yaw_jitter_rad: 0.523599
+    target_translation_jitter_m: [0.02, 0.02, 0.02]
+    target_yaw_jitter_rad: 0.523599
+    target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: spatial_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.03, 0.03, 0.0]
+      object_yaw_jitter_rad: 0.523599
+      target_translation_jitter_m: [0.02, 0.02, 0.02]
+      target_yaw_jitter_rad: 0.523599
+      target_roll_pitch_jitter_rad: [0.174533, 0.174533]
+      seed_stride: 1
+
+x-domain-articulation-spatial-pose: &domain_articulation_spatial_pose
+  id: articulation_spatial_pose
+  version: v1
+  kind: robustness
+  case_generator: deterministic_stratified_pose_batch
+  perturbations:
+    distribution: stratified
+    object_translation_jitter_m: [0.03, 0.03, 0.02]
+    object_yaw_jitter_rad: 0.523599
+    object_roll_pitch_jitter_rad: [0.174533, 0.174533]
+    samples_per_seed: 8
+  overrides:
+    batch_sizes: [8]
+    randomization:
+      enabled: true
+      mode: spatial_pose
+      sampling_pattern: stratified
+      pose_batch_size: 8
+      object_translation_jitter_m: [0.03, 0.03, 0.02]
+      object_yaw_jitter_rad: 0.523599
+      object_roll_pitch_jitter_rad: [0.174533, 0.174533]
       seed_stride: 1
 
 x-physics: &physics
@@ -533,6 +673,12 @@ tracks:
       - <<: *domain_object_yaw
         applicability: [pick_up, pour, axis_align]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_task_frame_planar
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_planar_pose
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -566,6 +712,12 @@ tracks:
       - <<: *domain_target_roll_pitch
         applicability: [move_held_object]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_task_frame_planar
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_target_spatial_pose
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -593,6 +745,12 @@ tracks:
       - <<: *domain_target_yaw
         applicability: [place]
         scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_task_frame_planar
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_target_planar_pose
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -615,6 +773,12 @@ tracks:
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_target_relative_pose
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_task_frame_planar
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_object_target_position
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
     config:
@@ -644,6 +808,12 @@ tracks:
       - <<: *domain_object_roll_pitch
         applicability: [press, twist]
         scene_layout: franka_pgi_microwave_controls_v1
+      - <<: *domain_task_frame_planar
+        applicability: [press, twist]
+        scene_layout: franka_pgi_microwave_controls_v1
+      - <<: *domain_articulation_spatial_pose
+        applicability: [press, twist]
+        scene_layout: franka_pgi_microwave_controls_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -671,6 +841,12 @@ tracks:
       - <<: *domain_object_roll_pitch
         applicability: [slide]
         scene_layout: franka_pgi_drawer_v1
+      - <<: *domain_task_frame_planar
+        applicability: [slide]
+        scene_layout: franka_pgi_drawer_v1
+      - <<: *domain_articulation_spatial_pose
+        applicability: [slide]
+        scene_layout: franka_pgi_drawer_v1
     config:
       batch_sizes: [1]
       seeds: [11, 23, 47]
@@ -696,6 +872,12 @@ tracks:
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
       - <<: *domain_object_roll_pitch
+        applicability: [open_door]
+        scene_layout: franka_pgi_microwave_door_v1
+      - <<: *domain_task_frame_planar
+        applicability: [open_door]
+        scene_layout: franka_pgi_microwave_door_v1
+      - <<: *domain_articulation_spatial_pose
         applicability: [open_door]
         scene_layout: franka_pgi_microwave_door_v1
     config:

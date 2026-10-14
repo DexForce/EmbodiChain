@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_dual_ur5_pgi_coordinated_placement_spatial_generalization
-suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v3
+suite_version: atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization_v4
 profile: coverage
 
 robot:
@@ -227,6 +227,60 @@ tracks:
             enabled: true
             mode: planar_pose
             pose_batch_size: 8
+            task_frame_yaw_jitter_rad: 0.174533
+            seed_stride: 1
+      - id: task_frame_planar
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_stratified_pose_batch
+        perturbations:
+          distribution: stratified
+          task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+          task_frame_yaw_jitter_rad: 0.174533
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            sampling_pattern: stratified
+            pose_batch_size: 8
+            task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+            task_frame_yaw_jitter_rad: 0.174533
+            seed_stride: 1
+      - id: object_support_target_task_frame_pose
+        version: v1
+        kind: robustness
+        applicability: [coordinated_placement]
+        scene_layout: dual_ur5_pgi_bread_pan_table_v1
+        case_generator: deterministic_stratified_pose_batch
+        perturbations:
+          distribution: stratified
+          object_translation_jitter_m: [0.03, 0.03, 0.0]
+          object_yaw_jitter_rad: 0.523599
+          target_translation_jitter_m: [0.02, 0.02, 0.02]
+          target_yaw_jitter_rad: 0.523599
+          support_object_translation_jitter_m: [0.03, 0.03, 0.0]
+          support_object_yaw_jitter_rad: 0.523599
+          task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
+          task_frame_yaw_jitter_rad: 0.174533
+          samples_per_seed: 8
+        overrides:
+          batch_sizes: [8]
+          randomization:
+            enabled: true
+            mode: planar_pose
+            sampling_pattern: stratified
+            pose_batch_size: 8
+            object_translation_jitter_m: [0.03, 0.03, 0.0]
+            object_yaw_jitter_rad: 0.523599
+            target_translation_jitter_m: [0.02, 0.02, 0.02]
+            target_yaw_jitter_rad: 0.523599
+            support_object_translation_jitter_m: [0.03, 0.03, 0.0]
+            support_object_yaw_jitter_rad: 0.523599
+            task_frame_translation_jitter_m: [0.03, 0.03, 0.0]
             task_frame_yaw_jitter_rad: 0.174533
             seed_stride: 1
     config:

@@ -287,8 +287,9 @@ def _seeded_jitter(
     device: torch.device,
     batch_size: int = 1,
     seed_stride: int = 1,
+    sampling_pattern: str = "uniform",
 ) -> torch.Tensor:
-    """Sample deterministic uniform jitter, optionally one row per environment.
+    """Sample deterministic jitter, optionally one row per environment.
 
     The legacy ``batch_size=1`` result remains a one-dimensional vector.  For
     a pose-batch benchmark the returned tensor has shape ``(B, D)``; each row
@@ -299,19 +300,41 @@ def _seeded_jitter(
         raise ValueError("batch_size must be a positive integer.")
     if type(seed_stride) is not int or seed_stride < 1:
         raise ValueError("seed_stride must be a positive integer.")
+    if sampling_pattern not in {"uniform", "stratified"}:
+        raise ValueError("sampling_pattern must be 'uniform' or 'stratified'.")
     base_seed = (int(seed) * 1_000_003 + int(stream) * 97_409) % (2**63 - 1)
     # Keep the historical B=1 sequence byte-for-byte stable.  For a pose
     # batch, derive a separate deterministic CPU stream per row; this makes
     # adding/removing a neighboring skill unable to change an existing row.
-    rows: list[torch.Tensor] = []
-    for row in range(batch_size):
-        generator = torch.Generator(device="cpu")
-        generator.manual_seed((base_seed + row * seed_stride) % (2**63 - 1))
-        rows.append(
-            torch.rand(len(amplitude), generator=generator, dtype=torch.float32)
+    if sampling_pattern == "uniform":
+        rows: list[torch.Tensor] = []
+        for row in range(batch_size):
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed((base_seed + row * seed_stride) % (2**63 - 1))
+            rows.append(
+                torch.rand(len(amplitude), generator=generator, dtype=torch.float32)
+            )
+        unit = torch.stack(rows, dim=0)
+        normalized = 2.0 * unit - 1.0
+    else:
+        # Each active dimension visits every stratum exactly once.  Inclusive
+        # endpoints deliberately exercise both configured workspace bounds;
+        # independent seeded permutations avoid coupling dimensions along one
+        # diagonal while retaining exact reproducibility.
+        levels = (
+            torch.zeros(1, dtype=torch.float32)
+            if batch_size == 1
+            else torch.linspace(-1.0, 1.0, batch_size, dtype=torch.float32)
         )
-    unit = torch.stack(rows, dim=0)
-    values = (2.0 * unit - 1.0) * torch.tensor(amplitude, dtype=torch.float32)
+        columns: list[torch.Tensor] = []
+        for dimension in range(len(amplitude)):
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(
+                (base_seed + (dimension + 1) * 1_000_033 * seed_stride) % (2**63 - 1)
+            )
+            columns.append(levels[torch.randperm(batch_size, generator=generator)])
+        normalized = torch.stack(columns, dim=1)
+    values = normalized * torch.tensor(amplitude, dtype=torch.float32)
     values = values.to(dtype=dtype, device=device)
     return values[0] if batch_size == 1 else values
 
@@ -326,6 +349,7 @@ def _seeded_yaw_rotation(
     seed_stride: int,
     dtype: torch.dtype,
     device: torch.device,
+    sampling_pattern: str = "uniform",
 ) -> torch.Tensor:
     """Return deterministic world-Z rotation matrices for a pose batch."""
     yaw_amplitude = float(amplitude)
@@ -339,6 +363,7 @@ def _seeded_yaw_rotation(
         device=device,
         batch_size=batch_size,
         seed_stride=seed_stride,
+        sampling_pattern=sampling_pattern,
     )
     if yaw.dim() == 1:
         yaw = yaw[:1]
@@ -364,6 +389,7 @@ def _seeded_roll_pitch_rotation(
     seed_stride: int,
     dtype: torch.dtype,
     device: torch.device,
+    sampling_pattern: str = "uniform",
 ) -> torch.Tensor:
     """Return deterministic ``Ry(pitch) @ Rx(roll)`` rotations."""
     roll_pitch_amplitude = _float_vector(
@@ -382,6 +408,7 @@ def _seeded_roll_pitch_rotation(
         device=device,
         batch_size=batch_size,
         seed_stride=seed_stride,
+        sampling_pattern=sampling_pattern,
     )
     if angles.dim() == 1:
         angles = angles.unsqueeze(0)
@@ -413,6 +440,7 @@ def _seeded_spatial_rotation(
     seed_stride: int,
     dtype: torch.dtype,
     device: torch.device,
+    sampling_pattern: str = "uniform",
 ) -> torch.Tensor:
     """Return deterministic world-frame ``Rz @ Ry @ Rx`` rotations."""
     roll_pitch = _seeded_roll_pitch_rotation(
@@ -424,6 +452,7 @@ def _seeded_spatial_rotation(
         seed_stride=seed_stride,
         dtype=dtype,
         device=device,
+        sampling_pattern=sampling_pattern,
     )
     yaw = _seeded_yaw_rotation(
         batch_size=batch_size,
@@ -434,6 +463,7 @@ def _seeded_spatial_rotation(
         seed_stride=seed_stride,
         dtype=dtype,
         device=device,
+        sampling_pattern=sampling_pattern,
     )
     return yaw @ roll_pitch
 
@@ -449,6 +479,7 @@ def _apply_seeded_spatial_rotation(
     roll_pitch_stream: int,
     yaw_stream: int,
     seed_stride: int,
+    sampling_pattern: str = "uniform",
 ) -> None:
     """Pre-multiply each pose by a deterministic world-frame rotation."""
     rotation = _seeded_spatial_rotation(
@@ -463,6 +494,7 @@ def _apply_seeded_spatial_rotation(
         seed_stride=seed_stride,
         dtype=pose.dtype,
         device=pose.device,
+        sampling_pattern=sampling_pattern,
     )
     pose[:, :3, :3] = rotation @ pose[:, :3, :3]
 
@@ -488,6 +520,7 @@ def _task_frame_rotation(
         roll_pitch_stream=_TASK_FRAME_ROLL_PITCH_STREAM,
         yaw_stream=_TASK_FRAME_YAW_STREAM,
         seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
         dtype=dtype,
         device=device,
     )
@@ -524,6 +557,7 @@ def _apply_task_frame_randomization(
         device=pose.device,
         batch_size=pose.shape[0],
         seed_stride=stride,
+        sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
     )
     if translation.dim() == 1:
         translation = translation.unsqueeze(0)
@@ -627,6 +661,7 @@ def _randomized_vector_batch(
         device=device,
         batch_size=batch_size,
         seed_stride=stride,
+        sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
     )
     if jitter.dim() == 1:
         jitter = jitter.unsqueeze(0)
@@ -672,6 +707,7 @@ def _apply_target_rotation_randomization(
         roll_pitch_stream=stream + 1,
         yaw_stream=stream,
         seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+        sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
     )
 
 
@@ -691,7 +727,11 @@ def _randomization_parameters(
     parameters: dict[str, object] = {
         "enabled": bool(ranges) or pose_batch_enabled,
         "seed": int(seed),
-        "distribution": "independent_uniform",
+        "distribution": (
+            "deterministic_stratified"
+            if config.get("_pose_batch_sampling_pattern") == "stratified"
+            else "independent_uniform"
+        ),
         "ranges": ranges,
     }
     if pose_batch_enabled:
@@ -699,6 +739,9 @@ def _randomization_parameters(
             {
                 "pose_batch": True,
                 "pose_batch_seed_stride": int(config.get("_pose_batch_seed_stride", 1)),
+                "pose_batch_sampling_pattern": str(
+                    config.get("_pose_batch_sampling_pattern", "uniform")
+                ),
                 "pose_batch_translation_jitter_m": list(
                     config.get("_pose_batch_translation_jitter_m", (0.0, 0.0, 0.0))
                 ),
@@ -4445,6 +4488,7 @@ class AtomicTaskScenario(ScenarioProvider):
                     randomization.task_frame_roll_pitch_jitter_rad
                 )
             config["_pose_batch_seed_stride"] = randomization.seed_stride
+            config["_pose_batch_sampling_pattern"] = randomization.sampling_pattern
             config["_pose_batch_enabled"] = True
         return config
 
@@ -6070,6 +6114,9 @@ class AtomicTaskScenario(ScenarioProvider):
                 device=pose.device,
                 batch_size=pose.shape[0],
                 seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+                sampling_pattern=str(
+                    config.get("_pose_batch_sampling_pattern", "uniform")
+                ),
             )
             if translation.dim() == 1:
                 translation = translation.unsqueeze(0)
@@ -6092,6 +6139,7 @@ class AtomicTaskScenario(ScenarioProvider):
             roll_pitch_stream=stream + 2,
             yaw_stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
         )
         _apply_task_frame_randomization(pose, config, seed=seed)
         handle.reset(pose=pose, qpos=handle.initial_qpos)
@@ -6148,6 +6196,7 @@ class AtomicTaskScenario(ScenarioProvider):
             device=pose.device,
             batch_size=pose.shape[0],
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
         )
 
         yaw_jitter = config.get("object_yaw_jitter_rad")
@@ -6168,6 +6217,7 @@ class AtomicTaskScenario(ScenarioProvider):
             roll_pitch_stream=stream + 2,
             yaw_stream=stream + 1,
             seed_stride=int(config.get("_pose_batch_seed_stride", 1)),
+            sampling_pattern=str(config.get("_pose_batch_sampling_pattern", "uniform")),
         )
         _apply_task_frame_randomization(pose, config, seed=seed)
 

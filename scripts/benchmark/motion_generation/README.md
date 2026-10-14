@@ -79,7 +79,7 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
-- `atomic_franka_pgi_spatial_generalization_v5` is the strict spatial
+- `atomic_franka_pgi_spatial_generalization_v6` is the strict spatial
   generalization baseline for all ten task-level Franka skills: `PickUp`,
   `MoveHeldObject`, `Place`, `Press`, `Slide`, `Twist`, `OpenDoor`, `Pour`,
   `AxisAlign`, and `PushObject`. Tracks group only skills with the same spatial
@@ -89,7 +89,11 @@ in that run's `videos/` directory.
   Fixed-base articulations additionally vary root height and roll/pitch;
   held-object goals additionally vary target height and roll/pitch. Each domain
   keeps assets, physics, robot, and task semantics fixed and contains eight
-  deterministic samples per seed.
+  deterministic samples per seed. Every track also contains a shared planar
+  task-frame domain and a skill-appropriate composed domain. These domains use
+  deterministic per-dimension stratification, including both configured
+  interval bounds, so object, target, support, and task-frame changes are
+  evaluated together without replacing the isolated-factor populations.
   Domain overrides
   select `B=1` for nominal cases and `B=8` for shifted cases; generated poses
   are frozen in the case manifest and restored before every planner replay.
@@ -115,21 +119,24 @@ in that run's `videos/` directory.
   `support_object_position_jitter_m` and `support_object_yaw_jitter_rad`
   overrides; its grasp and target transforms are rebuilt per environment row.
   The corresponding `*_spatial_generalization` suites add three-seed nominal,
-  object-XY, object-yaw, and target-relative-position populations. Coordinated
+  object-XY, object-yaw, and target-relative-position populations, plus
+  stratified task-frame and composed-pose populations. Coordinated
   Pickment varies target height, yaw, and roll/pitch. Coordinated Placement
   varies target height/yaw, separately varies the support object's XY/yaw, and
   applies shared task-frame XY/yaw transforms to both objects while preserving
-  their relative layout.
+  their relative layout. HandOver's composed population additionally varies
+  delivery height; Coordinated Placement combines subject, support, target,
+  and task-frame pose changes in one domain.
 
   | Atomic Skill | Subject XY | Subject Z | Subject yaw | Subject roll/pitch | Target XY | Target Z | Target yaw | Target roll/pitch | Support XY/yaw | Task-frame XY/yaw |
   | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-  | `PickUp`, `Pour`, `AxisAlign` | ✓ |  | ✓ |  |  |  |  |  |  |  |
-  | `MoveHeldObject` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  |  |
-  | `Place` | ✓ |  | ✓ |  | ✓ |  | ✓ |  |  |  |
-  | `PushObject` | ✓ |  | ✓ |  | ✓ |  |  |  |  |  |
-  | `Press`, `Twist`, `Slide`, `OpenDoor` | ✓ | ✓ | ✓ | ✓ |  |  |  |  |  |  |
-  | `HandOver` | ✓ |  | ✓ |  | ✓ |  |  |  |  |  |
-  | `CoordinatedPickment` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  |  |
+  | `PickUp`, `Pour`, `AxisAlign` | ✓ |  | ✓ |  |  |  |  |  |  | ✓ |
+  | `MoveHeldObject` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  | ✓ |
+  | `Place` | ✓ |  | ✓ |  | ✓ |  | ✓ |  |  | ✓ |
+  | `PushObject` | ✓ |  | ✓ |  | ✓ |  |  |  |  | ✓ |
+  | `Press`, `Twist`, `Slide`, `OpenDoor` | ✓ | ✓ | ✓ | ✓ |  |  |  |  |  | ✓ |
+  | `HandOver` | ✓ |  | ✓ |  | ✓ | ✓ |  |  |  | ✓ |
+  | `CoordinatedPickment` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ | ✓ |  | ✓ |
   | `CoordinatedPlacement` | ✓ |  | ✓ |  | ✓ | ✓ | ✓ |  | ✓ | ✓ |
 - Track configs may declare `grippers` (one entry per gripper) instead of
   `gripper`, `fixtures` (static tables and slabs that are never parked), and
