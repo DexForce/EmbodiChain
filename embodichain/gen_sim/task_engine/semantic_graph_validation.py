@@ -285,11 +285,7 @@ def validate_graph_coverage(
                         and c.get("inside")
                         in {
                             f"inside__{target['uid']}__{entry['object_uid']}"
-                            + (
-                                f"__{target['part_id']}"
-                                if step["task_type"] == "E1" and target["part_id"]
-                                else ""
-                            )
+                            + (f"__{target['part_id']}" if target["part_id"] else "")
                             for target in role_members[target_role]
                         }
                     )

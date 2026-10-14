@@ -16,12 +16,260 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
 from embodichain.gen_sim.task_engine import interpretation as interpretation_module
+
+
+def _resource_step(step_id: str, task_type: str = "E4") -> dict[str, Any]:
+    step = interpretation_module._instruction_shape_example()["steps"][0]
+    step.update(
+        id=step_id,
+        task_type=task_type,
+        orientation_goal="none",
+        required_arm="none",
+        transfer_arm="right_arm" if task_type == "E4" else "none",
+        receive_arm="left_arm" if task_type == "E4" else "none",
+        terminal_behavior="hold",
+        direction="up" if task_type == "E5" else "none",
+    )
+    step["object"]["reference"] = step_id
+    return step
+
+
+def _result_selector(step_id: str) -> dict[str, Any]:
+    return {
+        "kind": "step_result",
+        "step_id": step_id,
+        "reference": "",
+        "quantifier": "one",
+        "count": 0,
+    }
+
+
+def _place_transfer(step: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(step)
+    result.update(terminal_behavior="place", relation="inside")
+    result["target"] = {
+        "kind": "scene_ref",
+        "step_id": "",
+        "reference": "plate",
+        "quantifier": "one",
+        "count": 0,
+    }
+    return result
+
+
+def test_intent_rejects_occupied_handover_receiver_before_grounding() -> None:
+    first = _resource_step("first")
+    second = _resource_step("second")
+    second["depends_on"] = ["first"]
+
+    with pytest.raises(ValueError, match="receiver.*occupied"):
+        interpretation_module.validate_instruction_intent({"steps": [first, second]})
+
+
+def test_resource_repair_uses_per_object_transfer_placement_without_rewriting() -> None:
+    invalid = {"steps": [_resource_step("first"), _resource_step("second")]}
+    repaired = {"steps": [_place_transfer(step) for step in invalid["steps"]]}
+    repaired["steps"][1]["depends_on"] = ["first"]
+    responses = iter((invalid, repaired))
+    prompts = []
+
+    def caller(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return deepcopy(next(responses))
+
+    result = interpretation_module.interpret_instruction_draft(
+        "Transfer each fruit from right to left, then put each in the plate.",
+        caller=caller,
+    )
+
+    assert result.attempts == 2
+    assert result.intent == repaired
+    assert invalid["steps"][0]["terminal_behavior"] == "hold"
+    assert "per-object transfer and placement" in prompts[1]
+    assert "Do not drop objects, arm requirements, targets, or ordering" in prompts[1]
+
+
+def test_explicit_hold_conflict_stays_invalid_after_one_repair() -> None:
+    invalid = {"steps": [_resource_step("first"), _resource_step("second")]}
+    caller = Mock(return_value=invalid)
+
+    with pytest.raises(ValueError, match="after one repair.*receiver.*occupied"):
+        interpretation_module.interpret_instruction_draft(
+            "Receive the first object in the left hand, keep holding it, then "
+            "receive the second object in that same hand.",
+            caller=caller,
+        )
+
+    assert caller.call_count == 2
+    assert all(step["terminal_behavior"] == "hold" for step in invalid["steps"])
+
+
+def test_held_object_can_be_transferred_back_through_explicit_result() -> None:
+    first = _resource_step("first")
+    second = _resource_step("second")
+    second.update(
+        object=_result_selector("first"),
+        transfer_arm="left_arm",
+        receive_arm="right_arm",
+        depends_on=["first"],
+    )
+
+    intent = {"steps": [first, second]}
+    assert interpretation_module.validate_instruction_intent(intent) == intent
+
+
+def test_separate_explicit_placement_releases_receiver_before_next_transfer() -> None:
+    first = _resource_step("first")
+    place = _place_transfer(_resource_step("place"))
+    place.update(
+        task_type="E1",
+        object=_result_selector("first"),
+        required_arm="left_arm",
+        transfer_arm="none",
+        receive_arm="none",
+        terminal_behavior="none",
+        depends_on=["first"],
+    )
+    second = _resource_step("second")
+    second["depends_on"] = ["place"]
+
+    intent = {"steps": [first, place, second]}
+    assert interpretation_module.validate_instruction_intent(intent) == intent
+
+
+@pytest.mark.parametrize("transfer,receive", [("auto", "auto"), ("auto", "right_arm")])
+def test_auto_handover_checks_possible_assignments_without_inventing_arms(
+    transfer: str, receive: str
+) -> None:
+    first = _resource_step("first")
+    second = _resource_step("second")
+    second.update(
+        object=_result_selector("first"),
+        transfer_arm=transfer,
+        receive_arm=receive,
+        depends_on=["first"],
+    )
+
+    intent = {"steps": [first, second]}
+    assert interpretation_module.validate_instruction_intent(intent) == intent
+
+
+@pytest.mark.parametrize("first_type", ["E4", "E5"])
+def test_new_dual_hold_cannot_use_occupied_hands(first_type: str) -> None:
+    first = _resource_step("first", first_type)
+    second = _resource_step("second", "E5")
+    second["depends_on"] = ["first"]
+
+    with pytest.raises(ValueError, match="both arms.*occupied"):
+        interpretation_module.validate_instruction_intent({"steps": [first, second]})
+
+
+def test_dual_hold_continuation_and_release_require_explicit_same_object() -> None:
+    first = _resource_step("first", "E5")
+    second = _resource_step("second", "E5")
+    second.update(
+        object=_result_selector("first"),
+        direction="none",
+        terminal_behavior="place",
+        depends_on=["first"],
+    )
+    transfer = _resource_step("transfer")
+    transfer["depends_on"] = ["second"]
+
+    intent = {"steps": [first, second, transfer]}
+    assert interpretation_module.validate_instruction_intent(intent) == intent
+
+
+def test_prompt_same_part_continuation_does_not_merge_nouns() -> None:
+    prompt = interpretation_module._instruction_prompt(
+        "Open the sliding tray, unload it, then close the now-empty tray."
+    )
+    assert "same-entity continuation" in prompt
+    assert "E6 opening and later closing the same part" in prompt
+    assert "Do not merge independently selected native parts" in prompt
+    assert "empty" in prompt
+
+
+def test_e6_coreference_keeps_order_and_final_closed_state() -> None:
+    from embodichain.gen_sim.task_engine.agent import TaskAgent
+    from embodichain.gen_sim.task_engine.task_spec import task_spec_from_candidate
+    from embodichain.gen_sim.task_spec import TaskSpec
+
+    opened = _resource_step("opened")
+    opened.update(
+        task_type="E6",
+        required_arm="right_arm",
+        transfer_arm="none",
+        receive_arm="none",
+        terminal_behavior="none",
+        target_state="open",
+    )
+    on_tray = _place_transfer(_resource_step("on_tray"))
+    on_tray.update(
+        task_type="E1",
+        required_arm="right_arm",
+        transfer_arm="none",
+        receive_arm="none",
+        terminal_behavior="none",
+        target=_result_selector("opened"),
+        relation="on",
+        depends_on=["opened"],
+    )
+    on_table = deepcopy(on_tray)
+    on_table.update(
+        id="on_table",
+        object=_result_selector("on_tray"),
+        target={**on_tray["object"], "reference": "table"},
+        depends_on=["on_tray"],
+    )
+    closed = deepcopy(opened)
+    closed.update(
+        id="closed",
+        object=_result_selector("opened"),
+        target_state="closed",
+        depends_on=["on_table"],
+    )
+    candidates = TaskAgent(
+        caller=lambda **_kwargs: {
+            "steps": deepcopy([opened, on_tray, on_table, closed])
+        }
+    ).generate(
+        "same_part", "Open, load, unload, and close the same tray.", candidate_count=1
+    )
+    candidate = candidates["candidates"][0]
+    specification = task_spec_from_candidate(candidate)
+
+    roles = specification.metadata["step_roles"]
+    assert roles["step_01"]["object"] == roles["step_02"]["target"]
+    assert roles["step_01"]["object"] == roles["step_04"]["object"]
+    assert [
+        predicate.arguments["target_state"]
+        for predicate in specification.goal
+        if predicate.name == "articulation_joint_near"
+    ] == ["closed"]
+    assert [
+        predicate.arguments["target_state"]
+        for milestone in specification.milestones
+        for predicate in milestone.achieve
+        if predicate.name == "articulation_joint_near"
+    ] == ["open", "closed"]
+    assert [milestone.after for milestone in specification.milestones] == [
+        (),
+        ("step_01",),
+        ("step_02",),
+        ("step_03",),
+    ]
+    assert (
+        TaskSpec.from_dict(specification.to_dict()).to_dict() == specification.to_dict()
+    )
 
 
 def test_prompt_preserves_explicit_handover_orientation() -> None:

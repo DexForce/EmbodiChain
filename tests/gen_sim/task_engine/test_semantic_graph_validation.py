@@ -19,6 +19,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -348,10 +349,7 @@ def test_publication_cannot_reseal_tampered_contract(
     assert not destination.exists()
 
 
-@pytest.mark.parametrize("kind,part", [("E1", None), ("E4", None), ("E1", "part_0")])
-def test_inside_uses_existing_builtin_affordance_protocol(
-    kind: str, part: str | None
-) -> None:
+def _inside_plan(kind: str, part: str | None):
     source = candidate(
         step(
             kind,
@@ -370,7 +368,7 @@ def test_inside_uses_existing_builtin_affordance_protocol(
     }
     if part:
         bindings["role_bindings"]["step_01.target"] = part
-    plan = SemanticTaskPlanner().plan_spec(
+    return SemanticTaskPlanner().plan_spec(
         source,
         bindings,
         [
@@ -382,12 +380,116 @@ def test_inside_uses_existing_builtin_affordance_protocol(
             for uid in ("a", "box")
         ],
     )
+
+
+@pytest.mark.parametrize(
+    "kind,part", [("E1", None), ("E4", None), ("E1", "part_0"), ("E4", "part_0")]
+)
+def test_inside_uses_existing_builtin_affordance_protocol(
+    kind: str, part: str | None
+) -> None:
+    plan = _inside_plan(kind, part)
+    inside = next(
+        node["call"]["inside"]
+        for node in plan.graph["nodes"]
+        if "inside" in node["call"]
+    )
+    expected = "inside__box__a" + (f"__{part}" if part else "")
+    assert inside == expected
     assert _coverage(plan)["status"] == "covered"
     graph = deepcopy(plan.graph)
     for node in graph["nodes"]:
         if node["call"].get("inside"):
             node["call"]["inside"] = "inside__wrong__a"
     assert _coverage(plan, graph=graph)["status"] == "uncovered"
+
+
+def _mock_drawer_parts(monkeypatch: pytest.MonkeyPatch, *parts: str):
+    from embodichain.gen_sim.task_engine._task_program import drawer_binding
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        PrismaticBinding,
+    )
+
+    bindings = {
+        part: PrismaticBinding(
+            "box",
+            f"slide_{part}",
+            f"drawer_{part}",
+            "base",
+            "/fixture/handle",
+            "a" * 64,
+            1.0,
+            (1.0, 0.0, 0.0),
+            (0.0, 0.2),
+            part_id=part,
+        )
+        for part in parts
+    }
+    monkeypatch.setattr(drawer_binding, "graph_bindings", lambda *_: bindings)
+    monkeypatch.setattr(
+        drawer_binding, "discover_prismatic_parts", lambda *_: tuple(bindings.values())
+    )
+    monkeypatch.setattr(
+        drawer_binding, "inspect_prismatic_part", lambda _, part: bindings[part]
+    )
+    return SimpleNamespace(articulations=({"uid": "box"},))
+
+
+@pytest.mark.parametrize("kind", ["E1", "E4"])
+def test_qualified_inside_coverage_survives_drawer_rewrite(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        prepare_drawer_graph,
+    )
+
+    plan = _inside_plan(kind, "part_0")
+    scene = _mock_drawer_parts(monkeypatch, "part_0")
+    graph = prepare_drawer_graph(plan.graph, scene)
+    assert any(
+        node["call"].get("call_id") == "gen_sim.drawer_transport"
+        for node in graph["nodes"]
+    )
+    assert _coverage(plan, graph=graph)["status"] == "covered"
+    assert prepare_drawer_graph(graph, scene) == graph
+
+
+@pytest.mark.parametrize("kind", ["E1", "E4"])
+@pytest.mark.parametrize("damage", ["wrong_part", "missing_part", "unbound_part"])
+def test_inside_coverage_rejects_missing_or_foreign_part(
+    kind: str, damage: str
+) -> None:
+    plan = _inside_plan(kind, "part_0")
+    graph, bindings = deepcopy(plan.graph), deepcopy(plan.role_bindings)
+    if damage == "unbound_part":
+        bindings["role_bindings"].pop("step_01.target")
+    else:
+        inside = "inside__box__a" + ("__part_other" if damage == "wrong_part" else "")
+        for node in graph["nodes"]:
+            if "inside" in node["call"]:
+                node["call"]["inside"] = inside
+    report = _coverage(plan, graph=graph, role_bindings=bindings)
+    assert {"code": "required_relation_not_covered", "owner": "step_01"} in report[
+        "issues"
+    ]
+
+
+@pytest.mark.parametrize("kind", ["E1", "E4"])
+def test_unqualified_inside_cannot_default_to_first_drawer(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import (
+        prepare_drawer_graph,
+    )
+
+    plan = _inside_plan(kind, "part_0")
+    graph = deepcopy(plan.graph)
+    for node in graph["nodes"]:
+        if "inside" in node["call"]:
+            node["call"]["inside"] = "inside__box__a"
+    scene = _mock_drawer_parts(monkeypatch, "part_0", "part_1")
+    with pytest.raises(ValueError, match="one explicit E6 part"):
+        prepare_drawer_graph(graph, scene)
 
 
 def test_pour_target_and_primary_arm_are_not_covered_by_other_calls() -> None:

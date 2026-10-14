@@ -147,6 +147,10 @@ class _MissingRequiredObjectError(ValueError):
     """Identify a missing manipulated-object selector for targeted repair."""
 
 
+class _InstructionResourceError(ValueError):
+    """Identify explicit held-resource conflicts before scene grounding."""
+
+
 @dataclass(frozen=True)
 class InstructionDraftResult:
     """One validated, scene-independent interpretation and its audit metadata."""
@@ -490,7 +494,90 @@ def validate_instruction_intent(value: Mapping[str, Any]) -> dict[str, Any]:
                 f"{sorted(unknown)}."
             )
     _validate_dag(dependencies)
+    _validate_instruction_resources(steps)
     return {"steps": steps}
+
+
+def _validate_instruction_resources(steps: Sequence[Mapping[str, Any]]) -> None:
+    """Check occupancy and explicit hold continuation in compiler step order.
+
+    Auto arms retain every possible allocation. Only ``step_result`` establishes
+    subject identity; scene references may alias after grounding, so a release
+    keeps both possibilities rather than asserting noun-based ownership.
+    This is an early necessary check, not a grounded resource certificate.
+    """
+    arms = ("left_arm", "right_arm")
+    states: set[tuple[str | None, str | None]] = {(None, None)}
+    subjects: dict[str, str] = {}
+
+    def choices(requested: str) -> tuple[int, ...]:
+        return (arms.index(requested),) if requested in arms else (0, 1)
+
+    for step in steps:
+        step_id = str(step["id"])
+        selector = step["object"]
+        subject = (
+            subjects[str(selector["step_id"])]
+            if selector["kind"] == "step_result"
+            else step_id
+        )
+        subjects[step_id] = subject
+        contract = TASK_CONTRACTS[str(step["task_type"])]
+        next_states: set[tuple[str | None, str | None]] = set()
+        for state in states:
+            known_owner = tuple(
+                index for index, item in enumerate(state) if item == subject
+            )
+            if contract.resource_mode == "handover":
+                for source in choices(str(step["transfer_arm"])):
+                    for receiver in choices(str(step["receive_arm"])):
+                        if source == receiver or state[receiver] is not None:
+                            continue
+                        if known_owner and known_owner != (source,):
+                            continue
+                        updated = list(state)
+                        updated[source] = None
+                        terminal = str(step["terminal_behavior"])
+                        place = terminal == "place" or (
+                            terminal == "none" and step["target"]["kind"] != "none"
+                        )
+                        updated[receiver] = None if place else subject
+                        next_states.add(tuple(updated))
+            elif contract.resource_mode == "coordinated":
+                if any(state) and not (
+                    selector["kind"] == "step_result" and state == (subject, subject)
+                ):
+                    continue
+                next_states.add(
+                    (None, None)
+                    if step["terminal_behavior"] == "place"
+                    else (subject, subject)
+                )
+            else:
+                for resource in choices(str(step["required_arm"])):
+                    if contract.accepts_incoming_hold:
+                        if known_owner and known_owner != (resource,):
+                            continue
+                        updated = list(state)
+                        updated[resource] = None
+                        next_states.add(tuple(updated))
+                    elif state[resource] is None:
+                        next_states.add(state)
+        if not next_states:
+            if contract.resource_mode == "handover":
+                reason = (
+                    "HandOver receiver is occupied or the explicit source arm "
+                    "does not own the held step_result"
+                )
+            elif contract.resource_mode == "coordinated":
+                reason = (
+                    "E5 requires both arms, but an arm is occupied; continuation "
+                    "requires an explicit step_result jointly held by both arms"
+                )
+            else:
+                reason = "the requested arm is occupied by a held object"
+            raise _InstructionResourceError(f"Instruction step {step_id!r}: {reason}.")
+        states = next_states
 
 
 def _validate_selector(value: Any, context: str) -> dict[str, Any]:
@@ -684,7 +771,12 @@ def _instruction_prompt(instruction: str) -> str:
         "do not invent missing objects. Use step_result for cross-step pronouns "
         "and explicit references to the result of an earlier manipulation. Keep "
         "an independently selected repeated noun as scene_ref; identical text "
-        "alone does not prove object identity. "
+        "alone does not prove object identity. A same-entity continuation remains "
+        "step_result even when the later clause redescribes its changed state, "
+        "such as 'the now-empty tray'. E6 opening and later closing the same part "
+        "use the opening step's result; intermediate target references to that "
+        "same part also use its step_result. Do not merge independently selected native parts "
+        "or distinct roles merely because they belong to one cabinet or appliance. "
         "Object directions are robot-relative; arm names are robot body sides. "
         "Preserve each concrete object or target phrase from the instruction as "
         "an open scene_ref.reference. Do not classify it or emit a scene UID. "
@@ -700,7 +792,13 @@ def _instruction_prompt(instruction: str) -> str:
         "the same user intent, emit one E4 with target, relation, and "
         "terminal_behavior=place; do not emit a trailing E1. Use "
         "terminal_behavior=hold only when the receiver should keep holding the "
-        "object. The exact output keys are steps -> id, "
+        "object. Each gripper can hold only one object: a held receiver cannot "
+        "accept another handover, and an E5 pickup requires both hands free. "
+        "For multiple objects that are handed over and then placed, use per-object "
+        "transfer and placement before the next object's handover, unless the "
+        "instruction explicitly requires a different order. An E5 continuation "
+        "of the jointly held object uses step_result; it does not acquire a "
+        "second object. The exact output keys are steps -> id, "
         "task_type, object, target, relation, required_arm, transfer_arm, "
         "receive_arm, orientation_goal, target_state, target_setting, layout, "
         "axis, direction, terminal_behavior, depends_on; each selector has kind, "
@@ -841,6 +939,19 @@ def _instruction_selector_rules() -> str:
 
 def _instruction_repair_guidance(error: Exception) -> str:
     """Add narrow semantic guidance for errors weak JSON-mode models repeat."""
+    if isinstance(error, _InstructionResourceError):
+        return (
+            "\nHeld-resource repair rule: re-read the original instruction. "
+            "Do not drop objects, arm requirements, targets, or ordering. When "
+            "the instruction requests handover followed by placement for each "
+            "object, encode per-object transfer and placement as one E4 with "
+            "terminal_behavior=place and its own target/relation, or explicitly "
+            "release the held step_result before the next transfer. Use "
+            "step_result for a same-object continuation, never infer identity "
+            "from repeated noun text. Do not add a release when the instruction "
+            "requires holding, or reorder an explicitly ordered clause merely "
+            "to avoid the conflict; an impossible request must remain invalid.\n"
+        )
     if "quantifier=all requires count=0" in str(error):
         return (
             "\nQuantifier repair rule: re-read the original instruction. If it "

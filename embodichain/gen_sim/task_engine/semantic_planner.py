@@ -488,6 +488,7 @@ class SemanticTaskPlanner:
                         target_id=target_id,
                         relation=str(step.get("relation", "none")),
                         resource=destination,
+                        target_part=_bound_part(step, "target", bindings, steps_by_id),
                     )
                     calls.append(place_call)
                     held_by.pop(object_id, None)
@@ -552,10 +553,9 @@ class SemanticTaskPlanner:
                     target_id=target_id,
                     relation=relation,
                     resource=resource,
+                    target_part=target_part,
                 )
-                if relation == "inside" and target_part is not None:
-                    place_call["inside"] += f"__{target_part}"
-                elif target_part is not None:
+                if relation != "inside" and target_part is not None:
                     from ._task_program.spatial_reference import SIDE_RELATIONS
 
                     if relation in SIDE_RELATIONS:
@@ -1036,13 +1036,15 @@ class SemanticTaskPlanner:
         target_id: str,
         relation: str,
         resource: str,
+        target_part: str | None = None,
     ) -> dict[str, Any]:
         """Build one canonical built-in or live-relative Place call."""
         if relation == "inside":
             return {
                 "kind": "place",
                 "object": object_id,
-                "inside": _inside_affordance(target_id, object_id),
+                "inside": _inside_affordance(target_id, object_id)
+                + (f"__{target_part}" if target_part is not None else ""),
                 "resources": {"primary": resource},
             }
         if relation not in {

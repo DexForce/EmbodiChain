@@ -381,6 +381,49 @@ def test_place_open_close_intent_preserves_arm_order_and_drawer_identity() -> No
     assert len(candidate["scene_request"]["references"]) == 3
 
 
+def test_e6_step_result_preserves_exact_native_part_in_production_graph() -> None:
+    opened = _step(step_id="opened", reference="selected sliding tray")
+    opened.update(
+        task_type="E6",
+        orientation_goal="none",
+        target_state="open",
+        required_arm="right_arm",
+    )
+    closed = deepcopy(opened)
+    closed.update(
+        id="closed",
+        object=_selector("step_result", step_id="opened"),
+        target_state="closed",
+        depends_on=["opened"],
+    )
+    candidate = TaskAgent(
+        caller=lambda **_kwargs: {"steps": deepcopy([opened, closed])}
+    ).generate("same_part", "Open then close the same tray.", candidate_count=1)[
+        "candidates"
+    ][
+        0
+    ]
+    graph = SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "same_part",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": {"step_01.object": ["appliance"]},
+            "role_bindings": {"step_01.object": "part_selected"},
+        },
+        [{"uid": "appliance", "init_pos": [0.0, -0.1, 0.7]}],
+    )
+
+    primary_calls = [
+        node["call"] for node in graph["nodes"] if node["role"] == "primary"
+    ]
+    assert [call["arguments"] for call in primary_calls] == [
+        {"object": "appliance", "state": "open", "part": "part_selected"},
+        {"object": "appliance", "state": "closed", "part": "part_selected"},
+    ]
+
+
 def test_model_repair_preserves_requested_drawer_closing() -> None:
     legacy = _step(reference="drawer")
     legacy.update(
