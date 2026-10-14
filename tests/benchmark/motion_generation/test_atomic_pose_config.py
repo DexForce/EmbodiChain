@@ -502,7 +502,10 @@ def test_stratified_pose_sampling_is_deterministic_and_covers_bounds() -> None:
     for dimension, amplitude in enumerate(kwargs["amplitude"]):
         expected = torch.linspace(-amplitude, amplitude, 8)
         torch.testing.assert_close(torch.sort(first[:, dimension]).values, expected)
-    assert not torch.equal(first[:, 0], first[:, 1])
+    assert not torch.allclose(
+        first[:, 0] / kwargs["amplitude"][0],
+        first[:, 1] / kwargs["amplitude"][1],
+    )
 
 
 def test_pose_sampling_pattern_is_validated_and_injected() -> None:
