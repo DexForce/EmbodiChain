@@ -2750,12 +2750,19 @@ class SimulationManager:
         cfg.validate()
         cfg.__post_init__()
         if (
-            cfg.render.mode != "none"
-            and self.sim_config.render_cfg.renderer == "hybrid"
+            self.sim_config.render_cfg.renderer == "hybrid"
+            or SimulationManager._get_process_renderer() == "hybrid"
         ):
             raise NotImplementedError(
                 "Newton fluid rendering requires renderer='fast-rt' or 'rt'. "
-                "Hybrid does not publish the OptiX liquid geometry to its Vulkan primary surface."
+                "Hybrid does not publish the OptiX liquid geometry to its Vulkan primary surface. "
+                "Use renderer='no-render' for physics-only runs. "
+                "Select FastRT or OfflineRT before creating the first World; "
+                "start a new process if Hybrid is already initialized."
+            )
+        if cfg.render.mode == "none" and self.has_native_renderer:
+            raise NotImplementedError(
+                "Fluid mode='none' currently requires renderer='no-render'."
             )
         if not cfg.uid or cfg.uid in self.asset_uids:
             raise ValueError(
@@ -2791,10 +2798,6 @@ class SimulationManager:
                 )
             pose = _pose_from_cfg(reference.cfg) @ pose
         mesh_surface = FluidMeshSurfaceRenderDesc(**cfg.render.mesh_surface)
-        if cfg.render.mode == "none" and self.has_native_renderer:
-            raise NotImplementedError(
-                "Fluid mode='none' currently requires renderer='no-render'."
-            )
         material = None
         if self.has_native_renderer and cfg.render.material is not None:
             material_cfg = cfg.render.material.copy()

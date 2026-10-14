@@ -311,7 +311,11 @@ OptiX mesh/sphere instances. Particle statistics and indirect image changes
 can therefore be nonzero while the liquid primary surface is missing.
 
 The fluid deployment and runner now select FastRT, and the public manager and
-runner reject unsupported Hybrid liquid rendering. Empty-cup source generation
+runner reject unsupported Hybrid liquid rendering. The declaration gate checks
+both the resolved configuration and the initialized process renderer, including
+all fluid render modes, before sampling, material creation or declaration.
+Existing Hybrid processes require a fresh process for FastRT/RT; pure physics
+uses NoRender. Empty-cup source generation
 continues using Hybrid. The record camera focuses on the cup and receiver; the
 mesh reconstruction kernel is 1.5 particle spacings. Spacing overrides resample
 the existing fill volume and also scale the explicit render radius, mesh cell
@@ -321,6 +325,10 @@ Task Program motion remain unchanged; no native binary change was needed.
 
 Validation:
 
+- Hybrid declaration gate, process-backend resolution, launcher and context
+  regression: **265 passed**. Coverage includes auto selection, reused Hybrid processes,
+  all fluid render modes and supported FastRT/RT/NoRender declarations. These
+  contract tests do not allocate GPU fluid state.
 - Focused config/launcher/Gym/context contracts: **80 passed**. Serial GPU camera
   regression: **1 passed**, including physical stepping, display clipping,
   hidden-fluid controls and exact state restoration. Blue foreground counts

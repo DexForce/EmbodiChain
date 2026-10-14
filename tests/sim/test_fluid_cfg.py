@@ -203,21 +203,120 @@ def test_points_reject_geometry_filters_instead_of_silently_ignoring_them(extra)
         FluidSpawnCfg(positions=[[0, 0, 0]], **extra).sample(0.001)
 
 
-def test_manager_rejects_hybrid_fluid_rendering_before_sampling():
+def _fluid_manager_for_renderer(renderer):
     from types import SimpleNamespace
+    from unittest.mock import Mock
     import torch
-    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim import SimulationManagerCfg
     from embodichain.lab.sim.cfg import RenderCfg
 
-    manager = SimpleNamespace(
-        physics=SimpleNamespace(name="newton"),
+    return SimpleNamespace(
+        physics=SimpleNamespace(name="newton", configure_world=Mock()),
         device=torch.device("cuda"),
         num_envs=1,
         _active_newton_solver_type="sph",
         spawn_result=None,
         sim_config=SimulationManagerCfg(
-            physics_cfg=NewtonPhysicsCfg(), render_cfg=RenderCfg(renderer="hybrid")
+            headless=True,
+            physics_cfg=NewtonPhysicsCfg(),
+            render_cfg=RenderCfg(renderer=renderer),
         ),
+        has_native_renderer=renderer != "no-render",
+        asset_uids=[],
+        _fluid_objects={},
+        _rigid_objects={},
+        _spawn_scene=SimpleNamespace(declare=Mock()),
+        create_visual_material=Mock(),
+        _invalidate_fluid_state=Mock(),
+        notify_visualization_topology_changed=Mock(),
     )
+
+
+@pytest.mark.parametrize("mode", ["particles", "mesh_surface", "none"])
+@pytest.mark.parametrize(
+    "requested,process_renderer",
+    [
+        ("hybrid", None),
+        ("fast-rt", "hybrid"),
+        ("rt", "hybrid"),
+        ("auto", "hybrid"),
+        ("no-render", "hybrid"),
+    ],
+)
+def test_manager_rejects_hybrid_fluid_rendering_before_sampling(
+    requested, process_renderer, mode, monkeypatch
+):
+    from unittest.mock import Mock
+    from embodichain.lab.sim import SimulationManager
+
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", lambda: process_renderer
+    )
+    sample = Mock(side_effect=AssertionError("Fluid must be rejected before sampling"))
+    monkeypatch.setattr(FluidSpawnCfg, "sample", sample)
+    manager = _fluid_manager_for_renderer(requested)
+    cfg = FluidObjectCfg(uid="water", render={"mode": mode})
+    with pytest.raises(NotImplementedError, match="fast-rt.*Vulkan.*new process"):
+        SimulationManager.add_fluid_object(manager, cfg)
+    sample.assert_not_called()
+    manager.create_visual_material.assert_not_called()
+    manager._spawn_scene.declare.assert_not_called()
+
+
+@pytest.mark.parametrize("process_renderer", [None, "hybrid"])
+def test_auto_selected_hybrid_rejects_fluid_before_sampling(
+    process_renderer, monkeypatch, tmp_path
+):
+    from unittest.mock import Mock
+    from embodichain.lab.sim import SimulationManager, cfg as sim_cfg
+
+    monkeypatch.setattr(sim_cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", lambda: process_renderer
+    )
+    monkeypatch.setattr(
+        "embodichain.lab.sim.utility.render_utils.select_default_renderer",
+        lambda _: "hybrid",
+    )
+    manager = _fluid_manager_for_renderer("auto")
+    manager._requires_native_renderer = True
+    manager._material_cache_dir = tmp_path
+    SimulationManager._convert_sim_config(manager, manager.sim_config)
+    assert manager.sim_config.render_cfg.renderer == "hybrid"
+    sample = Mock(side_effect=AssertionError("Fluid must be rejected before sampling"))
+    monkeypatch.setattr(FluidSpawnCfg, "sample", sample)
     with pytest.raises(NotImplementedError, match="fast-rt.*Vulkan"):
         SimulationManager.add_fluid_object(manager, FluidObjectCfg(uid="water"))
+    sample.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "requested,process_renderer,mode",
+    [
+        ("fast-rt", None, "particles"),
+        ("fast-rt", "fast-rt", "mesh_surface"),
+        ("rt", "rt", "mesh_surface"),
+        ("no-render", "no-render", "none"),
+        ("no-render", "no-render", "particles"),
+    ],
+)
+def test_fluid_renderer_gate_allows_supported_backends(
+    requested, process_renderer, mode, monkeypatch
+):
+    from unittest.mock import Mock
+    from embodichain.lab.sim import SimulationManager
+
+    monkeypatch.setattr(
+        SimulationManager, "_get_process_renderer", lambda: process_renderer
+    )
+    facade = Mock()
+    monkeypatch.setattr(
+        "embodichain.lab.sim.sim_manager.FluidObject", Mock(return_value=facade)
+    )
+    manager = _fluid_manager_for_renderer(requested)
+    cfg = FluidObjectCfg(
+        uid="water", spawn=FluidSpawnCfg(kind="box"), render={"mode": mode}
+    )
+    assert SimulationManager.add_fluid_object(manager, cfg) is facade
+    assert manager._fluid_objects["water"] is facade
+    manager._spawn_scene.declare.assert_called_once()

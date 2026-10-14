@@ -43,8 +43,12 @@ scene uses a profile source with no particle file or disk cache. Its existing
 stationary replay hold provides physical settling after direct initialization.
 
 Native fluid geometry requires FastRT (`fast-rt`) or OfflineRT (`rt`). The
-manager rejects Hybrid before sampling/declaration because the current bridge
-creates OptiX-only instances, absent from Hybrid's Vulkan primary surface.
+manager rejects Hybrid in both the resolved configuration and the initialized
+process renderer before sampling, material creation or declaration. The gate
+covers every fluid render mode: requesting FastRT in an existing Hybrid process
+cannot bypass it. Start a fresh process to change the initialized renderer;
+pure physics runs use NoRender. The current bridge creates OptiX-only instances,
+absent from Hybrid's Vulkan primary surface.
 Validate camera pixels with visible and hidden fluid, not only particle counts.
 Native rendering is published through the existing Newton render bridge.
 Display clipping acts only on copied positions; Viser consumes detached point
