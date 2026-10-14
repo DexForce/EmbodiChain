@@ -6,7 +6,9 @@ fluid point files and explicit relative rigid/visual mesh paths against the
 owning component. Spawn rigid references are resolved before fluid binding.
 The default pour deployment generates its fill from a local revolved profile;
 no particle asset file is required. The runner's spacing override resamples the
-same volume recipe and rejects fixed point imports. Fill definitions and
+same volume recipe and rejects fixed point imports. It scales explicit render
+radius, mesh cell size and reconstruction kernel radius by the spacing ratio,
+keeping the surface reconstruction consistent with the new particle density. Fill definitions and
 in-memory template ownership are documented under
 [simulation fluids](../simulation-system/fluids.md).
 
@@ -39,7 +41,12 @@ source provenance; fluid capture metrics remain separate measured outcomes.
 
 ## Rendering and recording
 
-The pouring environment selects `hybrid`; the runner also accepts `fast-rt`.
+The pouring environment and runner select `fast-rt`. Hybrid is rejected for
+native fluid rendering: OptiX-only liquid geometry is absent from its Vulkan
+primary surface. Particle-state and video-decode checks alone do not qualify
+liquid visibility; use the image-based fluid regression linked below. The
+default record view focuses on the cup and receiver; the mesh kernel radius
+is 1.5 times the particle spacing to retain a connected surface after settling.
 Its interval `record_camera` event uses the existing `record_camera_data`
 functor with `per_env=True` and `fps=None`, recording every environment view at
 control frequency. The runner only redirects the output directory and sets
@@ -51,5 +58,6 @@ NoRender qualification removes the recorder before constructing the scene.
 
 Production configuration/measurement checks are in
 `tests/gym/envs/test_fluid_integration.py`; live isolation checks are in
-`tests/sim/objects/test_fluid_batch_runtime.py`. Generated trajectories/videos
+`tests/sim/objects/test_fluid_batch_runtime.py`; actual primary-surface visibility
+is checked by `tests/sim/objects/test_fluid_visibility.py`. Generated trajectories/videos
 are local qualification evidence, not packaged task assets.

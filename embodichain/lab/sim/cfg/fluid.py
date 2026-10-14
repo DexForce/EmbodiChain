@@ -119,6 +119,8 @@ class FluidRenderCfg:
 
     ``mesh_surface`` forwards DexSim FluidMeshSurfaceRenderDesc fields directly.
     Optional world-space clipping affects only a detached render copy.
+    Native fluid geometry requires ``fast-rt`` or ``rt``; Hybrid's Vulkan
+    primary surface does not contain the OptiX liquid instances.
     ``mode="none"`` currently requires the simulation NoRender backend.
     """
 

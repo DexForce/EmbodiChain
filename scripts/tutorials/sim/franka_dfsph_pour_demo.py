@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--physics-hz", type=int, default=1440)
     parser.add_argument("--substeps", type=int, default=1)
-    parser.add_argument("--renderer", choices=["rt", "hybrid"], default="rt")
+    parser.add_argument("--renderer", choices=["rt", "fast-rt"], default="rt")
     parser.add_argument("--headless", action="store_true")
     args = parser.parse_args()
     if min(args.speed, args.spacing, args.fps, args.substeps, args.physics_hz) <= 0:

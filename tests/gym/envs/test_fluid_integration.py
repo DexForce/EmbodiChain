@@ -42,7 +42,7 @@ TASK = (
 
 def test_fluid_deployment_resolves_sources_and_observation_entities():
     cfg = config_to_cfg(load_config(TASK), source_path=TASK)
-    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.sim_cfg.render_cfg.renderer == "fast-rt"
     assert cfg.events.record_camera.params["per_env"] is True
     assert cfg.events.record_camera.params["fps"] is None
     assert cfg.events.record_camera.interval_step == 1

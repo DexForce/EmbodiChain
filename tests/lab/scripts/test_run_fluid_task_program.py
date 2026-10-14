@@ -36,7 +36,7 @@ TASK = (
 )
 
 
-@pytest.mark.parametrize("renderer", [None, "hybrid", "fast-rt"])
+@pytest.mark.parametrize("renderer", [None, "fast-rt"])
 def test_launcher_selects_supported_renderers(renderer, monkeypatch, tmp_path):
     args = [
         "fluid",
@@ -52,15 +52,26 @@ def test_launcher_selects_supported_renderers(renderer, monkeypatch, tmp_path):
     replay = Mock()
     monkeypatch.setattr(runner, "_replay", replay)
     runner.main()
-    assert replay.call_args.args[0].renderer == (renderer or "hybrid")
+    assert replay.call_args.args[0].renderer == "fast-rt"
 
 
-def test_final_episode_is_committed_through_record_camera(monkeypatch, tmp_path):
+@pytest.mark.parametrize("spacing", [None, 0.003, 0.006])
+def test_final_episode_is_committed_through_record_camera(
+    spacing, monkeypatch, tmp_path
+):
     from embodichain.lab.gym.envs import fluid_replay
     from embodichain.lab.gym.envs.managers import observations
 
     recorder = SimpleNamespace(save_and_clear=Mock())
     created = []
+    decode_cfg = runner.config_to_cfg
+
+    def configured_render_settings(*args, **kwargs):
+        cfg = decode_cfg(*args, **kwargs)
+        cfg.sim_cfg.render_cfg.spp = 8
+        return cfg
+
+    monkeypatch.setattr(runner, "config_to_cfg", configured_render_settings)
 
     class Environment:
         def __init__(self, cfg, **kwargs):
@@ -103,7 +114,7 @@ def test_final_episode_is_committed_through_record_camera(monkeypatch, tmp_path)
         replay_task=str(TASK),
         num_envs=3,
         renderer="fast-rt",
-        particle_spacing=None,
+        particle_spacing=spacing,
         speed=2,
         seconds=None,
         partial_reset_step=None,
@@ -111,13 +122,23 @@ def test_final_episode_is_committed_through_record_camera(monkeypatch, tmp_path)
     runner._replay(args, tmp_path / "source.pt", tmp_path)
     recorder.save_and_clear.assert_called_once_with()
     cfg = created[0]
+    assert cfg.sim_cfg.render_cfg.spp == 8
     assert cfg.events.record_camera.params["max_env_num"] == 3
     assert cfg.events.record_camera.params["save_path"] == str(tmp_path / "videos")
     result = json.loads((tmp_path / "fluid_gym_result.json").read_text())
     assert result["renderer"] == "fast-rt"
     assert result["fluid_source"]["kind"] == "revolved_volume"
     assert result["fluid_source"]["file_path"] is None
-    assert result["particle_spacing_m"] == 0.0015
+    expected_spacing = spacing or 0.0015
+    assert result["particle_spacing_m"] == expected_spacing
+    fluid = cfg.fluid_object[0]
+    scale = expected_spacing / 0.0015
+    assert fluid.render.render_radius == pytest.approx(0.00045 * scale)
+    assert fluid.render.mesh_surface["cell_size"] == pytest.approx(0.00081 * scale)
+    assert fluid.render.mesh_surface["kernel_radius"] == pytest.approx(0.00225 * scale)
+    assert cfg.sim_cfg.physics_cfg.solver_cfg[
+        "particle_support_radius"
+    ] == pytest.approx(2.25 * expected_spacing)
     assert result["video_fps"] == 24
     assert result["videos"] == [
         f"videos/episode_0_fluid_gym_env{i}.mp4" for i in range(3)
@@ -137,9 +158,17 @@ def test_spacing_override_rejects_fixed_points_before_scene_creation(
     args = argparse.Namespace(
         replay_task=str(TASK),
         num_envs=2,
-        renderer="hybrid",
+        renderer="fast-rt",
         particle_spacing=0.006,
         speed=2,
     )
     with pytest.raises(ValueError, match="fixed sampling"):
         runner._replay(args, tmp_path / "unused.pt", tmp_path)
+
+
+def test_fluid_launcher_rejects_invisible_hybrid_backend(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["fluid", "--renderer", "hybrid"])
+    with pytest.raises(SystemExit) as error:
+        runner.main()
+    assert error.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err

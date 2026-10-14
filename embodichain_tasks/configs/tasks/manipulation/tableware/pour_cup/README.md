@@ -15,17 +15,20 @@
 ## Task Program → 流体 Gym
 
 ```bash
-python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2 --renderer hybrid
+python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2 --renderer fast-rt
 ```
 
 默认先在 MuJoCo 中执行现有 Task Program，验证真实杯子抬升、倾倒和放回，
 再启动独立 SPH Gym 回放其关节与杯子实测状态。输出包含源轨迹、源验收报告、
 流体接水量统计，以及 `videos/episode_0_fluid_gym_env0.mp4`、
 `videos/episode_0_fluid_gym_env1.mp4` 等每环境独立视频。
-默认使用 `hybrid`，也支持 `--renderer fast-rt`。
+流体阶段默认使用 `fast-rt`。当前原生液面重建只发布到 OptiX 场景，
+Hybrid 的 Vulkan 主表面看不到它，因此该组合会明确报错；空杯轨迹生成阶段
+仍可使用 Hybrid。
 录制通过环境 `record_camera` 事件调用现有 `record_camera_data`，
 配置 `per_env: true`、`fps: null`，每个控制步采集各 arena 的相对视角，
-按实际控制频率（本配置 24 fps）保存。脚本结束前显式保存最后一段视频。
+按实际控制频率（本配置 24 fps）保存。默认视角靠近杯口与接水碗，便于观察水流。
+脚本结束前显式保存最后一段视频。
 复用本工具生成的已验收轨迹可传
 `--trajectory outputs/fluid-task-program/task_program_trajectory.pt`。
 `--renderer no-render --seconds 0.125 --particle-spacing 0.006 --partial-reset-step 1`
@@ -51,7 +54,8 @@ spawn:
 其液面裁剪与固体壁面间隙分别处理；它不表示稳定后的体积百分比。
 1.5 mm 规则网格生成 76,607 个粒子，名义体积约 258.55 ml。
 修改 `particle_spacing` 或 `fill_level` 后，在下一次构建时重新生成点集。
-`--particle-spacing` 也使用同一截面重新采样，便于粗分辨率检查。
+`--particle-spacing` 也使用同一截面重新采样，并按间距比例缩放显示半径、
+液面网格间距和重建核半径，便于粗分辨率检查。
 
 局部点集只生成一次并保存在内存，reset 根据杯子位姿和 arena 偏移恢复选中环境；
 回放起始的静置阶段继续用于液体稳定化。NPZ 仍可作为外部点集导入格式，

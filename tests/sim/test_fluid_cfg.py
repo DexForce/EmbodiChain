@@ -201,3 +201,23 @@ def test_profile_source_round_trip_rebuilds_without_a_particle_file():
 def test_points_reject_geometry_filters_instead_of_silently_ignoring_them(extra):
     with pytest.raises(ValueError, match="points sources"):
         FluidSpawnCfg(positions=[[0, 0, 0]], **extra).sample(0.001)
+
+
+def test_manager_rejects_hybrid_fluid_rendering_before_sampling():
+    from types import SimpleNamespace
+    import torch
+    from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
+    from embodichain.lab.sim.cfg import RenderCfg
+
+    manager = SimpleNamespace(
+        physics=SimpleNamespace(name="newton"),
+        device=torch.device("cuda"),
+        num_envs=1,
+        _active_newton_solver_type="sph",
+        spawn_result=None,
+        sim_config=SimulationManagerCfg(
+            physics_cfg=NewtonPhysicsCfg(), render_cfg=RenderCfg(renderer="hybrid")
+        ),
+    )
+    with pytest.raises(NotImplementedError, match="fast-rt.*Vulkan"):
+        SimulationManager.add_fluid_object(manager, FluidObjectCfg(uid="water"))

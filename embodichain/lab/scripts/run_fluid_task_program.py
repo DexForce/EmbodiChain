@@ -105,7 +105,7 @@ def _replay(args, trajectory: Path, output: Path) -> None:
     cfg = config_to_cfg(load_config(str(path)), source_path=path)
     cfg.num_envs = args.num_envs
     cfg.sim_cfg.headless = True
-    cfg.sim_cfg.render_cfg = RenderCfg(renderer=args.renderer)
+    cfg.sim_cfg.render_cfg.renderer = args.renderer
     if args.renderer == "no-render":
         cfg.enable_sensor = False
         cfg.events.record_camera = None
@@ -119,6 +119,12 @@ def _replay(args, trajectory: Path, output: Path) -> None:
             raise ValueError(
                 "particle-spacing override requires a volume source; imported points have fixed sampling."
             )
+        scale = args.particle_spacing / fluid.particle_spacing
+        if fluid.render.render_radius is not None:
+            fluid.render.render_radius *= scale
+        for key in ("cell_size", "kernel_radius"):
+            if key in fluid.render.mesh_surface:
+                fluid.render.mesh_surface[key] *= scale
         fluid.particle_spacing = args.particle_spacing
         fluid.particle_radius = 0.3 * args.particle_spacing
         cfg.sim_cfg.physics_cfg.solver_cfg["particle_support_radius"] = (
@@ -231,7 +237,10 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--speed", type=float, default=2.0)
     parser.add_argument(
-        "--renderer", choices=["hybrid", "fast-rt", "no-render"], default="hybrid"
+        "--renderer",
+        choices=["fast-rt", "no-render"],
+        default="fast-rt",
+        help="FastRT renders liquid surfaces; NoRender is for physics-only checks.",
     )
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--particle-spacing", type=float)

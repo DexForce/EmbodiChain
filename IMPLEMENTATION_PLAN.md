@@ -294,3 +294,62 @@ Evidence: `outputs/fluid-gym-procedural-full/initialization-comparison.json`,
 `videos/episode_0_fluid_gym_env*.mp4` in that output directory. The coarse check
 is in `outputs/fluid-procedural-coarse/`; package inspection is in
 `outputs/fluid-procedural-validation/wheel-assets.json`.
+
+
+## Completed fix: liquid visibility in recorded cameras
+
+The user reported no fluid in the supplied videos. Reproduction confirmed that
+the prior Hybrid recordings qualified particle state and robot motion but did
+not display the liquid itself. Earlier claims of liquid visual qualification
+for Hybrid are retracted; decoded frames and robot pixel motion are insufficient
+oracles. Original OfflineRT Sim parity is a separate earlier result.
+
+Controlled reproduction: the same opaque blue 8,000-particle fluid block has
+**0 blue foreground pixels in Hybrid**, versus **5,873 in FastRT**. Hybrid
+shades a Vulkan G-buffer primary surface, while the fluid bridge creates only
+OptiX mesh/sphere instances. Particle statistics and indirect image changes
+can therefore be nonzero while the liquid primary surface is missing.
+
+The fluid deployment and runner now select FastRT, and the public manager and
+runner reject unsupported Hybrid liquid rendering. Empty-cup source generation
+continues using Hybrid. The record camera focuses on the cup and receiver; the
+mesh reconstruction kernel is 1.5 particle spacings. Spacing overrides resample
+the existing fill volume and also scale the explicit render radius, mesh cell
+size and reconstruction kernel radius. Renderer overrides retain other configured
+render settings. The clear-water material, physical solver, fill recipe and
+Task Program motion remain unchanged; no native binary change was needed.
+
+Validation:
+
+- Focused config/launcher/Gym/context contracts: **80 passed**. Serial GPU camera
+  regression: **1 passed**, including physical stepping, display clipping,
+  hidden-fluid controls and exact state restoration. Blue foreground counts
+  are **1,601 / 1,609**, versus **0 / 0** with the fluid outside the views.
+- Complete live SPH rollout: **2 x 76,607 particles**, **744 frames / 31 s**,
+  final received volumes **141.89175 / 141.39900 ml**, all sampled states finite.
+  Every particle-position frame was retained as ignored diagnostic output;
+  the last frame exactly matches the completed physical state.
+- The final visual configuration was qualified by a separate render-only pass
+  over those exact physical particle frames, using the existing per-environment
+  record-camera functor. No physics steps or synthetic liquid motion were added
+  during re-recording. Both **744-frame / 24-fps / 31-s** videos decoded fully;
+  decoded frames show the stream and accumulated water in both environments.
+- Clear-water visible/hidden camera control after the complete frame sequence:
+  **938 / 1,002 receiver pixels** changed by more than 10/255. Receiver RGB MAE
+  is **1.92990 / 2.08807**, versus repeat-render noise **0.17535 / 0.18492**.
+  This is direct liquid visibility evidence, independent of particle counts.
+- The production runner with 6-mm resampling, FastRT and a selected reset passed
+  a live three-control-step check: **1,225 particles/environment**, exact
+  untouched state at reset, and separate **1 / 3-frame** recordings. This checks
+  the scaled reconstruction and recording/reset protocol, not fluid fidelity.
+- Black **26.3.1**, API coverage **2503/2503**, context validation, tutorial syntax
+  and `git diff --check` pass. No full suite or release/AOT rebuild was needed.
+
+Final media and pixel/decode reports:
+`outputs/fluid-gym-visible-qualified/` (`videos/episode_0_fluid_gym_env*.mp4`,
+`render_validation.json`, `video_decode_validation.json`, decoded keyframes,
+`water_visible_env*.png` and `water_hidden_env*.png`). Physical-state evidence is
+`outputs/fluid-visibility-live-cache/` (`fluid_gym_result.json`, diagnostic particle
+frames and `particle_frame_validation.json`). The live scaled/reset smoke is in
+`outputs/fluid-visible-scaled-smoke/`. Baseline renderer comparison remains in
+`outputs/fluid-visibility-baseline/`; these generated files are not task assets.

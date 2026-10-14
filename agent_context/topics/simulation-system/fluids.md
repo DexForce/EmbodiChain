@@ -42,7 +42,11 @@ sampling and reject volume-only profile/fill-level controls. The default pour
 scene uses a profile source with no particle file or disk cache. Its existing
 stationary replay hold provides physical settling after direct initialization.
 
-Native rendering is published once through the existing Newton render bridge.
+Native fluid geometry requires FastRT (`fast-rt`) or OfflineRT (`rt`). The
+manager rejects Hybrid before sampling/declaration because the current bridge
+creates OptiX-only instances, absent from Hybrid's Vulkan primary surface.
+Validate camera pixels with visible and hidden fluid, not only particle counts.
+Native rendering is published through the existing Newton render bridge.
 Display clipping acts only on copied positions; Viser consumes detached point
 clouds. NoRender fluid mode does not require optical materials. Ordinary rigid
 objects may supply a separate `visual_shape`; SDF cooking stays on the physical
@@ -51,6 +55,8 @@ shape. Explicit `force_sdf=False` permits pre-baked mesh SDFs.
 Focused checks are `tests/sim/test_fluid_cfg.py`,
 `tests/sim/objects/test_fluid_object.py` and the serial CUDA lifecycle test
 `tests/sim/objects/test_fluid_runtime.py` and `test_fluid_batch_runtime.py`.
+`tests/sim/objects/test_fluid_visibility.py` checks real camera pixels after
+stepping and direct state writes, including display clipping.
 For YAML declarations, refill observations and Task Program replay, see
 [fluid Gym integration](../env-framework/fluid-replay.md). The pouring tutorial is an end-to-end
 qualification workload, not a unit-test import target.

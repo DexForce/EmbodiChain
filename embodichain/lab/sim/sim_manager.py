@@ -2718,7 +2718,7 @@ class SimulationManager:
         return [item[3] for item in declarations]
 
     def add_fluid_object(self, cfg: FluidObjectCfg) -> FluidObject:
-        """Declare a fixed-count, single-environment Newton DFSPH fluid.
+        """Declare a fixed-count Newton DFSPH fluid.
 
         Args:
             cfg: Fluid source, initial state, physical and render properties.
@@ -2749,6 +2749,14 @@ class SimulationManager:
         cfg = cfg.copy()
         cfg.validate()
         cfg.__post_init__()
+        if (
+            cfg.render.mode != "none"
+            and self.sim_config.render_cfg.renderer == "hybrid"
+        ):
+            raise NotImplementedError(
+                "Newton fluid rendering requires renderer='fast-rt' or 'rt'. "
+                "Hybrid does not publish the OptiX liquid geometry to its Vulkan primary surface."
+            )
         if not cfg.uid or cfg.uid in self.asset_uids:
             raise ValueError(
                 "Fluid uid must be nonempty and unique across scene assets."
