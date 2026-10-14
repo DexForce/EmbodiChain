@@ -128,6 +128,17 @@ in that run's `videos/` directory.
   delivery height; Coordinated Placement combines subject, support, target,
   and task-frame pose changes in one domain.
 
+  | Atomic Skill | Shared workspace domain | Composed domain | Simultaneously varied dimensions |
+  | --- | --- | --- | --- |
+  | `PickUp`, `Pour`, `AxisAlign` | `task_frame_planar` | `object_planar_pose` | subject XY + subject yaw |
+  | `MoveHeldObject` | `task_frame_planar` | `object_target_spatial_pose` | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `Place` | `task_frame_planar` | `object_target_planar_pose` | subject XY/yaw + target XY/yaw |
+  | `PushObject` | `task_frame_planar` | `object_target_position` | subject XY/yaw + target XY |
+  | `Press`, `Twist`, `Slide`, `OpenDoor` | `task_frame_planar` | `articulation_spatial_pose` | articulation XYZ/yaw/roll/pitch |
+  | `HandOver` | `task_frame_planar` | `object_target_position` | subject XY/yaw + delivery XYZ |
+  | `CoordinatedPickment` | `task_frame_planar` | `object_target_spatial_pose` | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `CoordinatedPlacement` | `task_frame_planar` | `object_support_target_task_frame_pose` | subject XY/yaw + support XY/yaw + target XYZ/yaw + task-frame XY/yaw |
+
   | Atomic Skill | Subject XY | Subject Z | Subject yaw | Subject roll/pitch | Target XY | Target Z | Target yaw | Target roll/pitch | Support XY/yaw | Task-frame XY/yaw |
   | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
   | `PickUp`, `Pour`, `AxisAlign` | ✓ |  | ✓ |  |  |  |  |  |  | ✓ |
