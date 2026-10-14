@@ -346,6 +346,10 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
         },
         support_object_id="support",
         object_initial_pose=pose.tolist(),
+        placing_target_pose=pose.tolist(),
+        support_target_pose=pose.tolist(),
+        placing_height_offset_m=0.0,
+        support_height_offset_m=0.0,
         placing_relative_target_pose=pose.tolist(),
     )
     observation = _observation(
@@ -388,6 +392,82 @@ def test_coordinated_placement_evaluator_uses_named_support_pose_trace() -> None
     }
 
 
+def test_coordinated_placement_alignment_uses_world_height_offsets() -> None:
+    """Alignment follows raised commands while stability uses resting poses."""
+    support_target = _pose(0.3, -0.2, 0.4)
+    support_target[:3, :3] = axis_angle_to_rotation_matrix(
+        torch.tensor([0.0, math.pi / 2, 0.0])
+    )
+    placing_target = support_target.clone()
+    placing_height_offset = 0.10
+    support_height_offset = 0.02
+    aligned_placing = placing_target.clone()
+    aligned_support = support_target.clone()
+    aligned_placing[2, 3] += placing_height_offset
+    aligned_support[2, 3] += support_height_offset
+    aligned_placing_trace = aligned_placing.reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)
+    aligned_support_trace = aligned_support.reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)
+    resting_placing_trace = placing_target.reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)
+    resting_support_trace = support_target.reshape(1, 1, 4, 4).repeat(2, 1, 1, 1)
+    placing_released = torch.zeros(2, 1, 1)
+    support_held = torch.full((2, 1, 1), 0.5)
+    case = _case(
+        "coordinated_placement",
+        control_parts={
+            "placing": {"motion": "left_arm", "grasp": "left_hand"},
+            "support": {"motion": "right_arm", "grasp": "right_hand"},
+        },
+        support_object_id="support",
+        object_initial_pose=placing_target.unsqueeze(0).tolist(),
+        placing_target_pose=placing_target.unsqueeze(0).tolist(),
+        support_target_pose=support_target.unsqueeze(0).tolist(),
+        placing_height_offset_m=placing_height_offset,
+        support_height_offset_m=support_height_offset,
+        placing_relative_target_pose=torch.eye(4).unsqueeze(0).tolist(),
+    )
+    observation = _observation(
+        gripper_open_qpos={
+            "left_hand": torch.tensor([0.0]),
+            "right_hand": torch.tensor([0.0]),
+        },
+        gripper_grasp_qpos={
+            "left_hand": torch.tensor([1.0]),
+            "right_hand": torch.tensor([1.0]),
+        },
+        replay_traces={
+            "coordinated_place_alignment": ReplayObservationTrace(
+                object_pose=aligned_placing_trace,
+                scene_object_poses={"support": aligned_support_trace},
+            ),
+            "coordinated_place_release": ReplayObservationTrace(
+                gripper_qpos={
+                    "left_hand": placing_released,
+                    "right_hand": support_held,
+                }
+            ),
+            "coordinated_place_settle": ReplayObservationTrace(
+                object_pose=resting_placing_trace,
+                scene_object_poses={"support": resting_support_trace},
+            ),
+        },
+    )
+
+    evaluator = create_atomic_skill_provider(
+        "coordinated_placement"
+    ).physical_evaluator()
+    assert evaluator is not None
+    result = evaluator.evaluate(case, observation, (_outcome(),))[0]
+
+    assert result.task_success
+    assert [stage.stage_id for stage in result.stages] == [
+        "aligned",
+        "released",
+        "stable",
+    ]
+    assert result.stages[0].measurements["relative_position_error_m"] < 1.0e-6
+    assert result.stages[2].measurements["relative_position_error_m"] < 1.0e-6
+
+
 def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
     target = _pose(0.0).unsqueeze(0)
     aligned_trace = target.unsqueeze(0).repeat(2, 1, 1, 1)
@@ -403,6 +483,10 @@ def test_coordinated_placement_rechecks_relative_target_after_release() -> None:
         },
         support_object_id="support",
         object_initial_pose=target.tolist(),
+        placing_target_pose=target.tolist(),
+        support_target_pose=target.tolist(),
+        placing_height_offset_m=0.0,
+        support_height_offset_m=0.0,
         placing_relative_target_pose=target.tolist(),
     )
     observation = _observation(

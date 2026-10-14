@@ -602,7 +602,7 @@ def resolve_atomic_pose_randomization(
 
        randomization:
          enabled: true
-         mode: planar_pose
+         mode: spatial_pose
          pose_batch_size: 8
          object_translation_jitter_m: [0.03, 0.03, 0.0]
          object_yaw_jitter_rad: 0.5236

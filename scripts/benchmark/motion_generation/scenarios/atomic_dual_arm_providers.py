@@ -403,6 +403,24 @@ class _CoordinatedPickmentEvaluator:
         return evaluate_skill_stage_batch("coordinated_pickment", evidence)
 
 
+def _coordinated_placement_alignment_target(
+    case: BenchmarkCase, *, device: torch.device
+) -> torch.Tensor:
+    """Return the relative object pose commanded before placement release.
+
+    Coordinated placement applies each object's height offset in world Z.  The
+    support can be rotated, so the resulting relative displacement must be
+    computed from the two offset absolute targets rather than added in the
+    support's local frame.
+    """
+    parameters = case.case_parameters
+    placing = _case_pose(case, "placing_target_pose", device=device).clone()
+    support = _case_pose(case, "support_target_pose", device=device).clone()
+    placing[:, 2, 3] += float(parameters["placing_height_offset_m"])
+    support[:, 2, 3] += float(parameters["support_height_offset_m"])
+    return torch.bmm(pose_inv(support), placing)
+
+
 class _CoordinatedPlacementEvaluator:
     """Evaluate relative alignment, role-aware release, and settled stability."""
 
@@ -418,7 +436,7 @@ class _CoordinatedPlacementEvaluator:
         placing_part = str(parts["placing"]["grasp"])
         support_part = str(parts["support"]["grasp"])
         support_id = str(parameters["support_object_id"])
-        target = _case_pose(
+        resting_target = _case_pose(
             case,
             "placing_relative_target_pose",
             device=observation.execution_success.device,
@@ -435,7 +453,9 @@ class _CoordinatedPlacementEvaluator:
             placing = aligned.object_pose[-1]
             support = aligned.scene_object_poses[support_id][-1]
             relative = torch.bmm(pose_inv(support), placing)
-            local_target = target.to(device=relative.device, dtype=relative.dtype)
+            alignment_target = _coordinated_placement_alignment_target(
+                case, device=relative.device
+            ).to(dtype=relative.dtype)
             min_height = _minimum_height_above_initial_support(aligned, case)
             if min_height is not None:
                 batches.append(
@@ -445,10 +465,11 @@ class _CoordinatedPlacementEvaluator:
                         window="actuation_end",
                         measurements={
                             "relative_position_error_m": torch.linalg.vector_norm(
-                                relative[:, :3, 3] - local_target[:, :3, 3], dim=-1
+                                relative[:, :3, 3] - alignment_target[:, :3, 3],
+                                dim=-1,
                             ),
                             "relative_rotation_error_rad": _rotation_error(
-                                relative, local_target
+                                relative, alignment_target
                             ),
                             "min_height_above_support_m": min_height,
                         },
@@ -485,7 +506,7 @@ class _CoordinatedPlacementEvaluator:
             )
             relative_start = relative[:1].expand_as(relative)
             final_relative = relative[-1]
-            local_target = target.to(
+            local_target = resting_target.to(
                 device=final_relative.device, dtype=final_relative.dtype
             )
             min_height = _minimum_height_above_initial_support(settle, case)
