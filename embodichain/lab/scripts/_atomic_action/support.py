@@ -1675,10 +1675,21 @@ def create_parallel_jaw_grasp_pose_generator(
     n_sample: int,
     force_refresh: bool,
     opening_margin: float = 0.03,
+    gripper_model: ParallelJawGripperModelCfg | None = None,
 ) -> AntipodalGraspPoseGenerator:
-    """Create the standalone generator shared by tutorial planning paths."""
+    """Create a standalone generator for the sample's mounted gripper.
+
+    Args:
+        n_sample: Number of antipodal contact-pair samples.
+        force_refresh: Whether to regenerate cached object annotations.
+        opening_margin: Additional clearance used for grasp collision checks.
+        gripper_model: Explicit fixture geometry; omission uses the PGI sample.
+
+    Returns:
+        A generator with an independently owned gripper model.
+    """
     return AntipodalGraspPoseGenerator(
-        TUTORIAL_PARALLEL_JAW_MODEL,
+        TUTORIAL_PARALLEL_JAW_MODEL if gripper_model is None else gripper_model,
         algorithm_cfg=AntipodalGraspPoseGeneratorCfg(sample_count=n_sample),
         collision_cfg=ParallelJawGraspCollisionCfg(
             opening_margin=opening_margin,

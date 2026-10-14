@@ -24,13 +24,17 @@ internal sample defaults. The scenes share the implementations used by
 initial poses, lighting, motion options, and replay callbacks. Place and Pour
 retain their PickUp precondition. Slide pulls the drawer, executes it, reads
 the moved handle, then plans and executes the push. Handover retains the
-dual-arm robot and soda-can/support-surface scene. Selecting `--physics newton`
+dual-arm robot and soda-can/support-surface scene. Its UR5, Franka, and UR10
+presets mount two Robotiq 2F-140 grippers from
+`get_data_path("Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf")`. Handover
+uses a matching 140 mm opening grasp model and a 0.4 rad closing angle with
+the URDF's mimic directions. Selecting `--physics newton`
 applies the examples' scene-specific Newton contact overlays and solver settings.
 
 Franka Handover currently selects numerical PyTorch IK; its single-arm scenes
-retain the preset FEP solver. The dual-arm factory applies
-`FRANKA_PGI_HANDOVER_TCP` to each arm. UR5 and UR10 retain their analytical UR
-solvers. These solver choices remain internal sample defaults.
+retain the preset FEP solver. The Handover factory applies
+`FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP` to each Franka arm. UR5 and UR10 retain
+their analytical UR solvers. These solver choices remain internal sample defaults.
 
 `MotionGenerator` solves both environments and Cartesian waypoints through
 `compute_batch_ik`, with bounded chunks to limit numerical multi-start memory.
@@ -50,14 +54,20 @@ local frame; the upper-left 3x3 block is rotation.
 | Mounted fixture / tool point | Pose to edit | Existing local-Z offset |
 | --- | --- | --- |
 | UR5 + PGI, general point (Press/Twist/MoveJoint) | `UR5_PGI_TCP` | 0.17 m |
-| UR5 + PGI, manipulation and handover point | `UR5_PGI_GRASP_TCP` | 0.15 m |
+| UR5 + PGI, manipulation / generic dual helper | `UR5_PGI_GRASP_TCP` | 0.15 m |
 | Franka + PGI, single-arm Pickup/Place/MoveJoint | `FRANKA_PGI_TCP` | 0.15 m |
-| Franka + PGI, dual-arm Handover | `FRANKA_PGI_HANDOVER_TCP` | 0.165 m |
+| Franka + PGI, generic dual helper | `FRANKA_PGI_HANDOVER_TCP` | 0.165 m |
+| UR5 + Robotiq 2F-140, Handover | `UR5_ROBOTIQ_2F_140_HANDOVER_TCP` | 0.21 m, with a 90-degree local-Z rotation |
+| Franka + Robotiq 2F-140, Handover | `FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP` | 0.21 m, with a 90-degree local-Z rotation |
 | UR10 + Robotiq 2F-140 | `UR10_ROBOTIQ_2F_140_TCP` | 0.21 m, with its mounting rotation |
 
 For `--skill place --robot franka`, edit `FRANKA_PGI_TCP`. This calibrates the
 single-arm Franka/PGI tool without affecting UR5, Robotiq, or the separately
 authored handover calibration. Each solver receives an independent matrix.
+For `--skill handover --robot franka`, edit
+`FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP`; the corresponding UR5 calibration is
+`UR5_ROBOTIQ_2F_140_HANDOVER_TCP`. The generic dual helper retains PGI unless
+the scene explicitly selects `gripper="robotiq_2f_140"`.
 The named tool points preserve the existing sample offsets; they are sample
 calibrations, not measured guarantees for another physical fixture.
 

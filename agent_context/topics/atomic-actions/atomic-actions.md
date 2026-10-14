@@ -145,7 +145,13 @@ IK. Cartesian preparation uses the shared
 [batched motion facade](../motion-planning/planner-details.md#normalization-and-capabilities).
 Mounted-gripper TCP calibration belongs to `lab/scripts/_atomic_action/tcp_presets.py`.
 The UR5/PGI, Franka/PGI and UR10/Robotiq mounting poses are independent; named
-tool points retain the existing general, grasp and handover calibrations.
+tool points retain the existing general, grasp and legacy PGI dual calibrations.
+Handover explicitly mounts the Robotiq 2F-140 asset on every supported arm.
+UR5 and Franka own separate Robotiq Handover TCP matrices (0.21 m local Z
+and a 90-degree local-Z rotation); the generic dual factory retains PGI unless
+that gripper is selected. The scene's antipodal generator uses its matching
+140 mm opening geometry, and closure commands follow the six Robotiq joints'
+mimic directions with a 0.4 rad master angle.
 Scene callers select those points, and single/dual robot factories forward full
 poses to their solvers. Explicit Python PGI `tcp_z` overrides affect only local
 Z while preserving rotation and lateral offsets. TCP calibration changes the

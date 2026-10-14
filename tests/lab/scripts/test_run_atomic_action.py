@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 import pytest
 import torch
@@ -358,7 +359,140 @@ def test_handover_uses_numerical_franka_and_analytical_ur_defaults(
     monkeypatch.setattr(handover, "add_dual_tutorial_robot", add_robot)
     assert handover.create_dual_robot(sim, robot) is expected_robot
     assert captured["robot_type"] == robot
+    assert captured["gripper"] == "robotiq_2f_140"
     assert captured["solver"] == ("pytorch" if robot == "franka" else "ur")
+
+
+@pytest.mark.parametrize("robot_type", ROBOTS)
+def test_handover_robotiq_assembly_and_signed_hand_commands(robot_type: str) -> None:
+    """Every selected arm mounts the requested asset with valid six-joint commands."""
+    from embodichain.lab.scripts._atomic_action import handover
+    from embodichain.lab.scripts._atomic_action.support import get_hand_open_close_qpos
+
+    cfg = create_dual_tutorial_robot_cfg(
+        robot_type=robot_type,
+        uid=f"test_{robot_type}_robotiq",
+        urdf_name=f"test_{robot_type}_robotiq_handover",
+        gripper="robotiq_2f_140",
+        solver="pytorch" if robot_type == "franka" else "ur",
+    )
+    arm_dof = len(create_tutorial_robot_cfg(robot_type).control_parts["arm"])
+    assert len(cfg.init_qpos) == 2 * arm_dof + 12
+    assert cfg.init_qpos[-12:] == [0.0] * 12
+    for side in ("left", "right"):
+        assert cfg.urdf_cfg.components[f"{side}_hand"]["urdf_path"].endswith(
+            "/Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf"
+        )
+        assert cfg.solver_cfg[f"{side}_arm"].tcp == tcp_presets.sample_tool_tcp(
+            robot_type, point="handover", gripper="robotiq_2f_140"
+        )
+    root = ET.parse(cfg.urdf_cfg.assemble_urdf()).getroot()
+    joints = {
+        joint.get("name"): joint
+        for joint in root.findall("joint")
+        if joint.get("type") != "fixed"
+    }
+    assert len(joints) == len(cfg.init_qpos)
+    for rules in (
+        cfg.joint_drive_props.stiffness,
+        cfg.joint_drive_props.damping,
+        cfg.joint_drive_props.max_effort,
+    ):
+        assert all("gripper_finger" not in pattern for pattern in rules)
+        patterns = [
+            pattern
+            for selector in rules
+            for pattern in cfg.control_parts.get(selector, [selector])
+        ]
+        resolve_matching_names(patterns, list(joints))
+    for side in ("left", "right"):
+        part = f"{side}_eef"
+        _, names = resolve_matching_names(cfg.control_parts[part], list(joints))
+        assert len(names) == 6
+        limits = torch.tensor(
+            [
+                [
+                    float(joints[name].find("limit").get(key))
+                    for key in ("lower", "upper")
+                ]
+                for name in names
+            ]
+        )[None]
+        robot = SimpleNamespace(
+            device=torch.device("cpu"),
+            cfg=SimpleNamespace(control_parts={part: names}),
+            get_qpos_limits=lambda name: limits,
+        )
+        opened, closed = get_hand_open_close_qpos(
+            robot, hand_control_part=part, close_qpos=handover.HAND_CLOSE_QPOS
+        )
+        assert torch.equal(opened, torch.zeros(6))
+        master_joint = f"{side}_finger_joint"
+        expected = []
+        for name in names:
+            mimic = joints[name].find("mimic")
+            if name == master_joint:
+                assert mimic is None
+                expected.append(handover.HAND_CLOSE_QPOS)
+            else:
+                assert mimic is not None and mimic.get("joint") == master_joint
+                expected.append(
+                    float(mimic.get("multiplier", "1")) * handover.HAND_CLOSE_QPOS
+                    + float(mimic.get("offset", "0"))
+                )
+        expected = torch.tensor(expected)
+        torch.testing.assert_close(closed, expected)
+
+
+def test_handover_robotiq_tcp_is_independent_of_pgi_and_other_arms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibrated = (
+        (0.0, -1.0, 0.0, 0.01),
+        (1.0, 0.0, 0.0, -0.02),
+        (0.0, 0.0, 1.0, 0.22),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+    monkeypatch.setattr(tcp_presets, "FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP", calibrated)
+    cfg = create_dual_tutorial_robot_cfg(
+        robot_type="franka",
+        uid="robotiq_tcp_test",
+        urdf_name="robotiq_tcp_test",
+        gripper="robotiq_2f_140",
+        tcp_z=0.12,  # The legacy PGI override does not shorten this Robotiq fixture.
+    )
+    for part in ("left_arm", "right_arm"):
+        assert torch.equal(
+            torch.as_tensor(cfg.solver_cfg[part].tcp), torch.tensor(calibrated)
+        )
+    sample_tool_pose = tcp_presets.sample_tool_tcp("franka")
+    assert sample_tool_pose == [list(row) for row in tcp_presets.FRANKA_PGI_TCP]
+    for robot_type in ("ur5", "ur10"):
+        pose = tcp_presets.sample_tool_tcp(robot_type, gripper="robotiq_2f_140")
+        assert pose[2][3] == 0.21
+
+
+def test_handover_grasp_model_uses_robotiq_opening_and_owns_its_geometry() -> None:
+    from embodichain.lab.scripts._atomic_action import handover
+    from embodichain.lab.scripts._atomic_action.support import (
+        create_parallel_jaw_grasp_pose_generator,
+    )
+
+    generator = create_parallel_jaw_grasp_pose_generator(
+        n_sample=32, force_refresh=False, gripper_model=handover.HANDOVER_GRIPPER_MODEL
+    )
+    assert generator.gripper_model.model_id == "robotiq_2f_140"
+    assert generator.gripper_model.max_opening_width == 0.14
+    geometry = generator.gripper_model
+    geometry.max_opening_width = 0.12
+    assert generator.gripper_model.max_opening_width == 0.14
+    assert handover.HANDOVER_GRIPPER_MODEL.max_opening_width == 0.14
+    assert (
+        create_parallel_jaw_grasp_pose_generator(
+            n_sample=32, force_refresh=False
+        ).gripper_model.model_id
+        == "dh_pgi_140_80"
+    )
 
 
 @pytest.mark.parametrize("value", (float("nan"), float("inf"), True))

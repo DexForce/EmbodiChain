@@ -34,6 +34,7 @@ from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.data import get_data_path
 from embodichain.lab.sim.objects import RigidObject, Robot
 from embodichain.lab.sim.shapes import MeshCfg, MeshCollisionCfg
+from embodichain.toolkits.graspkit import ParallelJawGripperModelCfg
 from embodichain.utils import logger
 from embodichain.lab.scripts._atomic_action.scenario import (
     add_dual_tutorial_robot,
@@ -83,7 +84,18 @@ OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-HAND_CLOSE_QPOS = 0.04
+# Robotiq's revolute closing angle follows the URDF mimic directions. At 0.4
+# rad the pads preload the sample can's approximately 63 mm diameter.
+HAND_CLOSE_QPOS = 0.4
+HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
+    model_id="robotiq_2f_140",
+    min_opening_width=0.005,
+    max_opening_width=0.140,
+    finger_length=0.08,
+    finger_width=0.027,
+    finger_thickness=0.0075,
+    palm_depth=0.10,
+)
 HANDOVER_SAMPLE_INTERVAL = 220
 HANDOVER_HAND_INTERP_STEPS = 10
 HANDOVER_PRE_GRASP_DISTANCE = 0.08
@@ -121,12 +133,13 @@ def create_dual_robot(
     sim: SimulationManager,
     robot_type: TutorialRobot,
 ) -> Robot:
-    """Create the selected dual-arm robot with its matching grippers."""
+    """Create the selected dual-arm robot with two Robotiq 2F-140 grippers."""
     return add_dual_tutorial_robot(
         sim,
         robot_type=robot_type,
         uid=f"Dual{robot_type.title()}HandOver",
         urdf_name=f"dual_{robot_type}_hand_over",
+        gripper="robotiq_2f_140",
         solver="pytorch" if robot_type == "franka" else "ur",
         ur_ik_nearest_weight=(1.0, 4.0, 1.0, 1.0, 1.0, 1.0),
         hand_stiffness=1e3,
@@ -223,6 +236,7 @@ def run_handover_demo(
     grasp_pose_generator = create_parallel_jaw_grasp_pose_generator(
         n_sample=args.n_sample,
         force_refresh=args.force_reannotate,
+        gripper_model=HANDOVER_GRIPPER_MODEL,
     )
     engine = create_simulation_atomic_action_engine(
         motion_generator=motion_gen,

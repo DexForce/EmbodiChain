@@ -40,6 +40,8 @@ from embodichain.lab.sim.robots import build_dual_arm_cfg
 from embodichain.lab.sim.motion.solvers import PytorchSolverCfg
 from embodichain.utils import logger
 from embodichain.lab.scripts._atomic_action.support import (
+    ROBOTIQ_2F_140_URDF_PATH,
+    ROBOTIQ_HAND_JOINT_PATTERN,
     TutorialRobot,
     configure_newton_gripper_contacts,
     create_tutorial_rigid_body_physics,
@@ -91,6 +93,7 @@ def create_dual_tutorial_robot_cfg(
     uid: str,
     urdf_name: str,
     tcp_z: float | None = None,
+    gripper: Literal["robotiq_2f_140"] | None = None,
     solver: Literal["ur", "pytorch"] = "ur",
     ur_ik_nearest_weight: Sequence[float] | None = None,
     pytorch_num_samples: int = 30,
@@ -107,9 +110,10 @@ def create_dual_tutorial_robot_cfg(
     Franka retains its preset FEP analytical solver and redundancy search.
     ``solver="ur"`` selects the analytical solver for UR5 and UR10, while
     ``solver="pytorch"`` explicitly selects numerical IK for any preset.
-    UR5 and Franka use the shared PGI hand, while ``ur10`` uses the six-DOF
-    Robotiq 2F-140 and its rotated 0.21 m TCP. The mounting layout, control-part
-    names, and downstream action bindings stay identical across robot choices.
+    UR5 and Franka default to the PGI hand; Handover explicitly selects the
+    six-joint Robotiq 2F-140, which UR10 already uses. Its TCP includes the
+    mounting rotation and an independently calibrated tool offset. Control-part
+    names and downstream action bindings stay identical across robot choices.
 
     Args:
         robot_type: Arm family to mount on both sides.
@@ -118,6 +122,8 @@ def create_dual_tutorial_robot_cfg(
         tcp_z: Optional explicit PGI local-Z override for Python callers.
             Omission selects the fixture's handover TCP; UR10/Robotiq uses
             its separate calibrated mounting transform.
+        gripper: Explicit Handover gripper selection. Robotiq uses its full
+            fixture TCP and does not consume the PGI ``tcp_z`` override.
         solver: UR solver selection; Franka retains its preset unless
             ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
@@ -133,11 +139,33 @@ def create_dual_tutorial_robot_cfg(
     Returns:
         A dual-arm robot configuration with two matching grippers.
     """
+    if gripper not in (None, "robotiq_2f_140"):
+        raise ValueError(f"Unknown dual sample gripper {gripper!r}")
     base_cfg = create_tutorial_robot_cfg(robot_type)
+    if gripper == "robotiq_2f_140":
+        old_hand_patterns = tuple(base_cfg.control_parts["eef"])
+        hand_component = base_cfg.urdf_cfg.components["hand"]
+        base_cfg.urdf_cfg.add_component(
+            "hand",
+            get_data_path(ROBOTIQ_2F_140_URDF_PATH),
+            hand_component["transform"],
+            **hand_component.get("params", {}),
+        )
+        base_cfg.control_parts["eef"] = [ROBOTIQ_HAND_JOINT_PATTERN]
+        base_cfg.init_qpos = (
+            base_cfg.init_qpos[: len(base_cfg.control_parts["arm"])] + [0.0] * 6
+        )
+        # Drop retired PGI drive selectors before adding Robotiq's six joints.
+        for field in base_cfg.joint_drive_props.__dataclass_fields__:
+            rules = getattr(base_cfg.joint_drive_props, field)
+            if isinstance(rules, dict):
+                for pattern in old_hand_patterns:
+                    rules.pop(pattern, None)
     tcp = sample_tool_tcp(
         robot_type,
         point="handover",
-        tcp_z=tcp_z if robot_type != "ur10" else None,
+        tcp_z=tcp_z if robot_type != "ur10" and gripper is None else None,
+        gripper=gripper,
     )
     base_solver = base_cfg.solver_cfg["arm"]
     if solver == "ur":
@@ -223,6 +251,7 @@ def add_dual_tutorial_robot(
     uid: str,
     urdf_name: str,
     tcp_z: float | None = None,
+    gripper: Literal["robotiq_2f_140"] | None = None,
     solver: Literal["ur", "pytorch"] = "ur",
     ur_ik_nearest_weight: Sequence[float] | None = None,
     pytorch_num_samples: int = 30,
@@ -244,6 +273,8 @@ def add_dual_tutorial_robot(
         tcp_z: Optional explicit PGI local-Z override for Python callers.
             Omission selects the fixture's handover TCP; UR10/Robotiq uses
             its separate calibrated mounting transform.
+        gripper: Explicit Handover gripper selection. Robotiq uses its full
+            fixture TCP and does not consume the PGI ``tcp_z`` override.
         solver: UR solver selection; Franka retains its preset unless
             ``"pytorch"`` is explicitly selected.
         ur_ik_nearest_weight: Optional nearest-solution weights for UR IK.
@@ -264,6 +295,7 @@ def add_dual_tutorial_robot(
         uid=uid,
         urdf_name=urdf_name,
         tcp_z=tcp_z,
+        gripper=gripper,
         solver=solver,
         ur_ik_nearest_weight=ur_ik_nearest_weight,
         pytorch_num_samples=pytorch_num_samples,

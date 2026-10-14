@@ -17,8 +17,8 @@
 """TCP calibration poses for the atomic samples' mounted grippers.
 
 Each pose maps the configured arm end link to a tool point. Translation is in
-meters, expressed in that end link's local frame. Separate mounted presets let
-Franka/PGI calibration change without altering UR5/PGI or UR10/Robotiq.
+meters, expressed in that end link's local frame. Each robot/gripper fixture
+owns its calibration, including the Robotiq mounts used by Handover.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ FRANKA_PGI_TCP = (
     (0.0, 0.0, 1.0, 0.15),
     (0.0, 0.0, 0.0, 1.0),
 )
-# Retain the independently authored dual-arm handover tool point.
+# Retain the legacy PGI tool point for generic dual-arm Python callers.
 FRANKA_PGI_HANDOVER_TCP = (
     (1.0, 0.0, 0.0, 0.0),
     (0.0, 1.0, 0.0, 0.0),
@@ -68,12 +68,28 @@ UR10_ROBOTIQ_2F_140_TCP = (
     (0.0, 0.0, 0.0, 1.0),
 )
 
+# Handover mounts the same Robotiq hand on these arm flanges. Keep each
+# calibration independent, including the rotation that maps its opening axis.
+UR5_ROBOTIQ_2F_140_HANDOVER_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.21),
+    (0.0, 0.0, 0.0, 1.0),
+)
+FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP = (
+    (0.0, -1.0, 0.0, 0.0),
+    (1.0, 0.0, 0.0, 0.0),
+    (0.0, 0.0, 1.0, 0.21),
+    (0.0, 0.0, 0.0, 1.0),
+)
+
 
 def sample_tool_tcp(
     robot_type: RobotPreset,
     *,
     point: ToolPoint = "default",
     tcp_z: float | None = None,
+    gripper: Literal["robotiq_2f_140"] | None = None,
 ) -> list[list[float]]:
     """Resolve a mounted gripper's TCP as an independent homogeneous matrix.
 
@@ -83,16 +99,29 @@ def sample_tool_tcp(
             calibrations where they differ from the general tool point.
         tcp_z: Optional explicit local-Z calibration override for Python callers.
             The remaining translation and mounting rotation are preserved.
+        gripper: Optional explicit Robotiq selection for the Handover fixture.
+            Omission uses the robot's existing sample gripper calibration.
 
     Returns:
         A fresh 4x4 end-link-to-tool matrix.
 
     Raises:
-        ValueError: If the robot, tool point, or scalar calibration is invalid.
+        ValueError: If the robot, gripper, tool point, or calibration is invalid.
     """
     if point not in ("default", "grasp", "handover"):
         raise ValueError(f"Unknown sample tool point {point!r}")
-    if robot_type == "ur5":
+    if gripper is not None:
+        if gripper != "robotiq_2f_140":
+            raise ValueError(f"Unknown sample gripper {gripper!r}")
+        poses = {
+            "ur5": UR5_ROBOTIQ_2F_140_HANDOVER_TCP,
+            "franka": FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP,
+            "ur10": UR10_ROBOTIQ_2F_140_TCP,
+        }
+        if robot_type not in poses:
+            raise ValueError(f"Unknown sample robot/fixture {robot_type!r}")
+        pose = poses[robot_type]
+    elif robot_type == "ur5":
         pose = UR5_PGI_TCP if point == "default" else UR5_PGI_GRASP_TCP
     elif robot_type == "franka":
         pose = FRANKA_PGI_HANDOVER_TCP if point == "handover" else FRANKA_PGI_TCP
@@ -114,5 +143,7 @@ __all__ = [
     "FRANKA_PGI_TCP",
     "FRANKA_PGI_HANDOVER_TCP",
     "UR10_ROBOTIQ_2F_140_TCP",
+    "UR5_ROBOTIQ_2F_140_HANDOVER_TCP",
+    "FRANKA_ROBOTIQ_2F_140_HANDOVER_TCP",
     "sample_tool_tcp",
 ]
