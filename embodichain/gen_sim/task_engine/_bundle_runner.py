@@ -19,13 +19,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from copy import deepcopy
 import json
 import os
 from pathlib import Path
 import random
 import sys
-from typing import Any, NoReturn, Sequence
+from typing import Any, Iterator, NoReturn, Sequence
 
 import numpy as np
 import torch
@@ -38,6 +39,25 @@ from .reporting import write_execution_report
 from .semantic_graph import validate_semantic_task_graph
 
 __all__ = ["execute_bundle", "main"]
+
+
+@contextmanager
+def _cpu_runtime_threads(env: Any) -> Iterator[None]:
+    """Avoid thread-pool overhead for one CPU episode in the isolated worker."""
+    runtime = env.unwrapped
+    if runtime.num_envs != 1 or torch.device(runtime.device).type != "cpu":
+        yield
+        return
+    from ._task_program.motion import _CPU_BATCH_THREADS
+
+    previous = torch.get_num_threads()
+    token = _CPU_BATCH_THREADS.set(min(previous, 8))
+    try:
+        torch.set_num_threads(1)
+        yield
+    finally:
+        torch.set_num_threads(previous)
+        _CPU_BATCH_THREADS.reset(token)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -195,15 +215,19 @@ def execute_bundle(
             )
 
         if args.plan_probe_only:
-            publish_initial_plan(
-                _isolated_initial_probe(env, deployment, env_cfg.task_program)
-            )
+            with _cpu_runtime_threads(env):
+                publish_initial_plan(
+                    _isolated_initial_probe(env, deployment, env_cfg.task_program)
+                )
             _write_terminal_robot_state(env, output)
         else:
             from ._task_program.planning_probe import capture_initial_plan
 
-            with capture_initial_plan(
-                compiled_program, publish_initial_plan, _exception_metadata
+            with (
+                _cpu_runtime_threads(env),
+                capture_initial_plan(
+                    compiled_program, publish_initial_plan, _exception_metadata
+                ),
             ):
                 result = execute_demo_episode(env, episode_index=0, attempt_id=0)
             result_metadata = result.to_metadata()

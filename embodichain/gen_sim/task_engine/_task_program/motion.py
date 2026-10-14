@@ -45,6 +45,10 @@ __all__: list[str] = []
 MOTION_VALIDATION_REVISION = 6
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
+_CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(
+    "gen_sim_cpu_batch_threads", default=None
+)
+
 
 @dataclass
 class _PlaceIKRecovery:

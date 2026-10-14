@@ -69,6 +69,70 @@ from embodichain.lab.task_program.semantics import (
     SceneObjectRef,
     SemanticEffectKind,
 )
+
+
+@pytest.mark.parametrize(
+    "rows,batch,device,scope,backend,previous,raises,parallel",
+    [
+        (506, 1, "cpu", 8, "pytorch", 1, False, True),
+        (506, 1, "cpu", 8, "pytorch", 1, True, True),
+        (100, 1, "cpu", 8, "pytorch", 1, False, True),
+        (99, 1, "cpu", 8, "pytorch", 1, False, False),
+        (506, 2, "cpu", 8, "pytorch", 1, False, False),
+        (506, 1, "cuda:0", 8, "pytorch", 1, False, False),
+        (506, 1, "cpu", None, "pytorch", 1, False, False),
+        (506, 1, "cpu", 8, "other", 1, False, False),
+        (506, 1, "cpu", 8, "pytorch", 16, False, False),
+    ],
+)
+def test_pick_batch_threads_are_scoped_without_changing_candidates(
+    monkeypatch, rows, batch, device, scope, backend, previous, raises, parallel
+):
+    from embodichain.gen_sim.task_engine._task_program import motion
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPickUp
+    from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
+    from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolver
+
+    current = {"threads": previous}
+    changes = []
+    monkeypatch.setattr(torch, "get_num_threads", lambda: current["threads"])
+
+    def set_threads(value):
+        changes.append(value)
+        current["threads"] = value
+
+    monkeypatch.setattr(torch, "set_num_threads", set_threads)
+    solver = object.__new__(PytorchSolver) if backend == "pytorch" else object()
+    action = GenSimPickUp()
+    action._planning_services = SimpleNamespace(
+        robot=SimpleNamespace(get_solver=lambda _: solver)
+    )
+    poses = SimpleNamespace(
+        shape=(batch, rows // 2, 2, 4, 4), device=torch.device(device)
+    )
+    seed, target, result = object(), SimpleNamespace(control_part="arm"), object()
+
+    def original(_self, p, s, m):
+        assert p is poses and s is seed and m is target
+        assert current["threads"] == (8 if parallel else previous)
+        if raises:
+            raise RuntimeError("IK failure")
+        return result
+
+    monkeypatch.setattr(PickUp, "_compute_batch_candidate_ik", original)
+    token = motion._CPU_BATCH_THREADS.set(scope)
+    try:
+        if raises:
+            with pytest.raises(RuntimeError, match="IK failure"):
+                action._compute_batch_candidate_ik(poses, seed, target)
+        else:
+            assert action._compute_batch_candidate_ik(poses, seed, target) is result
+    finally:
+        motion._CPU_BATCH_THREADS.reset(token)
+    assert current["threads"] == previous
+    assert changes == ([8, previous] if parallel else [])
+
+
 from embodichain.utils.utility import load_config
 
 __all__: list[str] = []

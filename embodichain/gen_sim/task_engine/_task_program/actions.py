@@ -132,6 +132,36 @@ class GenSimPickUp(PickUp):
     path_simulation: object | None = None
     path_excluded_invocations: frozenset[str] = frozenset()
 
+    def _compute_batch_candidate_ik(
+        self,
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        manipulator: JointPositionTarget,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Use the episode's parallel budget only for large CPU IK batches."""
+        from .motion import _CPU_BATCH_THREADS
+        from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolver
+
+        threads = _CPU_BATCH_THREADS.get()
+        if (
+            threads is None
+            or poses.device.type != "cpu"
+            or poses.shape[0] != 1
+            or poses.shape[1] * poses.shape[2] < 100
+            or not isinstance(
+                self.robot.get_solver(manipulator.control_part), PytorchSolver
+            )
+        ):
+            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+        previous = torch.get_num_threads()
+        if previous >= threads:
+            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+        try:
+            torch.set_num_threads(threads)
+            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+        finally:
+            torch.set_num_threads(previous)
+
     def _select_feasible_grasp_variants(
         self,
         grasp_xpos: torch.Tensor,

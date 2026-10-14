@@ -32,6 +32,45 @@ from embodichain.gen_sim.task_engine import _bundle_runner
 from embodichain.gen_sim.task_engine._bundle_runner import _exception_metadata
 
 
+@pytest.mark.parametrize("raises", [False, True])
+def test_single_cpu_runtime_thread_scope_restores_caller(monkeypatch, raises):
+    from embodichain.gen_sim.task_engine._task_program.motion import _CPU_BATCH_THREADS
+
+    state = {"threads": 8}
+    calls = []
+
+    def set_threads(value):
+        calls.append(value)
+        state["threads"] = value
+
+    monkeypatch.setattr(torch, "get_num_threads", lambda: state["threads"])
+    monkeypatch.setattr(torch, "set_num_threads", set_threads)
+    env = SimpleNamespace(unwrapped=SimpleNamespace(device="cpu", num_envs=1))
+    try:
+        with _bundle_runner._cpu_runtime_threads(env):
+            assert state["threads"] == 1
+            assert _CPU_BATCH_THREADS.get() == 8
+            if raises:
+                raise RuntimeError("episode failure")
+    except RuntimeError:
+        assert raises
+    assert calls == [1, 8]
+    assert state["threads"] == 8
+    assert _CPU_BATCH_THREADS.get() is None
+
+
+@pytest.mark.parametrize("device, num_envs", [("cuda:0", 1), ("cpu", 2)])
+def test_runtime_threads_leave_gpu_and_batch_policy_unchanged(
+    monkeypatch, device, num_envs
+):
+    setter = Mock()
+    monkeypatch.setattr(torch, "set_num_threads", setter)
+    env = SimpleNamespace(unwrapped=SimpleNamespace(device=device, num_envs=num_envs))
+    with _bundle_runner._cpu_runtime_threads(env):
+        pass
+    setter.assert_not_called()
+
+
 def test_feedback_audit_snapshot_owns_rows_before_reset():
     row = {"window_timestamps": [1.0, 1.01, 1.02], "alignment_accepted": True}
     audit = deque([row])
@@ -364,7 +403,8 @@ def test_bundle_plans_initial_call_once(
     if outcome == "exception":
         planning.side_effect = ValueError("fixture planning exception")
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", planning)
-    env = SimpleNamespace(reset=Mock(), close=Mock())
+    env = SimpleNamespace(reset=Mock(), close=Mock(), device="cpu", num_envs=1)
+    env.unwrapped = env
     audit_record = {
         "decision": "tracking_window",
         "alignment_accepted": True,
@@ -454,6 +494,7 @@ def test_bundle_plans_initial_call_once(
     monkeypatch.setattr(_bundle_runner, "_print_json", print_json)
 
     def probe(*args):
+        assert torch.get_num_threads() == 1
         plan = engine._plan_request(request)
         return {"plan_success": plan.plan_success.tolist()}
 
@@ -463,6 +504,7 @@ def test_bundle_plans_initial_call_once(
     dispatched = []
 
     def execute(*args, **kwargs):
+        assert torch.get_num_threads() == 1
         if feedback is not None:
             feedback.audit.append(audit_record)
         plan = engine._plan_request(request)
