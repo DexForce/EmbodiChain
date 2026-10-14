@@ -30,35 +30,14 @@ from .pick_safety import _inspect_pick_motion
 from .planning_probe import _validate_final_plan_velocity
 from .held_alignment_recovery import _RandomState, _cuda_devices
 from .adaptive_grasp import ADAPTIVE_GRASP
+from .scene_geometry import capture_scene_vertices, scene_components, world_bounds
 
 __all__: list[str] = []
 
 
 def scene_vertices(simulation: Any, bindings: Any) -> dict[str, torch.Tensor]:
     """Capture immutable native, scaled geometry; live poses remain context-owned."""
-    result = {}
-    if not callable(getattr(simulation, "get_rigid_object", None)):
-        return result
-    if getattr(bindings, "articulations", ()) or getattr(
-        bindings, "rigidized_articulations", ()
-    ):
-        return result
-    for binding in getattr(bindings, "rigid_objects", ()):
-        native = simulation.get_rigid_object(binding.simulation_uid)
-        if native is None or not callable(getattr(native, "get_vertices", None)):
-            return {}
-        vertices = native.get_vertices(scale=True)
-        if (
-            isinstance(vertices, torch.Tensor)
-            and vertices.ndim == 3
-            and vertices.shape[-1] == 3
-            and vertices.shape[1]
-            and torch.isfinite(vertices).all()
-        ):
-            result[binding.entity_id] = vertices.detach().clone()
-        else:
-            return {}
-    return result
+    return capture_scene_vertices(simulation, bindings)
 
 
 def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any]:
@@ -115,31 +94,35 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     )
     lower, upper = world.amin(2), world.amax(2)
     minimum_gap = None
-    for uid, mesh in meshes.items():
-        if uid == held.semantics.entity_id:
-            continue
-        if uid not in context.scene.entities:
-            return {"valid": False, "reason": "scene_pose_unavailable", "entity": uid}
-        pose = context.scene.entities[uid].pose.to(poses)
-        other = (
-            mesh.to(poses) @ pose[:, :3, :3].transpose(-1, -2) + pose[:, None, :3, 3]
-        )
-        other_lower, other_upper = other.amin(1), other.amax(1)
-        overlap = (
-            (upper > other_lower[:, None] - 0.002)
-            & (lower < other_upper[:, None] + 0.002)
-        ).all(-1)
-        if overlap.any():
-            return {
-                "valid": False,
-                "reason": "held_object_scene_envelope_rejected",
-                "entity": uid,
-            }
-        if uid == "table":
-            minimum_gap = float((lower[:, :, 2] - other_upper[:, None, 2]).min())
+    try:
+        for uid, component, mesh, pose in scene_components(
+            meshes, context, excluded_owner=held.semantics.entity_id
+        ):
+            other_lower, other_upper = world_bounds(mesh, pose.to(poses))
+            overlap = (
+                (upper > other_lower[:, None] - 0.002)
+                & (lower < other_upper[:, None] + 0.002)
+            ).all(-1)
+            if overlap.any():
+                return {
+                    "valid": False,
+                    "reason": "held_object_scene_envelope_rejected",
+                    "entity": uid,
+                    "component": component,
+                }
+            if uid == "table":
+                minimum_gap = float((lower[:, :, 2] - other_upper[:, None, 2]).min())
+    except (ValueError, TypeError, AttributeError) as error:
+        return {
+            "valid": False,
+            "reason": "scene_geometry_unavailable",
+            "unavailable": str(error),
+        }
     return {
         "valid": True,
-        "scope": "discrete_robot_self_meshes_and_bound_rigid_envelopes",
+        "scope": "discrete_robot_self_meshes_and_bound_scene_component_envelopes",
+        "geometry_sources": "legacy_rigid_visual_vertices_and_articulation_collision_components",
+        "not_certified": "continuous_collision_contact_or_robot_scene_clearance",
         "minimum_table_gap_m": minimum_gap,
         "rotation_max_rad": rotation_max,
         "rotation_path_rad": rotation_path,

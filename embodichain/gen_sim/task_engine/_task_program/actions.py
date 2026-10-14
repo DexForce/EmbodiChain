@@ -1060,6 +1060,7 @@ class GenSimMoveHeldObject(MoveHeldObject):
     GoalType = MoveHeldObject.GoalType
     OptionsType = MoveHeldObject.OptionsType
     binding_contract = MoveHeldObject.binding_contract
+    held_path_scene_vertices: dict[str, torch.Tensor] | None = None
 
     def __init__(self, *, staging_contract: StagingContract | None = None) -> None:
         super().__init__()
@@ -1068,6 +1069,7 @@ class GenSimMoveHeldObject(MoveHeldObject):
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_transport_planning", False) is True:
             return super()._plan(request, context)
+        source_request = request
         goal = request.goal
         target = goal.object_target_pose
         if isinstance(target, torch.Tensor) and target.ndim == 3:
@@ -1162,6 +1164,10 @@ class GenSimMoveHeldObject(MoveHeldObject):
                 request.invocation_id
             ),
         )
+        if self.held_path_scene_vertices is not None:
+            from .held_path import qualify_or_recover
+
+            plan = qualify_or_recover(self, source_request, context, plan)
         handoff = GenSimStateHandoff.from_request(
             request, context, participant="GenSim transport"
         )

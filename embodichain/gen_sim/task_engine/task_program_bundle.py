@@ -1900,12 +1900,10 @@ def _integration_payload(
                 f"Unsupported generated registered call {call['call_id']!r}."
             )
 
-    if collision_world:
-        referenced_objects.update(
-            uid
-            for uid, source in scene_objects.items()
-            if source["role"] != "articulation"
-        )
+    # Physical obstacle ownership must not depend on the selected planner backend.
+    referenced_objects.update(
+        uid for uid, source in scene_objects.items() if source["role"] != "articulation"
+    )
     rigid_bindings: list[dict[str, Any]] = []
     spatial_articulations: set[str] = set()
     for entity_id in sorted(referenced_objects | {"table"}):
@@ -2036,6 +2034,30 @@ def _integration_payload(
     hold_lowerer_routes = coordinated_lowerer_routes(coordinated_hold_routes)
     if len(pour_objects) > 1:
         raise ValueError("One generated bundle currently supports one Pour object.")
+    from ._task_program.collision_bindings import additional_collision_links
+
+    physical_links = additional_collision_links(
+        getattr(scene, "articulations", ()),
+        (
+            *[r.payload() for r in spatial_references.values()],
+            *[
+                {
+                    "entity_id": r.link_id,
+                    "articulation_id": r.binding.object_id,
+                    "native_link_name": r.binding.link,
+                }
+                for r in (*press_routes, *twist_routes)
+            ],
+            *[
+                {
+                    "entity_id": b.link_id,
+                    "articulation_id": b.object_id,
+                    "native_link_name": b.link,
+                }
+                for b in articulation_bindings.values()
+            ],
+        ),
+    )
     return {
         "integration_id": f"{program_id}_integration_v1",
         "program_id": program_id,
@@ -2054,9 +2076,11 @@ def _integration_payload(
                     | spatial_articulations
                     | {r.binding.object_id for r in press_routes}
                     | {r.binding.object_id for r in twist_routes}
+                    | {str(cfg["uid"]) for cfg in getattr(scene, "articulations", ())}
                 )
             ],
             "links": [
+                *physical_links,
                 *[
                     r.payload()
                     for r in spatial_references.values()

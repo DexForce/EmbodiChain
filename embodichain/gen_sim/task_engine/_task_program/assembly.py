@@ -239,15 +239,15 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
         transport = GenSimMoveHeldObject(staging_contract=self._staging_contract)
+        from .place_recovery import scene_vertices
+
+        transport.held_path_scene_vertices = scene_vertices(
+            getattr(self, "_simulation", None),
+            getattr(self.task_program_registration, "scene_binding", None),
+        )
         engine.register(transport, replace=True)
         place = GenSimPlace()
-        if not self._drawers:
-            from .place_recovery import scene_vertices
-
-            place.recovery_scene_vertices = scene_vertices(
-                getattr(self, "_simulation", None),
-                getattr(self.task_program_registration, "scene_binding", None),
-            )
+        place.recovery_scene_vertices = transport.held_path_scene_vertices
         engine.register(place, replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         if self._coordinated_motion:
@@ -405,12 +405,13 @@ class TaskAdapterFactory:
         motion_factory = None
         if any(
             preset.motion_policy.strategy == "motion_gen"
+            and (self.runtime_preset is None or preset.preset_id == self.runtime_preset)
             for preset in self.registration.robot_profile_binding.presets
         ):
             from embodichain.lab.sim.motion.motion_generator import (
                 MotionGenCfg,
-                MotionGenerator,
             )
+            from .motion import CheckedMotionGenerator
             from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
                 CuroboPlannerCfg,
                 CuroboWorldCfg,
@@ -432,7 +433,7 @@ class TaskAdapterFactory:
                 raise ValueError(
                     "GenSim motion_gen requires bound scene collision objects."
                 )
-            motion_factory = lambda: MotionGenerator(
+            motion_factory = lambda: CheckedMotionGenerator(
                 MotionGenCfg(
                     planner_cfg=CuroboPlannerCfg(
                         robot_uid=environment.robot.uid,

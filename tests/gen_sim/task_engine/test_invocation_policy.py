@@ -625,3 +625,108 @@ def test_pick_transform_keeps_other_owner_contracts_unchanged(
     )
     assert result.plan_success.tolist() == [True]
     assert result.joint_trajectory is probe.first.joint_trajectory
+
+
+@pytest.mark.parametrize("valid", [False, True])
+@pytest.mark.parametrize("implicit_context", [False, True])
+def test_held_transform_checks_final_samples_in_original_context(
+    monkeypatch, pick_transform_inputs, valid, implicit_context
+):
+    from embodichain.gen_sim.task_engine._task_program import held_path
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+    )
+
+    probe = pick_transform_inputs
+    action = GenSimMoveHeldObject()
+    action.held_path_scene_vertices = {}
+    probe.engine._actions = {"move_held_object": action}
+    probe.request.skill_id = "move_held_object"
+    probe.request.goal = SimpleNamespace(world_yaw_free=False)
+    inspection = Mock(return_value={"valid": valid, "scope": "final_samples"})
+    monkeypatch.setattr(held_path, "inspect", inspection)
+    monkeypatch.setattr(
+        held_path, "phase_scope", lambda *args: {"owned": True, "domain": "free_space"}
+    )
+    transformed = probe.make_plan(torch.full((1, 3, 2), 0.001))
+    result = probe.engine._plan_request(
+        probe.request,
+        None if implicit_context else probe.context,
+        plan_transform=lambda *args: transformed,
+    )
+    inspection.assert_called_once()
+    inspected_action, inspected_request, inspected_context, inspected_plan = (
+        inspection.call_args.args
+    )
+    assert inspected_action is action
+    assert inspected_request is probe.request
+    assert inspected_context is probe.context
+    assert inspected_plan.joint_trajectory is transformed.joint_trajectory
+    assert result.plan_success.tolist() == [valid]
+    assert result.joint_trajectory is transformed.joint_trajectory
+    assert probe.engine.initial_context.call_count == int(implicit_context)
+    assert result.diagnostics.metadata["gen_sim_held_path"]["post_transform_check"] == {
+        "valid": valid,
+        "scope": "final_samples",
+    }
+    if not valid:
+        assert result.diagnostics.failure.code == "held_transport_path_unqualified"
+        assert result.diagnostics.failure.retryable is False
+
+
+@pytest.mark.parametrize("route", ["no_transform", "direct", "unconfigured"])
+def test_held_final_inspection_preserves_other_route_owners(
+    monkeypatch, pick_transform_inputs, route
+):
+    from embodichain.gen_sim.task_engine._task_program import held_path
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+    )
+
+    probe = pick_transform_inputs
+    action = GenSimMoveHeldObject()
+    action.held_path_scene_vertices = None if route == "unconfigured" else {}
+    probe.engine._actions = {"move_held_object": action}
+    probe.request.skill_id = "move_held_object"
+    probe.request.goal = SimpleNamespace(world_yaw_free=False)
+    probe.engine.motion_generator.direct_transport_planning = route == "direct"
+    inspection = Mock(side_effect=AssertionError("foreign route inspected"))
+    monkeypatch.setattr(held_path, "inspect", inspection)
+    result = probe.engine._plan_request(
+        probe.request,
+        plan_transform=(None if route == "no_transform" else lambda *args: probe.first),
+    )
+    inspection.assert_not_called()
+    probe.engine.initial_context.assert_not_called()
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
+
+
+def test_held_transform_does_not_claim_contact_endpoint_qualification(
+    monkeypatch, pick_transform_inputs
+):
+    from embodichain.gen_sim.task_engine._task_program import held_path
+    from embodichain.gen_sim.task_engine._task_program.actions import (
+        GenSimMoveHeldObject,
+    )
+
+    probe = pick_transform_inputs
+    action = GenSimMoveHeldObject()
+    action.held_path_scene_vertices = {}
+    probe.engine._actions = {"move_held_object": action}
+    probe.request.skill_id = "move_held_object"
+    probe.request.goal = SimpleNamespace(world_yaw_free=False)
+    scope = {"owned": False, "not_migrated_reason": "endpoint_domain_not_free_space"}
+    monkeypatch.setattr(held_path, "phase_scope", lambda *args: scope)
+    inspection = Mock(side_effect=AssertionError("foreign phase inspected"))
+    monkeypatch.setattr(held_path, "inspect", inspection)
+    result = probe.engine._plan_request(
+        probe.request, probe.context, plan_transform=lambda *args: probe.first
+    )
+    inspection.assert_not_called()
+    assert result.plan_success.tolist() == [True]
+    assert result.joint_trajectory is probe.first.joint_trajectory
+    assert result.diagnostics.metadata["gen_sim_held_path"]["phase"] == scope
+    assert (
+        result.diagnostics.metadata["gen_sim_held_path"]["post_transform_check"] is None
+    )

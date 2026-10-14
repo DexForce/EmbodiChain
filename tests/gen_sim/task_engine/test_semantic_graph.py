@@ -420,9 +420,7 @@ def test_handover_minimum_requires_finite_table_height(table_height) -> None:
         task_program_bundle._handover_position_z(table_height)
 
 
-def test_collision_world_declares_unreferenced_obstacles_without_changing_default() -> (
-    None
-):
+def test_physical_obstacle_binding_is_independent_of_planner_collision_role() -> None:
     graph = _graph()
     graph["nodes"] = [{"call": {"kind": "pick", "object": "bottle"}}]
     scene = SimpleNamespace(
@@ -438,6 +436,7 @@ def test_collision_world_declares_unreferenced_obstacles_without_changing_defaul
     )
     assert {v["entity_id"] for v in default["scene_binding"]["rigid_objects"]} == {
         "bottle",
+        "obstacle",
         "table",
     }
     assert all(

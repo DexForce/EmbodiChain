@@ -412,8 +412,143 @@ def test_geometry_capture_requires_complete_supported_scene_and_owns_its_copy(
     if damage is None:
         assert torch.equal(meshes["item"], vertices)
         assert meshes["item"].data_ptr() != vertices.data_ptr()
+    elif damage == "articulation":
+        assert meshes.unavailable
     else:
         assert meshes == {}
+
+
+def _articulated_scene(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import drawer_geometry
+
+    meshes = {}
+    for name, center in (("left", -0.3), ("right", 0.3)):
+        panel = trimesh.creation.box(extents=(0.04, 0.5, 0.5))
+        panel.apply_translation((center, 0.0, 0.0))
+        meshes[("cabinet", name)] = panel
+    monkeypatch.setattr(drawer_geometry, "collision_meshes", lambda _cfg: meshes)
+    vertices = torch.ones(1, 3, 3)
+    art = SimpleNamespace(cfg=SimpleNamespace(fpath="panels.usdc", body_scale=(1,) * 3))
+    simulation = SimpleNamespace(
+        get_rigid_object=lambda _uid: SimpleNamespace(
+            get_vertices=lambda **_kw: vertices
+        ),
+        get_articulation=lambda _uid: art,
+    )
+    bindings = SimpleNamespace(
+        rigid_objects=[SimpleNamespace(entity_id="item", simulation_uid="a")],
+        articulations=[SimpleNamespace(entity_id="cabinet", simulation_uid="native")],
+        links=[
+            SimpleNamespace(
+                entity_id="cabinet_link",
+                articulation_id="cabinet",
+                native_link_name="cabinet",
+            )
+        ],
+        rigidized_articulations=(),
+    )
+    return simulation, bindings, meshes
+
+
+def test_articulation_collision_components_do_not_erase_rigid_geometry(monkeypatch):
+    from embodichain.lab.task_program.semantics import SceneCollisionRole
+
+    simulation, bindings, _ = _articulated_scene(monkeypatch)
+    bindings.articulations[0].collision_role = SceneCollisionRole.NONE
+    meshes = gate.scene_vertices(simulation, bindings)
+    assert "item" in meshes
+    assert len(meshes.components) == 2
+    assert all(item.pose_entity_id == "cabinet_link" for item in meshes.components)
+    assert all(item.owner_id == "cabinet" for item in meshes.components)
+    assert all(item.faces.shape[1] == 3 for item in meshes.components)
+    assert all(item.faces.dtype is torch.int64 for item in meshes.components)
+    assert meshes.collision_roles["cabinet"] is SceneCollisionRole.NONE
+    assert meshes.pose_entity_ids == ("cabinet_link",)
+
+
+@pytest.mark.parametrize("damage", ["link_binding", "collision_mesh", "native"])
+def test_articulation_capture_retains_explicit_unavailable_not_partial_success(
+    monkeypatch, damage
+):
+    simulation, bindings, native_meshes = _articulated_scene(monkeypatch)
+    if damage == "link_binding":
+        bindings.links = ()
+    elif damage == "collision_mesh":
+        native_meshes.clear()
+    else:
+        simulation.get_articulation = lambda _uid: None
+    meshes = gate.scene_vertices(simulation, bindings)
+    assert meshes.unavailable
+    assert "item" in meshes
+
+
+def test_connected_hollow_collision_shell_is_not_replaced_by_filled_cabinet_aabb(
+    monkeypatch,
+):
+    simulation, bindings, native_meshes = _articulated_scene(monkeypatch)
+    native_meshes.clear()
+    native_meshes[("cabinet", "connected_shell")] = trimesh.creation.annulus(
+        r_min=0.2, r_max=0.3, height=0.5
+    )
+    meshes = gate.scene_vertices(simulation, bindings)
+    assert "nonconvex_unavailable" in meshes.unavailable
+    assert meshes.components == ()
+
+
+@pytest.mark.parametrize(
+    ("scale", "error"),
+    [
+        ((2.0, 2.0, 2.0), None),
+        ((1.0, 2.0, 1.0), "uniform"),
+        ((0.0, 0.0, 0.0), "positive"),
+    ],
+)
+def test_articulation_capture_uses_scaled_collision_mesh_in_owning_link_frame(
+    tmp_path, scale, error
+):
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    stage = Usd.Stage.CreateNew(str(tmp_path / "scene.usda"))
+    UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+    owner = UsdGeom.Xform.Define(stage, "/root/cabinet")
+    owner.AddTranslateOp().Set((10.0, 0.0, 0.0))
+    UsdPhysics.RigidBodyAPI.Apply(owner.GetPrim())
+    box = trimesh.creation.box(extents=(0.2, 0.2, 0.2))
+    for name, enabled in (("panel", True), ("disabled", False)):
+        mesh = UsdGeom.Mesh.Define(stage, f"/root/cabinet/{name}")
+        mesh.CreatePointsAttr(box.vertices.tolist())
+        mesh.CreateFaceVertexCountsAttr([3] * len(box.faces))
+        mesh.CreateFaceVertexIndicesAttr(box.faces.reshape(-1).tolist())
+        mesh.AddTranslateOp().Set((0.2, 0.0, 0.0))
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim()).CreateCollisionEnabledAttr(
+            enabled
+        )
+    stage.GetRootLayer().Save()
+    art = SimpleNamespace(
+        cfg=SimpleNamespace(fpath=tmp_path / "scene.usda", body_scale=scale)
+    )
+    simulation = SimpleNamespace(get_articulation=lambda _uid: art)
+    bindings = SimpleNamespace(
+        rigid_objects=(),
+        articulations=[SimpleNamespace(entity_id="cabinet", simulation_uid="native")],
+        links=[
+            SimpleNamespace(
+                entity_id="panel_link",
+                articulation_id="cabinet",
+                native_link_name="cabinet",
+            )
+        ],
+    )
+    meshes = gate.scene_vertices(simulation, bindings)
+    if error is not None:
+        assert error in meshes.unavailable
+        return
+    assert meshes.unavailable is None
+    assert len(meshes.components) == 1
+    points = meshes.components[0].vertices[0]
+    assert points.amin(0).tolist() == pytest.approx([0.2, -0.2, -0.2])
+    assert points.amax(0).tolist() == pytest.approx([0.6, 0.2, 0.2])
 
 
 @pytest.mark.parametrize("ik_success", [True, False])

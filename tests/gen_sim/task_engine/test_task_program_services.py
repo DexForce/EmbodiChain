@@ -914,12 +914,12 @@ def test_velocity_limits_use_urdf_names_and_preserve_stricter_runtime_limits(
 
 def test_curobo_adapter_allocates_only_declared_mesh_cache(monkeypatch) -> None:
     from embodichain.gen_sim.task_engine._task_program import assembly
-    from embodichain.lab.sim.motion import motion_generator
+    from embodichain.gen_sim.task_engine._task_program import motion
     from embodichain.lab.task_program.semantics import SceneCollisionRole
 
     cfgs = []
     monkeypatch.setattr(
-        motion_generator, "MotionGenerator", lambda cfg: cfgs.append(cfg) or object()
+        motion, "CheckedMotionGenerator", lambda cfg: cfgs.append(cfg) or object()
     )
     captured = {}
 
