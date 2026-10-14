@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import torch
+import pytest
 
 from embodichain.lab.scripts.preview_joint_control import (
     ArticulationPreviewController,
@@ -42,6 +43,7 @@ class _Articulation:
             "slide": "prismatic",
         }
         self.qpos = torch.tensor([[0.1, 0.2, 0.3]], dtype=torch.float32)
+        self.targets = self.qpos.clone()
         self.limits = torch.tensor(
             [[[-1.0, 1.0], [-0.5, 0.5], [0.0, float("inf")]]],
             dtype=torch.float32,
@@ -50,8 +52,8 @@ class _Articulation:
         self.qvel_writes: list[tuple[torch.Tensor, list[int], list[int], bool]] = []
         self.qf_writes: list[tuple[torch.Tensor, list[int], list[int]]] = []
 
-    def get_qpos(self) -> torch.Tensor:
-        return self.qpos
+    def get_qpos(self, target: bool = False) -> torch.Tensor:
+        return self.targets if target else self.qpos
 
     def get_joint_type(self, joint_name: str) -> str:
         self.requested_joint_names.append(joint_name)
@@ -72,6 +74,8 @@ class _Articulation:
         self.qpos_writes.append((value.clone(), joint_ids, env_ids, target))
         if not target:
             self.qpos[0, joint_ids] = value[0]
+        else:
+            self.targets[0, joint_ids] = value[0]
 
     def set_qvel(
         self,
@@ -192,3 +196,89 @@ def test_preview_controller_applies_valid_commands_and_holds_pose() -> None:
     assert states[1].control_id == slide_id
     np.testing.assert_allclose(states[1].value, 0.3)
     assert states[1].applied_sequence == 0
+
+
+def test_gizmo_targets_persist_and_new_slider_commands_take_effect() -> None:
+    articulation = _Articulation()
+    runtime = _Runtime()
+    controller = ArticulationPreviewController(
+        [articulation], runtime, follow_external_targets=True
+    )
+    hinge = controller.joint_control_specs()[0]
+
+    # Gizmo writes a new drive target after the preceding preview step.
+    articulation.targets[0, 0] = 0.7
+    controller.update()
+    torch.testing.assert_close(articulation.qpos, torch.tensor([[0.7, 0.2, 0.3]]))
+    assert controller.update() == 0
+    assert controller.joint_control_states()[0].value == pytest.approx(0.7)
+
+    runtime.commands.append(_command(hinge.control_id, -0.4, sequence=1))
+    assert controller.update() == 1
+    assert articulation.targets[0, 0] == pytest.approx(-0.4)
+
+    # Reset uses the existing panel's initial-value command.
+    runtime.commands.append(_command(hinge.control_id, hinge.initial_value, sequence=2))
+    controller.update()
+    controller.update()
+    assert articulation.qpos[0, 0] == pytest.approx(hinge.initial_value)
+    assert articulation.qpos[0, 1] == pytest.approx(0.2)  # Mimic is never commanded.
+
+
+def test_same_step_gizmo_target_wins_and_survives_next_step() -> None:
+    from embodichain.lab.scripts._preview import _step_preview_simulation
+
+    articulation = _Articulation()
+    runtime = _Runtime()
+    controller = ArticulationPreviewController(
+        [articulation], runtime, follow_external_targets=True
+    )
+    hinge = controller.joint_control_specs()[0]
+    runtime.commands.append(_command(hinge.control_id, 0.4, sequence=1))
+
+    def apply_gizmo(*, step: int) -> None:
+        assert step == 1
+        assert articulation.targets[0, 0] == pytest.approx(0.4)
+        articulation.targets[0, 0] = 0.8
+
+    sim = SimpleNamespace(update=apply_gizmo)
+    _step_preview_simulation(sim, controller)
+    controller.update()
+
+    assert articulation.qpos[0, 0] == pytest.approx(0.8)
+    assert articulation.targets[0, 0] == pytest.approx(0.8)
+
+
+def test_asset_preview_keeps_its_original_pose_holding_default() -> None:
+    articulation = _Articulation()
+    controller = ArticulationPreviewController([articulation], _Runtime())
+    articulation.targets[0, 0] = 0.7
+
+    controller.update()
+
+    assert articulation.qpos[0, 0] == pytest.approx(0.1)
+    assert articulation.targets[0, 0] == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_external_nonfinite_target_is_rejected_before_writing(value: float) -> None:
+    articulation = _Articulation()
+    controller = ArticulationPreviewController(
+        [articulation], _Runtime(), follow_external_targets=True
+    )
+    articulation.targets[0, 0] = value
+
+    with pytest.raises(ValueError, match="Invalid drive target"):
+        controller.update()
+
+    assert not articulation.qpos_writes
+
+
+def test_overlapping_robot_control_parts_do_not_duplicate_joint_controls() -> None:
+    articulation = _Articulation()
+    articulation.cfg.control_parts = {"arm": ["hinge"], "full_body": ["hinge", "slide"]}
+    controller = ArticulationPreviewController(
+        [articulation], _Runtime(), follow_external_targets=True
+    )
+
+    assert [spec.joint_id for spec in controller.joint_control_specs()] == [0, 2]

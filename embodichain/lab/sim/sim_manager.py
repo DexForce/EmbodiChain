@@ -559,6 +559,10 @@ class SimulationManager:
     ) -> None:
         """Construct the simulation World with a fixed renderer selection.
 
+        Failed construction queues cleanup for its owned World without exiting
+        the process. Flush the cleanup queue after constructor frames unwind.
+        Failures before World creation remove only their own registry entry.
+
         Args:
             sim_config: Simulation, physics and rendering configuration.
             defer_startup_summary: Let the owning environment emit the summary.
@@ -567,6 +571,45 @@ class SimulationManager:
                 forced-sync consumers. ``None`` preserves standalone GPU-based
                 selection. Explicit and global renderer overrides take precedence.
         """
+        try:
+            self._initialize_simulation(
+                sim_config,
+                defer_startup_summary=defer_startup_summary,
+                requires_native_renderer=requires_native_renderer,
+            )
+        except BaseException:
+            if getattr(self, "_world", None) is not None:
+                try:
+                    self.destroy(exit_process=False)
+                except Exception as error:
+                    logger.log_warning(
+                        f"Failed to queue constructor cleanup: {error!r}"
+                    )
+            elif type(self)._instances.get(self.instance_id) is self:
+                type(self)._instances.pop(self.instance_id)
+            raise
+
+    def _initialize_simulation(
+        self,
+        sim_config: SimulationManagerCfg,
+        *,
+        defer_startup_summary: bool,
+        requires_native_renderer: bool | None,
+    ) -> None:
+        """Initialize resources with teardown state ready before native allocation."""
+        self._world: dexsim.World | None = None
+        self._env = None
+        self._spawn_scene: SpawnScene | None = None
+        self._window_record_state: _WindowRecordState | None = None
+        self._window_record_save_threads: list[threading.Thread] = []
+        self._visualization_runtime = None
+        self._arenas: list[dexsim.environment.Arena] = []
+        self._gizmos: dict[str, object] = {}
+        self._markers: dict[str, _AxisMarkerGroup] = {}
+        self._constraints: dict[str, RigidConstraint] = {}
+        self._visual_materials: dict[str, VisualMaterial] = {}
+        self._texture_cache: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+
         self._defer_startup_summary = defer_startup_summary
         self._requires_native_renderer = requires_native_renderer
         self._renderer_selection_reason: str | None = None
@@ -579,8 +622,6 @@ class SimulationManager:
             if isinstance(solver_cfg, Mapping)
             else getattr(solver_cfg, "solver_type", "auto")
         )
-        instance_id = self.instance_id
-
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -605,11 +646,7 @@ class SimulationManager:
         # branching on a backend name throughout the manager.
         self.physics = make_physics_backend(sim_config.physics_cfg, self)
 
-        try:
-            world_config = self._convert_sim_config(sim_config)
-        except Exception:
-            type(self)._instances.pop(instance_id, None)
-            raise
+        world_config = self._convert_sim_config(sim_config)
         self._world_config = world_config
         self.profiler = Profiler(sim_config.profiler, self.device)
 
@@ -625,14 +662,13 @@ class SimulationManager:
                 if render_device.ordinal == sim_config.gpu_id:
                     self._render_device_name = render_device.name
                     break
-        self._world: dexsim.World = dexsim.World(world_config)
+        self._world = dexsim.World(world_config)
         SimulationManager._initialized_process_renderer = True
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
 
         self._window: Windows | None = None
         self._auto_entity_gizmo_pending = sim_config.enable_entity_gizmo
-        self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
         self._window_record_hotkey_cfg: dict[str, object] | None = (
@@ -646,7 +682,6 @@ class SimulationManager:
             else None
         )
         self._window_record_input_control: ObjectManipulator | None = None
-        self._window_record_save_threads: list[threading.Thread] = []
         wcp = sim_config.window_camera_pose
         self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
             {"convert_to_look_at": wcp.convert_to_look_at}
@@ -666,22 +701,14 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        # arena is used as a standalone space for robots to simulate in.
-        self._arenas: List[dexsim.environment.Arena] = []
-
         # gizmo management
-        self._gizmos: Dict[str, object] = dict()  # Store active gizmos
         self._disabled_robot_gizmos: set[str] = set()
         # ``(uid, control_part)`` of the Gizmo currently owned by the Viser
         # click-to-pick feature, or ``None``. Only one picker Gizmo is kept at a
         # time and user-created Gizmos are never touched.
         self._picker_gizmo: tuple[str, str | None] | None = None
 
-        # marker management
-        self._markers: dict[str, _AxisMarkerGroup] = {}
-
         self._rigid_objects: Dict[str, RigidObject] = dict()
-        self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
         self._fluid_objects: dict[str, FluidObject] = {}
@@ -705,20 +732,12 @@ class SimulationManager:
         self._render_state_published: bool | None = None
         self._pending_record_dt = 0.0
 
-        self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
         self._visualization_topology_revision = 0
         self._visualization_manifest_topology_revision = -1
         self._visualization_sim_step = 0
         self._visualization_sim_time = 0.0
         self._visualization_error_reported = False
-
-        # material placeholder.
-        self._visual_materials: Dict[str, VisualMaterial] = dict()
-
-        # Global texture cache for material creation or randomization.
-        # The structure is keys to the loaded texture data. The keys represent the texture group.
-        self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
 
         # The plane material and visibility are authored before declaration so
         # both eager Default loading and deferred Newton loading see them.
@@ -1065,8 +1084,8 @@ class SimulationManager:
             SceneExporter(self, visualization_cfg),
             visualization_cfg,
         )
-        runtime.start()
         self._visualization_runtime = runtime
+        runtime.start()
         self._visualization_manifest_topology_revision = (
             self._visualization_topology_revision
         )
@@ -5098,7 +5117,8 @@ class SimulationManager:
 
         # REMOVE INSTANCE FROM POOL
         instance_id = getattr(self, "instance_id", 0)
-        SimulationManager.reset(instance_id)
+        if SimulationManager._instances.get(instance_id) is self:
+            SimulationManager.reset(instance_id)
 
         # Helper to aggressively decouple C++ wrapped objects
         def _sever_wrapper_refs(obj_registry):
@@ -5145,7 +5165,8 @@ class SimulationManager:
         self._gizmos.clear()
         self._constraints.clear()
 
-        SimulationManager.reset(self.instance_id)
+        if SimulationManager._instances.get(self.instance_id) is self:
+            SimulationManager.reset(self.instance_id)
 
         # Forcefully drop underlying C++ object wrappers
         self._env = None

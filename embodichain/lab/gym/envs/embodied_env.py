@@ -394,6 +394,8 @@ class EmbodiedEnv(BaseEnv):
         self.affordance_datas = {}
         self._task_program_adapter: TaskProgramEnvironmentAdapter | None = None
         self._active_task_program_bridge: TaskProgramDemoBridge | None = None
+        self._scene_expansion_attempt_active = False
+        self._scene_expansion_recording_rejected = False
 
         extensions = getattr(cfg, "extensions", {}) or {}
 
@@ -1154,6 +1156,30 @@ class EmbodiedEnv(BaseEnv):
                     "commit_env_ids must be a subset of the rows being reset."
                 )
 
+        # Scene eligibility follows the recording buffers, not replaceable demo
+        # annotations. Preparation and measurement resets cannot commit an
+        # active attempt; rejected buffers stay blocked until a full row reset.
+        episode_metadata = getattr(self, "_demo_episode_metadata", None)
+        if self.num_envs == 1:
+            scene_attempt_active = getattr(
+                self, "_scene_expansion_attempt_active", False
+            )
+            if episode_metadata:
+                scene_expansion = episode_metadata[0].get("scene_expansion")
+                if (
+                    not scene_attempt_active
+                    and isinstance(scene_expansion, Mapping)
+                    and scene_expansion.get("accepted") is not True
+                ):
+                    self._scene_expansion_recording_rejected = True
+            if scene_attempt_active or getattr(
+                self, "_scene_expansion_recording_rejected", False
+            ):
+                save_data = False
+                env_ids_to_commit = torch.empty(
+                    0, device=status_device, dtype=torch.long
+                )
+
         # Persist replay state before the dataset recorder snapshots metadata
         # (including asynchronous snapshots). The existing state buffer retains
         # the source episode's initial state even when training exports fragments.
@@ -1281,6 +1307,13 @@ class EmbodiedEnv(BaseEnv):
             for env_id in env_ids_to_process.cpu().tolist():
                 if 0 <= env_id < len(executed_qpos_history):
                     executed_qpos_history[env_id].clear()
+
+        if (
+            self.num_envs == 1
+            and env_ids_to_process.numel() == 1
+            and int(env_ids_to_process[0].item()) == 0
+        ):
+            self._scene_expansion_recording_rejected = False
 
     def _clear_expert_rollout_rows(self, env_ids: torch.Tensor) -> None:
         """Invalidate selected expert-buffer rows without clearing large frames."""

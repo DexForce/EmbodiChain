@@ -821,7 +821,7 @@
           "label": "Compute API reference"
         }
       ],
-      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
+      "details": "Compute provides reusable numerical routines for kinematics, trajectories, geometry, and images. The geometry facade exposes Torch kernels with broadcast batch dimensions; scene-specific CPU search and solver policies stay in sim.scene. Its dependency boundary excludes lab objects and environment managers, allowing higher-level robotics modules to share algorithms without owning their runtime lifecycle."
     },
     {
       "id": "rl",
@@ -1208,6 +1208,70 @@
         {
           "docname": "api_reference/embodichain/embodichain.lab.sim.motion.expansion",
           "label": "Trajectory augmentation documentation"
+        }
+      ]
+    },
+    {
+      "id": "scene-expansion",
+      "label": "Scene expansion contracts",
+      "kind": "package",
+      "topic_ids": [
+        "scene-expansion"
+      ],
+      "summary": "Defines immutable arena-local scene proposals and bounded authored candidate sources.",
+      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The canonical package is sim.scene.expansion; legacy sim.scene_expansion imports re-export the same types and candidate identities.",
+      "boundaries": [
+        "The core does not import Task Program, GenSim or Gym and does not reset, step or validate task success."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/expansion/__init__.py",
+          "symbol": "<module>",
+          "start_line": 25,
+          "end_line": 27,
+          "excerpt": "from .cfg import SceneExpansionCfg\nfrom .contracts import ScenePoseChange, SceneVariant\nfrom .source import FixedSceneCandidateSource"
+        },
+        {
+          "path": "embodichain/lab/sim/scene/expansion/source.py",
+          "symbol": "FixedSceneCandidateSource",
+          "start_line": 30,
+          "end_line": 30,
+          "excerpt": "class FixedSceneCandidateSource:"
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.scene.expansion",
+          "label": "Scene expansion contracts and fixed candidates"
+        }
+      ]
+    },
+    {
+      "id": "scene-expansion-integration",
+      "label": "Scene expansion attempt",
+      "kind": "function",
+      "topic_ids": [
+        "scene-expansion",
+        "task-programs"
+      ],
+      "summary": "Prepares one scene candidate and executes a Task Program with separate measured acceptance.",
+      "details": "execute_scene_variant connects a scene proposal to injected preparation and measurement callbacks. For a valid initial state it creates the canonical Task Program segments and uses the existing Gym demo executor, recording separate initial-state, program, and measured-outcome evidence.",
+      "boundaries": [
+        "One B=1 attempt; the caller supplies physical preparation, measured task evidence, retry policy, and the reset-time persistence transaction."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 195,
+          "end_line": 195,
+          "excerpt": "def execute_scene_variant("
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.task_program.integrations.scene_expansion",
+          "label": "Task Program scene preparation and measured acceptance"
         }
       ]
     },
@@ -2513,7 +2577,7 @@
           "symbol": "<module>",
           "start_line": 24,
           "end_line": 35,
-          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0\u2026DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
+          "excerpt": "\"\"\"Depth quantization/dequantization for compressed depth sidecar videos.\n\nDepth maps are packed into 12-bit integer codes (``uint16``, values\n``0…DEPTH_QMAX``) so they fit the ``gray12le`` pixel format and can be encoded\nlosslessly by HEVC (``libx265``). Logarithmic quantization is the default\nbecause it allocates more quanta to near-range depth, matching the\n``1/depth`` error profile of typical depth sensors.\n\nThe math is ported from lerobot 0.6.0 (itself adapted from BEHAVIOR-1K's\n``obs_utils.py``) and depends only on :mod:`av`, :mod:`numpy` and\n:mod:`torch` -- all of which run on Python 3.10--3.12. See issue #424.\n\"\"\""
         }
       ],
       "documentation": [
@@ -3196,6 +3260,41 @@
         {
           "docname": "features/toolkits/convex_decomposition",
           "label": "Convex decomposition documentation"
+        }
+      ]
+    },
+    {
+      "id": "scene-services",
+      "label": "Shared scene services",
+      "kind": "package",
+      "topic_ids": [
+        "scene-services"
+      ],
+      "summary": "Composes explicit configurations, proposes layouts, and operates on caller-owned physical state.",
+      "details": "Scene services are shared by procedural recipes and GenSim adapters. They compose existing entity configurations, solve fixed-orientation XY layouts, query or change supported B=1 physical state, and collect measured validation. Compute owns reusable tensor geometry kernels; scene services retain CPU support, polygon-placement, packing and SLSQP strategies. Spawn and SimulationManager retain native resource and topology ownership; callers retain stepping, task lifecycle and persistence.",
+      "boundaries": [
+        "Arena-local Z-up geometry in metres; AABB layout is not exact mesh collision or task-success evidence.",
+        "Runtime state operations currently require B=1; snapshots are owner-bound physical state, not complete backend checkpoints.",
+        "GenSim retains model calls, assets, editing semantics, temporary simulation lifetime and export formats.",
+        "Tensor geometry supports independent leading batches and CPU/CUDA devices; current physical state services remain B=1 and CPU strategies do not become GPU solvers."
+      ],
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/__init__.py",
+          "symbol": "<module>",
+          "start_line": 17,
+          "end_line": 22,
+          "excerpt": "\"\"\"Shared scene construction, layout and runtime services.\n\nSubmodules are loaded on first access. Scene services own no simulator, task\nlifecycle, semantic registry, or model-generation clients. Expansion contracts\nare available separately in :mod:`embodichain.lab.sim.scene.expansion`.\n\"\"\""
+        }
+      ],
+      "documentation": [
+        {
+          "docname": "api_reference/embodichain/embodichain.lab.sim.scene",
+          "label": "Scene composition, layout, state and validation"
+        },
+        {
+          "docname": "api_reference/embodichain/embodichain.compute.scene_geometry",
+          "label": "Shared numerical geometry and layout"
         }
       ]
     }
@@ -3887,9 +3986,9 @@
         {
           "path": "embodichain/lab/sim/sim_manager.py",
           "symbol": "SimulationManager.start_visualization",
-          "start_line": 999,
-          "end_line": 1003,
-          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        runtime.start()"
+          "start_line": 1075,
+          "end_line": 1080,
+          "excerpt": "        runtime = VisualizationRuntime(\n            SceneExporter(self, visualization_cfg),\n            visualization_cfg,\n        )\n        self._visualization_runtime = runtime\n        runtime.start()"
         }
       ]
     },
@@ -5346,6 +5445,164 @@
           "excerpt": "    generate_urdf_collision_convexes("
         }
       ]
+    },
+    {
+      "id": "scene-attempt-imports-scene-contracts",
+      "source": "scene-expansion-integration",
+      "target": "scene-expansion",
+      "relation": "imports",
+      "description": "Consumes the shared SceneVariant proposal contract.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit module import; does not move task or execution ownership into the scene proposal core.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "<module>",
+          "start_line": 33,
+          "end_line": 33,
+          "excerpt": "from embodichain.lab.sim.scene.expansion import SceneVariant"
+        }
+      ]
+    },
+    {
+      "id": "scene-attempt-calls-task-program-segments",
+      "source": "scene-expansion-integration",
+      "target": "embodied-env",
+      "relation": "calls",
+      "description": "Creates canonical Task Program segments for the selected program.",
+      "provenance": "source-reviewed",
+      "scope": "After injected scene preparation and initial validation pass; the existing demo executor consumes the resulting segments.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/task_program/integrations/scene_expansion.py",
+          "symbol": "execute_scene_variant",
+          "start_line": 294,
+          "end_line": 296,
+          "excerpt": "        segments = EmbodiedEnv.create_demo_segments(\n            target, task_program=selected_program\n        )"
+        }
+      ]
+    },
+    {
+      "id": "scene-layout-calls-scene-services",
+      "source": "scene-layout",
+      "target": "scene-services",
+      "relation": "calls",
+      "description": "Delegates each edited parent support group to the shared layout solver.",
+      "provenance": "source-reviewed",
+      "scope": "Selected indirect call through SceneLayoutConstructor and ParentSurfaceLayoutOptimizer; GenSim retains hierarchy traversal and edit semantics.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/scene_layout_constructor.py",
+          "symbol": "SceneLayoutConstructor._optimize_parent_group",
+          "start_line": 275,
+          "end_line": 277,
+          "excerpt": "        solved_child_xy_by_id = self.parent_surface_layout_optimizer.optimize(\n            parent_surface_problem\n        )"
+        },
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/parent_surface_layout_optimizer.py",
+          "symbol": "ParentSurfaceLayoutOptimizer.optimize",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "        solution = solve_layout("
+        }
+      ]
+    },
+    {
+      "id": "scene-assets-calls-scene-services",
+      "source": "scene-assets",
+      "target": "scene-services",
+      "relation": "calls",
+      "description": "Reuses the shared layout service for generated parent-child support groups.",
+      "provenance": "source-reviewed",
+      "scope": "Selected generation refinement path through the existing parent-surface adapter; asset generation and group-policy orchestration remain in GenSim.",
+      "evidence": [
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/generation/scene_generation.py",
+          "symbol": "_refine_on_children_bfs",
+          "start_line": 882,
+          "end_line": 884,
+          "excerpt": "        solved_child_xy_by_id = parent_surface_optimizer.optimize(\n            parent_surface_problem\n        )"
+        },
+        {
+          "path": "embodichain/gen_sim/scene_engine/pipeline/utils/parent_surface_layout_optimizer.py",
+          "symbol": "ParentSurfaceLayoutOptimizer.optimize",
+          "start_line": 182,
+          "end_line": 182,
+          "excerpt": "        solution = solve_layout("
+        }
+      ]
+    },
+    {
+      "id": "scene-services-calls-compute-layout",
+      "source": "scene-services",
+      "target": "compute",
+      "relation": "calls",
+      "description": "Reuses batched tensor geometry kernels inside CPU scene strategies.",
+      "provenance": "source-reviewed",
+      "scope": "Scene retains support-selection, polygon-search and SLSQP policies. Tensor batches represent independent numeric inputs, not B>1 simulator-host support.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/_support_cpu.py",
+          "symbol": "SupportSurfaceDetector.detect",
+          "start_line": 142,
+          "end_line": 142,
+          "excerpt": "        face_normals, _, valid_faces = triangle_geometry("
+        }
+      ]
+    },
+    {
+      "id": "scene-services-declares-manager-entities",
+      "source": "scene-services",
+      "target": "simulation-manager",
+      "relation": "calls",
+      "description": "Declares composed entity configurations through the existing manager.",
+      "provenance": "source-reviewed",
+      "scope": "Caller-owned manager and Spawn retain native entity ownership and prepare/commit boundaries; declaration failures do not imply rollback.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/composition.py",
+          "symbol": "declare_fragment",
+          "start_line": 205,
+          "end_line": 205,
+          "excerpt": "            sim.add_rigid_object(cfg)"
+        }
+      ]
+    },
+    {
+      "id": "scene-services-references-manager",
+      "source": "scene-services",
+      "target": "simulation-manager",
+      "relation": "holds",
+      "description": "Keeps a non-owning reference to the caller-supplied simulation manager.",
+      "provenance": "source-reviewed",
+      "scope": "SceneView selects existing bindings; this reference does not create a second resource registry or transfer world ownership.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/query.py",
+          "symbol": "SceneView.__init__",
+          "start_line": 40,
+          "end_line": 40,
+          "excerpt": "        self.sim = sim"
+        }
+      ]
+    },
+    {
+      "id": "scene-recipes-import-expansion-contracts",
+      "source": "scene-services",
+      "target": "scene-expansion",
+      "relation": "imports",
+      "description": "Represents recipe proposals using the shared immutable expansion contracts.",
+      "provenance": "source-reviewed",
+      "scope": "Explicit procedural-module import; generating a proposal does not execute a task or commit persistence.",
+      "evidence": [
+        {
+          "path": "embodichain/lab/sim/scene/procedural.py",
+          "symbol": "<module>",
+          "start_line": 29,
+          "end_line": 29,
+          "excerpt": "from .expansion import ScenePoseChange, SceneVariant"
+        }
+      ]
     }
   ],
   "views": [
@@ -5372,6 +5629,7 @@
         "semantic-executor",
         "environment-adapter",
         "gym-bridge",
+        "scene-expansion-integration",
         "mllm",
         "atomic-engine",
         "motion-generator",
@@ -5380,6 +5638,7 @@
         "workspace",
         "augmentation",
         "simulation-manager",
+        "scene-expansion",
         "robot",
         "sensors",
         "physics",
@@ -5435,7 +5694,8 @@
         "device-controller",
         "grasp-tools",
         "urdf-assembly",
-        "convex-decomposition"
+        "convex-decomposition",
+        "scene-services"
       ],
       "edge_ids": [
         "adapter-calls-compiler",
@@ -5511,7 +5771,15 @@
         "differentiable-trainer-constructs-observation-normalizer",
         "rl-algorithms-holds-ppo",
         "rl-algorithms-holds-grpo",
-        "rl-algorithms-holds-apg"
+        "rl-algorithms-holds-apg",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments",
+        "scene-layout-calls-scene-services",
+        "scene-assets-calls-scene-services",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts"
       ],
       "groups": [
         {
@@ -5542,6 +5810,7 @@
             "semantic-executor",
             "environment-adapter",
             "gym-bridge",
+            "scene-expansion-integration",
             "mllm"
           ]
         },
@@ -5562,6 +5831,7 @@
           "label": "Simulation world",
           "node_ids": [
             "simulation-manager",
+            "scene-expansion",
             "robot",
             "sensors",
             "physics",
@@ -5572,7 +5842,8 @@
             "deformables",
             "lights",
             "rigid-constraints",
-            "gizmo"
+            "gizmo",
+            "scene-services"
           ]
         },
         {
@@ -5666,6 +5937,7 @@
         "mllm",
         "program-input",
         "scene-registry",
+        "scene-expansion",
         "skill-profile",
         "integration-catalog",
         "task-program-config",
@@ -5681,6 +5953,7 @@
         "parallel-execution",
         "effect-evidence",
         "gym-bridge",
+        "scene-expansion-integration",
         "command-sink",
         "step-clock",
         "embodied-env",
@@ -5715,7 +5988,9 @@
         "base-constructs-simulation",
         "env-calls-add-robot",
         "mllm-imports-program-input",
-        "mllm-calls-environment-adapter"
+        "mllm-calls-environment-adapter",
+        "scene-attempt-imports-scene-contracts",
+        "scene-attempt-calls-task-program-segments"
       ],
       "groups": [
         {
@@ -5725,6 +6000,7 @@
             "mllm",
             "program-input",
             "scene-registry",
+            "scene-expansion",
             "skill-profile",
             "integration-catalog"
           ]
@@ -5770,6 +6046,7 @@
           "label": "Gym integration & simulation",
           "node_ids": [
             "gym-bridge",
+            "scene-expansion-integration",
             "command-sink",
             "step-clock",
             "embodied-env",
@@ -5791,6 +6068,7 @@
         "robot",
         "articulations",
         "rigid-objects",
+        "scene-expansion",
         "rigid-object-groups",
         "deformables",
         "surface-deformables",
@@ -5813,11 +6091,13 @@
         "differentiable-env",
         "autograd-bridge",
         "configuration",
+        "scene-expansion-integration",
         "data-assets",
         "event-manager",
         "randomization",
         "devices",
-        "device-controller"
+        "device-controller",
+        "scene-services"
       ],
       "edge_ids": [
         "engine-holds-motion",
@@ -5848,7 +6128,12 @@
         "rigid-object-groups-inherits-batch-entity",
         "articulations-inherits-batch-entity",
         "deformables-inherits-batch-entity",
-        "lights-inherits-batch-entity"
+        "lights-inherits-batch-entity",
+        "scene-attempt-imports-scene-contracts",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts"
       ],
       "groups": [
         {
@@ -5858,7 +6143,8 @@
             "simulation-manager",
             "physics",
             "sensors",
-            "visualization"
+            "visualization",
+            "scene-services"
           ]
         },
         {
@@ -5868,6 +6154,7 @@
             "robot",
             "articulations",
             "rigid-objects",
+            "scene-expansion",
             "rigid-object-groups",
             "deformables",
             "surface-deformables",
@@ -5914,6 +6201,7 @@
           "label": "Configuration & control",
           "node_ids": [
             "configuration",
+            "scene-expansion-integration",
             "data-assets",
             "event-manager",
             "randomization",
@@ -6084,7 +6372,10 @@
         "convex-decomposition",
         "simulation-manager",
         "robot",
-        "workspace-analyzer"
+        "workspace-analyzer",
+        "scene-services",
+        "compute",
+        "scene-expansion"
       ],
       "edge_ids": [
         "simulation-constructs-robot",
@@ -6101,7 +6392,13 @@
         "scene-assets-constructs-scene-simready",
         "scene-editing-constructs-scene-import",
         "scene-editing-calls-scene-layout",
-        "simready-calls-asset-parsers"
+        "simready-calls-asset-parsers",
+        "scene-layout-calls-scene-services",
+        "scene-assets-calls-scene-services",
+        "scene-services-calls-compute-layout",
+        "scene-services-declares-manager-entities",
+        "scene-services-references-manager",
+        "scene-recipes-import-expansion-contracts"
       ],
       "groups": [
         {
@@ -6159,6 +6456,15 @@
             "simulation-manager",
             "robot",
             "workspace-analyzer"
+          ]
+        },
+        {
+          "id": "shared-scene-services",
+          "label": "Shared scene construction & numerics",
+          "node_ids": [
+            "scene-services",
+            "compute",
+            "scene-expansion"
           ]
         }
       ]

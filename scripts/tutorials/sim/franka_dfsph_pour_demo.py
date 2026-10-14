@@ -50,7 +50,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.visualization import VisualizationCfg
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+from embodichain_robots import FrankaPandaCfg
 from embodichain.lab.sim.sensors import CameraCfg
 
 __all__ = ["main"]

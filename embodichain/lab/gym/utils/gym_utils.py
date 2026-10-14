@@ -706,11 +706,9 @@ def config_to_cfg(
         robot_class_type = robot_config.pop("robot_type")
 
     if robot_class_type is not None:
-        robot_cfg = get_class_instance(
-            "embodichain.lab.sim.robots",
-            robot_class_type + "Cfg",
-        )
-        robot_cfg = robot_cfg.from_dict(robot_config)
+        from embodichain.robot_registry import resolve_robot_cfg
+
+        robot_cfg = resolve_robot_cfg(robot_class_type, robot_config)
     else:
         robot_cfg = RobotCfg.from_dict(robot_config)
 

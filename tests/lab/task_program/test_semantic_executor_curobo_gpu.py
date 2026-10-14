@@ -56,7 +56,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa:
     CuroboPlannerCfg,
     CuroboWorldCfg,
 )
-from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
+from embodichain_robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.task_program.semantics import (  # noqa: E402
     BoundSemanticCall,
