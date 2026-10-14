@@ -402,6 +402,21 @@ class NewtonPhysicsCfg(PhysicsBackendCfg):
             "featherstone": FeatherstoneSolverCfg,
             "vbd": VBDSolverCfg,
         }
+        # Import SPH lazily so older DexSim builds can still run other solvers.
+        if isinstance(self.solver_cfg, Mapping):
+            requested = (
+                self.solver_cfg.get("solver_type")
+                or self.solver_cfg.get("class_type")
+                or "auto"
+            )
+            if _normalize_newton_solver_type(str(requested)) == "sph":
+                try:
+                    from dexsim.engine.newton_physics import SPHSolverCfg
+                except ImportError as exc:
+                    raise ImportError(
+                        "SPH requires a DexSim build exporting SPHSolverCfg."
+                    ) from exc
+                solver_cfg_map["sph"] = SPHSolverCfg
         solver_cfg = _newton_solver_cfg_to_dexsim(
             solver_cfg=self.solver_cfg,
             solver_cfg_map=solver_cfg_map,
@@ -460,6 +475,8 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
     """Normalize public EmbodiChain and DexSim Newton solver aliases."""
     key = solver_type.replace("-", "_").lower()
     aliases = {
+        "sph": "sph",
+        "sphsolvercfg": "sph",
         "auto": "auto",
         "autosolver": "auto",
         "autosolvercfg": "auto",
@@ -497,7 +514,7 @@ def _normalize_newton_solver_type(solver_type: str) -> str:
         logger.log_error(
             f"Unsupported Newton solver type '{solver_type}'. "
             "Expected one of 'auto', 'dexuni', 'mjwarp', 'xpbd', 'semi_implicit', "
-            "'featherstone', or 'vbd'."
+            "'featherstone', 'vbd', or 'sph'."
         )
     return aliases[key]
 

@@ -71,6 +71,9 @@ class MeshCollisionCfg:
     VisACD requires a DexSim build with CUDA/OptiX support.
     """
 
+    force_sdf: bool | None = None
+    """Optional Newton SDF strategy override; False uses an eagerly baked SDF."""
+
     sdf_resolution: int | None = None
     """Maximum SDF grid resolution; valid only for the ``sdf`` strategy."""
 
@@ -126,6 +129,7 @@ class MeshCollisionCfg:
             )
 
         sdf_values = {
+            "force_sdf": self.force_sdf,
             "sdf_resolution": self.sdf_resolution,
             "is_hydroelastic": self.is_hydroelastic,
             "sdf_narrow_band_range": self.sdf_narrow_band_range,
@@ -187,6 +191,9 @@ class MeshCollisionCfg:
             "force_sdf",
             "sdf_max_resolution",
         }
+        explicit_force_sdf = data.get("force_sdf") if "approximation" in data else None
+        if "approximation" in data:
+            legacy_fields.discard("force_sdf")
         has_legacy_fields = bool(legacy_fields.intersection(data))
         if has_legacy_fields:
             warnings.warn(
@@ -230,6 +237,8 @@ class MeshCollisionCfg:
 
         if data.get("sdf_resolution") == 0:
             data.pop("sdf_resolution")
+        if explicit_force_sdf is not None:
+            data["force_sdf"] = explicit_force_sdf
         return cls(**data)
 
 
@@ -241,6 +250,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
     approximation: MeshCollisionApproximation | None = None,
     max_hulls: int | None = None,
     acd_method: Literal["visacd", "coacd", "vhacd"] | None = None,
+    force_sdf: bool | None = None,
     sdf_resolution: int | None = None,
     is_hydroelastic: bool | None = None,
     sdf_narrow_band_range: tuple[float, float] | None = None,
@@ -283,6 +293,7 @@ def _mesh_collision_cfg_init_with_legacy_max_hulls(
         approximation="convex_hull" if approximation is None else approximation,
         max_hulls=max_hulls,
         acd_method=acd_method,
+        force_sdf=force_sdf,
         sdf_resolution=sdf_resolution,
         is_hydroelastic=is_hydroelastic,
         sdf_narrow_band_range=sdf_narrow_band_range,

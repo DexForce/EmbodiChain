@@ -46,6 +46,12 @@ class RigidObjectCfg(ObjectBaseCfg):
 
     # TODO: supoort basic primitive shapes, such as box, sphere, etc cfg and spawn method.
 
+    visual_shape: ShapeCfg | None = None
+    """Optional independent render geometry; shape remains collision geometry."""
+
+    render_enabled: bool = True
+    """Whether to create native render geometry for this rigid object."""
+
     attrs: RigidBodyPhysicsCfg = RigidBodyPhysicsCfg()
     """Rigid-body physics.
 
@@ -73,6 +79,8 @@ class RigidObjectCfg(ObjectBaseCfg):
     def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
         """Parse a rigid object and normalize legacy mesh collision ownership."""
         data = dict(init_dict)
+        if isinstance(data.get("visual_shape"), Mapping):
+            data["visual_shape"] = ShapeCfg.from_dict(data["visual_shape"])
         attrs_value = data.get("attrs")
         if isinstance(attrs_value, Mapping) and "mesh_collision_props" in attrs_value:
             shape_value = data.get("shape")

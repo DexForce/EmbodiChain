@@ -13,7 +13,7 @@ topics:
     NRDCfg, DLSS, NRD, frame_time_delta_ms, explicit physics stepping, arena, DexSim, PhysicsBackendCfg,
     DefaultPhysicsCfg, NewtonPhysicsCfg, AutoSolverCfg, DexUniSolverCfg, DexUni, runtime control, deformable, particle set,
     ArticulationJointKinematics, get_parent_joint_chain, asset_physics_mode, joint_drive_props, enable_gravity,
-    fixed-cadence playback, quaternion, xyzw]
+    fixed-cadence playback, FluidObjectCfg, FluidSpawnCfg, FluidObject, SPHSolverCfg, revolved_volume, fill_level, 粒子采样, fluid, 流体, quaternion, xyzw]
   paths: [topics/simulation-system/simulation-system.md]
   source_of_truth:
   - embodichain/lab/sim/motion/__init__.py
@@ -22,6 +22,7 @@ topics:
   - embodichain/cli/_visualization.py
   - embodichain/lab/sim/__init__.py
   - embodichain/lab/sim/cfg/
+  - embodichain/compute/geometry/particles.py
   - embodichain/lab/sim/physics/
   - embodichain/lab/sim/spawn/
   - embodichain/lab/sim/common.py
@@ -33,7 +34,7 @@ topics:
   - embodichain/lab/sim/objects/gizmo.py
   - embodichain/lab/gym/envs/base_env.py
   watch_paths: [embodichain/lab/sim/sim_manager.py, embodichain/lab/sim/cfg/, embodichain/lab/sim/physics/,
-    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, tests/sim/]
+    embodichain/lab/sim/spawn/, embodichain/lab/sim/objects/, embodichain/compute/geometry/particles.py, tests/compute/test_particles.py, tests/sim/]
   related_topics: [env-framework, robot-system, sensor-system, sim-visualization, ik-solvers, motion-planning,
     atomic-actions, rl-learning, configclass-pattern, robot-workspace]
   status: active
@@ -44,7 +45,7 @@ topics:
   keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
-    ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
+    FluidReplayEnv, fluid Gym, 流体 Gym, ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
     task_instruction, resolve_demo_instruction,
     show-task, task catalog, task gallery, 任务画廊, physical_objective, 物理目标]
   paths: [topics/env-framework/env-framework.md]
@@ -63,11 +64,13 @@ topics:
   - embodichain/lab/gym/envs/_startup_summary.py
   - embodichain/lab/gym/envs/embodied_env.py
   - embodichain/lab/gym/envs/expert_trajectory.py
+  - embodichain/lab/gym/envs/fluid_replay.py
+  - embodichain/lab/scripts/run_fluid_task_program.py
   - embodichain/lab/gym/envs/demo.py
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
-    embodichain/lab/gym/envs/demo.py,
-    embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
+    embodichain/lab/gym/envs/demo.py, embodichain/lab/gym/envs/fluid_replay.py,
+    embodichain/lab/scripts/run_fluid_task_program.py, embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
     embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
@@ -375,7 +378,7 @@ topics:
   title: Data Assets
   aliases: [data assets, data path, asset download, 数据资产, 资产下载, 数据路径]
   keywords: [get_data_path, get_data_class, EmbodiChainDataset, EMBODICHAIN_DATA_ROOT, EMBODICHAIN_DATASET_ROOT,
-    CATEGORY_MODULES, download lock, get_registry]
+    CATEGORY_MODULES, download lock, get_registry, task_assets, PourCupAssets, PourCupDemoData]
   paths: [topics/data-assets/data-assets.md]
   source_of_truth:
   - embodichain/data/dataset.py

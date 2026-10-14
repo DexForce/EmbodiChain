@@ -76,6 +76,12 @@ class VisualMaterialCfg:
     ior: float = 1.5
     """Index of refraction for PBR materials, only used in ray tracing."""
 
+    transmission: float | None = None
+    """Optional native PBR transmission coefficient."""
+    volume_thickness: float | None = None
+    volume_attenuation_distance: float | None = None
+    volume_attenuation_color: tuple[float, float, float] | None = None
+
     material_type: str = "BRDF"
     """Ray tracing material type. Options: 'BRDF', 'BTDF', 'BSDF'"""
 
@@ -92,6 +98,24 @@ class VisualMaterialCfg:
             else:
                 logger.log_warning(f"Unknown field '{k}' in VisualMaterialCfg.")
         return base
+
+
+def _apply_volume_material_properties(
+    native: MaterialInst, cfg: VisualMaterialCfg
+) -> None:
+    """Apply optical volume parameters not carried by Spawn MaterialDesc."""
+    for name in (
+        "transmission",
+        "volume_thickness",
+        "volume_attenuation_distance",
+        "volume_attenuation_color",
+    ):
+        value = getattr(cfg, name)
+        if value is not None:
+            if isinstance(value, (list, tuple)):
+                native.set_pbr_param(name, *value)
+            else:
+                native.set_pbr_param(name, value)
 
 
 class VisualMaterial:
@@ -151,6 +175,7 @@ class VisualMaterial:
         mat_inst.set_ao_texture(cfg.ao_texture)
 
         mat_inst.set_ior(cfg.ior)
+        _apply_volume_material_properties(mat_inst.mat, cfg)
         mat_inst.mat.update_pbr_material_type(self.MAT_TYPE_MAPPING[cfg.material_type])
 
     def create_instance(self, uid: str) -> VisualMaterialInst:

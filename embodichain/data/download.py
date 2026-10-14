@@ -58,6 +58,7 @@ CATEGORY_MODULES: dict[str, str] = {
     "obj": "embodichain.data.assets.obj_assets",
     "robot": "embodichain.data.assets.robot_assets",
     "scene": "embodichain.data.assets.scene_assets",
+    "task": "embodichain.data.assets.task_assets",
     "w1": "embodichain.data.assets.w1_assets",
 }
 
