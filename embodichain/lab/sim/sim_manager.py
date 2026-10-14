@@ -607,6 +607,8 @@ class SimulationManager:
         self._gizmos: dict[str, object] = {}
         self._markers: dict[str, _AxisMarkerGroup] = {}
         self._constraints: dict[str, RigidConstraint] = {}
+        self._fluid_objects: dict[str, FluidObject] = {}
+        self._rigid_trajectory_controls: dict[str, tuple] = {}
         self._visual_materials: dict[str, VisualMaterial] = {}
         self._texture_cache: dict[str, torch.Tensor | list[torch.Tensor]] = {}
 
@@ -711,8 +713,6 @@ class SimulationManager:
         self._rigid_objects: Dict[str, RigidObject] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
-        self._fluid_objects: dict[str, FluidObject] = {}
-        self._rigid_trajectory_controls: dict[str, tuple] = {}
         self._articulations: Dict[str, Articulation] = dict()
         self._robots: Dict[str, Robot] = dict()
 

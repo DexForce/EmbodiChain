@@ -150,7 +150,7 @@ def _replay(args, trajectory: Path, output: Path) -> None:
                 before = (
                     env.sim.get_fluid_object("water").data.particle_state_w[1].clone()
                 )
-                env.reset(
+                obs, info = env.reset(
                     options={
                         "reset_ids": torch.tensor([0], device=env.device),
                         "save_data": False,

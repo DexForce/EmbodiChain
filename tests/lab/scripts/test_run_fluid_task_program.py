@@ -172,6 +172,86 @@ def test_final_episode_is_committed_through_record_camera(
     ]
 
 
+@pytest.mark.parametrize("reset_step", [0, 1])
+def test_partial_reset_reports_current_row_clocks_and_observations(
+    reset_step, monkeypatch, tmp_path
+):
+    from embodichain.lab.gym.envs import fluid_replay
+    from embodichain.lab.gym.envs.managers import observations
+
+    class Environment:
+        def __init__(self, cfg, **kwargs):
+            self.num_envs = cfg.num_envs
+            self.device = torch.device("cpu")
+            self.step_dt = 1 / 24
+            self.replay_duration = 2 * self.step_dt
+            self.active_joint_ids = [0]
+            self.source_qualification = {"accepted": True}
+            self.close = Mock()
+            self.clock = torch.zeros(self.num_envs)
+            self.water = SimpleNamespace(
+                num_particles=1,
+                data=SimpleNamespace(particle_state_w=torch.zeros(self.num_envs, 1, 6)),
+            )
+            self.sim = SimpleNamespace(get_fluid_object=lambda uid: self.water)
+
+        def snapshot(self):
+            return {"clock": self.clock.clone()}, {
+                "fluid_replay_time_s": self.clock.clone(),
+                "fluid_replay_finished": self.clock >= self.replay_duration,
+            }
+
+        def reset(self, *, seed=None, options=None):
+            ids = options["reset_ids"] if options else torch.arange(self.num_envs)
+            self.clock[ids] = 0
+            self.water.data.particle_state_w[ids] = 0
+            return self.snapshot()
+
+        def step(self, action):
+            self.clock += self.step_dt
+            self.water.data.particle_state_w[..., 0] += 1
+            obs, info = self.snapshot()
+            return obs, None, None, None, info
+
+    monkeypatch.setattr(fluid_replay, "FluidReplayEnv", Environment)
+    monkeypatch.setattr(
+        observations,
+        "get_fluid_summary",
+        lambda env, obs, *args: torch.stack(
+            (obs["clock"], torch.ones(env.num_envs)), dim=-1
+        ),
+    )
+    monkeypatch.setattr(
+        observations,
+        "get_fluid_volume_in_region",
+        lambda env, *args, **kwargs: torch.zeros(env.num_envs, 1),
+    )
+    args = argparse.Namespace(
+        replay_task=str(TASK),
+        num_envs=2,
+        renderer="no-render",
+        particle_spacing=None,
+        speed=2,
+        seconds=None,
+        partial_reset_step=reset_step,
+    )
+
+    runner._replay(args, tmp_path / "source.pt", tmp_path)
+
+    result = json.loads((tmp_path / "fluid_gym_result.json").read_text())
+    step_dt = 1 / 24
+    expected_times = (
+        [[0, step_dt], [step_dt, 2 * step_dt]]
+        if reset_step == 0
+        else [[step_dt, step_dt], [0, 2 * step_dt]]
+    )
+    assert len(result["samples"]) == len(expected_times)
+    for sample, expected in zip(result["samples"], expected_times):
+        assert sample["time_s"] == pytest.approx(expected)
+        assert [row[0] for row in sample["summary"]] == pytest.approx(expected)
+    assert result["replay_complete"] == [False, True]
+
+
 def test_spacing_override_rejects_fixed_points_before_scene_creation(
     monkeypatch, tmp_path
 ):

@@ -122,6 +122,53 @@ def test_per_environment_reset_and_discard_preserve_unselected_recordings(monkey
     assert not recorder._env_frames[1]
 
 
+@pytest.mark.parametrize(
+    ("env_ids", "max_env_num", "expected_env_ids"),
+    [
+        (None, 3, [0, 1, 2]),
+        ([2, 0], 3, [2, 0]),
+        ([2, 0], 2, [0]),
+        ([], 3, []),
+        ([2], 2, []),
+    ],
+)
+def test_per_environment_capture_honors_event_rows_and_recording_limit(
+    env_ids, max_env_num, expected_env_ids, monkeypatch
+):
+    env, recorder = _make_recorder(per_env=True)
+    # Pixel values identify original arena IDs even for reordered selections.
+    env.sim.camera.rgb = torch.stack(
+        [torch.full((4, 6, 4), env_id, dtype=torch.uint8) for env_id in range(3)]
+    )
+    selection = None if env_ids is None else torch.tensor(env_ids, dtype=torch.long)
+    recorder(env, selection, name="views", max_env_num=max_env_num)
+    save_video = Mock()
+    monkeypatch.setattr(record_module, "images_to_video", save_video)
+
+    recorder.save_and_clear()
+
+    assert [call.args[2] for call in save_video.call_args_list] == [
+        f"episode_0_views_env{env_id}" for env_id in expected_env_ids
+    ]
+    for env_id, call in zip(expected_env_ids, save_video.call_args_list):
+        np.testing.assert_array_equal(call.args[0][0], np.full((4, 6, 3), env_id))
+
+
+def test_per_environment_capture_preserves_frames_for_rows_not_due(monkeypatch):
+    env, recorder = _make_recorder(per_env=True)
+    save_video = Mock()
+    monkeypatch.setattr(record_module, "images_to_video", save_video)
+    recorder(env, None, name="views")
+    # After a partial reset, per-row event intervals can be out of phase.
+    recorder(env, torch.tensor([1]), name="views")
+
+    recorder.save_and_clear()
+
+    assert [
+        (call.args[2], len(call.args[0])) for call in save_video.call_args_list
+    ] == [("episode_0_views_env0", 1), ("episode_0_views_env1", 2)]
+
+
 def test_failed_per_environment_save_keeps_frames_for_retry(monkeypatch):
     env, recorder = _make_recorder(per_env=True)
     recorder(env, None, name="views")

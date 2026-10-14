@@ -112,8 +112,10 @@ helper. See [profiling](../env-framework/profiling.md).
 `record_camera_data` is an interval event, independent of policy dataset
 recording. It renders its camera group before reading the buffers because
 interval events precede observation rendering. Views use arena-relative camera
-extrinsics. `per_env=True` retains separate owned CPU frames and episode counters;
-selected save/discard only touches those rows. The default remains a tiled video.
+extrinsics. `per_env=True` retains separate owned CPU frames and episode counters.
+It captures only the event's selected `env_ids` within `max_env_num`, preserving
+their original arena IDs; `None` captures all views within that limit. Selected
+save/discard only touches those rows. The default remains a tiled video.
 `fps=None` follows control frequency for an every-step recording event.
 
 Reset commits or discards frames via `save_and_clear` / `discard_and_clear`.

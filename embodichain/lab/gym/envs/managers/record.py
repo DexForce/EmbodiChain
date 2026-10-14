@@ -41,7 +41,7 @@ class record_camera_data(Functor):
 
     By default, views are tiled into one video at 20 fps. Set ``per_env=True``
     to save one video per environment, with independent episode counters and
-    selected-row save/discard. ``fps=None`` uses the environment's control
+    selected-row capture/save/discard. ``fps=None`` uses the environment's control
     frequency; use an explicit fps when capturing less often than every step.
 
     Frames are committed by :meth:`save_and_clear` before reset. Closing the
@@ -239,7 +239,8 @@ class record_camera_data(Functor):
 
         Args:
             env: Owning environment.
-            env_ids: Event rows; all camera rows are captured at a global interval.
+            env_ids: Rows to capture in per-environment mode, or all camera rows
+                when None. Tiled recording always captures all camera rows.
             name: Camera name, configured at initialization.
             resolution: Image width and height, configured at initialization.
             eye: Arena-relative camera position.
@@ -262,7 +263,16 @@ class record_camera_data(Functor):
         num_frames = min(rgb.shape[0], max_env_num)
         rgb = rgb[:num_frames]
         if self._per_env:
-            for env_id, frame in enumerate(rgb[..., :3].detach().cpu().numpy()):
+            selected_env_ids = list(range(num_frames))
+            frames = rgb[..., :3]
+            if env_ids is not None:
+                selected_env_ids = [
+                    int(env_id)
+                    for env_id in torch.as_tensor(env_ids).reshape(-1).cpu().tolist()
+                    if 0 <= int(env_id) < num_frames
+                ]
+                frames = frames[selected_env_ids]
+            for env_id, frame in zip(selected_env_ids, frames.detach().cpu().numpy()):
                 self._env_frames.setdefault(env_id, []).append(frame.copy())
             return
         rgb = self._draw_frames_into_one_image(rgb)[..., :3].cpu().numpy()
