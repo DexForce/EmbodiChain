@@ -43,7 +43,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 9
+MOTION_VALIDATION_REVISION = 10
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 _CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(

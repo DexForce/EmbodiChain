@@ -89,8 +89,10 @@ def capture_scene_vertices(simulation: Any, bindings: Any) -> dict[str, torch.Te
     physical collision geometry and must not stand in for a native shape oracle.
     Collision roles classify the planner, not whether a native collider exists.
     In particular ``NONE`` cannot omit a physical collider from this safety gate.
-    The existing USD adapter supplies scaled collision geometry in owning link
-    frames, and connected panels remain separate instead of filling cavities.
+    Retained Default/USD descriptors preserve the native convex approximation
+    and SDK part preprocessing; the legacy USD adapter remains for other routes.
+    Parts use owning-link frames, separate from freshly observed link poses.
+    This is materialization-input geometry, not a cooked-shape/contact oracle.
     """
     rigid: dict[str, torch.Tensor] = {}
     components: list[SceneComponent] = []
@@ -112,6 +114,7 @@ def capture_scene_vertices(simulation: Any, bindings: Any) -> dict[str, torch.Te
             return rigid
         if getattr(bindings, "rigidized_articulations", ()):
             raise ValueError("rigidized_articulation_collision_components_unavailable")
+        from .collision_descriptors import descriptor_collision_meshes
         from .drawer_geometry import collision_meshes
         from pxr import Tf
 
@@ -126,9 +129,13 @@ def capture_scene_vertices(simulation: Any, bindings: Any) -> dict[str, torch.Te
                 raise ValueError(f"scene_articulation_unavailable:{binding.entity_id}")
             roles[binding.entity_id] = getattr(binding, "collision_role", None)
             try:
-                meshes = collision_meshes(
-                    {"fpath": native.cfg.fpath, "body_scale": native.cfg.body_scale}
+                meshes = descriptor_collision_meshes(
+                    simulation, native, binding.simulation_uid
                 )
+                if meshes is None:
+                    meshes = collision_meshes(
+                        {"fpath": native.cfg.fpath, "body_scale": native.cfg.body_scale}
+                    )
             except Tf.ErrorException as error:
                 raise ValueError(
                     f"scene_collision_meshes_unavailable:{binding.entity_id}:{error}"
