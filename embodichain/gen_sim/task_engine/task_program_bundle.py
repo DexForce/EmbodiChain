@@ -1314,9 +1314,16 @@ def _program_payload(
                             _STACK_PLACE_CALL_ID,
                         }
                     )
-                    and any(
-                        call.get("call_id") == _CLEAR_RELEASED_CALL_ID
-                        for call in cleanup_calls
+                    and (
+                        any(
+                            call.get("call_id") == _CLEAR_RELEASED_CALL_ID
+                            for call in cleanup_calls
+                        )
+                        or isinstance(stability_presets, Mapping)
+                        and stability_presets.get(f"gen_sim.{node_id}.stable", {}).get(
+                            "support_contract_revision"
+                        )
+                        == 1
                     )
                     and all(
                         call.get("kind") == "registered"

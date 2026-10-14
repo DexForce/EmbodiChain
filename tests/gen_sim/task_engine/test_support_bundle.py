@@ -224,11 +224,12 @@ def test_relative_on_exact_reference_preserves_existing_pose_contract(
     assert len(new_place["post"]) == 1
 
 
+@pytest.mark.parametrize("inside", [False, True])
 @pytest.mark.parametrize("clearance", [False, True])
 def test_cleanup_terminal_reuses_one_strong_window_without_generic_wait(
-    support_scene: PreparedScene, clearance: bool
+    support_scene: PreparedScene, clearance: bool, inside: bool
 ) -> None:
-    graph = _placement_graph(reference="tray")
+    graph = _placement_graph(reference="tray", inside=inside)
     cleanup = [("park", "simulation.park", {})]
     if clearance:
         cleanup.insert(
@@ -260,10 +261,22 @@ def test_cleanup_terminal_reuses_one_strong_window_without_generic_wait(
             "preset": "gen_sim.place.stable",
         }
     ]
-    assert items[-1]["validators"][0]["reference"] == "tray"
-    if clearance:
-        assert "post" not in items[1]
-        assert "validators" not in items[1]
+    if not inside:
+        assert items[-1]["validators"][0]["reference"] == "tray"
+    assert "post" not in items[1]
+    assert "validators" not in items[1]
+    owners = [
+        item["name"]
+        for item in items
+        for policy in item.get("post", [])
+        if policy.get("preset") == "gen_sim.place.stable"
+    ]
+    assert owners == ["park"]
+    legacy = _constraints(graph, support_scene, revision=None)
+    old_items = bundle._program_payload(
+        graph, "legacy", support_scene, stability_presets=legacy["presets"]
+    )["program"]["items"]
+    assert bool(old_items[1].get("post")) is not clearance
 
 
 @pytest.mark.parametrize("unsupported", ["moving_link", "wrong_object"])
