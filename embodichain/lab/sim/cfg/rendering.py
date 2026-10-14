@@ -399,8 +399,12 @@ class RenderCfg:
         they have no enabled cameras, recording cameras, window, Viser or explicit
         rendering demand. Custom camera/visual code must explicitly select a native
         renderer or reserve rendering through its environment's demand hook.
-        Native rendering defaults to 'fast-rt' on every platform and GPU.
+        The run-task/run-env launcher uses 'fast-rt' for native auto rendering
+        on every platform; other entry points retain GPU-based selection.
         Explicit renderer selections and global defaults retain precedence.
+    - GPU-based auto selection: RTX-series cards use
+        'hybrid', while datacenter cards (A100/A800, H100/H800/H200/H20) use 'fast-rt'.
+        If no CUDA device is available or the GPU is unknown, it falls back to 'hybrid'.
     - 'hybrid' uses ray tracing for shadows and reflections while keeping rasterization for primary rendering,
         providing a balance between performance and visual quality.
     - 'fast-rt' is a fully ray-traced renderer for maximum visual fidelity, but may have higher computational cost.

@@ -564,8 +564,8 @@ class SimulationManager:
             defer_startup_summary: Let the owning environment emit the summary.
             requires_native_renderer: Predeclared render demand. ``False`` allows
                 auto to select NoRender when there are no window, browser or
-                forced-sync consumers. ``None`` uses the default native renderer
-                (FastRT). Explicit and global renderer overrides take precedence.
+                forced-sync consumers. ``None`` preserves standalone GPU-based
+                selection. Explicit and global renderer overrides take precedence.
         """
         try:
             self._initialize_simulation(
@@ -852,10 +852,9 @@ class SimulationManager:
         Args:
             renderer: The renderer to set. One of ``"auto"``, ``"hybrid"``,
                 ``"fast-rt"``, or ``"rt"``. When ``"auto"``, the renderer is
-                resolved immediately to the native default (FastRT) via
+                resolved immediately from the detected GPU via
                 :func:`embodichain.lab.sim.utility.render_utils.select_default_renderer`.
-            gpu_id: Retained for compatibility; default selection is independent
-                of the GPU.
+            gpu_id: The CUDA device index to query when ``renderer="auto"``.
 
         Returns:
             The resolved renderer name that was set as the default.
@@ -870,7 +869,7 @@ class SimulationManager:
             )
 
         if renderer == "auto":
-            # Resolve auto regardless of any previously forced default.
+            # Force auto-detection regardless of any previously forced default.
             cfg.DEFAULT_RENDERER = "auto"
             resolved = select_default_renderer(gpu_id)
         else:

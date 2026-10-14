@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import gc
 import queue
 
@@ -72,11 +73,11 @@ pytestmark = pytest.mark.no_sim
     ("requested", "override", "demand", "consumer", "expected"),
     [
         ("auto", "auto", False, None, "no-render"),
-        ("auto", "auto", True, None, "fast-rt"),
-        ("auto", "auto", None, None, "fast-rt"),
-        ("auto", "auto", False, "window", "fast-rt"),
-        ("auto", "auto", False, "viser", "fast-rt"),
-        ("auto", "auto", False, "sync", "fast-rt"),
+        ("auto", "auto", True, None, "hybrid"),
+        ("auto", "auto", None, None, "hybrid"),
+        ("auto", "auto", False, "window", "hybrid"),
+        ("auto", "auto", False, "viser", "hybrid"),
+        ("auto", "auto", False, "sync", "hybrid"),
         ("auto", "fast-rt", False, None, "fast-rt"),
         ("auto", "no-render", True, None, "no-render"),
         ("hybrid", "auto", False, None, "hybrid"),
@@ -85,16 +86,31 @@ pytestmark = pytest.mark.no_sim
         ("no-render", "hybrid", True, None, "no-render"),
     ],
 )
+@pytest.mark.parametrize("task_launcher", [False, True])
 def test_auto_renderer_respects_demand_and_overrides(
-    requested, override, demand, consumer, expected, monkeypatch, tmp_path
+    requested,
+    override,
+    demand,
+    consumer,
+    expected,
+    task_launcher,
+    monkeypatch,
+    tmp_path,
 ) -> None:
     from embodichain.lab.sim import cfg
-    from embodichain.lab.sim.utility.render_utils import select_default_renderer
+
+    from embodichain.lab.sim.utility.render_utils import (
+        _native_auto_renderer,
+        select_default_renderer,
+    )
 
     monkeypatch.setattr(SimulationManager, "_get_process_renderer", lambda: None)
     monkeypatch.setattr(cfg, "DEFAULT_RENDERER", override)
-
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _: "NVIDIA RTX 4090")
     selector = MagicMock(wraps=select_default_renderer)
+    if task_launcher and requested == override == "auto" and expected == "hybrid":
+        expected = "fast-rt"
     monkeypatch.setattr(
         "embodichain.lab.sim.utility.render_utils.select_default_renderer", selector
     )
@@ -111,7 +127,9 @@ def test_auto_renderer_respects_demand_and_overrides(
         _material_cache_dir=tmp_path,
         physics=SimpleNamespace(configure_world=lambda *_: None),
     )
-    world = SimulationManager._convert_sim_config(manager, config)
+    scope = _native_auto_renderer("fast-rt") if task_launcher else nullcontext()
+    with scope:
+        world = SimulationManager._convert_sim_config(manager, config)
     assert config.render_cfg.renderer == expected
     assert world.renderer == RenderCfg(renderer=expected).to_dexsim_flags()
     auto_no_render = requested == override == "auto" and expected == "no-render"

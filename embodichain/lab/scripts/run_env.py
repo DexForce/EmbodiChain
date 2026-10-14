@@ -49,6 +49,7 @@ from embodichain.lab.gym.utils.registration import (
     discover_task_packages,
     execute_init_hooks,
 )
+from embodichain.lab.sim.utility.render_utils import _native_auto_renderer
 from embodichain.utils.logger import (
     decorate_str_color,
     log_warning,
@@ -1638,6 +1639,7 @@ def _abort_and_close_env(env: Any, *, exit_process: bool | None = None) -> None:
         raise abort_error
 
 
+@_native_auto_renderer("fast-rt")
 def cli(argv: Sequence[str] | None = None) -> None:
     """Command-line interface for environment runner.
 
