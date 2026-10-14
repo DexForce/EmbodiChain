@@ -171,6 +171,17 @@ exact native support, full measured planar footprint, contact height and release
 evidence. Point/upright/named targets retain their prior constraints. Episode
 geometry caches remove only exactly duplicated payload points; poses, contact
 and acceptance are freshly measured on the unchanged stability cadence.
+New bundles may explicitly request `support_contract_revision=1` from
+`generate_task_program_bundle()`. `support_evidence.py` captures rigid-pair load
+patches during actual physics substeps; `support_contract.py` binds their original
+sample time, episode and actors to the exact release phase. The pinned Default
+contact-cache revision getter is capability-checked; missing provenance is
+unavailable, never a newly stamped cached observation. `stability.py` uses the
+canonical acknowledged environment clock, and `task_spec_runtime.py` independently
+joins historical terminal support and current final support. Strong declarations
+cannot fall back to geometry-only evidence; unsupported relations or moving links
+remain unavailable. The marker changes the bundle fingerprint, not physical
+parameters or legacy default behavior. It is not itself native qualification.
 Up to three shared waypoint plans may be compared for the same acquired grasp
 and unchanged targets. Each must pass every existing safety gate. FK records
 maximum/intermediate rotation, not just final heading; a low-rotation plan is

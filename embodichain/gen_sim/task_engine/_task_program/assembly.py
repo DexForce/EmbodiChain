@@ -137,6 +137,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             constraints,
             step_dt=self.step_dt,
         )
+        self._support_post_port = self._task_post_port
+        self._strong_support = any(
+            c.support_contract_revision == 1 for c in constraints.values()
+        )
         if articulation_bindings:
             from .articulation_slide import (
                 ArticulationStabilityPort,
@@ -300,6 +304,8 @@ class _TaskFactory(SimulationTaskProgramFactory):
         )
         # GenSim snapshot collision qualification needs the same-tick base frame.
         provider._capture_root_pose = True
+        if self._strong_support:
+            self._support_post_port.bind_clock(clock)
         return provider
 
     def create_registered_semantic_lowerers(
@@ -392,6 +398,7 @@ class TaskAdapterFactory:
     runtime_preset: str | None = None
     press_routes: tuple = ()
     twist_routes: tuple = ()
+    support_contract_revision: int | None = None
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -621,6 +628,7 @@ def load_deployment(
             "pour_receivers",
             "staging_calls",
             "staging_retention_sources",
+            "support_contract_revision",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
     ):
@@ -628,6 +636,11 @@ def load_deployment(
             "Unsupported GenSim task constraint format; regenerate the bundle."
         )
     presets = payload["presets"]
+    support_revision = payload.get("support_contract_revision")
+    if support_revision is not None and (
+        type(support_revision) is not int or support_revision != 1
+    ):
+        raise ValueError("Unsupported GenSim support contract revision.")
     adaptive_pick = payload.get("adaptive_pick", False)
     if type(adaptive_pick) is not bool:
         raise ValueError("GenSim adaptive_pick must be an explicit boolean.")
@@ -639,6 +652,10 @@ def load_deployment(
     constraints = {
         name: StabilityConstraint.decode(cfg) for name, cfg in presets.items()
     }
+    if support_revision is None and any(
+        cfg.support_contract_revision == 1 for cfg in constraints.values()
+    ):
+        raise ValueError("Strong support presets require the bundle contract marker.")
     from .drawer_binding import DrawerRoute
 
     if type(payload.get("drawers", [])) is not list:
@@ -983,6 +1000,7 @@ def load_deployment(
         runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
         twist_routes=twist_routes,
+        support_contract_revision=support_revision,
     )
     integration = replace(
         base.integration,

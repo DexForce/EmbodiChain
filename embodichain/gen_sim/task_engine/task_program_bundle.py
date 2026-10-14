@@ -192,6 +192,7 @@ def generate_task_program_bundle(
     twist_grip_depth_m: float | None = None,
     twist_contact_feedback: bool = False,
     twist_mass_source: bool = False,
+    support_contract_revision: int | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -214,6 +215,8 @@ def generate_task_program_bundle(
         twist_mass_source: Opt in to the Default-only deployment MassAPI copy
             instead of the Lab mass conversion. This is also selected when the
             unmodified Lab loader does not expose the mass policy capability.
+        support_contract_revision: Explicit native E1 support contract; None
+            preserves legacy bundles, while 1 requires scoped physical evidence.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -586,7 +589,12 @@ def generate_task_program_bundle(
             (route.binding.object_id, route.binding.part_id) for route in drawers
         ),
     )
-    stability = _task_stability_payload(selected_graph, scene, embodiment_payload)
+    stability = _task_stability_payload(
+        selected_graph,
+        scene,
+        embodiment_payload,
+        support_contract_revision=support_contract_revision,
+    )
     drawer_targets = {route.affordance for route in drawers}
     drawer_groups = frozenset(
         node["task_instance_id"]
@@ -822,9 +830,15 @@ def _task_stability_payload(
     graph: SemanticTaskGraph,
     scene: Any,
     embodiment: dict[str, Any],
+    *,
+    support_contract_revision: int | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
+    if support_contract_revision is not None and (
+        type(support_contract_revision) is not int or support_contract_revision != 1
+    ):
+        raise ValueError("Unsupported GenSim support contract revision.")
     upright: set[str] = set()
     oriented_groups = {
         node["task_instance_id"]
@@ -1080,7 +1094,35 @@ def _task_stability_payload(
                 ),
                 "position_tolerance": 0.05 if holding else _RELATIVE_POSITION_TOLERANCE,
             }
-    return {
+    if support_contract_revision == 1:
+        from ._task_program.drawer_binding import inside_parts
+
+        for node in graph["nodes"]:
+            if node["task_type"] != "E1":
+                continue
+            call = node["call"]
+            args = call.get("arguments", {})
+            obj = call.get("object", args.get("object"))
+            ref = None
+            if call["kind"] == "place" and "inside" in call:
+                ref, parsed_obj, part = inside_parts(call["inside"])
+                if parsed_obj != obj or part:
+                    continue
+            elif call.get("call_id") in {
+                _PLACE_RELATIVE_CALL_ID,
+                _UPRIGHT_PLACE_CALL_ID,
+                _STACK_PLACE_CALL_ID,
+            } and args.get("relation") in {"on", "inside"}:
+                ref = args.get("reference")
+            if ref not in objects or objects[ref].get("role") == "articulation":
+                continue
+            key = f"gen_sim.{node['id']}.stable"
+            cfg = dict(presets.get(key, {"kind": "supported_region", "entity": obj}))
+            if cfg["kind"] in {"placement", "upright"}:
+                cfg["kind"] = "supported_region"
+            cfg.update(reference=ref, support_contract_revision=1)
+            presets[key] = cfg
+    result = {
         "schema_version": "gen_sim_task_constraints/v1",
         "presets": presets,
         "adaptive_pick": any(
@@ -1093,6 +1135,9 @@ def _task_stability_payload(
             if n["call"]["kind"] == "pick" and not n["call"].get("grasp")
         },
     }
+    if support_contract_revision is not None:
+        result["support_contract_revision"] = support_contract_revision
+    return result
 
 
 def _program_payload(
@@ -1163,6 +1208,14 @@ def _program_payload(
         for node in graph["nodes"]
     ]
     by_name = {item["name"]: item for item in items}
+    if isinstance(stability_presets, Mapping):
+        for item in items:
+            key = f"gen_sim.{item['name']}.stable"
+            if stability_presets.get(key, {}).get("support_contract_revision") == 1:
+                # The strong service owns this uninterrupted terminal window.
+                item["post"] = [
+                    p for p in item.get("post", ()) if p.get("preset") == key
+                ]
     articulation_bindings = graph_bindings(graph, scene)
     for group in graph["task_groups"]:
         if group.get("task_type") == "E8":

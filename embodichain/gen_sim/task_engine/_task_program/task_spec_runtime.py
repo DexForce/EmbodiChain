@@ -567,6 +567,498 @@ def _release_window(
     }
 
 
+def _strong_support_trace(
+    boundary: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    preset: str,
+    uid: str,
+    reference: str,
+    num_envs: int,
+) -> Mapping[str, Any]:
+    """Resolve the declared terminal policy without borrowing another occurrence."""
+    prefix = boundary["metadata"]["program_segment_source_path"]
+    traces = [
+        p
+        for p in boundary["metadata"].get("post_policies", [])
+        if p.get("kind") == "wait_stable"
+        and type(p.get("policy_index")) is int
+        and p.get("source_path") == [*prefix, "post", p["policy_index"]]
+        and p.get("result", {}).get("preset") == preset
+    ]
+    if len(traces) != 1:
+        raise ValueError("Strong support lacks its unique terminal policy.")
+    trace, result = traces[0], traces[0]["result"]
+    native = result.get("measurements", {}).get("native_support", {})
+    duration = cfg.get("duration", 3.0)
+    seconds = result.get("stable_seconds", [])
+    start, end = result.get("start_step"), result.get("end_step")
+    started, ended, dt = (
+        result.get("clock_started_at"),
+        result.get("clock_ended_at"),
+        native.get("step_dt"),
+    )
+    if (
+        result.get("kind") != cfg["kind"]
+        or result.get("support_contract_revision") != 1
+        or result.get("entity") != uid
+        or result.get("reference") != reference
+        or result.get("required_seconds") != duration
+        or any(
+            not _bool_rows(v, num_envs) or not all(v)
+            for v in (trace.get("result_mask"), result.get("accepted_mask"))
+        )
+        or not isinstance(seconds, list)
+        or len(seconds) != num_envs
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < duration
+            for v in seconds
+        )
+        or type(start) is not int
+        or type(end) is not int
+        or not 0 <= start <= end
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < 0
+            for v in (started, ended, dt)
+        )
+        or dt == 0
+        or not math.isclose(started, start * dt, rel_tol=0, abs_tol=1e-8)
+        or not math.isclose(ended, end * dt, rel_tol=0, abs_tol=1e-8)
+        or ended - started + 1e-8 < duration
+        or any(v > ended - started + 1e-8 for v in seconds)
+        or native.get("observed_step") != end
+        or native.get("observed_at") != ended
+        or boundary.get("end_steps") != [end] * num_envs
+    ):
+        raise ValueError("Strong support policy lacks its exact stable clock/boundary.")
+    return result
+
+
+def _strong_native_loads(native: Mapping[str, Any], num_envs: int) -> list[bool]:
+    """Recheck the actual pair and load rather than trusting derived booleans."""
+    import numpy as np
+    from .support_evidence import support_from_contacts
+
+    result = []
+    for row, pair in zip(native["rows"], native["actor_pairs"], strict=True):
+        raw = row.get("raw_contacts", {})
+        pairs = np.asarray(raw.get("user_ids", []))
+        points, normals = (
+            np.asarray(raw.get(key, [])) for key in ("position", "normal")
+        )
+        impulses = np.asarray(raw.get("impulse", []))
+        center = np.asarray(row.get("center_of_mass_world"))
+        tolerance = row.get("com_tolerance_m")
+        if (
+            pairs.ndim != 2
+            or pairs.shape[1] != 2
+            or pairs.dtype.kind not in "iu"
+            or points.shape != (len(pairs), 3)
+            or normals.shape != points.shape
+            or impulses.shape != (len(pairs),)
+            or center.shape != (3,)
+            or not np.isfinite(center).all()
+            or type(tolerance) not in (int, float)
+            or not math.isfinite(tolerance)
+            or not 0 < tolerance <= 0.01
+        ):
+            raise ValueError(
+                "Strong native support lacks its original contact payload."
+            )
+        accepted, recomputed = support_from_contacts(
+            pairs,
+            points,
+            normals,
+            impulses,
+            center,
+            object_actor=pair["object_actor"],
+            reference_actor=pair["reference_actor"],
+            tolerance=tolerance,
+        )
+        if row.get("contacts_world") != recomputed["contacts_world"] or any(
+            type(row.get(key)) not in (int, float)
+            or type(recomputed[key]) not in (int, float)
+            or not math.isclose(row[key], recomputed[key], rel_tol=1e-6, abs_tol=1e-12)
+            for key in ("com_patch_distance_m", "upward_impulse")
+        ):
+            raise ValueError(
+                "Strong native support derived patch differs from raw contacts."
+            )
+        result.append(accepted)
+    if len(result) != num_envs:
+        raise ValueError("Strong native support differs from the environment batch.")
+    return result
+
+
+def _strong_support_flags(
+    native: Mapping[str, Any],
+    landing: Mapping[str, Any] | None,
+    cfg: Mapping[str, Any],
+    window: Mapping[str, Any],
+    trace: Mapping[str, Any],
+    uid: str,
+    reference: str,
+    num_envs: int,
+    contacts: list[Any] | None = None,
+) -> list[bool]:
+    from .support_contract import support_window_flags
+    from .placement_evidence import _valid_pose
+    from .stability import _contact_support_heights, _constraint_pose_flags
+
+    pose, ref_pose = torch.tensor(native["object_pose"]), torch.tensor(
+        native["reference_pose"]
+    )
+    _valid_pose(pose, num_envs)
+    _valid_pose(ref_pose, num_envs)
+    flags = support_window_flags(
+        native,
+        window,
+        num_envs,
+        entity=uid,
+        reference=reference,
+        native_entity=uid,
+        native_reference=reference,
+    )
+    origin = trace["measurements"]["native_support"]
+    original_pose, original_ref = torch.tensor(origin["object_pose"]), torch.tensor(
+        origin["reference_pose"]
+    )
+    _valid_pose(original_pose, num_envs)
+    _valid_pose(original_ref, num_envs)
+    constraint = StabilityConstraint.decode(dict(cfg))
+    if not _constraint_pose_flags(constraint, original_pose, original_ref).all():
+        raise ValueError(
+            "Strong history violates its original placement target or axes."
+        )
+    static_flags = _constraint_pose_flags(constraint, pose, ref_pose).tolist()
+    flags = [a and b for a, b in zip(flags, static_flags, strict=True)]
+    if (
+        native.get("episode_generations") != origin.get("episode_generations")
+        or native.get("actor_pairs") != origin.get("actor_pairs")
+        or trace["clock_started_at"] + 1e-8 < window["completed_at"]
+    ):
+        raise ValueError("Strong support differs from the release episode or actors.")
+    source_flags = support_window_flags(
+        origin,
+        window,
+        num_envs,
+        entity=uid,
+        reference=reference,
+        native_entity=uid,
+        native_reference=reference,
+    )
+    source_supported = origin.get("supported", [])
+    if (
+        not _bool_rows(source_supported, num_envs)
+        or not all(source_supported)
+        or not all(source_flags)
+        or not all(_strong_native_loads(origin, num_envs))
+    ):
+        raise ValueError("Strong stability lacks its own qualified native sample.")
+    if not torch.isfinite(
+        _contact_support_heights(
+            torch.tensor(source_supported, dtype=torch.bool), origin, pose[:, 2, 3]
+        )
+    ).all():
+        raise ValueError("Strong stability lacks its own qualified load patch.")
+    supported = native.get("supported", [])
+    if not _bool_rows(supported, num_envs):
+        raise ValueError("Strong support lacks measured load flags.")
+    loads = torch.isfinite(
+        _contact_support_heights(
+            torch.tensor(supported, dtype=torch.bool), native, pose[:, 2, 3]
+        )
+    ).tolist()
+    raw_loads = _strong_native_loads(native, num_envs)
+    for row, item in enumerate(native["rows"]):
+        sample = item.get("sample")
+        flags[row] &= bool(
+            supported[row] and loads[row] and raw_loads[row] and sample is not None
+        )
+    if cfg["kind"] == "supported_region":
+        if not isinstance(landing, Mapping):
+            raise ValueError(
+                "Strong region support lacks its complete landing geometry."
+            )
+        original_pose, original_ref = torch.tensor(origin["object_pose"]), torch.tensor(
+            origin["reference_pose"]
+        )
+        if not all(
+            _region_flags(
+                origin,
+                trace["measurements"].get("landing_region", {}),
+                original_pose,
+                original_ref,
+                uid,
+                trace["measurements"].get("support_gap", []),
+                num_envs,
+                reference_uid=reference,
+            )
+        ):
+            raise ValueError("Strong stability lacks its own complete planar support.")
+        # The collector computes this from the same native object mesh and patch.
+        physical = _region_flags(
+            native,
+            landing,
+            pose,
+            ref_pose,
+            uid,
+            contacts or [],
+            num_envs,
+            reference_uid=reference,
+        )
+        flags = [a and b for a, b in zip(flags, physical, strict=True)]
+    return flags
+
+
+def _strong_placement_record(
+    target: Any,
+    node: Mapping[str, Any],
+    group: Mapping[str, Any],
+    configured: StabilityConstraint | None,
+    object_binding: Any,
+    reference_binding: Any,
+    pose: torch.Tensor,
+    reference_pose: torch.Tensor,
+    predicate: Any,
+    member: Mapping[str, Any],
+    segments: Mapping[str, Any],
+    boundary: Mapping[str, Any],
+    num_envs: int,
+    *,
+    recorded: bool,
+    frames: list[int] | None,
+) -> dict[str, Any]:
+    """Collect the release occurrence and its independent historical/current support."""
+    from dataclasses import asdict
+    from .placement_evidence import _native_mesh
+    from .stability import _contact_support_heights
+    from .support_contract import release_window
+
+    uid, reference = member["object_uid"], reference_binding.entity_id
+    if (
+        configured is None
+        or configured.support_contract_revision != 1
+        or configured.kind not in {"stack", "supported_placement", "supported_region"}
+        or configured.entity != uid
+        or configured.reference != reference
+        or object_binding.simulation_uid != uid
+        or reference_binding.simulation_uid != reference
+        or predicate.arguments.get("relation") not in {"on", "inside"}
+        or predicate.arguments["relation"] == "inside"
+        and configured.kind != "supported_region"
+    ):
+        raise ValueError("Strong placement lacks its frozen supported rigid binding.")
+    cfg, preset = asdict(configured), f"gen_sim.{node['id']}.stable"
+    source = segments[group["node_ids"][-1]]
+    trace = _strong_support_trace(source, cfg, preset, uid, reference, num_envs)
+    released, window = release_window(node, segments, boundary, num_envs)
+    if recorded:
+        native = deepcopy(trace["measurements"]["native_support"])
+    else:
+        sensor = target.sim.get_sensor(f"gen_sim_support__{uid}__{reference}")
+        reader = getattr(sensor, "support_reader", None)
+        if (
+            reader is None
+            or reader.entity_id != uid
+            or reader.reference_id != reference
+        ):
+            raise ValueError(
+                "Strong final observation lacks its canonical native reader."
+            )
+        if reader.object is not target.sim.get_rigid_object(
+            uid
+        ) or reader.reference is not target.sim.get_rigid_object(reference):
+            raise ValueError(
+                "Strong reader differs from current frozen native bindings."
+            )
+        _, native = reader.observe(pose, reference_pose, support_contract_revision=1)
+    if not _region_poses_match(native, pose, reference_pose, num_envs):
+        raise ValueError("Strong support differs from exact observed boundary poses.")
+    landing, contacts = None, None
+    if configured.kind == "supported_region":
+        _, landing = measure_planar_placement(
+            target.sim, object_binding, reference_binding, pose, reference_pose
+        )
+        if recorded and not _region_poses_match(
+            trace["measurements"].get("landing_region", {}),
+            pose,
+            reference_pose,
+            num_envs,
+        ):
+            raise ValueError(
+                "Strong landing region differs from recorded boundary poses."
+            )
+        vertices, _ = _native_mesh(target.sim, object_binding, num_envs)
+        bottom = (vertices.to(pose) @ pose[:, 2, :3, None]).squeeze(-1).amin(-1) + pose[
+            :, 2, 3
+        ]
+        heights = _contact_support_heights(
+            torch.tensor(native["supported"], dtype=torch.bool), native, bottom
+        )
+        contacts = [float(v) if torch.isfinite(v) else None for v in bottom - heights]
+    flags = _strong_support_flags(
+        native, landing, cfg, window, trace, uid, reference, num_envs, contacts
+    )
+    metrics = {
+        "scope": "native_supported_placement",
+        "support_contract_revision": 1,
+        "placement_node_id": node["id"],
+        "support_boundary_node_id": source["name"],
+        "boundary_node_id": boundary["name"],
+        "stability_preset": preset,
+        "observation_kind": "recorded" if recorded else "final",
+        "native_support": native,
+        "reference_uid": reference,
+        "relation": predicate.arguments["relation"],
+        "released": released,
+        "release_window": window,
+    }
+    if landing is not None:
+        metrics["landing_region"] = landing
+        metrics["support_gap_m"] = contacts
+    if recorded:
+        metrics["boundary_frames"] = list(frames)
+    return {
+        "group_id": group["id"],
+        "uid": uid,
+        "part_id": member["object_part_id"],
+        "accepted": [a and b for a, b in zip(flags, released, strict=True)],
+        "measurements": metrics,
+    }
+
+
+def _strong_placement_matches(
+    record: Mapping[str, Any],
+    predicate: Any,
+    roles: Mapping[str, Any],
+    num_envs: int,
+    *,
+    graph: Mapping[str, Any],
+    constraints: Mapping[str, Any],
+    segments: Mapping[str, Any],
+) -> bool:
+    """Require the explicit strong scope; never downgrade to a legacy boolean."""
+    from .support_contract import release_window
+
+    try:
+        metrics, uid = record["measurements"], record["uid"]
+        references = roles.get(predicate.arguments.get("reference"), [])
+        if len(references) != 1:
+            return False
+        group = next(g for g in graph["task_groups"] if g["id"] == record["group_id"])
+        node = next(
+            n for n in graph["nodes"] if n["id"] == metrics["placement_node_id"]
+        )
+        raw_call = node["call"]
+        reference = references[0]["uid"]
+        preset = f"gen_sim.{node['id']}.stable"
+        cfg = constraints["presets"][preset]
+        if raw_call.get("kind") == "place":
+            from .drawer_binding import inside_parts
+
+            if predicate.arguments.get("relation") != "inside" or inside_parts(
+                raw_call.get("inside", "")
+            ) != (reference, uid, None):
+                return False
+        source = segments[group["node_ids"][-1]]
+        recorded = metrics["observation_kind"] == "recorded"
+        boundary = source if recorded else next(reversed(segments.values()))
+        if (
+            metrics.get("scope") != "native_supported_placement"
+            or metrics.get("support_contract_revision") != 1
+            or predicate.name != "semantic_goal"
+            or predicate.arguments.get("task_type") != "E1"
+            or cfg.get("support_contract_revision") != 1
+            or cfg.get("kind")
+            not in {"stack", "supported_placement", "supported_region"}
+            or cfg.get("entity") != uid
+            or cfg.get("reference") != reference
+            or len(references) != 1
+            or references[0].get("part_id") is not None
+            or record.get("part_id") is not None
+            or group["task_type"] != "E1"
+            or node["id"] not in group["node_ids"]
+            or node.get("task_type") != "E1"
+            or raw_call.get("object", raw_call.get("arguments", {}).get("object"))
+            != uid
+            or not any(
+                v == {"uid": uid, "part_id": None}
+                for v in roles.get(predicate.arguments.get("subject"), [])
+            )
+            or metrics.get("reference_uid") != reference
+            or metrics.get("relation") != predicate.arguments.get("relation")
+            or metrics["relation"] not in {"on", "inside"}
+            or raw_call.get("kind") not in {"place", "registered"}
+            or raw_call.get("kind") == "place"
+            and not raw_call.get(metrics["relation"])
+            or metrics["relation"] == "inside"
+            and (
+                raw_call.get("kind") != "place"
+                or not raw_call.get("inside")
+                or cfg["kind"] != "supported_region"
+            )
+            or raw_call.get("kind") == "registered"
+            and raw_call.get("call_id")
+            not in {
+                "simulation.place_relative",
+                "gen_sim.place_upright",
+                "gen_sim.stack_place",
+            }
+            or raw_call.get("kind") == "registered"
+            and (
+                raw_call.get("arguments", {}).get("reference") != reference
+                or raw_call["arguments"].get("relation") != metrics["relation"]
+            )
+            or metrics.get("stability_preset") != preset
+            or metrics.get("boundary_node_id") != boundary["name"]
+            or metrics.get("support_boundary_node_id") != source["name"]
+            or metrics.get("observation_kind") not in {"recorded", "final"}
+        ):
+            return False
+        trace = _strong_support_trace(source, cfg, preset, uid, reference, num_envs)
+        released, window = release_window(node, segments, boundary, num_envs)
+        native = metrics["native_support"]
+        if (
+            metrics.get("released") != released
+            or metrics.get("release_window") != window
+        ):
+            return False
+        if recorded:
+            original = trace["measurements"]["native_support"]
+            if (
+                native != original
+                or metrics.get("boundary_frames") != boundary.get("end_steps")
+                or cfg["kind"] == "supported_region"
+                and metrics.get("landing_region")
+                != trace["measurements"].get("landing_region")
+            ):
+                return False
+        physical = _strong_support_flags(
+            native,
+            metrics.get("landing_region"),
+            cfg,
+            window,
+            trace,
+            uid,
+            reference,
+            num_envs,
+            metrics.get("support_gap_m"),
+        )
+        accepted = record.get("accepted")
+        return _bool_rows(accepted, num_envs) and all(
+            a == (p and r) for a, p, r in zip(accepted, physical, released, strict=True)
+        )
+    except (
+        KeyError,
+        ValueError,
+        TypeError,
+        RuntimeError,
+        StopIteration,
+        AttributeError,
+    ):
+        return False
+
+
 def _placement_record(
     target: Any,
     deployment: Any,
@@ -581,9 +1073,19 @@ def _placement_record(
     recorded: bool = False,
 ) -> dict[str, Any]:
     registration = deployment.integration.registration
+    strong = (
+        getattr(
+            getattr(deployment.integration, "adapter_factory", None),
+            "support_contract_revision",
+            None,
+        )
+        == 1
+    )
     from .spatial_reference import SIDE_RELATIONS
 
     if predicate.arguments.get("relation") in SIDE_RELATIONS:
+        if strong:
+            raise ValueError("Strong support does not qualify this placement relation.")
         return _side_placement_record(
             target,
             deployment,
@@ -608,6 +1110,7 @@ def _placement_record(
         member,
         contract["coverage"]["roles"],
         scene_binding,
+        support_contract_revision=1 if strong else None,
     )
     uid = member["object_uid"]
     preset = f"gen_sim.{node['id']}.stable"
@@ -620,11 +1123,15 @@ def _placement_record(
         _bare_table_node(node, predicate)
         and getattr(configured, "kind", None) == "supported_region"
     )
-    if region_scope and (
-        configured.entity != uid
-        or configured.reference != reference_uid
-        or getattr(configured, "displacement", None) is not None
-        or getattr(configured, "target_position", None) is not None
+    if (
+        region_scope
+        and not strong
+        and (
+            configured.entity != uid
+            or configured.reference != reference_uid
+            or getattr(configured, "displacement", None) is not None
+            or getattr(configured, "target_position", None) is not None
+        )
     ):
         raise ValueError("Region placement preset differs from its exact graph call.")
     if (
@@ -681,6 +1188,24 @@ def _placement_record(
     object_pose, reference_pose = pose(bindings[uid]), pose(bindings[reference_uid])
     if object_pose.shape[0] != num_envs:
         raise ValueError("Placement observation environment count differs.")
+    if strong:
+        return _strong_placement_record(
+            target,
+            node,
+            groups[group_id],
+            configured,
+            bindings[uid],
+            bindings[reference_uid],
+            object_pose,
+            reference_pose,
+            predicate,
+            member,
+            segments,
+            boundary,
+            num_envs,
+            recorded=recorded,
+            frames=frames,
+        )
     if predicate.arguments["relation"] == "on":
         if recorded:
             prefix = boundary["metadata"]["program_segment_source_path"]
@@ -877,6 +1402,8 @@ def _region_flags(
     uid: str,
     contacts: list[Any],
     num_envs: int,
+    *,
+    reference_uid: str = "table",
 ) -> list[bool]:
     """Conjoin exact native load and the complete measured planar footprint."""
     from .placement_evidence import (
@@ -892,7 +1419,7 @@ def _region_flags(
     if (
         native.get("scope") != "native_contact_support"
         or native.get("entity") != uid
-        or native.get("reference") != "table"
+        or native.get("reference") != reference_uid
         or native.get("env_ids") != list(range(num_envs))
         or any(type(v) is not int for v in native.get("env_ids", []))
         or not _region_poses_match(native, pose, reference_pose, num_envs)
@@ -946,6 +1473,19 @@ def _placement_measurement_matches(
     segments: Mapping[str, Any],
 ) -> bool:
     """Do not accept a generic success/alignment record as E1 relation evidence."""
+    if constraints.get("support_contract_revision") == 1 or any(
+        cfg.get("support_contract_revision") == 1
+        for cfg in constraints.get("presets", {}).values()
+    ):
+        return _strong_placement_matches(
+            record,
+            predicate,
+            roles,
+            num_envs,
+            graph=graph,
+            constraints=constraints,
+            segments=segments,
+        )
     metrics = record.get("measurements", {})
     references = roles.get(predicate.arguments.get("reference"), [])
     accepted = record.get("accepted", [])
@@ -1446,6 +1986,7 @@ def evaluate_runtime_evidence(
                             "bound_link_world_axes",
                             "native_contact_support",
                             "native_supported_landing_region",
+                            "native_supported_placement",
                         }
                         and metrics.get("boundary_frames") == segment.get("end_steps")
                     ):

@@ -185,6 +185,36 @@ def _run(port, policy, segment):
     return port.post_policy_result(policy, segment=segment).tolist()
 
 
+@pytest.mark.parametrize("acknowledge", [False, True])
+def test_strong_stability_requires_real_clock_steps(acknowledge):
+    from embodichain.lab.gym.envs.task_program.bridge import EnvironmentStepClock
+
+    port, policy, segment, _, _, _ = _case()
+    cfg = port._constraints[policy.cfg.preset]
+    port._constraints[policy.cfg.preset] = replace(cfg, support_contract_revision=1)
+    observer = port._support_observers[("object", "support")]
+    legacy = observer.observe
+    observer.bind_clock = lambda clock: None
+    observer.observe = lambda obj, ref, **kw: legacy(obj, ref)
+    clock = EnvironmentStepClock(0.04)
+    port.bind_clock(clock)
+    actions = port.actions(policy, segment=segment, active_mask=torch.tensor([True]))
+    next(actions)
+    if not acknowledge:
+        with pytest.raises(ValueError, match="acknowledged environment steps"):
+            next(actions)
+        assert not port.post_policy_result(policy, segment=segment).any()
+        return
+    clock.advance_after_env_step()
+    for _ in actions:
+        clock.advance_after_env_step()
+    assert port.post_policy_result(policy, segment=segment).tolist() == [True]
+    result = port.post_policy_metadata(policy, segment=segment)
+    assert result["start_step"] == 0 and result["end_step"] == 2
+    assert result["clock_started_at"] == 0 and result["clock_ended_at"] == 0.08
+    assert result["stable_seconds"] == [0.08]
+
+
 def test_contact_patch_surface_not_reference_rim_controls_height():
     port, policy, segment, _, _, observations = _case()
     assert _run(port, policy, segment) == [True]
