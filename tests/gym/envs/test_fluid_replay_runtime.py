@@ -48,6 +48,7 @@ class _FluidReplayRuntime:
         cfg.sim_cfg.render_cfg = RenderCfg(renderer="no-render")
         cfg.sim_cfg.headless = True
         cfg.enable_sensor = False
+        cfg.events.record_camera = None
         cfg.sim_steps_per_control = 1
         cfg.sim_cfg.physics_dt = 0.001
         solver = cfg.sim_cfg.physics_cfg.solver_cfg

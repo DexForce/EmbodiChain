@@ -106,7 +106,12 @@ def _replay(args, trajectory: Path, output: Path) -> None:
     cfg.num_envs = args.num_envs
     cfg.sim_cfg.headless = True
     cfg.sim_cfg.render_cfg = RenderCfg(renderer=args.renderer)
-    cfg.enable_sensor = args.renderer != "no-render"
+    if args.renderer == "no-render":
+        cfg.enable_sensor = False
+        cfg.events.record_camera = None
+    else:
+        cfg.events.record_camera.params["save_path"] = str(output / "videos")
+        cfg.events.record_camera.params["max_env_num"] = cfg.num_envs
     if args.particle_spacing is not None:
         # Qualification smoke mode uses a coarser initial fill, explicitly recorded.
         fluid = cfg.fluid_object[0]
@@ -121,18 +126,8 @@ def _replay(args, trajectory: Path, output: Path) -> None:
             2.25 * args.particle_spacing
         )
     env = FluidReplayEnv(cfg, trajectory=str(trajectory), speed=args.speed)
-    writer = None
     try:
         obs, info = env.reset(seed=0)
-        if cfg.enable_sensor:
-            import imageio.v2 as imageio
-
-            writer = imageio.get_writer(
-                output / "fluid_gym.mp4",
-                fps=round(1 / env.step_dt),
-                codec="libx264",
-                quality=8,
-            )
         duration = (
             env.replay_duration
             if args.seconds is None
@@ -162,13 +157,6 @@ def _replay(args, trajectory: Path, output: Path) -> None:
                     rtol=0,
                     atol=0,
                 )
-            if writer is not None:
-                writer.append_data(
-                    env.sensors["overview"]
-                    .get_data()["color"][0, :, :, :3]
-                    .cpu()
-                    .numpy()
-                )
             if index % max(1, round(1 / env.step_dt)) == 0 or index == steps - 1:
                 from embodichain.lab.gym.envs.managers.observations import (
                     get_fluid_summary,
@@ -197,10 +185,23 @@ def _replay(args, trajectory: Path, output: Path) -> None:
                 }
                 samples.append(sample)
                 print(json.dumps(sample), flush=True)
+        videos = []
+        if args.renderer != "no-render":
+            # Closing discards uncommitted recordings. Commit the last episode
+            # explicitly, including short qualification runs without a reset.
+            env.event_manager.get_functor("record_camera").save_and_clear()
+            name = cfg.events.record_camera.params["name"]
+            videos = [
+                str(Path("videos") / f"episode_0_{name}_env{env_id}.mp4")
+                for env_id in range(env.num_envs)
+            ]
         report = {
             "source": env.source_qualification,
             "coupling": "one-way measured Task Program state replay",
             "num_envs": env.num_envs,
+            "renderer": args.renderer,
+            "videos": videos,
+            "video_fps": env.control_frequency if videos else None,
             "particle_count_per_env": env.sim.get_fluid_object("water").num_particles,
             "partial_reset_step": args.partial_reset_step,
             "replay_complete": info["fluid_replay_finished"].cpu().tolist(),
@@ -211,8 +212,6 @@ def _replay(args, trajectory: Path, output: Path) -> None:
             json.dumps(report, indent=2) + "\n"
         )
     finally:
-        if writer is not None:
-            writer.close()
         env.close(exit_process=False)
     del env
     SimulationManager.flush_cleanup_queue()
@@ -230,7 +229,7 @@ def main() -> None:
     parser.add_argument("--num-envs", type=int, default=2)
     parser.add_argument("--speed", type=float, default=2.0)
     parser.add_argument(
-        "--renderer", choices=["no-render", "rt", "hybrid"], default="rt"
+        "--renderer", choices=["hybrid", "fast-rt", "no-render"], default="hybrid"
     )
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--particle-spacing", type=float)

@@ -15,12 +15,18 @@
 ## Task Program → 流体 Gym
 
 ```bash
-python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2
+python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2 --renderer hybrid
 ```
 
 默认先在 MuJoCo 中执行现有 Task Program，验证真实杯子抬升、倾倒和放回，
 再启动独立 SPH Gym 回放其关节与杯子实测状态。输出包含源轨迹、源验收报告、
-流体接水量统计和 `fluid_gym.mp4`。复用本工具生成的已验收轨迹可传
+流体接水量统计，以及 `videos/episode_0_fluid_gym_env0.mp4`、
+`videos/episode_0_fluid_gym_env1.mp4` 等每环境独立视频。
+默认使用 `hybrid`，也支持 `--renderer fast-rt`。
+录制通过环境 `record_camera` 事件调用现有 `record_camera_data`，
+配置 `per_env: true`、`fps: null`，每个控制步采集各 arena 的相对视角，
+按实际控制频率（本配置 24 fps）保存。脚本结束前显式保存最后一段视频。
+复用本工具生成的已验收轨迹可传
 `--trajectory outputs/fluid-task-program/task_program_trajectory.pt`。
 `--renderer no-render --seconds 0.125 --particle-spacing 0.006 --partial-reset-step 1`
 用于低成本双环境局部重置检查；粗粒度检查不代表完整液体效果。

@@ -196,3 +196,41 @@ Python at `/home/dex/.codex/worktrees/fluid-sph-worlds/venv/bin/python`, with
 embodichain.lab.scripts.run_fluid_task_program --num-envs 2` runs both phases.
 Old pre-recorded tutorial trajectories lack qualification metadata and are
 intentionally rejected by the Gym adapter.
+
+
+## Rendering follow-up: Hybrid / FastRT and record cameras
+
+User requested Hybrid or FastRT rendering and record-camera views for every
+environment. The fluid deployment now owns a `record_camera` interval event
+using `record_camera_data(per_env=True, fps=None)`. The runner defaults to
+Hybrid, supports FastRT, redirects recorder output to `<output>/videos`, and
+commits the final recording explicitly before close. Independent recorder
+buffers/counters preserve unselected rows during partial reset. Capture renders
+the current camera group before fetching frames, since interval events precede
+observation rendering. The previous script-owned, environment-zero ImageIO
+writer is removed.
+
+Validation:
+- Focused recorder, finalization, launcher/config and context tests: **128 passed**.
+- Live Gym row-reset/exhaustion regression: **1 passed**.
+- Hybrid and FastRT short camera runs both generated two valid 640x480,
+  24-fps videos. Full Hybrid replay generated **two separate 744-frame,
+  31-second videos**. Every frame decoded; both arena views were inspected at
+  lift, pour and return. Source acceptance and final fluid statistics are
+  unchanged: received **141.98288 / 140.88261 mL**, all sampled states finite.
+- Full Hybrid run wall time: **908.71 s**, including final video persistence.
+  This run is functional qualification, not a rendering performance benchmark.
+- Live partial-reset recording smoke: after discarding row 0's first two
+  frames, row 0 saved one new frame while row 1 retained all three frames.
+  The unchanged row's particle state also passed the exact preservation check.
+- API coverage **2503/2503**, Black 26.3.1, syntax/headers, context and diff checks
+  passed. General recording ownership was revised in manager-functor context;
+  fluid deployment usage was revised in env-framework context. Existing render
+  lifecycle guidance remains accurate because capture uses its public group API.
+
+Evidence: `outputs/fluid-gym-hybrid-record/videos/episode_0_fluid_gym_env0.mp4`,
+`episode_0_fluid_gym_env1.mp4` in the same directory, and
+`outputs/fluid-gym-hybrid-record/record-camera-validation.json` /
+`record-camera-contact-sheet.jpg`. Backend smoke evidence is in
+`outputs/fluid-record-fastrt-smoke/`; row-selection evidence is in
+`outputs/fluid-record-partial-smoke/`.

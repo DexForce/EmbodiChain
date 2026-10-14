@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import os
+import math
 import random
 import threading
 from collections import deque
@@ -36,23 +37,19 @@ __all__ = ["record_camera_data", "record_camera_data_async", "validation_cameras
 
 
 class record_camera_data(Functor):
-    """Record camera data in the environment. The camera is usually setup with third-person view, and
-    is used to record the scene during the episode. It is helpful for debugging and visualization.
+    """Capture a third-person camera through an interval event.
 
-    Note:
-        Currently, the functor is implemented in `interval' mode such that, it can only save the
-        recorded frames when in :meth:`env.step()` function call. For example:
-        ```python
-        env.step()
-        # perform multiple steps in the same episode
-        env.reset()
-        env.step()  # the video of the first episode will be saved here.
-        ```
-        The final episode frames will not be saved in the current implementation.
-        We may improve it in the future.
+    By default, views are tiled into one video at 20 fps. Set ``per_env=True``
+    to save one video per environment, with independent episode counters and
+    selected-row save/discard. ``fps=None`` uses the environment's control
+    frequency; use an explicit fps when capturing less often than every step.
+
+    Frames are committed by :meth:`save_and_clear` before reset. Closing the
+    environment discards uncommitted frames, so callers ending without reset
+    must explicitly commit the last recording.
     """
 
-    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv):
+    def __init__(self, cfg: FunctorCfg, env: EmbodiedEnv) -> None:
         """Initialize the functor.
 
         Args:
@@ -63,6 +60,14 @@ class record_camera_data(Functor):
             ValueError: If the asset is not a RigidObject or an Articulation.
         """
         super().__init__(cfg, env)
+
+        self._per_env = cfg.params.get("per_env", False)
+        fps = cfg.params.get("fps", 20.0)
+        self._fps = float(env.control_frequency if fps is None else fps)
+        if not math.isfinite(self._fps) or self._fps <= 0:
+            raise ValueError("Recording fps must be finite and positive.")
+        self._env_frames: dict[int, list[np.ndarray]] = {}
+        self._env_episode_ids: dict[int, int] = {}
 
         # extract the used quantities (to enable type-hinting)
         self._name = cfg.params.get("name", "default")
@@ -144,18 +149,57 @@ class record_camera_data(Functor):
         frames are saved before the episode is reset. This avoids the issue where the
         final episode's frames are lost because the save previously relied on detecting
         a reset inside :meth:`__call__`.
+
+        Args:
+            env_ids: Selected rows for separate videos, or all rows when None.
+                Tiled recording saves the whole shared frame buffer.
         """
         self._ensure_open()
+        if getattr(self, "_per_env", False):
+            for env_id in self._selected_recorded_envs(env_ids):
+                frames = self._env_frames[env_id]
+                if not frames:
+                    continue
+                episode = self._env_episode_ids.get(env_id, 0)
+                images_to_video(
+                    frames,
+                    self._save_path,
+                    f"episode_{episode}_{self._name}_env{env_id}",
+                    fps=self._fps,
+                )
+                self._env_episode_ids[env_id] = episode + 1
+                self._env_frames[env_id] = []
+            return
         if len(self._frames) > 0:
             video_name = f"episode_{self._current_episode}_{self._name}"
-            images_to_video(self._frames, self._save_path, video_name, fps=20)
+            images_to_video(
+                self._frames, self._save_path, video_name, fps=getattr(self, "_fps", 20)
+            )
 
             self._current_episode += 1
             self._frames = []
 
     def discard_and_clear(self, env_ids: Union[torch.Tensor, None] = None) -> None:
-        """Discard recorded frames without creating an episode video."""
+        """Discard frames without creating an episode video.
+
+        Args:
+            env_ids: Selected rows for separate videos, or all rows when None.
+                Tiled recording discards the whole shared frame buffer.
+        """
+        if getattr(self, "_per_env", False):
+            for env_id in self._selected_recorded_envs(env_ids):
+                self._env_frames[env_id] = []
+            return
         self._frames = []
+
+    def _selected_recorded_envs(self, env_ids: torch.Tensor | None) -> list[int]:
+        if env_ids is None:
+            return list(self._env_frames)
+        return [
+            int(env_id)
+            for env_id in torch.as_tensor(env_ids).reshape(-1).cpu().tolist()
+            if int(env_id) in self._env_frames
+        ]
 
     def finalize(self) -> None:
         """Discard uncommitted frames and close the recorder exactly once."""
@@ -188,14 +232,39 @@ class record_camera_data(Functor):
         ),
         max_env_num: int = 16,
         save_path: str = "./outputs/videos",
-    ):
+        per_env: bool = False,
+        fps: float | None = 20.0,
+    ) -> None:
+        """Capture up to ``max_env_num`` arena-relative views at this step.
+
+        Args:
+            env: Owning environment.
+            env_ids: Event rows; all camera rows are captured at a global interval.
+            name: Camera name, configured at initialization.
+            resolution: Image width and height, configured at initialization.
+            eye: Arena-relative camera position.
+            target: Arena-relative look-at position.
+            up: Camera up direction.
+            intrinsics: Pinhole intrinsics.
+            max_env_num: Maximum number of environment views to capture.
+            save_path: Output directory, configured at initialization.
+            per_env: Whether to save separate environment videos.
+            fps: Video cadence, or None for the environment control frequency.
+        """
         self._ensure_open()
+        # Interval events run before observation rendering. Render this group
+        # from the current physics state before reading its reusable buffers.
+        env.sim.render_camera_group([self.camera.group_id])
         self.camera.update(fetch_only=True)
         data = self.camera.get_data()
         rgb = data["color"]
 
-        num_frames = max(rgb.shape[0], max_env_num)
+        num_frames = min(rgb.shape[0], max_env_num)
         rgb = rgb[:num_frames]
+        if self._per_env:
+            for env_id, frame in enumerate(rgb[..., :3].detach().cpu().numpy()):
+                self._env_frames.setdefault(env_id, []).append(frame.copy())
+            return
         rgb = self._draw_frames_into_one_image(rgb)[..., :3].cpu().numpy()
         self._frames.append(rgb)
 

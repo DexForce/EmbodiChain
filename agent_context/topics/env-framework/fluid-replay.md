@@ -32,6 +32,18 @@ forces do not affect the recorded motion. Action managers, trajectory recording
 and active policy dataset recorders are rejected. Task Program acceptance is
 source provenance; fluid capture metrics remain separate measured outcomes.
 
+## Rendering and recording
+
+The pouring environment selects `hybrid`; the runner also accepts `fast-rt`.
+Its interval `record_camera` event uses the existing `record_camera_data`
+functor with `per_env=True` and `fps=None`, recording every environment view at
+control frequency. The runner only redirects the output directory and sets
+the recording limit to the resolved environment count. It explicitly commits
+at normal completion before close, which otherwise discards pending frames.
+Selected-row recording and camera consumption are owned by the
+[recording functor](../manager-functor/manager-functor.md#camera-recording).
+NoRender qualification removes the recorder before constructing the scene.
+
 Production configuration/measurement checks are in
 `tests/gym/envs/test_fluid_integration.py`; live isolation checks are in
 `tests/sim/objects/test_fluid_batch_runtime.py`. Generated trajectories/videos

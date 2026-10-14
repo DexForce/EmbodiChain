@@ -42,6 +42,10 @@ TASK = (
 
 def test_fluid_deployment_resolves_sources_and_observation_entities():
     cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    assert cfg.sim_cfg.render_cfg.renderer == "hybrid"
+    assert cfg.events.record_camera.params["per_env"] is True
+    assert cfg.events.record_camera.params["fps"] is None
+    assert cfg.events.record_camera.interval_step == 1
     assert len(cfg.fluid_object) == 1
     fluid = cfg.fluid_object[0]
     assert isinstance(fluid, FluidObjectCfg)
