@@ -115,7 +115,31 @@ def test_final_episode_is_committed_through_record_camera(monkeypatch, tmp_path)
     assert cfg.events.record_camera.params["save_path"] == str(tmp_path / "videos")
     result = json.loads((tmp_path / "fluid_gym_result.json").read_text())
     assert result["renderer"] == "fast-rt"
+    assert result["fluid_source"]["kind"] == "revolved_volume"
+    assert result["fluid_source"]["file_path"] is None
+    assert result["particle_spacing_m"] == 0.0015
     assert result["video_fps"] == 24
     assert result["videos"] == [
         f"videos/episode_0_fluid_gym_env{i}.mp4" for i in range(3)
     ]
+
+
+def test_spacing_override_rejects_fixed_points_before_scene_creation(
+    monkeypatch, tmp_path
+):
+    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
+    from embodichain.lab.sim.cfg import FluidSpawnCfg
+    from embodichain.utils.utility import load_config
+
+    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg.fluid_object[0].spawn = FluidSpawnCfg(positions=[[0, 0, 0]])
+    monkeypatch.setattr(runner, "config_to_cfg", lambda *args, **kwargs: cfg)
+    args = argparse.Namespace(
+        replay_task=str(TASK),
+        num_envs=2,
+        renderer="hybrid",
+        particle_spacing=0.006,
+        speed=2,
+    )
+    with pytest.raises(ValueError, match="fixed sampling"):
+        runner._replay(args, tmp_path / "unused.pt", tmp_path)

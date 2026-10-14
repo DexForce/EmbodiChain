@@ -39,13 +39,19 @@ class FluidSpawnCfg:
     ``reference_uid`` resolves a declared rigid body's initial pose once.
     """
 
-    kind: Literal["points", "box", "sphere", "cylinder", "mesh_volume"] = "points"
+    kind: Literal[
+        "points", "box", "sphere", "cylinder", "revolved_volume", "mesh_volume"
+    ] = "points"
     positions: Any = None
     file_path: str | None = None
     size: tuple[float, float, float] = (0.05, 0.05, 0.05)
     radius: float = 0.025
     height: float = 0.05
     clearance: float = 0.0
+    profile: tuple[tuple[float, float], ...] | None = None
+    """Piecewise-linear ``(local Z, radius)`` pairs for a capped revolved fill volume."""
+    fill_level: float = 1.0
+    """Filled fraction of the complete source Z extent; only for volume sources."""
     reference_uid: str | None = None
     initial_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
     max_particles: int = 1_000_000
@@ -67,6 +73,10 @@ class FluidSpawnCfg:
         if type(self.max_particles) is not int or self.max_particles <= 0:
             raise ValueError("max_particles must be a positive integer.")
         if self.kind == "points":
+            if self.profile is not None or self.fill_level != 1.0:
+                raise ValueError(
+                    "points sources cannot apply profile or fill_level; use a volume source."
+                )
             if (self.positions is None) == (self.file_path is None):
                 raise ValueError(
                     "points requires exactly one of positions or file_path."
@@ -86,6 +96,8 @@ class FluidSpawnCfg:
                 radius=self.radius,
                 height=self.height,
                 clearance=self.clearance,
+                profile=self.profile,
+                fill_level=self.fill_level,
                 mesh_path=self.file_path,
                 max_particles=self.max_particles,
             )

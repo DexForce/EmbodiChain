@@ -234,3 +234,63 @@ Evidence: `outputs/fluid-gym-hybrid-record/videos/episode_0_fluid_gym_env0.mp4`,
 `record-camera-contact-sheet.jpg`. Backend smoke evidence is in
 `outputs/fluid-record-fastrt-smoke/`; row-selection evidence is in
 `outputs/fluid-record-partial-smoke/`.
+
+
+## Completed follow-up: file-free procedural fluid initialization
+
+Default pouring now declares a capped revolved cavity profile and fill level.
+`compute/geometry/particles.py` samples it on the existing deterministic cubic
+lattice, respecting side-wall distance and end-cap clearance. The free-surface
+clip is separate from solid clearance. Geometric configuration is converted to
+local points once during declaration, with no disk cache or particle artifact;
+existing scene binding and selected reset reuse the memory template. Direct
+initialization and the existing stationary replay hold are retained; this change
+does not introduce an unused settled-state cache or a second stepping owner.
+
+`water_fill.npz` is removed, and package-data patterns include only task mesh
+assets (OBJ/GLB). Explicit points/NPZ imports remain supported. Volume-only
+filters and launcher spacing overrides are rejected for fixed point imports.
+The runner's spacing override preserves the configured volume instead of
+substituting a cylinder. New reports include the source recipe, spacing and
+density for reproducibility.
+
+For this cup: profile `[-0.044, 0.031] -> [0.05, 0.0385]` (Z, radius),
+fill level 0.91, clearance 0.003 m, spacing 0.0015 m. The standard cell-centre
+lattice produces **76,607 particles / 258.548625 ml**, versus the previous
+**76,538 / 258.31575 ml** (nominal volume +0.0901%). Point layouts differ because
+sampling now consistently follows source bounds and physical wall clearance.
+
+Acceptance: numerical geometry/volume/spacing and configuration tests; package
+asset removal; real batched initialization/reset without resampling; complete
+Hybrid pouring with record cameras for both environments; finite state and
+received-volume comparison with the previous run.
+
+Validation completed:
+- Geometry/config/object/packaging/task/context regression: **294 passed**.
+  Final launcher/packaging checks after the fixed-point override guard: **7 passed**.
+  Context routing checks after registering profile sampling: **40 passed**.
+- Real batched Gym reset/exhaustion and Sim selected-reset regressions:
+  **2 passed**. Gym tests replace the sampler with a failing stub during full
+  and selected reset, proving reset reuses the memory template.
+- Cold-built wheel contains five pour-cup mesh assets and no `water_fill.npz`.
+  Points/NPZ import tests continue to pass. API coverage **2503/2503**, Black
+  26.3.1, context validation and diff whitespace checks pass.
+- Complete Hybrid replay: **2 x 76,607 particles**, both rows completed;
+  all sampled states finite; two independent **744-frame / 31-second / 24-fps**
+  videos decoded fully and visually checked through lift, pour and return.
+  Wall time **914.49 s**. Final received volumes **141.89175 / 141.39900 ml**,
+  relative changes **-0.06418% / +0.36654%** versus the previous saved-point run.
+- FastRT 6-mm spacing / partial-reset smoke uses the same configured profile
+  and fill level, generating **1,225** particles per environment. Untouched
+  particle state is identical at reset; record-camera frame counts are **1 / 3**
+  for reset/untouched rows. This coarse case validates protocol and finite state,
+  not liquid fidelity at the qualified 1.5-mm resolution.
+- Context revised in simulation fluids and the consuming Gym guide; routing now
+  includes profile sampling and its compute owner. Existing solver, Task Program
+  and recording contracts remain unchanged.
+
+Evidence: `outputs/fluid-gym-procedural-full/initialization-comparison.json`,
+`record-camera-validation.json`, `record-camera-contact-sheet.jpg` and both
+`videos/episode_0_fluid_gym_env*.mp4` in that output directory. The coarse check
+is in `outputs/fluid-procedural-coarse/`; package inspection is in
+`outputs/fluid-procedural-validation/wheel-assets.json`.

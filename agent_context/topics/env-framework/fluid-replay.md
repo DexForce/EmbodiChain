@@ -4,6 +4,11 @@
 components own these alongside rigid entities; `config_to_cfg()` resolves
 fluid point files and explicit relative rigid/visual mesh paths against the
 owning component. Spawn rigid references are resolved before fluid binding.
+The default pour deployment generates its fill from a local revolved profile;
+no particle asset file is required. The runner's spacing override resamples the
+same volume recipe and rejects fixed point imports. Fill definitions and
+in-memory template ownership are documented under
+[simulation fluids](../simulation-system/fluids.md).
 
 `managers/observations.py` provides particle state, summary and volume-in-region
 observations. Particle arrays are world-frame; rigid `get_local_pose()` is

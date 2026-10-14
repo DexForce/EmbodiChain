@@ -49,8 +49,9 @@ def test_fluid_deployment_resolves_sources_and_observation_entities():
     assert len(cfg.fluid_object) == 1
     fluid = cfg.fluid_object[0]
     assert isinstance(fluid, FluidObjectCfg)
-    assert Path(fluid.spawn.file_path).is_absolute()
-    assert fluid.spawn.sample(fluid.particle_spacing).shape == (76538, 3)
+    assert fluid.spawn.kind == "revolved_volume"
+    assert fluid.spawn.file_path is None
+    assert fluid.spawn.sample(fluid.particle_spacing).shape == (76607, 3)
     assert cfg.observations.received_volume.extra["shape"] == [1]
     assert all(
         isinstance(item, SceneEntityCfg)

@@ -27,8 +27,20 @@ Registered host controls disable graph replay and rewind selected clocks on
 object reset.
 
 A spawn reference is a declared rigid body's initial pose, not a persistent
-attachment. Mesh volume sources must describe closed cavities, not cup walls.
-Sampling math belongs to `compute/geometry/particles.py`.
+attachment. The source may be an explicit point import, a primitive, a capped
+Z-axis revolved profile, or a closed fill-volume mesh. Profiles contain ordered
+`(local Z, radius)` pairs. `fill_level` clips the source's full Z extent before
+sampling; solid-wall clearance does not inset that free-surface plane. Mesh
+volume sources must describe closed cavities, not cup walls.
+
+Sampling math belongs to `compute/geometry/particles.py`, independent of lab.
+The manager samples once at declaration and retains the local template in
+memory; replica binding and selected reset never reopen or regenerate a source.
+Changing spacing or fill level before construction regenerates the point count;
+prepared topology remains fixed. Points/NPZ imports already contain fixed
+sampling and reject volume-only profile/fill-level controls. The default pour
+scene uses a profile source with no particle file or disk cache. Its existing
+stationary replay hold provides physical settling after direct initialization.
 
 Native rendering is published once through the existing Newton render bridge.
 Display clipping acts only on copied positions; Viser consumes detached point

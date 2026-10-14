@@ -173,3 +173,31 @@ def test_closed_mesh_sampling_matches_equivalent_box(tmp_path):
     actual = sample_volume_particles("mesh_volume", 0.01, mesh_path=str(mesh))
     expected = sample_volume_particles("box", 0.01, size=(0.04,) * 3)
     np.testing.assert_allclose(actual, expected)
+
+
+def test_profile_source_round_trip_rebuilds_without_a_particle_file():
+    cfg = FluidObjectCfg.from_dict(
+        {
+            "uid": "water",
+            "spawn": {
+                "kind": "revolved_volume",
+                "profile": [[-0.02, 0.01], [0.03, 0.02]],
+                "fill_level": 0.8,
+                "clearance": 0.001,
+                "reference_uid": "cup",
+            },
+        }
+    )
+    restored = FluidObjectCfg.from_dict(cfg.to_dict())
+    assert restored.spawn.file_path is None
+    points = restored.spawn.sample(0.004)
+    np.testing.assert_array_equal(points, cfg.spawn.sample(0.004))
+    assert points.dtype == np.float32
+    assert points[:, 2].max() < -0.02 + 0.8 * 0.05
+    assert len(restored.spawn.sample(0.002)) > len(points)
+
+
+@pytest.mark.parametrize("extra", [{"profile": [[0, 1], [1, 1]]}, {"fill_level": 0.5}])
+def test_points_reject_geometry_filters_instead_of_silently_ignoring_them(extra):
+    with pytest.raises(ValueError, match="points sources"):
+        FluidSpawnCfg(positions=[[0, 0, 0]], **extra).sample(0.001)

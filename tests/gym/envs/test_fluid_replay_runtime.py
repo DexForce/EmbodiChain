@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 import subprocess
 import sys
 import numpy as np
@@ -63,7 +64,10 @@ class _FluidReplayRuntime:
         fluid.particle_spacing = 0.01
         fluid.particle_radius = 0.003
         fluid.spawn = FluidSpawnCfg(
-            kind="box", size=(0.02, 0.02, 0.02), reference_uid="cup"
+            kind="revolved_volume",
+            profile=((-0.01, 0.01), (0.01, 0.01)),
+            fill_level=0.8,
+            reference_uid="cup",
         )
         fluid.render = FluidRenderCfg(mode="none")
         root = torch.tensor([0, 0, 0, 0, 0, 0, 1.0]).repeat(1, 2, 1)
@@ -102,19 +106,29 @@ class _FluidReplayRuntime:
 
     def test_partial_reset_preserves_other_world_then_finishes_independently(self):
         env = self.env
-        env.reset(seed=0)
+        with patch.object(
+            FluidSpawnCfg,
+            "sample",
+            side_effect=AssertionError("reset must reuse memory"),
+        ):
+            env.reset(seed=0)
         action = torch.zeros(
             (env.num_envs, len(env.active_joint_ids)), device=env.device
         )
         env.step(action)
         env.step(action)
         before = env.sim.get_fluid_object("water").data.particle_state_w.clone()
-        env.reset(
-            options={
-                "reset_ids": torch.tensor([0], device=env.device),
-                "save_data": False,
-            }
-        )
+        with patch.object(
+            FluidSpawnCfg,
+            "sample",
+            side_effect=AssertionError("reset must reuse memory"),
+        ):
+            env.reset(
+                options={
+                    "reset_ids": torch.tensor([0], device=env.device),
+                    "save_data": False,
+                }
+            )
         torch.testing.assert_close(
             env.sim.get_fluid_object("water").data.particle_state_w[1],
             before[1],

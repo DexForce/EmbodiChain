@@ -33,18 +33,26 @@ def sample_volume_particles(
     radius: float = 0.025,
     height: float = 0.05,
     clearance: float = 0.0,
+    profile: Sequence[Sequence[float]] | None = None,
+    fill_level: float = 1.0,
     mesh_path: str | None = None,
     max_particles: int = 1_000_000,
 ) -> np.ndarray:
-    """Sample an origin-centred primitive or closed mesh on a cubic lattice.
+    """Sample a local primitive, revolved profile or closed mesh on a cubic lattice.
 
     Args:
-        kind: ``box``, ``sphere``, ``cylinder`` (Z axis), or ``mesh_volume``.
+        kind: ``box``, ``sphere``, ``cylinder`` (Z axis),
+            ``revolved_volume`` (Z-axis profile), or ``mesh_volume``.
         spacing: Positive lattice spacing, metres.
         size: Full box dimensions, metres.
         radius: Sphere or cylinder radius, metres.
         height: Full cylinder height, metres.
         clearance: Inward distance from the volume boundary, metres.
+        profile: For ``revolved_volume``, at least two ``(z, radius)`` pairs
+            with strictly increasing Z and nonnegative radii, in local metres.
+            Linear segments define the side wall; both ends are capped.
+        fill_level: Fraction of the source's full Z extent to fill, in ``(0, 1]``.
+            The free-surface cutoff is independent of solid-wall clearance.
         mesh_path: Closed fill-volume mesh for ``mesh_volume``.
         max_particles: Maximum candidate-grid size before allocation.
 
@@ -55,9 +63,28 @@ def sample_volume_particles(
         raise ValueError("spacing must be finite and positive.")
     if not math.isfinite(clearance) or clearance < 0:
         raise ValueError("clearance must be finite and nonnegative.")
+    if not math.isfinite(fill_level) or not 0 < fill_level <= 1:
+        raise ValueError("fill_level must be finite and in (0, 1].")
     if type(max_particles) is not int or max_particles <= 0:
         raise ValueError("max_particles must be a positive integer.")
     mesh = None
+    section = None
+    if kind == "revolved_volume":
+        section = np.asarray(profile, dtype=float)
+        if (
+            section.ndim != 2
+            or section.shape[1] != 2
+            or len(section) < 2
+            or not np.isfinite(section).all()
+            or np.any(np.diff(section[:, 0]) <= 0)
+            or np.any(section[:, 1] < 0)
+            or not np.any(section[:, 1] > 0)
+        ):
+            raise ValueError(
+                "profile requires finite (z, radius) pairs with increasing Z and nonnegative radii."
+            )
+    elif profile is not None:
+        raise ValueError("profile is only valid for revolved_volume.")
     if kind == "mesh_volume":
         import trimesh
 
@@ -76,12 +103,19 @@ def sample_volume_particles(
             extent = np.array([2 * radius] * 3)
         elif kind == "cylinder":
             extent = np.array([2 * radius, 2 * radius, height])
+        elif section is not None:
+            max_radius = section[:, 1].max()
+            extent = np.array([2 * max_radius, 2 * max_radius, np.ptp(section[:, 0])])
         else:
             raise ValueError(f"Unsupported fluid volume {kind!r}.")
         if extent.shape != (3,) or not np.isfinite(extent).all() or (extent <= 0).any():
             raise ValueError("Volume dimensions must be finite and positive.")
         lower, upper = -extent / 2, extent / 2
+        if section is not None:
+            lower[2], upper[2] = section[0, 0], section[-1, 0]
+    surface_z = lower[2] + fill_level * (upper[2] - lower[2])
     lower, upper = lower + clearance, upper - clearance
+    upper[2] = min(upper[2], surface_z)
     counts = [max(0, math.ceil(float(v) / spacing)) for v in upper - lower]
     if not all(counts):
         raise ValueError("clearance leaves an empty fill volume.")
@@ -94,6 +128,22 @@ def sample_volume_particles(
         keep &= np.linalg.norm(points, axis=1) < radius - clearance
     elif kind == "cylinder":
         keep &= np.linalg.norm(points[:, :2], axis=1) < radius - clearance
+    elif section is not None:
+        radial = np.linalg.norm(points[:, :2], axis=1)
+        keep &= radial < np.interp(points[:, 2], section[:, 0], section[:, 1])
+        if clearance:
+            # Rotational symmetry reduces side-wall distance to the meridian
+            # plane. Include all segments, including steep or concave profiles.
+            meridian = np.column_stack((points[:, 2], radial))
+            distance2 = np.full(len(points), np.inf)
+            for start, end in zip(section[:-1], section[1:]):
+                segment = end - start
+                t = np.clip(
+                    (meridian - start) @ segment / np.dot(segment, segment), 0, 1
+                )
+                delta = meridian - (start + t[:, None] * segment)
+                distance2 = np.minimum(distance2, np.einsum("ij,ij->i", delta, delta))
+            keep &= distance2 >= clearance**2
     elif mesh is not None:
         import trimesh
 

@@ -113,15 +113,14 @@ def _replay(args, trajectory: Path, output: Path) -> None:
         cfg.events.record_camera.params["save_path"] = str(output / "videos")
         cfg.events.record_camera.params["max_env_num"] = cfg.num_envs
     if args.particle_spacing is not None:
-        # Qualification smoke mode uses a coarser initial fill, explicitly recorded.
+        # Resample the configured fill volume at the smoke-test resolution.
         fluid = cfg.fluid_object[0]
-        from embodichain.lab.sim.cfg import FluidSpawnCfg
-
+        if fluid.spawn.kind == "points":
+            raise ValueError(
+                "particle-spacing override requires a volume source; imported points have fixed sampling."
+            )
         fluid.particle_spacing = args.particle_spacing
         fluid.particle_radius = 0.3 * args.particle_spacing
-        fluid.spawn = FluidSpawnCfg(
-            kind="cylinder", radius=0.028, height=0.07, reference_uid="cup"
-        )
         cfg.sim_cfg.physics_cfg.solver_cfg["particle_support_radius"] = (
             2.25 * args.particle_spacing
         )
@@ -203,6 +202,9 @@ def _replay(args, trajectory: Path, output: Path) -> None:
             "videos": videos,
             "video_fps": env.control_frequency if videos else None,
             "particle_count_per_env": env.sim.get_fluid_object("water").num_particles,
+            "fluid_source": cfg.fluid_object[0].spawn.to_dict(),
+            "particle_spacing_m": cfg.fluid_object[0].particle_spacing,
+            "density_kg_m3": cfg.fluid_object[0].density,
             "partial_reset_step": args.partial_reset_step,
             "replay_complete": info["fluid_replay_finished"].cpu().tolist(),
             "wall_seconds": time.perf_counter() - started,

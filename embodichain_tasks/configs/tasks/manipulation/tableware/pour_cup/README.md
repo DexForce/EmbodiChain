@@ -32,8 +32,30 @@ python -m embodichain.lab.scripts.run_fluid_task_program --num-envs 2 --renderer
 用于低成本双环境局部重置检查；粗粒度检查不代表完整液体效果。
 
 `env.fluid.yaml` 拥有 SPH 参数、刚体边界、初始粒子和流体观测；
-`task.franka.fluid.yaml` 选择环境和机器人组件。粒子文件相对环境配置解析，
-杯子、边界网格和初始粒子随任务包发布。求解器配置直接使用 DexSim SPHSolverCfg。
+`task.franka.fluid.yaml` 选择环境和机器人组件。杯子与边界网格随任务包发布，
+水体在构建场景时直接采样生成，默认不读取或保存粒子文件。
+求解器配置直接使用 DexSim SPHSolverCfg。
+
+初始水体由以下配置描述（单位为米）：
+
+```yaml
+spawn:
+  kind: revolved_volume
+  reference_uid: cup
+  profile: [[-0.044, 0.031], [0.05, 0.0385]]  # [杯子局部 Z, 腔体内半径]
+  fill_level: 0.91
+  clearance: 0.003
+```
+
+截面绕局部 Z 轴旋转并封闭两端。`fill_level` 指完整腔体高度的比例，
+其液面裁剪与固体壁面间隙分别处理；它不表示稳定后的体积百分比。
+1.5 mm 规则网格生成 76,607 个粒子，名义体积约 258.55 ml。
+修改 `particle_spacing` 或 `fill_level` 后，在下一次构建时重新生成点集。
+`--particle-spacing` 也使用同一截面重新采样，便于粗分辨率检查。
+
+局部点集只生成一次并保存在内存，reset 根据杯子位姿和 arena 偏移恢复选中环境；
+回放起始的静置阶段继续用于液体稳定化。NPZ 仍可作为外部点集导入格式，
+点集导入模式的采样分辨率固定，不接受脚本的间距覆盖。
 
 `FluidReplayEnv` 支持标准 reset/step、按行时钟与流体重置、summary 和区域体积观测。
 它从单行合格源轨迹广播到多个环境，要求固定机器人根位姿和单个 Newton 子步。

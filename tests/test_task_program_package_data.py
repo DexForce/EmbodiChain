@@ -106,7 +106,6 @@ _RESOURCE_PATHS = frozenset(
                 "fluid_table.obj",
                 "mug_wall.obj",
                 "receiver_wall.obj",
-                "water_fill.npz",
             )
         ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
@@ -246,13 +245,18 @@ def test_setup_stages_all_official_task_programs(
         "**/*.yaml",
         "**/*.yml",
         "**/README.md",
-        "tasks/manipulation/tableware/pour_cup/assets/*",
+        "tasks/manipulation/tableware/pour_cup/assets/*.obj",
+        "tasks/manipulation/tableware/pour_cup/assets/*.glb",
     ]
     expected_outputs = {
         Path("embodichain_tasks") / "configs" / relative_path
         for relative_path in _RESOURCE_PATHS
     }
     assert expected_outputs <= staged_config_package.relative_outputs
+    assert not (
+        staged_config_package.build_lib
+        / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets/water_fill.npz"
+    ).exists()
 
 
 def test_staged_task_program_resources_decode_through_installed_paths(
