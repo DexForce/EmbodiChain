@@ -168,7 +168,7 @@ unified CLI calls `discover_task_packages()` (from
 `embodichain.lab.gym.utils.registration`) at
 startup, which imports this package via its entry point. See the
 [task-package discovery utilities](../../embodichain/lab/gym/utils/registration.py)
-and the [official task package initializer](extensions/embodichain_tasks/__init__.py) for
+and the [official task package initializer](embodichain_tasks/__init__.py) for
 the implementation.
 
 ## Extending with your own tasks

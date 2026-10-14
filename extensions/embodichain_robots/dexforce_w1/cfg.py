@@ -29,6 +29,7 @@ if __name__ == "__main__" and not __package__:
     # Replace the script directory so its ``types.py`` cannot shadow the
     # standard-library ``types`` module in compiler subprocesses.
     sys.path[0] = str(Path(__file__).resolve().parents[2])
+    sys.path.insert(1, str(Path(__file__).resolve().parents[3]))
 
 from typing import TYPE_CHECKING, Dict
 
