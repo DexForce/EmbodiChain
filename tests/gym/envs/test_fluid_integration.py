@@ -40,7 +40,34 @@ TASK = (
 )
 
 
-def test_fluid_deployment_resolves_sources_and_observation_entities():
+@pytest.fixture(autouse=True)
+def task_mesh_cache(tmp_path, monkeypatch):
+    """Resolve task meshes locally so configuration tests never download them."""
+    from types import SimpleNamespace
+    from embodichain.data import dataset
+
+    directory = tmp_path / "PourCupAssets"
+    directory.mkdir()
+    for name in (
+        "cup.glb",
+        "mug_wall.obj",
+        "receiver_wall.obj",
+        "fluid_table.obj",
+        "fluid_floor.obj",
+    ):
+        (directory / name).touch()
+    original = dataset.get_data_class
+
+    def resolve(name, extra_modules=None):
+        if name == "PourCupAssets":
+            return lambda: SimpleNamespace(extract_dir=str(directory))
+        return original(name, extra_modules)
+
+    monkeypatch.setattr(dataset, "get_data_class", resolve)
+    return directory
+
+
+def test_fluid_deployment_resolves_sources_and_observation_entities(task_mesh_cache):
     cfg = config_to_cfg(load_config(TASK), source_path=TASK)
     assert cfg.sim_cfg.render_cfg.renderer == "fast-rt"
     assert cfg.events.record_camera.params["per_env"] is True
@@ -58,7 +85,8 @@ def test_fluid_deployment_resolves_sources_and_observation_entities():
         for item in cfg.observations.received_volume.params["entity_cfgs"]
     )
     cup = next(item for item in cfg.background if item.uid == "cup")
-    assert Path(cup.visual_shape.fpath).is_absolute()
+    assert cup.visual_shape.fpath == str(task_mesh_cache / "cup.glb")
+    assert cup.shape.fpath == str(task_mesh_cache / "mug_wall.obj")
     assert cup.shape.collision.force_sdf is False
 
 

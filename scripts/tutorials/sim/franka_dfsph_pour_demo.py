@@ -48,6 +48,7 @@ from embodichain.lab.sim.cfg import (
     FluidSpawnCfg,
     FluidRenderCfg,
 )
+from embodichain.data import get_data_path
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.visualization import VisualizationCfg
 from embodichain_robots import FrankaPandaCfg
@@ -56,10 +57,8 @@ from embodichain.lab.sim.sensors import CameraCfg
 __all__ = ["main"]
 
 ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_TRAJECTORY = Path(__file__).parent / "assets/franka_dfsph_pour/trajectory.pt"
-CUP_ASSET = ROOT / (
-    "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets/cup.glb"
-)
+DEFAULT_TRAJECTORY = "PourCupDemoData/trajectory.pt"
+CUP_ASSET = "PourCupAssets/cup.glb"
 RECEIVER_CENTER = np.array([-0.755, -0.137, 0.50])
 BOWL_OUTER_RADIUS = 0.097
 BOWL_INNER_RADIUS = 0.0915
@@ -171,7 +170,11 @@ def _particle_summary(
 def main() -> None:
     """Replay the arm and simulate water in the same EmbodiChain world."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--trajectory", type=Path, default=DEFAULT_TRAJECTORY)
+    parser.add_argument(
+        "--trajectory",
+        type=Path,
+        help=f"Recorded trajectory path; defaults to cached {DEFAULT_TRAJECTORY}.",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -193,6 +196,9 @@ def main() -> None:
     if min(args.speed, args.spacing, args.fps, args.substeps, args.physics_hz) <= 0:
         parser.error("speed, spacing, fps, substeps and physics-hz must be positive")
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.trajectory is None:
+        args.trajectory = Path(get_data_path(DEFAULT_TRAJECTORY))
+    cup_asset = Path(get_data_path(CUP_ASSET))
     data = torch.load(args.trajectory, map_location="cpu", weights_only=False)
     joints = data["states"]["robot", "qpos"][0].numpy()
     cup_states = data["states"]["rigid_objects", "cup", "pose"][0].numpy()
@@ -320,7 +326,7 @@ def main() -> None:
             sections=128,
         )
         mug = _add_boundary(
-            sim, "liquid_mug", mug_mesh, initial_pose, visual_asset=CUP_ASSET
+            sim, "liquid_mug", mug_mesh, initial_pose, visual_asset=cup_asset
         )
         if args.substeps > 1:
             boundary_times = (

@@ -98,16 +98,6 @@ _DEPLOYMENTS = {
 }
 _RESOURCE_PATHS = frozenset(
     {
-        *(
-            Path("tasks/manipulation/tableware/pour_cup/assets") / name
-            for name in (
-                "cup.glb",
-                "fluid_floor.obj",
-                "fluid_table.obj",
-                "mug_wall.obj",
-                "receiver_wall.obj",
-            )
-        ),
         Path("tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"),
         Path("tasks/manipulation/tableware/pour_cup/env.fluid.yaml"),
         *_PROGRAMS,
@@ -245,8 +235,6 @@ def test_setup_stages_all_official_task_programs(
         "**/*.yaml",
         "**/*.yml",
         "**/README.md",
-        "tasks/manipulation/tableware/pour_cup/assets/*.obj",
-        "tasks/manipulation/tableware/pour_cup/assets/*.glb",
     ]
     expected_outputs = {
         Path("embodichain_tasks") / "configs" / relative_path
@@ -255,7 +243,7 @@ def test_setup_stages_all_official_task_programs(
     assert expected_outputs <= staged_config_package.relative_outputs
     assert not (
         staged_config_package.build_lib
-        / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets/water_fill.npz"
+        / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets"
     ).exists()
 
 

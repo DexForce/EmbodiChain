@@ -5,7 +5,9 @@ components own these alongside rigid entities; `config_to_cfg()` resolves
 fluid point files and explicit relative rigid/visual mesh paths against the
 owning component. Spawn rigid references are resolved before fluid binding.
 The default pour deployment generates its fill from a local revolved profile;
-no particle asset file is required. The runner's spacing override resamples the
+no particle asset file is required. Pouring meshes use `PourCupAssets/...`
+references resolved through the [data asset cache](../data-assets/data-assets.md),
+so installed task packages carry configuration without mesh payloads. The runner's spacing override resamples the
 same volume recipe and rejects fixed point imports. It scales explicit render
 radius, mesh cell size and reconstruction kernel radius by the spacing ratio,
 keeping the surface reconstruction consistent with the new particle density. Fill definitions and

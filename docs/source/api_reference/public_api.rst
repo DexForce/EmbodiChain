@@ -83,6 +83,25 @@ embodichain.data.assets.solver_assets
 
    download_neural_ik_checkpoint
 
+embodichain.data.assets.task_assets
+-----------------------------------
+
+Task mesh bundles and reference demonstration data downloaded through the shared
+asset cache. Runtime meshes and demo recordings are separate downloads so task
+initialization does not require video assets.
+
+.. currentmodule:: embodichain.data.assets.task_assets
+
+.. autosummary::
+   :nosignatures:
+
+   PourCupAssets
+   PourCupDemoData
+
+.. autoclass:: PourCupAssets
+
+.. autoclass:: PourCupDemoData
+
 embodichain.data_pipeline.depth_video
 -------------------------------------
 

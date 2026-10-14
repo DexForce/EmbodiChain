@@ -151,8 +151,6 @@ def main():
                 "**/*.yaml",
                 "**/*.yml",
                 "**/README.md",
-                "tasks/manipulation/tableware/pour_cup/assets/*.obj",
-                "tasks/manipulation/tableware/pour_cup/assets/*.glb",
             ],
         },
         cmdclass=cmdclass,

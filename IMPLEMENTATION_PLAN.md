@@ -393,3 +393,34 @@ The earlier full physical replay and video qualification remain prior evidence;
 the full 31-second physical workload was not repeated for this Git integration.
 The DexSim batched-SPH release/pin and release/AOT qualification remain pending,
 so #777 stays Draft.
+
+## Downloadable task assets
+
+Task meshes and historical demo data are hosted in
+`DexForceAI/embodichain_data/task_assets` at HF commit
+`f13a1240d82d728cd0caf7550487a833c2b59368`. Runtime and demo downloads are
+separate: `PourCupAssets.zip` contains the five meshes, while
+`PourCupDemoData.zip` preserves the trajectory, reference snapshot, media and
+original validation records. Both use the standard `EmbodiChainDataset` locked
+cache, pinned archive MD5, configured mirror and official-Hub fallback, with a
+new `task` download-CLI category. The HF manifest records original file SHA-256
+and source commit `0f132ef68`.
+
+The Git tree and wheel no longer carry these payloads. YAML references use
+`PourCupAssets/...`; the standalone tutorial resolves its default trajectory
+lazily from `PourCupDemoData/trajectory.pt`. Configuration parsing resolves
+both collision and independent visual mesh assets, including rigid groups.
+Fluid initialization remains profile-based in memory; the archived final NPZ
+snapshot is historical evidence only.
+
+Verification includes an empty-cache download/extraction with all **20 file
+SHA-256 checks** and both ZIP MD5 checks matching their original source bytes;
+a cold wheel with the downloader and three environment configs but **zero pour
+mesh or demo payload files**; the real dual-environment FastRT runner with
+1,225 particles per row, exact untouched state at selected reset and separate
+1 / 3-frame recordings; **250 passing data/config/packaging/API/context checks**; and
+standalone tutorial syntax/help checks. Local transfer and cache reports are
+in `outputs/task-assets-hf/`, wheel validation in
+`outputs/task-assets-package-validation/`, and the live smoke in
+`outputs/task-assets-runtime-smoke/`. Historical wheel-with-mesh observations
+above describe the earlier implementation and are superseded by this migration.

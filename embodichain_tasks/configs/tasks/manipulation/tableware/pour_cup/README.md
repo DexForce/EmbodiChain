@@ -35,7 +35,7 @@ Hybrid 的 Vulkan 主表面看不到它，因此该组合会明确报错；空�
 用于低成本双环境局部重置检查；粗粒度检查不代表完整液体效果。
 
 `env.fluid.yaml` 拥有 SPH 参数、刚体边界、初始粒子和流体观测；
-`task.franka.fluid.yaml` 选择环境和机器人组件。杯子与边界网格随任务包发布，
+`task.franka.fluid.yaml` 选择环境和机器人组件。杯子与边界网格通过 `PourCupAssets` 下载并缓存，
 水体在构建场景时直接采样生成，默认不读取或保存粒子文件。
 求解器配置直接使用 DexSim SPHSolverCfg。
 
@@ -88,9 +88,9 @@ spawn:
 python scripts/tutorials/sim/franka_dfsph_pour_demo.py --headless
 ```
 
-脚本默认读取随本分支提交的
-[`trajectory.pt`](../../../../../../scripts/tutorials/sim/assets/franka_dfsph_pour/trajectory.pt)，
-不需要先生成轨迹。去掉 `--headless` 可打开原生窗口。
+脚本默认通过 `get_data_path("PourCupDemoData/trajectory.pt")` 下载并缓存
+已验证轨迹，不需要先生成。运行时杯子网格使用 `PourCupAssets/cup.glb`。
+去掉 `--headless` 可打开原生窗口。
 短时检查或指定自行生成的轨迹：
 
 ```bash
@@ -104,18 +104,19 @@ python scripts/tutorials/sim/franka_dfsph_pour_demo.py --headless \
 本机验证使用 Python 3.10、DexSim 0.5.1 本地 wheel、Newton 1.6.0、
 MuJoCo / MuJoCo-Warp 3.12.0、Warp 1.17.0 和 NVIDIA RTX 5090 D v2。
 还需要 Torch、TensorDict、NumPy、SciPy、Trimesh、OpenCV、ImageIO 和
-ImageIO-FFmpeg。完整版本记录见
-[`environment.json`](../../../../../../scripts/tutorials/sim/assets/franka_dfsph_pour/environment.json)。
+ImageIO-FFmpeg。完整版本记录可通过
+`get_data_path("PourCupDemoData/environment.json")` 获取。
 DexSim 必须包含原生 SPH、volume map、液体网格重建和 OptiX 支持；
 本地 wheel 和虚拟环境不随分支提交，也未更改项目的全局依赖。
-本演示针对源码 checkout，不承诺随 wheel 打包二进制资产。
+教程脚本针对源码 checkout；资产单独下载，wheel 仅携带代码与配置。
 
-Franka 模型沿用 EC 现有资产解析；杯子网格随任务提交，接水碗由脚本生成。
+Franka 模型沿用 EC 现有资产解析；杯子网格通过任务资产下载，接水碗由脚本生成。
 默认输出目录是 `outputs/franka_pour_cup/dfsph_stable_bowl/`，包括全景/近景
 MP4、每秒关键帧、粒子位置和速度 NPZ、参数及统计 `validation.json`。
 已录制的最终结果见
 [演示资料目录](../../../../../../scripts/tutorials/sim/assets/franka_dfsph_pour/README.md)，
-包含三段视频、原始轨迹、最终粒子快照和验证报告。
+`PourCupDemoData` 包含三段视频、原始轨迹、最终粒子快照和验证报告，
+均托管于 [Hugging Face task_assets](https://huggingface.co/datasets/DexForceAI/embodichain_data/tree/main/task_assets)。
 
 ## 场景和求解器
 
@@ -176,17 +177,15 @@ MP4、每秒关键帧、粒子位置和速度 NPZ、参数及统计 `validation.
 两份完整视频各 744 帧、31 秒，18 秒静置近景片段为 432 帧，均逐帧解码通过。
 31 份粒子快照的数量均为 76,538，位置和速度均有限。
 这些是一次完整运行和离散快照的结果，不代表批量成功率。
-已提交最终快照和全部统计，其他每秒快照可由运行脚本重新生成。
+下载包保留最终快照和全部统计，其他每秒快照可由运行脚本重新生成。
 
 ## 空杯任务及轨迹生成
 
-首次运行 YAML 部署前，把杯子放入本机资产缓存；若设置了
-`EMBODICHAIN_DATA_ROOT`，改用该目录：
+首次运行会自动下载并缓存任务网格，也可提前下载。
+`EMBODICHAIN_DATA_ROOT` 可覆盖缓存根目录：
 
 ```bash
-mkdir -p ~/.cache/embodichain_data/PourCupDemo
-cp embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/assets/cup.glb \
-  ~/.cache/embodichain_data/PourCupDemo/cup.glb
+embodichain data download --name PourCupAssets
 ```
 
 Newton + MuJoCo-Warp：
@@ -218,7 +217,7 @@ Newton 配置使用 `mujoco_warp`、`solver: newton`、`implicitfast`，
 运动学继续使用 FEP IK 和 `ik_interp`，没有新增 IK 或动作实现。
 两种执行策略均为 `projected`，程序完成须结合实际杯子位姿和录像判断。
 
-随分支提交的 MuJoCo 轨迹来自固定种子 0 的一次完整成功运行，1160 帧、20 Hz，
+下载包中的 MuJoCo 轨迹来自固定种子 0 的一次完整成功运行，1160 帧、20 Hz，
 包含侧抓、抬升、倾倒、回正、放回和松爪。相对优化前布局，累计关节转动量
 从 19.23 rad 降到 6.03 rad（减少 68.7%），最大关节速度从 0.473 rad/s
 降到 0.163 rad/s。杯子最大抬升 11.98 cm、实际最大倾角 66.09°，

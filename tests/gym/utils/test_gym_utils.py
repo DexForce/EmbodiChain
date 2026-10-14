@@ -2554,3 +2554,40 @@ def test_launcher_can_explicitly_disable_configured_headless() -> None:
     args = parser.parse_args(["--gym_config", "task.yaml", "--no-headless"])
     merged = merge_args_with_gym_config(args, {"physics": "default", "headless": True})
     assert merged["headless"] is False
+
+
+@pytest.mark.parametrize(
+    "collection", ["background", "rigid_object", "rigid_object_group"]
+)
+def test_mesh_asset_paths_resolve_collision_and_visual_geometry(
+    collection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Separate render meshes use the same asset resolver as collision meshes."""
+    paths = {
+        "TaskMeshes/collision.obj": str(tmp_path / "collision.obj"),
+        "TaskMeshes/visual.glb": str(tmp_path / "visual.glb"),
+    }
+    monkeypatch.setattr("embodichain.data.get_data_path", paths.__getitem__)
+    obj = {
+        "uid": "cup",
+        "shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/collision.obj"},
+        "visual_shape": {"shape_type": "Mesh", "fpath": "TaskMeshes/visual.glb"},
+    }
+    entries = [obj]
+    if collection == "rigid_object_group":
+        entries = [{"uid": "cups", "rigid_objects": {"cup": obj}}]
+    cfg = config_to_cfg(
+        {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "env": {},
+            "robot": {"uid": "robot"},
+            collection: entries,
+        },
+        manager_modules=DEFAULT_MANAGER_MODULES,
+    )
+    parsed = getattr(cfg, collection)[0]
+    if collection == "rigid_object_group":
+        parsed = parsed.rigid_objects["cup"]
+    assert parsed.shape.fpath == paths["TaskMeshes/collision.obj"]
+    assert parsed.visual_shape.fpath == paths["TaskMeshes/visual.glb"]

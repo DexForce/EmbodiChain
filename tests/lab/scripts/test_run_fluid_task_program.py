@@ -36,6 +36,33 @@ TASK = (
 )
 
 
+@pytest.fixture(autouse=True)
+def task_mesh_cache(tmp_path, monkeypatch):
+    """Resolve task meshes locally so configuration tests never download them."""
+    from types import SimpleNamespace
+    from embodichain.data import dataset
+
+    directory = tmp_path / "PourCupAssets"
+    directory.mkdir()
+    for name in (
+        "cup.glb",
+        "mug_wall.obj",
+        "receiver_wall.obj",
+        "fluid_table.obj",
+        "fluid_floor.obj",
+    ):
+        (directory / name).touch()
+    original = dataset.get_data_class
+
+    def resolve(name, extra_modules=None):
+        if name == "PourCupAssets":
+            return lambda: SimpleNamespace(extract_dir=str(directory))
+        return original(name, extra_modules)
+
+    monkeypatch.setattr(dataset, "get_data_class", resolve)
+    return directory
+
+
 @pytest.mark.parametrize("renderer", [None, "fast-rt"])
 def test_launcher_selects_supported_renderers(renderer, monkeypatch, tmp_path):
     args = [

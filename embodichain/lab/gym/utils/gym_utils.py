@@ -490,6 +490,16 @@ def config_to_cfg(
     from embodichain.utils import configclass
     from embodichain.data import get_data_path
 
+    def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
+        for key in ("shape", "visual_shape"):
+            shape = obj_dict.get(key)
+            if (
+                shape is not None
+                and shape.get("shape_type") == "Mesh"
+                and shape.get("fpath") is not None
+            ):
+                shape["fpath"] = get_data_path(shape["fpath"])
+
     @configclass
     class ComponentCfg:
         """Configuration for env events.
@@ -749,9 +759,7 @@ def config_to_cfg(
     # parser background objects config
     if "background" in config:
         for obj_dict in config["background"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
+            _resolve_mesh_asset_paths(obj_dict)
             # Set to static object if not specified.
             obj_dict["body_type"] = (
                 "static" if "body_type" not in obj_dict else obj_dict["body_type"]
@@ -762,9 +770,7 @@ def config_to_cfg(
     # parser scene objects config
     if "rigid_object" in config:
         for obj_dict in config["rigid_object"]:
-            shape_type = obj_dict["shape"]["shape_type"]
-            if shape_type == "Mesh":
-                obj_dict["shape"]["fpath"] = get_data_path(obj_dict["shape"]["fpath"])
+            _resolve_mesh_asset_paths(obj_dict)
             cfg = RigidObjectCfg.from_dict(obj_dict)
             env_cfg.rigid_object.append(cfg)
 
@@ -773,11 +779,7 @@ def config_to_cfg(
             if "folder_path" in obj_dict:
                 obj_dict["folder_path"] = get_data_path(obj_dict["folder_path"])
             for rigid_obj in obj_dict["rigid_objects"].values():
-                shape_type = rigid_obj["shape"]["shape_type"]
-                if shape_type == "Mesh" and "fpath" in rigid_obj["shape"]:
-                    rigid_obj["shape"]["fpath"] = get_data_path(
-                        rigid_obj["shape"]["fpath"]
-                    )
+                _resolve_mesh_asset_paths(rigid_obj)
             cfg = RigidObjectGroupCfg.from_dict(obj_dict)
             env_cfg.rigid_object_group.append(cfg)
 
