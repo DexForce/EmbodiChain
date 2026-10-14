@@ -14,24 +14,23 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Fluid replay launcher renderer and final recording commit contracts."""
+"""Online fluid deployment and measured physical qualification."""
 
 from __future__ import annotations
 
-import argparse
-import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
-import sys
+import numpy as np
 import pytest
-import torch
 
-from embodichain.lab.scripts import run_fluid_task_program as runner
+from embodichain.lab.scripts.run_fluid_task_program import (
+    _configure,
+    _cup_qualification,
+)
 
 pytestmark = pytest.mark.no_sim
+ROOT = Path(__file__).resolve().parents[3]
 TASK = (
-    Path(__file__).resolve().parents[3]
+    ROOT
     / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
 )
 
@@ -63,219 +62,101 @@ def task_mesh_cache(tmp_path, monkeypatch):
     return directory
 
 
-@pytest.mark.parametrize("renderer", [None, "fast-rt"])
-def test_launcher_selects_supported_renderers(renderer, monkeypatch, tmp_path):
-    args = [
-        "fluid",
-        "--trajectory",
-        str(tmp_path / "source.pt"),
-        "--output",
-        str(tmp_path),
-    ]
-    if renderer is not None:
-        args += ["--renderer", renderer]
-    monkeypatch.setattr(sys, "argv", args)
-    monkeypatch.setattr(runner, "discover_task_packages", lambda: None)
-    replay = Mock()
-    monkeypatch.setattr(runner, "_replay", replay)
-    runner.main()
-    assert replay.call_args.args[0].renderer == "fast-rt"
+def test_online_task_uses_live_grasp_and_same_body_particle_boundary(tmp_path):
+    task_id, cfg = _configure(TASK, num_envs=2, renderer="fast-rt", output=tmp_path)
+    assert task_id == "PourCup-Franka-Fluid-v1"
+    assert cfg.task_program is not None
+    cup = next(c for c in cfg.rigid_object if c.uid == "cup")
+    assert cup.body_type == "dynamic"
+    assert Path(cup.particle_collision_shape.fpath).is_absolute()
+    assert cup.particle_collision_shape.collision.approximation == "sdf"
+    assert cup.shape.collision.approximation == "convex_decomposition"
+    solver = cfg.sim_cfg.physics_cfg.solver_cfg
+    assert solver["rigid_solver_cfg"]["solver_type"] == "mujoco_warp"
+    assert solver["rigid_solver_substeps"] == 7
+    assert cfg.events.record_camera.params["per_env"] is True
+    assert cfg.events.record_camera.params["max_env_num"] == 2
+    assert cfg.record_trajectory is False
+    assert cfg.sim_steps_per_control * cfg.sim_cfg.physics_dt == pytest.approx(0.025)
+    assert not hasattr(cfg.events, "settle_cup")
 
 
-@pytest.mark.parametrize("spacing", [None, 0.003, 0.006])
-def test_final_episode_is_committed_through_record_camera(
-    spacing, monkeypatch, tmp_path
-):
-    from embodichain.lab.gym.envs import fluid_replay
-    from embodichain.lab.gym.envs.managers import observations
-
-    recorder = SimpleNamespace(save_and_clear=Mock())
-    created = []
-    decode_cfg = runner.config_to_cfg
-
-    def configured_render_settings(*args, **kwargs):
-        cfg = decode_cfg(*args, **kwargs)
-        cfg.sim_cfg.render_cfg.spp = 8
-        return cfg
-
-    monkeypatch.setattr(runner, "config_to_cfg", configured_render_settings)
-
-    class Environment:
-        def __init__(self, cfg, **kwargs):
-            created.append(cfg)
-            self.num_envs = cfg.num_envs
-            self.device = torch.device("cpu")
-            self.step_dt = 1 / 24
-            self.control_frequency = 24
-            self.replay_duration = self.step_dt
-            self.active_joint_ids = [0]
-            self.event_manager = SimpleNamespace(get_functor=lambda name: recorder)
-            self.sim = SimpleNamespace(
-                get_fluid_object=lambda uid: SimpleNamespace(num_particles=8)
-            )
-            self.source_qualification = {"accepted": True}
-            self.close = Mock()
-
-        def reset(self, **kwargs):
-            return {}, {}
-
-        def step(self, action):
-            info = {
-                "fluid_replay_time_s": torch.full((self.num_envs,), self.step_dt),
-                "fluid_replay_finished": torch.ones(self.num_envs, dtype=torch.bool),
-            }
-            return {}, None, None, None, info
-
-    monkeypatch.setattr(fluid_replay, "FluidReplayEnv", Environment)
-    monkeypatch.setattr(
-        observations,
-        "get_fluid_summary",
-        lambda env, *args: torch.ones(env.num_envs, 5),
+def test_no_render_coarse_override_resamples_and_keeps_physical_scale(tmp_path):
+    _, cfg = _configure(
+        TASK, num_envs=1, renderer="no-render", output=tmp_path, particle_spacing=0.003
     )
-    monkeypatch.setattr(
-        observations,
-        "get_fluid_volume_in_region",
-        lambda env, *args, **kwargs: torch.zeros(env.num_envs, 1),
-    )
-    args = argparse.Namespace(
-        replay_task=str(TASK),
-        num_envs=3,
-        renderer="fast-rt",
-        particle_spacing=spacing,
-        speed=2,
-        seconds=None,
-        partial_reset_step=None,
-    )
-    runner._replay(args, tmp_path / "source.pt", tmp_path)
-    recorder.save_and_clear.assert_called_once_with()
-    cfg = created[0]
-    assert cfg.sim_cfg.render_cfg.spp == 8
-    assert cfg.events.record_camera.params["max_env_num"] == 3
-    assert cfg.events.record_camera.params["save_path"] == str(tmp_path / "videos")
-    result = json.loads((tmp_path / "fluid_gym_result.json").read_text())
-    assert result["renderer"] == "fast-rt"
-    assert result["fluid_source"]["kind"] == "revolved_volume"
-    assert result["fluid_source"]["file_path"] is None
-    expected_spacing = spacing or 0.0015
-    assert result["particle_spacing_m"] == expected_spacing
     fluid = cfg.fluid_object[0]
-    scale = expected_spacing / 0.0015
-    assert fluid.render.render_radius == pytest.approx(0.00045 * scale)
-    assert fluid.render.mesh_surface["cell_size"] == pytest.approx(0.00081 * scale)
-    assert fluid.render.mesh_surface["kernel_radius"] == pytest.approx(0.00225 * scale)
+    assert fluid.render.mode == "none"
+    assert fluid.particle_radius == pytest.approx(0.0009)
+    assert fluid.render.mesh_surface["kernel_radius"] == pytest.approx(0.0045)
     assert cfg.sim_cfg.physics_cfg.solver_cfg[
         "particle_support_radius"
-    ] == pytest.approx(2.25 * expected_spacing)
-    assert result["video_fps"] == 24
-    assert result["videos"] == [
-        f"videos/episode_0_fluid_gym_env{i}.mp4" for i in range(3)
-    ]
+    ] == pytest.approx(0.00675)
+    assert cfg.events.record_camera is None
 
 
-@pytest.mark.parametrize("reset_step", [0, 1])
-def test_partial_reset_reports_current_row_clocks_and_observations(
-    reset_step, monkeypatch, tmp_path
+def test_physical_qualification_does_not_accept_motion_commands_alone():
+    initial = np.array([[0, 0, 0.5, 0, 0, 0, 1], [1, 0, 0.5, 0, 0, 0, 1]], dtype=float)
+    moving = initial.copy()
+    moving[0, 2] += 0.12
+    moving[0, 3] = np.sin(np.deg2rad(35))
+    moving[0, 6] = np.cos(np.deg2rad(35))
+    result = _cup_qualification([initial, moving, initial])
+    assert result["accepted"] == [True, False]
+    assert result["max_tilt_deg"] == pytest.approx([70, 0])
+    assert result["lift_m"] == pytest.approx([0.12, 0])
+
+
+@pytest.mark.parametrize("renderer", ["fast-rt", "no-render"])
+def test_online_runner_commits_last_recording_before_close(
+    renderer, tmp_path, monkeypatch
 ):
-    from embodichain.lab.gym.envs import fluid_replay
-    from embodichain.lab.gym.envs.managers import observations
+    import argparse
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import torch
+    from embodichain.lab.scripts import run_fluid_task_program as runner
 
-    class Environment:
-        def __init__(self, cfg, **kwargs):
-            self.num_envs = cfg.num_envs
-            self.device = torch.device("cpu")
-            self.step_dt = 1 / 24
-            self.replay_duration = 2 * self.step_dt
-            self.active_joint_ids = [0]
-            self.source_qualification = {"accepted": True}
-            self.close = Mock()
-            self.clock = torch.zeros(self.num_envs)
-            self.water = SimpleNamespace(
-                num_particles=1,
-                data=SimpleNamespace(particle_state_w=torch.zeros(self.num_envs, 1, 6)),
-            )
-            self.sim = SimpleNamespace(get_fluid_object=lambda uid: self.water)
-
-        def snapshot(self):
-            return {"clock": self.clock.clone()}, {
-                "fluid_replay_time_s": self.clock.clone(),
-                "fluid_replay_finished": self.clock >= self.replay_duration,
-            }
-
-        def reset(self, *, seed=None, options=None):
-            ids = options["reset_ids"] if options else torch.arange(self.num_envs)
-            self.clock[ids] = 0
-            self.water.data.particle_state_w[ids] = 0
-            return self.snapshot()
-
-        def step(self, action):
-            self.clock += self.step_dt
-            self.water.data.particle_state_w[..., 0] += 1
-            obs, info = self.snapshot()
-            return obs, None, None, None, info
-
-    monkeypatch.setattr(fluid_replay, "FluidReplayEnv", Environment)
-    monkeypatch.setattr(
-        observations,
-        "get_fluid_summary",
-        lambda env, obs, *args: torch.stack(
-            (obs["clock"], torch.ones(env.num_envs)), dim=-1
+    order = []
+    recorder = SimpleNamespace(
+        save_and_clear=Mock(side_effect=lambda: order.append("save"))
+    )
+    env = SimpleNamespace(
+        num_envs=2,
+        step_dt=0.05,
+        control_frequency=20,
+        elapsed_steps=torch.zeros(2),
+        reset=Mock(),
+        event_manager=SimpleNamespace(get_functor=lambda name: recorder),
+        sim=SimpleNamespace(
+            get_rigid_object=lambda uid: SimpleNamespace(
+                get_local_pose=lambda: torch.tensor([[0.0, 0, 0, 0, 0, 0, 1]]).repeat(
+                    2, 1
+                )
+            ),
+            get_fluid_object=lambda uid: SimpleNamespace(num_particles=1),
         ),
+        close=Mock(side_effect=lambda **kwargs: order.append("close")),
     )
-    monkeypatch.setattr(
-        observations,
-        "get_fluid_volume_in_region",
-        lambda env, *args, **kwargs: torch.zeros(env.num_envs, 1),
+    result = SimpleNamespace(
+        completed=False, all_success=False, to_metadata=lambda: {"completed": False}
     )
+    monkeypatch.setattr(runner, "make", lambda *args, **kwargs: env)
+    monkeypatch.setattr(runner, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(runner, "execute_demo_episode", lambda *args, **kwargs: result)
+    monkeypatch.setattr(runner, "_sample", lambda env: {"received_ml": [0.0, 0.0]})
+    monkeypatch.setattr(runner.SimulationManager, "flush_cleanup_queue", lambda: None)
     args = argparse.Namespace(
-        replay_task=str(TASK),
+        task=str(TASK),
         num_envs=2,
-        renderer="no-render",
+        renderer=renderer,
         particle_spacing=None,
-        speed=2,
-        seconds=None,
-        partial_reset_step=reset_step,
+        record_trajectory=False,
+        seconds=0.05,
+        settle_seconds=0,
     )
-
-    runner._replay(args, tmp_path / "source.pt", tmp_path)
-
-    result = json.loads((tmp_path / "fluid_gym_result.json").read_text())
-    step_dt = 1 / 24
-    expected_times = (
-        [[0, step_dt], [step_dt, 2 * step_dt]]
-        if reset_step == 0
-        else [[step_dt, step_dt], [0, 2 * step_dt]]
-    )
-    assert len(result["samples"]) == len(expected_times)
-    for sample, expected in zip(result["samples"], expected_times):
-        assert sample["time_s"] == pytest.approx(expected)
-        assert [row[0] for row in sample["summary"]] == pytest.approx(expected)
-    assert result["replay_complete"] == [False, True]
-
-
-def test_spacing_override_rejects_fixed_points_before_scene_creation(
-    monkeypatch, tmp_path
-):
-    from embodichain.lab.gym.utils.gym_utils import config_to_cfg
-    from embodichain.lab.sim.cfg import FluidSpawnCfg
-    from embodichain.utils.utility import load_config
-
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
-    cfg.fluid_object[0].spawn = FluidSpawnCfg(positions=[[0, 0, 0]])
-    monkeypatch.setattr(runner, "config_to_cfg", lambda *args, **kwargs: cfg)
-    args = argparse.Namespace(
-        replay_task=str(TASK),
-        num_envs=2,
-        renderer="fast-rt",
-        particle_spacing=0.006,
-        speed=2,
-    )
-    with pytest.raises(ValueError, match="fixed sampling"):
-        runner._replay(args, tmp_path / "unused.pt", tmp_path)
-
-
-def test_fluid_launcher_rejects_invisible_hybrid_backend(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["fluid", "--renderer", "hybrid"])
-    with pytest.raises(SystemExit) as error:
-        runner.main()
-    assert error.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
+    report = runner._run(args, tmp_path)
+    assert report["accepted"] is False
+    assert order == (["save", "close"] if renderer == "fast-rt" else ["close"])
+    assert len(report["videos"]) == (2 if renderer == "fast-rt" else 0)
+    assert (tmp_path / "fluid_gym_result.json").is_file()

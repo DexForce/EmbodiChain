@@ -20,26 +20,29 @@ arena-local. Region measurement and `events.reset_fluid_in_container()` add
 arena offsets before comparing or placing particles. Region volume is particle
 count times nominal spacing cubed, not a reconstructed-surface measurement.
 
-## Two-stage Task Program workflow
+## Online Task Program workflow
 
-`lab/scripts/run_fluid_task_program.py` generates the existing pour-cup Task
-Program in MuJoCo, requires program acceptance and measured cup lift/tilt/return,
-and stores provenance in trajectory metadata. A separate process/world runs
-`gym/envs/fluid_replay.py::FluidReplayEnv` with live SPH. The physical deployments
-remain separate files (`env.newton.yaml` versus `env.fluid.yaml`); the latter
-reuses DexSim's SPH solver configuration directly.
+`lab/scripts/run_fluid_task_program.py` runs the configured pour-cup deployment
+through ordinary `EmbodiedEnv` and `execute_demo_episode()`. The environment
+component selects DexSim SPH with an existing MuJoCo configuration nested under
+`rigid_solver_cfg`. Robot drive targets, dynamic grasp contacts and fluid state
+advance in one World, with no recorded trajectory input. SPH reads live rigid
+boundaries; fluid reaction forces are not fed back into the rigid solver.
+The fluid program measures cup lift and alignment, transports the held cup
+to a receiver-relative pour pose through the existing MoveHeldObject lowerer,
+then pours and returns it. The standalone Sim tutorial uses the same physical
+component and relative pour target with freshly planned Atomic Action targets.
 
-Replay broadcasts one accepted source row across environments. It adopts the
-recorded fixed robot root, checks joint compatibility, interpolates measured
-joints/rigid poses on the physics grid, and publishes kinematic boundary twist.
-Each environment has its own clock and selected reset/refill. Newton substeps
-must be one; control intervals may contain multiple physics steps. Completion
-is truncation; reset is required once every row is exhausted.
+Program completion and physical qualification are separate: the runner measures
+cup lift, maximum tilt, final return error and received volume. Projected effect
+assurance alone does not prove grasp or pouring success. Optional trajectory
+recording stores measured online state for inspection. `--seconds` qualifies
+only a bounded fragment, not completion of the task.
 
-This is one-way state replay: policy actions do not drive the robot and fluid
-forces do not affect the recorded motion. Action managers, trajectory recording
-and active policy dataset recorders are rejected. Task Program acceptance is
-source provenance; fluid capture metrics remain separate measured outcomes.
+`FluidReplayEnv` remains an explicit diagnostic utility for accepted historical
+recordings; it is not the default deployment or task runner. It requires a
+separate kinematic configuration, one Newton substep and fixed-root source
+states, and rejects action managers and policy dataset/trajectory recording.
 
 ## Rendering and recording
 
@@ -60,6 +63,7 @@ NoRender qualification removes the recorder before constructing the scene.
 
 Production configuration/measurement checks are in
 `tests/gym/envs/test_fluid_integration.py`; live isolation checks are in
-`tests/sim/objects/test_fluid_batch_runtime.py`; actual primary-surface visibility
+`tests/sim/objects/test_fluid_batch_runtime.py` and
+`tests/sim/objects/test_fluid_online_runtime.py`; actual primary-surface visibility
 is checked by `tests/sim/objects/test_fluid_visibility.py`. Generated trajectories/videos
 are local qualification evidence, not packaged task assets.

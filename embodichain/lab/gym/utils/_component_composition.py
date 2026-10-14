@@ -69,7 +69,7 @@ def _resolve_physical_source_paths(simulation: dict, base_dir: Path) -> dict:
     result = deepcopy(dict(simulation))
     for field in ("background", "rigid_object"):
         for item in result.get(field, []):
-            for key in ("shape", "visual_shape"):
+            for key in ("shape", "visual_shape", "particle_collision_shape"):
                 shape = item.get(key) or {}
                 path = shape.get("fpath")
                 if isinstance(path, str) and path.startswith(("./", "../")):

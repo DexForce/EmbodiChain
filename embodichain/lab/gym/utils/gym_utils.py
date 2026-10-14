@@ -491,7 +491,7 @@ def config_to_cfg(
     from embodichain.data import get_data_path
 
     def _resolve_mesh_asset_paths(obj_dict: dict[str, Any]) -> None:
-        for key in ("shape", "visual_shape"):
+        for key in ("shape", "visual_shape", "particle_collision_shape"):
             shape = obj_dict.get(key)
             if (
                 shape is not None

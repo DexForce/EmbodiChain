@@ -335,6 +335,39 @@ def rigid_desc_from_cfg(
         0 if cfg.visual_shape is None and cfg.render_enabled else None
     )
 
+    collisions = [collision]
+    if cfg.particle_collision_shape is not None:
+        boundary_shape = cfg.particle_collision_shape
+        if newton_solver_type is None:
+            raise ValueError("particle_collision_shape requires Newton physics.")
+        if (
+            not isinstance(boundary_shape, MeshCfg)
+            or boundary_shape.collision is None
+            or boundary_shape.collision.approximation != "sdf"
+        ):
+            raise ValueError(
+                "particle_collision_shape requires a MeshCfg with sdf collision."
+            )
+        boundary_cfg = cfg.copy()
+        boundary_cfg.shape = boundary_shape
+        boundary_geometry = _compile_geometry(boundary_cfg)[0]
+        boundary = CollisionDesc.from_geometry(
+            boundary_geometry, approximation=CollisionApproximation.SDF
+        )
+        boundary.enable_collision = False
+        boundary.newton = replace(
+            _compile_newton_collision(
+                physics,
+                newton_solver_type=newton_solver_type,
+                author_shape_defaults=True,
+                mesh_collision=boundary_shape.collision,
+            ),
+            has_particle_collision=True,
+            contributes_to_mass=False,
+        )
+        collision.newton = replace(collision.newton, has_particle_collision=False)
+        collisions.append(boundary)
+
     descriptor = ObjectDesc(
         name=uid,
         pose=_pose_from_cfg(cfg),
@@ -349,7 +382,7 @@ def rigid_desc_from_cfg(
             if cfg.render_enabled
             else []
         ),
-        collisions=[collision],
+        collisions=collisions,
         physics=_compile_rigid_physics(physics, cfg.body_type),
         per_env=per_env,
         body_scale=_vector3(cfg.body_scale, field_name="body_scale"),

@@ -46,6 +46,13 @@ class _FluidReplayRuntime:
             / "embodichain_tasks/configs/tasks/manipulation/tableware/pour_cup/task.franka.fluid.yaml"
         )
         cfg = config_to_cfg(load_config(task), source_path=task)
+        cfg.task_program = None
+        cup_cfg = cfg.rigid_object.pop(0)
+        cup_cfg.body_type = "kinematic"
+        cfg.background.append(cup_cfg)
+        cfg.events.settle_cup = None
+        cfg.sim_cfg.physics_cfg.num_substeps = 1
+        cfg.sim_cfg.physics_cfg.solver_cfg.pop("rigid_solver_cfg", None)
         cfg.sim_cfg.render_cfg = RenderCfg(renderer="no-render")
         cfg.sim_cfg.headless = True
         cfg.enable_sensor = False
@@ -59,7 +66,9 @@ class _FluidReplayRuntime:
             particle_support_radius=0.0225,
         )
         for obj in cfg.background:
-            obj.shape.collision.sdf_resolution = 16
+            for shape in (obj.shape, obj.particle_collision_shape):
+                if shape is not None and getattr(shape, "collision", None) is not None:
+                    shape.collision.sdf_resolution = 16
         fluid = cfg.fluid_object[0]
         fluid.particle_spacing = 0.01
         fluid.particle_radius = 0.003

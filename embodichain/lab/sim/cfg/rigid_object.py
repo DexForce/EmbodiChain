@@ -49,6 +49,13 @@ class RigidObjectCfg(ObjectBaseCfg):
     visual_shape: ShapeCfg | None = None
     """Optional independent render geometry; shape remains collision geometry."""
 
+    particle_collision_shape: ShapeCfg | None = None
+    """Optional Newton SDF mesh for particles on this same rigid body.
+
+    Rigid contacts and mass use :attr:`shape`. This boundary follows the body's
+    live pose and twist and contributes no mass or rigid contact geometry.
+    """
+
     render_enabled: bool = True
     """Whether to create native render geometry for this rigid object."""
 
@@ -79,8 +86,9 @@ class RigidObjectCfg(ObjectBaseCfg):
     def from_dict(cls, init_dict: Dict[str, Any]) -> RigidObjectCfg:
         """Parse a rigid object and normalize legacy mesh collision ownership."""
         data = dict(init_dict)
-        if isinstance(data.get("visual_shape"), Mapping):
-            data["visual_shape"] = ShapeCfg.from_dict(data["visual_shape"])
+        for key in ("visual_shape", "particle_collision_shape"):
+            if isinstance(data.get(key), Mapping):
+                data[key] = ShapeCfg.from_dict(data[key])
         attrs_value = data.get("attrs")
         if isinstance(attrs_value, Mapping) and "mesh_collision_props" in attrs_value:
             shape_value = data.get("shape")

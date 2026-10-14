@@ -40,6 +40,17 @@ TASK = (
 )
 
 
+def _replay_cfg():
+    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg.task_program = None
+    cup = cfg.rigid_object.pop(0)
+    cup.body_type = "kinematic"
+    cfg.background.append(cup)
+    cfg.sim_cfg.physics_cfg.num_substeps = 1
+    cfg.sim_cfg.physics_cfg.solver_cfg.pop("rigid_solver_cfg", None)
+    return cfg
+
+
 @pytest.fixture(autouse=True)
 def task_mesh_cache(tmp_path, monkeypatch):
     """Resolve task meshes locally so configuration tests never download them."""
@@ -67,7 +78,7 @@ def task_mesh_cache(tmp_path, monkeypatch):
     return directory
 
 
-def test_fluid_deployment_resolves_sources_and_observation_entities(task_mesh_cache):
+def test_fluid_deployment_resolves_sources_and_observation_entities():
     cfg = config_to_cfg(load_config(TASK), source_path=TASK)
     assert cfg.sim_cfg.render_cfg.renderer == "fast-rt"
     assert cfg.events.record_camera.params["per_env"] is True
@@ -84,10 +95,10 @@ def test_fluid_deployment_resolves_sources_and_observation_entities(task_mesh_ca
         isinstance(item, SceneEntityCfg)
         for item in cfg.observations.received_volume.params["entity_cfgs"]
     )
-    cup = next(item for item in cfg.background if item.uid == "cup")
-    assert cup.visual_shape.fpath == str(task_mesh_cache / "cup.glb")
-    assert cup.shape.fpath == str(task_mesh_cache / "mug_wall.obj")
-    assert cup.shape.collision.force_sdf is False
+    cup = next(item for item in cfg.rigid_object if item.uid == "cup")
+    assert Path(cup.particle_collision_shape.fpath).is_absolute()
+    assert cup.body_type == "dynamic"
+    assert cfg.task_program is not None
 
 
 def test_fluid_component_rejects_duplicate_inline_ownership():
@@ -143,7 +154,7 @@ def test_fluid_replay_rejects_unqualified_recording_before_world_creation():
     from embodichain.lab.gym.envs.fluid_replay import FluidReplayEnv
     from tensordict import TensorDict
 
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg = _replay_cfg()
     source = {
         "meta": {"num_envs": 1, "num_steps": 2, "lengths": [2]},
         "states": TensorDict({}, batch_size=[1, 2]),
@@ -191,7 +202,7 @@ def test_replay_adopts_source_root_before_scene_creation(monkeypatch):
     from embodichain.lab.gym.envs.fluid_replay import FluidReplayEnv
     from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg = _replay_cfg()
     cfg.dataset = {}  # Empty mapping is a supported Python configuration.
     captured = []
 
@@ -210,7 +221,7 @@ def test_replay_adopts_source_root_before_scene_creation(monkeypatch):
 def test_replay_rejects_misleading_policy_recording(kind):
     from embodichain.lab.gym.envs.fluid_replay import FluidReplayEnv
 
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg = _replay_cfg()
     if kind == "trajectory":
         cfg.record_trajectory = True
     elif kind == "actions":
@@ -224,7 +235,7 @@ def test_replay_rejects_misleading_policy_recording(kind):
 def test_replay_rejects_moving_root_before_scene_creation():
     from embodichain.lab.gym.envs.fluid_replay import FluidReplayEnv
 
-    cfg = config_to_cfg(load_config(TASK), source_path=TASK)
+    cfg = _replay_cfg()
     source = _qualified_source()
     source["states"]["robot", "root_pose"][0, 1, 0] = 0.2
     with pytest.raises(ValueError, match="fixed-root"):

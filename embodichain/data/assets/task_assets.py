@@ -70,8 +70,8 @@ class PourCupAssets(_TaskAsset):
 class PourCupDemoData(_TaskAsset):
     """Recorded pouring trajectory, videos and original validation evidence.
 
-    ``trajectory.pt`` is the MuJoCo recording used by the standalone pouring
-    tutorial. ``particles_30.npz`` is a final reference snapshot and is not used
+    ``trajectory.pt`` is a historical MuJoCo recording for diagnostic replay.
+    Online pouring tutorials and tasks do not load it. ``particles_30.npz`` is a final reference snapshot and is not used
     to initialize fluids. Resolve files through ``get_data_path()``.
     """
 

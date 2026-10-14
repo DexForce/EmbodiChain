@@ -159,16 +159,19 @@ class NewtonPhysicsBackend(PhysicsBackend):
         if backend is None or backend.solver_type != "sph":
             raise RuntimeError("Prepared SPH backend required.")
         backend.invalidate_cuda_graph("fluid state write")
-        if getattr(backend.solver, "supports_world_reset", False):
+        solver = getattr(backend, "sph_solver", backend.solver)
+        if getattr(solver, "supports_world_reset", False):
             mask = [
                 env_ids is None or i in env_ids
                 for i in range(backend.model.world_count)
             ] + [False]
-            backend.clear_solver_state(
-                wp.array(mask, dtype=wp.bool, device=backend.model.device)
+            solver.reset(
+                backend._runtime.current_state,
+                world_mask=wp.array(mask, dtype=wp.bool, device=backend.model.device),
+                flags=0,
             )
             return
-        boundary = backend.solver.sdf_boundary
+        boundary = solver.sdf_boundary
         if boundary is not None and boundary._body_q_prev is not None:
             boundary._body_q_prev.assign(backend.state_0.body_q)
 
@@ -178,7 +181,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         import torch
 
         backend = get_newton_backend(self._manager._world)
-        solver = backend.solver
+        solver = getattr(backend, "sph_solver", backend.solver)
         density = wp.to_torch(solver.particle_density)
         values = []
         for entity in fluid._entities:

@@ -21,6 +21,17 @@ Writes update Scene particle batches; resetting transforms a saved local
 particle template or restores the immutable initial state. Render topology is
 reconstructed and is not inherited from volume/surface deformables.
 
+An opt-in `SPHSolverCfg.rigid_solver_cfg` composes the existing MuJoCo solver
+with SPH using Newton-owned views on one model/clock. MuJoCo owns rigid bodies
+and joints; SPH owns particles and reads live body proxies. Rigid microsteps
+refine contact integration without adding simulation time. This is online
+one-way coupling; there is no fluid reaction feedback. `RigidObjectCfg` may
+provide `particle_collision_shape`, an SDF mesh on the same body, so rigid
+contact hulls and a hollow fluid boundary coexist without extra mass or a
+pose follower. The native adapter owns particle-only SDF cooking and mass
+exclusion. Selected fluid state writes invalidate SPH caches without clearing
+the rigid solver history.
+
 Kinematic rigid boundaries can be written with `set_kinematic_state()` or
 driven before each solver substep using `register_kinematic_rigid_trajectory()`.
 Registered host controls disable graph replay and rewind selected clocks on
@@ -39,8 +50,9 @@ memory; replica binding and selected reset never reopen or regenerate a source.
 Changing spacing or fill level before construction regenerates the point count;
 prepared topology remains fixed. Points/NPZ imports already contain fixed
 sampling and reject volume-only profile/fill-level controls. The default pour
-scene uses a profile source with no particle file or disk cache. Its existing
-stationary replay hold provides physical settling after direct initialization.
+scene uses a profile source with no particle file or disk cache. Gym reset restores/refills selected rows without advancing the shared world;
+normal approach actions provide physical settling. The standalone Sim host
+resets configured robot/object state before a short initialization warmup.
 
 Native fluid geometry requires FastRT (`fast-rt`) or OfflineRT (`rt`). The
 manager rejects Hybrid in both the resolved configuration and the initialized
@@ -53,14 +65,14 @@ Validate camera pixels with visible and hidden fluid, not only particle counts.
 Native rendering is published through the existing Newton render bridge.
 Display clipping acts only on copied positions; Viser consumes detached point
 clouds. NoRender fluid mode does not require optical materials. Ordinary rigid
-objects may supply a separate `visual_shape`; SDF cooking stays on the physical
-shape. Explicit `force_sdf=False` permits pre-baked mesh SDFs.
+objects may supply a separate `visual_shape`; SDF cooking stays on the collision
+shape or the separate particle boundary. Explicit `force_sdf=False` permits pre-baked mesh SDFs.
 
 Focused checks are `tests/sim/test_fluid_cfg.py`,
 `tests/sim/objects/test_fluid_object.py` and the serial CUDA lifecycle test
 `tests/sim/objects/test_fluid_runtime.py` and `test_fluid_batch_runtime.py`.
 `tests/sim/objects/test_fluid_visibility.py` checks real camera pixels after
 stepping and direct state writes, including display clipping.
-For YAML declarations, refill observations and Task Program replay, see
+For YAML declarations, refill observations and online Task Program execution, see
 [fluid Gym integration](../env-framework/fluid-replay.md). The pouring tutorial is an end-to-end
 qualification workload, not a unit-test import target.
