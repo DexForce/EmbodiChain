@@ -655,6 +655,10 @@ def config_to_cfg(
     env_cfg.num_envs = config.get("num_envs", 1)
     env_cfg.seed = config.get("seed", None)
     env_cfg.enable_sensor = config.get("enable_sensor", True)
+    ground_plane_visible = config.get("ground_plane_visible")
+    if ground_plane_visible is not None and type(ground_plane_visible) is not bool:
+        raise TypeError("ground_plane_visible must be a bool or None.")
+    env_cfg.ground_plane_visible = ground_plane_visible
 
     render_config = deepcopy(config.get("render_cfg", {}))
     if isinstance(render_config.get("denoising"), dict):
@@ -1439,6 +1443,7 @@ def _apply_expansion_runtime_overlay(
         "max_episode_steps",
         "num_envs",
         "arena_space",
+        "ground_plane_visible",
         "env",
     }
     unknown = set(runtime) - allowed
@@ -1460,7 +1465,13 @@ def _apply_expansion_runtime_overlay(
         return merged
 
     resolved = deepcopy(config)
-    for key in ("max_episodes", "max_episode_steps", "num_envs", "arena_space"):
+    for key in (
+        "max_episodes",
+        "max_episode_steps",
+        "num_envs",
+        "arena_space",
+        "ground_plane_visible",
+    ):
         if key in runtime:
             resolved[key] = deepcopy(runtime[key])
     for key in ("env",):

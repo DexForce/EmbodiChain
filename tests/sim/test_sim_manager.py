@@ -1869,6 +1869,42 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     )
 
 
+@pytest.mark.parametrize("native_renderer", [False, True])
+@pytest.mark.parametrize("visible", [False, True])
+def test_ground_visibility_only_accesses_native_visuals(
+    native_renderer, visible
+) -> None:
+    plane = MagicMock()
+    sim = SimpleNamespace(
+        _default_plane=plane,
+        has_native_renderer=native_renderer,
+    )
+
+    SimulationManager.set_ground_plane_visibility(sim, visible)
+
+    assert sim._spawn_default_plane_visibility is visible
+    if native_renderer:
+        plane.set_visible.assert_called_once_with(visible)
+    else:
+        plane.set_visible.assert_not_called()
+
+
+@pytest.mark.parametrize("native_renderer", [False, True])
+def test_ground_visibility_survives_deferred_binding(native_renderer) -> None:
+    sim = SimpleNamespace(_default_plane=None, has_native_renderer=native_renderer)
+    plane = MagicMock()
+
+    SimulationManager.set_ground_plane_visibility(sim, False)
+    SimulationManager._bind_default_plane(sim, plane)
+    SimulationManager.set_ground_plane_visibility(sim, True)
+
+    assert sim._default_plane is plane
+    assert sim._spawn_default_plane_visibility is True
+    assert plane.set_visible.call_args_list == (
+        [call(False), call(True)] if native_renderer else []
+    )
+
+
 @pytest.mark.parametrize(
     ("backend", "device", "initializes_direct_gpu"),
     [

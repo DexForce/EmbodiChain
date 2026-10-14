@@ -190,6 +190,15 @@ class EmbodiedEnvCfg(EnvCfg):
 
     light: EnvLightCfg = EnvLightCfg()
 
+    ground_plane_visible: bool | None = None
+    """Native rendering visibility of the default ground plane.
+
+    ``None`` hides the ground when an active HDR indirect-lighting randomizer
+    is configured, and shows it otherwise. Explicit booleans override that
+    default. Visibility affects native windows and cameras without changing
+    ground collisions or the Viser grid.
+    """
+
     background: List[RigidObjectCfg] = []
 
     rigid_object: List[RigidObjectCfg] = []
@@ -893,7 +902,32 @@ class EmbodiedEnv(BaseEnv):
     def _setup_scene(self, **kwargs) -> None:
         """Filter configuration independently of the overridable demand hook."""
         self._apply_functor_filter()
+        self.cfg.ground_plane_visible = self._resolve_ground_plane_visibility()
         super()._setup_scene(**kwargs)
+
+    def _resolve_ground_plane_visibility(self) -> bool:
+        """Resolve the native ground default from filtered event configuration."""
+        visible = self.cfg.ground_plane_visible
+        if visible is not None:
+            if type(visible) is not bool:
+                raise TypeError("ground_plane_visible must be a bool or None.")
+            return visible
+
+        from embodichain.lab.gym.envs.managers.randomization.visual import (
+            randomize_indirect_lighting,
+        )
+
+        for collection, _, term in self._iter_configured_functors():
+            if collection is not self.cfg.events:
+                continue
+            func = self._configured_functor_callable(term)
+            if (
+                isinstance(func, type)
+                and issubclass(func, randomize_indirect_lighting)
+                and term.params.get("path") is not None
+            ):
+                return False
+        return True
 
     def _requires_native_renderer(self) -> bool:
         """Predict cameras from the already-filtered manager configuration."""
@@ -1049,6 +1083,7 @@ class EmbodiedEnv(BaseEnv):
         return rewards
 
     def _prepare_scene(self, **kwargs) -> None:
+        self.sim.set_ground_plane_visibility(self.cfg.ground_plane_visible)
         self._setup_background()
         self._setup_interactive_objects()
         self._setup_lights()

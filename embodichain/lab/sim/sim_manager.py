@@ -2244,13 +2244,17 @@ class SimulationManager:
         self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
-        """_summary_
+        """Set native ground rendering visibility while preserving collisions.
+
+        Applies to native windows and cameras. The setting is retained until
+        the ground is materialized, and does not control the Viser grid.
+        NoRender stores the setting without accessing native visual resources.
 
         Args:
-            visible (bool): _description_
+            visible: Whether the default ground plane is rendered.
         """
         self._spawn_default_plane_visibility = bool(visible)
-        if self._default_plane is None:
+        if self._default_plane is None or not self.has_native_renderer:
             return
         self._default_plane.set_visible(bool(visible))
 
