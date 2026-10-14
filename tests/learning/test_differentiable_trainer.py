@@ -415,3 +415,135 @@ def test_checkpoint_load_falls_back_for_older_torch(
     trainer.load_checkpoint(checkpoint_path)
 
     assert calls == [True, False]
+
+
+@pytest.mark.parametrize("rollout_mode", ["segmented", "complete"])
+@pytest.mark.parametrize("normalize", [False, True])
+def test_checkpoint_continues_apg_updates_and_rollout_schedule(
+    tmp_path: Path,
+    rollout_mode: str,
+    normalize: bool,
+) -> None:
+    from copy import deepcopy
+
+    def components(directory: Path) -> DifferentiableTrainer:
+        env = (
+            _ScheduledCompleteRolloutEnv()
+            if rollout_mode == "complete"
+            else _QuadraticActionEnv()
+        )
+        policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1, bias=False))
+        algorithm = APG(
+            APGCfg(
+                device="cpu",
+                optimizer=OptimizerCfg(learning_rate=0.05),
+                lr_scheduler=LRSchedulerCfg(name="linear", kwargs={"total_iters": 4}),
+                max_grad_norm=10.0,
+            ),
+            policy,
+        )
+        return DifferentiableTrainer(
+            DifferentiableTrainerCfg(
+                segment_length=2,
+                update_horizon=4,
+                rollout_mode=rollout_mode,
+                deterministic_actions=True,
+                gradient_accumulation_steps=2,
+                normalize_observations=normalize,
+                checkpoint_dir=str(directory),
+            ),
+            env,
+            policy,
+            algorithm,
+        )
+
+    torch.manual_seed(17)
+    original = components(tmp_path / "original")
+    original.train(total_updates=2)
+    path = original.save_checkpoint()
+    saved_index = original._rollout_index
+    original.train(total_updates=4)
+    expected_policy = deepcopy(original.policy.state_dict())
+    expected_optimizer = deepcopy(original.algorithm.optimizer.state_dict())
+
+    restored = components(tmp_path / "restored")
+    restored.load_checkpoint(path)
+    assert restored._rollout_index == saved_index
+    restored.train(total_updates=4)
+    assert restored.num_updates == 4
+    assert restored.global_step == original.global_step
+    assert restored._rollout_index == original._rollout_index
+    for key, value in expected_policy.items():
+        torch.testing.assert_close(
+            restored.policy.state_dict()[key], value, rtol=0, atol=0
+        )
+    for key, state in expected_optimizer["state"].items():
+        for name, value in state.items():
+            torch.testing.assert_close(
+                restored.algorithm.optimizer.state_dict()["state"][key][name],
+                value,
+                rtol=0,
+                atol=0,
+            )
+    assert (
+        restored.algorithm.lr_scheduler.state_dict()
+        == original.algorithm.lr_scheduler.state_dict()
+    )
+    if normalize:
+        torch.testing.assert_close(
+            restored.observation_normalizer.mean, original.observation_normalizer.mean
+        )
+        assert (
+            restored.observation_normalizer.count
+            == original.observation_normalizer.count
+        )
+    if rollout_mode == "complete":
+        assert restored.env.prepared_indices[0] == saved_index
+
+
+def test_load_existing_apg_schema_v1_and_continue(tmp_path: Path) -> None:
+    env, policy, algorithm = _make_components()
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(segment_length=2),
+        env,
+        policy,
+        algorithm,
+    )
+    trainer.train(total_updates=1)
+    path = trainer.save_checkpoint(tmp_path / "v1.pt")
+    checkpoint = torch.load(path, weights_only=True)
+    for key in (
+        "metadata",
+        "rng_by_rank",
+        "normalizer_by_rank",
+        "world_size",
+        "best_checkpoint",
+    ):
+        checkpoint.pop(key)
+    checkpoint["schema_version"] = 1
+    torch.save(checkpoint, path)
+    with pytest.warns(UserWarning, match="Legacy checkpoint"):
+        trainer.load_checkpoint(path)
+    trainer.train(total_updates=2)
+    assert trainer.num_updates == 2
+    assert trainer.global_step == 8
+
+
+def test_variable_horizon_requires_update_budget_for_implicit_lr_curve() -> None:
+    env = _ScheduledCompleteRolloutEnv()
+    policy = ActorOnly(1, 1, env.device, actor=nn.Linear(1, 1, bias=False))
+    algorithm = APG(
+        APGCfg(device="cpu", lr_scheduler=LRSchedulerCfg(name="linear")),
+        policy,
+    )
+    trainer = DifferentiableTrainer(
+        DifferentiableTrainerCfg(rollout_mode="complete", update_horizon=4),
+        env,
+        policy,
+        algorithm,
+    )
+    with pytest.raises(
+        ValueError, match="total_updates or an explicit scheduler horizon"
+    ):
+        trainer.train(total_timesteps=8)
+    assert trainer.num_updates == 0

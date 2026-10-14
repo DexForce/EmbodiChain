@@ -19,11 +19,12 @@
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from embodichain.learning.rl.checkpoint import _atomic_write
 
 __all__ = ["RUN_MANIFEST_NAME", "RunManifest", "write_run_manifest"]
 
@@ -132,10 +133,10 @@ def write_run_manifest(
         "checkpoints": checkpoints,
     }
     path = root / RUN_MANIFEST_NAME
-    path.write_text(
-        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    contents = (
+        json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    _atomic_write(path, lambda stream: stream.write(contents))
     return path
 
 
@@ -145,7 +146,8 @@ def _snapshot_config(source: str | Path, target: Path, name: str) -> str:
         raise FileNotFoundError(f"Training config does not exist: {path}")
     suffix = path.suffix.lower() if path.suffix else ".yaml"
     destination = target / f"{name}{suffix}"
-    shutil.copyfile(path, destination)
+    if path != destination:
+        _atomic_write(destination, lambda stream: stream.write(path.read_bytes()))
     return destination.relative_to(target.parent).as_posix()
 
 

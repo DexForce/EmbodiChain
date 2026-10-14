@@ -29,6 +29,7 @@ import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
+from embodichain.learning.rl.checkpoint import _resolve_resume, _sync_errors
 from embodichain.learning.rl.models import get_registered_policy_names
 from embodichain.learning.rl.policy_evaluation.manifest import (
     write_run_manifest,
@@ -43,6 +44,7 @@ from embodichain.learning.rl.differentiable_trainer import (
     DifferentiableTrainerCfg,
 )
 from embodichain.learning.rl.runtime import (
+    _close_environment,
     _build_learning_environment,
     _build_learning_policy,
     build_gym_policy_runtime,
@@ -114,7 +116,32 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Dump the profiling report as JSON on env.close() (requires --profile).",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Resume a checkpoint file, or latest/best selected from --run.",
+    )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default=None,
+        help="Source run directory for --resume latest/best.",
+    )
+    parser.add_argument(
+        "--resume-scheduler",
+        choices=("restore", "restart"),
+        default="restore",
+        help="Restore the saved LR curve, or restart it with the current config.",
+    )
+    args = parser.parse_args(argv)
+    if args.resume in {"latest", "best"} and args.run is None:
+        parser.error("--resume latest/best requires --run")
+    if args.run is not None and args.resume not in {"latest", "best"}:
+        parser.error("--run requires --resume latest/best")
+    if args.resume is None and args.resume_scheduler != "restore":
+        parser.error("--resume-scheduler requires --resume")
+    return args
 
 
 def _resolve_profile_output(
@@ -149,6 +176,9 @@ def _train_learning_env(
     config_path: str | Path,
     distributed: bool | None,
     profile: bool = False,
+    resume: str | Path | None = None,
+    run: str | Path | None = None,
+    resume_scheduler: str = "restore",
 ) -> dict[str, object]:
     """Train a lightweight registered environment through the unified CLI."""
     if profile:
@@ -208,7 +238,7 @@ def _train_learning_env(
     trainer_class = get_trainer_class(algorithm)
 
     exp_name = trainer_cfg.get("exp_name", f"{env_name}_{algorithm_block['name']}")
-    run_stamp = time.strftime("%Y%m%d_%H%M%S")
+    run_stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
     run_base = Path("outputs") / f"{exp_name}_{run_stamp}"
     log_dir = run_base / "logs" / exp_name
     checkpoint_dir = run_base / "checkpoints"
@@ -301,6 +331,8 @@ def _train_learning_env(
                 ),
             )
             default_steps = iterations * buffer_size * num_envs
+        _configure_checkpoints(trainer, cfg_data, config_path, run_base)
+        _resume_training(trainer, resume, run, resume_scheduler)
         if (
             trainer_class is DifferentiableTrainer
             and diff_cfg.rollout_mode == "complete"
@@ -329,6 +361,9 @@ def train_from_config(
     *,
     profile: bool = False,
     profile_output: str | None = None,
+    resume: str | Path | None = None,
+    run: str | Path | None = None,
+    resume_scheduler: str = "restore",
 ) -> dict[str, object] | None:
     """Run training from a config file path.
 
@@ -338,6 +373,10 @@ def train_from_config(
             If None, use trainer.distributed from config.
         profile: Enable gym ``EnvProfiler`` on the training environment.
         profile_output: Optional JSON dump path for the profiling report.
+        resume: Checkpoint file, or latest/best selected from run.
+        run: Source run directory when resume selects latest/best.
+        resume_scheduler: Restore the saved LR curve or restart the configured
+            curve with optimizer momentum retained.
 
     Returns:
         The lightweight trainer summary, or ``None`` for simulator training.
@@ -345,6 +384,12 @@ def train_from_config(
     if profile_output is not None and not profile:
         raise ValueError("--profile_output requires --profile.")
 
+    if resume_scheduler not in {"restore", "restart"}:
+        raise ValueError("resume_scheduler must be 'restore' or 'restart'.")
+    if resume is None and resume_scheduler != "restore":
+        raise ValueError("resume_scheduler restart requires resume.")
+    if resume is None and run is not None:
+        raise ValueError("run requires resume latest/best.")
     cfg_data = load_config(config_path)
 
     trainer_cfg = cfg_data["trainer"]
@@ -354,6 +399,9 @@ def train_from_config(
             config_path=config_path,
             distributed=distributed,
             profile=profile,
+            resume=resume,
+            run=run,
+            resume_scheduler=resume_scheduler,
         )
     policy_block = cfg_data["policy"]
     algo_block = cfg_data["algorithm"]
@@ -450,12 +498,18 @@ def train_from_config(
 
     # Outputs
     if distributed:
-        run_stamp = time.strftime("%Y%m%d_%H%M%S") if rank == 0 else None
+        run_stamp = (
+            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+            if rank == 0
+            else None
+        )
         run_stamp_list = [run_stamp]
         torch.distributed.broadcast_object_list(run_stamp_list, src=0)
         run_stamp = run_stamp_list[0]
     else:
-        run_stamp = time.strftime("%Y%m%d_%H%M%S")
+        run_stamp = (
+            f"{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}"
+        )
     run_base = os.path.join("outputs", f"{exp_name}_{run_stamp}")
     log_dir = os.path.join(run_base, "logs")
     checkpoint_dir = os.path.join(run_base, "checkpoints")
@@ -630,14 +684,23 @@ def train_from_config(
 
     summary = None
     try:
+        _configure_checkpoints(
+            trainer,
+            cfg_data,
+            config_path,
+            run_base,
+            gym_config=gym_config_path,
+            gym_data=gym_config_data,
+        )
+        _resume_training(trainer, resume, run, resume_scheduler)
         trainer.train(total_steps)
+        trainer.save_checkpoint()
+        if rank == 0:
+            summary = trainer.get_summary()
     except KeyboardInterrupt:
         if rank == 0:
             logger.log_info("Training interrupted by user")
     finally:
-        trainer.save_checkpoint()
-        if rank == 0:
-            summary = trainer.get_summary()
         if writer is not None:
             writer.close()
         if use_wandb and rank == 0:
@@ -649,14 +712,14 @@ def train_from_config(
         # Clean up environments to prevent resource leaks
         try:
             if env is not None:
-                env.close()
+                runtime.close()
         except Exception as e:
             if rank == 0:
                 logger.log_warning(f"Failed to close training environment: {e}")
 
         try:
             if eval_env is not None:
-                eval_env.close()
+                _close_environment(eval_env)
         except Exception as e:
             if rank == 0:
                 logger.log_warning(f"Failed to close evaluation environment: {e}")
@@ -673,6 +736,55 @@ def train_from_config(
         )
     if rank == 0:
         logger.log_info("Training finished")
+
+
+def _checkpoint_context(cfg_data: dict, gym_data: dict | None = None) -> dict:
+    policy = dict(cfg_data["policy"])
+    policy.pop("initial_log_std", None)
+    trainer = cfg_data["trainer"]
+    result = {"policy": policy, "learning_env": trainer.get("learning_env")}
+    if gym_data is not None:
+        result["gym"] = gym_data
+    result["best_eval_metric"] = trainer.get("best_eval_metric", "eval/avg_reward")
+    result["best_eval_mode"] = trainer.get("best_eval_mode", "max")
+    return result
+
+
+def _configure_checkpoints(
+    trainer,
+    cfg_data: dict,
+    config_path: str | Path,
+    run_base: str | Path,
+    *,
+    gym_config: str | Path | None = None,
+    gym_data: dict | None = None,
+) -> None:
+    trainer._checkpoint_context = _checkpoint_context(cfg_data, gym_data)
+    trainer._checkpoint_config = deepcopy(cfg_data)
+    trainer._checkpoint_callback = lambda summary: _write_policy_run_manifest(
+        run_base,
+        config_path,
+        summary,
+        gym_config=gym_config,
+    )
+
+
+def _resume_training(trainer, resume, run, scheduler: str) -> None:
+    error = None
+    path = None
+    try:
+        path = _resolve_resume(resume, run)
+    except Exception as exc:
+        error = exc
+    _sync_errors(error, getattr(trainer, "distributed", False))
+    if path is not None:
+        trainer.load_checkpoint(path, resume_scheduler=scheduler)
+        if getattr(trainer, "rank", 0) == 0:
+            logger.log_info(
+                f"Resumed step={trainer.global_step}, updates={trainer.num_updates}, "
+                f"learning_rate={trainer.algorithm.current_learning_rate():.6g}, "
+                f"scheduler={scheduler}"
+            )
 
 
 def _write_policy_run_manifest(
@@ -712,12 +824,20 @@ def cli(argv: Sequence[str] | None = None) -> None:
     discover_task_packages()
     execute_init_hooks()
 
-    train_from_config(
-        args.config,
-        distributed=args.distributed,
-        profile=args.profile,
-        profile_output=args.profile_output,
-    )
+    try:
+        train_from_config(
+            args.config,
+            distributed=args.distributed,
+            profile=args.profile,
+            profile_output=args.profile_output,
+            resume=args.resume,
+            run=args.run,
+            resume_scheduler=args.resume_scheduler,
+        )
+    finally:
+        from embodichain.lab.sim.sim_manager import SimulationManager
+
+        SimulationManager.flush_cleanup_queue()
 
 
 if __name__ == "__main__":
