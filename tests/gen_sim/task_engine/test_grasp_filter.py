@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from types import SimpleNamespace
+from unittest.mock import Mock
 import pytest
 import torch
 
@@ -235,6 +236,54 @@ class CandidateGenerator(ParallelJawGraspPoseGenerator):
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs):
         return [None] * len(kwargs["obj_poses"])
+
+
+@pytest.mark.parametrize("method", ["get_valid_grasp_poses", "get_grasp_candidates"])
+def test_task_generator_axis_policy_is_call_local_on_pose_and_width_paths(
+    method,
+) -> None:
+    delegate = CandidateGenerator(((0.02, 0.04),))
+    original = getattr(delegate, method)
+    observe = Mock(wraps=original)
+    setattr(delegate, method, observe)
+    provider = TaskGraspPoseGenerator(delegate, ())
+    kwargs = {
+        "mesh_vertices": VERTICES,
+        "mesh_triangles": TRIANGLES,
+        "obj_poses": torch.eye(4)[None],
+        "approach_direction": torch.tensor([0.0, 0.0, -1.0]),
+    }
+    opted = getattr(provider, method)(**kwargs, axis_region_policy="supported_end")
+    default = getattr(provider, method)(**kwargs, axis_region_policy="mesh_extent")
+    assert observe.call_count == 2
+    assert observe.call_args_list[0].kwargs["axis_region_policy"] == "supported_end"
+    assert "axis_region_policy" not in observe.call_args_list[1].kwargs
+    for actual, expected in zip(opted[0], default[0], strict=True):
+        assert torch.equal(actual, expected)
+    observe.side_effect = TypeError("unsupported policy")
+    with pytest.raises(TypeError, match="unsupported policy"):
+        getattr(provider, method)(**kwargs, axis_region_policy="supported_end")
+    assert observe.call_count == 3
+
+
+@pytest.mark.parametrize("method", ["get_valid_grasp_poses", "get_grasp_candidates"])
+@pytest.mark.parametrize("policy", [None, "whole_mesh", True])
+def test_task_generator_rejects_unknown_axis_policy_before_delegate(
+    method, policy
+) -> None:
+    delegate = CandidateGenerator(((0.02,),))
+    observe = Mock()
+    setattr(delegate, method, observe)
+    provider = TaskGraspPoseGenerator(delegate, ())
+    with pytest.raises(ValueError, match="axis_region_policy"):
+        getattr(provider, method)(
+            mesh_vertices=VERTICES,
+            mesh_triangles=TRIANGLES,
+            obj_poses=torch.eye(4)[None],
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+            axis_region_policy=policy,
+        )
+    observe.assert_not_called()
 
 
 def test_e6_candidate_metadata_preserves_widths_and_approach() -> None:

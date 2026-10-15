@@ -596,6 +596,15 @@ certify target contact, robot self-collision, payload clearance, future scene
 motion or between-sample clearance. Its E4-only revision is fingerprinted;
 regenerate changed E4 bundles instead of resealing historical artifacts.
 Transfer, release, retreat and state effects remain owned by shared HandOver.
+Only derived adaptive handover ends may request the grasp service's call-local
+`supported_end` policy. An already viable mesh-end pool retains its poses,
+costs and random draws unchanged. If that geometry pool is empty before IK,
+the same prepared pairs and approach variants may define an end from the
+angle/NMS/static-qualified support, before ranking truncation. Explicit
+top/bottom or hard task regions remain `mesh_extent`; IK, path and physical
+acquisition failures never activate this reinterpretation. The service owns
+the geometry stages, not a second GenSim sampler or deployment-wide setting.
+Its revision is fingerprinted only for generated handover deployments.
 Generated E4 integrations include the curated Pick monitor needed by the existing bounded
 workflow recovery, even when source acquisition uses a registered alias.
 This does not change recovery budgets or qualify initial grasp stability;

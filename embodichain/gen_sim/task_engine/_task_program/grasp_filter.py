@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import math
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -228,7 +228,10 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        if axis_region_policy not in ("mesh_extent", "supported_end"):
+            raise ValueError("Unknown axis_region_policy.")
         results = self._delegate.get_valid_grasp_poses(
             mesh_vertices=mesh_vertices,
             mesh_triangles=mesh_triangles,
@@ -236,6 +239,11 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
             approach_direction=approach_direction,
             obj_longest_axis=obj_longest_axis,
             is_positive_part=is_positive_part,
+            **(
+                {"axis_region_policy": axis_region_policy}
+                if axis_region_policy != "mesh_extent"
+                else {}
+            ),
         )
         rules = self._active_rules
         if rules and (
@@ -297,9 +305,23 @@ class TaskGraspPoseGenerator(ParallelJawGraspPoseGenerator):
         """Retain the baseline articulation-service protocol, not used by GenSim Pick."""
         return self._delegate.get_best_grasp_poses(**kwargs)
 
-    def get_grasp_candidates(self, **kwargs: Any) -> Any:
+    def get_grasp_candidates(
+        self,
+        *,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+        **kwargs: Any,
+    ) -> Any:
         """Forward articulation metadata; Pick uses the filtered pose protocol."""
-        return self._delegate.get_grasp_candidates(**kwargs)
+        if axis_region_policy not in ("mesh_extent", "supported_end"):
+            raise ValueError("Unknown axis_region_policy.")
+        return self._delegate.get_grasp_candidates(
+            **kwargs,
+            **(
+                {"axis_region_policy": axis_region_policy}
+                if axis_region_policy != "mesh_extent"
+                else {}
+            ),
+        )
 
     def get_dual_arm_valid_grasp_poses(self, **kwargs: Any) -> Any:
         """Coordinated grasps have a separate, unchanged paired-contact contract."""

@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -1033,6 +1033,7 @@ class GenSimPickUp(PickUp):
                 sample_key,
                 choices,
                 selection,
+                **({"axis_region_policy": "supported_end"} if mode == "ends" else {}),
             )
         if rule_selector is None:
             return super()._resolve_grasp_pose(
@@ -1110,6 +1111,8 @@ class GenSimPickUp(PickUp):
         sample_key,
         choices,
         selection,
+        *,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ):
         request = selection.request
         grasp = request.binding.endpoint("primary", "grasp")
@@ -1161,6 +1164,11 @@ class GenSimPickUp(PickUp):
                 ),
                 candidate_observer=observe_pool,
                 raw_candidate_observer=observe_raw_pool,
+                **(
+                    {"axis_region_policy": axis_region_policy}
+                    if axis_region_policy != "mesh_extent"
+                    else {}
+                ),
             )
             viable = sample.success & ~success
             attempt = {"strategy": index, "grasp_feasible": sample.success.tolist()}
@@ -1215,6 +1223,11 @@ class GenSimPickUp(PickUp):
                 "candidate_ids": candidate_ids.tolist(),
                 "selected_poses": poses.detach().cpu().tolist(),
                 "adaptive_grasp": {
+                    **(
+                        {"axis_region_policy": axis_region_policy}
+                        if axis_region_policy != "mesh_extent"
+                        else {}
+                    ),
                     "strategy_indices": strategies.tolist(),
                     "approach_directions": directions.tolist(),
                     "attempts": attempts,
@@ -1547,6 +1560,12 @@ class GenSimHandOver(HandOver):
             sample_key,
             feasible=feasible if screen_candidates else None,
             raw_candidate_observer=observe_pool if screen_candidates else None,
+            **(
+                {"axis_region_policy": "supported_end"}
+                if selection.request.skill_options.receive_pick_object_part == "center"
+                and affordance.get_custom_config(_PICK_GRASP_RULE) is None
+                else {}
+            ),
         )
         selection.sampled = True
         reference = (

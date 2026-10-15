@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import math
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import torch
 
@@ -32,6 +32,7 @@ __all__: list[str] = []
 
 ADAPTIVE_GRASP = "gen_sim.adaptive_grasp"
 ADAPTIVE_GRASP_REVISION = 3
+HANDOVER_END_REGION_REVISION = 1
 
 
 def bind_pick_purposes(
@@ -171,8 +172,16 @@ def select_grasp(
     ) = None,
     candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
     raw_candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
+    axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
 ) -> tuple[Any, torch.Tensor]:
     """Keep the first feasible strategy per row and the normal branch sampler."""
+    if axis_region_policy not in ("mesh_extent", "supported_end"):
+        raise ValueError("Unknown axis_region_policy.")
+    policy = (
+        {"axis_region_policy": axis_region_policy}
+        if axis_region_policy != "mesh_extent"
+        else {}
+    )
     covered = torch.zeros(pose.shape[0], dtype=torch.bool, device=pose.device)
     pools, directions, strategies, counts = [], [], [], []
     for index, choice in enumerate(choices):
@@ -182,6 +191,7 @@ def select_grasp(
             choice.direction,
             obj_longest_axis=choice.axis,
             is_positive_part=choice.positive,
+            **policy,
         )
         if raw_candidate_observer is not None:
             raw_candidate_observer(candidates)
@@ -229,6 +239,7 @@ def select_grasp(
             metadata={
                 **sample.metadata,
                 "adaptive_grasp": {
+                    **policy,
                     "strategy_indices": torch.where(
                         sample.success, strategy, -1
                     ).tolist(),

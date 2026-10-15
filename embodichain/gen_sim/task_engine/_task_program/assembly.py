@@ -956,6 +956,7 @@ def load_deployment(
         for item in program["program"]["items"]
     )
     if handover_scene_clearance:
+        from .adaptive_grasp import HANDOVER_END_REGION_REVISION
         from .handover_safety import HANDOVER_SCENE_CLEARANCE_REVISION
         from .handover_exchange import HANDOVER_EXCHANGE_REVISION
 
@@ -973,6 +974,7 @@ def load_deployment(
                 {
                     "handover_scene_clearance_revision": HANDOVER_SCENE_CLEARANCE_REVISION,
                     "handover_exchange_revision": HANDOVER_EXCHANGE_REVISION,
+                    "handover_end_region_revision": HANDOVER_END_REGION_REVISION,
                 }
                 if handover_scene_clearance
                 else {}

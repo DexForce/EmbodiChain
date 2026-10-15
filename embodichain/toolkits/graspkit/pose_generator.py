@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 import math
 from types import MappingProxyType
+from typing import Literal
 
 import torch
 
@@ -174,8 +175,14 @@ class GraspPoseGenerator(ABC):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-        """Return candidates, optionally restricted to one projected axis end."""
+        """Return candidates with an explicit, call-local axis-region policy.
+
+        ``mesh_extent`` preserves the mesh-based end restriction. An explicitly
+        requested ``supported_end`` may derive an otherwise empty end region
+        from feasible grasp support, without relaxing angle or collision checks.
+        """
 
     @abstractmethod
     def get_best_grasp_poses(
@@ -213,6 +220,7 @@ class ParallelJawGraspPoseGenerator(GraspPoseGenerator, ABC):
         approach_direction: torch.Tensor,
         obj_longest_axis: torch.Tensor | None = None,
         is_positive_part: bool | torch.Tensor = True,
+        axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
     ) -> list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """Return aligned poses, opening widths and costs for each object row.
 

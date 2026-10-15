@@ -148,11 +148,12 @@ def test_unavailable_environment_geometry_fails_before_motion_planning(
 
 
 @pytest.mark.parametrize("handover", [False, True])
-@pytest.mark.parametrize("revision", ["scene", "exchange"])
+@pytest.mark.parametrize("revision", ["scene", "exchange", "end_region"])
 def test_scene_safety_revision_changes_only_handover_deployment_identity(
     monkeypatch, tmp_path, handover, revision
 ):
     from embodichain.gen_sim.task_engine._task_program import (
+        adaptive_grasp,
         handover_safety,
         handover_exchange,
     )
@@ -191,11 +192,11 @@ def test_scene_safety_revision_changes_only_handover_deployment_identity(
 
     before = load()
     assert before.adapter_factory.handover_scene_clearance is handover
-    owner, attribute = (
-        (handover_safety, "HANDOVER_SCENE_CLEARANCE_REVISION")
-        if revision == "scene"
-        else (handover_exchange, "HANDOVER_EXCHANGE_REVISION")
-    )
+    owner, attribute = {
+        "scene": (handover_safety, "HANDOVER_SCENE_CLEARANCE_REVISION"),
+        "exchange": (handover_exchange, "HANDOVER_EXCHANGE_REVISION"),
+        "end_region": (adaptive_grasp, "HANDOVER_END_REGION_REVISION"),
+    }[revision]
     monkeypatch.setattr(owner, attribute, getattr(owner, attribute) + 1)
     after = load()
     assert (before.integration_fingerprint != after.integration_fingerprint) is handover
