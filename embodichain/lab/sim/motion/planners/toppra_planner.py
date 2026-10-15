@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from dataclasses import field
+
 import os
 
 import torch
@@ -79,6 +81,14 @@ def _toppra_solve_one_env(
     """
     dofs = waypoints.shape[1]
     vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
+
+    if vlims.shape in ((dofs,), (dofs, 2)):
+        frozen = vlims == 0 if vlims.ndim == 1 else (vlims == 0).all(axis=1)
+        if np.any(waypoints[:, frozen] != waypoints[:1, frozen]):
+            return _empty_failure(dofs)
+        # TOPPRA requires nonzero intervals. Proven-constant joints impose no
+        # timing constraint, so use a finite interval only inside the solver.
+        vlims[frozen] = 1.0 if vlims.ndim == 1 else [-1.0, 1.0]
 
     if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
         return _empty_failure(dofs)
@@ -259,6 +269,9 @@ class ToppraPlannerCfg(BasePlannerCfg):
 
 @configclass
 class ToppraPlanOptions(PlanOptions):
+
+    control_part: str | None = field(default=None, kw_only=True)
+    """Control group whose joint order matches the trajectory columns."""
 
     constraints: dict = {
         "velocity": None,

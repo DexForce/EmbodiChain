@@ -66,6 +66,14 @@ def test_planning_acceleration_metadata_roundtrips_without_overriding_asset_velo
     assert restored.joint_acceleration_limits == {"arm": 0.8}
 
 
+def test_planning_acceleration_rule_named_class_type_roundtrips() -> None:
+    cfg = RobotCfg.from_dict({"joint_acceleration_limits": {"class_type": 0.5}})
+    assert cfg.joint_acceleration_limits == {"class_type": 0.5}
+    assert RobotCfg.from_dict(cfg.to_dict()).joint_acceleration_limits == {
+        "class_type": 0.5
+    }
+
+
 def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
     from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
 

@@ -833,24 +833,52 @@ def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
     assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
 
 
-def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    ("source_velocity", "runtime_velocity", "expected_velocity"),
+    [
+        (2.0, 0.3, 0.3),
+        (1e10, 0.3, 0.3),
+        (None, float("inf"), 0.2),
+        (2.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+    ],
+)
+def test_robot_yaml_preserves_limits_through_curobo_loading(
+    tmp_path, monkeypatch, source_velocity, runtime_velocity, expected_velocity
+):
+    from dataclasses import replace
+
     pytest.importorskip("curobo")
     import dexsim.kit.meshproc as meshproc
+    from curobo._src.types.robot import RobotCfg as CuroboRobotCfg
+    from curobo._src.types.device_cfg import DeviceCfg
+    from embodichain.lab.sim.objects.robot import Robot
 
-    urdf_path = tmp_path / "robot.urdf"
-    urdf_path.write_text(
-        '<?xml version="1.0"?><robot name="test"><link name="base"/></robot>',
-        encoding="utf-8",
+    urdf_path = tmp_path / "assets" / "robot.urdf"
+    urdf_path.parent.mkdir()
+    source_xml = _NO_MIMIC_URDF.replace(
+        'velocity="2.0"',
+        f'velocity="{source_velocity}"' if source_velocity is not None else "",
     )
+    urdf_path.write_text(source_xml, encoding="utf-8")
 
     class FakeRobot:
+        get_joint_motion_limits = Robot.get_joint_motion_limits
         cfg = type(
             "Cfg",
             (),
-            {"fpath": str(urdf_path), "init_qpos": [], "base_link_name": "base"},
+            {
+                "fpath": str(urdf_path),
+                "init_qpos": [0.0],
+                "joint_acceleration_limits": 0.4,
+            },
         )()
-        joint_names = []
-        control_parts = {"arm": []}
+        joint_names = ["joint1"]
+        control_parts = {"arm": ["joint1"]}
+
+        def get_qvel_limits(self, **kwargs):
+            return torch.tensor([[runtime_velocity]], dtype=torch.float64)
 
         def get_link_names(self):
             return ["base"]
@@ -859,7 +887,7 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
             return _unit_cube_vertices(), _cube_faces()
 
         def get_control_part_link_names(self, control_part):  # noqa: ARG002
-            return ["base"]
+            return ["link1"]
 
     calls = []
 
@@ -873,15 +901,18 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(meshproc, "sphere_fit", fake_sphere_fit)
-    output_path = tmp_path / "robot.yml"
+    output_path = tmp_path / "cache" / "robot.yml"
 
-    generate_curobo_robot_yaml(
-        FakeRobot(),
-        "arm",
-        str(output_path),
-        urdf_path=str(urdf_path),
-        device="cuda:0",
-    )
+    if expected_velocity == 0:
+        with pytest.raises(ValueError, match="zero velocity"):
+            generate_curobo_robot_yaml(
+                FakeRobot(), "arm", str(output_path), device="cpu"
+            )
+        assert urdf_path.read_text(encoding="utf-8") == source_xml
+        assert not output_path.exists()
+        return
+
+    generate_curobo_robot_yaml(FakeRobot(), "arm", str(output_path), device="cpu")
 
     assert len(calls) == 1
     _, kwargs = calls[0]
@@ -893,6 +924,25 @@ def test_robot_spheres_use_dexsim_morphit_with_two_hulls(tmp_path, monkeypatch):
     assert kinematics["collision_spheres"]["base"][0]["radius"] == pytest.approx(0.25)
     assert "self_collision_buffer" not in kinematics
     assert "self_collision_ignore" not in kinematics
+    assert kinematics["urdf_path"] != str(urdf_path)
+    assert kinematics["asset_root_path"] == str(urdf_path.parent)
+    assert urdf_path.read_text(encoding="utf-8") == source_xml
+
+    model = CuroboRobotCfg.create(
+        {"robot_cfg": {"kinematics": kinematics}},
+        device_cfg=DeviceCfg(device="cpu"),
+        load_collision_spheres=False,
+    )
+    expected = torch.tensor([[-expected_velocity], [expected_velocity]])
+    torch.testing.assert_close(model.kinematics.get_joint_limits().velocity, expected)
+    # Reinitialize copied native limits with the CPU device preserved. cuRobo's
+    # clone() omits device_cfg and otherwise assumes CUDA even for a CPU model.
+    copied = replace(
+        model.kinematics.kinematics_config,
+        joint_limits=model.kinematics.get_joint_limits().clone(),
+    )
+    torch.testing.assert_close(copied.joint_limits.velocity, expected)
+    torch.testing.assert_close(model.cspace.velocity_scale, torch.ones(1))
 
 
 def test_robot_collision_visualization_reads_cache_and_live_link_pose(tmp_path):

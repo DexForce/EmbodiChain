@@ -42,6 +42,7 @@ Example:
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import field
 from typing import TYPE_CHECKING, Dict, List
@@ -58,6 +59,7 @@ from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.utils import configclass
+from embodichain.utils.string import resolve_matching_names_values
 
 if TYPE_CHECKING:
     import pytorch_kinematics as pk
@@ -391,14 +393,30 @@ def _populate_dual_cfg(
     acceleration = base_cfg.joint_acceleration_limits
     if isinstance(acceleration, dict):
         cfg.joint_acceleration_limits = {
-            (
-                f"{side}_{pattern}"
-                if pattern in base_cfg.control_parts
-                else _prefixed_name(pattern, prefix, "joint", name_case)
-            ): value
+            f"{side}_{pattern}": value
             for pattern, value in acceleration.items()
-            for side, _, prefix in _SIDES
+            if pattern in base_control
+            for side, _, _ in _SIDES
         }
+        joint_rules = {
+            key: value for key, value in acceleration.items() if key not in base_control
+        }
+        if joint_rules:
+            # Match source expressions before renaming; prefixing a regex
+            # changes the meaning of anchors and alternatives.
+            source_names = [
+                joint.attrib["name"]
+                for joint in ET.parse(arm_urdf).getroot().findall("joint")
+                if joint.get("type") != "fixed"
+            ]
+            _, names, values = resolve_matching_names_values(joint_rules, source_names)
+            cfg.joint_acceleration_limits.update(
+                {
+                    f"^{re.escape(_prefixed_name(name, prefix, 'joint', name_case))}$": value
+                    for name, value in zip(names, values)
+                    for _, _, prefix in _SIDES
+                }
+            )
     else:
         cfg.joint_acceleration_limits = acceleration
     cfg.attrs = base_cfg.attrs.copy()

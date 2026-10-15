@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import torch
 
 from embodichain.lab.sim.motion.planners.base_planner import (
     BasePlanner,
@@ -31,8 +32,46 @@ from embodichain.lab.sim.motion.planners.base_planner import (
 
 pytestmark = pytest.mark.no_sim
 from embodichain.lab.sim.motion.planners.base_planner import PlanOptions
-from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlanner
-from embodichain.lab.sim.motion.planners.utils import PlanResult, PlanState
+from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
+    CuroboPlanner,
+    CuroboPlanOptions,
+)
+from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanOptions,
+)
+from embodichain.lab.sim.motion.planners.utils import (
+    PlanResult,
+    PlanState,
+    TrajectorySampleMethod,
+)
+
+
+def test_cpu_plan_options_preserve_positional_arguments_and_keyword_context() -> None:
+    constraints = {"velocity": 0.1, "acceleration": 0.2, "jerk": 2.0}
+    toppra = ToppraPlanOptions(
+        constraints, TrajectorySampleMethod.QUANTITY, 101, control_part="arm"
+    )
+    trapezoidal = TrapezoidalPlanOptions(
+        "double_s",
+        constraints,
+        TrajectorySampleMethod.QUANTITY,
+        101,
+        control_part="arm",
+    )
+    for options in (toppra, trapezoidal):
+        assert options.control_part == "arm"
+        assert options.constraints == constraints
+        assert options.sample_method == TrajectorySampleMethod.QUANTITY
+        assert options.sample_interval == 101
+    assert trapezoidal.profile == "double_s"
+
+
+def test_curobo_plan_options_preserve_positional_start_and_control_part() -> None:
+    start = torch.zeros(1, 2)
+    options = CuroboPlanOptions(start, "arm")
+    torch.testing.assert_close(options.start_qpos, start)
+    assert options.control_part == "arm"
 
 
 class _PlannerWithoutCollisionAvoidance(BasePlanner):

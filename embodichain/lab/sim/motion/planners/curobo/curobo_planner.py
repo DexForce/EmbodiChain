@@ -1810,7 +1810,12 @@ class CuroboPlanner(BasePlanner):
             urdf_path, control_part, tool_frame, auto
         )
         cache_path = os.path.join(cache_dir, f"{cache_key}.yml")
-        if not auto.force and os.path.exists(cache_path):
+        motion_urdf_path = os.path.splitext(cache_path)[0] + ".motion.urdf"
+        if (
+            not auto.force
+            and os.path.exists(cache_path)
+            and os.path.exists(motion_urdf_path)
+        ):
             logger.log_info(f"cuRobo robot YAML cache hit: {cache_path}")
             return cache_path
         logger.log_info(
@@ -1839,6 +1844,7 @@ class CuroboPlanner(BasePlanner):
     ) -> str:
         """Hash the URDF path/content and fit parameters into a stable cache key."""
         hasher = hashlib.md5()
+        hasher.update(b"absolute-motion-limits-v1")
         hasher.update(urdf_path.encode("utf-8"))
         try:
             with open(urdf_path, "rb") as urdf_file:

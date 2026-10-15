@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -85,6 +86,8 @@ class TrapezoidalPlanOptions(PlanOptions):
     """
 
     profile: Literal["trapezoidal", "double_s"] = "trapezoidal"
+    control_part: str | None = field(default=None, kw_only=True)
+    """Control group whose joint order matches the trajectory columns."""
     constraints: dict = {  # noqa: RUF012
         "velocity": None,
         "acceleration": None,
@@ -749,7 +752,8 @@ class TrapezoidalPlanner(BasePlanner):
             Batched positions, velocities, accelerations, and explicit timing.
 
         Raises:
-            ValueError: If fewer than two valid joint waypoints are supplied.
+            ValueError: If fewer than two valid joint waypoints are supplied,
+                or a joint with a zero velocity cap is requested to move.
         """
         if len(target_states) < 2 or any(state.qpos is None for state in target_states):
             raise ValueError("TrapezoidalPlanner requires at least two qpos waypoints.")
@@ -764,4 +768,24 @@ class TrapezoidalPlanner(BasePlanner):
             dof=waypoints.shape[-1],
             batch_size=waypoints.shape[0],
         )
-        return _plan_linear_profiles(waypoints, resolved)
+        velocity = resolved.constraints["velocity"]
+        frozen = velocity == 0
+        has_frozen = bool(frozen.any())
+        if has_frozen:
+            frozen_columns = frozen.to(waypoints.device)
+            locked = waypoints[..., frozen_columns]
+            if bool((locked != locked[:, :1]).any()):
+                raise ValueError("Trajectory moves a joint with a zero velocity limit.")
+            # Timing kernels require positive limits; constant joints impose
+            # no timing bound. Preserve the real cap in the diagnostic report.
+            resolved.constraints["velocity"] = velocity.masked_fill(frozen, 1.0)
+            # Interpolate these constant coordinates at zero to avoid roundoff.
+            waypoints[..., frozen_columns] = 0.0
+        result = _plan_linear_profiles(waypoints, resolved)
+        if has_frozen:
+            result.positions[..., frozen_columns] = locked[:, :1]
+            if result.constraint_report is not None:
+                result.constraint_report["velocity_limit"] = (
+                    velocity.amax().to(result.positions).expand(waypoints.shape[0])
+                )
+        return result

@@ -51,10 +51,15 @@ planning batch to its strictest caps, and merges requests and fallbacks. TOPPRA
 and Trapezoidal resolve unspecified limits after the control part is known;
 explicit requests remain capped by robot limits. Partial-joint trajectories
 require an explicit control part when their column mapping is ambiguous.
+Explicit zero runtime speeds hold those joints; moving them must fail planning.
 
-cuRobo exports these same caps in active cspace order, excluding mimic followers.
-Its YAML and backend caches include the effective limits; changing robot limits
-closes and rebuilds the affected backend. Neural policy rollout and `ik_interp`
+cuRobo writes absolute speed caps into a cache-owned URDF copy and acceleration
+caps into YAML in active cspace order, excluding mimic followers. Keep velocity
+scales at one so loading and cloning preserve these caps. Mesh paths retain the
+source asset root. cuRobo rejects controlled zero-speed joints before loading;
+it cannot represent zero-width velocity intervals. Its YAML and backend caches
+include the effective limits; changing robot limits closes and rebuilds the
+affected backend. Neural policy rollout and `ik_interp`
 retain their existing timing contracts and do not consume these backend limits.
 
 ## Backend-specific boundaries

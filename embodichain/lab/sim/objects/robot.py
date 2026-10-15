@@ -76,9 +76,7 @@ def _read_motion_limits(
         name = joint.attrib["name"]
         limit, mimic = joint.find("limit"), joint.find("mimic")
         if limit is not None and "velocity" in limit.attrib:
-            value = float(limit.attrib["velocity"])
-            if math.isfinite(value) and 0 < value < 1e9:
-                velocities[name] = value
+            velocities[name] = float(limit.attrib["velocity"])
         if mimic is not None:
             mimics[name] = mimic.attrib["joint"], abs(
                 float(mimic.get("multiplier", "1"))
@@ -506,6 +504,7 @@ class Robot(Articulation):
             ``acceleration`` resolves configured metadata and mimic coupling;
             ``source_velocity`` preserves raw asset speeds for backend export.
             Unavailable caps are infinite so callers can select their fallback.
+            Zero velocity is a hard cap: the joint must remain stationary.
         """
         names = list(self.joint_names)
         velocity = (
@@ -516,7 +515,7 @@ class Robot(Articulation):
         if velocity.ndim != 2 or velocity.shape[1] != len(names):
             raise ValueError("Robot velocity limits must have shape (B, robot DOF).")
         velocity = torch.where(
-            torch.isfinite(velocity) & (velocity > 0) & (velocity < 1e9),
+            torch.isfinite(velocity) & (velocity >= 0) & (velocity < 1e9),
             velocity,
             torch.inf,
         )
@@ -528,6 +527,14 @@ class Robot(Articulation):
             except OSError:
                 pass
         source_velocity = velocity.new_tensor(
+            [source.get(name, math.inf) for name in names]
+        )
+        source = {
+            name: value
+            for name, value in source.items()
+            if math.isfinite(value) and 0 <= value < 1e9
+        }
+        source_caps = velocity.new_tensor(
             [source.get(name, math.inf) for name in names]
         )
         acceleration = velocity.new_full((len(names),), torch.inf)
@@ -553,7 +560,7 @@ class Robot(Articulation):
             acceleration[ids] = values
         caps = torch.stack(
             (
-                torch.minimum(velocity, source_velocity),
+                torch.minimum(velocity, source_caps),
                 acceleration.expand_as(velocity),
             ),
             dim=1,

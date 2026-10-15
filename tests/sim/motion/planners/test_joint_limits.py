@@ -88,6 +88,163 @@ def test_single_row_planning_does_not_read_other_environment_caps() -> None:
     )
 
 
+@pytest.mark.parametrize("source", ["runtime", "asset"])
+@pytest.mark.parametrize("velocity_request", [None, 1.0])
+def test_zero_speed_caps_survive_limit_resolution(
+    tmp_path: Path, source: str, velocity_request: float | None
+) -> None:
+    robot = _Robot()
+    if source == "runtime":
+        robot.velocities[:, 2] = 0.0
+    else:
+        path = tmp_path / "robot.urdf"
+        path.write_text(
+            '<robot name="test"><joint name="elbow"><limit velocity="0"/></joint></robot>'
+        )
+        robot.cfg.fpath = str(path)
+    constraints = _resolve_joint_constraints(
+        robot, {"velocity": velocity_request}, dof=3
+    )
+    assert constraints["velocity"][2].item() == 0.0
+
+
+def _zero_speed_planner(planner_type: str) -> ToppraPlanner | TrapezoidalPlanner:
+    planner_class, cfg_class = (
+        (ToppraPlanner, ToppraPlannerCfg)
+        if planner_type == "toppra"
+        else (TrapezoidalPlanner, TrapezoidalPlannerCfg)
+    )
+    planner = planner_class.__new__(planner_class)
+    planner.robot = _Robot()
+    planner.robot.velocities[:, 2] = 0.0
+    planner.device = torch.device("cpu")
+    planner.cfg = cfg_class(robot_uid="robot")
+    if planner_type == "toppra":
+        planner.cfg.max_workers = 1
+        planner._pool = None
+    return planner
+
+
+@pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
+def test_zero_speed_joint_can_hold_while_another_joint_moves(planner_type: str) -> None:
+    planner = _zero_speed_planner(planner_type)
+    start = torch.tensor([[0.0, 0.01, 0.25]], dtype=torch.float64).repeat(2, 1)
+    goal = start.clone()
+    goal[:, 0] = 0.4
+    options = planner.default_plan_options()
+    options.sample_interval = 101
+    result = planner.plan(
+        [PlanState.from_qpos(start), PlanState.from_qpos(goal)], options
+    )
+    assert result.is_all_success()
+    assert bool((result.positions[..., 2] == start[:, 2:3]).all())
+    assert torch.count_nonzero(result.velocities[..., 2]) == 0
+    if result.constraint_report is not None:
+        assert result.constraint_report["velocity_limit"].tolist() == pytest.approx(
+            [0.6, 0.6]
+        )
+
+
+@pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
+@pytest.mark.parametrize("displacement", [0.1, 1e-7])
+def test_zero_speed_joint_cannot_be_commanded_to_move(
+    planner_type: str, displacement: float
+) -> None:
+    planner = _zero_speed_planner(planner_type)
+    start = torch.zeros(2, 3, dtype=torch.float64)
+    goal = start.clone()
+    goal[:, 2] = displacement
+    states = [PlanState.from_qpos(start), PlanState.from_qpos(goal)]
+    options = planner.default_plan_options()
+    options.sample_interval = 101
+    if planner_type == "trapezoidal":
+        with pytest.raises(ValueError, match="zero velocity"):
+            planner.plan(states, options)
+    else:
+        assert not planner.plan(states, options).success.any()
+
+
+@pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
+def test_all_zero_speed_joints_can_hold(planner_type: str) -> None:
+    planner = _zero_speed_planner(planner_type)
+    planner.robot.velocities[:] = 0.0
+    start = torch.full((2, 3), 0.25, dtype=torch.float64)
+    result = planner.plan([PlanState.from_qpos(start), PlanState.from_qpos(start)])
+    assert result.is_all_success()
+    assert bool((result.positions == 0.25).all())
+    assert torch.count_nonzero(result.velocities) == 0
+    if result.constraint_report is not None:
+        assert result.constraint_report["velocity_limit"].tolist() == [0.0, 0.0]
+
+
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+def test_blended_profiles_preserve_zero_speed_joints(profile: str) -> None:
+    planner = _zero_speed_planner("trapezoidal")
+    options = planner.default_plan_options()
+    options.profile = profile
+    options.stop_at_waypoints = False
+    options.blend_tolerance = 0.02
+    options.sample_interval = 101
+    options.constraints["jerk"] = 2.0
+    states = [
+        PlanState.from_qpos(torch.tensor([point], dtype=torch.float64).repeat(2, 1))
+        for point in ([0.0, 0.0, 0.25], [0.2, 0.0, 0.25], [0.2, 0.05, 0.25])
+    ]
+    result = planner.plan(states, options)
+    assert result.is_all_success()
+    assert bool((result.positions[..., 2] == 0.25).all())
+    assert torch.count_nonzero(result.velocities[..., 2]) == 0
+    assert result.constraint_report["velocity_limit"].tolist() == pytest.approx(
+        [0.6, 0.6]
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+
+
+@pytest.mark.parametrize("displacement", [0.0, 0.1])
+def test_toppra_signed_requests_preserve_zero_speed_caps(displacement: float) -> None:
+    planner = _zero_speed_planner("toppra")
+    options = planner.default_plan_options()
+    options.constraints["velocity"] = [[-0.5, 0.7], [-0.01, 0.01], [-1.0, 1.0]]
+    start = torch.zeros(2, 3, dtype=torch.float64)
+    goal = start.clone()
+    goal[:, 0] = 0.4
+    goal[:, 2] = displacement
+    result = planner.plan(
+        [PlanState.from_qpos(start), PlanState.from_qpos(goal)], options
+    )
+    assert result.is_all_success() is (displacement == 0.0)
+    if displacement == 0.0:
+        assert torch.count_nonzero(result.positions[..., 2]) == 0
+        assert torch.count_nonzero(result.velocities[..., 2]) == 0
+
+
+def test_zero_speed_mimic_follower_freezes_its_leader(tmp_path: Path) -> None:
+    robot = _Robot()
+    path = tmp_path / "robot.urdf"
+    path.write_text(
+        '<robot name="test"><joint name="elbow"><limit velocity="0"/><mimic joint="shoulder" multiplier="-2"/></joint></robot>'
+    )
+    robot.cfg.fpath = str(path)
+    result = _resolve_joint_constraints(robot, {}, dof=3)
+    assert result["velocity"].tolist() == [0.0, 0.02, 0.0]
+
+
+@pytest.mark.parametrize("source", ["runtime", "asset"])
+def test_curobo_exports_zero_velocity_cap(tmp_path: Path, source: str) -> None:
+    robot = _Robot()
+    if source == "runtime":
+        robot.velocities[:, 2] = 0.0
+    else:
+        path = tmp_path / "robot.urdf"
+        path.write_text(
+            '<robot name="test"><joint name="elbow"><limit velocity="0"/></joint></robot>'
+        )
+        robot.cfg.fpath = str(path)
+    exported = _curobo_joint_limits(robot)
+    assert exported["max_velocity"][2] == 0.0
+    assert bool(torch.isfinite(torch.tensor(exported["max_velocity"])).all())
+
+
 def test_asset_caps_survive_unbounded_drive_overlays(tmp_path: Path) -> None:
     robot = _Robot()
     path = tmp_path / "robot.urdf"
@@ -247,7 +404,7 @@ def test_curobo_export_uses_effective_velocity_and_acceleration_caps(
     exported = _curobo_joint_limits(
         robot, urdf_path=str(path) if override_path else None
     )
-    assert exported["velocity_scale"] == pytest.approx([0.3, 0.5, 0.4])
+    assert exported["max_velocity"] == pytest.approx([0.6, 0.02, 1.2])
     assert exported["max_acceleration"] == [1.5, 0.5, 1.5]
 
 
@@ -291,8 +448,20 @@ def test_mimic_follower_caps_constrain_curobo_active_joint(tmp_path: Path) -> No
     )
     robot.cfg.fpath = str(path)
     exported = _curobo_joint_limits(robot)
-    assert exported["velocity_scale"] == pytest.approx([0.05, 0.4])
+    assert exported["max_velocity"] == pytest.approx([0.1, 1.2])
     assert len(exported["max_acceleration"]) == 2
+
+
+def test_large_authored_speed_keeps_raw_value_and_runtime_cap(tmp_path: Path) -> None:
+    robot = _Robot()
+    path = tmp_path / "robot.urdf"
+    path.write_text(
+        '<robot name="test"><joint name="elbow"><limit velocity="1e10"/></joint></robot>'
+    )
+    robot.cfg.fpath = str(path)
+    limits = robot.get_joint_motion_limits()
+    assert limits["source_velocity"][:, 2].tolist() == [1e10, 1e10]
+    assert limits["velocity"][:, 2].tolist() == [1.6, 1.2]
 
 
 def test_mimic_runtime_and_acceleration_overrides_constrain_leader(
@@ -327,3 +496,28 @@ def test_curobo_cache_changes_with_robot_metadata_and_closes_stale_backend() -> 
         planner._get_backend("arm", 2)
     cached.planner.close.assert_called_once()
     assert backend_key not in planner._backend_cache
+
+
+def test_curobo_regenerates_cache_when_motion_urdf_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    planner = CuroboPlanner.__new__(CuroboPlanner)
+    planner.robot = _Robot()
+    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    planner.cfg.auto_gen.cache_dir = str(tmp_path)
+    planner._curobo_device = torch.device("cpu")
+    key = planner._robot_yaml_cache_key("", "arm", "tool", planner.cfg.auto_gen)
+    yaml_path = tmp_path / f"{key}.yml"
+    motion_path = tmp_path / f"{key}.motion.urdf"
+    yaml_path.touch()
+    motion_path.touch()
+    generate = Mock(return_value=str(yaml_path))
+    monkeypatch.setattr(
+        "embodichain.lab.sim.motion.planners.curobo.curobo_yaml.generate_curobo_robot_yaml",
+        generate,
+    )
+    assert planner._auto_generate_robot_yaml("arm", "tool") == str(yaml_path)
+    generate.assert_not_called()
+    motion_path.unlink()
+    assert planner._auto_generate_robot_yaml("arm", "tool") == str(yaml_path)
+    generate.assert_called_once()

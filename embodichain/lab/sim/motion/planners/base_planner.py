@@ -53,8 +53,7 @@ class BasePlannerCfg:
 
 @configclass
 class PlanOptions:
-    control_part: str | None = None
-    """Robot control group whose joint order matches the trajectory columns."""
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,8 +311,8 @@ class BasePlanner(ABC):
     ) -> PlanOptions:
         """Attach MotionGenerator runtime context to backend options.
 
-        The base planner fills an absent control group. Backends with additional
-        contextual options override this method.
+        The base planner fills an absent control group when the options support
+        it. Backends with additional contextual options override this method.
 
         Args:
             options: The backend's planning options, already constructed (either
@@ -324,7 +323,7 @@ class BasePlanner(ABC):
         Returns:
             The (possibly mutated) planning options carrying the context.
         """
-        if options.control_part is None:
+        if hasattr(options, "control_part") and options.control_part is None:
             options.control_part = control_part
         return options
 
