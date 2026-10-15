@@ -51,6 +51,12 @@ verified grasp. Its goal optionally frees only the final world yaw; default
 goals remain exact. Heading alternatives are checked as complete motion paths,
 with accepted rows retained independently and selected offsets in diagnostics.
 
+Existing-hold `HandOver` resolves its internal exchange object pose and receiving
+grasp together through `_resolve_existing_hold_receive`. The default retains
+the original root-midpoint construction and grasp selection. A specialization
+must return a consistent pair: source transport and the receiving attachment
+are derived from that same pose; the hook never commits effects or steps physics.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;

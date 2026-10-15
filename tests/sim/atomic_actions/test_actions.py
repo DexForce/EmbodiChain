@@ -5249,12 +5249,27 @@ def test_handover_can_end_with_receiving_resource_holding_object(
 
 
 @pytest.mark.parametrize("source_hold_mode", ["observed", "grasp_command"])
+@pytest.mark.parametrize("station_shift", [0.0, 0.2])
 def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     monkeypatch: pytest.MonkeyPatch,
     source_hold_mode: str,
+    station_shift: float,
 ) -> None:
     """The receiver enters diagonally from its embodiment side."""
     action = _bind_action(_dual_motion_generator(), HandOver())
+    if station_shift:
+        original_receive = action._resolve_existing_hold_receive
+
+        def shifted_receive(
+            request, context, resources, exchange_pose, *args, **kwargs
+        ):
+            selected = exchange_pose.clone()
+            selected[:, 0, 3] += station_shift
+            return original_receive(
+                request, context, resources, selected, *args, **kwargs
+            )
+
+        action._resolve_existing_hold_receive = shifted_receive
     semantics, _ = _handover_semantics()
     held = _held(semantics, env_mask=torch.ones(NUM_ENVS, dtype=torch.bool))
     task = TaskState(
@@ -5353,8 +5368,9 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
     # values are final-delivery hints and cannot bias a transfer-only route.
     torch.testing.assert_close(
         planned_targets[0][:, 0, :2, 3],
-        torch.zeros(NUM_ENVS, 2),
+        torch.tensor([station_shift, 0.0]).expand(NUM_ENVS, -1),
     )
+    torch.testing.assert_close(planned_targets[0][:, 0], grasp_call.args[1])
     # The configured provider still owns the absolute safe exchange height;
     # existing-hold mode must not add lift_height once more.
     torch.testing.assert_close(
@@ -5384,6 +5400,53 @@ def test_handover_existing_hold_uses_root_midpoint_and_absolute_height(
         trajectory[:, release.start, DUAL_ARM_DOF : DUAL_ARM_DOF + HAND_DOF],
         expected_source_hold,
     )
+
+
+@pytest.mark.parametrize("invocation_id", [None, "original_receive"])
+def test_handover_receive_hook_default_preserves_original_delegate_objects(
+    invocation_id,
+):
+    action = HandOver()
+    exchange = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    direction, axis = torch.zeros(NUM_ENVS, 3), torch.ones(NUM_ENVS, 3)
+    positive = torch.tensor([True, False])
+    affordance, context = object(), object()
+    resources = SimpleNamespace(
+        second=SimpleNamespace(hand=SimpleNamespace(target_id="hand"))
+    )
+    request = SimpleNamespace(
+        goal=SimpleNamespace(semantics=SimpleNamespace(affordance=affordance)),
+        invocation_id=invocation_id,
+    )
+    sample = AffordanceSample(torch.tensor([True, True]), exchange, {"original": True})
+    action._resolve_grasp = Mock(return_value=sample)
+    selected, actual = action._resolve_existing_hold_receive(
+        request,
+        context,
+        resources,
+        exchange,
+        direction,
+        receive_axis=None,
+        receive_positive=positive,
+        receive_center_axis=axis,
+        source_root=exchange,
+        destination_root=exchange,
+    )
+    assert selected is exchange and actual is sample
+    call = action._resolve_grasp.call_args
+    assert (
+        call.args[0] is affordance
+        and call.args[1] is exchange
+        and call.args[2] is direction
+    )
+    assert call.args[3] == "hand"
+    assert call.kwargs["obj_longest_axis"] is None
+    assert call.kwargs["is_positive_part"] is positive
+    assert call.kwargs["center_axis"] is axis and call.kwargs["context"] is context
+    assert (
+        call.kwargs["sample_key"] == (invocation_id or "hand_over") + ":receive_grasp"
+    )
+    action._resolve_grasp.assert_called_once()
 
 
 @pytest.mark.parametrize("sampling_enabled", [False, True])

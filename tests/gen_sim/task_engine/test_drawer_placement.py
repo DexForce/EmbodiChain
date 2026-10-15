@@ -31,8 +31,12 @@ from embodichain.gen_sim.task_engine._task_program.drawer_geometry import (
 
 @pytest.mark.parametrize("has_drawers", [False, True])
 @pytest.mark.parametrize("coordinated", [False, True])
+@pytest.mark.parametrize("handover_clearance", [False, True])
 def test_factory_selects_runtime_without_shadowing_drawer_engine(
-    monkeypatch: pytest.MonkeyPatch, has_drawers: bool, coordinated: bool
+    monkeypatch: pytest.MonkeyPatch,
+    has_drawers: bool,
+    coordinated: bool,
+    handover_clearance: bool,
 ) -> None:
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -67,6 +71,7 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._pick_continuations = ()
     factory._pick_purposes = ()
     factory._coordinated_motion = coordinated
+    factory._handover_scene_clearance = handover_clearance
     factory._motion_samples = (("call", 260),)
     factory._cartesian_calls = ("drawer_call",)
     factory._articulation_calls = (("drawer_call", "slide"),)
@@ -109,6 +114,8 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
         GenSimPour,
     ] + ([GenSimCoordinatedPickment] if coordinated else [])
     assert all(c.kwargs == {"replace": True} for c in result.register.call_args_list)
+    handover = result.register.call_args_list[1].args[0]
+    assert (handover.environment_screen_factory is not None) is handover_clearance
 
 
 def test_close_resource_rewrite_is_scoped_to_bound_drawer() -> None:

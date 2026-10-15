@@ -570,6 +570,31 @@ that order. Candidate, IK or path failure triggers one alternate-direction
 attempt through the complete shared HandOver planner before execution. Successful
 rows retain their first trajectories and attachment candidates. Exhaustion
 fails normally; this planning retry adds no source regrasp or cross-call recovery.
+Generated E4 deployments qualify the receiver hand's emitted joint-command
+grid in the supported single-environment Default scope against invocation-owned,
+enabled native non-target collision shapes through
+`handover_safety.py`. Materialized geometry owns its effective scale; do not
+reapply an asset YAML scale that USD preservation may have replaced. Safe
+trajectories, effects and timing are retained; full-plan failure may use only the
+existing alternate receiving direction. Deterministic (`affordance_sampling=None`) receiving
+selection first filters that same candidate pool with the original Cartesian
+approach grid and bound-open native hand geometry, without extra candidates,
+IK calls or random draws. Candidate costs and ordering remain unchanged; the
+final emitted-command check is still required. If that original pool is exhausted
+only by scene geometry, `handover_exchange.py` may select an internal exchange
+position from bounded, native-geometry-derived displacements in the root middle
+plane. It preserves the original relative grasps and candidate costs, uses the
+configured IK and joint limits, restores random state, and does not change the
+semantic task target or physics. The shared existing-hold receive hook returns
+the exchange pose with its grasp sample, so source transport and the destination
+attachment use the same pose. Safe original pools do not enter this selection.
+Nominal candidate screening is
+not a certificate for an IK solution or physical acquisition, and stochastic
+branch sampling retains its existing selection plus the final command check.
+This discrete hand/environment check does not
+certify target contact, robot self-collision, payload clearance, future scene
+motion or between-sample clearance. Its E4-only revision is fingerprinted;
+regenerate changed E4 bundles instead of resealing historical artifacts.
 Transfer, release, retreat and state effects remain owned by shared HandOver.
 Generated E4 integrations include the curated Pick monitor needed by the existing bounded
 workflow recovery, even when source acquisition uses a registered alias.

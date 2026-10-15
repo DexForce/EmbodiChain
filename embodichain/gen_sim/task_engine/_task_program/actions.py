@@ -118,7 +118,11 @@ class _ReceiveSelection:
     resources: object
     held: object
     alternate: torch.Tensor
+    request: object
+    screen: Any
     sampled: bool = False
+    exchange_pose: torch.Tensor | None = None
+    root_poses: tuple[torch.Tensor, torch.Tensor] | None = None
 
 
 _RECEIVE_SELECTION: ContextVar[_ReceiveSelection | None] = ContextVar(
@@ -1226,19 +1230,74 @@ class GenSimHandOver(HandOver):
     GoalType = HandOver.GoalType
     OptionsType = HandOver.OptionsType
     binding_contract = HandOver.binding_contract
+    environment_screen_factory: Any = None
+
+    def _resolve_existing_hold_receive(
+        self,
+        request,
+        context,
+        resources,
+        exchange_pose,
+        approach_direction,
+        *,
+        receive_axis,
+        receive_positive,
+        receive_center_axis,
+        source_root,
+        destination_root,
+    ):
+        selection = _RECEIVE_SELECTION.get()
+        if selection is not None:
+            selection.exchange_pose = exchange_pose
+            selection.root_poses = (source_root, destination_root)
+        original, sample = super()._resolve_existing_hold_receive(
+            request,
+            context,
+            resources,
+            exchange_pose,
+            approach_direction,
+            receive_axis=receive_axis,
+            receive_positive=receive_positive,
+            receive_center_axis=receive_center_axis,
+            source_root=source_root,
+            destination_root=destination_root,
+        )
+        return (
+            selection.exchange_pose if selection is not None else original,
+            sample,
+        )
 
     def _plan_existing_hold(self, request, context, resources, held):
         mode = held.semantics.affordance.get_custom_config(ADAPTIVE_GRASP)
         if mode not in {"ordinary", "pour", "ends"}:
             return super()._plan_existing_hold(request, context, resources, held)
+        screen = None
+        if self.environment_screen_factory is not None:
+            try:
+                screen = self.environment_screen_factory(request, context, resources)
+            except (
+                AttributeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                RuntimeError,
+            ) as error:
+                return self.failed_plan(
+                    request,
+                    context,
+                    message=f"HandOver receiver environment geometry unavailable: {error}",
+                )
         selection = _ReceiveSelection(
             resources,
             held,
             torch.zeros(context.batch_size, dtype=torch.bool, device=self.device),
+            request,
+            screen,
         )
         token = _RECEIVE_SELECTION.set(selection)
         try:
             first = super()._plan_existing_hold(request, context, resources, held)
+            first = self._qualify_receiver_environment(first, screen)
             if first.plan_success.all() or not selection.sampled:
                 return first
             selection.alternate = ~first.plan_success
@@ -1249,6 +1308,7 @@ class GenSimHandOver(HandOver):
             )
             with torch.random.fork_rng(devices=devices):
                 second = super()._plan_existing_hold(request, context, resources, held)
+                second = self._qualify_receiver_environment(second, screen)
             metadata = {
                 "receive_direction_attempts": [
                     {
@@ -1269,9 +1329,43 @@ class GenSimHandOver(HandOver):
                         metadata={**first.diagnostics.metadata, **metadata},
                     ),
                 )
-            return self._merge_receive_plans(request, context, first, second, metadata)
+            merged = self._merge_receive_plans(
+                request, context, first, second, metadata
+            )
+            return self._qualify_receiver_environment(merged, screen)
         finally:
             _RECEIVE_SELECTION.reset(token)
+
+    def _qualify_receiver_environment(
+        self, plan: ActionPlan, screen: Any
+    ) -> ActionPlan:
+        if screen is None or not plan.plan_success.any():
+            return plan
+        try:
+            evidence = screen.inspect(plan)
+        except (AttributeError, KeyError, TypeError, ValueError, RuntimeError) as error:
+            evidence = {"valid": False, "unavailable": str(error)}
+        valid = evidence.get("valid") is True
+        return replace(
+            plan,
+            plan_success=(
+                plan.plan_success if valid else torch.zeros_like(plan.plan_success)
+            ),
+            diagnostics=replace(
+                plan.diagnostics,
+                metadata={
+                    **plan.diagnostics.metadata,
+                    "gen_sim_handover_environment": evidence,
+                },
+                failure=(
+                    plan.diagnostics.failure
+                    if valid
+                    else PlanningFailure(
+                        "handover_receiver_environment_unqualified", retryable=False
+                    )
+                ),
+            ),
+        )
 
     def _merge_receive_plans(self, request, context, first, second, metadata):
         """Retain successful rows and shared HandOver's planned effect contracts."""
@@ -1371,6 +1465,79 @@ class GenSimHandOver(HandOver):
                 selection.alternate[:, None], choices[1].direction, choices[0].direction
             ),
         )
+        candidate_report = None
+        raw_pool = None
+
+        def observe_pool(pool):
+            nonlocal raw_pool
+            raw_pool = pool
+
+        def feasible(poses, _direction):
+            nonlocal candidate_report
+            if raw_pool is None or raw_pool.poses is not poses:
+                raise ValueError(
+                    "HandOver candidate screen requires its original pool."
+                )
+            eligible = (
+                raw_pool.valid
+                & torch.isfinite(raw_pool.costs)
+                & torch.isfinite(poses).all(dim=(-1, -2))
+            )
+            lengths = self._compute_existing_hold_segment_lengths(
+                selection.request.motion_policy.sample_count,
+                selection.request.skill_options,
+            )
+            valid, evidence = selection.screen.candidate_mask(
+                poses,
+                eligible,
+                resources=resources,
+                approach_samples=lengths["approach"],
+                pre_grasp_distance=selection.request.skill_options.pre_grasp_distance,
+            )
+            selected_poses = poses
+            if (
+                not valid.any()
+                and eligible.any()
+                and selection.exchange_pose is not None
+                and selection.root_poses is not None
+            ):
+                from .handover_exchange import select_exchange
+
+                station, selected_poses, valid, station_evidence = select_exchange(
+                    selection.screen,
+                    self.robot,
+                    selection.request,
+                    context,
+                    resources,
+                    held,
+                    selection.exchange_pose,
+                    *selection.root_poses,
+                    raw_pool,
+                    valid,
+                    lengths["approach"],
+                    selection.request.skill_options.pre_grasp_distance,
+                )
+                selection.exchange_pose = station
+                evidence = {**evidence, "exchange_selection": station_evidence}
+            candidate_report = {
+                **evidence,
+                "raw_valid_count": raw_pool.valid.sum(-1).tolist(),
+                "sampler_eligible_count": eligible.sum(-1).tolist(),
+                "original_candidates": [
+                    {
+                        "env_row": row,
+                        "pool_index": column,
+                        "pose": poses[row, column].detach().cpu().tolist(),
+                        "cost": float(raw_pool.costs[row, column]),
+                    }
+                    for row, column in eligible.nonzero(as_tuple=False).tolist()
+                ],
+            }
+            return selected_poses, valid
+
+        screen_candidates = (
+            selection.screen is not None and context.affordance_sampling is None
+        )
         sample, _ = select_grasp(
             affordance,
             self.planning_services.grasp_pose_generator(grasp_target_id),
@@ -1378,12 +1545,25 @@ class GenSimHandOver(HandOver):
             (choice,),
             context,
             sample_key,
+            feasible=feasible if screen_candidates else None,
+            raw_candidate_observer=observe_pool if screen_candidates else None,
         )
         selection.sampled = True
+        reference = (
+            {"reference_poses": selection.exchange_pose.detach().cpu().tolist()}
+            if selection.exchange_pose is not None
+            else {}
+        )
         return replace(
             sample,
             metadata={
                 **sample.metadata,
+                **reference,
+                **(
+                    {"gen_sim_handover_candidate_environment": candidate_report}
+                    if candidate_report is not None
+                    else {}
+                ),
                 "adaptive_grasp": {
                     **sample.metadata["adaptive_grasp"],
                     "strategy_indices": torch.where(

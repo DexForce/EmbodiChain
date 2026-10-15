@@ -105,6 +105,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         adaptive_pick: bool = False,
         pick_purposes: tuple[tuple[str, str], ...] = (),
         coordinated_motion: bool = False,
+        handover_scene_clearance: bool = False,
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
@@ -125,6 +126,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._adaptive_pick = adaptive_pick
         self._pick_purposes = pick_purposes
         self._coordinated_motion = coordinated_motion
+        self._handover_scene_clearance = handover_scene_clearance
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
@@ -263,7 +265,21 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 )
             )
         engine.register(pick, replace=True)
-        engine.register(GenSimHandOver(), replace=True)
+        handover = GenSimHandOver()
+        if self._handover_scene_clearance:
+            from .handover_safety import build_handover_environment_screen
+
+            handover.environment_screen_factory = (
+                lambda request, context, resources: build_handover_environment_screen(
+                    self._robot,
+                    self._simulation,
+                    self.task_program_registration.scene_binding,
+                    request,
+                    context,
+                    resources,
+                )
+            )
+        engine.register(handover, replace=True)
         transport = GenSimMoveHeldObject(
             staging_contract=self._staging_contract,
             held_command_sources=dict(getattr(self, "_held_command_sources", ())),
@@ -415,6 +431,7 @@ class TaskAdapterFactory:
     adaptive_pick: bool = False
     pick_purposes: tuple[tuple[str, str], ...] = ()
     coordinated_grasp: bool = False
+    handover_scene_clearance: bool = False
     motion_samples: tuple[tuple[str, int], ...] = ()
     cartesian_calls: tuple[str, ...] = ()
     articulation_calls: tuple[tuple[str, str], ...] = ()
@@ -589,6 +606,7 @@ class TaskAdapterFactory:
             adaptive_pick=self.adaptive_pick,
             pick_purposes=self.pick_purposes,
             coordinated_motion=self.coordinated_grasp,
+            handover_scene_clearance=self.handover_scene_clearance,
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
@@ -933,6 +951,14 @@ def load_deployment(
         in {"simulation.coordinated_hold", "simulation.coordinated_transport"}
         for item in program["program"]["items"]
     )
+    handover_scene_clearance = any(
+        item.get("steps", {}).get("call", {}).get("kind") == "hand_over"
+        for item in program["program"]["items"]
+    )
+    if handover_scene_clearance:
+        from .handover_safety import HANDOVER_SCENE_CLEARANCE_REVISION
+        from .handover_exchange import HANDOVER_EXCHANGE_REVISION
+
     pour_receivers = bind_pour_receivers(payload["pour_receivers"], compiled)
     from .articulation_recovery import ARTICULATION_RECOVERY_REVISION
     from .park_recovery import PARK_RECOVERY_REVISION
@@ -943,6 +969,14 @@ def load_deployment(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {
+                    "handover_scene_clearance_revision": HANDOVER_SCENE_CLEARANCE_REVISION,
+                    "handover_exchange_revision": HANDOVER_EXCHANGE_REVISION,
+                }
+                if handover_scene_clearance
+                else {}
+            ),
             **(
                 {"held_command_revision": held_command_revision}
                 if payload.get("held_command_sources")
@@ -1050,6 +1084,7 @@ def load_deployment(
         adaptive_pick=adaptive_pick,
         pick_purposes=pick_purposes,
         coordinated_grasp=coordinated,
+        handover_scene_clearance=handover_scene_clearance,
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,

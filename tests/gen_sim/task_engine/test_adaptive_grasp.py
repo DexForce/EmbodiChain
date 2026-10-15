@@ -487,7 +487,10 @@ def test_generated_pick_purposes_separate_pour_and_ordinary():
 
 @pytest.mark.parametrize("vertical", [True, False])
 @pytest.mark.parametrize("failure", ["candidate", "ik", "path", "both", "none"])
-def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, failure):
+@pytest.mark.parametrize("scene_screen", [False, True])
+def test_receiver_retries_through_real_shared_handover(
+    monkeypatch, vertical, failure, scene_screen
+):
     from dataclasses import replace
     from pathlib import Path
     import runpy
@@ -584,6 +587,17 @@ def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, fa
 
     monkeypatch.setattr(HandOver, "_plan_existing_hold", record_shared)
     action = fixtures._bind_action(generator, actions.GenSimHandOver())
+    screen = SimpleNamespace(
+        inspect=Mock(return_value={"valid": True}),
+        candidate_mask=Mock(
+            side_effect=lambda _poses, eligible, **_kwargs: (
+                eligible,
+                {"scope": "nominal_fixture"},
+            )
+        ),
+    )
+    if scene_screen:
+        action.environment_screen_factory = Mock(return_value=screen)
     target = torch.eye(4)
     target[2, 3] = 0.2
     plan = fixtures._plan_action(
@@ -599,6 +613,49 @@ def test_receiver_retries_through_real_shared_handover(monkeypatch, vertical, fa
     )
     assert plan.plan_success.tolist() == [failure != "both", True]
     assert len(plans) == (1 if failure == "none" else 2)
+    if scene_screen:
+        assert screen.candidate_mask.call_count == len(plans)
+        assert screen.inspect.call_count >= 1
+    else:
+        screen.candidate_mask.assert_not_called()
+    if failure == "none":
+        for actual, original in zip(
+            plan.commands.frames, plans[0].commands.frames, strict=True
+        ):
+            assert torch.equal(actual.hold_duration, original.hold_duration)
+            assert torch.equal(actual.active_mask, original.active_mask)
+            assert torch.equal(actual.env_ids, original.env_ids)
+            for command, before in zip(actual.commands, original.commands, strict=True):
+                assert (
+                    command.target.address_fingerprint
+                    == before.target.address_fingerprint
+                )
+                assert torch.equal(command.payload.positions, before.payload.positions)
+        for name in ("positions", "dt", "env_ids"):
+            assert torch.equal(
+                getattr(plan.joint_trajectory, name),
+                getattr(plans[0].joint_trajectory, name),
+            )
+        for name in ("expected_effects", "effect_candidates"):
+            actual = getattr(plan, name).held_object_updates
+            original = getattr(plans[0], name).held_object_updates
+            assert actual.keys() == original.keys()
+            for key, value in actual.items():
+                if value is None:
+                    assert original[key] is None
+                else:
+                    for field in ("entity_id", "label", "properties", "geometry"):
+                        assert getattr(value.semantics, field) == getattr(
+                            original[key].semantics, field
+                        )
+                    assert (
+                        value.semantics.affordance.custom_config
+                        == original[key].semantics.affordance.custom_config
+                    )
+                    for field in ("object_to_eef", "grasp_xpos", "env_mask"):
+                        assert torch.equal(
+                            getattr(value, field), getattr(original[key], field)
+                        )
     assert actions._RECEIVE_SELECTION.get() is None
     torch.testing.assert_close(torch.random.get_rng_state(), rng_states[0])
     assert context.task.get_held_object("right_arm") is None
