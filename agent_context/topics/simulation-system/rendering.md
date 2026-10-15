@@ -51,6 +51,25 @@ native renderer. Viser retains native rendering because its current exporter
 reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
 when the saved training configuration uses NoRender.
 
+## Default scene presentation
+
+`SimulationManager.set_default_background()` authors the native ground material
+before Spawn declares the plane, using the bundled `PlaneDark` color and
+roughness textures. Viser owns its separate browser grid and does not mirror
+native lights or PBR materials.
+
+`set_default_global_lighting()` initializes only environment emission; it does
+not create direct lights or change existing scene lights. Standalone callers
+declare direct lights through `SimulationManager.add_light()`. Task deployments
+own them through `light.direct`; `light.indirect` can override the initial
+environment emission or select IBL. Each explicitly declared light controls
+its own shadows through `LightCfg.enable_shadow`. NoRender skips native visual
+setup while retaining physical ground.
+
+`RenderCfg` owns final RGB tone mapping and fixed exposure for native windows
+and offscreen cameras. Tone mapping is disabled by default; explicit
+`tone_mapping_enabled=True` enables the tone-mapping curve.
+
 ## Rendering does not advance physics
 
 `SimulationManager.render_frame()` owns a read-only consumption phase after

@@ -1170,14 +1170,15 @@ def test_default_physics_cfg_applies_fixed_solver_defaults() -> None:
     assert physics_args["enable_friction_every_iteration"] is True
 
 
-def test_render_cfg_defaults_both_targets_to_dlss_rr() -> None:
-    """Default rendering follows DexSim's DLSS RR target defaults."""
+def test_render_cfg_defaults_to_dlss_rr_without_tone_mapping() -> None:
+    """Default rendering enables DLSS RR and bypasses tone mapping."""
     world_config = dexsim.WorldConfig()
 
     RenderCfg(renderer="hybrid").apply_to_dexsim_config(world_config)
 
     assert world_config.rt_pipeline_config.window.mode == RTRenderMode.DLSS_RR
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.DLSS_RR
+    assert world_config.postprocess_config.tone_mapping_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -1224,20 +1225,21 @@ def test_render_cfg_keeps_window_and_offscreen_modes_independent() -> None:
     assert world_config.rt_pipeline_config.offscreen.mode == RTRenderMode.NRD_RELAX
 
 
-def test_render_cfg_applies_tone_mapping_and_fixed_exposure() -> None:
-    """Tone mapping forwards its curve and fixed exposure to DexSim."""
+@pytest.mark.parametrize("enabled", [False, True])
+def test_render_cfg_applies_tone_mapping_and_fixed_exposure(enabled: bool) -> None:
+    """Tone mapping forwards its explicit switch and fixed exposure to DexSim."""
     expected_exposure = 1.25
     world_config = dexsim.WorldConfig()
     render_cfg = RenderCfg(
         renderer="rt",
-        tone_mapping_enabled=True,
+        tone_mapping_enabled=enabled,
         tone_mapping_exposure=expected_exposure,
     )
 
     render_cfg.apply_to_dexsim_config(world_config)
 
     assert world_config.renderer == Renderer.OFFLINERT
-    assert world_config.postprocess_config.tone_mapping_enabled is True
+    assert world_config.postprocess_config.tone_mapping_enabled is enabled
     assert (
         world_config.postprocess_config.tone_mapping_type
         == ToneMappingType.MODIFIED_REINHARD
