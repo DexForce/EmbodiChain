@@ -51,16 +51,17 @@ from embodichain.utils.utility import load_config, save_config
 _REPOSITORY_ROOT = Path(__file__).parents[3]
 _CUBE_GYM_CONFIG_PATH = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _CUBE_TASK_PROGRAM_DIR = _CUBE_GYM_CONFIG_PATH.parent / "task_program"
 _CUBE_INTEGRATION_PATH = _CUBE_TASK_PROGRAM_DIR / "integration.yaml"
 _CUBE_ENVIRONMENT_PATH = _CUBE_GYM_CONFIG_PATH.parent / "envs/default.yaml"
-_COMPONENT_ROOT = _REPOSITORY_ROOT / "embodichain_tasks/configs/components"
+_COMPONENT_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/components"
 _CUBE_POLICY_PATH = _COMPONENT_ROOT / "execution_policies/trajectory_open_loop.yaml"
 _CUBE_EMBODIMENT_PATH = _COMPONENT_ROOT / "embodiments/ur5_dh_pgi_140_80.yaml"
 _TABLEWARE_CONFIG_ROOT = (
-    _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation/tableware"
+    _REPOSITORY_ROOT
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
@@ -390,7 +391,7 @@ class TestInitRolloutBufferFromConfig:
         )
         config = {
             "embodiment": {
-                "component": "embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+                "component": "extensions/embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
             },
             "env": {},
         }

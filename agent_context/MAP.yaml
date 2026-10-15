@@ -68,7 +68,7 @@ topics:
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
     embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
-    embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
+    extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
   status: active
@@ -126,10 +126,10 @@ topics:
   - embodichain/robot_registry.py
   - embodichain/cli/list_robot.py
   - embodichain/lab/scripts/preview_robot.py
-  - embodichain_robots/
+  - extensions/embodichain_robots/
   - embodichain/lab/sim/cfg/
   - embodichain/lab/gym/envs/embodied_env.py
-  watch_paths: [embodichain/lab/sim/robots/, embodichain_robots/, embodichain/lab/sim/objects/robot.py,
+  watch_paths: [embodichain/lab/sim/robots/, extensions/embodichain_robots/, embodichain/lab/sim/objects/robot.py,
     embodichain/robot_registry.py, embodichain/lab/sim/cfg/, tests/sim/robots/, tests/test_robot_registry.py,
     embodichain/cli/list_robot.py, tests/cli/test_list_robot.py, embodichain/lab/scripts/preview_robot.py,
     tests/lab/scripts/test_preview_robot.py]
@@ -265,8 +265,8 @@ topics:
   - embodichain/learning/rl/normalization.py
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
-  - embodichain_tasks/configs/tasks/
-  watch_paths: [embodichain/learning/rl/, embodichain_tasks/configs/tasks/, tests/learning/]
+  - extensions/embodichain_tasks/configs/tasks/
+  watch_paths: [embodichain/learning/rl/, extensions/embodichain_tasks/configs/tasks/, tests/learning/]
   related_topics: [simulation-system, env-framework, manager-functor, configclass-pattern]
   status: active
 - id: differentiable-env
@@ -280,7 +280,7 @@ topics:
   - embodichain/lab/gym/envs/differentiable_env.py
   - embodichain/lab/sim/cfg/simulation.py
   - embodichain/lab/sim/diff/
-  - embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
+  - extensions/embodichain_tasks/embodichain_tasks/special/franka_reach_apg.py
   related_topics: [env-framework, rl-learning]
   status: active
 - id: configclass-pattern
@@ -349,7 +349,7 @@ topics:
   - embodichain/lab/task_program/integrations/_configured_composition.py
   - embodichain/lab/gym/envs/task_program/
   - embodichain/agents/mllm/task_program.py
-  watch_paths: [embodichain/lab/task_program/, embodichain/lab/gym/envs/task_program/, embodichain_tasks/configs/,
+  watch_paths: [embodichain/lab/task_program/, embodichain/lab/gym/envs/task_program/, extensions/embodichain_tasks/configs/,
     tests/lab/task_program/, tests/lab/task_program/semantics/]
   related_topics: [atomic-actions, env-framework, simulation-system, motion-planning, sensor-system, data-pipeline]
   status: active

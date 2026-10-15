@@ -64,7 +64,7 @@ TABLEWARE_CONFIG_TASKS = {
     "stack_cups",
 }
 TASK_CONFIG_ROOT = (
-    Path(__file__).resolve().parents[3] / "embodichain_tasks/configs/tasks"
+    Path(__file__).resolve().parents[3] / "extensions/embodichain_tasks/configs/tasks"
 )
 
 

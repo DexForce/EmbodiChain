@@ -75,6 +75,14 @@ def test_repository_manifest_selectors_resolve() -> None:
     ("source_path", "expected_selector"),
     [
         (
+            "extensions/embodichain_robots/franka_panda.py",
+            "tests/sim/robots/test_entrypoints.py",
+        ),
+        (
+            "extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/env.json",
+            "tests/test_task_program_package_data.py",
+        ),
+        (
             "embodichain/lab/scripts/preview_joint_control.py",
             "tests/lab/scripts/test_preview_joint_control.py",
         ),

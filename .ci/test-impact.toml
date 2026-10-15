@@ -275,6 +275,7 @@ risk = "medium"
 [[rules]]
 id = "robot-system"
 paths = [
+  "extensions/embodichain_robots/**",
   "embodichain/lab/sim/robots/**",
   "embodichain/lab/sim/objects/robot.py",
 ]
@@ -326,7 +327,7 @@ id = "task-program"
 paths = [
   "embodichain/lab/task_program/**",
   "embodichain/lab/gym/envs/task_program/**",
-  "embodichain_tasks/**",
+  "extensions/embodichain_tasks/**",
 ]
 tests = [
   "tests/lab/task_program/**",

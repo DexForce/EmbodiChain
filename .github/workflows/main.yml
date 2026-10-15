@@ -63,7 +63,7 @@ jobs:
             docs:
               - 'docs/**'
               - 'embodichain/**'
-              - 'embodichain_tasks/**'
+              - 'extensions/**'
               - 'examples/**'
               - 'README.md'
               - 'pyproject.toml'
@@ -560,8 +560,8 @@ jobs:
                   )
 
           source_task_configs = {
-              path.as_posix()
-              for path in Path("embodichain_tasks/configs").rglob("*")
+              path.relative_to("extensions").as_posix()
+              for path in Path("extensions/embodichain_tasks/configs").rglob("*")
               if path.suffix in {".json", ".yaml", ".yml"}
           }
           wheel_task_configs = {

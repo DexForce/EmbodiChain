@@ -71,7 +71,7 @@ three typed selections: `environment.component`,
 `embodiment.component`. The reusable `env.yaml` owns only
 embodiment-independent Gym values and physical simulation entities. All
 ordinary deployment component paths resolve from `task.<embodiment>.yaml`.
-Official `embodichain_tasks/configs/` references for program, integration and
+Official `extensions/embodichain_tasks/configs/` references for program, integration and
 execution policy use the imported SDK's packaged configs. The shared
 [Gym component path contract](../env-framework/configuration.md#reusable-gym-deployment-components)
 defines the owner-directory and CWD-shadow behavior.

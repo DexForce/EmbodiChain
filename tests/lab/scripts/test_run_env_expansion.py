@@ -49,7 +49,7 @@ def _resolve(path: str):
 
 def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     request = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     assert request is not None
@@ -83,7 +83,8 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
 
 def test_open_drawer_policy_component_merges_phase_binding() -> None:
     request = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_slide/" "task.ur5.yaml"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/"
+        "task.ur5.yaml"
     )
     assert request is not None
     profile, candidate_indices, _, collection = request
@@ -104,7 +105,7 @@ def test_open_drawer_policy_component_merges_phase_binding() -> None:
 
 def test_task_expansion_config_accepts_local_candidate_override() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     config = load_config(task_path)
@@ -259,7 +260,7 @@ def test_collection_plan_maps_legacy_max_episodes_as_fallback() -> None:
 
 def test_task_expansion_config_applies_runtime_overlay() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     with pytest.raises(ValueError, match="unsupported fields.*simulation"):
@@ -297,11 +298,11 @@ def test_task_expansion_config_applies_runtime_overlay() -> None:
 
 def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
     task_path = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/"
         "task.ur5.yaml"
     )
     policy_path = resolve_config_path(
-        "embodichain_tasks/configs/components/expansion_policies/"
+        "extensions/embodichain_tasks/configs/components/expansion_policies/"
         "task_program_episode.yaml"
     )
     args = _create_parser().parse_args(
@@ -323,9 +324,7 @@ def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
 
 
 def test_explicit_num_envs_updates_expansion_capacity():
-    path = (
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
-    )
+    path = "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     args = _create_parser().parse_args(["--gym-config", path, "--num-envs", "4"])
     profile, _, _, _ = _resolve_expansion_request(
         args, load_config(resolve_config_path(path))
@@ -353,7 +352,7 @@ def test_cyclic_collection_requires_an_expansion_profile() -> None:
 
 def test_cyclic_collection_rejects_a_start_outside_recipe_budget() -> None:
     profile = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )[0]
     with pytest.raises(ValueError, match="starts outside"):
         _validate_expansion_collection_plan(
@@ -368,9 +367,7 @@ def test_cyclic_expansion_resets_before_each_repeated_batch(monkeypatch, tmp_pat
     import json
     from types import SimpleNamespace
 
-    path = (
-        "embodichain_tasks/configs/tasks/manipulation/repeated_move_joint/task.ur5.yaml"
-    )
+    path = "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_move_joint/task.ur5.yaml"
     args = _create_parser().parse_args(
         ["--gym-config", path, "--max_episodes", "10", "--output-dir", str(tmp_path)]
     )
@@ -395,7 +392,7 @@ def test_cyclic_expansion_resets_before_each_repeated_batch(monkeypatch, tmp_pat
 
 
 def test_reused_cube_scene_keeps_move_held_object_recording_identity() -> None:
-    path = "embodichain_tasks/configs/tasks/manipulation/repeated_move_held_object/task.ur5.yaml"
+    path = "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_move_held_object/task.ur5.yaml"
     args = _create_parser().parse_args(
         ["--gym-config", path, "--headless", "--disable-sensor", "--num-envs", "1"]
     )

@@ -33,7 +33,7 @@ return merge_robot_cfg(cfg, init_dict)
 
 ## Two Layouts
 
-Concrete configs live in the `embodichain_robots/` import package, bundled
+Concrete configs live in the `extensions/embodichain_robots/` import package, bundled
 with the core distribution/version. Generic robot runtime, configuration,
 solvers, and composition stay in `embodichain/lab/sim/`.
 
@@ -109,8 +109,8 @@ must match the matching `control_parts` entry (the test stub asserts this).
 
 5. **Keep `from_dict` as the 3-line template** — do not reimplement it.
 6. **Add `__all__` and register** the class in
-   `embodichain_robots/_catalog.py`, then add its lazy export to
-   `embodichain_robots/__init__.py` (`_EXPORTS` and `__all__`):
+   `extensions/embodichain_robots/_catalog.py`, then add its lazy export to
+   `extensions/embodichain_robots/__init__.py` (`_EXPORTS` and `__all__`):
 
    ```python
    # Catalog entry; importing the catalog must not import the robot module.
@@ -185,8 +185,8 @@ Do not copy those semantic declarations into the robot class.
 
 **File locations:**
 
-- Config: `embodichain_robots/<name>.py` or `embodichain_robots/<name>/`
-- Catalog / lazy exports: `embodichain_robots/_catalog.py`, `embodichain_robots/__init__.py`
+- Config: `extensions/embodichain_robots/<name>.py` or `extensions/embodichain_robots/<name>/`
+- Catalog / lazy exports: `extensions/embodichain_robots/_catalog.py`, `extensions/embodichain_robots/__init__.py`
 - Shared resolver: `embodichain/robot_registry.py`
 - Docs: `docs/source/resources/robot/<name>.md`
 - Tests: `tests/sim/objects/test_robot_cfg.py`

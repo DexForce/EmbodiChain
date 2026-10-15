@@ -1,7 +1,7 @@
 # Robot catalogs
 
 Catalog selection and display metadata are owned by `embodichain/robot_registry.py`,
-`embodichain/cli/list_robot.py` and `embodichain_robots/_catalog.py`.
+`embodichain/cli/list_robot.py` and `extensions/embodichain_robots/_catalog.py`.
 For runtime configuration, return to [robot-system](robot-system.md).
 
 The `embodichain.robots` entry points provide lightweight catalog mappings from

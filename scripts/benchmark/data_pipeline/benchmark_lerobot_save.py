@@ -68,7 +68,7 @@ VARIANTS: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_GYM_CONFIG = (
-    "embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json"
+    "extensions/embodichain_tasks/configs/tasks/special/stay_still_save/env_ur10.json"
 )
 
 

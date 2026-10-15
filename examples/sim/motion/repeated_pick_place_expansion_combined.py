@@ -49,7 +49,7 @@ from embodichain.utils.utility import load_config
 
 _DEFAULT_TASK_CONFIG = (
     _REPOSITORY_ROOT
-    / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
 )
 _DEFAULT_OUTPUT_DIR = (
     _REPOSITORY_ROOT / "output" / "repeated_pick_place_expansion_combined"

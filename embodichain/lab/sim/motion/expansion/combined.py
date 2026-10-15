@@ -193,7 +193,7 @@ class _SceneRandomizationCfg:
     reference_family_count: int = 4
     profile: str = "cube_initial_pose"
     profile_file: str = (
-        "embodichain_tasks/configs/components/randomization_profiles/"
+        "extensions/embodichain_tasks/configs/components/randomization_profiles/"
         "cube_initial_pose.yaml"
     )
     change_scope: str = "cube_initial_pose_only"
@@ -289,7 +289,7 @@ class _TrajectoryCfg:
 class _VisualCfg:
     enabled: bool = True
     profile_file: str = (
-        "embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml"
+        "extensions/embodichain_tasks/configs/components/randomization_profiles/rgb_visual.yaml"
     )
     profiles: tuple[str, ...] = (
         "rgb_canonical",

@@ -74,7 +74,7 @@ from embodichain.lab.gym.utils.gym_utils import build_env_cfg_from_args
 from embodichain.utils.utility import load_config
 
 _ROOT = Path(__file__).resolve().parents[4]
-_TASKS = _ROOT / "embodichain_tasks/configs/tasks/manipulation"
+_TASKS = _ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
 _DEPLOYMENTS = (
     ("repeated_pickup/task.ur5.yaml", "pick"),
     ("repeated_move_held_object/task.ur5.yaml", "simulation.move_held_object"),

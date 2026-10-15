@@ -58,7 +58,7 @@ DEFAULT_MANIFEST = ".ci/test-impact.toml"
 DEFAULT_MAP = "agent_context/MAP.yaml"
 TEST_ROOT = "tests"
 _GLOB_CHARS = "*?["
-_SOURCE_ROOTS = ("embodichain", "embodichain_tasks", "scripts", "examples", "tests")
+_SOURCE_ROOTS = ("embodichain", "extensions", "scripts", "examples", "tests")
 _DOC_PATTERNS = (
     "docs/**",
     "docs/scripts/**",
@@ -655,7 +655,7 @@ def _content_risk(changed: Sequence[ChangedPath], diff_text: str | None = None) 
             path = _normalize_path(path_value)
             if path.endswith("/__init__.py") or path in {
                 "embodichain/__init__.py",
-                "embodichain_tasks/embodichain_tasks/__init__.py",
+                "extensions/embodichain_tasks/embodichain_tasks/__init__.py",
             }:
                 risk = "high"
     return risk

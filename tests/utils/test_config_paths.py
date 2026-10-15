@@ -46,15 +46,18 @@ def test_resolve_config_path_preserves_ordinary_relative_path(
     assert resolve_config_path("local/config.yaml") == Path("local/config.yaml")
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
 def test_resolve_config_path_redirects_packaged_task_config(
     tmp_path: Path,
     monkeypatch,
+    prefix: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
     resolved = resolve_config_path(
-        "embodichain_tasks/configs/tasks/manipulation/tableware/"
-        "pour_water/task.cobotmagic.yaml"
+        f"{prefix}/tasks/manipulation/tableware/" "pour_water/task.cobotmagic.yaml"
     )
 
     assert resolved.is_file()
@@ -62,14 +65,18 @@ def test_resolve_config_path_redirects_packaged_task_config(
     assert resolved.parent.name == "pour_water"
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
 def test_resolve_config_path_rejects_packaged_path_escape(
     tmp_path: Path,
     monkeypatch,
+    prefix: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(ValueError, match="stay within the package"):
-        resolve_config_path("embodichain_tasks/configs/../VERSION")
+        resolve_config_path(f"{prefix}/../VERSION")
 
 
 def test_owner_relative_config_ignores_same_named_cwd_file(
@@ -89,33 +96,38 @@ def test_owner_relative_config_ignores_same_named_cwd_file(
     )
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
 def test_owned_official_config_ignores_same_named_cwd_shadow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
 ) -> None:
     """Component references bind packaged configs to their imported SDK."""
-    reference = Path(
-        "embodichain_tasks/configs/components/embodiments/franka_panda.yaml"
-    )
+    reference = Path(f"{prefix}/components/embodiments/franka_panda.yaml")
     shadow = tmp_path / reference
     shadow.parent.mkdir(parents=True)
     shadow.write_text("shadow: true\n")
     monkeypatch.chdir(tmp_path)
-    expected = Path(__file__).resolve().parents[2] / reference
+    expected = (
+        Path(__file__).resolve().parents[2]
+        / "extensions/embodichain_tasks/configs/components/embodiments/franka_panda.yaml"
+    )
 
     assert resolve_config_path(reference, base_dir=tmp_path / "deployment") == expected
     assert resolve_config_path(reference) == reference
 
 
+@pytest.mark.parametrize(
+    "prefix", ["embodichain_tasks/configs", "extensions/embodichain_tasks/configs"]
+)
 def test_owned_official_config_rejects_escape_even_when_cwd_target_exists(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
 ) -> None:
     """An existing CWD file cannot bypass the packaged selector boundary."""
-    shadow_root = tmp_path / "embodichain_tasks"
+    shadow_root = tmp_path / Path(prefix).parent
     (shadow_root / "configs").mkdir(parents=True)
     (shadow_root / "VERSION").write_text("shadow\n")
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(ValueError, match="stay within the package"):
-        resolve_config_path(
-            "embodichain_tasks/configs/../VERSION", base_dir=tmp_path / "deployment"
-        )
+        resolve_config_path(f"{prefix}/../VERSION", base_dir=tmp_path / "deployment")

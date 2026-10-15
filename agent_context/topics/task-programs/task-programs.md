@@ -104,16 +104,16 @@ Generic profiles and candidate coordination stay in
 
 | Environment | Assurance | Source |
 |---|---|---|
-| `TaskProgramRubiksCubePickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
-| `TaskProgramRepeatedPickPlace-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
-| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
-| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
-| `TaskProgramOpenDrawer-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_slide/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml` with `--physics newton` |
-| `HandOver-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/repeated_handover/` |
-| `PourWater-v1` | projected | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
+| `TaskProgramRubiksCubePickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/rubiks_cube_pick_place/` |
+| `TaskProgramRepeatedPickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
+| `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
+| `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
+| `TaskProgramOpenDrawer-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/` |
+| `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml` with `--physics newton` |
+| `HandOver-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_handover/` |
+| `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
 
-The [packaged manipulation guide](../../../embodichain_tasks/configs/tasks/manipulation/README.md)
+The [packaged manipulation guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/README.md)
 routes the ten Atomic reference scenes and existing MoveHeldObject/PushObject
 calls to runnable Gym deployments. The default expansion policy keeps the
 physical scene fixed and selects independent Affordance/trajectory recipes.

@@ -60,6 +60,7 @@ an embodiment's simulation robot and sensor suite while keeping its events,
 observations, objects, and Python demo logic task-local. Ordinary component
 paths resolve relative to the runnable config that declares them
 (conventionally `task.<embodiment>.yaml`). References starting with
+`extensions/embodichain_tasks/configs/` or the legacy
 `embodichain_tasks/configs/` resolve through the imported SDK's configs, including
 from an external deployment or installed wheel; same-named CWD files do not
 override these selections. Both component resolvers reuse
@@ -225,7 +226,7 @@ See [execution](execution.md) for the separate result authority and reset contra
 Use the `/add-task-env` skill. It first selects one of two registration paths:
 
 1. Import-backed handwritten or RL tasks add a task-named module at
-   `embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
+   `extensions/embodichain_tasks/embodichain_tasks/<category-path>/<task>.py`, keep
    `@register_env("<GymId>")` and `__all__` there, and add a runnable config.
 2. Supported configuration-defined Task Programs omit the Python module. They
    add a reusable physical `env.yaml`, one or more runnable

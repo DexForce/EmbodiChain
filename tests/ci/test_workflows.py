@@ -104,7 +104,7 @@ def test_release_guard_validates_bundled_robot_catalog(
     task_config = (
         "embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/env.yaml"
     )
-    source = tmp_path / task_config
+    source = tmp_path / "extensions" / task_config
     source.parent.mkdir(parents=True)
     source.write_text("physics: default\n")
     entry_points = (

@@ -354,6 +354,7 @@ def load_config(path: str | Path) -> Dict[str, Any]:
 
     Args:
         path: Path to the config file. Repository-style paths beginning with
+            ``extensions/embodichain_tasks/configs`` or the legacy
             ``embodichain_tasks/configs`` also resolve from an installed wheel.
 
     Returns:
