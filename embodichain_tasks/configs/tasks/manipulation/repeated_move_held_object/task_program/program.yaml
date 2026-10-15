@@ -1,0 +1,37 @@
+program_id: repeated_move_held_object
+instruction: Pick up, transport and place the cube.
+targets:
+  drop_pose:
+    kind: cyclic_pose
+    values:
+      - position: [-0.42, 0.1, 0.1]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: pickup
+      steps:
+        kind: invoke
+        call:
+          kind: pick
+          object: cube
+    - kind: segment
+      name: transport
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_held_object
+          arguments:
+            target: transport_pose
+    - kind: segment
+      name: place
+      steps:
+        kind: invoke
+        call:
+          kind: place
+          object: cube
+          at:
+            kind: target_ref
+            target: drop_pose

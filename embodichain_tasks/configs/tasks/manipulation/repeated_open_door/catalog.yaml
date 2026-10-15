@@ -1,0 +1,8 @@
+task_key: repeated_open_door
+title: Open Door the microwave
+summary: Open Door the microwave with fixed-scene Atomic trajectory expansion.
+tags: [atomic_skill, task_program, trajectory_expansion]
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

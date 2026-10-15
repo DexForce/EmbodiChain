@@ -1,106 +1,40 @@
 # Repeated Pick and Place
 
-The Task Program repeats cube transfers between two authored target poses. The
-configuration directory separates the physical environment, robot deployments,
-and expansion settings:
-
-```text
-envs/default.yaml       # Default physics scene
-envs/newton.yaml        # Newton physics scene and solver settings
-task.franka.yaml                # Franka Task Program deployment
-task.ur5.yaml                   # UR5 deployment and expansion reference
-expansion/repeated_pick_place.yaml
-                                # task-facing expansion runtime and overrides
-task_program/{program,integration}.yaml
+```bash
+conda activate embodichain
+embodichain run-env --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 ```
 
-Both task deployments use the same Task Program and select the backend through
-one environment mapping. The launcher chooses the backend with `--physics`; the
-selected environment file owns its `physics` and optional `physics_config`.
-Requesting an unavailable backend fails before simulator construction. A task
-with one `environment.component` uses `--physics` only to confirm that file's
-backend.
+Each episode repeats Pick/Place three times. UR5, its PGI gripper, initial
+pre-pick pose, cube and drop targets follow the Atomic Pickup/Place samples.
+The Trapezoidal planner and shared phase permissions expand both Pick and Place.
 
-| Deployment | Robot component | Physics | Configuration |
-|---|---|---|---|
-| franka | franka_panda | default or newton | `task.franka.yaml` |
-| ur5 | ur5_dh_pgi_140_80 | default or newton | `task.ur5.yaml` |
+The default collection contains 16 fixed-scene recipes: four grasp branches
+and four trajectory variants, collected in batches of two environments. Scene
+and visual randomization are disabled. The recipe selection is cyclic: raising
+`--max_episodes` repeats the recipes with a full scene/robot reset and a new
+recorded episode after each three-cycle Pick/Place round.
+The embodiment supplies the RGB camera, while `env.dataset` owns LeRobot output.
+`expansion/repeated_pick_place.yaml` owns the episode schedule and manifest path;
+shared expansion parameters live in `components/expansion_policies/atomic_fixed_scene.yaml`.
 
-Inspect the available deployments:
+For a smaller run, including two reset batches:
 
 ```bash
-embodichain show-task embodichain_tasks:repeated_pick_place
 embodichain run-env \
-  --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
-```
-
-## Configured trajectory expansion
-
-`task.ur5.yaml` references `expansion/repeated_pick_place.yaml` through its
-`expansion.config` field. The expansion file contains the Task Program policy,
-scene/affordance/trajectory/visual overrides, runtime recorder events, and the
-collection target. The task config remains the only file that selects the
-robot and environment.
-
-The trajectory override declares both the joint-space amplitude
-(`trajectory.spatial.joint_offset_scale`) and the deduplication tolerance
-(`trajectory.spatial.dedup_tolerance`), both as fractions of each joint's
-declared range. The tolerance has to stay below the amplitude: at or above it
-every proposal counts as a copy of the reference trajectory, and each recipe
-would keep the unmodified nominal motion instead of the requested variant.
-
-Run the complete 64-recipe batch schedule through the formal task entry point:
-
-```bash
-embodichain run-task \
   --gym-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
-  --device cpu --headless --seed 7 \
-  --output-dir /tmp/repeated-pick-place/expansion \
-  --dataset-dir /tmp/repeated-pick-place/datasets
+  --headless --num-envs 2 --max_episodes 4 \
+  --expansion-recipe-indices 0 1 4 5 \
+  --output-dir /tmp/pick-place/expansion \
+  --dataset-dir /tmp/pick-place/datasets
 ```
 
-`--expansion-profile` replaces the profile selected by the task expansion
-file. Collection uses `target_episodes` as the final data count and `num_envs`
-as batch capacity. The default sequential policy collects 64 rows in four
-batches of sixteen. For a small explicit selection, set the matching target
-and use `--max_episodes 4 --expansion-recipe-indices 0 16 32 48`; the legacy
-`--expansion-candidate-indices` spelling remains accepted. Explicit recipe
-selection requires the list length to equal `collection.target_episodes`.
-The selected environment backend provides the same LeRobot recorder for
-Default and Newton; the embodiment supplies the recorder's robot metadata.
-The recorder writes structured data below `/tmp/repeated-pick-place/datasets`,
-the Expansion manifest below `/tmp/repeated-pick-place/expansion`, and the
-debug camera videos below `/tmp/repeated-pick-place/cameras`. Each path can be
-overridden by its owning config or CLI option (`--dataset-dir` and
-`--output-dir` cover the dataset and manifest); the camera path is owned by the
-Expansion declaration. The recorder can be filtered for a dry run with
-`--filter-dataset-saving`.
+Add `--disable-sensor` to collect joints/state without RGB. Explicit recipe
+indices must match the requested episode count. `--num-envs` controls parallel
+capacity independently of the number of episodes.
 
-The Python showcase remains available for visual debugging and uses the same
-`task.ur5.yaml` deployment and referenced expansion config. Both commands write
-below the repository's `output/` directory unless `--output-dir` overrides it:
-
-```bash
-python examples/sim/motion/repeated_pick_place_expansion_combined.py \
-  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
-
-python examples/sim/motion/repeated_pick_place_expansion_showcase.py \
-  --task-config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
-  --candidate-indices 0 16 32 48 --num_envs 16 --seed 7 \
-  --device cpu --headless
-```
-
-The expansion runtime adds a reset event for the selected candidate and a
-synchronous 4×4 camera grid for sixteen environments. Combined expansion with
-visual variation requires the configured sensors; use `--disable-sensor` only
-with a expansion override that disables visual capture.
-
-The expansion manifest reports the collection boundary separately from the
-recipe schedule. `target_episodes` and `committed_episodes` describe the final
-dataset size; `batch_count` describes parallel execution; `attempts` includes
-failed retries; and the prepare, commit, and discard reset counts describe
-reset boundaries. These counters let a run be compared across different
-`num_envs` values without treating a batch or a reset as an episode.
-
-The task-local `catalog.yaml` names the two robot deployments; expansion is a
-capability of the UR5 deployment rather than a third deployment entry.
+`task.franka.yaml` retains the Franka embodiment. `--physics newton` selects
+`envs/newton.yaml` on either deployment. The `task.ur5.objective.yaml` deployment
+adds measured physical objectives; ordinary projected completion records the
+command trajectory. See [the manipulation guide](../README.md) for all skills,
+phase protection, repetition and output behavior.

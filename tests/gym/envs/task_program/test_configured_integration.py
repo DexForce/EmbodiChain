@@ -95,7 +95,7 @@ _TASKS = {
         "ur5_dh_pgi_140_80",
         frozenset({"pick", "place", "hand_over"}),
     ),
-    "open_drawer": (
+    "repeated_slide": (
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
         frozenset(
@@ -107,9 +107,9 @@ _TASKS = {
             }
         ),
     ),
-    "hand_over": (
+    "repeated_handover": (
         "dual_ur5_handover_v1",
-        "dual_ur5_dh_pgi_140_80",
+        "dual_ur5_robotiq_2f_140",
         frozenset({"pick", "place", "hand_over"}),
     ),
 }
@@ -135,7 +135,7 @@ def _config_path(task_name: str) -> Path:
     """Return one official task's Gym config path."""
     filename = (
         "task.dual_ur5_dh_pgi_140_80.yaml"
-        if task_name == "hand_over"
+        if task_name == "repeated_handover"
         else "task.ur5.yaml"
     )
     return _CONFIG_DIRECTORY / task_name / filename
@@ -269,17 +269,17 @@ def test_all_examples_decode_through_one_composable_integration_schema(
 def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
     """The policy-owned planner selection stays outside semantic payloads."""
     deployment = _deployment_from_path(
-        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+        _CONFIG_DIRECTORY / "repeated_handover" / "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
-    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    assert deployment.planner_config == {"type": "trapezoidal", "config": {}}
     delegate = deployment.integration.adapter_factory.delegate
     assert delegate._planner_config == deployment.planner_config
     assert (
         deployment.integration.registration.robot_profile_binding.presets[
             0
         ].required_planner
-        == "toppra"
+        == "trapezoidal"
     )
 
 
@@ -304,7 +304,7 @@ def test_planner_policy_decoder_validates_backend_and_options() -> None:
             )
 
 
-@pytest.mark.parametrize("task_name", ("repeated_pick_place", "open_drawer"))
+@pytest.mark.parametrize("task_name", ("repeated_pick_place", "repeated_slide"))
 def test_single_task_program_composes_with_ur5_and_franka(
     task_name: str,
 ) -> None:
@@ -346,9 +346,9 @@ def test_single_task_program_composes_with_ur5_and_franka(
 def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     """Drawer-specific clearance does not mutate the shared embodiment."""
     repeated_config = _gym_config("repeated_pick_place")
-    drawer_config = _gym_config("open_drawer")
+    drawer_config = _gym_config("repeated_slide")
     repeated = _integration_payload("repeated_pick_place")
-    drawer = _integration_payload("open_drawer")
+    drawer = _integration_payload("repeated_slide")
 
     repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["eef"]
     drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["eef"]
@@ -362,14 +362,14 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
         _config_path("repeated_pick_place").parent / "envs/default.yaml"
     )
     drawer_environment = load_config(
-        _config_path("open_drawer").parent / "envs/default.yaml"
+        _config_path("repeated_slide").parent / "envs/default.yaml"
     )
     assert (
         repeated_environment["environment_id"] != drawer_environment["environment_id"]
     )
     assert "task_program" not in repeated_environment
     assert "task_program" not in drawer_environment
-    assert repeated_generator["opening_margin"] == pytest.approx(0.002)
+    assert repeated_generator["opening_margin"] == pytest.approx(0.03)
     assert drawer_generator["opening_margin"] == pytest.approx(0.03)
 
 
@@ -915,7 +915,7 @@ def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
             "franka_panda_hand",
             0.01,
         ),
-        ("open_drawer/task.franka.yaml", "eef", "franka_panda_hand", 0.03),
+        ("repeated_slide/task.franka.yaml", "eef", "franka_panda_hand", 0.03),
         (
             "tableware/pour_water/task.cobotmagic.yaml",
             "right_eef",
@@ -957,8 +957,8 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     monkeypatch.setattr(
         "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
     )
-    path = _config_path("hand_over")
-    config = _gym_config("hand_over")
+    path = _config_path("repeated_handover")
+    config = _gym_config("repeated_handover")
     config["embodiment"] = {
         "component": "../../../components/embodiments/tianji_marvin.yaml"
     }
@@ -1354,18 +1354,25 @@ def test_official_generators_use_named_models_without_default_fields() -> None:
         services = _integration_payload(task_name)["runtime_services"]
         generators = services["grasp_pose_generators"]
         for generator in generators.values():
-            assert generator["model"] == "dh_pgi_140_80"
+            expected_model = (
+                "robotiq_2f_140"
+                if task_name == "repeated_handover"
+                else "dh_pgi_140_80"
+            )
+            actual_model = generator["model"]
+            assert (
+                actual_model["model_id"]
+                if isinstance(actual_model, dict)
+                else actual_model
+            ) == expected_model
             assert forbidden.isdisjoint(generator)
-            if task_name == "hand_over":
-                assert generator["approach_direction_samples"] == 1
-            else:
-                assert "approach_direction_samples" not in generator
+            assert "approach_direction_samples" not in generator
 
 
 def test_open_drawer_trajectory_integration_selects_a_snapshot_target() -> None:
     """The showcase does not install dynamic-target recovery monitoring."""
     integration = _decode_configured_task_program_integration(
-        _integration_payload("open_drawer")
+        _integration_payload("repeated_slide")
     )
     factories = integration.registration.registered_semantic_lowerer_factories
 
@@ -1375,7 +1382,7 @@ def test_open_drawer_trajectory_integration_selects_a_snapshot_target() -> None:
 
 def test_integration_config_rejects_unknown_slide_target_pose_mode() -> None:
     """Configured lowerers accept only explicit live or snapshot targets."""
-    payload = deepcopy(_integration_payload("open_drawer"))
+    payload = deepcopy(_integration_payload("repeated_slide"))
     services = payload["runtime_services"]
     assert type(services) is dict
     lowerers = services["registered_semantic_lowerers"]
@@ -1484,7 +1491,7 @@ def test_examples_have_no_importable_task_environment_modules() -> None:
     its task module is intentional even though the original Task Program
     deployments remain configuration-defined.
     """
-    for task_name in ("open_drawer", "hand_over"):
+    for task_name in ("repeated_slide", "repeated_handover"):
         module_name = f"embodichain_tasks.manipulation.{task_name}"
         assert importlib.util.find_spec(module_name) is None
 
@@ -1523,9 +1530,9 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         ("rubiks_cube_pick_place", "default"),
         ("repeated_pick_place", "default"),
         ("repeated_pick_place", "newton"),
-        ("open_drawer", "default"),
-        ("open_drawer", "newton"),
-        ("hand_over", "default"),
+        ("repeated_slide", "default"),
+        ("repeated_slide", "newton"),
+        ("repeated_handover", "default"),
         ("pour_water", "default"),
     ],
 )
@@ -1570,8 +1577,8 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     expected_names = {
         "rubiks_cube_pick_place": ["pick_rubiks_cube", "place_rubiks_cube"] * 3,
         "repeated_pick_place": ["pick_cube", "place_cube"] * 3,
-        "open_drawer": ["open_drawer"],
-        "hand_over": ["hand_over_can"],
+        "repeated_slide": ["open_drawer", "close_drawer"],
+        "repeated_handover": ["hand_over_can"],
         "pour_water": [
             "pick_bottle",
             "move_bottle_above_cup",

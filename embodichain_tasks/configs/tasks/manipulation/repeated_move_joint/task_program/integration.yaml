@@ -1,0 +1,19 @@
+integration_id: repeated_move_joint_v1
+program_id: repeated_move_joint
+requires:
+  scene_contract: repeated_move_joint_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_move_joint_scene_v1
+  registry_id: repeated_move_joint_scene
+profile:
+  defaults:
+    move_joints:
+      primary: primary_manipulator
+  action_options:
+    simulation.move_joints:
+      kind: move_joints
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: move_joints

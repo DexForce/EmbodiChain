@@ -1,0 +1,20 @@
+program_id: dual_ur5_hand_over
+instruction: Pick up the can, hand it to the other arm, and place it at the delivery position.
+targets:
+  delivery_pose:
+    kind: cyclic_pose
+    values:
+      - position: [0.0, -0.2, 0.6]
+        quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+program:
+  kind: segment
+  name: hand_over_can
+  instruction: Pick up the can, transfer it between the grippers, then place and release it.
+  steps:
+    kind: invoke
+    call:
+      kind: hand_over
+      object: can
+      final_target:
+        kind: target_ref
+        target: delivery_pose

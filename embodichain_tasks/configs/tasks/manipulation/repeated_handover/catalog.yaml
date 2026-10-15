@@ -1,0 +1,10 @@
+task_key: repeated_handover
+title: Repeated Handover
+summary: Repeatedly transfer and place an object with full scene and robot resets between episodes.
+tags: [manipulation, bimanual, task_program]
+default_deployment: default
+deployments:
+  default:
+    config: task.dual_ur5_dh_pgi_140_80.yaml
+  ur5_objective:
+    config: task.ur5.objective.yaml

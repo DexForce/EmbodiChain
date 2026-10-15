@@ -1,0 +1,35 @@
+integration_id: repeated_open_door_v1
+program_id: repeated_open_door
+requires:
+  scene_contract: repeated_open_door_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_open_door_scene_v1
+  registry_id: repeated_open_door_scene
+  articulations:
+    - entity_id: microwave
+      simulation_uid: microwave
+      dynamics: dynamic
+  links:
+    - entity_id: microwave_open_door_target
+      articulation_id: microwave
+      native_link_name: handle_link
+      dynamics: dynamic
+profile:
+  defaults:
+    open_door:
+      primary: primary_manipulator
+  action_options:
+    simulation.open_door:
+      kind: open_door
+      hand_interp_steps: 30
+      door_waypoint_count: 50
+      approach_distance: 0.1
+      retract_distance: 0.1
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: open_door
+      articulation_id: microwave
+      articulation_simulation_uid: microwave
+      link_entity_id: microwave_open_door_target

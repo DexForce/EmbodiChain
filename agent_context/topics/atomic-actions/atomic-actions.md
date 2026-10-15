@@ -159,8 +159,14 @@ kinematic tool frame, not physical geometry.
 The matching tutorial files are compatibility entry points to those same scenes.
 Affordance branch overrides stay independent of physical slots, then the host
 adapts each compiled reference to `motion.expansion` for spatial variants.
-Contact phases and hand columns stay exact; protected phase samples are copied
-from the source after adaptation, including near-identical zero-time joins.
+The two sample hosts share conservative phase permissions in
+`atomic_actions/_expansion_phases.py`. Contact phases and hand columns stay
+exact; protected phase samples are copied from the source after adaptation,
+including near-identical zero-time joins. Handover's editable pickup approach
+ends at an explicit pre-grasp waypoint; its final reach and every subsequent
+grasp, held transport, receiving approach, source retreat and placement phase
+remain exact. Only joints moving in that empty-hand approach may be augmented,
+so the other arm remains stationary even though the binding includes both.
 Original action joins and intervals are restored before replay so callbacks
 retain their source indices. MoveJoint compiles each required joint target as
 a separate invocation, preserving its ordered waypoints as action boundaries

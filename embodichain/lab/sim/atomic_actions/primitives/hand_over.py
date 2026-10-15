@@ -629,7 +629,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             scene_dependency_monitor_until=(
                 {}
                 if goal.semantics.entity_id is None
-                else {goal.semantics.entity_id: segment_lengths["pickup_approach"]}
+                else {
+                    goal.semantics.entity_id: segment_lengths["pickup_approach"]
+                    + segment_lengths["pickup_reach"]
+                }
             ),
         )
 
@@ -1365,9 +1368,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             & receive_grasp_success
             & lowering_direction_valid
         )
-        pickup_approach_targets = torch.stack(
-            [handover_pre_grasp, handover_grasp], dim=1
-        )
+        # Export the pre-grasp as an explicit phase boundary. Spatial
+        # expansion may vary the empty-hand approach, while the final reach
+        # and every subsequent grasp/held-object motion stay exact.
+        pickup_approach_targets = handover_pre_grasp[:, None]
         phase_success, pickup_approach = plan_named_arm_trajectory(
             self.motion_generator,
             handover.arm.control_part,
@@ -1386,14 +1390,42 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         self._report_phase_failure(
             context,
             phase_name="pickup_approach",
-            waypoint_names=("pickup_pre_grasp", "pickup_grasp"),
+            waypoint_names=("pickup_pre_grasp",),
             target_poses=pickup_approach_targets,
             start_qpos=handover_start_qpos,
             arm=handover.arm,
             failed_mask=active_mask & ~pickup_approach_success,
         )
         success &= pickup_approach_success
-        handover_grasp_qpos = pickup_approach[:, -1]
+        phase_success, pickup_reach = plan_named_arm_trajectory(
+            self.motion_generator,
+            handover.arm.control_part,
+            pickup_approach[:, -1],
+            handover_grasp[:, None],
+            segment_lengths["pickup_reach"] + 1,
+            request.motion_policy,
+            context.control_dt,
+        )
+        pickup_reach_success = normalize_success_mask(
+            phase_success,
+            num_envs=self.num_envs,
+            device=self.device,
+            name="HandOver pickup-reach success",
+        )
+        self._report_phase_failure(
+            context,
+            phase_name="pickup_reach",
+            waypoint_names=("pickup_grasp",),
+            target_poses=handover_grasp[:, None],
+            start_qpos=pickup_approach[:, -1],
+            arm=handover.arm,
+            failed_mask=active_mask & ~pickup_reach_success,
+        )
+        success &= pickup_reach_success
+        # The pre-grasp sample already belongs to pickup_approach. Removing
+        # this duplicate retains the configured total sample budget.
+        pickup_reach = pickup_reach[:, 1:]
+        handover_grasp_qpos = pickup_reach[:, -1]
 
         pickup_transport_targets = torch.stack(
             [handover_lift_eef, handover_middle_eef], dim=1
@@ -1540,6 +1572,15 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                     handover.hand_open_qpos, segment_lengths["pickup_approach"]
                 ),
                 repeat_qpos(receive.hand_open_qpos, segment_lengths["pickup_approach"]),
+                handover,
+                receive,
+            ),
+            self._assemble_segment(
+                state,
+                pickup_reach,
+                repeat_qpos(receive_start_qpos, segment_lengths["pickup_reach"]),
+                repeat_qpos(handover.hand_open_qpos, segment_lengths["pickup_reach"]),
+                repeat_qpos(receive.hand_open_qpos, segment_lengths["pickup_reach"]),
                 handover,
                 receive,
             ),
@@ -1976,7 +2017,9 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         hand_phase_count = 4 if options.release_at_target else 3
         motion_phase_count = 4
         motion_budget = sample_count - hand_phase_count * hand_count
-        if motion_budget < 2 * motion_phase_count:
+        # Pickup needs start, pre-grasp and grasp samples; each of the other
+        # motion phases needs at least its two endpoints.
+        if motion_budget < 2 * motion_phase_count + 1:
             raise ValueError(
                 "Not enough HandOver waypoints. Increase sample_count or decrease "
                 "hand_interp_steps."
@@ -1984,8 +2027,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         motion_counts = [motion_budget // motion_phase_count] * motion_phase_count
         for index in range(motion_budget % motion_phase_count):
             motion_counts[index] += 1
+        approach_count = (motion_counts[0] + 1) // 2
         result = {
-            "pickup_approach": motion_counts[0],
+            "pickup_approach": approach_count,
+            "pickup_reach": motion_counts[0] - approach_count,
             "pickup_close": hand_count,
             "pickup_transport": motion_counts[1],
             "receive_approach": motion_counts[2],

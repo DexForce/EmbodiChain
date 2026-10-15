@@ -45,10 +45,10 @@ _PROGRAMS = {
         "repeated_cube_pick_place"
     ),
     Path(
-        "tasks/manipulation/open_drawer/task_program/program.yaml"
+        "tasks/manipulation/repeated_slide/task_program/program.yaml"
     ): "slide_open_drawer",
     Path(
-        "tasks/manipulation/hand_over/task_program/program.yaml"
+        "tasks/manipulation/repeated_handover/task_program/program.yaml"
     ): "dual_ur5_hand_over",
     Path(
         "tasks/manipulation/tableware/pour_water/task_program/program.yaml"
@@ -75,20 +75,20 @@ _DEPLOYMENTS = {
         "task_program_repeated_pick_place",
         "franka_panda",
     ),
-    Path("tasks/manipulation/open_drawer/task.ur5.yaml"): (
+    Path("tasks/manipulation/repeated_slide/task.ur5.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "ur5_dh_pgi_140_80",
     ),
-    Path("tasks/manipulation/open_drawer/task.franka.yaml"): (
+    Path("tasks/manipulation/repeated_slide/task.franka.yaml"): (
         "slide_open_drawer",
         "task_program_open_drawer",
         "franka_panda",
     ),
-    Path("tasks/manipulation/hand_over/task.dual_ur5_dh_pgi_140_80.yaml"): (
+    Path("tasks/manipulation/repeated_handover/task.dual_ur5_dh_pgi_140_80.yaml"): (
         "dual_ur5_hand_over",
         "dual_ur5_handover_v1",
-        "dual_ur5_dh_pgi_140_80",
+        "dual_ur5_robotiq_2f_140",
     ),
     Path("tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml"): (
         "pour_water_with_right_arm",
@@ -119,13 +119,13 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/franka_panda.yaml"),
         Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
-        Path("tasks/manipulation/hand_over/env.yaml"),
-        Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
-        Path("tasks/manipulation/open_drawer/envs/default.yaml"),
-        Path("tasks/manipulation/open_drawer/envs/newton.yaml"),
-        Path("tasks/manipulation/open_drawer/expansion/open_drawer.yaml"),
-        Path("tasks/manipulation/open_drawer/README.md"),
-        Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
+        Path("tasks/manipulation/repeated_handover/env.yaml"),
+        Path("tasks/manipulation/repeated_handover/task_program/integration.yaml"),
+        Path("tasks/manipulation/repeated_slide/envs/default.yaml"),
+        Path("tasks/manipulation/repeated_slide/envs/newton.yaml"),
+        Path("tasks/manipulation/repeated_slide/expansion/open_drawer.yaml"),
+        Path("tasks/manipulation/repeated_slide/README.md"),
+        Path("tasks/manipulation/repeated_slide/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/default.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
         Path(
@@ -138,6 +138,66 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+    }
+)
+
+# Stage every resource selected by the expanded deployments, including their
+# shared fixtures and policies, so installed-path resolution cannot fall back
+# to the source checkout.
+_ADDED_TASKS = (
+    "repeated_move_held_object",
+    "repeated_pickup",
+    "repeated_pour",
+    "repeated_press",
+    "repeated_twist",
+    "repeated_move_joint",
+    "repeated_axis_align",
+    "repeated_open_door",
+    "repeated_push_object",
+)
+for _task in _ADDED_TASKS:
+    _profile = {
+        "repeated_press": "ur5_dh_pgi_140_80_press",
+        "repeated_twist": "ur5_dh_pgi_140_80_contact",
+        "repeated_move_joint": "ur5_dh_pgi_140_80_contact",
+        "repeated_open_door": "ur5_dh_pgi_140_80_door",
+    }.get(_task, "ur5_dh_pgi_140_80")
+    _DEPLOYMENTS[Path(f"tasks/manipulation/{_task}/task.ur5.yaml")] = (
+        _task,
+        f"{_task}_scene",
+        _profile,
+    )
+    _PROGRAMS[Path(f"tasks/manipulation/{_task}/task_program/program.yaml")] = _task
+_RESOURCE_PATHS |= frozenset(
+    {
+        *_PROGRAMS,
+        *_DEPLOYMENTS,
+        *(
+            path.relative_to(_CONFIG_SOURCE)
+            for folder in (
+                *_ADDED_TASKS,
+                "repeated_handover",
+                "rubiks_cube_pick_place",
+                "repeated_pick_place",
+                "repeated_slide",
+                "tableware/pour_water",
+            )
+            for path in (_CONFIG_SOURCE / "tasks/manipulation" / folder).rglob("*.yaml")
+        ),
+        *(
+            path.relative_to(_CONFIG_SOURCE)
+            for path in (_CONFIG_SOURCE / "components/execution_policies").glob(
+                "atomic_*.yaml"
+            )
+        ),
+        *(
+            path.relative_to(_CONFIG_SOURCE)
+            for path in (_CONFIG_SOURCE / "components/embodiments").glob(
+                "ur5_dh_pgi_140_80_*.yaml"
+            )
+        ),
+        Path("components/embodiments/dual_ur5_robotiq_2f_140.yaml"),
+        Path("components/expansion_policies/atomic_fixed_scene.yaml"),
     }
 )
 

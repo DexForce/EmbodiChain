@@ -1,0 +1,8 @@
+task_key: repeated_move_joint
+title: Move through ready, intermediate and home joints
+summary: Move through ready, intermediate and home joints with fixed-scene Atomic trajectory expansion.
+tags: [atomic_skill, task_program, trajectory_expansion]
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

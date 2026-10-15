@@ -26,9 +26,14 @@ from embodichain.lab.scripts.run_env import (
     _create_parser,
     _pad_expansion_recipe_indices,
     _resolve_expansion_request,
+    _run_expansion,
+    _validate_expansion_collection_plan,
     resolve_collection_plan,
 )
-from embodichain.lab.gym.utils.gym_utils import _apply_expansion_runtime_overlay
+from embodichain.lab.gym.utils.gym_utils import (
+    _apply_expansion_runtime_overlay,
+    build_env_cfg_from_args,
+)
 from embodichain.lab.sim.motion.expansion import CombinedExpansionProfile
 from embodichain.utils.config_paths import resolve_config_path
 from embodichain.utils.utility import load_config
@@ -52,7 +57,9 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "repeated_cube_pick_place"
     assert profile.source.call_count == 6
-    assert profile.scene_randomization.reference_family_count == 4
+    assert profile.scene_randomization.reference_family_count == 1
+    assert not profile.scene_randomization.enabled
+    assert not profile.visual.enabled
     assert profile.trajectory.spatial.joint_offset_scale == 0.005
     # Without a smaller tolerance the declared amplitude would measure as a
     # duplicate of the reference and the variants would collapse into nominal.
@@ -62,7 +69,7 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
         < profile.trajectory.spatial.joint_offset_scale
     )
     assert candidate_indices == ()
-    assert collection["target_episodes"] == 64
+    assert collection["target_episodes"] == 16
     plan = resolve_collection_plan(
         args=_create_parser().parse_args(
             ["--gym-config", "task.yaml", "--headless", "--device", "cpu"]
@@ -76,21 +83,23 @@ def test_repeated_pick_place_policy_component_merges_task_binding() -> None:
 
 def test_open_drawer_policy_component_merges_phase_binding() -> None:
     request = _resolve(
-        "embodichain_tasks/configs/tasks/manipulation/open_drawer/" "task.ur5.yaml"
+        "embodichain_tasks/configs/tasks/manipulation/repeated_slide/" "task.ur5.yaml"
     )
     assert request is not None
     profile, candidate_indices, _, collection = request
     assert isinstance(profile, CombinedExpansionProfile)
     assert profile.source.source_id == "slide_open_drawer"
-    assert profile.source.call_count == 1
-    assert profile.source.phase_permissions["pull"] == ("joint_residual",)
+    assert profile.source.call_count == 2
+    assert not profile.source.phase_permissions
+    assert profile.source.affordance_call_indices == (0, 1)
+    assert profile.source.trajectory_call_indices == (0, 1)
     assert profile.visual.enabled is False
     assert (
         profile.trajectory.spatial.dedup_tolerance
         < profile.trajectory.spatial.joint_offset_scale
     )
     assert candidate_indices == ()
-    assert collection["target_episodes"] == 3
+    assert collection["target_episodes"] == 48
 
 
 def test_task_expansion_config_accepts_local_candidate_override() -> None:
@@ -311,3 +320,89 @@ def test_cli_expansion_profile_overrides_task_expansion_policy() -> None:
 
     assert request is not None
     assert request[0].source.source_id == "task_program_source"
+
+
+def test_explicit_num_envs_updates_expansion_capacity():
+    path = (
+        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    )
+    args = _create_parser().parse_args(["--gym-config", path, "--num-envs", "4"])
+    profile, _, _, _ = _resolve_expansion_request(
+        args, load_config(resolve_config_path(path))
+    )
+    profile.validate_for_num_envs(4)
+    assert profile.execution.max_inflight == 4
+
+
+def test_cyclic_selection_wraps_without_changing_recipe_ids() -> None:
+    selection = CollectionSelection("cyclic", start_recipe_index=2)
+    assert selection.take(0, 3, recipe_count=4) == (2, 3, 0)
+    assert selection.take(3, 5, recipe_count=4) == (1, 2, 3, 0, 1)
+    with pytest.raises(ValueError, match="positive recipe_count"):
+        selection.take(0, 1)
+
+
+def test_cyclic_collection_requires_an_expansion_profile() -> None:
+    args = _create_parser().parse_args(["--gym-config", "task.yaml"])
+    with pytest.raises(ValueError, match="requires an expansion profile"):
+        resolve_collection_plan(
+            args,
+            {"collection": {"selection": {"mode": "cyclic"}}},
+        )
+
+
+def test_cyclic_collection_rejects_a_start_outside_recipe_budget() -> None:
+    profile = _resolve(
+        "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+    )[0]
+    with pytest.raises(ValueError, match="starts outside"):
+        _validate_expansion_collection_plan(
+            profile,
+            CollectionPlan(48, 3, CollectionSelection("cyclic", start_recipe_index=16)),
+            num_envs=2,
+        )
+
+
+def test_cyclic_expansion_resets_before_each_repeated_batch(monkeypatch, tmp_path):
+    """A wrapped recipe gets a fresh host reset and its own collected episode."""
+    import json
+    from types import SimpleNamespace
+
+    path = (
+        "embodichain_tasks/configs/tasks/manipulation/repeated_move_joint/task.ur5.yaml"
+    )
+    args = _create_parser().parse_args(
+        ["--gym-config", path, "--max_episodes", "10", "--output-dir", str(tmp_path)]
+    )
+    resets = []
+    batches = []
+    env = SimpleNamespace(num_envs=2, reset=lambda **kwargs: resets.append(kwargs))
+
+    def generate(env, **kwargs):
+        assert len(resets) == len(batches) + 1
+        assert resets[-1] == {"seed": None, "options": {"save_data": False}}
+        assert kwargs["reset_before"] is False
+        batches.append(kwargs["expansion_recipe_indices"])
+        return True
+
+    monkeypatch.setattr("embodichain.lab.scripts.run_env.generate_function", generate)
+    _run_expansion(env, args, load_config(resolve_config_path(path)))
+    assert batches == [(0, 1), (2, 3), (0, 1), (2, 3), (0, 1)]
+    manifest = json.loads((tmp_path / "expansion_manifest.json").read_text())
+    assert manifest["committed_episodes"] == 10
+    assert manifest["prepare_reset_count"] == 5
+    assert manifest["selection"]["mode"] == "cyclic"
+
+
+def test_reused_cube_scene_keeps_move_held_object_recording_identity() -> None:
+    path = "embodichain_tasks/configs/tasks/manipulation/repeated_move_held_object/task.ur5.yaml"
+    args = _create_parser().parse_args(
+        ["--gym-config", path, "--headless", "--disable-sensor", "--num-envs", "1"]
+    )
+    _, config, _ = build_env_cfg_from_args(args)
+    params = config["env"]["dataset"]["lerobot"]["params"]
+    assert (
+        params["save_path"]
+        == "/tmp/embodichain-manipulation/repeated_move_held_object/datasets"
+    )
+    assert params["extra"]["task_description"] == "repeated_move_held_object"

@@ -1,0 +1,16 @@
+runtime:
+  num_envs: 2
+policy:
+  component: ../../../../components/expansion_policies/atomic_fixed_scene.yaml
+overrides:
+  source:
+    source_id: slide_open_drawer
+    source_revision: config:slide_open_drawer
+    template_id: slide_open_drawer_episode
+    call_count: 2
+    affordance_call_indices: [0, 1]
+    trajectory_call_indices: [0, 1]
+  persistence:
+    output_dir: /tmp/embodichain-manipulation/slide_open_drawer/expansion
+collection:
+  target_episodes: 48

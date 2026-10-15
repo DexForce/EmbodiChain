@@ -1,0 +1,14 @@
+runtime:
+  num_envs: 2
+policy:
+  component: ../../../components/expansion_policies/atomic_fixed_scene.yaml
+overrides:
+  source:
+    source_id: repeated_press
+    source_revision: config:repeated_press
+    template_id: repeated_press_episode
+    call_count: 1
+    affordance_call_indices: [0]
+    trajectory_call_indices: [0]
+  persistence:
+    output_dir: /tmp/embodichain-manipulation/repeated_press/expansion

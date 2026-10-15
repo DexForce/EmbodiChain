@@ -799,6 +799,79 @@ def test_both_spatial_operators_keep_contacts_hands_clock_and_action_joins() -> 
     )
 
 
+@pytest.mark.parametrize("moving_arm", ("left_arm", "right_arm"))
+@pytest.mark.parametrize("operator", ("joint_residual", "via_points"))
+def test_handover_expansion_locks_pre_grasp_and_all_transfer_waypoints(
+    moving_arm: str,
+    operator: str,
+) -> None:
+    lengths = {
+        "pickup_approach": 25,
+        "pickup_reach": 10,
+        "pickup_close": 5,
+        "pickup_transport": 25,
+        "receive_approach": 25,
+        "receive_close": 5,
+        "handover_release": 5,
+        "place": 25,
+        "receive_release": 5,
+    }
+    samples = sum(lengths.values())
+    positions = torch.zeros(3, samples, 5)
+    moving_joints = [0, 1] if moving_arm == "left_arm" else [2, 3]
+    stationary_joints = [index for index in range(4) if index not in moving_joints]
+    positions[:, :, moving_joints[0]] = torch.linspace(0, 0.8, samples)
+    positions[:, :, moving_joints[1]] = positions[:, :, moving_joints[0]] * 0.5
+    positions[:, 25:, :4] += 0.3
+    positions[:, 35:125, 4] = 0.04
+    source = TimedTrajectory.from_uniform_step(
+        positions, env_ids=torch.arange(3), step_dt=0.01
+    )
+    segments = []
+    offset = 0
+    for name, length in lengths.items():
+        segments.append(SimpleNamespace(name=name, start=offset, stop=offset + length))
+        offset += length
+    plan = SimpleNamespace(
+        skill_id="hand_over",
+        segments=segments,
+        diagnostics=SimpleNamespace(metadata={}),
+    )
+    compiled = SimpleNamespace(
+        trajectory=source,
+        action_plans=(plan,),
+        segment=lambda _index, name: next(s for s in segments if s.name == name),
+    )
+
+    class DualRobot(_Robot):
+        joint_names = ("l0", "l1", "r0", "r1", "hand")
+
+        def get_joint_ids(self, name: str) -> list[int]:
+            return [0, 1] if name == "left_arm" else [2, 3]
+
+        def get_qpos_limits(self) -> torch.Tensor:
+            return torch.tensor([[-3.0, 3.0]] * 4 + [[0.0, 0.05]]).expand(3, -1, -1)
+
+    cfg = _sample_defaults("handover")
+    cfg["expansion"]["trajectory"]["spatial"]["operators"] = [operator]
+    expanded, records = _augment(compiled, DualRobot(), _scene_args(cfg, (0, 1, 2), 0))
+    assert torch.equal(expanded.dt, source.dt)
+    assert torch.equal(expanded.positions[0], source.positions[0])
+    # Pre-grasp and the complete reach/close/lift/receive/place sequence are exact.
+    assert torch.equal(expanded.positions[:, 24:], source.positions[:, 24:])
+    assert torch.equal(expanded.positions[:, :, 4], source.positions[:, :, 4])
+    assert torch.equal(
+        expanded.positions[:, :, stationary_joints],
+        source.positions[:, :, stationary_joints],
+    )
+    assert {record["operator"] for record in records[1:]} == {operator}
+    for row in (1, 2):
+        assert not torch.equal(
+            expanded.positions[row, 1:24, moving_joints],
+            source.positions[row, 1:24, moving_joints],
+        )
+
+
 @pytest.mark.parametrize("robot_type", ("ur5", "franka", "ur10"))
 def test_move_joint_expansion_preserves_required_mid_waypoint(
     monkeypatch: pytest.MonkeyPatch, robot_type: str

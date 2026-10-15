@@ -1,0 +1,13 @@
+program_id: repeated_axis_align
+instruction: Align the cube axis upright
+targets: {}
+program:
+  kind: segment
+  name: align
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.axis_align
+      arguments:
+        object: cube

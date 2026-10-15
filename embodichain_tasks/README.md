@@ -150,7 +150,7 @@ python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manip
 python -m embodichain.lab.scripts.run_env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
 # Newton variant selected from the same deployment
-python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
+python -m embodichain run-env --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml --physics newton
 ```
 
 ## How registration works

@@ -1,0 +1,40 @@
+schema_version: 1
+source:
+  source_id: task_program_source
+  source_revision: task_program_source:v1
+  unit_scope: episode
+  template_id: task_program_call
+scene_randomization:
+  enabled: false
+  reference_family_count: 1
+affordance:
+  enabled: true
+  branches_per_family: 4
+  max_proposals: 128
+trajectory:
+  variants_per_family: 4
+  spatial:
+    enabled: true
+    operators: [joint_residual, via_points]
+    joint_offset_scale: 0.005
+    via_count: 3
+    dedup_tolerance: 0.002
+visual:
+  enabled: false
+  profiles: []
+observation:
+  profiles: []
+  capture_rgb: false
+scheduling:
+  candidate_budget: 16
+  reference_family_budget: 1
+execution:
+  max_inflight: 2
+persistence:
+  sink: lerobot
+  output_dir: /tmp/embodichain-expansion
+collection:
+  target_episodes: 16
+  max_attempts: 3
+  selection:
+    mode: cyclic

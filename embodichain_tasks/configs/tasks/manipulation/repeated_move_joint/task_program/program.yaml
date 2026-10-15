@@ -1,0 +1,33 @@
+program_id: repeated_move_joint
+instruction: Move through ready, intermediate and home joints
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: target_0
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_joints
+          arguments:
+            qpos: [0.35, -1.2, 1.3, -1.65, -1.57, 0.2]
+    - kind: segment
+      name: target_1
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_joints
+          arguments:
+            qpos: [0.15, -1.4, 1.45, -1.6, -1.57, 0.1]
+    - kind: segment
+      name: target_2
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.move_joints
+          arguments:
+            qpos: [0.0, -1.57, 1.57, -1.57, -1.57, 0.0]

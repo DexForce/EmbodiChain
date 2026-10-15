@@ -1,0 +1,14 @@
+program_id: repeated_open_door
+instruction: Open Door the microwave
+targets: {}
+program:
+  kind: segment
+  name: open_door
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.open_door
+      arguments:
+        handle: microwave_open_door_target
+        open_angle: 1.0471975511965976

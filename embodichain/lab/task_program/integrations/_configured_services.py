@@ -18,8 +18,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
+from numbers import Real
 from typing import TYPE_CHECKING, ClassVar
 
 import torch
@@ -52,6 +53,7 @@ from embodichain.lab.sim.atomic_actions import (
     Slide,
     SlideAffordance,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
     sample_initial_articulation_geometry,
 )
@@ -231,6 +233,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
         link_entity_id: str,
         *,
         target_pose_mode: str = "live",
+        joint_target_template: SlideJointTarget | None = None,
     ) -> None:
         if not isinstance(semantics, ObjectSemantics):
             raise TypeError("semantics must be ObjectSemantics.")
@@ -242,6 +245,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             field_name="link_entity_id",
         )
         self._target_pose_mode = _slide_target_pose_mode(target_pose_mode)
+        self._joint_target_template = joint_target_template
 
     def lower(
         self,
@@ -258,11 +262,35 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
                 "Articulation-link Slide requires an exact SlideOptions template."
             )
         arguments = dict(call.arguments)
-        configured_arguments = {"handle": self._link_entity_id}
-        if arguments != configured_arguments:
+        if arguments.get("handle") != self._link_entity_id or not set(arguments) <= {
+            "handle",
+            "joint_position",
+        }:
             raise ValueError(
-                f"{self.call_id} arguments must name only the configured handle; "
+                f"{self.call_id} arguments must name the configured handle "
+                "and optionally an absolute joint_position; "
                 "motion options belong to the selected policy preset."
+            )
+        joint_target = None
+        if "joint_position" in arguments:
+            if self._joint_target_template is None:
+                raise ValueError(
+                    "Slide joint_position requires one unambiguous prismatic "
+                    "ancestor with joint limits and automatic axis geometry."
+                )
+            position = arguments["joint_position"]
+            if (
+                isinstance(position, bool)
+                or not isinstance(position, Real)
+                or not math.isfinite(position)
+            ):
+                raise ValueError("Slide joint_position must be a finite real number.")
+            limits = self._semantics.affordance.joint_limits
+            assert limits is not None
+            if not limits[0] <= position <= limits[1]:
+                raise ValueError("Slide joint_position is outside its joint limits.")
+            joint_target = replace(
+                self._joint_target_template, position=float(position)
             )
         target_pose: torch.Tensor | SceneEntityPose
         if self._target_pose_mode == "live":
@@ -284,6 +312,7 @@ class _ArticulationLinkSlideLowerer(RegisteredSemanticLowerer):
             goal=SlideGoal(
                 semantics=self._semantics,
                 target_pose=target_pose,
+                joint_target=joint_target,
             )
         )
 
@@ -293,7 +322,7 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
     """Create Slide semantics from one configured articulation-link geometry."""
 
     call_id: ClassVar[str] = _ARTICULATION_LINK_SLIDE_CALL_ID
-    revision: ClassVar[str] = "4"
+    revision: ClassVar[str] = "5"
     target_descriptor: ClassVar[SkillDescriptor] = Slide.descriptor()
 
     articulation_id: str
@@ -361,17 +390,37 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
             raise TypeError("Articulation must provide get_link_vert_face().")
         vertices, triangles = get_link_vert_face(native_link_name)
         geometry: dict[str, object] = {}
+        sampled_geometry = None
         if self.translation_axis is None:
             # Explicit axes own the legacy mesh-only path: sampled geometry
             # would both override their sign and reject scaled articulations.
-            geometry = sample_initial_articulation_geometry(
+            sampled_geometry = sample_initial_articulation_geometry(
                 articulation,
                 native_link_name,
                 initial_qpos=articulation.cfg.init_qpos,
                 initial_qpos_joint_names=articulation.joint_names,
                 body_scale=articulation.cfg.body_scale,
-            ).to_object_geometry()
+            )
+            geometry = sampled_geometry.to_object_geometry()
         affordance_kwargs: dict[str, object] = {}
+        joint_target_template = None
+        prismatic = None
+        if (
+            sampled_geometry is not None
+            and sampled_geometry.prismatic_joint_axis is not None
+        ):
+            active = tuple(
+                joint
+                for joint in articulation.get_parent_joint_chain(native_link_name)
+                if joint.joint_type != "fixed"
+            )
+            if len(active) == 1 and active[0].joint_type == "prismatic":
+                prismatic = active[0]
+                if prismatic.joint_limits is not None:
+                    affordance_kwargs.update(
+                        joint_name=prismatic.name,
+                        joint_limits=prismatic.joint_limits,
+                    )
         if self.translation_axis is not None:
             affordance_kwargs["translation_axis"] = torch.tensor(
                 self.translation_axis,
@@ -396,10 +445,29 @@ class _ArticulationLinkSlideLowererFactory(RegisteredSemanticLowererFactory):
                 **affordance_kwargs,
             ),
         )
+        if prismatic is not None and prismatic.joint_limits is not None:
+            # Geometry resolves Slide's positive axis toward the drawer body;
+            # increasing native qpos may point in the opposite direction.
+            axis_sign = (
+                1
+                if torch.dot(
+                    sampled_geometry.prismatic_joint_axis,
+                    semantics.affordance.translation_axis,
+                ).item()
+                > 0.0
+                else -1
+            )
+            joint_target_template = SlideJointTarget(
+                self.articulation_id,
+                prismatic.name,
+                prismatic.joint_limits[0],
+                axis_sign=axis_sign,
+            )
         return _ArticulationLinkSlideLowerer(
             semantics,
             self.link_entity_id,
             target_pose_mode=self.target_pose_mode,
+            joint_target_template=joint_target_template,
         )
 
 

@@ -37,7 +37,16 @@ from `embodichain.cli.sim` with Gym config, seed and recording options. When
 `require_gym_config=True`, omitted runtime overrides stay `None`: `num_envs`,
 `device`, `headless`, `renderer`, `physics`, `arena_space`, and `gpu_id` preserve
 file-owned values. Explicit values override runtime settings (`--headless` / `--no-headless`
-select either mode); `--physics` can only confirm the file-owned backend. An omitted seed preserves the config seed.
+select either mode); `--physics` can only confirm the file-owned backend. An omitted seed preserves the config seed. For combined trajectory expansion,
+an explicit `--num-envs` also updates the host slot capacity; the collection
+episode target remains independent of parallel capacity.
+`collection.selection.mode="cyclic"` wraps logical recipe indices at the
+Expansion Profile's recipe count. Every repeated batch uses the ordinary full
+scene/robot reset and an independent dataset episode. Task collection overrides
+merge with the reusable policy's collection settings, retaining its cyclic
+selection when only the episode target changes. The manipulation reference
+policy defaults to two parallel environments and task-sized recording horizons;
+Handover and OpenDrawer collect three recipe sweeps by default.
 Standalone examples use `add_sim_args_to_parser()` and opt into seed separately.
 `--disable_sensor` (also accepted as `--disable-sensor`) sets the resolved Gym
 config's `enable_sensor` switch to false; this keeps reusable embodiment sensor

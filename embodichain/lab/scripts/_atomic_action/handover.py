@@ -84,9 +84,10 @@ OBJECT_ROT_HORIZONTAL = (90.0, 0.0, 0.0)
 FINAL_OBJECT_XYZ = (0.0, -0.2, 0.6)
 # ---------------------------------------------------------------------------
 
-# Robotiq's revolute closing angle follows the URDF mimic directions. At 0.4
-# rad the pads preload the sample can's approximately 63 mm diameter.
-HAND_CLOSE_QPOS = 0.4
+# Robotiq's revolute closing angle follows the URDF mimic directions. Keep
+# enough closing preload to hold the can while the other arm approaches;
+# 0.4 rad lets it slip vertically even on the nominal transfer path.
+HAND_CLOSE_QPOS = 0.5
 HANDOVER_GRIPPER_MODEL = ParallelJawGripperModelCfg(
     model_id="robotiq_2f_140",
     min_opening_width=0.005,

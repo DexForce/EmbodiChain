@@ -1,0 +1,150 @@
+embodiment_id: dual_ur5_robotiq_2f_140
+simulation:
+  uid: DualUR5HandOver
+  urdf_cfg:
+    fname: dual_ur5_hand_over
+    name_case:
+      joint: lower
+      link: lower
+    components:
+      - component_type: left_arm
+        urdf_path: UniversalRobots/UR5/UR5.urdf
+        transform:
+          - [0.0, -1.0, 0.0, -0.3]
+          - [1.0, 0.0, 0.0, -1.45]
+          - [0.0, 0.0, 1.0, 0.4]
+          - [0.0, 0.0, 0.0, 1.0]
+      - component_type: right_arm
+        urdf_path: UniversalRobots/UR5/UR5.urdf
+        transform:
+          - [0.0, -1.0, 0.0, 0.3]
+          - [1.0, 0.0, 0.0, -1.45]
+          - [0.0, 0.0, 1.0, 0.4]
+          - [0.0, 0.0, 0.0, 1.0]
+      - component_type: left_hand
+        urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
+      - component_type: right_hand
+        urdf_path: Robotiq/robotiq_arg2f_140/robotiq_arg2f_140.urdf
+  control_parts:
+    left_arm: ['left_joint[0-9]']
+    right_arm: ['right_joint[0-9]']
+    dual_arm: ['left_joint[0-9]', 'right_joint[0-9]']
+    left_eef: ['left_.*(?:finger|knuckle)_joint']
+    right_eef: ['right_.*(?:finger|knuckle)_joint']
+  joint_drive_props:
+    stiffness:
+      (left|right)_joint[0-9]: 50000.0
+      (left|right)_.*(?:finger|knuckle)_joint: 1000.0
+    damping:
+      (left|right)_joint[0-9]: 5000.0
+      (left|right)_.*(?:finger|knuckle)_joint: 100.0
+    max_effort:
+      (left|right)_joint[0-9]: 1000000.0
+      (left|right)_.*(?:finger|knuckle)_joint: 10000.0
+    drive_type: force
+  link_attrs: {}
+  solver_cfg:
+    left_arm:
+      class_type: URSolver
+      ur_type: ur5
+      root_link_name: left_base_link
+      end_link_name: left_ee_link
+      tcp:
+        - [0.0, -1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.21]
+        - [0.0, 0.0, 0.0, 1.0]
+      ik_nearest_weight: [1.0, 4.0, 1.0, 1.0, 1.0, 1.0]
+      user_qpos_limits:
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+    right_arm:
+      class_type: URSolver
+      ur_type: ur5
+      root_link_name: right_base_link
+      end_link_name: right_ee_link
+      tcp:
+        - [0.0, -1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 1.0, 0.21]
+        - [0.0, 0.0, 0.0, 1.0]
+      ik_nearest_weight: [1.0, 4.0, 1.0, 1.0, 1.0, 1.0]
+      user_qpos_limits:
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+        - [-6.283185307179586, 6.283185307179586]
+  init_pos: [1.95, 0.0, 0.1]
+  init_rot: [0.0, 0.0, -90.0]
+  init_qpos: [0.0, 0.0, -1.57, -1.57, 1.57, 1.57, -1.57, -1.57, -1.57, -1.57, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+sensor: []
+skill_profile:
+  contract_id: dual_arm_parallel_gripper
+  profile_id: dual_ur5_robotiq_2f_140
+  resources:
+    - resource_id: left
+      endpoints:
+        - endpoint_id: motion
+          control_part: left_arm
+          capabilities: [kinematics.batch_inverse, motion.cartesian_pose, kinematics.forward]
+        - endpoint_id: grasp
+          control_part: left_eef
+          capabilities: [interaction.grasp]
+          command_preset: left_parallel_gripper
+    - resource_id: right
+      endpoints:
+        - endpoint_id: motion
+          control_part: right_arm
+          capabilities: [kinematics.batch_inverse, motion.cartesian_pose, kinematics.forward]
+        - endpoint_id: grasp
+          control_part: right_eef
+          capabilities: [interaction.grasp]
+          command_preset: right_parallel_gripper
+  command_presets:
+    - preset_id: left_parallel_gripper
+      control_part: left_eef
+      commands:
+        open: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        grasp: [0.5, -0.5, -0.5, -0.5, 0.5, 0.5]
+    - preset_id: right_parallel_gripper
+      control_part: right_eef
+      commands:
+        open: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        grasp: [0.5, -0.5, -0.5, -0.5, 0.5, 0.5]
+  runtime_services:
+    grasp_pose_generators:
+      left_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        opening_margin: 0.03
+        point_sample_density: 0.012
+        filter_ground_collision: false
+        model:
+          model_id: robotiq_2f_140
+          min_opening_width: 0.005
+          max_opening_width: 0.14
+          finger_length: 0.08
+          finger_width: 0.027
+          finger_thickness: 0.0075
+          palm_depth: 0.1
+      right_eef:
+        kind: antipodal_parallel_jaw
+        sample_count: 10000
+        opening_margin: 0.03
+        point_sample_density: 0.012
+        filter_ground_collision: false
+        model:
+          model_id: robotiq_2f_140
+          min_opening_width: 0.005
+          max_opening_width: 0.14
+          finger_length: 0.08
+          finger_width: 0.027
+          finger_thickness: 0.0075
+          palm_depth: 0.1

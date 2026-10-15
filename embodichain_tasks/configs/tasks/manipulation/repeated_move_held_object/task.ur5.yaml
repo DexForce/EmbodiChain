@@ -1,0 +1,14 @@
+id: TaskProgramRepeatedMoveHeldObject-v1
+environment:
+  component: ../repeated_push_object/env.yaml
+expansion:
+  config: expansion.yaml
+task_program:
+  program: task_program/program.yaml
+  integration: task_program/integration.yaml
+  execution_policy: ../../../components/execution_policies/atomic_trapezoidal.yaml
+embodiment:
+  component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+  overrides:
+    init_qpos: [-0.0703720971941948, -1.72176194190979, 1.5078608989715576, -1.3538234233856201, -1.5702142715454102,
+      -0.0703449621796608, 0.0, 0.0]

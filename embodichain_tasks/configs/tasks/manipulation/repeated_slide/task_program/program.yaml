@@ -1,0 +1,28 @@
+program_id: slide_open_drawer
+instruction: Open the drawer, then close it again.
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: open_drawer
+      instruction: Grasp the drawer handle and pull the drawer open.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.articulation_link_slide
+          arguments:
+            handle: drawer_handle
+            joint_position: 0.18
+    - kind: segment
+      name: close_drawer
+      instruction: Push the drawer back to its closed position and release it.
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.articulation_link_slide
+          arguments:
+            handle: drawer_handle
+            joint_position: 0.0

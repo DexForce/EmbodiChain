@@ -1,0 +1,8 @@
+task_key: repeated_move_held_object
+title: Move a held cube
+summary: Pick, transport and place a cube with fixed-scene trajectory expansion.
+tags: [atomic_skill, task_program, trajectory_expansion]
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

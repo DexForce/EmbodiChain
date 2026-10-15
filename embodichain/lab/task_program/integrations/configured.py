@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 import hashlib
 import json
@@ -34,6 +34,13 @@ from ._configured_services import (
     _MoveHeldObjectLowererFactory,
     _PourLowererFactory,
     _PushObjectLowererFactory,
+)
+from ._configured_atomic_skills import (
+    _AxisAlignLowererFactory,
+    _MoveJointsLowererFactory,
+    _OpenDoorLowererFactory,
+    _PressLowererFactory,
+    _TwistLowererFactory,
 )
 from .catalog import (
     SimulationTaskProgramRegistration,
@@ -61,19 +68,24 @@ from .simulation.handover import (
 )
 from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
+    AxisAlignOptions,
     DynamicCollisionMode,
     ExecutionRunnerCfg,
     HandOverOptions,
     MotionPolicy,
     MoveHeldObjectOptions,
+    MoveJointsOptions,
+    OpenDoorOptions,
     PickUpOptions,
     PlaceOptions,
     PourOptions,
+    PressOptions,
     PushObjectOptions,
     PushObjectToolCalibration,
     RecoveryPolicy,
     SlideOptions,
     TrackingPolicy,
+    TwistOptions,
 )
 from embodichain.lab.task_program.semantics import (
     EffectAssurance,
@@ -936,10 +948,81 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
                 "support_frame_planar_contact_offset",
                 "contact_frame_to_eef",
                 "tool_calibrations",
+                "press_distance",
+                "press_position",
+                "twist_angle",
+                "twist_waypoint_count",
+                "door_waypoint_count",
+                "retract_distance",
+                "joint_position_tolerance",
+                "target_axis",
             }
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind == "move_joints":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return MoveJointsOptions()
+    if kind == "axis_align":
+        # AxisAlign owns the PickUp contract plus exactly one world axis.
+        pick_config = dict(common)
+        target_axis = pick_config.pop("target_axis", [0.0, 0.0, 1.0])
+        pick_config["kind"] = "pick_up"
+        pick_options = _decode_action_options(pick_config, path=path)
+        import torch
+
+        return AxisAlignOptions(
+            **{
+                field.name: getattr(pick_options, field.name)
+                for field in fields(PickUpOptions)
+            },
+            target_axis=torch.tensor(
+                _finite_tuple(
+                    target_axis, path=f"{path}.target_axis", expected_length=3
+                ),
+                dtype=torch.float32,
+            ),
+        )
+    if kind in {"press", "twist", "open_door"}:
+        option_types = {
+            "press": PressOptions,
+            "twist": TwistOptions,
+            "open_door": OpenDoorOptions,
+        }
+        option_type = option_types[kind]
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset({"kind"}),
+            optional=frozenset(field.name for field in fields(option_type)),
+        )
+        kwargs: dict[str, object] = {}
+        for name, item in config.items():
+            if name == "kind":
+                continue
+            if name in {
+                "hand_interp_steps",
+                "twist_waypoint_count",
+                "door_waypoint_count",
+            }:
+                kwargs[name] = _integer(item, path=f"{path}.{name}", minimum=1)
+            elif name == "press_position":
+                kwargs[name] = (
+                    None
+                    if item is None
+                    else _finite_tuple(
+                        item,
+                        path=f"{path}.{name}",
+                        expected_length=3,
+                    )
+                )
+            else:
+                kwargs[name] = _real(
+                    item,
+                    path=f"{path}.{name}",
+                    **({} if name == "twist_angle" else {"minimum": 0.0}),
+                )
+        return option_type(**kwargs)
     if kind == "pick_up":
         config = _mapping(
             value,
@@ -1299,8 +1382,8 @@ def _decode_action_options(value: object, *, path: str) -> ActionOptions:
         return HandOverOptions(**kwargs)
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['hand_over', 'move_held_object', 'pick_up', 'place', 'pour', "
-        "'push_object', 'slide']."
+        "['axis_align', 'hand_over', 'move_held_object', 'move_joints', "
+        "'open_door', 'pick_up', 'place', 'pour', 'press', 'push_object', 'slide', 'twist']."
     )
 
 
@@ -1876,6 +1959,11 @@ def _decode_registered_lowerer(
     | _MoveHeldObjectLowererFactory
     | _PourLowererFactory
     | _PushObjectLowererFactory
+    | _PressLowererFactory
+    | _TwistLowererFactory
+    | _OpenDoorLowererFactory
+    | _AxisAlignLowererFactory
+    | _MoveJointsLowererFactory
 ):
     """Decode one allowlisted registered semantic lowerer factory."""
     common = _mapping(
@@ -1898,6 +1986,25 @@ def _decode_registered_lowerer(
         ),
     )
     kind = _identifier(common["kind"], path=f"{path}.kind")
+    if kind in {"press", "twist", "open_door"}:
+        names = {"articulation_id", "articulation_simulation_uid", "link_entity_id"}
+        config = _mapping(value, path=path, required=frozenset({"kind", *names}))
+        factories = {
+            "press": _PressLowererFactory,
+            "twist": _TwistLowererFactory,
+            "open_door": _OpenDoorLowererFactory,
+        }
+        return factories[kind](
+            **{name: _identifier(config[name], path=f"{path}.{name}") for name in names}
+        )
+    if kind == "axis_align":
+        config = _mapping(value, path=path, required=frozenset({"kind", "object_id"}))
+        return _AxisAlignLowererFactory(
+            object_id=_identifier(config["object_id"], path=f"{path}.object_id"),
+        )
+    if kind == "move_joints":
+        _mapping(value, path=path, required=frozenset({"kind"}))
+        return _MoveJointsLowererFactory()
     if kind == "articulation_link_slide":
         config = _mapping(
             value,
@@ -2009,7 +2116,7 @@ def _decode_registered_lowerer(
         return _PushObjectLowererFactory(routes=tuple(routes))
     raise ValueError(
         f"Unsupported {path}.kind {kind!r}; supported kinds are "
-        "['articulation_link_slide', 'move_held_object', 'pour', 'push_object']."
+        "['articulation_link_slide', 'axis_align', 'move_held_object', 'move_joints', 'open_door', 'pour', 'press', 'push_object', 'twist']."
     )
 
 

@@ -1,0 +1,16 @@
+runtime:
+  num_envs: 2
+policy:
+  component: ../../../components/expansion_policies/atomic_fixed_scene.yaml
+overrides:
+  source:
+    source_id: dual_ur5_hand_over
+    source_revision: config:dual_ur5_hand_over
+    template_id: dual_ur5_hand_over_episode
+    call_count: 1
+    affordance_call_indices: [0]
+    trajectory_call_indices: [0]
+  persistence:
+    output_dir: /tmp/embodichain-manipulation/dual_ur5_hand_over/expansion
+collection:
+  target_episodes: 48
