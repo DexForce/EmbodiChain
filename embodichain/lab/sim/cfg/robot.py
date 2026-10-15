@@ -72,11 +72,20 @@ class RobotCfg(ArticulationCfg):
         stiffness=1e4,
         damping=1e3,
         max_effort=1e10,
-        max_velocity=1e10,
+        max_velocity=None,
         friction=0.0,
         armature=0.0,
     )
     """Joint drive, limit, friction, and armature properties."""
+
+    joint_acceleration_limits: dict[str, float] | float | None = None
+    """Optional planning acceleration caps [rad/s^2 or m/s^2].
+
+    A scalar applies to every joint; mapping keys are control parts or joint
+    name expressions, with no overlapping rules. Unconfigured joints use the
+    planner's explicit request or its fallback. This metadata does not configure
+    a physics drive or derive acceleration from effort limits.
+    """
 
     asset_physics_mode: AssetPhysicsMode = "overlay"
     """Apply configured robot physics on top of source-authored values."""

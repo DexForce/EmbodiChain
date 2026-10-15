@@ -56,7 +56,10 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     PlanOptions,
     validate_plan_options,
 )
-from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import _named_rigid_objects
+from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
+    _curobo_joint_limits,
+    _named_rigid_objects,
+)
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult, PlanState
 
 if TYPE_CHECKING:
@@ -1309,8 +1312,15 @@ class CuroboPlanner(BasePlanner):
         """Return a cached in-process backend for one goal-buffer shape."""
         multi_env = bool(self.cfg.world.multi_env)
         key = (control_part, int(batch_size), multi_env, planning_mode)
-        if key in self._backend_cache:
-            return self._backend_cache[key]
+        limits_key = self._robot_yaml_cache_key(
+            self.robot.cfg.fpath, control_part, None, self.cfg.auto_gen
+        )
+        cached = self._backend_cache.get(key)
+        if cached is not None:
+            if cached.motion_limits_key == limits_key:
+                return cached
+            self._close_planner(cached.planner)
+            del self._backend_cache[key]
 
         profile = self._materialize_profile(control_part)
         sim_joint_names = self._resolve_sim_joint_names(control_part)
@@ -1399,6 +1409,7 @@ class CuroboPlanner(BasePlanner):
                         f"cuRobo capture coordinator release failed: {exc}"
                     )
 
+        backend.motion_limits_key = limits_key
         self._backend_cache[key] = backend
         logger.log_info(
             f"cuRobo in-process backend ready for '{control_part}' "
@@ -1841,6 +1852,9 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
+        hasher.update(
+            repr(_curobo_joint_limits(self.robot, urdf_path=urdf_path)).encode("utf-8")
+        )
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":
@@ -2818,6 +2832,7 @@ class _CuroboBackend:
     batch_size: int
     use_cuda_graph: bool
     planning_mode: MoveType
+    motion_limits_key: str | None = None
     collision_checker: "Any | None" = None
     # Lazily-built device-tensor caches for the shared post-processing. The
     # cuRobo joint order and the profile's fixed transforms are stable for a

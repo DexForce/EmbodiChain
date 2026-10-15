@@ -388,6 +388,19 @@ def _populate_dual_cfg(
     cfg.joint_drive_props = _mirror_joint_drive_props(
         base_cfg.joint_drive_props, name_case
     )
+    acceleration = base_cfg.joint_acceleration_limits
+    if isinstance(acceleration, dict):
+        cfg.joint_acceleration_limits = {
+            (
+                f"{side}_{pattern}"
+                if pattern in base_cfg.control_parts
+                else _prefixed_name(pattern, prefix, "joint", name_case)
+            ): value
+            for pattern, value in acceleration.items()
+            for side, _, prefix in _SIDES
+        }
+    else:
+        cfg.joint_acceleration_limits = acceleration
     cfg.attrs = base_cfg.attrs.copy()
     cfg.root_props = base_cfg.root_props.copy()
 

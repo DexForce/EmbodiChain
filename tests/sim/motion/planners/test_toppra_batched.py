@@ -168,6 +168,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=15,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -201,6 +202,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.TIME,
                 sample_interval=0.05,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -275,6 +277,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=12,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -345,6 +348,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=12,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -405,6 +409,7 @@ class TestToppraNumericalRegression:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=20,
                 constraints={"velocity": 1.0, "acceleration": 2.0},

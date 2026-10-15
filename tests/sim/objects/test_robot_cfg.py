@@ -56,6 +56,16 @@ from embodichain.utils import configclass
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
 
 
+def test_planning_acceleration_metadata_roundtrips_without_overriding_asset_velocity() -> (
+    None
+):
+    cfg = RobotCfg.from_dict({"joint_acceleration_limits": {"arm": 0.8}})
+    restored = RobotCfg.from_dict(cfg.to_dict())
+    assert cfg.joint_drive_props.max_velocity is None
+    assert restored.joint_drive_props.max_velocity is None
+    assert restored.joint_acceleration_limits == {"arm": 0.8}
+
+
 def test_mounted_sensor_config_roundtrip_and_instance_isolation() -> None:
     from embodichain.lab.sim.sensors import CameraCfg, StereoCameraCfg
 

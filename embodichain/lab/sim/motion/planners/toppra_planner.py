@@ -32,6 +32,7 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     _infer_batch_size,
 )
 from .utils import PlanState, PlanResult
+from ._joint_limits import _resolve_joint_constraints
 
 try:
     import toppra as ta
@@ -260,12 +261,14 @@ class ToppraPlannerCfg(BasePlannerCfg):
 class ToppraPlanOptions(PlanOptions):
 
     constraints: dict = {
-        "velocity": 0.2,
-        "acceleration": 0.5,
+        "velocity": None,
+        "acceleration": None,
     }
     """Constraints for the planner, including velocity and acceleration limits.
 
-    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    Values may be scalars, per-joint magnitudes, or signed bounds. ``None``
+    resolves robot limits at planning time. Explicit requests are capped by
+    available robot limits; missing limits use compatibility fallbacks.
     """
 
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
@@ -274,7 +277,7 @@ class ToppraPlanOptions(PlanOptions):
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
     """
 
-    sample_interval: float | int = 0.01
+    sample_interval: float | int = 100
     """Interval for sampling the trajectory.
 
     If sample_method is 'time', this is the time interval in seconds.
@@ -438,8 +441,15 @@ class ToppraPlanner(BasePlanner):
             [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
         )  # (B, N, DOF)
 
-        vc = options.constraints["velocity"]
-        ac = options.constraints["acceleration"]
+        constraints = _resolve_joint_constraints(
+            self.robot,
+            options.constraints,
+            control_part=options.control_part,
+            dof=dofs,
+            batch_size=b,
+        )
+        vc = constraints["velocity"].numpy()
+        ac = constraints["acceleration"].numpy()
         args_per_env = [
             (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
             for i in range(b)

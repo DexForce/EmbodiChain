@@ -31,6 +31,25 @@ from embodichain.lab.sim.robots.dual_arm import (
 from embodichain_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
 
+
+@pytest.mark.parametrize("limits", [None, 0.8, {"arm": 0.8}, {"joint[12]": 0.6}])
+def test_dual_arm_preserves_planning_acceleration_metadata(
+    limits: dict[str, float] | float | None,
+) -> None:
+    base = URRobotCfg.from_dict({"robot_type": "ur5"})
+    base.joint_acceleration_limits = limits
+    cfg = build_dual_arm_cfg(base, resolve_mounts({}))
+    if limits == {"arm": 0.8}:
+        assert cfg.joint_acceleration_limits == {"left_arm": 0.8, "right_arm": 0.8}
+    elif limits == {"joint[12]": 0.6}:
+        assert cfg.joint_acceleration_limits == {
+            "left_joint[12]": 0.6,
+            "right_joint[12]": 0.6,
+        }
+    else:
+        assert cfg.joint_acceleration_limits == limits
+
+
 # --------------------------------------------------------------------------- #
 # resolve_mounts
 # --------------------------------------------------------------------------- #

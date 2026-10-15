@@ -141,6 +141,12 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 [robot workspace](../robot-workspace/robot-workspace.md) for cache ownership and
 [motion planning](../motion-planning/motion-planning.md) for planner integration.
 
+`RobotCfg` preserves asset velocity limits unless a drive override is configured.
+`joint_acceleration_limits` is planning metadata, separate from physical drives;
+it supports scalar, control-part and joint-expression rules and survives dual-arm
+composition. Planner resolution and fallback ownership are described in
+[planner contracts](../motion-planning/planner-details.md).
+
 ## Focused validation
 
 | Changed boundary | Existing coverage |

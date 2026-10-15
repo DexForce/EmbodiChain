@@ -37,6 +37,7 @@ import torch
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
+from .._joint_limits import _asset_velocity_limits, _resolve_joint_constraints
 from embodichain.utils import logger
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -58,6 +59,40 @@ __all__ = [
 
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
+
+
+def _curobo_joint_limits(
+    robot: Robot,
+    *,
+    max_acceleration: float | None = None,
+    urdf_path: str | None = None,
+) -> dict[str, list[float]]:
+    """Export effective caps in active cspace order rather than source order."""
+    urdf_path = urdf_path if urdf_path is not None else robot.cfg.fpath
+    mimic_joints = _parse_mimic_joint_names(urdf_path)
+    ids = [
+        index
+        for index, name in enumerate(robot.joint_names)
+        if name not in mimic_joints
+    ]
+    constraints = _resolve_joint_constraints(
+        robot,
+        {"velocity": None, "acceleration": max_acceleration},
+        joint_ids=ids,
+        urdf_path=urdf_path,
+    )
+    source = _asset_velocity_limits(robot, include_mimic=False, urdf_path=urdf_path)
+    # cuRobo 0.8 uses 100.0 when the source URDF omits a velocity limit.
+    source_velocity = torch.tensor(
+        [source.get(robot.joint_names[index], 100.0) for index in ids],
+        dtype=torch.float64,
+    )
+    return {
+        "velocity_scale": (constraints["velocity"] / source_velocity)
+        .clamp(max=1.0)
+        .tolist(),
+        "max_acceleration": constraints["acceleration"].tolist(),
+    }
 
 
 def _named_rigid_objects(
@@ -150,7 +185,7 @@ def generate_curobo_robot_yaml(
     surface_radius: float = 0.005,
     iterations: int = 200,
     collision_sphere_buffer: float = 0.0,
-    max_acceleration: float = 15.0,
+    max_acceleration: float | None = None,
     max_jerk: float = 500.0,
     device: str = "cuda:0",
 ) -> str:
@@ -188,7 +223,8 @@ def generate_curobo_robot_yaml(
         surface_radius: Fixed radius used by MorphIt's surface fallback.
         iterations: Adam iterations for MorphIt.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
-        max_acceleration: cspace maximum acceleration.
+        max_acceleration: Optional cspace acceleration request, capped by robot
+            metadata. ``None`` uses robot metadata or the shared fallback.
         max_jerk: cspace maximum jerk.
         device: CUDA device for sphere fitting.
 
@@ -296,7 +332,9 @@ def generate_curobo_robot_yaml(
     cspace = {
         "joint_names": [j for j, _ in cspace_pairs],
         "default_joint_position": [v for _, v in cspace_pairs],
-        "max_acceleration": float(max_acceleration),
+        **_curobo_joint_limits(
+            robot, max_acceleration=max_acceleration, urdf_path=urdf_path
+        ),
         "max_jerk": float(max_jerk),
         "cspace_distance_weight": [1.0] * len(cspace_pairs),
         "null_space_weight": [1.0] * len(cspace_pairs),
