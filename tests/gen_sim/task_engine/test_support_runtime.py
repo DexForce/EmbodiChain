@@ -317,7 +317,7 @@ def test_strong_root_never_downgrades_to_legacy_receipt(tmp_path, scope, target)
 
 
 @pytest.mark.parametrize("target", ["final", "history"])
-def test_support_after_release_command_but_before_verified_release_is_rejected(
+def test_release_phase_load_with_verified_release_and_stability_is_accepted(
     tmp_path, target
 ):
     case = _strong_case(tmp_path)
@@ -329,12 +329,10 @@ def test_support_after_release_command_but_before_verified_release_is_rejected(
     assert entered_at < case.call["effects"][0]["timestamp"]
     final, history = _records(tmp_path, case)
     result = _evaluate(case, final, history)
-    assert result["certificate_ready"] is False
-    assert result["goal"][0]["status"] != "satisfied"
-    if target == "final":
-        assert result["milestones"][0]["status"] == "satisfied"
-    else:
-        assert result["milestones"][0]["status"] != "satisfied"
+    assert result["certificate_ready"] is True
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["milestones"][0]["status"] == "satisfied"
+    assert source["rows"][0]["sample"]["timestamp"] == entered_at
 
 
 @pytest.mark.parametrize(
@@ -442,6 +440,8 @@ def test_strong_history_requires_exact_seeded_terminal_boundary(tmp_path, damage
         "completion_mask",
         "receipt_object",
         "receipt_resource",
+        "missing_terminal_receipt",
+        "unverified_release",
     ],
 )
 def test_strong_release_joins_one_actual_plan_and_physical_receipt(tmp_path, damage):
@@ -454,6 +454,10 @@ def test_strong_release_joins_one_actual_plan_and_physical_receipt(tmp_path, dam
         case.call["events"][0]["invocation_id"] = "foreign/release"
     elif damage == "completion_mask":
         case.call["events"][-1]["env_mask"] = [False]
+    elif damage == "missing_terminal_receipt":
+        case.call["effects"] = []
+    elif damage == "unverified_release":
+        case.call["effects"][0]["decision"]["success_mask"] = [False]
     else:
         expectation = case.call["effects"][0]["effect_spec"]["state_expectations"][0]
         expectation["object_id" if damage == "receipt_object" else "resource_id"] = (

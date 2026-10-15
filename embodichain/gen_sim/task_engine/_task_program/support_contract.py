@@ -114,7 +114,7 @@ def support_window_flags(
     native_entity: str,
     native_reference: str,
 ) -> list[bool]:
-    """Require load at or after verified terminal release, not command entry."""
+    """Bind load to the release phase and require verified release completion."""
     now, step, dt = (
         native.get("observed_at"),
         native.get("observed_step"),
@@ -212,5 +212,8 @@ def support_window_flags(
             <= sample["control_step"] * dt + 1e-8
         ):
             raise ValueError("Native support sample provenance is invalid.")
-        accepted.append(window["timestamp"] - 1e-8 <= sample["timestamp"] <= now + 1e-8)
+        # Sleeping contacts retain their actual load time, not the later read time.
+        accepted.append(
+            window["release_started_at"] - 1e-8 <= sample["timestamp"] <= now + 1e-8
+        )
     return accepted
