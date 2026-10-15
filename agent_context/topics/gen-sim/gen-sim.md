@@ -114,7 +114,9 @@ runner and unchanged bundle declarations/fingerprints, not a second executor.
 Curved/unmeasured floors and articulated reference parts remain unavailable;
 the legacy planar landing-region certificate is not contact-force or arbitrary
 3D-cavity qualification. Explicit `support_contract_revision=1` instead requires
-release-scoped native support samples at historical and final boundaries.
+native support samples at or after the same invocation's measured terminal
+RELEASE receipt, at historical and final boundaries. Release command entry alone
+cannot authorize a retained load patch; its original sample time remains intact.
 An independent `pick_contact_revision=1` opts rigid Pick into a Default/B1 native
 cooked-shape screen: complete named hand commands and actual rest offsets qualify
 sampled nominal closure only until bilateral pad contact. It screens final TCP

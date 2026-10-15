@@ -316,6 +316,27 @@ def test_strong_root_never_downgrades_to_legacy_receipt(tmp_path, scope, target)
     assert _evaluate(case, final, history)["certificate_ready"] is False
 
 
+@pytest.mark.parametrize("target", ["final", "history"])
+def test_support_after_release_command_but_before_verified_release_is_rejected(
+    tmp_path, target
+):
+    case = _strong_case(tmp_path)
+    source = case.live if target == "final" else case.source
+    entered_at = case.call["events"][0]["timestamp"]
+    source["rows"][0]["sample"].update(
+        timestamp=entered_at, control_step=round(entered_at / CONTROL_DT)
+    )
+    assert entered_at < case.call["effects"][0]["timestamp"]
+    final, history = _records(tmp_path, case)
+    result = _evaluate(case, final, history)
+    assert result["certificate_ready"] is False
+    assert result["goal"][0]["status"] != "satisfied"
+    if target == "final":
+        assert result["milestones"][0]["status"] == "satisfied"
+    else:
+        assert result["milestones"][0]["status"] != "satisfied"
+
+
 @pytest.mark.parametrize(
     "damage",
     [

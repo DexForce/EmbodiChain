@@ -114,7 +114,7 @@ def support_window_flags(
     native_entity: str,
     native_reference: str,
 ) -> list[bool]:
-    """Reject stale, foreign or re-stamped samples without changing load gates."""
+    """Require load at or after verified terminal release, not command entry."""
     now, step, dt = (
         native.get("observed_at"),
         native.get("observed_step"),
@@ -139,7 +139,11 @@ def support_window_flags(
         or dt == 0
         or not math.isclose(now, step * dt, rel_tol=0, abs_tol=1e-8)
         or not _time(window.get("release_started_at"))
+        or not _time(window.get("timestamp"))
         or not _time(window.get("completed_at"))
+        or not window["release_started_at"]
+        <= window["timestamp"]
+        <= window["completed_at"]
         or window["completed_at"] > now + 1e-8
         or any(
             not isinstance(values, list) or len(values) != num_envs
@@ -208,7 +212,5 @@ def support_window_flags(
             <= sample["control_step"] * dt + 1e-8
         ):
             raise ValueError("Native support sample provenance is invalid.")
-        accepted.append(
-            window["release_started_at"] - 1e-8 <= sample["timestamp"] <= now + 1e-8
-        )
+        accepted.append(window["timestamp"] - 1e-8 <= sample["timestamp"] <= now + 1e-8)
     return accepted

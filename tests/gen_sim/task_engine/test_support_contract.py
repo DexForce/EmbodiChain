@@ -167,8 +167,8 @@ def _native():
             {
                 "retained": True,
                 "sample": {
-                    "timestamp": 1.6,
-                    "control_step": 40,
+                    "timestamp": 2.4,
+                    "control_step": 60,
                     "substep": 4,
                     "serial": 9,
                     "episode_generation": 1,
@@ -204,6 +204,37 @@ def test_typed_inside_uses_same_verified_release_and_actual_phase():
     fake["verification_id"] = 99
     segments["place"]["metadata"]["runtime"]["calls"][0]["effects"].append(fake)
     assert release_window(node, segments, boundary, 1)[1]["verification_id"] == 8
+
+
+def test_support_during_release_command_is_not_post_verified_release():
+    _, window = release_window(*_release_case(), 1)
+    native = _native()
+    native["rows"][0]["sample"].update(timestamp=1.6, control_step=40)
+    assert window["release_started_at"] < native["rows"][0]["sample"]["timestamp"]
+    assert native["rows"][0]["sample"]["timestamp"] < window["timestamp"]
+    assert _flags(native, window) == [False]
+
+
+@pytest.mark.parametrize(
+    "timestamp,step,substep", [(2.0, 50, 4), (2.1, 53, 2), (2.4, 60, 4)]
+)
+def test_support_at_or_after_terminal_release_remains_eligible(
+    timestamp, step, substep
+):
+    _, window = release_window(*_release_case(), 1)
+    native = _native()
+    native["rows"][0]["sample"].update(
+        timestamp=timestamp, control_step=step, substep=substep
+    )
+    assert _flags(native, window) == [True]
+
+
+@pytest.mark.parametrize("timestamp", [None, True, "2.0", float("nan"), -0.1, 1.2, 2.4])
+def test_support_requires_a_valid_ordered_verified_release_fence(timestamp):
+    _, window = release_window(*_release_case(), 1)
+    window["timestamp"] = timestamp
+    with pytest.raises(ValueError, match="window identity"):
+        _flags(_native(), window)
 
 
 @pytest.mark.parametrize(
@@ -270,9 +301,11 @@ def test_sleep_retention_keeps_original_sample_time_but_not_prior_release():
     native = _native()
     native["observed_at"], native["observed_step"] = 4.0, 100
     assert _flags(native, window) == [True]
-    assert native["rows"][0]["sample"]["timestamp"] == 1.6
-    window["release_started_at"], window["completed_at"] = 2.4, 3.0
+    assert native["rows"][0]["sample"]["timestamp"] == 2.4
+    window.update(release_started_at=2.4, timestamp=2.8, completed_at=3.0)
     assert _flags(native, window) == [False]
     native["actor_pairs"][0]["reference_info"]["env_id"] = -1
     native["actor_pairs"][0]["reference_info"]["arena_name"] = "default"
-    assert _flags(native, {**window, "release_started_at": 1.4}) == [True]
+    assert _flags(native, {**window, "release_started_at": 1.4, "timestamp": 2.0}) == [
+        True
+    ]
