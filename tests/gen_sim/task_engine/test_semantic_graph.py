@@ -1647,6 +1647,209 @@ def _prepared_axis_scene(
     return scene
 
 
+def _inside_orientation_case(tmp_path: Path) -> tuple[PreparedScene, dict, dict]:
+    scene = _prepared_axis_scene(tmp_path)
+    tray_path = tmp_path / "tray.glb"
+    # Source GLBs are Y-up; the production loader maps this floor to Z-up.
+    trimesh.creation.box(extents=(1.0, 0.02, 0.8)).export(tray_path)
+    tray = {
+        "uid": "tray",
+        "shape": {"shape_type": "Mesh", "fpath": str(tray_path)},
+        "init_pos": [0.0, 0.0, 0.75],
+        "init_rot": [0.0, 0.0, 0.0],
+    }
+    other = {**deepcopy(scene.rigid_objects[0]), "uid": "other"}
+    scene = replace(
+        scene,
+        rigid_objects=(*scene.rigid_objects, tray, other),
+        planner_objects=(
+            *scene.planner_objects,
+            {**tray, "runtime_uid": "tray", "role": "rigid_object"},
+            {**other, "runtime_uid": "other", "role": "rigid_object"},
+        ),
+    )
+    embodiment = load_config(
+        Path(task_program_bundle.__file__).resolve().parents[3]
+        / "embodichain_tasks/configs/components/embodiments/dual_franka_robotiq_arg2f_140.yaml"
+    )
+    graph = _graph()
+    graph["nodes"][0]["call"] = {
+        "kind": "pick",
+        "object": "bottle",
+        "resources": {"primary": "left"},
+    }
+    graph["nodes"][1]["call"] = {
+        "kind": "place",
+        "object": "bottle",
+        "inside": "inside__tray__bottle",
+        "resources": {"primary": "left"},
+    }
+    return scene, embodiment, graph
+
+
+def _append_inside_alignment(graph: dict) -> None:
+    group = "turn"
+    target = f"{group}_upright_target"
+    graph["targets"][target] = {
+        "kind": "cyclic_pose",
+        "values": [
+            {
+                "position": [0.1, -0.2, 0.85],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+            }
+        ],
+    }
+    calls = [
+        {"kind": "pick", "object": "bottle"},
+        {
+            "kind": "registered",
+            "call_id": "gen_sim.align_held",
+            "arguments": {"object": "bottle", "target": target, "preserve_yaw": False},
+        },
+        {
+            "kind": "registered",
+            "call_id": "simulation.place_relative",
+            "arguments": {"object": "bottle", "reference": "table", "relation": "on"},
+        },
+    ]
+    previous = graph["nodes"][-1]["id"]
+    ids = []
+    for index, call in enumerate(calls):
+        identity = f"{group}_{index}"
+        ids.append(identity)
+        graph["nodes"].append(
+            {
+                "id": identity,
+                "task_instance_id": group,
+                "task_type": "E2",
+                "role": "primary",
+                "depends_on": [previous],
+                "call": {**call, "resources": {"primary": "left"}},
+            }
+        )
+        previous = identity
+    graph["task_groups"].append(
+        {
+            "id": group,
+            "task_type": "E2",
+            "node_ids": ids,
+            "depends_on": ["place_group"],
+            "success": {"kind": "call_completed"},
+        }
+    )
+
+
+def _append_inside_placement(graph: dict, object_id: str) -> None:
+    previous = graph["nodes"][-1]["id"]
+    group = "next_inside"
+    ids = []
+    for index, kind in enumerate(("pick", "place")):
+        identity = f"{group}_{index}"
+        ids.append(identity)
+        graph["nodes"].append(
+            {
+                "id": identity,
+                "task_instance_id": group,
+                "task_type": "E1",
+                "role": "primary",
+                "depends_on": [previous],
+                "call": {
+                    "kind": kind,
+                    "object": object_id,
+                    "resources": {"primary": "left"},
+                    **(
+                        {"inside": f"inside__tray__{object_id}"}
+                        if kind == "place"
+                        else {}
+                    ),
+                },
+            }
+        )
+        previous = identity
+    graph["task_groups"].append(
+        {
+            "id": group,
+            "task_type": "E1",
+            "node_ids": ids,
+            "depends_on": [graph["task_groups"][-1]["id"]],
+            "success": {"kind": "call_completed"},
+        }
+    )
+
+
+def _inside_targets(graph: dict, scene: PreparedScene, embodiment: dict) -> dict:
+    payload = _integration_payload(
+        validate_semantic_task_graph(graph),
+        scene,
+        program_id="inside_orientation",
+        scene_contract="inside_orientation_scene",
+        embodiment=embodiment,
+    )
+    tray = next(
+        item
+        for item in payload["scene_binding"]["rigid_objects"]
+        if item["entity_id"] == "tray"
+    )
+    return {
+        a["entity_id"]: a["object_target_pose"]
+        for a in tray["affordances"]
+        if a["kind"] == "container"
+    }
+
+
+def test_inside_prefix_target_ignores_future_alignment(tmp_path: Path) -> None:
+    scene, embodiment, graph = _inside_orientation_case(tmp_path)
+    expected = _inside_targets(graph, scene, embodiment)
+    prefix = deepcopy(graph["nodes"])
+    _append_inside_alignment(graph)
+    assert graph["nodes"][: len(prefix)] == prefix
+    assert _inside_targets(graph, scene, embodiment) == expected
+
+
+def test_inside_target_retains_preceding_alignment(tmp_path: Path) -> None:
+    scene, embodiment, graph = _inside_orientation_case(tmp_path)
+    baseline = _inside_targets(graph, scene, embodiment)["inside__tray__bottle"]
+    _append_inside_alignment(graph)
+    graph["nodes"] = [*graph["nodes"][2:], *graph["nodes"][:2]]
+    graph["nodes"][0]["depends_on"] = []
+    graph["nodes"][3]["depends_on"] = [graph["nodes"][2]["id"]]
+    graph["task_groups"] = [graph["task_groups"][-1], *graph["task_groups"][:2]]
+    graph["task_groups"][0]["depends_on"] = []
+    graph["task_groups"][1]["depends_on"] = ["turn"]
+    target = _inside_targets(graph, scene, embodiment)["inside__tray__bottle"]
+    assert target[11] == pytest.approx(0.131)
+    assert baseline[11] == pytest.approx(0.041)
+
+
+@pytest.mark.parametrize("alignment_position", ["future", "between"])
+def test_inside_occupied_footprint_keeps_its_reserved_orientation(
+    tmp_path: Path, alignment_position: str
+) -> None:
+    scene, embodiment, graph = _inside_orientation_case(tmp_path)
+    original = deepcopy(graph)
+    _append_inside_placement(graph, "other")
+    expected = _inside_targets(graph, scene, embodiment)["inside__tray__other"]
+    if alignment_position == "between":
+        graph = original
+        _append_inside_alignment(graph)
+        _append_inside_placement(graph, "other")
+    else:
+        _append_inside_alignment(graph)
+        graph["task_groups"][-1]["depends_on"] = ["next_inside"]
+    assert _inside_targets(graph, scene, embodiment)["inside__tray__other"] == expected
+
+
+def test_repeated_inside_pair_retains_existing_affordance_rejection(
+    tmp_path: Path,
+) -> None:
+    scene, _, graph = _inside_orientation_case(tmp_path)
+    _append_inside_placement(graph, "bottle")
+    with pytest.raises(ValueError, match="affordance|unique|Duplicate"):
+        generate_task_program_bundle(
+            graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+        )
+
+
 @pytest.mark.parametrize(
     "change",
     [

@@ -1677,7 +1677,6 @@ def _integration_payload(
     verify_pick_phases: bool = False,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
-    planned_object_rotations = _planned_object_rotations(graph)
     articulation_bindings = graph_bindings(graph, scene)
     from ._task_program.press_binding import graph_routes, PREPARE_CALL, PRESS_CALL
 
@@ -1727,7 +1726,7 @@ def _integration_payload(
                 (np.linalg.inv(link) @ target).reshape(-1).tolist()
             )
     referenced_objects: set[str] = set()
-    inside_routes: list[tuple[str, str, str, str]] = []
+    inside_routes: list[tuple[str, str, str, str, dict[str, np.ndarray]]] = []
     on_routes: list[tuple[str, str, str]] = []
     coordinated_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     coordinated_on_routes = {
@@ -1787,6 +1786,7 @@ def _integration_payload(
                         container_id,
                         object_id,
                         str(call.get("resources", {}).get("primary", "left")),
+                        _planned_object_rotations(graph, before_node_id=node["id"]),
                     )
                 )
         if call["kind"] == "place" and "on" in call:
@@ -2090,10 +2090,17 @@ def _integration_payload(
                 grasp_affordance["internal_axis"] = _longest_local_axis(source)
             affordances.append(grasp_affordance)
         occupied_landings: list[tuple[list[float], dict[str, Any]]] = []
+        occupied_rotations: dict[str, np.ndarray | None] = {}
         inside_count = sum(
-            1 for _, container_id, _, _ in inside_routes if container_id == entity_id
+            1 for _, container_id, *_ in inside_routes if container_id == entity_id
         )
-        for affordance_id, container_id, object_id, resource in inside_routes:
+        for (
+            affordance_id,
+            container_id,
+            object_id,
+            resource,
+            rotations,
+        ) in inside_routes:
             if container_id != entity_id:
                 continue
             lateral = 0.06 if "apple" in object_id else -0.06
@@ -2103,8 +2110,8 @@ def _integration_payload(
                 resource=resource,
                 embodiment=embodiment,
                 occupied=occupied_landings,
-                child_rotation=planned_object_rotations.get(object_id),
-                planned_rotations=planned_object_rotations,
+                child_rotation=rotations.get(object_id),
+                planned_rotations=occupied_rotations,
             )
             if target is None and inside_count > 1:
                 raise ValueError(
@@ -2112,6 +2119,8 @@ def _integration_payload(
                 )
             if target is not None:
                 occupied_landings.append((target, scene_objects[object_id]))
+                # A reservation keeps its release-time footprint after later alignment.
+                occupied_rotations.setdefault(object_id, rotations.get(object_id))
             affordances.append(
                 {
                     "entity_id": affordance_id,
@@ -4150,7 +4159,7 @@ def _container_target_pose(
     embodiment: dict[str, Any] | None,
     occupied: Sequence[tuple[list[float], dict[str, Any]]] = (),
     child_rotation: np.ndarray | None = None,
-    planned_rotations: Mapping[str, np.ndarray] | None = None,
+    planned_rotations: Mapping[str, np.ndarray | None] | None = None,
 ) -> list[float] | None:
     """Ground an arm-side landing on a measured, nearly level container floor."""
     if embodiment is None:
@@ -4227,8 +4236,10 @@ def _container_target_pose(
     return None if translation is None else _translation_pose(*translation)
 
 
-def _planned_object_rotations(graph: SemanticTaskGraph) -> dict[str, np.ndarray]:
-    """Return the latest declared held-object orientation before release.
+def _planned_object_rotations(
+    graph: SemanticTaskGraph, *, before_node_id: str | None = None
+) -> dict[str, np.ndarray]:
+    """Return declared orientations, optionally stopping before one call.
 
     Bundle geometry must follow explicit GenSim alignment targets rather than
     silently reverting to the source ``init_rot`` after an earlier E2/E4 call.
@@ -4238,6 +4249,8 @@ def _planned_object_rotations(graph: SemanticTaskGraph) -> dict[str, np.ndarray]
 
     result: dict[str, np.ndarray] = {}
     for node in graph["nodes"]:
+        if before_node_id is not None and node.get("id") == before_node_id:
+            break
         call = node["call"]
         if call.get("kind") != "registered" or call.get("call_id") not in {
             _ALIGN_HELD_CALL_ID,

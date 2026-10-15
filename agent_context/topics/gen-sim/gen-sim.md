@@ -599,8 +599,10 @@ the shared Pick/AxisAlign configuration schema.
 Multiple children
 placed inside the same measured container reserve each prior landing footprint
 and margin; insufficient space or an unmeasured shared floor fails preflight
-instead of assigning overlapping destinations. These are planning contracts,
-not physical placement acceptance.
+instead of assigning overlapping destinations. Each landing uses only declared
+orientations preceding its own Place; a reservation retains its placement-time
+orientation rather than a later alignment target. This is a planning snapshot,
+not a live occupancy tracker or physical placement acceptance.
 Generated non-drawer held-object transports declare a measured attachment postcondition.
 GenSim installs PickUp, HandOver, MoveHeldObject, Place and Pour wrappers for all
 deployments after shared engine validation and configure shared Lab action
