@@ -45,6 +45,7 @@ from ._task_program.articulation_binding import (
 from ._task_program.articulation_slide import preset_id
 from ._task_program.drawer_binding import DRAWER_TRANSPORT_CALL
 from ._task_program.identity import bundle_registration_fingerprint
+from ._task_program.physical_inputs import FrozenPhysicalInput
 from ._task_program.invocation_policy import (
     cartesian_call_declarations,
     motion_sample_declarations,
@@ -200,7 +201,9 @@ def generate_task_program_bundle(
     Args:
         graph: Provider-free semantic task graph. Its provisional fingerprint
             is replaced with the exact composed integration fingerprint.
-        prepared_scene: Scene Adapter output with physical and planner views.
+        prepared_scene: Scene Adapter output, or an explicit FrozenPhysicalInput
+            whose scene must also be used before semantic planning. Frozen
+            inputs bypass all graph-selected physical adaptation and calibration.
         output_dir: Fresh bundle staging directory.
         robot_profile: Task Engine robot-profile selector. Phase one supports
             only the canonical dual-Franka embodiment.
@@ -232,6 +235,27 @@ def generate_task_program_bundle(
     selected_graph = validate_semantic_task_graph(graph)
     if type(fit_grasp_assets) is not bool:
         raise TypeError("fit_grasp_assets must be a boolean.")
+    frozen = prepared_scene if isinstance(prepared_scene, FrozenPhysicalInput) else None
+    if frozen is not None:
+        frozen.assert_unchanged()
+        if str(robot_profile).strip() != frozen.robot_profile:
+            raise ValueError("Frozen physical input owns its robot-profile selection.")
+        if (
+            fit_grasp_assets
+            or twist_mass_source
+            or twist_grip_depth_m is not None
+            or twist_support_lift_m != 0.001
+        ):
+            raise ValueError(
+                "Frozen physical inputs cannot request physical adaptation."
+            )
+        for key, value in (
+            ("max_episodes", max_episodes),
+            ("max_episode_steps", max_episode_steps),
+        ):
+            if value is not None and value != frozen.deployment[key]:
+                raise ValueError(f"Frozen physical input owns {key}.")
+        prepared_scene = frozen.scene
     unsupported = sorted(
         {node["task_type"] for node in selected_graph["nodes"]}
         - {"E1", "E2", "E3", "E4", "E5", "E6", "E8", "E9"}
@@ -260,7 +284,7 @@ def generate_task_program_bundle(
         raise ValueError("E8 deployment mass source must be an explicit boolean.")
     if twist_mass_source and not source_twist_routes:
         raise ValueError("Deployment mass source requires a standalone E8 deployment.")
-    if source_twist_routes and not twist_mass_source:
+    if source_twist_routes and not twist_mass_source and frozen is None:
         from embodichain.lab.sim.cfg import ArticulationCfg
 
         twist_mass_source = (
@@ -293,10 +317,15 @@ def generate_task_program_bundle(
         / "embodichain_tasks/configs/components/embodiments"
         / embodiment_filename
     )
-    embodiment_payload = load_config(embodiment_source)
-    if normalized_profile == "dual_franka_pgi":
-        _apply_pgi_experiment_embodiment(embodiment_payload)
-    _calibrate_task_gripper_opening(embodiment_payload)
+    embodiment_payload = (
+        deepcopy(frozen.embodiment)
+        if frozen is not None
+        else load_config(embodiment_source)
+    )
+    if frozen is None:
+        if normalized_profile == "dual_franka_pgi":
+            _apply_pgi_experiment_embodiment(embodiment_payload)
+        _calibrate_task_gripper_opening(embodiment_payload)
     adaptation = None
     if fit_grasp_assets:
         from .orchestration.grasp_fit import fit_grasp_assets as fit_assets
@@ -316,8 +345,14 @@ def generate_task_program_bundle(
                 prepared_scene, embodiment_payload
             ),
         )
-    scene = normalize_scene_assets(prepared_scene, root)
-    scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
+    scene = (
+        frozen.scene
+        if frozen is not None
+        else normalize_scene_assets(prepared_scene, root)
+    )
+    press_adaptation = ()
+    if frozen is None:
+        scene, press_adaptation = prepare_press_scene(scene, source_press_routes)
     scene_uids = {
         str(item.get("runtime_uid"))
         for item in scene.planner_objects
@@ -337,7 +372,7 @@ def generate_task_program_bundle(
 
     _collect_scene_refs(selected_graph)
     eligible_table_children: set[str] = set()
-    if source_twist_routes:
+    if source_twist_routes and frozen is None:
         graph_path = scene.source_config_path.with_name("scene_graph.json")
         if graph_path.is_file():
             source_graph = load_config(graph_path)
@@ -365,7 +400,7 @@ def generate_task_program_bundle(
     }
     twist_scale_audits = []
     twist_adaptation = []
-    if source_twist_routes:
+    if source_twist_routes and frozen is None:
         from ._task_program.twist_adaptation import select_twist_scale
 
         adapted_scales = {}
@@ -553,9 +588,10 @@ def generate_task_program_bundle(
         / "embodichain_tasks/configs/components/execution_policies"
         / "dual_arm_trajectory_verified.yaml"
     )
-    _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
-    _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
-    if articulation_bindings:
+    if frozen is None:
+        _bind_embodiment_to_scene(embodiment_payload, table_top_z=scene.table_top_z)
+        _calibrate_task_gripper_effort(embodiment_payload, scene, selected_graph)
+    if articulation_bindings and frozen is None:
         # Calibrate this generated E6 deployment, not shared robot defaults.
         stiffness = embodiment_payload["simulation"]["joint_drive_props"]["stiffness"]
         for resource in embodiment_payload["skill_profile"]["resources"]:
@@ -564,9 +600,14 @@ def generate_task_program_bundle(
                     stiffness[endpoint["control_part"]] = ARM_STIFFNESS
     save_config(paths.embodiment, embodiment_payload)
     drawers = drawer_routes(selected_graph, scene)
-    policy_payload = load_config(policy_source)
-    policy_payload["tracking"]["consecutive_acceptances"] = 5
-    policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
+    policy_payload = (
+        deepcopy(frozen.execution_policy)
+        if frozen is not None
+        else load_config(policy_source)
+    )
+    if frozen is None:
+        policy_payload["tracking"]["consecutive_acceptances"] = 5
+        policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     save_config(paths.execution_policy, policy_payload)
 
     program_id = _program_identifier(selected_graph["task_id"])
@@ -633,94 +674,103 @@ def generate_task_program_bundle(
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
-    for route in twist_routes:
-        art = next(
-            a
-            for a in scene_payload["simulation"]["articulation"]
-            if a["uid"] == route.binding.object_id
+    if frozen is not None:
+        scene_payload["simulation"] = deepcopy(frozen.scene_simulation)
+    else:
+        for route in twist_routes:
+            art = next(
+                a
+                for a in scene_payload["simulation"]["articulation"]
+                if a["uid"] == route.binding.object_id
+            )
+            art["asset_physics_mode"] = "overlay"
+        press_calibration = calibrate_scene(
+            scene_payload, press_routes, source_routes=source_press_routes
         )
-        art["asset_physics_mode"] = "overlay"
-    press_calibration = calibrate_scene(
-        scene_payload, press_routes, source_routes=source_press_routes
-    )
-    if press_calibration:
-        _write_json(root / "press_calibration.json", {"routes": press_calibration})
-    bound_uids = {binding.object_id for binding in articulation_bindings.values()}
-    for articulation in scene_payload["simulation"]["articulation"]:
-        if articulation["uid"] not in bound_uids:
-            continue
-        articulation.setdefault("asset_physics_mode", "overlay")
-        parts = discover_prismatic_parts(articulation)
-        link_attrs = articulation.setdefault("link_attrs", {})
-        mass_group = "gen_sim_prismatic_link_mass"
-        if mass_group in link_attrs:
-            raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
-        link_attrs[mass_group] = {
-            "link_names_expr": sorted({part.link for part in parts}),
-            "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
-        }
-        drive = articulation.setdefault("joint_drive_props", {})
-        if drive.get("drive_type", "none") == "none":
-            drive.setdefault("drive_type", "none")
-            if "friction" not in drive:
-                drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
+        if press_calibration:
+            _write_json(root / "press_calibration.json", {"routes": press_calibration})
+        bound_uids = {binding.object_id for binding in articulation_bindings.values()}
+        for articulation in scene_payload["simulation"]["articulation"]:
+            if articulation["uid"] not in bound_uids:
+                continue
+            articulation.setdefault("asset_physics_mode", "overlay")
+            parts = discover_prismatic_parts(articulation)
+            link_attrs = articulation.setdefault("link_attrs", {})
+            mass_group = "gen_sim_prismatic_link_mass"
+            if mass_group in link_attrs:
+                raise ValueError(f"Generated E6 articulation reserves {mass_group!r}.")
+            link_attrs[mass_group] = {
+                "link_names_expr": sorted({part.link for part in parts}),
+                "attrs": {"mass_props": {"mass": PRISMATIC_LINK_MASS}},
+            }
+            drive = articulation.setdefault("joint_drive_props", {})
+            if drive.get("drive_type", "none") == "none":
+                drive.setdefault("drive_type", "none")
+                if "friction" not in drive:
+                    drive["friction"] = {part.joint: PASSIVE_FRICTION for part in parts}
     save_config(paths.scene, scene_payload)
     episode_steps = int(max_episode_steps or TaskEnginePlanningCfg().max_episode_steps)
-    if twist_routes and len(selected_graph["task_groups"]) == 1:
+    if twist_routes and len(selected_graph["task_groups"]) == 1 and frozen is None:
         from ._task_program.twist_adaptation import MAX_E8_EPISODE_STEPS
 
         episode_steps = min(episode_steps, MAX_E8_EPISODE_STEPS)
-    save_config(
-        paths.deployment,
-        {
-            "id": f"GenSimTaskProgram-{program_id}-v1",
-            "max_episodes": int(max_episodes or 1),
-            "max_episode_steps": episode_steps,
-            "num_envs": 1,
-            "arena_space": 2.5,
-            # Gym configs own the physics backend explicitly.  Generated
-            # bundles retain the calibrated DexSim/Default path that the
-            # legacy scene attributes and CCD setting were authored for.
-            "physics": "default",
-            "physics_config": {"enable_ccd": True},
-            "env": {
-                "sim_steps_per_control": 4,
-                "events": {
-                    "settle_objects_on_reset": {
-                        "func": "wait_for_dynamic_objects_to_settle",
-                        "mode": "reset",
-                        "params": {
-                            "entity_cfgs": [
-                                {"uid": str(item["uid"])}
-                                for item in _task_settle_rigid_objects(
-                                    selected_graph,
-                                    scene,
-                                )
-                            ],
-                            "min_steps": 10,
-                            # Tall generated objects may need several seconds
-                            # to finish a final low-energy roll after import.
-                            "max_steps": 600,
-                            "check_interval_steps": 2,
-                            "required_stable_checks": 3,
-                            "timeout_behavior": "raise",
-                            # Plan from the measured settled pose. Teleporting
-                            # afterward invalidates the settled contact state.
-                            "restore_initial_xy": False,
-                        },
-                    }
-                },
-                "extensions": {},
+    deployment_payload = {
+        "id": f"GenSimTaskProgram-{program_id}-v1",
+        "max_episodes": int(max_episodes or 1),
+        "max_episode_steps": episode_steps,
+        "num_envs": 1,
+        "arena_space": 2.5,
+        # Gym configs own the physics backend explicitly.  Generated
+        # bundles retain the calibrated DexSim/Default path that the
+        # legacy scene attributes and CCD setting were authored for.
+        "physics": "default",
+        "physics_config": {"enable_ccd": True},
+        "env": {
+            "sim_steps_per_control": 4,
+            "events": {
+                "settle_objects_on_reset": {
+                    "func": "wait_for_dynamic_objects_to_settle",
+                    "mode": "reset",
+                    "params": {
+                        "entity_cfgs": [
+                            {"uid": str(item["uid"])}
+                            for item in _task_settle_rigid_objects(
+                                selected_graph,
+                                scene,
+                            )
+                        ],
+                        "min_steps": 10,
+                        # Tall generated objects may need several seconds
+                        # to finish a final low-energy roll after import.
+                        "max_steps": 600,
+                        "check_interval_steps": 2,
+                        "required_stable_checks": 3,
+                        "timeout_behavior": "raise",
+                        # Plan from the measured settled pose. Teleporting
+                        # afterward invalidates the settled contact state.
+                        "restore_initial_xy": False,
+                    },
+                }
             },
-            "scene": {"component": "components/scene.yaml"},
-            "embodiment": {"component": "components/embodiment.yaml"},
-            "task_program": {
-                "program": "task_program/program.yaml",
-                "integration": "task_program/integration.yaml",
-                "execution_policy": "components/execution_policy.yaml",
-            },
+            "extensions": {},
         },
-    )
+        "scene": {"component": "components/scene.yaml"},
+        "embodiment": {"component": "components/embodiment.yaml"},
+        "task_program": {
+            "program": "task_program/program.yaml",
+            "integration": "task_program/integration.yaml",
+            "execution_policy": "components/execution_policy.yaml",
+        },
+    }
+    if frozen is not None:
+        deployment_payload.update(deepcopy(frozen.deployment))
+    save_config(paths.deployment, deployment_payload)
+    if frozen is not None:
+        frozen.assert_unchanged()
+        _write_json(root / "physical_input.json", frozen.manifest())
+        from ._task_program.physical_inputs import verify_physical_input_manifest
+
+        verify_physical_input_manifest(root)
 
     embodiment = load_config(paths.embodiment)
     deployment = load_deployment(
@@ -770,6 +820,9 @@ def generate_task_program_bundle(
         task_spec=task_spec,
         validation=validation,
     )
+    if frozen is not None:
+        frozen.assert_unchanged()
+        verify_physical_input_manifest(root)
     return selected_graph, paths
 
 

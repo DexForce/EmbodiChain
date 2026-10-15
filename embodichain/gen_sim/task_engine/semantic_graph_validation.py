@@ -428,6 +428,15 @@ def _identities(root: Path, graph: Mapping[str, Any], spec: TaskSpec) -> dict[st
             key: canonical_hash(load_config(root / path))
             for key, path in _FILES.items()
         },
+        **(
+            {
+                "physical_input_digest": canonical_hash(
+                    load_config(root / "physical_input.json")
+                )
+            }
+            if (root / "physical_input.json").is_file()
+            else {}
+        ),
     }
 
 
@@ -554,6 +563,9 @@ def verify_graph_contract(
         ValueError: Companions are partial, stale, uncovered or mismatched.
     """
     root = Path(bundle)
+    from ._task_program.physical_inputs import verify_physical_input_manifest
+
+    verify_physical_input_manifest(root)
     spec_path, validation_path = (
         root / "task_spec.json",
         root / "semantic_graph_validation.json",
