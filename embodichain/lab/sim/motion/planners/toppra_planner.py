@@ -226,6 +226,7 @@ def retime_joint_paths(
     positions: torch.Tensor,
     *,
     constraints: Mapping[str, float | Sequence[float] | torch.Tensor],
+    path_lengths: torch.Tensor | None = None,
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY,
     sample_interval: float | int | None = None,
     grid_size: int = 100,
@@ -255,6 +256,9 @@ def retime_joint_paths(
         constraints: ``velocity`` and ``acceleration`` limits, each a scalar,
             one value per joint, or signed ``(DOF, 2)`` bounds, matching
             :class:`ToppraPlanOptions`.
+        path_lengths: Optional valid prefix length for each batch row. This
+            excludes rectangular tail padding from spline fitting while
+            preserving explicit repeated endpoints inside each prefix.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
             ``None`` keeps the input sample count and is only meaningful for
@@ -269,9 +273,10 @@ def retime_joint_paths(
         not be parameterized.
 
     Raises:
-        ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor, the
-            constraints omit ``velocity`` or ``acceleration``, or ``TIME``
-            sampling is requested without an explicit interval in seconds.
+        ValueError: If ``positions`` is not a ``(B, N, DOF)`` tensor,
+            ``path_lengths`` is malformed, the constraints omit ``velocity``
+            or ``acceleration``, or ``TIME`` sampling is requested without an
+            explicit interval in seconds.
     """
     if positions.dim() != 3:
         raise ValueError(
@@ -289,6 +294,21 @@ def retime_joint_paths(
         )
     resolved_device = positions.device if device is None else device
     batch, count, dofs = positions.shape
+    if path_lengths is not None:
+        if not isinstance(path_lengths, torch.Tensor) or path_lengths.shape != (batch,):
+            raise ValueError(f"path_lengths must have shape ({batch},)")
+        if path_lengths.dtype not in (
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ):
+            raise ValueError("path_lengths must contain integers")
+        path_lengths = path_lengths.to(device=positions.device, dtype=torch.int32)
+        if bool(((path_lengths < 2) | (path_lengths > count)).any().item()):
+            raise ValueError(f"path_lengths must be between 2 and {count}")
+        path_lengths = path_lengths.contiguous()
     resolved_interval = count if sample_interval is None else sample_interval
     velocity, acceleration = constraints["velocity"], constraints["acceleration"]
     needs_grad = torch.is_grad_enabled() and (
@@ -312,6 +332,7 @@ def retime_joint_paths(
                 waypoints,
                 velocity,
                 acceleration,
+                path_lengths=path_lengths,
                 sample_count=int(resolved_interval) if quantity else None,
                 sample_dt=None if quantity else float(resolved_interval),
                 grid_size=grid_size,
@@ -330,7 +351,10 @@ def retime_joint_paths(
     )
     results = [
         _toppra_solve_one_env(
-            samples[index],
+            samples[
+                index,
+                : (count if path_lengths is None else int(path_lengths[index].item())),
+            ],
             to_numpy(velocity),
             to_numpy(acceleration),
             sample_method,

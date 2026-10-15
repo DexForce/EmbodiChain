@@ -31,6 +31,7 @@ __all__ = []
 @wp.kernel
 def _prepare(
     points: wp.array3d(dtype=wp.float64),
+    path_lengths: wp.array(dtype=int),
     clean: wp.array3d(dtype=wp.float64),
     kept: wp.array2d(dtype=int),
     counts: wp.array(dtype=int),
@@ -44,36 +45,41 @@ def _prepare(
     count = int(0)
     last_kept = int(-1)
     valid = int(1)
+    path_count = path_lengths[row]
     for i in range(points.shape[1]):
-        different = int(0)
-        for j in range(points.shape[2]):
-            value = points[row, i, j]
-            if not wp.isfinite(value):
-                valid = 0
-            if count == 0:
-                different = 1
-            elif single_precision != 0:
-                # Match the legacy subtraction and threshold rounding before
-                # the numerical solve is promoted to double precision.
-                if (
-                    wp.float64(
-                        wp.abs(wp.float32(value) - wp.float32(clean[row, count - 1, j]))
-                    )
-                    >= duplicate_tolerance
-                ):
-                    different = 1
-            elif wp.abs(value - clean[row, count - 1, j]) >= duplicate_tolerance:
-                different = 1
-        if different != 0:
-            kept[row, count] = i
+        if i < path_count:
+            different = int(0)
             for j in range(points.shape[2]):
-                clean[row, count, j] = points[row, i, j]
-            count += 1
-            last_kept = i
-    if last_kept != points.shape[1] - 1:
-        kept[row, count] = points.shape[1] - 1
+                value = points[row, i, j]
+                if not wp.isfinite(value):
+                    valid = 0
+                if count == 0:
+                    different = 1
+                elif single_precision != 0:
+                    # Match the legacy subtraction and threshold rounding before
+                    # the numerical solve is promoted to double precision.
+                    if (
+                        wp.float64(
+                            wp.abs(
+                                wp.float32(value) - wp.float32(clean[row, count - 1, j])
+                            )
+                        )
+                        >= duplicate_tolerance
+                    ):
+                        different = 1
+                elif wp.abs(value - clean[row, count - 1, j]) >= duplicate_tolerance:
+                    different = 1
+            if different != 0:
+                kept[row, count] = i
+                for j in range(points.shape[2]):
+                    clean[row, count, j] = points[row, i, j]
+                count += 1
+                last_kept = i
+    last_index = path_count - 1
+    if last_kept != last_index:
+        kept[row, count] = last_index
         for j in range(points.shape[2]):
-            clean[row, count, j] = points[row, points.shape[1] - 1, j]
+            clean[row, count, j] = points[row, last_index, j]
         count += 1
     if count == 2:
         stationary = int(1)

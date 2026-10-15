@@ -59,6 +59,32 @@ def _mean_unbounded(values: Iterable[float | None]) -> float | None:
     return sum(measured) / len(measured)
 
 
+def _mean_dynamic(
+    outcomes: Iterable[CaseOutcome],
+    attribute: str,
+    *,
+    violation_attribute: str | None = None,
+) -> float | None:
+    """Average one dynamic metric while restoring JSON-safe unbounded rows.
+
+    Raw artifacts encode non-finite numbers as ``null`` and retain
+    ``dynamic_measurement_status="unbounded"``. Peak fields are therefore
+    unbounded whenever any such row is present. Utilization fields additionally
+    require their matching limit to apply; otherwise ``null`` means N/A rather
+    than an infinite utilization.
+    """
+    rows = list(outcomes)
+    if any(
+        outcome.dynamic_measurement_status == "unbounded"
+        and (
+            violation_attribute is None or getattr(outcome, violation_attribute) is True
+        )
+        for outcome in rows
+    ):
+        return math.inf
+    return _mean_unbounded(getattr(outcome, attribute) for outcome in rows)
+
+
 def _dynamic_measurement_status(outcomes: Iterable[CaseOutcome]) -> str:
     """Summarize whether dynamic measurements are finite or unbounded."""
     rows = list(outcomes)
@@ -891,23 +917,29 @@ def _metric_rows(
                     # outcome invalid, so restricting the population here would
                     # drop exactly the trajectories with the largest peaks and
                     # pair a modest peak with a nonzero violation rate.
-                    "max_joint_velocity_rad_s": _mean_unbounded(
-                        outcome.max_joint_velocity_rad_s for outcome in outcomes
+                    "max_joint_velocity_rad_s": _mean_dynamic(
+                        outcomes, "max_joint_velocity_rad_s"
                     ),
-                    "max_joint_acceleration_rad_s2": _mean_unbounded(
-                        outcome.max_joint_acceleration_rad_s2 for outcome in outcomes
+                    "max_joint_acceleration_rad_s2": _mean_dynamic(
+                        outcomes, "max_joint_acceleration_rad_s2"
                     ),
-                    "max_joint_jerk_rad_s3": _mean_unbounded(
-                        outcome.max_joint_jerk_rad_s3 for outcome in outcomes
+                    "max_joint_jerk_rad_s3": _mean_dynamic(
+                        outcomes, "max_joint_jerk_rad_s3"
                     ),
-                    "velocity_utilization": _mean_unbounded(
-                        outcome.velocity_utilization for outcome in outcomes
+                    "velocity_utilization": _mean_dynamic(
+                        outcomes,
+                        "velocity_utilization",
+                        violation_attribute="velocity_limit_violation",
                     ),
-                    "acceleration_utilization": _mean_unbounded(
-                        outcome.acceleration_utilization for outcome in outcomes
+                    "acceleration_utilization": _mean_dynamic(
+                        outcomes,
+                        "acceleration_utilization",
+                        violation_attribute="acceleration_limit_violation",
                     ),
-                    "jerk_utilization": _mean_unbounded(
-                        outcome.jerk_utilization for outcome in outcomes
+                    "jerk_utilization": _mean_dynamic(
+                        outcomes,
+                        "jerk_utilization",
+                        violation_attribute="jerk_limit_violation",
                     ),
                     "dynamic_measurement_status": _dynamic_measurement_status(outcomes),
                     "joint_path_length_rad": _mean(

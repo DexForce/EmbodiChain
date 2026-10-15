@@ -498,6 +498,29 @@ def test_retime_joint_paths_rejects_malformed_input():
             constraints=limits,
             sample_method=TrajectorySampleMethod.TIME,
         )
+    with pytest.raises(ValueError, match="path_lengths"):
+        retime_joint_paths(
+            positions,
+            constraints=limits,
+            path_lengths=torch.tensor([5]),
+        )
+
+
+def test_retime_joint_paths_slices_a_single_cpu_path_to_its_valid_prefix():
+    path = torch.zeros(1, 4, NUM_ARM_JOINTS, dtype=torch.float64)
+    path[0, :, 0] = torch.tensor([0.0, 0.05, 0.1, 0.1])
+    limits = {"velocity": 1.0, "acceleration": 2.0}
+
+    result = retime_joint_paths(
+        path,
+        constraints=limits,
+        path_lengths=torch.tensor([3]),
+        sample_interval=17,
+    )
+    trimmed = retime_joint_paths(path[:, :3], constraints=limits, sample_interval=17)
+
+    torch.testing.assert_close(result.positions, trimmed.positions)
+    torch.testing.assert_close(result.dt, trimmed.dt)
 
 
 def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):

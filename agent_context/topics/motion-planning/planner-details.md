@@ -138,7 +138,9 @@ the planner's own time parameterization. CUDA paths, gradient requests and
 CPU batches of more than one row run on Warp, since the function has no worker
 pool to fan NumPy rows out to; a single CPU row stays on NumPy. It resamples
 along the fitted spline, so recompute derived poses from its output rather
-than reusing the input samples.
+than reusing the input samples. Optional per-row path lengths exclude
+rectangular tail holds from spline fitting; without them, an explicit repeated
+final waypoint retains the historical final-knot geometry.
 
 `compute/trajectory/timing.py` owns time-domain differentiation/resampling and
 `retime_to_control_grid()`. Zero-time position changes are invalid; repeated-time

@@ -476,6 +476,16 @@ def _dynamic_trial(outcomes) -> TrialRecord:
     )
 
 
+def _json_round_tripped_outcomes(trial: TrialRecord) -> tuple[CaseOutcome, ...]:
+    """Rebuild outcomes after the strict-JSON artifact boundary."""
+    payload = json.loads(json.dumps(trial.to_dict(), allow_nan=False))
+    outcomes = []
+    for row in payload["outcomes"]:
+        row.pop("end_to_end_success")
+        outcomes.append(CaseOutcome(**row))
+    return tuple(outcomes)
+
+
 def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
     from scripts.benchmark.motion_generation.artifacts import (
         TrialJsonlWriter,
@@ -819,19 +829,63 @@ def test_an_unbounded_peak_is_not_averaged_away():
     ]
     trial = _dynamic_trial(
         (
-            replace(_outcome(), max_joint_velocity_rad_s=2.0, velocity_utilization=0.5),
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=2.0,
+                velocity_utilization=0.5,
+                dynamic_measurement_status="finite",
+            ),
             replace(
                 _outcome(),
                 max_joint_velocity_rad_s=math.inf,
                 velocity_utilization=math.inf,
+                velocity_limit_violation=True,
+                dynamic_measurement_status="unbounded",
             ),
         )
     )
-    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
+    round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
+    for record in (trial, round_tripped):
+        row = aggregate_results([record], metadata, [case], measured_trials=1)[
+            "success_and_metrics"
+        ][0]
+        assert row["max_joint_velocity_rad_s"] == math.inf
+        assert row["velocity_utilization"] == math.inf
+        assert row["dynamic_measurement_status"] == "unbounded"
+
+
+def test_json_round_trip_keeps_unbounded_peak_without_a_configured_limit():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+            native_timing=True,
+        )
+    ]
+    trial = _dynamic_trial(
+        (
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=math.inf,
+                velocity_utilization=None,
+                velocity_limit_violation=None,
+                dynamic_measurement_status="unbounded",
+            ),
+        )
+    )
+    round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
+
+    row = aggregate_results([round_tripped], metadata, [case], measured_trials=1)[
         "success_and_metrics"
     ][0]
+
     assert row["max_joint_velocity_rad_s"] == math.inf
-    assert row["velocity_utilization"] == math.inf
+    assert row["velocity_utilization"] is None
+    assert row["velocity_violation_rate"] is None
     assert row["dynamic_measurement_status"] == "unbounded"
 
 

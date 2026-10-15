@@ -545,6 +545,7 @@ class NeuralPlanner(BasePlanner):
         positions = [qpos.clone()]
         xpos_list = [self._fk_matrix(qpos, control_part)]
         converged = torch.zeros(b, dtype=torch.bool, device=self.device)
+        path_lengths = torch.ones(b, dtype=torch.int32, device=self.device)
         max_steps = int(options.max_steps or self._max_steps)
 
         with torch.no_grad():
@@ -581,6 +582,7 @@ class NeuralPlanner(BasePlanner):
                 )
                 positions.append(qpos.clone())
                 xpos_list.append(self._fk_matrix(qpos, control_part))
+                path_lengths += not_converged.to(path_lengths.dtype)
 
                 ee_pose = self._fk_pose_xyzw(qpos, control_part)
                 reached = self._is_active_reached(
@@ -617,6 +619,7 @@ class NeuralPlanner(BasePlanner):
                 success,
                 positions_t,
                 control_part,
+                path_lengths=path_lengths,
                 waypoints=(
                     waypoints_pos,
                     waypoints_quat,
@@ -646,6 +649,7 @@ class NeuralPlanner(BasePlanner):
         positions: torch.Tensor,
         control_part: str,
         *,
+        path_lengths: torch.Tensor,
         waypoints: tuple[torch.Tensor, ...],
         episode_k: int,
         qpos_limits: tuple[torch.Tensor, torch.Tensor],
@@ -665,6 +669,9 @@ class NeuralPlanner(BasePlanner):
             success: Per-env rollout convergence of shape ``(B,)``.
             positions: Rollout joint samples of shape ``(B, N, DOF)``.
             control_part: Robot control part used for forward kinematics.
+            path_lengths: Valid rollout prefix length for each environment.
+                Samples after that prefix only hold an already-converged row
+                while other rows continue and must not affect spline fitting.
             waypoints: Parsed waypoint targets and masks from
                 :meth:`_parse_waypoints`.
             episode_k: Number of waypoints this episode must reach.
@@ -683,6 +690,7 @@ class NeuralPlanner(BasePlanner):
         retimed = retime_joint_paths(
             positions,
             constraints=dict(self.cfg.constraints),
+            path_lengths=path_lengths,
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=float(self.cfg.dt),
             device=self.device,

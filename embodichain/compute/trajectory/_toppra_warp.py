@@ -45,6 +45,7 @@ class _ToppraAutograd(torch.autograd.Function):
         waypoints: torch.Tensor,
         velocity: torch.Tensor,
         acceleration: torch.Tensor,
+        path_lengths: torch.Tensor,
         sample_count: int | None,
         sample_dt: float | None,
         grid_size: int,
@@ -54,6 +55,7 @@ class _ToppraAutograd(torch.autograd.Function):
             waypoints,
             velocity,
             acceleration,
+            path_lengths,
             sample_count=sample_count,
             sample_dt=sample_dt,
             grid_size=grid_size,
@@ -102,7 +104,7 @@ class _ToppraAutograd(torch.autograd.Function):
                     state["inputs"], saved, ctx.needs_input_grad
                 )
             )
-        return *gradients, None, None, None
+        return *gradients, None, None, None, None
 
 
 def _retime_toppra_warp(
@@ -110,6 +112,7 @@ def _retime_toppra_warp(
     velocity: object,
     acceleration: object,
     *,
+    path_lengths: torch.Tensor | None = None,
     sample_count: int | None = None,
     sample_dt: float | None = None,
     grid_size: int = 100,
@@ -117,7 +120,9 @@ def _retime_toppra_warp(
     """Retime (B, N, DOF) paths, isolating invalid/infeasible rows.
 
     Failed rows contain zeros. Stationary rows have two zero-time samples.
-    Shorter successful rows pad with their endpoint and zero derivatives/dt.
+    ``path_lengths`` can exclude rectangular tail padding independently for
+    each row. Shorter successful outputs pad with their endpoint and zero
+    derivatives/dt.
     The floating outputs use the input dtype and device. Computation uses
     float64 on both Warp CPU and CUDA, and honors the current Torch stream.
 
@@ -137,11 +142,20 @@ def _retime_toppra_warp(
         raise ValueError("waypoints must have float32 or float64 dtype")
     velocity = _tensor_limits(velocity, waypoints.shape[2], waypoints.device)
     acceleration = _tensor_limits(acceleration, waypoints.shape[2], waypoints.device)
+    path_lengths = _tensor_path_lengths(
+        path_lengths, waypoints.shape[0], waypoints.shape[1], waypoints.device
+    )
     if torch.is_grad_enabled() and any(
         tensor.requires_grad for tensor in (waypoints, velocity, acceleration)
     ):
         values = _ToppraAutograd.apply(
-            waypoints, velocity, acceleration, sample_count, sample_dt, grid_size
+            waypoints,
+            velocity,
+            acceleration,
+            path_lengths,
+            sample_count,
+            sample_dt,
+            grid_size,
         )
         return dict(
             zip(("success", "positions", "velocities", "accelerations", "dt"), values)
@@ -150,10 +164,36 @@ def _retime_toppra_warp(
         waypoints,
         velocity,
         acceleration,
+        path_lengths,
         sample_count=sample_count,
         sample_dt=sample_dt,
         grid_size=grid_size,
     )
+
+
+def _tensor_path_lengths(
+    value: torch.Tensor | None,
+    batch: int,
+    count: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Validate per-row valid waypoint counts on the input device."""
+    if value is None:
+        return torch.full((batch,), count, dtype=torch.int32, device=device)
+    if not isinstance(value, torch.Tensor) or value.shape != (batch,):
+        raise ValueError(f"path_lengths must have shape ({batch},)")
+    if value.dtype not in (
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    ):
+        raise ValueError("path_lengths must contain integers")
+    lengths = value.to(device=device, dtype=torch.int32).contiguous()
+    if bool(((lengths < 2) | (lengths > count)).any().item()):
+        raise ValueError(f"path_lengths must be between 2 and {count}")
+    return lengths
 
 
 def _tensor_limits(value: object, dofs: int, device: torch.device) -> torch.Tensor:
@@ -184,6 +224,7 @@ def _launch_toppra(
     waypoints: torch.Tensor,
     velocity: torch.Tensor,
     acceleration: torch.Tensor,
+    path_lengths: torch.Tensor,
     *,
     sample_count: int | None = None,
     sample_dt: float | None = None,
@@ -224,6 +265,7 @@ def _launch_toppra(
             dim=batch,
             inputs=[
                 points,
+                wp.from_torch(path_lengths),
                 clean,
                 kept,
                 counts,
@@ -357,7 +399,7 @@ def _launch_toppra(
             ok = wp.to_torch(success).bool()
             moving = ok & (wp.to_torch(counts) > 1)
             if sample_count is not None:
-                lengths = torch.full(
+                sample_lengths = torch.full(
                     (batch,), sample_count, device=waypoints.device, dtype=torch.int32
                 )
             else:
@@ -366,9 +408,9 @@ def _launch_toppra(
                 desired = torch.ceil(duration_tensor.detach() / sample_dt) + 1
                 if bool((desired > torch.iinfo(torch.int32).max).any().item()):
                     raise ValueError("sample_dt requests too many samples")
-                lengths = desired.to(torch.int32).clamp_min(2)
-            lengths = torch.where(moving, lengths, 2).contiguous()
-            samples = int(lengths.max().item())
+                sample_lengths = desired.to(torch.int32).clamp_min(2)
+            sample_lengths = torch.where(moving, sample_lengths, 2).contiguous()
+            samples = int(sample_lengths.max().item())
             positions = wp.zeros(
                 (batch, samples, dofs),
                 dtype=wp.float64,
@@ -396,7 +438,7 @@ def _launch_toppra(
                     x,
                     times,
                     durations,
-                    wp.from_torch(lengths),
+                    wp.from_torch(sample_lengths),
                     positions,
                     velocities,
                     accelerations,

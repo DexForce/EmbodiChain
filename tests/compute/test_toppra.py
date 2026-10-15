@@ -126,6 +126,72 @@ def test_mixed_batch_duplicates_stationary_failure_and_time_padding(
         assert result["dt"][row].sum().item() == pytest.approx(reference.duration)
 
 
+def test_path_lengths_exclude_rectangular_hold_padding_from_spline() -> None:
+    points = torch.tensor(
+        [
+            [[0.0], [0.05], [0.1], [0.1]],
+            [[0.0], [0.03], [0.08], [0.12]],
+        ],
+        dtype=torch.float64,
+    )
+    lengths = torch.tensor([3, 4])
+
+    result = _retime_toppra_warp(
+        points, 1.0, 2.0, path_lengths=lengths, sample_count=17
+    )
+    trimmed = _retime_toppra_warp(points[:1, :3], 1.0, 2.0, sample_count=17)
+    explicit_repeat = _retime_toppra_warp(points[:1], 1.0, 2.0, sample_count=17)
+
+    torch.testing.assert_close(result["positions"][0], trimmed["positions"][0])
+    torch.testing.assert_close(result["dt"][0], trimmed["dt"][0])
+    assert result["dt"][0].sum() < explicit_repeat["dt"][0].sum()
+    assert result["positions"][0].max() <= points[0, 2, 0]
+    assert explicit_repeat["positions"][0].max() > points[0, 2, 0]
+
+
+def test_path_lengths_leave_ignored_padding_with_zero_gradient() -> None:
+    points = torch.tensor(
+        [
+            [[0.0], [0.05], [0.1], [0.1]],
+            [[0.0], [0.03], [0.08], [0.12]],
+        ],
+        dtype=torch.float64,
+        requires_grad=True,
+    )
+    result = _retime_toppra_warp(
+        points,
+        1.0,
+        2.0,
+        path_lengths=torch.tensor([3, 4]),
+        sample_count=9,
+    )
+
+    result["dt"].sum().backward()
+
+    assert points.grad[0, 3].count_nonzero() == 0
+    assert points.grad[:, :3].count_nonzero() > 0
+
+
+@pytest.mark.parametrize(
+    "path_lengths",
+    [
+        torch.tensor([[3]]),
+        torch.tensor([3.0]),
+        torch.tensor([1]),
+        torch.tensor([5]),
+    ],
+)
+def test_invalid_path_lengths_rejected(path_lengths: torch.Tensor) -> None:
+    with pytest.raises(ValueError, match="path_lengths"):
+        _retime_toppra_warp(
+            torch.zeros(1, 4, 1),
+            1.0,
+            2.0,
+            path_lengths=path_lengths,
+            sample_count=8,
+        )
+
+
 def test_one_sided_and_locked_joint_limits_isolate_infeasible_rows() -> None:
     points = torch.tensor(
         [[[0.0, 2.0], [1.0, 2.0]], [[0.0, 2.0], [-1.0, 2.0]], [[0.0, 2.0], [1.0, 3.0]]],
