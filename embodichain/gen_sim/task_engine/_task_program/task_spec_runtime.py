@@ -90,6 +90,20 @@ def capture_final_goals(
             num_envs,
             final=True,
         )
+    coordinated = {}
+    if runtime is not None and any(g["task_type"] == "E5" for g in groups.values()):
+        from .coordinated_evidence import capture_coordinated_holds
+
+        coordinated = capture_coordinated_holds(
+            env,
+            deployment,
+            graph,
+            runtime,
+            load_config(bundle / "task_program/program.yaml"),
+            constraint_payload,
+            num_envs,
+            final=True,
+        )
     spec = TaskSpec.from_dict(load_config(bundle / "task_spec.json"))
     declarations = {v.id: v for v in spec.goal}
     result: dict[str, Any] = {}
@@ -111,6 +125,20 @@ def capture_final_goals(
             )
             uid = member["object_uid"]
             try:
+                if (
+                    predicate.arguments.get("task_type") == "E5"
+                    and predicate.name == "held_by_both_grippers"
+                ):
+                    record = coordinated.get(group_id, {})
+                    if "accepted" not in record:
+                        raise ValueError(
+                            record.get(
+                                "unavailable",
+                                "No measured coordinated hold observation.",
+                            )
+                        )
+                    observations.append(deepcopy(record))
+                    continue
                 if predicate.arguments.get("task_type") == "E4" and predicate.name in {
                     "held",
                     "orientation",
@@ -1837,6 +1865,7 @@ def evaluate_runtime_evidence(
     placement_milestones: Mapping[str, Any] | None = None,
     control_milestones: Mapping[str, Any] | None = None,
     handover_milestones: Mapping[str, Any] | None = None,
+    coordinated_milestones: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate only newly collected final measurements and exact segment evidence."""
     if contract["task_spec_digest"] != canonical_hash(spec.to_dict()) or contract[
@@ -1864,6 +1893,11 @@ def evaluate_runtime_evidence(
         from .handover_evidence import handover_record_matches
 
         handover_matches = handover_record_matches
+    coordinated_matches = None
+    if any(g["task_type"] == "E5" for g in groups.values()):
+        from .coordinated_evidence import coordinated_record_matches
+
+        coordinated_matches = coordinated_record_matches
     for segment in runtime.get("segments", []):
         if not isinstance(segment, Mapping):
             raise ValueError("Malformed segment evidence.")
@@ -1913,6 +1947,23 @@ def evaluate_runtime_evidence(
                             and handover_matches(
                                 v,
                                 predicate.name,
+                                groups[v["group_id"]],
+                                graph,
+                                runtime,
+                                program,
+                                constraints,
+                                num_envs,
+                                final=True,
+                            )
+                        )
+                    )
+                    and (
+                        predicate.arguments.get("task_type") != "E5"
+                        or predicate.name != "held_by_both_grippers"
+                        or (
+                            coordinated_matches is not None
+                            and coordinated_matches(
+                                v,
                                 groups[v["group_id"]],
                                 graph,
                                 runtime,
@@ -2108,6 +2159,41 @@ def evaluate_runtime_evidence(
                                 )
                             continue
                         if (
+                            predicate.arguments.get("task_type") == "E5"
+                            and predicate.name == "held_by_both_grippers"
+                        ):
+                            observations = [
+                                (coordinated_milestones or {}).get(id, {})
+                                for id in record["groups"]
+                            ]
+                            if observations and all(
+                                set(groups[id]["node_ids"]).issubset(successful_nodes)
+                                and value.get("group_id") == id
+                                and value.get("uid") == members[id]["object_uid"]
+                                and value.get("part_id")
+                                == members[id]["object_part_id"]
+                                and _bool_rows(value.get("accepted"), num_envs)
+                                and isinstance(value.get("measurements"), Mapping)
+                                and bool(value["measurements"])
+                                and coordinated_matches is not None
+                                and coordinated_matches(
+                                    value,
+                                    groups[id],
+                                    graph,
+                                    runtime,
+                                    program,
+                                    constraints,
+                                    num_envs,
+                                )
+                                for id, value in zip(
+                                    record["groups"], observations, strict=True
+                                )
+                            ):
+                                snapshot[predicate.observation or predicate.id] = all(
+                                    value["accepted"][env_id] for value in observations
+                                )
+                            continue
+                        if (
                             predicate.name == "articulation_joint_near"
                             and predicate.arguments.get("task_type") == "E6"
                         ):
@@ -2227,7 +2313,9 @@ def evaluate_runtime_evidence(
     return {
         "schema_version": "task_spec_evaluation/v1",
         "observer_revision": (
-            5 if any(g["task_type"] == "E4" for g in groups.values()) else 4
+            6
+            if any(g["task_type"] == "E5" for g in groups.values())
+            else (5 if any(g["task_type"] == "E4" for g in groups.values()) else 4)
         ),
         "run_id": run_id,
         "task_spec_digest": contract["task_spec_digest"],
@@ -2237,6 +2325,11 @@ def evaluate_runtime_evidence(
         "constraints_digest": contract["constraints_digest"],
         "environments": rows,
         "placement_milestone_measurements": dict(placement_milestones or {}),
+        **(
+            {"coordinated_milestone_measurements": dict(coordinated_milestones)}
+            if coordinated_milestones is not None
+            else {}
+        ),
         **(
             {"handover_milestone_measurements": dict(handover_milestones)}
             if handover_milestones is not None

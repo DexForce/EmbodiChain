@@ -242,6 +242,9 @@ def execute_bundle(
                 )
                 from ._task_program.control_evidence import capture_control_operations
                 from ._task_program.handover_evidence import capture_handover_operations
+                from ._task_program.coordinated_evidence import (
+                    capture_coordinated_holds,
+                )
 
                 spec = TaskSpec.from_dict(_read_json(root / "task_spec.json"))
                 try:
@@ -285,6 +288,16 @@ def execute_bundle(
                     )
                     or None,
                     handover_milestones=capture_handover_operations(
+                        env,
+                        deployment,
+                        graph,
+                        result_metadata,
+                        load_config(program_path),
+                        load_config(root / "task_program/constraints.json"),
+                        len(result.success),
+                    )
+                    or None,
+                    coordinated_milestones=capture_coordinated_holds(
                         env,
                         deployment,
                         graph,

@@ -19,16 +19,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from copy import deepcopy
 import math
 from typing import Any
 
 import torch
 
-from embodichain.utils.math import pose_inv, xyz_quat_to_4x4_matrix
+from embodichain.utils.math import pose_inv
 from ..contracts import canonical_hash
-from .placement_evidence import _valid_pose
 from .stability import StabilityConstraint
+from .held_evidence import (
+    one as _one,
+    flags as _flags,
+    number as _number,
+    matrix as _matrix,
+    delta as _delta,
+    receipt as _receipt,
+    slot as _slot,
+    frames as _frames,
+    native_poses as _native_poses,
+    fresh_grip as _shared_fresh_grip,
+    grip_flags as _shared_grip_flags,
+)
 
 __all__: list[str] = []
 
@@ -45,144 +56,31 @@ _UNAVAILABLE = (
 def _fresh_grip(
     env: Any, record: Mapping[str, Any], terminal: Mapping[str, Any], count: int
 ) -> dict[str, Any]:
-    from embodichain.lab.task_program.semantics.evidence import (
-        BinaryEffectEvidenceQuery,
-        EffectEvidenceCollectionContext,
+    metrics = record["measurements"]
+    return _shared_fresh_grip(
+        env,
+        uid=record["uid"],
+        resource=metrics["destination_resource"],
+        terminal=terminal,
+        frames=metrics["boundary_frames"],
+        dt=metrics["step_dt"],
+        count=count,
     )
-    from embodichain.lab.task_program.semantics.effects import (
-        BinaryEffectClause,
-        BinaryEvidenceKind,
-        ControlPartEvidenceAddress,
-        EffectEvidenceSourceRef,
-        HeldObjectRelation,
-        HeldObjectStateExpectation,
-    )
-    from .grip_evidence import NativeGripObserver, SENSOR_UID
-
-    target = getattr(env, "unwrapped", env)
-    observer = target.sim.get_sensor(SENSOR_UID)._gen_sim_grip_observer
-    if not isinstance(observer, NativeGripObserver):
-        raise ValueError("Final E4 requires its existing native grip observer.")
-    destination = record["measurements"]["destination_resource"]
-    expectation = _one(
-        value
-        for value in terminal["effect_spec"]["state_expectations"]
-        if value["object_id"] == record["uid"]
-        and value["resource_id"] == destination
-        and value["relation"] == "attached"
-    )
-    clause = _one(
-        value
-        for value in terminal["effect_spec"]["clauses"]
-        if value["expectation_id"] == expectation["expectation_id"]
-        and value.get("evidence_kind") == "constraint"
-        and value.get("expected") is True
-    )
-    address = clause["source"]["address"]
-    part = address["control_part"]
-    query = BinaryEffectEvidenceQuery(
-        BinaryEffectClause(
-            clause["clause_id"],
-            clause["expectation_id"],
-            EffectEvidenceSourceRef(
-                "builtin.control_part",
-                "1",
-                ControlPartEvidenceAddress(part, "constraint"),
-            ),
-            BinaryEvidenceKind.CONSTRAINT,
-            True,
-        ),
-        HeldObjectStateExpectation(
-            expectation["expectation_id"],
-            HeldObjectRelation.ATTACHED,
-            record["uid"],
-            expectation["slot_id"],
-            destination,
-            destination,
-        ),
-    )
-    frames = record["measurements"]["boundary_frames"]
-    context = EffectEvidenceCollectionContext(
-        max(frames) * record["measurements"]["step_dt"],
-        terminal["observation_revision"] + 1,
-        torch.arange(count, dtype=torch.long),
-    )
-    observer(query, context)
-    return {
-        "query": deepcopy(observer.trace[-1]),
-        "object_actor_ids": observer.object_actors[record["uid"]].tolist(),
-        "pad_actor_ids": observer.pad_actors[part].tolist(),
-        "timestamp_scope": "collection_query_clock_not_native_impulse_refresh",
-    }
 
 
 def _grip_flags(
     record: Mapping[str, Any], terminal: Mapping[str, Any], count: int
 ) -> list[bool]:
-    from .grip_evidence import classify_contacts
-
-    metrics, uid = record["measurements"], record["uid"]
-    sample = metrics["fresh_grip"]
-    query = sample["query"]
-    expectation = _one(
-        value
-        for value in terminal["effect_spec"]["state_expectations"]
-        if value["object_id"] == uid
-        and value["resource_id"] == metrics["destination_resource"]
-        and value["relation"] == "attached"
+    metrics = record["measurements"]
+    return _shared_grip_flags(
+        uid=record["uid"],
+        resource=metrics["destination_resource"],
+        sample=metrics["fresh_grip"],
+        terminal=terminal,
+        frames=metrics["boundary_frames"],
+        dt=metrics["step_dt"],
+        count=count,
     )
-    clause = _one(
-        value
-        for value in terminal["effect_spec"]["clauses"]
-        if value["expectation_id"] == expectation["expectation_id"]
-        and value.get("evidence_kind") == "constraint"
-    )
-    if (
-        query["object_id"] != uid
-        or query["control_part"] != clause["source"]["address"]["control_part"]
-        or query["expected"] is not True
-        or query["dropped_contacts"] != 0
-        or query["timestamp"] != max(metrics["boundary_frames"]) * metrics["step_dt"]
-        or query["observation_revision"] != terminal["observation_revision"] + 1
-        or sample["timestamp_scope"]
-        != "collection_query_clock_not_native_impulse_refresh"
-    ):
-        raise ValueError("Final E4 grip query has another participant or boundary.")
-    actors, pads = sample["object_actor_ids"], sample["pad_actor_ids"]
-    if len(actors) != count or len(pads) != count or len(query["rows"]) != count:
-        raise ValueError("Final E4 grip actor inventory has another batch.")
-    flags = []
-    for env_id, row in enumerate(query["rows"]):
-        inventory = [*actors[env_id], *pads[env_id]]
-        if (
-            len(actors[env_id]) != 1
-            or len(pads[env_id]) != 2
-            or len(set(inventory)) != 3
-            or any(type(value) is not int for value in inventory)
-            or type(row["env_id"]) is not int
-            or row["env_id"] != env_id
-        ):
-            raise ValueError("Final E4 grip lacks exact object/pad actors.")
-        raw = row["raw_contacts"]
-        if any(type(value) is not int for pair in raw["pairs"] for value in pair):
-            raise ValueError("Final E4 grip contact actor IDs are invalid.")
-        pairs = torch.tensor(raw["pairs"], dtype=torch.long).reshape(-1, 2)
-        normals = torch.tensor(raw["normals"], dtype=torch.float64).reshape(-1, 3)
-        impulses = torch.tensor(raw["impulses"], dtype=torch.float64)
-        if len(pairs) != len(normals) or impulses.shape != (len(pairs),):
-            raise ValueError("Final E4 grip contact arrays disagree.")
-        value, valid = classify_contacts(
-            pairs, normals, impulses, target=actors[env_id][0], pads=tuple(pads[env_id])
-        )
-        if (
-            not valid
-            or row["finite"] is not True
-            or row["valid"] is not True
-            or row["value"] is not value
-        ):
-            raise ValueError("Final E4 native grip constraint is unavailable.")
-        flags.append(value)
-    return flags
 
 
 def _holding_receipt(
@@ -198,43 +96,6 @@ def _holding_receipt(
         for value in call["effects"]
         if canonical_hash(value) == metrics["holding_receipt_hash"]
     )
-
-
-def _one(values: Any) -> Any:
-    values = list(values)
-    if len(values) != 1:
-        raise ValueError("E4 evidence requires one exact occurrence.")
-    return values[0]
-
-
-def _flags(values: Any, count: int, expected: bool = True) -> None:
-    if (
-        not isinstance(values, list)
-        or len(values) != count
-        or any(type(value) is not bool or value is not expected for value in values)
-    ):
-        raise ValueError("E4 evidence masks are invalid or not accepted.")
-
-
-def _number(value: Any) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-        raise ValueError("E4 evidence requires finite nonnegative clocks/metrics.")
-    return float(value)
-
-
-def _matrix(value: Any, count: int) -> torch.Tensor:
-    result = torch.as_tensor(value, dtype=torch.float64).cpu()
-    _valid_pose(result, count)
-    return result
-
-
-def _delta(
-    first: torch.Tensor, second: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
-    translation = torch.linalg.vector_norm(first[:, :3, 3] - second[:, :3, 3], dim=-1)
-    rotation = first[:, :3, :3].transpose(-1, -2) @ second[:, :3, :3]
-    cosine = ((rotation.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) / 2).clamp(-1, 1)
-    return translation, torch.acos(cosine)
 
 
 def _call(
@@ -274,110 +135,6 @@ def _call(
     ):
         raise ValueError("E4 invocation did not complete its actual commands.")
     return call
-
-
-def _receipt(receipt: Mapping[str, Any], call: Mapping[str, Any], count: int) -> None:
-    spec, monitor = receipt["effect_spec"], receipt["monitor"]
-    if (
-        spec["invocation_id"] != call["invocation_id"]
-        or spec["invocation_revision"] != call["invocation_revision"]
-        or type(spec["invocation_revision"]) is not int
-        or spec["env_ids"] != list(range(count))
-        or any(type(value) is not int for value in spec["env_ids"])
-        or monitor["monitor_id"] != "builtin.composite_effect"
-        or monitor["revision"] != "1"
-        or type(receipt["observation_revision"]) is not int
-    ):
-        raise ValueError("E4 physical receipt has another identity or monitor.")
-    _number(receipt["timestamp"])
-    _flags(receipt["decision"]["success_mask"], count)
-    _flags(receipt["decision"]["failure_mask"], count, False)
-    for clause in spec["clauses"]:
-        expectation = _one(
-            value
-            for value in spec["state_expectations"]
-            if value["expectation_id"] == clause["expectation_id"]
-        )
-        is_pose = clause.get("expectation") in {"matched", "separated"}
-        endpoint = _one(
-            value
-            for value in call["resolved_core_policy"]["endpoints"]
-            if value["slot_id"] == expectation["slot_id"]
-            and value["endpoint_id"] == ("motion" if is_pose else "grasp")
-            and value["resource_id"] == expectation["resource_id"]
-            and value["task_state_key"] == expectation["task_state_key"]
-        )
-        address = clause["source"]["address"]
-        if address["control_part"] != endpoint["target_id"] or address["channel"] != (
-            "pose_relation" if is_pose else "constraint"
-        ):
-            raise ValueError("E4 samples do not belong to the resolved participant.")
-
-
-def _slot(
-    receipt: Mapping[str, Any], uid: str, resource: str, relation: str, count: int
-) -> tuple[torch.Tensor, str]:
-    spec = receipt["effect_spec"]
-    expectation = _one(
-        value
-        for value in spec["state_expectations"]
-        if value["object_id"] == uid
-        and value["resource_id"] == resource
-        and value["relation"] == relation
-        and value["task_state_key"] == resource
-    )
-    decision = _one(
-        value
-        for value in receipt["decision"]["expectations"]
-        if value["expectation_id"] == expectation["expectation_id"]
-    )
-    _flags(decision["satisfied_mask"], count)
-    _flags(decision["contradicted_mask"], count, False)
-    clauses = [
-        value
-        for value in spec["clauses"]
-        if value["expectation_id"] == expectation["expectation_id"]
-    ]
-    pose = _one(
-        value
-        for value in clauses
-        if value.get("expectation")
-        == ("matched" if relation == "attached" else "separated")
-    )
-    constraint = _one(
-        value
-        for value in clauses
-        if value.get("evidence_kind") == "constraint"
-        and value.get("expected") is (relation == "attached")
-    )
-    samples = [receipt["evidence"][value["clause_id"]] for value in (pose, constraint)]
-    for clause, sample in zip((pose, constraint), samples, strict=True):
-        if (
-            clause["source"]["provider_id"] != "builtin.control_part"
-            or clause["source"]["revision"] != "1"
-            or sample["env_ids"] != list(range(count))
-            or sample["timestamp"] != receipt["timestamp"]
-            or sample["observation_revision"] != receipt["observation_revision"]
-            or sample.get("acquisition_errors") != [None] * count
-        ):
-            raise ValueError("E4 physical samples differ from their receipt.")
-        _flags(sample["valid_mask"], count)
-    _flags(samples[1]["values"], count, relation == "attached")
-    return (
-        _matrix(samples[0]["object_to_endpoint"], count),
-        pose["source"]["address"]["control_part"],
-    )
-
-
-def _frames(segment: Mapping[str, Any], count: int) -> list[int]:
-    frames = segment["end_steps"]
-    if (
-        not isinstance(frames, list)
-        or len(frames) != count
-        or any(type(frame) is not int or frame <= 0 for frame in frames)
-    ):
-        raise ValueError("E4 has no exact recorded end-step boundary.")
-    return frames
 
 
 def _holder(segment: Mapping[str, Any], uid: str, destination: str, count: int) -> None:
@@ -684,80 +441,6 @@ def _hold(
                 },
             }
     return result
-
-
-def _native_poses(
-    env: Any,
-    deployment: Any,
-    uid: str,
-    frames: list[int],
-    motion_part: str,
-    count: int,
-    final: bool,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    target = getattr(env, "unwrapped", env)
-    binding = _one(
-        value
-        for value in deployment.integration.registration.scene_binding.rigid_objects
-        if value.entity_id == uid
-    )
-    counts = target._traj_steps
-    states = target._traj_buffer["states"]
-    objects, joints = (
-        states["rigid_objects"][binding.simulation_uid]["pose"],
-        states["robot"]["qpos"],
-    )
-    if (
-        len(counts) != count
-        or objects.ndim != 3
-        or objects.shape[0] != count
-        or objects.shape[-1] != 7
-        or joints.ndim != 3
-        or joints.shape[0] != count
-        or any(
-            frame > int(counts[row]) or frame >= min(objects.shape[1], joints.shape[1])
-            for row, frame in enumerate(frames)
-        )
-    ):
-        raise ValueError("E4 requires its seeded end-step pose and robot state slots.")
-    # Recorder rows are pre-action; only the seeded end_step is post-segment.
-    pose = xyz_quat_to_4x4_matrix(
-        torch.stack([objects[row, frame] for row, frame in enumerate(frames)])
-        .detach()
-        .cpu()
-    )
-    qpos = torch.stack([joints[row, frame] for row, frame in enumerate(frames)])
-    robot = target.robot
-    tcp = (
-        robot.compute_fk(
-            qpos=qpos[:, robot.get_joint_ids(name=motion_part)],
-            name=motion_part,
-            to_matrix=True,
-        )
-        .detach()
-        .cpu()
-    )
-    recorded = (_matrix(pose, count), _matrix(tcp, count))
-    if not final:
-        return recorded
-    native = target.sim.get_rigid_object(binding.simulation_uid)
-    fresh_pose = _matrix(native.get_local_pose(to_matrix=True).detach().cpu(), count)
-    fresh_tcp = _matrix(
-        robot.compute_fk(
-            qpos=robot.get_qpos()[:, robot.get_joint_ids(name=motion_part)],
-            name=motion_part,
-            to_matrix=True,
-        )
-        .detach()
-        .cpu(),
-        count,
-    )
-    if not all(
-        torch.allclose(first, last, atol=1e-4, rtol=0)
-        for first, last in zip(recorded, (fresh_pose, fresh_tcp), strict=True)
-    ):
-        raise ValueError("Final native E4 poses do not match their recorded boundary.")
-    return fresh_pose, fresh_tcp
 
 
 def capture_handover_operations(

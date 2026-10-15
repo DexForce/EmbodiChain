@@ -375,6 +375,13 @@ two verified grasps of the same object are retained through motion, and hands
 open only at release. Missing or conflicting held state cannot fall back to
 re-picking. Consecutive E5 relative targets accumulate for terminal checks;
 release retreat exceeds the unchanged separation threshold with tracking margin.
+`coordinated_evidence.py` observes registered E5 terminal holds separately from
+motion execution. It binds both native ATTACH receipts, the authored hold policy
+and recorded endpoint poses to the exact compiled occurrence; final holding also
+requires fresh native contact for both hands without advancing physics.
+`held_evidence.py` owns the shared receipt, pose and grip-query validation used by
+E4 and E5. A terminal hold does not qualify in-flight acquisition guards,
+continuation, released transport or cargo retention.
 E5 `terminal_behavior=place` with `relation=on` retains the bound rigid support
 instead of converting it into an initial-pose direction. Bundle generation
 reuses E1 relative-placement height geometry; the coordinated lowerer targets
