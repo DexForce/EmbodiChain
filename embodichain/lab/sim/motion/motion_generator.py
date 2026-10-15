@@ -53,6 +53,7 @@ from embodichain.utils import logger, configclass
 from embodichain.utils.math import (
     axis_angle_from_quat,
     axis_angle_to_rotation_matrix,
+    quat_error_magnitude,
     quat_from_matrix,
 )
 from .planners.utils import (
@@ -1117,9 +1118,28 @@ class MotionGenerator:
                 )
             if not torch.isfinite(result).all():
                 raise ValueError("cartesian_path_sampler output must be finite.")
-            if not torch.allclose(
-                result[:, 0], path[:, 0], rtol=1.0e-5, atol=1.0e-6
-            ) or not torch.allclose(
+            position_tolerance, rotation_tolerance = self._cartesian_start_tolerances(
+                control_part
+            )
+            start_position_error = torch.linalg.vector_norm(
+                result[:, 0, :3, 3] - path[:, 0, :3, 3],
+                dim=-1,
+            )
+            start_rotation_error = quat_error_magnitude(
+                quat_from_matrix(result[:, 0, :3, :3]),
+                quat_from_matrix(path[:, 0, :3, :3]),
+            )
+            start_matches = bool(
+                (start_position_error <= position_tolerance).all()
+                and (start_rotation_error <= rotation_tolerance).all()
+                and torch.allclose(
+                    result[:, 0, 3],
+                    path[:, 0, 3],
+                    rtol=0.0,
+                    atol=1.0e-6,
+                )
+            )
+            if not start_matches or not torch.allclose(
                 result[:, -1], path[:, -1], rtol=1.0e-5, atol=1.0e-6
             ):
                 raise ValueError(
@@ -1161,6 +1181,30 @@ class MotionGenerator:
         result[:, 0] = path[:, 0]
         result[:, -1] = path[:, -1]
         return result
+
+    def _cartesian_start_tolerances(
+        self,
+        control_part: str,
+    ) -> tuple[float, float]:
+        """Return the active IK solver's accepted position and rotation errors."""
+        solver = self.robot.get_solver(control_part)
+        cfg = None if solver is None else getattr(solver, "cfg", None)
+
+        def configured_tolerance(*names: str) -> float:
+            for name in names:
+                value = getattr(cfg, name, None)
+                if (
+                    not isinstance(value, bool)
+                    and isinstance(value, (int, float))
+                    and math.isfinite(value)
+                    and value > 0.0
+                ):
+                    return max(1.0e-6, float(value))
+            return 1.0e-6
+
+        return configured_tolerance(
+            "pos_eps", "position_tolerance"
+        ), configured_tolerance("rot_eps", "rotation_tolerance")
 
     @staticmethod
     def _interpolate_ik_keyframes(

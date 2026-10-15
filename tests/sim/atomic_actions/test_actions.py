@@ -5231,13 +5231,16 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     }
 
 
-def test_handover_mixed_directions_pad_each_phase_to_shared_lengths() -> None:
+@pytest.mark.parametrize("hold_steps", [0, 4])
+def test_handover_mixed_directions_pad_each_phase_to_shared_lengths(
+    hold_steps: int,
+) -> None:
     action = _bind_action(_dual_motion_generator(), HandOver())
     semantics, _ = _handover_semantics()
     object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
     object_pose[:, 0, 3] = torch.tensor([-0.8, 0.8])
     context = _handover_context(object_pose)
-    options = HandOverOptions(hand_interp_steps=2)
+    options = HandOverOptions(hand_interp_steps=2, hold_steps=hold_steps)
     requested = action._compute_segment_lengths(24, options)
     first_lengths = dict(requested)
     second_lengths = dict(requested)
@@ -5287,9 +5290,9 @@ def test_handover_mixed_directions_pad_each_phase_to_shared_lengths() -> None:
         name: max(first_lengths[name], second_lengths[name]) for name in requested
     }
     assert plan.plan_success.tolist() == [True, True]
-    assert {
-        segment.name: segment.waypoint_count for segment in plan.segments
-    } == shared_lengths
+    assert {segment.name: segment.waypoint_count for segment in plan.segments} == {
+        name: length for name, length in shared_lengths.items() if length
+    }
     assert _joint_trajectory(plan).waypoint_count == sum(shared_lengths.values())
     first_call, second_call = action._plan_direction.call_args_list
     assert first_call.args[-2] is not second_call.args[-2]

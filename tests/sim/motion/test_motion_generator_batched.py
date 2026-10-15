@@ -903,8 +903,12 @@ class TestMotionStrategy:
     def test_limited_cartesian_motion_resamples_external_rotation_exactly(self):
         generator = _mock_generator()
         start_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
-        start_pose[:, 0, 3] = 1.0
+        start_pose[:, 0, 3] = 1.0 - 2.5e-4
         generator.robot.compute_fk.return_value = start_pose
+        generator.robot.get_solver.return_value = SimpleNamespace(
+            supports_continuous_batch_ik=False,
+            cfg=SimpleNamespace(pos_eps=5.0e-4, rot_eps=5.0e-4),
+        )
 
         def encode_angle(
             pose: torch.Tensor,

@@ -24,8 +24,9 @@ on any failed row; `generate()` carries per-row success in a normalized
 it is not an implicit fallback from backend planning. When velocity or
 acceleration limits expand such a path, `MotionGenOptions.cartesian_path_sampler`
 may regenerate poses from normalized minimum-jerk progress. The callback must
-preserve the requested endpoints, batch, dtype, and device; without it, the
-facade resamples the caller-supplied Cartesian polyline.
+end at the requested target, begin within the active IK solver's accepted pose
+tolerance, and preserve the batch, dtype, and device. Without it, the facade
+resamples the caller-supplied Cartesian polyline.
 
 Preserve these coupled result rules in `motion_generator.py`:
 

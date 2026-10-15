@@ -2033,6 +2033,13 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         for name, source_length in plan.segment_lengths.items():
             stop = offset + source_length
             segment = plan.trajectory[:, offset:stop]
+            if source_length == 0:
+                if segment_lengths[name] != 0:
+                    raise ValueError(
+                        "HandOver cannot expand an empty directional phase."
+                    )
+                offset = stop
+                continue
             segments.append(pad_trajectory_to_length(segment, segment_lengths[name]))
             offset = stop
         if offset != plan.trajectory.shape[1]:
