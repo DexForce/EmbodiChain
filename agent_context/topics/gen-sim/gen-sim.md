@@ -596,6 +596,13 @@ preserved even for a singleton.
 Terminal preserve-pose handovers verify receiver attachment and the
 declared world-axis alignment. A preceding upright stage makes that axis
 world Z instead of reusing the initial fallen orientation.
+`handover_evidence.py` connects exact native TRANSFER receipts to E4 TaskSpec
+events, separately from terminal receiver holding and orientation observations.
+Authored hold policies retain their existing duration and attachment/axis checks;
+an undeclared hold window is not added. Historical milestones use their own
+recorded boundary, while final holding also checks fresh receiver-relative pose.
+Missing receipts or unsupported later execution remain unavailable, not inferred
+from command completion. This changes observation, not HandOver execution.
 `task_engine/_task_program/identity.py` owns v38 bundle identity for both
 generation and verification. It projects only equivalent default HandOver and
 empty relative-route stage fields at validated declaration slots; explicit new
