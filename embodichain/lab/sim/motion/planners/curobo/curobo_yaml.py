@@ -37,7 +37,7 @@ import torch
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
-from .._joint_limits import _asset_velocity_limits, _resolve_joint_constraints
+from .._joint_limits import _DEFAULT_ACCELERATION, _DEFAULT_VELOCITY, _merge_limit
 from embodichain.utils import logger
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -75,23 +75,25 @@ def _curobo_joint_limits(
         for index, name in enumerate(robot.joint_names)
         if name not in mimic_joints
     ]
-    constraints = _resolve_joint_constraints(
-        robot,
-        {"velocity": None, "acceleration": max_acceleration},
-        joint_ids=ids,
-        urdf_path=urdf_path,
+    if not ids:
+        return {"velocity_scale": [], "max_acceleration": []}
+    limits = robot.get_joint_motion_limits(urdf_path=urdf_path)
+    velocity = _merge_limit(
+        None, limits["velocity"][:, ids].amin(dim=0), _DEFAULT_VELOCITY
     )
-    source = _asset_velocity_limits(robot, include_mimic=False, urdf_path=urdf_path)
+    acceleration = _merge_limit(
+        max_acceleration,
+        limits["acceleration"][:, ids].amin(dim=0),
+        _DEFAULT_ACCELERATION,
+    )
     # cuRobo 0.8 uses 100.0 when the source URDF omits a velocity limit.
-    source_velocity = torch.tensor(
-        [source.get(robot.joint_names[index], 100.0) for index in ids],
-        dtype=torch.float64,
+    source_velocity = limits["source_velocity"][0, ids]
+    source_velocity = torch.where(
+        torch.isfinite(source_velocity), source_velocity, 100.0
     )
     return {
-        "velocity_scale": (constraints["velocity"] / source_velocity)
-        .clamp(max=1.0)
-        .tolist(),
-        "max_acceleration": constraints["acceleration"].tolist(),
+        "velocity_scale": (velocity / source_velocity).clamp(max=1.0).tolist(),
+        "max_acceleration": acceleration.tolist(),
     }
 
 

@@ -144,7 +144,10 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 `RobotCfg` preserves asset velocity limits unless a drive override is configured.
 `joint_acceleration_limits` is planning metadata, separate from physical drives;
 it supports scalar, control-part and joint-expression rules and survives dual-arm
-composition. Planner resolution and fallback ownership are described in
+composition. `Robot.get_joint_motion_limits()` supplies full-batch asset/runtime
+caps and mimic coupling in state-joint order, with unavailable caps left infinite.
+It also exposes raw source velocities for backend export. Planner request and
+fallback ownership are described in
 [planner contracts](../motion-planning/planner-details.md).
 
 ## Focused validation

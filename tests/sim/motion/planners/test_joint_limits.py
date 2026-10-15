@@ -23,6 +23,8 @@ from unittest.mock import Mock
 import pytest
 import torch
 
+from embodichain.lab.sim.objects.robot import Robot
+
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners._joint_limits import _resolve_joint_constraints
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
@@ -44,6 +46,8 @@ pytestmark = pytest.mark.no_sim
 
 
 class _Robot:
+    get_joint_motion_limits = Robot.get_joint_motion_limits
+
     def __init__(self) -> None:
         self.joint_names = ["shoulder", "finger", "elbow"]
         self.control_parts = {"arm": ["elbow", "shoulder"], "eef": ["finger"]}

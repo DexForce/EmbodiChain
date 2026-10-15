@@ -45,14 +45,12 @@ Preserve these coupled result rules in `motion_generator.py`:
 and applies supported generic timing constraints. Atomic Skills call this facade
 rather than branching on concrete planner option classes.
 
-Joint limit resolution is owned by `planners/_joint_limits.py`. TOPPRA and
-Trapezoidal resolve unspecified limits at planning time, after the control part
-is known, and intersect explicit requests with available robot caps. Velocity
-caps combine source URDF limits (including mimic ratios) and effective runtime
-limits; acceleration caps come from `RobotCfg.joint_acceleration_limits`, with
-fallbacks only where metadata and requests are absent. Shared backend constraints
-use the strictest participating environment. Partial-joint trajectories require
-an explicit control part when their column mapping is ambiguous.
+`Robot.get_joint_motion_limits()` owns asset/runtime and mimic-coupled caps.
+`planners/_joint_limits.py` only selects trajectory joints, reduces a shared
+planning batch to its strictest caps, and merges requests and fallbacks. TOPPRA
+and Trapezoidal resolve unspecified limits after the control part is known;
+explicit requests remain capped by robot limits. Partial-joint trajectories
+require an explicit control part when their column mapping is ambiguous.
 
 cuRobo exports these same caps in active cspace order, excluding mimic followers.
 Its YAML and backend caches include the effective limits; changing robot limits

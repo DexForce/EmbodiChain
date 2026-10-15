@@ -18,7 +18,13 @@ from __future__ import annotations
 
 import torch
 import numpy as np
+import math
+import re
+import xml.etree.ElementTree as ET
 
+from collections.abc import Mapping
+from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
@@ -58,6 +64,26 @@ class ControlGroup:
 
     def __post_init__(self):
         pass
+
+
+@lru_cache(maxsize=32)
+def _read_motion_limits(
+    contents: bytes,
+) -> tuple[dict[str, float], dict[str, tuple[str, float]]]:
+    """Cache asset metadata by content so rapid same-size edits stay visible."""
+    velocities, mimics = {}, {}
+    for joint in ET.fromstring(contents).findall("joint"):
+        name = joint.attrib["name"]
+        limit, mimic = joint.find("limit"), joint.find("mimic")
+        if limit is not None and "velocity" in limit.attrib:
+            value = float(limit.attrib["velocity"])
+            if math.isfinite(value) and 0 < value < 1e9:
+                velocities[name] = value
+        if mimic is not None:
+            mimics[name] = mimic.attrib["joint"], abs(
+                float(mimic.get("multiplier", "1"))
+            )
+    return velocities, mimics
 
 
 class Robot(Articulation):
@@ -465,6 +491,101 @@ class Robot(Articulation):
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
+
+    def get_joint_motion_limits(
+        self, *, urdf_path: str | None = None
+    ) -> dict[str, torch.Tensor]:
+        """Query robot motion caps independently of planner defaults or requests.
+
+        Args:
+            urdf_path: Optional source URDF override; otherwise use ``cfg.fpath``.
+
+        Returns:
+            CPU float64 tensors in final state order, each shaped ``(B, DOF)``:
+            ``velocity`` combines asset/runtime caps and mimic coupling;
+            ``acceleration`` resolves configured metadata and mimic coupling;
+            ``source_velocity`` preserves raw asset speeds for backend export.
+            Unavailable caps are infinite so callers can select their fallback.
+        """
+        names = list(self.joint_names)
+        velocity = (
+            self.get_qvel_limits(joint_ids=list(range(len(names))))
+            .detach()
+            .to(device="cpu", dtype=torch.float64)
+        )
+        if velocity.ndim != 2 or velocity.shape[1] != len(names):
+            raise ValueError("Robot velocity limits must have shape (B, robot DOF).")
+        velocity = torch.where(
+            torch.isfinite(velocity) & (velocity > 0) & (velocity < 1e9),
+            velocity,
+            torch.inf,
+        )
+        source, mimics = {}, {}
+        path = urdf_path if urdf_path is not None else getattr(self.cfg, "fpath", None)
+        if isinstance(path, str) and Path(path).suffix.lower() == ".urdf":
+            try:
+                source, mimics = _read_motion_limits(Path(path).read_bytes())
+            except OSError:
+                pass
+        source_velocity = velocity.new_tensor(
+            [source.get(name, math.inf) for name in names]
+        )
+        acceleration = velocity.new_full((len(names),), torch.inf)
+        configured = getattr(self.cfg, "joint_acceleration_limits", None)
+        if configured is not None:
+            ids = list(range(len(names)))
+            if isinstance(configured, Mapping):
+                parts = self.control_parts or {}
+                rules = {
+                    (
+                        "(?:" + "|".join(map(re.escape, parts[key])) + ")"
+                        if key in parts
+                        else key
+                    ): value
+                    for key, value in configured.items()
+                }
+                ids, _, configured = resolve_matching_names_values(rules, names)
+            values = velocity.new_tensor(configured)
+            if not bool(torch.isfinite(values).all()) or bool((values <= 0).any()):
+                raise ValueError(
+                    "joint_acceleration_limits must contain finite positive values."
+                )
+            acceleration[ids] = values
+        caps = torch.stack(
+            (
+                torch.minimum(velocity, source_velocity),
+                acceleration.expand_as(velocity),
+            ),
+            dim=1,
+        )
+        indices = {name: index for index, name in enumerate(names)}
+        for child in mimics:
+            bound = (
+                caps[:, :, indices[child]].clone()
+                if child in indices
+                else velocity.new_tensor([source.get(child, math.inf), math.inf])
+            )
+            visited = {child}
+            while child in mimics:
+                parent, multiplier = mimics[child]
+                if not math.isfinite(multiplier) or parent in visited:
+                    raise ValueError(
+                        "URDF mimic multipliers must be finite and relations acyclic."
+                    )
+                if multiplier == 0:
+                    break
+                bound = bound / multiplier
+                if parent in indices:
+                    caps[:, :, indices[parent]] = torch.minimum(
+                        caps[:, :, indices[parent]], bound
+                    )
+                visited.add(parent)
+                child = parent
+        return {
+            "velocity": caps[:, 0],
+            "acceleration": caps[:, 1],
+            "source_velocity": source_velocity.expand_as(velocity),
+        }
 
     def get_qf_limits(
         self,
