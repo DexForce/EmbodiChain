@@ -195,6 +195,7 @@ def generate_task_program_bundle(
     twist_mass_source: bool = False,
     support_contract_revision: int | None = None,
     pick_contact_revision: int | None = None,
+    verify_pick_phases: bool = False,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -224,6 +225,8 @@ def generate_task_program_bundle(
         pick_contact_revision: Explicit native rigid Pick closing screen. None
             preserves legacy sampling; 1 rejects nonpad-rest-first closure;
             2 also rejects nonpad contact-halo entry before bilateral pad rest.
+        verify_pick_phases: Explicit registered Pick acquisition/lift contract.
+            False preserves legacy lowerer declarations and fingerprints.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -233,6 +236,8 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    if type(verify_pick_phases) is not bool:
+        raise TypeError("verify_pick_phases must be a boolean.")
     if type(fit_grasp_assets) is not bool:
         raise TypeError("fit_grasp_assets must be a boolean.")
     frozen = prepared_scene if isinstance(prepared_scene, FrozenPhysicalInput) else None
@@ -671,6 +676,7 @@ def generate_task_program_bundle(
             collision_world=policy_payload["motion"]["strategy"] == "motion_gen",
             embodiment=embodiment_payload,
             twist_contact_feedback=twist_contact_feedback,
+            verify_pick_phases=verify_pick_phases,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -1668,6 +1674,7 @@ def _integration_payload(
     collision_world: bool = False,
     embodiment: dict[str, Any] | None = None,
     twist_contact_feedback: bool = False,
+    verify_pick_phases: bool = False,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     planned_object_rotations = _planned_object_rotations(graph)
@@ -2546,7 +2553,12 @@ def _integration_payload(
                     else []
                 ),
                 *[
-                    {"kind": "pick", "call_id": call_id, "routes": routes}
+                    {
+                        "kind": "pick",
+                        "call_id": call_id,
+                        "routes": routes,
+                        **({"verify_phases": True} if verify_pick_phases else {}),
+                    }
                     for call_id, routes in pick_routes.items()
                 ],
                 *(

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MethodType
 from typing import ClassVar
 from unittest.mock import Mock
@@ -316,6 +317,39 @@ class _ReleasingInspectLowerer(_InspectLowerer):
                         object_id="cube",
                         slot_id="primary",
                     ),
+                ),
+            ),
+        )
+
+
+class _AcquiringInspectLowerer(_EffectfulInspectLowerer):
+    def __init__(self, expectation_id: str = "destination") -> None:
+        super().__init__()
+        self.expectation_id = expectation_id
+
+    def lower(
+        self,
+        call: RegisteredSemanticCall,
+        *,
+        context: PlanningContext,
+        bound: object,
+        option_template: ActionOptions,
+    ) -> SemanticLowering:
+        result = super().lower(
+            call, context=context, bound=bound, option_template=option_template
+        )
+        return replace(
+            result,
+            registered_effect=replace(
+                result.registered_effect,
+                held_objects=tuple(
+                    replace(
+                        item,
+                        expectation_id=self.expectation_id,
+                        acquire_before_segment="lift",
+                        retain_during_segments=("lift",),
+                    )
+                    for item in result.registered_effect.held_objects
                 ),
             ),
         )
@@ -1352,6 +1386,131 @@ def test_registered_effect_contract_is_grounded_by_compiler() -> None:
     assert expectation.slot_id == "primary"
     assert expectation.object_id == "cube"
     assert grounded.effect_monitor is not None
+    assert grounded.effect_gates == ()
+    assert grounded.effect_guards == ()
+
+
+@pytest.mark.parametrize("expectation_id", ["destination", "primary"])
+def test_registered_acquisition_phase_contract_uses_existing_gate_and_guard(
+    expectation_id: str,
+) -> None:
+    registry, _ = _scene_registry()
+    templates = _action_option_templates(registered=True)
+    templates["vendor.inspect"] = PickUpOptions(pre_grasp_distance=0.07)
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            action_option_templates=templates,
+            effect_monitors={
+                "vendor.inspect": EffectMonitorRef(
+                    COMPOSITE_EFFECT_MONITOR_ID, COMPOSITE_EFFECT_MONITOR_REVISION
+                )
+            },
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_AcquiringInspectLowerer(expectation_id),),
+        profile=profile,
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+    first = compiler.ground(workflow, 0, _context(registry))
+    repeated = compiler.ground(workflow, 0, _context(registry))
+    assert len(first.effect_gates) == len(first.effect_guards) == 1
+    gate, guard = first.effect_gates[0], first.effect_guards[0]
+    assert gate.gate_id == f"{expectation_id}_acquired"
+    assert gate.segment_name == "lift"
+    assert gate.effect_spec.state_expectations[0].expectation_id == expectation_id
+    assert first.invocation.phase_effect_gates == (gate.requirement,)
+    assert guard.guard_id == f"{expectation_id}_attached"
+    assert guard.active_segments == ("lift",)
+    assert guard.baseline is HeldObjectGuardBaseline.PLANNED_EFFECT
+    assert guard.invalidation_task_state_keys == ("manipulator",)
+    assert guard.retry_action and gate.retry_action
+    assert gate.effect_monitor is not first.effect_monitor
+    assert guard.effect_monitor is not first.effect_monitor
+    assert repeated.effect_gates[0].effect_monitor is not gate.effect_monitor
+    assert repeated.effect_guards[0].effect_monitor is not guard.effect_monitor
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"acquire_before_segment": "lift"},
+        {"retain_during_segments": ("lift",)},
+        {
+            "acquire_before_segment": "lift",
+            "retain_during_segments": ("approach", "lift"),
+        },
+        {"acquire_before_segment": "lift", "retain_during_segments": ("lift", "lift")},
+        {
+            "relation": HeldObjectRelation.DETACHED,
+            "acquire_before_segment": "lift",
+            "retain_during_segments": ("lift",),
+        },
+    ],
+)
+def test_registered_acquisition_rejects_incomplete_or_inconsistent_schedule(
+    updates: dict,
+) -> None:
+    with pytest.raises(ValueError):
+        RegisteredHeldObjectEffect(
+            expectation_id="primary",
+            relation=updates.get("relation", HeldObjectRelation.ATTACHED),
+            object_id="cube",
+            slot_id="primary",
+            **{key: value for key, value in updates.items() if key != "relation"},
+        )
+
+
+def test_registered_acquisition_cannot_silently_use_projected_effects() -> None:
+    registry, _ = _scene_registry()
+    templates = _action_option_templates(registered=True)
+    templates["vendor.inspect"] = PickUpOptions()
+    profile = _profile(
+        preset=_preset(
+            "safe",
+            registered=True,
+            action_option_templates=templates,
+            effect_assurance=EffectAssurance.PROJECTED,
+            effect_monitors={},
+        )
+    )
+    compiler, _ = _compiler(
+        registry,
+        registered=True,
+        registered_lowerers=(_AcquiringInspectLowerer(),),
+        profile=profile,
+    )
+    workflow = compiler.analyze((RegisteredSemanticCall(call_id="vendor.inspect"),))
+    with pytest.raises(SemanticValidationError) as error:
+        compiler.ground(workflow, 0, _context(registry))
+    assert (
+        error.value.diagnostic.code == "registered_acquisition_requires_verified_effect"
+    )
+
+
+def test_registered_acquisition_rejects_string_and_multiple_phase_guards() -> None:
+    effect = RegisteredHeldObjectEffect(
+        expectation_id="primary",
+        relation=HeldObjectRelation.ATTACHED,
+        object_id="cube",
+        slot_id="primary",
+        acquire_before_segment="lift",
+        retain_during_segments=("lift",),
+    )
+    with pytest.raises(TypeError, match="exact tuple"):
+        replace(effect, retain_during_segments="lift")
+    with pytest.raises(ValueError, match="one phased"):
+        RegisteredSemanticEffect(
+            effect_kind=SemanticEffectKind.ATTACH,
+            held_objects=(
+                effect,
+                replace(effect, expectation_id="secondary", slot_id="secondary"),
+            ),
+        )
 
 
 def test_registered_release_requires_object_held_in_every_eligible_row() -> None:

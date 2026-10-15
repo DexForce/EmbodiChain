@@ -437,13 +437,19 @@ class SemanticWorkflow:
 
 @dataclass(frozen=True, slots=True)
 class RegisteredHeldObjectEffect:
-    """One registered-call held relation awaiting endpoint evidence binding."""
+    """One registered held relation, optionally acquiring before named motion.
+
+    Acquisition phases use the existing verified gate and planned-effect guard.
+    Empty phase declarations preserve terminal-only extension behavior.
+    """
 
     expectation_id: str
     relation: HeldObjectRelation
     object_id: str
     slot_id: str
     allow_missing_detached_baseline: bool = False
+    acquire_before_segment: str | None = None
+    retain_during_segments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for field_name in ("expectation_id", "object_id", "slot_id"):
@@ -462,6 +468,30 @@ class RegisteredHeldObjectEffect:
             raise ValueError(
                 "Only detached relations may allow a missing verified baseline."
             )
+        if type(self.retain_during_segments) is not tuple:
+            raise TypeError("retain_during_segments must be an exact tuple.")
+        segments = self.retain_during_segments
+        if bool(segments) != (self.acquire_before_segment is not None):
+            raise ValueError(
+                "Registered acquisition requires both a gate and retention phases."
+            )
+        if self.acquire_before_segment is not None:
+            if self.relation is not HeldObjectRelation.ATTACHED:
+                raise ValueError(
+                    "Only attached effects can declare acquisition phases."
+                )
+            _validate_identifier(
+                self.acquire_before_segment, field_name="acquire_before_segment"
+            )
+            for segment in segments:
+                _validate_identifier(segment, field_name="retain_during_segments")
+            if segments[0] != self.acquire_before_segment or len(set(segments)) != len(
+                segments
+            ):
+                raise ValueError(
+                    "Retention phases must start at acquisition and be unique."
+                )
+        object.__setattr__(self, "retain_during_segments", segments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -485,6 +515,10 @@ class RegisteredSemanticEffect:
             raise ValueError("Registered effect expectation IDs must be unique.")
         if len({value.slot_id for value in held_objects}) != len(held_objects):
             raise ValueError("Registered effect resource slots must be unique.")
+        if sum(value.acquire_before_segment is not None for value in held_objects) > 1:
+            raise ValueError(
+                "Registered acquisition supports one phased held relation."
+            )
         relations = {value.relation for value in held_objects}
         if self.effect_kind is SemanticEffectKind.ATTACH and relations != {
             HeldObjectRelation.ATTACHED
@@ -1441,6 +1475,19 @@ class SemanticCallCompiler:
             lowering=lowering,
             path=(*path, call_index, "effect"),
         )
+        if (
+            lowering.registered_effect is not None
+            and any(
+                item.acquire_before_segment is not None
+                for item in lowering.registered_effect.held_objects
+            )
+            and (effect_spec is None or analyzed.effect_monitor_ref is None)
+        ):
+            raise _diagnostic(
+                "registered_acquisition_requires_verified_effect",
+                (*path, call_index, "effect_gates"),
+                "Registered acquisition phases require a verified effect monitor.",
+            )
         effect_monitor: EffectMonitor | None = None
         if effect_spec is not None and analyzed.effect_monitor_ref is not None:
             try:
@@ -1458,11 +1505,13 @@ class SemanticCallCompiler:
             analyzed,
             effect_spec,
             context,
+            registered_effect=lowering.registered_effect,
             path=(*path, call_index, "effect_guards"),
         )
         effect_gates = self._ground_phase_effect_gates(
             analyzed,
             effect_spec,
+            registered_effect=lowering.registered_effect,
             path=(*path, call_index, "effect_gates"),
         )
         if effect_gates:
@@ -2153,9 +2202,10 @@ class SemanticCallCompiler:
         analyzed: AnalyzedSemanticCall,
         effect_spec: SemanticEffectSpec | None,
         *,
+        registered_effect: RegisteredSemanticEffect | None = None,
         path: tuple[PathPart, ...],
     ) -> tuple[GroundedPhaseEffectGate, ...]:
-        """Create blocking acquisition/release gates for built-in semantics."""
+        """Ground built-in gates and explicitly declared registered acquisition."""
         monitor_ref = analyzed.effect_monitor_ref
         if effect_spec is None or monitor_ref is None:
             return ()
@@ -2203,6 +2253,17 @@ class SemanticCallCompiler:
                         HeldObjectRelation.ATTACHED,
                     ),
                 )
+        elif type(call) is RegisteredSemanticCall and registered_effect is not None:
+            definitions = tuple(
+                (
+                    f"{item.expectation_id}_acquired",
+                    item.acquire_before_segment,
+                    item.expectation_id,
+                    HeldObjectRelation.ATTACHED,
+                )
+                for item in registered_effect.held_objects
+                if item.acquire_before_segment is not None
+            )
         else:
             return ()
 
@@ -2302,9 +2363,10 @@ class SemanticCallCompiler:
         effect_spec: SemanticEffectSpec | None,
         context: PlanningContext,
         *,
+        registered_effect: RegisteredSemanticEffect | None = None,
         path: tuple[PathPart, ...],
     ) -> tuple[GroundedHeldObjectGuard, ...]:
-        """Create phase-scoped held-object invariants for built-in semantics.
+        """Ground built-in holds and explicit registered acquisition retention.
 
         The guard observes only named action segments whose commanded motion
         assumes that a particular endpoint still holds the object.  It never
@@ -2314,6 +2376,7 @@ class SemanticCallCompiler:
             analyzed: Statically linked semantic call.
             effect_spec: Grounded terminal effect contract for the call.
             context: Latest planning context used to validate verified baselines.
+            registered_effect: Explicit extension acquisition declaration, if any.
             path: Diagnostic path for monitor-construction failures.
 
         Returns:
@@ -2406,6 +2469,23 @@ class SemanticCallCompiler:
                         True,
                     ),
                 )
+        elif type(call) is RegisteredSemanticCall and registered_effect is not None:
+            definitions = tuple(
+                (
+                    f"{item.expectation_id}_attached",
+                    item.expectation_id,
+                    item.retain_during_segments,
+                    HeldObjectGuardBaseline.PLANNED_EFFECT,
+                    (
+                        self._held_expectation(
+                            effect_spec, item.expectation_id
+                        ).task_state_key,
+                    ),
+                    True,
+                )
+                for item in registered_effect.held_objects
+                if item.acquire_before_segment is not None
+            )
         else:
             return ()
 

@@ -1624,6 +1624,53 @@ def test_pick_decoder_rejects_removed_runtime_option_declarations() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "call_id",
+    ["simulation.pick", "gen_sim.pick.step_01", "gen_sim.pick.handover_source"],
+)
+def test_pick_phase_contract_is_explicit_and_fingerprinted(call_id: str) -> None:
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    payload = {
+        "kind": "pick",
+        "call_id": call_id,
+        "routes": [{"object_id": "part", "target_id": "inspection"}],
+    }
+    legacy = decode_task_lowerer(payload, path="pick")
+    disabled = decode_task_lowerer({**payload, "verify_phases": False}, path="pick")
+    verified = decode_task_lowerer({**payload, "verify_phases": True}, path="pick")
+    assert _canonical_value(legacy) == _canonical_value(disabled)
+    assert _canonical_value(verified) != _canonical_value(legacy)
+    assert verified.revision == "5"
+    semantics = ObjectSemantics(
+        affordance=AntipodalAffordance(), geometry={}, entity_id="part"
+    )
+    call = RegisteredSemanticCall(
+        call_id=call_id, arguments={"object": "part", "target": "inspection"}
+    )
+    for factory, enabled in ((legacy, False), (verified, True)):
+        lowered = factory.lowerer_type(factory.routes, (semantics,)).lower(
+            call, context=None, bound=None, option_template=PickUpOptions()
+        )
+        effect = lowered.registered_effect.held_objects[0]
+        assert effect.expectation_id == "primary"
+        assert effect.acquire_before_segment == ("lift" if enabled else None)
+        assert effect.retain_during_segments == (("lift",) if enabled else ())
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_pick_phase_contract_rejects_nonboolean_config(value: object) -> None:
+    with pytest.raises(TypeError, match="verify_phases"):
+        decode_task_lowerer(
+            {
+                "kind": "pick",
+                "routes": [{"object_id": "part", "target_id": "inspection"}],
+                "verify_phases": value,
+            },
+            path="pick",
+        )
+
+
 def test_task_pick_alias_factory_has_stable_immutable_identity() -> None:
     payload = {
         "kind": "pick",

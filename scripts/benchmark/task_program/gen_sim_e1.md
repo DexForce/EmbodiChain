@@ -48,3 +48,11 @@ python -m scripts.benchmark.task_program.gen_sim_e1 \
 python -m pytest -q -c /dev/null --noconftest \
   "tests/benchmark/task_program/test_gen_sim_e1.py"
 ```
+
+## 已封装输入
+
+后续阶段可通过 `gensim.prepared-e-plan/v1` 复用同一串行 runner，不重复实现执行器。
+每个 case 明确指定物理reference、source config、固定digest和已封装bundle。
+不同bundle必须携带同一物理输入manifest；只能运行预先列出的case/round。
+阶段性 TaskSpec 即使为 satisfied，也只按该实验范围判读，不自动认证整个E家族。
+入场被资源门拒绝的记录保留，计入保守入场预算，不覆盖或自动重试。

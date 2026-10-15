@@ -135,6 +135,15 @@ at that boundary alone does not establish actual contact. Nonpad rest intrusion 
 rejects at the boundary, and runtime bilateral acquisition/holding gates remain.
 Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
+`generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
+registered Pick acquisition/lift verification through its fingerprinted lowerer
+declaration. The default preserves legacy factory identity; closing geometry,
+alignment, release and support contracts are independent. Phase ownership and
+assurance are defined by [Task Program execution](../task-programs/execution.md).
+Normal Task Engine preparation opts new bundles into this contract. E8 regeneration
+preserves the input declaration; mixed per-Pick modes require explicit handling
+and are rejected by the uniform generator rather than silently weakened.
+
 Gradio uses explicit allowed roots and per-session process ownership. A
 replacement run terminates the previous process for that session. Remote
 access requires complete basic auth; repository/dotenv path restrictions belong

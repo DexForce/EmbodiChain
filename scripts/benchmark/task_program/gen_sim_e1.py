@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Run a predeclared E1 developer/holdout/control through the production runner.
+"""Run predeclared E1 cases or sealed prepared cases through the production runner.
 
 This campaign helper selects an expanded member before compilation. It does not
 implement motion, physics, effect verification or an alternative executor.
@@ -248,7 +248,8 @@ def main() -> None:
     root = args.plan.resolve().parent
     plan = _read(args.plan)
     if (
-        plan["schema_version"] != "gensim.bounded-e-plan/v1"
+        plan["schema_version"]
+        not in {"gensim.bounded-e-plan/v1", "gensim.prepared-e-plan/v1"}
         or args.round > plan["max_rounds"]
     ):
         raise ValueError("Unsupported or exhausted experiment plan.")
@@ -266,6 +267,8 @@ def main() -> None:
     ):
         raise RuntimeError("Predeclared native run budget exhausted.")
     run_id = f"r{args.round}-{args.case}"
+    if "allowed_runs" in plan and run_id not in plan["allowed_runs"]:
+        raise ValueError("This case/round is not in the predeclared schedule.")
     output = root / "attempts" / run_id
     output.mkdir(parents=True, exist_ok=False)
     start = time.perf_counter()
@@ -296,24 +299,37 @@ def main() -> None:
     }
     pinned: dict[str, str] = {}
     try:
-        old = WORKSPACE / plan["reference_bundle"]
+        prepared = plan["schema_version"] == "gensim.prepared-e-plan/v1"
+        case_input = plan["cases"][args.case] if prepared else plan
+        old = WORKSPACE / case_input["reference_bundle"]
         frozen = load_frozen_physical_input(
-            prepare_scene(WORKSPACE / plan["source_config"]), old
+            prepare_scene(WORKSPACE / case_input["source_config"]), old
         )
-        if frozen.physical_digest != plan["expected_physical_digest"]:
+        if frozen.physical_digest != case_input["expected_physical_digest"]:
             raise RuntimeError(
                 "Physical input changed between declared cases; not admitted."
             )
         receipt["physical_digest"] = frozen.physical_digest
-        bindings = _read(old / "role_bindings.json")
-        candidate = next(
-            row
-            for row in _read(old / "task_candidate_set.json")["candidates"]
-            if row["candidate_id"] == bindings["candidate_id"]
+        uid = None if prepared else plan["cases"][args.case]
+        bundle = (
+            WORKSPACE / case_input["prepared_bundles"][str(args.round)]
+            if prepared
+            else old
         )
-        uid = plan["cases"][args.case]
-        bundle = old
+        if (
+            prepared
+            and bundle != old
+            and _read(bundle / "physical_input.json")["physical_digest"]
+            != frozen.physical_digest
+        ):
+            raise ValueError("Prepared bundle does not use the declared fixed model.")
         if uid is not None:
+            bindings = _read(old / "role_bindings.json")
+            candidate = next(
+                row
+                for row in _read(old / "task_candidate_set.json")["candidates"]
+                if row["candidate_id"] == bindings["candidate_id"]
+            )
             candidate, bindings, member = _select_member(
                 candidate, bindings, uid, run_id
             )
@@ -379,6 +395,13 @@ def main() -> None:
             )
         pinned = {str(WORKSPACE / name): digest for name, digest in source.items()}
         pinned.update(frozen.input_files)
+        cache_inputs = {
+            str(path): _sha(path)
+            for directory in plan.get("cache_roots", [])
+            for path in Path(directory).glob("*.npy")
+        }
+        pinned.update(cache_inputs)
+        receipt["existing_grasp_cache_files"] = len(cache_inputs)
         for directory in (old, bundle):
             pinned.update(
                 {
@@ -449,6 +472,9 @@ def main() -> None:
                     report, _read(evaluation_path) if evaluation_path.is_file() else {}
                 )
             )
+            if prepared:
+                receipt["qualification_scope"] = plan["qualification_scope"]
+                receipt["status"] = "native_returned_unverified"
         receipt["videos"] = [
             {
                 "path": str(path.relative_to(WORKSPACE / "outputs/gen_sim")),

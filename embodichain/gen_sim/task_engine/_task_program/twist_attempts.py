@@ -204,12 +204,28 @@ def _spec_arguments(preparation: Any) -> dict[str, Any]:
     from ..semantic_graph_validation import verify_graph_contract
     from embodichain.gen_sim.task_spec import TaskSpec
 
+    integration = load_config(preparation.output_dir / "task_program/integration.yaml")
+    modes = [
+        factory.get("verify_phases", False)
+        for factory in integration.get("runtime_services", {}).get(
+            "registered_semantic_lowerers", ()
+        )
+        if factory.get("kind") == "pick"
+    ]
+    if any(type(mode) is not bool for mode in modes):
+        raise TypeError("Registered Pick verify_phases must be a boolean.")
+    if any(modes) and not all(modes):
+        raise ValueError(
+            "Mixed registered Pick phase modes cannot be regenerated uniformly."
+        )
+    phase_arguments = {"verify_pick_phases": True} if modes and all(modes) else {}
     contract = verify_graph_contract(
         preparation.output_dir, preparation.semantic_task_graph
     )
     if contract is None:
-        return {}
+        return phase_arguments
     return {
+        **phase_arguments,
         "task_spec": TaskSpec.from_dict(
             load_config(preparation.output_dir / "task_spec.json")
         ),

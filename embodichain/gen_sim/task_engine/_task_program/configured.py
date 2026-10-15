@@ -167,7 +167,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
             value,
             path=path,
             required=frozenset({"kind", "routes"}),
-            optional=frozenset({"call_id"}),
+            optional=frozenset({"call_id", "verify_phases"}),
         )
         call_id = _identifier(
             config.get("call_id", "simulation.pick"), path=f"{path}.call_id"
@@ -228,7 +228,9 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     ),
                 )
             )
-        return make_pick_factory(tuple(routes), call_id)
+        return make_pick_factory(
+            tuple(routes), call_id, verify_phases=config.get("verify_phases", False)
+        )
     if kind in {"move_held_object", "drawer_transport"}:
         config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
         routes: list[_MoveHeldObjectRoute] = []

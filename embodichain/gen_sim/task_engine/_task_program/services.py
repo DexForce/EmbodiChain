@@ -313,6 +313,7 @@ class _PickLowerer(RegisteredSemanticLowerer):
     call_id: ClassVar[str] = _PICK_CALL_ID
     target_descriptor: ClassVar[SkillDescriptor] = PickUp.descriptor()
     effect_contract_kind: ClassVar[SemanticEffectKind] = SemanticEffectKind.ATTACH
+    verify_phases: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -400,6 +401,8 @@ class _PickLowerer(RegisteredSemanticLowerer):
                         relation=HeldObjectRelation.ATTACHED,
                         object_id=route.object_id,
                         slot_id="primary",
+                        acquire_before_segment="lift" if self.verify_phases else None,
+                        retain_during_segments=("lift",) if self.verify_phases else (),
                     ),
                 ),
             ),
@@ -480,7 +483,7 @@ class _PickLowererFactory(RegisteredSemanticLowererFactory):
 
 
 def make_pick_factory(
-    routes: tuple[_PickRoute, ...], call_id: str
+    routes: tuple[_PickRoute, ...], call_id: str, *, verify_phases: bool = False
 ) -> _PickLowererFactory:
     """Bind a task policy alias to the baseline's class-level factory identity.
 
@@ -488,11 +491,14 @@ def make_pick_factory(
     extending the shared goal/options. Constrained aliases retain their rules.
     No executable code comes from data.
     """
-    if call_id == _PICK_CALL_ID:
+    if type(verify_phases) is not bool:
+        raise TypeError("verify_phases must be a boolean.")
+    if call_id == _PICK_CALL_ID and not verify_phases:
         return _PickLowererFactory(routes)
-    if not call_id.startswith("gen_sim.pick."):
+    if call_id != _PICK_CALL_ID and not call_id.startswith("gen_sim.pick."):
         raise ValueError("Task Pick aliases must use the gen_sim.pick namespace.")
-    suffix = hashlib.sha256(call_id.encode("utf-8")).hexdigest()[:16]
+    identity = call_id + ("|acquisition-v1" if verify_phases else "")
+    suffix = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     handover = call_id == "gen_sim.pick.handover_source" or call_id.startswith(
         "gen_sim.pick.handover_horizontal_source."
     )
@@ -503,6 +509,7 @@ def make_pick_factory(
         {
             "call_id": call_id,
             "grasp_mode": "ends" if handover else "free",
+            **({"verify_phases": True} if verify_phases else {}),
             "__module__": __name__,
             "__slots__": (),
         },
@@ -514,7 +521,11 @@ def make_pick_factory(
         namespace={
             "call_id": call_id,
             "lowerer_type": lowerer_type,
-            **({"revision": "4"} if adaptive else {}),
+            **(
+                {"revision": "5"}
+                if verify_phases
+                else {"revision": "4"} if adaptive else {}
+            ),
             "__module__": __name__,
         },
         frozen=True,

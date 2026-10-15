@@ -234,6 +234,7 @@ class TaskEngineCoordinator:
                             max_episodes=max_episodes,
                             max_episode_steps=max_episode_steps,
                             fit_grasp_assets=fit_grasp_assets,
+                            verify_pick_phases=True,
                             task_spec=plan.task_spec,
                             task_candidate=plan.candidate,
                             role_bindings=plan.role_bindings,

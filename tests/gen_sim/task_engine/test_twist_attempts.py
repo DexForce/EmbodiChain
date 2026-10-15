@@ -38,7 +38,13 @@ from embodichain.gen_sim.task_engine.workflow import SubprocessActionExecutor
 from embodichain.utils.utility import save_config
 
 
-def bundle(path: Path, *, height: float = 0.001, twist: bool = True) -> Path:
+def bundle(
+    path: Path,
+    *,
+    height: float = 0.001,
+    twist: bool = True,
+    verify_pick_phases: bool = False,
+) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / "task_program").mkdir()
     save_config(
@@ -59,6 +65,18 @@ def bundle(path: Path, *, height: float = 0.001, twist: bool = True) -> Path:
             }
         },
     )
+    save_config(
+        path / "task_program/integration.yaml",
+        {
+            "runtime_services": {
+                "registered_semantic_lowerers": (
+                    [{"kind": "pick", "verify_phases": True}]
+                    if verify_pick_phases
+                    else []
+                )
+            }
+        },
+    )
     (path / "twist_adaptation.json").write_text(
         json.dumps(
             {
@@ -68,6 +86,54 @@ def bundle(path: Path, *, height: float = 0.001, twist: bool = True) -> Path:
         )
     )
     return path
+
+
+@pytest.mark.parametrize(
+    "declarations,expected",
+    [
+        ([], {}),
+        ([{}], {}),
+        ([{"verify_phases": False}], {}),
+        ([{"verify_phases": True}], {"verify_pick_phases": True}),
+        (
+            [{"verify_phases": True}, {"verify_phases": True}],
+            {"verify_pick_phases": True},
+        ),
+        ([{"verify_phases": True}, {}], ValueError),
+        ([{"verify_phases": True}, {"verify_phases": False}], ValueError),
+        ([{"verify_phases": 1}], TypeError),
+        ([{"verify_phases": "true"}], TypeError),
+        ([{"verify_phases": None}], TypeError),
+    ],
+)
+def test_regeneration_preserves_explicit_pick_phase_contract_without_taskspec(
+    tmp_path, monkeypatch, declarations, expected
+):
+    from embodichain.gen_sim.task_engine._task_program.twist_attempts import (
+        _spec_arguments,
+    )
+    from embodichain.gen_sim.task_engine import semantic_graph_validation
+
+    root = bundle(tmp_path / "bundle")
+    save_config(
+        root / "task_program/integration.yaml",
+        {
+            "runtime_services": {
+                "registered_semantic_lowerers": [
+                    {"kind": "pick", **item} for item in declarations
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        semantic_graph_validation, "verify_graph_contract", lambda *_a: None
+    )
+    prep = SimpleNamespace(output_dir=root, semantic_task_graph={})
+    if isinstance(expected, type):
+        with pytest.raises(expected):
+            _spec_arguments(prep)
+    else:
+        assert _spec_arguments(prep) == expected
 
 
 @dataclass
@@ -104,13 +170,14 @@ def test_support_retry_requires_specific_startup_failure(tmp_path, reason, expec
 
 
 @pytest.mark.parametrize("mass_source", (False, True))
+@pytest.mark.parametrize("verify_phases", (False, True))
 def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
-    tmp_path, monkeypatch, mass_source
+    tmp_path, monkeypatch, mass_source, verify_phases
 ):
     from embodichain.gen_sim.task_engine import task_program_bundle as generator
 
     source = object()
-    root = bundle(tmp_path / "bundle")
+    root = bundle(tmp_path / "bundle", verify_pick_phases=verify_phases)
     (root / "static_scene_manifest.json").write_text('{"source": {}}')
     prep = Preparation(
         root,
@@ -123,11 +190,18 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
 
     def generate(graph, scene, output, **kwargs):
         assert scene is source and graph is prep.semantic_task_graph
+        assert kwargs.get("verify_pick_phases", False) is verify_phases
+        if not verify_phases:
+            assert "verify_pick_phases" not in kwargs
         assert kwargs.get("twist_mass_source", False) is mass_source
         if not mass_source:
             assert "twist_mass_source" not in kwargs
         built.append(kwargs["twist_support_lift_m"])
-        bundle(output, height=kwargs["twist_support_lift_m"])
+        bundle(
+            output,
+            height=kwargs["twist_support_lift_m"],
+            verify_pick_phases=verify_phases,
+        )
         return graph, "fresh_paths"
 
     def execute(path, output, **options):
@@ -151,7 +225,7 @@ def test_support_retry_rebuilds_from_same_source_and_preserves_receipts(
     monkeypatch.setattr(generator, "generate_task_program_bundle", generate)
     report, selected, output, attempts = execute_support_candidates(
         prep,
-        tmp_path / f"action_{int(mass_source)}",
+        tmp_path / f"action_{int(mass_source)}_{int(verify_phases)}",
         execute,
         {"seed": 7},
         TaskEnginePlanningCfg(twist_mass_source=mass_source),
@@ -238,13 +312,14 @@ def test_missed_target_does_not_retry_height(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("mass_source", (False, True))
+@pytest.mark.parametrize("verify_phases", (False, True))
 def test_scale_search_uses_original_source_fixed_seed_and_stops_on_success(
-    tmp_path, monkeypatch, mass_source
+    tmp_path, monkeypatch, mass_source, verify_phases
 ):
     from embodichain.gen_sim.task_engine._task_program import twist_attempts
     from embodichain.gen_sim.task_engine import task_program_bundle as generator
 
-    root = bundle(tmp_path / "bundle")
+    root = bundle(tmp_path / "bundle", verify_pick_phases=verify_phases)
     adaptation = json.loads((root / "twist_adaptation.json").read_text())
     adaptation["scale_candidate"] = {"candidate_grip_depth": 0.0094}
     (root / "twist_adaptation.json").write_text(json.dumps(adaptation))
@@ -261,12 +336,15 @@ def test_scale_search_uses_original_source_fixed_seed_and_stops_on_success(
 
     def generate(g, scene, path, **kwargs):
         assert g is graph and scene is source
+        assert kwargs.get("verify_pick_phases", False) is verify_phases
+        if not verify_phases:
+            assert "verify_pick_phases" not in kwargs
         assert kwargs.get("twist_mass_source", False) is mass_source
         if not mass_source:
             assert "twist_mass_source" not in kwargs
         assert kwargs["twist_support_lift_m"] == 0.001
         generated.append(kwargs["twist_grip_depth_m"])
-        bundle(path)
+        bundle(path, verify_pick_phases=verify_phases)
         return {"generated": kwargs["twist_grip_depth_m"]}, path
 
     def execute(path, output, **options):
@@ -286,7 +364,7 @@ def test_scale_search_uses_original_source_fixed_seed_and_stops_on_success(
     )
     report, selected, output, attempts = execute_support_candidates(
         preparation,
-        tmp_path / f"action_{int(mass_source)}",
+        tmp_path / f"action_{int(mass_source)}_{int(verify_phases)}",
         execute,
         {"seed": 17, "num_envs": 1},
         TaskEnginePlanningCfg(twist_mass_source=mass_source),
@@ -299,9 +377,13 @@ def test_scale_search_uses_original_source_fixed_seed_and_stops_on_success(
     assert (selected.output_dir / "provider.json").read_bytes() == (
         root / "provider.json"
     ).read_bytes()
-    assert output.name == f"action_{int(mass_source)}_d4"
+    assert output.name == f"action_{int(mass_source)}_{int(verify_phases)}_d4"
     rows = json.loads(
-        (tmp_path / f"action_{int(mass_source)}" / "scale_attempts.json").read_text()
+        (
+            tmp_path
+            / f"action_{int(mass_source)}_{int(verify_phases)}"
+            / "scale_attempts.json"
+        ).read_text()
     )
     assert len(rows) == 5 and rows[-1]["size_rejected"] is False
 

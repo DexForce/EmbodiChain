@@ -529,6 +529,7 @@ def test_bound_prepare_publishes_semantic_task_program_bundle(
             "max_episodes": None,
             "max_episode_steps": None,
             "fit_grasp_assets": False,
+            "verify_pick_phases": True,
             "task_spec": generated_calls[0]["task_spec"],
             "task_candidate": adaptation.selected_candidate,
             "role_bindings": adaptation.role_bindings,
