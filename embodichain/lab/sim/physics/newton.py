@@ -156,7 +156,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(self._manager._world)
-        if backend is None or backend.solver_type != "sph":
+        if backend is None or getattr(backend, "sph_solver", None) is None:
             raise RuntimeError("Prepared SPH backend required.")
         backend.invalidate_cuda_graph("fluid state write")
         solver = getattr(backend, "sph_solver", backend.solver)
