@@ -43,6 +43,7 @@ from .grasp_filter import (
 )
 from .motion import MOTION_VALIDATION_REVISION
 from .state_handoff import StagingContract
+from .held_command import bind_held_command_sources
 
 __all__: list[str] = []
 
@@ -55,6 +56,8 @@ from .invocation_policy import (
     bind_cartesian_calls,
     bind_motion_samples,
     bind_pour_receivers,
+    bind_pour_return_calls,
+    POUR_RETURN_POLICY_REVISION,
     bind_articulation_calls,
 )
 
@@ -105,9 +108,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        pour_return_calls: tuple[str, ...] = (),
         clearance_routes: tuple = (),
         alignment_continuation_routes: tuple = (),
         staging_contract: StagingContract | None = None,
+        held_command_sources: tuple = (),
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         pick_continuations: tuple = (),
@@ -123,9 +128,11 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._motion_samples = motion_samples
         self._cartesian_calls = cartesian_calls
         self._articulation_calls = articulation_calls
+        self._pour_return_calls = pour_return_calls
         self._clearance_routes = clearance_routes
         self._alignment_continuation_routes = alignment_continuation_routes
         self._staging_contract = staging_contract or StagingContract.empty()
+        self._held_command_sources = held_command_sources
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
@@ -226,6 +233,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
                 articulation_calls=self._articulation_calls,
+                pour_return_calls=self._pour_return_calls,
             )
         else:
             engine = GenSimActionEngine(
@@ -235,6 +243,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                 motion_samples=self._motion_samples,
                 cartesian_calls=self._cartesian_calls,
                 articulation_calls=self._articulation_calls,
+                pour_return_calls=self._pour_return_calls,
             )
         pick = GenSimPickUp()
         pick.adaptive_unconstrained = self._adaptive_pick
@@ -255,7 +264,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
             )
         engine.register(pick, replace=True)
         engine.register(GenSimHandOver(), replace=True)
-        transport = GenSimMoveHeldObject(staging_contract=self._staging_contract)
+        transport = GenSimMoveHeldObject(
+            staging_contract=self._staging_contract,
+            held_command_sources=dict(getattr(self, "_held_command_sources", ())),
+        )
         from .place_recovery import scene_vertices
 
         transport.held_path_scene_vertices = scene_vertices(
@@ -414,6 +426,8 @@ class TaskAdapterFactory:
     twist_routes: tuple = ()
     support_contract_revision: int | None = None
     pick_contact_revision: int | None = None
+    pour_return_calls: tuple[str, ...] = ()
+    held_command_sources: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -578,9 +592,11 @@ class TaskAdapterFactory:
             motion_samples=self.motion_samples,
             cartesian_calls=self.cartesian_calls,
             articulation_calls=self.articulation_calls,
+            pour_return_calls=self.pour_return_calls,
             clearance_routes=self.clearance_routes,
             alignment_continuation_routes=self.alignment_continuation_routes,
             staging_contract=self.staging_contract,
+            held_command_sources=self.held_command_sources,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
@@ -642,9 +658,12 @@ def load_deployment(
             "motion_samples",
             "cartesian_calls",
             "pour_receivers",
+            "pour_return_calls",
             "staging_calls",
             "staging_retention_sources",
             "support_contract_revision",
+            "held_command_sources",
+            "held_command_revision",
             "pick_contact_revision",
         }
         or payload["schema_version"] != "gen_sim_task_constraints/v1"
@@ -852,7 +871,19 @@ def load_deployment(
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
+    pour_return_calls = bind_pour_return_calls(
+        payload.get("pour_return_calls", []), compiled
+    )
     articulation_calls = bind_articulation_calls(compiled)
+    held_command_revision = payload.get("held_command_revision", 1)
+    held_command_sources = bind_held_command_sources(
+        payload.get("held_command_sources", {}),
+        compiled,
+        registration.robot_profile_binding,
+        base.selection.runtime_preset,
+        frozenset(item.entity_id for item in registration.scene_binding.rigid_objects),
+        revision=held_command_revision,
+    )
     from .staging_recovery import STAGING_RECOVERY_REVISION
 
     # Owned drawer transports opt out at the call boundary; unrelated routes
@@ -912,6 +943,11 @@ def load_deployment(
         {
             "adaptive_grasp_revision": ADAPTIVE_GRASP_REVISION,
             "invocation_policy_revision": INVOCATION_POLICY_REVISION,
+            **(
+                {"held_command_revision": held_command_revision}
+                if payload.get("held_command_sources")
+                else {}
+            ),
             **(
                 {"pick_opening_recovery_revision": PICK_OPENING_RECOVERY_REVISION}
                 if any(
@@ -993,6 +1029,11 @@ def load_deployment(
             "program": program,
             "cartesian_calls": cartesian_calls,
             "pour_receivers": pour_receivers,
+            **(
+                {"pour_return_policy_revision": POUR_RETURN_POLICY_REVISION}
+                if pour_return_calls
+                else {}
+            ),
             "grasp_pose_generators": {
                 name: asdict(factory) for name, factory in grasp_factories
             },
@@ -1012,9 +1053,11 @@ def load_deployment(
         motion_samples=motion_samples,
         cartesian_calls=cartesian_calls,
         articulation_calls=articulation_calls,
+        pour_return_calls=pour_return_calls,
         clearance_routes=clearance_routes,
         alignment_continuation_routes=alignment_continuation_routes,
         staging_contract=staging_contract,
+        held_command_sources=tuple(held_command_sources.items()),
         runtime_preset=base.selection.runtime_preset,
         press_routes=press_routes,
         twist_routes=twist_routes,

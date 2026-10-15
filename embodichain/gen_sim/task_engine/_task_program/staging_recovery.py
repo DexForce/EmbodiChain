@@ -68,9 +68,12 @@ def bind_staging_calls(program: Any, rigid_ids: frozenset[str]) -> tuple[str, ..
 
 
 def verified_retention_sources(
-    profile: Any, preset_id: str | None, sources: tuple[tuple[str, str, str, str], ...]
+    profile: Any,
+    preset_id: str | None,
+    sources: tuple[tuple[str, str, str, str, str], ...],
+    *,
+    retention_call_id: str = "gen_sim.align_held",
 ) -> dict[str, dict[str, Any]]:
-    from .align_held import ALIGN_HELD_CALL
     from embodichain.lab.task_program.semantics import (
         EffectAssurance,
         EffectMonitorRef,
@@ -104,7 +107,7 @@ def verified_retention_sources(
     ) in sources:
         monitors = tuple(
             preset.effect_monitors.get(call_id)
-            for call_id in (acquisition_call_id, ALIGN_HELD_CALL)
+            for call_id in (acquisition_call_id, retention_call_id)
         )
         if any(
             type(ref) is not EffectMonitorRef
@@ -137,10 +140,14 @@ def inspect_staging_plan(
     *,
     retention_source: dict[str, Any] | None = None,
     _require_retained_command: bool = False,
+    _contract_revision: int = 1,
 ) -> dict[str, Any]:
     """Distinguish a new hand command from an unchanged native retained target."""
+    if type(_contract_revision) is not int or _contract_revision not in (1, 2):
+        return {"valid": False, "reason": "retained_command_revision_unavailable"}
+    require_retained = _require_retained_command or _contract_revision == 2
     strict = _inspect_pick_plan(robot, request, context, plan)
-    if (strict["valid"] and not _require_retained_command) or (
+    if (strict["valid"] and not require_retained) or (
         not strict["valid"] and strict.get("reason") != "initial_velocity_rejected"
     ):
         return strict
@@ -150,9 +157,14 @@ def inspect_staging_plan(
                 "valid": False,
                 "reason": "retained_previous_command_authority_unavailable",
             }
-            if _require_retained_command
+            if require_retained
             else strict
         )
+    if _contract_revision == 2 and (
+        type(retention_source.get("command_continuity_revision")) is not int
+        or retention_source["command_continuity_revision"] != 2
+    ):
+        return {"valid": False, "reason": "retained_command_revision_unavailable"}
     proof = {
         **retention_source,
         "accepted": False,
@@ -218,7 +230,15 @@ def inspect_staging_plan(
             raise ValueError("retained_observation_changed")
         limits = _joint_velocity_limits(robot, None).to(velocity)[context.env_ids]
         proof["velocity_limits"] = limits[:, hand_ids].tolist()
-        if (velocity[:, hand_ids].abs() > limits[:, hand_ids]).any():
+        within_limits = not bool(
+            (velocity[:, hand_ids].abs() > limits[:, hand_ids]).any()
+        )
+        if _contract_revision == 2:
+            proof.update(
+                actual_hand_velocity_within_limits=within_limits,
+                actual_hand_velocity_policy="diagnostic_only",
+            )
+        elif not within_limits:
             raise ValueError("retained_actual_hand_velocity_rejected")
         command = grasp.joint_positions(
             "grasp", num_envs=1, device=desired.device, dtype=desired.dtype

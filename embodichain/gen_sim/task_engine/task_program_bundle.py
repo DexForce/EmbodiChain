@@ -45,11 +45,13 @@ from ._task_program.articulation_binding import (
 from ._task_program.articulation_slide import preset_id
 from ._task_program.drawer_binding import DRAWER_TRANSPORT_CALL
 from ._task_program.identity import bundle_registration_fingerprint
+from ._task_program.held_command import HELD_COMMAND_REVISION, held_command_declarations
 from ._task_program.physical_inputs import FrozenPhysicalInput
 from ._task_program.invocation_policy import (
     cartesian_call_declarations,
     motion_sample_declarations,
     pour_receiver_declarations,
+    pour_return_call_declarations,
 )
 from ._task_program.e6_clearance import (
     ARM_STIFFNESS,
@@ -647,6 +649,13 @@ def generate_task_program_bundle(
         selected_graph, drawer_groups=drawer_groups
     )
     stability["pour_receivers"] = pour_receiver_declarations(selected_graph)
+    pour_returns = pour_return_call_declarations(selected_graph)
+    if pour_returns:
+        stability["pour_return_calls"] = pour_returns
+    held_commands = held_command_declarations(selected_graph)
+    if held_commands:
+        stability["held_command_sources"] = held_commands
+        stability["held_command_revision"] = HELD_COMMAND_REVISION
     (
         stability["staging_calls"],
         stability["staging_retention_sources"],
@@ -2305,7 +2314,7 @@ def _integration_payload(
                     "kind": "place",
                     "hand_interp_steps": 12,
                     "release_settle_steps": 60,
-                    "lift_height": 0.12 if pour_objects else 0.05,
+                    "lift_height": 0.05,
                     "cartesian_waypoint_count": 2,
                     "preserve_current_object_orientation": True,
                 },

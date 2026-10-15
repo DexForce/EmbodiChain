@@ -191,6 +191,14 @@ Missing bound rigid geometry or bound articulation obstacles disable this fallba
 Ordinary held transport in `held_path.py` first measures exact required endpoints.
 Only qualified free-space endpoints own its discrete carried-mesh sweep and
 bounded continuous-path recovery; external transforms recheck final samples.
+`held_command.py` binds unchanged hand-command authority to adjacent compiled
+same-object/resource Pick, Align or ordinary MoveHeld predecessors with verified
+effect monitors. Explicit revision 2 requires complete native target/command
+continuity and fresh finite state readback even when the strict boundary passes;
+instantaneous hand velocity remains diagnostic, not a standalone veto. Command
+and trajectory limits remain strict. Missing revision selects legacy revision 1
+without changing its behavior or fingerprint. This authority does not grant E2
+staging recovery; Pour, release and handover do not qualify as predecessors.
 Support-contact endpoints, missing geometry and direct-transport routes remain
 unmigrated. Bound-rigid envelopes are not full-world or continuous-contact proof.
 Bare `table/on` targets retain legal source XY; only occupied landings select a
@@ -624,8 +632,10 @@ vessel identity is bound per Pour invocation from that recipe's explicit staging
 reference, not from an object-wide map. Its position is late-bound while the source's upright heading is preserved
 independently of receiver yaw. Rim height, vessel radius and the declared finger
 envelope bound the clearance; E3 transports stage above the target before
-descending. E3 Place uses 0.12 m retreat/approach height without relaxing release
-acceptance. This is geometric/kinematic screening, not global collision planning
+descending. New bundles bind 0.12 m retreat/approach height only to each E3
+post-Pour return Place invocation; ordinary Place keeps 0.05 m. Legacy bundles
+without that declaration retain their original profile options. Release
+acceptance is unchanged. This is geometric/kinematic screening, not global collision planning
 or proof of fluid transfer; ambiguous upright geometry still needs qualification.
 For level containers with a dominant planar floor, inside placement selects an
 arm-side point from the actual floor triangles, eroded by the projected child

@@ -233,6 +233,81 @@ def test_qualified_original_is_returned_without_replanning_or_rng_changes(monkey
     assert torch.equal(before.cpu, torch.random.get_rng_state())
 
 
+@pytest.mark.parametrize("scope", ["ordinary", "both", "staging", "foreign", "legacy"])
+def test_held_path_routes_exact_command_authority_without_widening_staging(
+    monkeypatch, scope
+):
+    action, request, context, original = _fixture(monkeypatch)
+    original.joint_trajectory.positions[:, 1, 2] = 0.24
+    ordinary = {
+        "entity_id": "vessel",
+        "resource_id": "held",
+        "predecessor_invocation_id": "ordinary_pick:0",
+    }
+    staging = {**ordinary, "predecessor_invocation_id": "staging_pick:0"}
+    action.held_command_sources = {}
+    if scope in {"ordinary", "both"}:
+        action.held_command_sources[request.invocation_id] = ordinary
+    elif scope == "foreign":
+        action.held_command_sources["other_transport"] = ordinary
+    elif scope == "legacy":
+        del action.held_command_sources
+    if scope in {"both", "staging", "legacy"}:
+        action.staging_contract = StagingContract(
+            rigid_entity_ids=frozenset({"vessel"}),
+            invocation_ids=frozenset({request.invocation_id}),
+            retention_sources={request.invocation_id: staging},
+        )
+    else:
+        assert not action.staging_contract.invocation_ids
+    observed = []
+
+    def inspect_commands(*args, retention_source=None, _contract_revision=1):
+        assert _contract_revision == 1
+        observed.append(retention_source)
+        return {"valid": True}
+
+    monkeypatch.setattr(gate, "inspect_staging_plan", inspect_commands)
+    certificate = gate.inspect(action, request, context, original)
+    assert certificate["valid"]
+    expected = (
+        ordinary
+        if scope in {"ordinary", "both"}
+        else staging if scope in {"staging", "legacy"} else None
+    )
+    assert observed == [expected]
+
+
+@pytest.mark.parametrize("scope", ["exact_v2", "exact_v1", "foreign_v2"])
+def test_held_path_selects_revision_only_from_its_exact_command_source(
+    monkeypatch, scope
+):
+    action, request, context, original = _fixture(monkeypatch)
+    original.joint_trajectory.positions[:, 1, 2] = 0.24
+    source = {
+        "entity_id": "vessel",
+        "resource_id": "held",
+        "command_continuity_revision": 1 if scope == "exact_v1" else 2,
+    }
+    identity = "foreign_transport" if scope == "foreign_v2" else request.invocation_id
+    action.held_command_sources = {identity: source}
+    observed = []
+
+    def inspect_commands(*args, retention_source=None, _contract_revision=1):
+        observed.append((retention_source, _contract_revision))
+        return {"valid": True}
+
+    monkeypatch.setattr(gate, "inspect_staging_plan", inspect_commands)
+    assert gate.inspect(action, request, context, original)["valid"]
+    expected = (
+        (None, 1)
+        if scope == "foreign_v2"
+        else (source, source["command_continuity_revision"])
+    )
+    assert observed == [expected]
+    assert not action.staging_contract.invocation_ids
+
+
 def test_scene_entity_exact_target_recovered_by_real_continuous_ik(monkeypatch):
     action, request, context, original = _fixture(monkeypatch)
     before = gate._RandomState.capture(set())

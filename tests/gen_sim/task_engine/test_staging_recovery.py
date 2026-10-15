@@ -1166,8 +1166,15 @@ def test_factory_binds_native_rigids_and_compiled_calls_independent_of_drawer_ro
     monkeypatch.setattr(
         drawer_runtime, "DrawerPlacementEngine", Mock(return_value=drawer)
     )
+    ordinary_source = {
+        "predecessor_call_id": "pick",
+        "predecessor_invocation_id": "compiled/ordinary_pick:0",
+        "entity_id": "rigid",
+        "resource_id": "active",
+    }
     factory = assembly._TaskFactory(
         constraints={},
+        held_command_sources=(("compiled/ordinary_transport:0", ordinary_source),),
         staging_contract=StagingContract(
             rigid_entity_ids=frozenset({"rigid"}),
             invocation_ids=frozenset({"compiled/align:0"}),
@@ -1203,6 +1210,12 @@ def test_factory_binds_native_rigids_and_compiled_calls_independent_of_drawer_ro
         if isinstance(call.args[0], actions.GenSimMoveHeldObject)
     )
     assert transport.staging_contract == factory._staging_contract
+    assert transport.held_command_sources == {
+        "compiled/ordinary_transport:0": ordinary_source
+    }
+    assert "compiled/ordinary_transport:0" not in (
+        transport.staging_contract.invocation_ids
+    )
 
 
 def test_active_drawer_transport_excludes_ordinary_staging(staging_inputs):
@@ -1278,6 +1291,52 @@ def test_same_command_override_requires_factory_verified_attachment_monitor_bind
         profile, "unknown" if scope == "unknown" else "selected", sources
     )
     assert bool(actual) == (scope == "verified")
+
+
+@pytest.mark.parametrize(
+    "scope", ["verified", "missing_pick", "missing_transport", "align_only", "custom"]
+)
+def test_ordinary_transport_retention_checks_its_own_verified_monitor(scope):
+    from embodichain.lab.task_program.semantics import (
+        EffectAssurance,
+        EffectMonitorRef,
+        SkillPolicyPreset,
+    )
+
+    monitor = EffectMonitorRef("builtin.composite_effect", "1")
+    monitors = {name: monitor for name in ("pick", "simulation.move_held_object")}
+    if scope == "missing_pick":
+        monitors.pop("pick")
+    elif scope in {"missing_transport", "align_only"}:
+        monitors.pop("simulation.move_held_object")
+        if scope == "align_only":
+            monitors["gen_sim.align_held"] = monitor
+    elif scope == "custom":
+        monitors["simulation.move_held_object"] = EffectMonitorRef(
+            "custom.monitor", "1"
+        )
+    preset = SkillPolicyPreset(
+        preset_id="verified",
+        action_option_templates={},
+        effect_assurance=EffectAssurance.VERIFIED,
+        effect_monitors=monitors,
+    )
+    sources = (("program/transport:0", "program/pick:0", "pick", "item", "active"),)
+    actual = _module().verified_retention_sources(
+        SimpleNamespace(presets={"verified": preset}),
+        "verified",
+        sources,
+        retention_call_id="simulation.move_held_object",
+    )
+    assert bool(actual) == (scope == "verified")
+    if actual:
+        assert actual["program/transport:0"]["predecessor_invocation_id"] == (
+            "program/pick:0"
+        )
+        assert actual["program/transport:0"]["retention_monitor"] == {
+            "monitor_id": "builtin.composite_effect",
+            "revision": "1",
+        }
 
 
 @pytest.fixture
@@ -1363,6 +1422,411 @@ def test_already_applied_retained_hand_command_uses_previous_desired_boundary_on
     assert proof["actual_qvel"] == proof["prior_target_qvel"] == [[0.0]]
     assert torch.equal(probe.context.robot.qpos, before_qpos)
     assert torch.equal(fixture.plan.joint_trajectory.positions, before_positions)
+
+
+def _ordinary_held_command_action(fixture, monkeypatch, *, sources=None):
+    """Keep the production command gate; isolate only geometry and IK ownership."""
+    from embodichain.gen_sim.task_engine._task_program import held_path
+
+    probe = fixture.probe
+    request = replace(
+        probe.request,
+        invocation_id="program/ordinary_transport:0",
+        goal=replace(probe.request.goal, world_yaw_free=False),
+    )
+    if sources is None:
+        sources = {request.invocation_id: fixture.source}
+    action = actions.GenSimMoveHeldObject(
+        staging_contract=StagingContract.empty(), held_command_sources=sources
+    )
+    action._planning_services = probe.action._planning_services
+    action.held_path_scene_vertices = {}
+    monkeypatch.setattr(
+        held_path,
+        "phase_scope",
+        lambda *args: {"owned": True, "domain": "free_space"},
+    )
+    monkeypatch.setattr(held_path, "inspect_payload", lambda *args: {"valid": True})
+    return action, request, held_path
+
+
+def test_ordinary_transport_uses_native_command_authority_without_staging_or_replan(
+    monkeypatch, retained_hand_inputs
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    action, request, held_path = _ordinary_held_command_action(fixture, monkeypatch)
+    before_qpos = probe.context.robot.qpos.clone()
+    before_positions = fixture.plan.joint_trajectory.positions.clone()
+    monkeypatch.setattr(MoveHeldObject, "_plan", lambda *args: fixture.plan)
+    monkeypatch.setattr(
+        held_path,
+        "_cartesian_plan",
+        lambda *args: pytest.fail("unchanged retained command replanned"),
+    )
+    assert not action.staging_contract.invocation_ids
+    assert not _module().owns_staging(
+        request,
+        probe.context,
+        action.staging_contract.rigid_entity_ids,
+        action.staging_contract.invocation_ids,
+        action.motion_generator,
+    )
+    result = action._plan(request, probe.context)
+    assert result.plan_success.all()
+    assert result.joint_trajectory is fixture.plan.joint_trajectory
+    assert result.commands is fixture.plan.commands
+    proof = result.diagnostics.metadata["gen_sim_held_path"]["original"]["commands"][
+        "retained_hand_boundary"
+    ]
+    assert proof["accepted"]
+    assert proof["actual_qpos"] == [[0.0]]
+    assert proof["prior_target_qpos"] == [[pytest.approx(0.02)]]
+    assert result.expected_effects.held_object_updates["active"] is (
+        probe.context.task.get_held_object("active")
+    )
+    assert torch.equal(probe.context.robot.qpos, before_qpos)
+    assert torch.equal(fixture.plan.joint_trajectory.positions, before_positions)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "changed_target",
+        "actual_velocity",
+        "wrong_source_object",
+        "wrong_source_resource",
+        "missing_native_target",
+        "missing_native_velocity",
+        "wrong_invocation",
+        "arm_start",
+    ],
+)
+def test_ordinary_transport_keeps_command_identity_velocity_and_arm_boundary_gates(
+    monkeypatch, retained_hand_inputs, invalid
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    sources = {"program/ordinary_transport:0": dict(fixture.source)}
+    if invalid == "wrong_source_object":
+        sources["program/ordinary_transport:0"]["entity_id"] = "other"
+    elif invalid == "wrong_source_resource":
+        sources["program/ordinary_transport:0"]["resource_id"] = "other"
+    elif invalid == "wrong_invocation":
+        sources = {"program/other:0": fixture.source}
+    action, request, held_path = _ordinary_held_command_action(
+        fixture, monkeypatch, sources=sources
+    )
+    plan = fixture.plan
+    if invalid == "changed_target":
+        fixture.desired[:, 2] += 1e-6
+    elif invalid == "actual_velocity":
+        probe.context.robot.qvel[:, 2] = 0.101
+    elif invalid == "missing_native_target":
+        probe.robot.get_qpos = lambda target=False: (
+            (_ for _ in ()).throw(RuntimeError("native target unavailable"))
+            if target
+            else probe.context.robot.qpos
+        )
+    elif invalid == "missing_native_velocity":
+        probe.robot.get_qvel = lambda target=False: (_ for _ in ()).throw(
+            RuntimeError("native velocity unavailable")
+        )
+    elif invalid == "arm_start":
+        positions = plan.joint_trajectory.positions.clone()
+        positions[:, 0, 0] = 0.01
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions, env_ids=probe.context.env_ids, step_dt=0.04
+        )
+        plan = replace(
+            plan,
+            joint_trajectory=trajectory,
+            commands=action._joint_command_sequence(
+                request, trajectory, active_mask=torch.tensor([True])
+            ),
+        )
+    before_positions = plan.joint_trajectory.positions.clone()
+    certificate = held_path.inspect(action, request, probe.context, plan)
+    assert not certificate["valid"]
+    if invalid == "arm_start":
+        assert "zero-time arm start" in certificate["commands"]["unavailable"]
+    assert torch.equal(plan.joint_trajectory.positions, before_positions)
+
+
+def test_v2_retained_command_records_high_native_velocity_without_changing_commands(
+    retained_hand_inputs,
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    probe.context.robot.qvel[:, 2] = 0.101
+    positions = fixture.plan.joint_trajectory.positions.clone()
+    velocity = probe.context.robot.qvel.clone()
+    legacy = _module().inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        fixture.plan,
+        retention_source=fixture.source,
+    )
+    assert legacy["reason"] == "retained_actual_hand_velocity_rejected"
+    assert "actual_hand_velocity_policy" not in legacy["retained_hand_boundary"]
+    assert "actual_hand_velocity_within_limits" not in legacy["retained_hand_boundary"]
+    certificate = _module().inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        fixture.plan,
+        retention_source={**fixture.source, "command_continuity_revision": 2},
+        _contract_revision=2,
+    )
+    assert certificate["valid"]
+    proof = certificate["retained_hand_boundary"]
+    assert proof["accepted"]
+    assert proof["actual_hand_velocity_policy"] == "diagnostic_only"
+    assert proof["actual_hand_velocity_within_limits"] is False
+    assert proof["actual_qvel"] == [[pytest.approx(0.101)]]
+    assert proof["velocity_limits"] == [[pytest.approx(0.1)]]
+    assert torch.equal(probe.context.robot.qvel, velocity)
+    assert torch.equal(fixture.plan.joint_trajectory.positions, positions)
+
+
+@pytest.mark.parametrize("case", ["complete", "missing_source", "missing_target"])
+def test_v2_requires_full_authority_even_when_strict_command_boundary_is_valid(
+    monkeypatch, retained_hand_inputs, case
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    probe.context.robot.qpos[:, 2] = fixture.desired[:, 2]
+    assert _module()._inspect_pick_plan(
+        probe.robot, probe.request, probe.context, fixture.plan
+    )["valid"]
+    source = {**fixture.source, "command_continuity_revision": 2}
+    if case == "missing_source":
+        source = None
+    elif case == "missing_target":
+        probe.robot.get_qpos = lambda target=False: (
+            (_ for _ in ()).throw(RuntimeError("native target unavailable"))
+            if target
+            else probe.context.robot.qpos
+        )
+    certificate = _module().inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        fixture.plan,
+        retention_source=source,
+        _contract_revision=2,
+    )
+    assert certificate["valid"] is (case == "complete")
+    if case == "complete":
+        assert certificate["retained_hand_boundary"]["accepted"]
+
+
+@pytest.mark.parametrize("revision", [0, 3, True, 2.0, "2", None])
+def test_unknown_command_continuity_revision_fails_closed(
+    retained_hand_inputs, revision
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    certificate = _module().inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        fixture.plan,
+        retention_source={**fixture.source, "command_continuity_revision": 2},
+        _contract_revision=revision,
+    )
+    assert not certificate["valid"]
+
+
+@pytest.mark.parametrize("revision", [None, 1, True, 2.0, "2"])
+def test_v2_refuses_missing_or_inexact_source_revision(retained_hand_inputs, revision):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    source = dict(fixture.source)
+    if revision is not None:
+        source["command_continuity_revision"] = revision
+    certificate = _module().inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        fixture.plan,
+        retention_source=source,
+        _contract_revision=2,
+    )
+    assert not certificate["valid"]
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "native_target",
+        "declared_target",
+        "target_velocity",
+        "missing_current_position",
+        "missing_current_velocity",
+        "missing_target_position",
+        "missing_target_velocity",
+        "nonfinite_current_position",
+        "nonfinite_current_velocity",
+        "nonfinite_target_position",
+        "nonfinite_target_velocity",
+        "source_object",
+        "source_resource",
+        "observed_snapshot_mismatch",
+        "snapshot_changed",
+        "arm_start",
+        "trajectory_velocity",
+        "command_velocity",
+        "start_collision",
+    ],
+)
+def test_v2_continuity_keeps_native_identity_snapshot_and_command_safety_gates(
+    monkeypatch, retained_hand_inputs, invalid
+):
+    fixture = retained_hand_inputs
+    probe, recovery = fixture.probe, _module()
+    source = {**fixture.source, "command_continuity_revision": 2}
+    plan = fixture.plan
+    if invalid == "native_target":
+        fixture.desired[:, 2] += 1e-6
+    elif invalid == "declared_target":
+        probe.request.binding.endpoint("primary", "grasp").joint_positions = (
+            lambda *a, **kw: torch.tensor([[0.021]])
+        )
+    elif invalid == "target_velocity":
+        fixture.target_velocity[:, 2] = 0.01
+    elif invalid.startswith("missing_"):
+        target_channel = "target" in invalid
+        velocity_channel = "velocity" in invalid
+        attribute = "get_qvel" if velocity_channel else "get_qpos"
+        reader = getattr(probe.robot, attribute)
+
+        def missing(target=False):
+            if target is target_channel:
+                raise RuntimeError("native channel unavailable")
+            return reader(target=target)
+
+        setattr(probe.robot, attribute, missing)
+    elif invalid.startswith("nonfinite_"):
+        channel = {
+            "nonfinite_current_position": probe.context.robot.qpos,
+            "nonfinite_current_velocity": probe.context.robot.qvel,
+            "nonfinite_target_position": fixture.desired,
+            "nonfinite_target_velocity": fixture.target_velocity,
+        }[invalid]
+        channel[:, 2] = torch.nan
+    elif invalid in {"source_object", "source_resource"}:
+        source["entity_id" if invalid == "source_object" else "resource_id"] = "other"
+    elif invalid == "observed_snapshot_mismatch":
+        probe.robot.get_qpos = lambda target=False: (
+            fixture.desired if target else probe.context.robot.qpos + 0.01
+        )
+    elif invalid == "snapshot_changed":
+        inspect = recovery._inspect_pick_plan
+
+        def mutate_after_check(*args, **kwargs):
+            result = inspect(*args, **kwargs)
+            if kwargs.get("_initial_command_qpos") is not None:
+                fixture.desired[:, 2] += 1e-6
+            return result
+
+        monkeypatch.setattr(recovery, "_inspect_pick_plan", mutate_after_check)
+    elif invalid in {"arm_start", "trajectory_velocity"}:
+        positions = plan.joint_trajectory.positions.clone()
+        positions[:, 0 if invalid == "arm_start" else 1, 0] = (
+            0.01 if invalid == "arm_start" else 0.2
+        )
+        trajectory = TimedTrajectory.from_uniform_step(
+            positions, env_ids=probe.context.env_ids, step_dt=0.04
+        )
+        plan = replace(
+            plan,
+            joint_trajectory=trajectory,
+            commands=probe.action._joint_command_sequence(
+                probe.request, trajectory, active_mask=torch.tensor([True])
+            ),
+        )
+    elif invalid == "command_velocity":
+        velocities = torch.zeros_like(plan.joint_trajectory.positions)
+        velocities[:, 0, :2] = 2.0
+        trajectory = replace(plan.joint_trajectory, velocities=velocities)
+        plan = replace(
+            plan,
+            joint_trajectory=trajectory,
+            commands=probe.action._joint_command_sequence(
+                probe.request, trajectory, active_mask=torch.tensor([True])
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            articulation_collision, "check_robot_motion", lambda *args: {"valid": False}
+        )
+    certificate = recovery.inspect_staging_plan(
+        probe.robot,
+        probe.request,
+        probe.context,
+        plan,
+        retention_source=source,
+        _contract_revision=2,
+    )
+    assert not certificate["valid"]
+
+
+def test_ordinary_transport_selects_v2_and_keeps_high_native_velocity_as_diagnostic(
+    monkeypatch, retained_hand_inputs
+):
+    fixture = retained_hand_inputs
+    probe = fixture.probe
+    probe.context.robot.qvel[:, 2] = 0.101
+    source = {**fixture.source, "command_continuity_revision": 2}
+    action, request, held_path = _ordinary_held_command_action(
+        fixture, monkeypatch, sources={"program/ordinary_transport:0": source}
+    )
+    positions, velocity = (
+        fixture.plan.joint_trajectory.positions.clone(),
+        probe.context.robot.qvel.clone(),
+    )
+    monkeypatch.setattr(MoveHeldObject, "_plan", lambda *args: fixture.plan)
+    monkeypatch.setattr(
+        held_path,
+        "_cartesian_plan",
+        lambda *args: pytest.fail("v2 continuity replanned"),
+    )
+    result = action._plan(request, probe.context)
+    assert result.plan_success.all()
+    assert result.joint_trajectory is fixture.plan.joint_trajectory
+    assert result.commands is fixture.plan.commands
+    proof = result.diagnostics.metadata["gen_sim_held_path"]["original"]["commands"][
+        "retained_hand_boundary"
+    ]
+    assert proof["actual_hand_velocity_within_limits"] is False
+    assert proof["actual_qvel"] == [[pytest.approx(0.101)]]
+    assert proof["actual_hand_velocity_policy"] == "diagnostic_only"
+    assert not action.staging_contract.invocation_ids
+    assert torch.equal(fixture.plan.joint_trajectory.positions, positions)
+    assert torch.equal(probe.context.robot.qvel, velocity)
+
+
+def test_ordinary_transport_cannot_borrow_another_invocations_v2_authority(
+    monkeypatch, retained_hand_inputs
+):
+    fixture = retained_hand_inputs
+    action, request, held_path = _ordinary_held_command_action(
+        fixture,
+        monkeypatch,
+        sources={
+            "program/other_transport:0": {
+                **fixture.source,
+                "command_continuity_revision": 2,
+            }
+        },
+    )
+    certificate = held_path.inspect(
+        action, request, fixture.probe.context, fixture.plan
+    )
+    assert not certificate["valid"]
+    assert "retained_hand_boundary" not in certificate["commands"]
 
 
 @pytest.mark.parametrize(

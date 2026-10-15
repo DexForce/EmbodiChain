@@ -21,6 +21,8 @@ from __future__ import annotations
 from copy import deepcopy
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 import torch
@@ -1417,9 +1419,20 @@ class GenSimMoveHeldObject(MoveHeldObject):
     binding_contract = MoveHeldObject.binding_contract
     held_path_scene_vertices: dict[str, torch.Tensor] | None = None
 
-    def __init__(self, *, staging_contract: StagingContract | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        staging_contract: StagingContract | None = None,
+        held_command_sources: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         super().__init__()
         self.staging_contract = staging_contract or StagingContract.empty()
+        self.held_command_sources = MappingProxyType(
+            {
+                identity: MappingProxyType(dict(source))
+                for identity, source in (held_command_sources or {}).items()
+            }
+        )
 
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_transport_planning", False) is True:

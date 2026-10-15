@@ -35,6 +35,7 @@ from embodichain.utils import logger
 __all__: list[str] = []
 
 INVOCATION_POLICY_REVISION = 6
+POUR_RETURN_POLICY_REVISION = 1
 
 
 def motion_sample_declarations(
@@ -167,6 +168,46 @@ def bind_pour_receivers(
     return tuple((ids[name], receiver) for name, receiver in declarations.items())
 
 
+def pour_return_call_declarations(graph: dict[str, Any]) -> list[str]:
+    """Select the first absolute Place after this recipe's own object's Pour."""
+    pending: set[tuple[str, str]] = set()
+    result = []
+    for node in graph["nodes"]:
+        if node["task_type"] != "E3":
+            continue
+        call = node["call"]
+        if call.get("call_id") == "simulation.pour":
+            pending.add((node["task_instance_id"], call["arguments"]["object"]))
+        elif call["kind"] == "place" and call.get("at") is not None:
+            key = (node["task_instance_id"], call["object"])
+            if key in pending:
+                result.append(node["id"])
+                pending.remove(key)
+    return result
+
+
+def bind_pour_return_calls(declarations: object, program: Any) -> tuple[str, ...]:
+    """Bind the declared returns to exact built-in absolute Place invocations."""
+    from embodichain.lab.task_program.semantics.calls import Place
+
+    if (
+        type(declarations) is not list
+        or any(type(name) is not str for name in declarations)
+        or len(set(declarations)) != len(declarations)
+    ):
+        raise ValueError("GenSim pour_return_calls must be unique Place segment names.")
+    ids = _invocation_ids(program)
+    calls = {segment.name: segment.calls[0].call for segment in program.iter_segments()}
+    if any(
+        name not in calls or type(calls[name]) is not Place or calls[name].at is None
+        for name in declarations
+    ):
+        raise ValueError(
+            "Pour return policies require existing built-in absolute Place calls."
+        )
+    return tuple(ids[name] for name in declarations)
+
+
 def bind_motion_samples(
     declarations: object, program: Any
 ) -> tuple[tuple[str, int], ...]:
@@ -197,6 +238,7 @@ class GenSimActionEngine(AtomicActionEngine):
         motion_samples: tuple[tuple[str, int], ...] = (),
         cartesian_calls: tuple[str, ...] = (),
         articulation_calls: tuple[tuple[str, str], ...] = (),
+        pour_return_calls: tuple[str, ...] = (),
         **kwargs: Any,
     ) -> None:
         self._motion_samples = dict(motion_samples)
@@ -206,6 +248,16 @@ class GenSimActionEngine(AtomicActionEngine):
             raise ValueError("Cartesian planning scopes require invocation IDs.")
         self._cartesian_calls = frozenset(cartesian_calls)
         self._articulation_calls = dict(articulation_calls)
+        if (
+            type(pour_return_calls) is not tuple
+            or any(
+                type(identity) is not str or not identity
+                for identity in pour_return_calls
+            )
+            or len(set(pour_return_calls)) != len(pour_return_calls)
+        ):
+            raise ValueError("Pour return scopes require unique invocation IDs.")
+        self._pour_return_calls = frozenset(pour_return_calls)
         self._clearance_requests: dict[str, Any] = {}
         self._clearance_parks: frozenset[str] = frozenset()
         self._park_recovery_previews: dict[str, Any] = {}
@@ -341,6 +393,20 @@ class GenSimActionEngine(AtomicActionEngine):
         )
 
     def _resolve(self, invocation: ActionInvocation) -> ResolvedActionRequest:
+        if invocation.invocation_id in self._pour_return_calls:
+            from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+            if (
+                invocation.skill_id != "place"
+                or type(invocation.skill_options) is not PlaceOptions
+            ):
+                raise ValueError(
+                    "Pour return requires the exact Place options contract."
+                )
+            invocation = replace(
+                invocation,
+                skill_options=replace(invocation.skill_options, lift_height=0.12),
+            )
         if getattr(
             invocation, "skill_id", None
         ) == "twist" and "gen_sim_twist_operation_id" in getattr(

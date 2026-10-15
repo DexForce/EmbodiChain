@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -137,6 +137,7 @@ def test_cartesian_planning_scope_restores_on_nested_failure(monkeypatch):
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
     engine = object.__new__(GenSimActionEngine)
     engine._cartesian_calls = frozenset({"special", "fails"})
+    engine._pour_return_calls = frozenset()
     engine._articulation_calls = {}
 
     def request(name):
@@ -213,6 +214,7 @@ def test_velocity_failure_retries_only_this_gensim_invocation_with_denser_sample
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"task/segment:0": 140}
+    engine._pour_return_calls = frozenset()
     engine._cartesian_calls = frozenset()
     engine._articulation_calls = {}
     engine._planning_services = SimpleNamespace(robot=robot)
@@ -272,6 +274,7 @@ def test_valid_gensim_plan_does_not_pay_for_velocity_retry(monkeypatch, tmp_path
     monkeypatch.setattr(AtomicActionEngine, "_plan_request", plan)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"task/segment:0": 140}
+    engine._pour_return_calls = frozenset()
     engine._cartesian_calls = frozenset()
     engine._articulation_calls = {}
     engine._planning_services = SimpleNamespace(robot=robot)
@@ -327,6 +330,7 @@ def test_resolution_owns_policies_and_cannot_leak_between_same_skill_calls(monke
     monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"first": 140, "second": 260}
+    engine._pour_return_calls = frozenset()
     base = MotionPolicy(sample_count=140)
     first = Invocation("first", base)
     second = Invocation("second", base)
@@ -356,11 +360,171 @@ def test_resolution_failure_does_not_mutate_another_calls_policy(monkeypatch):
     monkeypatch.setattr(AtomicActionEngine, "_resolve", resolve)
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {"failed": 260, "next": 140}
+    engine._pour_return_calls = frozenset()
     policy = MotionPolicy(sample_count=140)
     with pytest.raises(RuntimeError, match="injected"):
         engine._resolve(Invocation("failed", policy))
     assert engine._resolve(Invocation("next", policy)).motion_policy.sample_count == 140
     assert policy.sample_count == 140
+
+
+def test_pour_return_declarations_follow_only_the_matching_prior_pour():
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        pour_return_call_declarations,
+    )
+
+    def entry(name, kind, *, family="E3", group="pour", object_id="vessel"):
+        call = (
+            {
+                "kind": "registered",
+                "call_id": "simulation.pour",
+                "arguments": {"object": object_id},
+            }
+            if kind == "pour"
+            else {
+                "kind": "place",
+                "object": object_id,
+                "at": {"kind": "target_ref", "target": "home"},
+            }
+        )
+        return {
+            "id": name,
+            "task_type": family,
+            "task_instance_id": group,
+            "call": call,
+        }
+
+    graph = {
+        "nodes": [
+            entry("before", "place"),
+            entry("pour", "pour"),
+            entry("ordinary", "place", family="E1"),
+            entry("other_group", "place", group="other"),
+            entry("other_object", "place", object_id="cup"),
+            entry("return", "place"),
+            entry("later", "place"),
+            entry("second_pour", "pour"),
+            entry("second_return", "place"),
+        ]
+    }
+    assert pour_return_call_declarations(graph) == ["return", "second_return"]
+
+
+def _pour_scope_program(call=None):
+    from embodichain.lab.task_program.semantics.calls import Place, SemanticPose
+    from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+
+    if call is None:
+        call = Place(
+            object=SceneObjectRef("vessel"), at=SemanticPose((0, 0, 1), (0, 0, 0, 1))
+        )
+    segment = SimpleNamespace(
+        name="return",
+        segment_id="segment-return",
+        calls=(SimpleNamespace(segment_call_index=0, call=call),),
+    )
+    return SimpleNamespace(program_id="task", iter_segments=lambda: iter((segment,)))
+
+
+@pytest.mark.parametrize(
+    "declaration", [None, {}, (), [True], ["return", "return"], ["missing"]]
+)
+def test_pour_return_binding_rejects_invalid_or_unknown_declarations(declaration):
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+
+    with pytest.raises(ValueError):
+        bind_pour_return_calls(declaration, _pour_scope_program())
+
+
+@pytest.mark.parametrize("kind", ["pick", "registered", "inside"])
+def test_pour_return_binding_requires_exact_builtin_absolute_place(kind):
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+    from embodichain.lab.task_program.semantics.calls import (
+        Pick,
+        Place,
+        RegisteredSemanticCall,
+    )
+    from embodichain.lab.task_program.semantics.scene import SceneObjectRef
+
+    obj = SceneObjectRef("vessel")
+    call = (
+        Pick(object=obj)
+        if kind == "pick"
+        else (
+            RegisteredSemanticCall(call_id="simulation.place_relative")
+            if kind == "registered"
+            else Place(object=obj, inside=SceneObjectRef("tray"))
+        )
+    )
+    with pytest.raises(ValueError, match="Place"):
+        bind_pour_return_calls(["return"], _pour_scope_program(call))
+
+
+def test_pour_return_binding_uses_canonical_invocation_identity():
+    from embodichain.gen_sim.task_engine._task_program.invocation_policy import (
+        bind_pour_return_calls,
+    )
+
+    assert bind_pour_return_calls(["return"], _pour_scope_program()) == (
+        "task/segment-return:0",
+    )
+    assert bind_pour_return_calls([], _pour_scope_program()) == ()
+
+
+@pytest.mark.parametrize("legacy_height", [0.05, 0.12])
+def test_pour_return_resolution_clones_only_the_selected_place_options(
+    monkeypatch, legacy_height
+):
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+    @dataclass(frozen=True)
+    class Invocation:
+        invocation_id: str
+        skill_id: str
+        skill_options: PlaceOptions
+        motion_policy: MotionPolicy
+        goal: object
+
+    monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._pour_return_calls = frozenset({"return"})
+    options = PlaceOptions(lift_height=legacy_height)
+    policy, goal = MotionPolicy(sample_count=140), object()
+    ordinary = Invocation("ordinary", "place", options, policy, goal)
+    returning = replace(ordinary, invocation_id="return")
+    result = engine._resolve(returning)
+    assert result.skill_options.lift_height == 0.12
+    assert result.skill_options is not options
+    assert asdict(replace(result.skill_options, lift_height=legacy_height)) == asdict(
+        options
+    )
+    assert result.goal is goal and result.motion_policy is policy
+    assert result.invocation_id == returning.invocation_id
+    assert engine._resolve(ordinary) is ordinary
+    assert options.lift_height == legacy_height
+    engine._pour_return_calls = frozenset()
+    assert engine._resolve(returning) is returning
+
+
+@pytest.mark.parametrize("skill,options", [("pick_up", None), ("place", None)])
+def test_pour_return_resolution_rejects_foreign_skill_or_missing_options(
+    monkeypatch, skill, options
+):
+    monkeypatch.setattr(AtomicActionEngine, "_resolve", lambda self, value: value)
+    engine = object.__new__(GenSimActionEngine)
+    engine._motion_samples = {}
+    engine._pour_return_calls = frozenset({"return"})
+    with pytest.raises(ValueError, match="Place"):
+        engine._resolve(
+            SimpleNamespace(
+                invocation_id="return", skill_id=skill, skill_options=options
+            )
+        )
 
 
 def test_two_pours_of_the_same_object_keep_distinct_receiver_bindings():
@@ -474,6 +638,7 @@ def pick_transform_inputs(monkeypatch):
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {}
     engine._cartesian_calls = frozenset()
+    engine._pour_return_calls = frozenset()
     engine._articulation_calls = {}
     engine._actions = {"pick_up": actions.GenSimPickUp()}
     engine._planning_services = SimpleNamespace(

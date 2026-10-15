@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 import math
 from pathlib import Path
 
@@ -1848,6 +1848,218 @@ def test_repeated_inside_pair_retains_existing_affordance_rejection(
         generate_task_program_bundle(
             graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
         )
+
+
+def _append_pour_suffix(graph: dict) -> None:
+    group = "pour_suffix"
+    graph["targets"].update(
+        {
+            "pour_stage": {
+                "kind": "cyclic_pose",
+                "values": [
+                    {"position": [0.0, 0.0, 1.0], "quaternion_xyzw": [0, 0, 0, 1]}
+                ],
+            },
+            "pour_home": {
+                "kind": "cyclic_pose",
+                "values": [
+                    {
+                        "position": [0.1, -0.2, 0.85],
+                        "quaternion_xyzw": _initial_quaternion_xyzw([90, 0, 0]),
+                    }
+                ],
+            },
+        }
+    )
+    calls = [
+        ("pour_pick", {"kind": "pick", "object": "other"}),
+        (
+            "pour_stage",
+            {
+                "kind": "registered",
+                "call_id": "simulation.move_held_object",
+                "arguments": {
+                    "object": "other",
+                    "target": "pour_stage",
+                    "reference": "tray",
+                },
+            },
+        ),
+        (
+            "pour",
+            {
+                "kind": "registered",
+                "call_id": "simulation.pour",
+                "arguments": {"object": "other"},
+            },
+        ),
+        (
+            "pour_return",
+            {
+                "kind": "place",
+                "object": "other",
+                "at": {"kind": "target_ref", "target": "pour_home"},
+            },
+        ),
+        (
+            "pour_park",
+            {"kind": "registered", "call_id": "simulation.park", "arguments": {}},
+        ),
+    ]
+    previous = graph["nodes"][-1]["id"]
+    for identity, call in calls:
+        graph["nodes"].append(
+            {
+                "id": identity,
+                "task_instance_id": group,
+                "task_type": "E3",
+                "role": "cleanup" if identity == "pour_park" else "primary",
+                "depends_on": [previous],
+                "call": {**call, "resources": {"primary": "left"}},
+            }
+        )
+        previous = identity
+    graph["task_groups"].append(
+        {
+            "id": group,
+            "task_type": "E3",
+            "node_ids": [identity for identity, _ in calls],
+            "depends_on": [graph["task_groups"][-1]["id"]],
+            "success": {"kind": "call_completed"},
+        }
+    )
+
+
+def test_unrelated_pour_suffix_preserves_ordinary_typed_place_options(tmp_path):
+    from embodichain.lab.sim.atomic_actions.primitives.place import PlaceOptions
+
+    scene, embodiment, graph = _inside_orientation_case(tmp_path)
+    original = deepcopy(graph)
+
+    def options(value):
+        payload = _integration_payload(
+            validate_semantic_task_graph(value),
+            scene,
+            program_id="pour_scope",
+            scene_contract="pour_scope_scene",
+            embodiment=embodiment,
+        )["profile"]["action_options"]["place"]
+        return PlaceOptions(
+            **{key: value for key, value in payload.items() if key != "kind"}
+        )
+
+    before = options(graph)
+    _append_pour_suffix(graph)
+    after = options(graph)
+    assert graph["nodes"][: len(original["nodes"])] == original["nodes"]
+    assert before.lift_height == after.lift_height == 0.05
+    assert asdict(before) == asdict(after)
+
+
+def test_pour_return_scope_is_bound_without_replacing_builtin_place(tmp_path):
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+
+    scene, _, graph = _inside_orientation_case(tmp_path)
+    _, ordinary = generate_task_program_bundle(
+        graph, scene, tmp_path / "ordinary", robot_profile="dual_franka"
+    )
+    assert "pour_return_calls" not in load_config(
+        ordinary.program.parent / "constraints.json"
+    )
+    _append_pour_suffix(graph)
+    _, mixed = generate_task_program_bundle(
+        graph, scene, tmp_path / "mixed", robot_profile="dual_franka"
+    )
+    constraints = load_config(mixed.program.parent / "constraints.json")
+    assert constraints["pour_return_calls"] == ["pour_return"]
+    items = {
+        item["name"]: item for item in load_config(mixed.program)["program"]["items"]
+    }
+    restored = items["pour_return"]
+    assert restored["steps"]["call"]["kind"] == "place"
+    assert restored["steps"]["call"]["at"]["target"] == "pour_home"
+    assert restored["validators"][0]["position_tolerance"] == 0.06
+    assert items["pour_park"]["validators"] == restored["validators"]
+    deployment = load_deployment(
+        task_program=load_config(mixed.deployment)["task_program"],
+        skill_profile=load_config(mixed.embodiment)["skill_profile"],
+        base_dir=mixed.deployment.parent,
+    )
+    program_id = load_config(mixed.program)["program_id"]
+    assert deployment.integration.adapter_factory.pour_return_calls == (
+        f"{program_id}/{program_id}:segment:$.program.items[5]:0",
+    )
+
+
+def _held_command_bundle(tmp_path):
+    scene, _, graph = _inside_orientation_case(tmp_path)
+    _append_pour_suffix(graph)
+    _, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "continuity", robot_profile="dual_franka"
+    )
+    return paths, {
+        "task_program": load_config(paths.deployment)["task_program"],
+        "skill_profile": load_config(paths.embodiment)["skill_profile"],
+        "base_dir": paths.deployment.parent,
+    }
+
+
+def test_generated_held_commands_explicitly_select_continuity_v2(tmp_path):
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+
+    paths, arguments = _held_command_bundle(tmp_path)
+    payload = load_config(paths.program.parent / "constraints.json")
+    assert payload["held_command_revision"] == 2
+    factory = load_deployment(**arguments).integration.adapter_factory
+    assert dict(factory.held_command_sources)
+    assert all(
+        source["command_continuity_revision"] == 2
+        for _, source in factory.held_command_sources
+    )
+    assert not factory.staging_contract.invocation_ids
+
+
+@pytest.mark.parametrize("revision", [None, 1, 2])
+def test_held_command_bundle_revision_is_not_a_global_default(
+    tmp_path, monkeypatch, revision
+):
+    from embodichain.gen_sim.task_engine._task_program import assembly
+
+    paths, arguments = _held_command_bundle(tmp_path)
+    path = paths.program.parent / "constraints.json"
+    payload = load_config(path)
+    if revision is None:
+        payload.pop("held_command_revision", None)
+    else:
+        payload["held_command_revision"] = revision
+    save_config(path, payload)
+    frozen = path.read_bytes()
+    before = assembly.load_deployment(**arguments)
+    # Old loaders used this module global to reinterpret existing bundles.
+    monkeypatch.setattr(assembly, "HELD_COMMAND_REVISION", 999, raising=False)
+    after = assembly.load_deployment(**arguments)
+    assert (
+        before.integration.integration_fingerprint
+        == after.integration.integration_fingerprint
+    )
+    assert path.read_bytes() == frozen
+    assert all(
+        source.get("command_continuity_revision", 1) == (revision or 1)
+        for _, source in after.integration.adapter_factory.held_command_sources
+    )
+
+
+@pytest.mark.parametrize("revision", [None, True, False, 0, 3, "2", 2.0])
+def test_held_command_loader_rejects_explicit_invalid_revision(tmp_path, revision):
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+
+    paths, arguments = _held_command_bundle(tmp_path)
+    path = paths.program.parent / "constraints.json"
+    payload = load_config(path)
+    payload["held_command_revision"] = revision
+    save_config(path, payload)
+    with pytest.raises(ValueError, match="revision"):
+        load_deployment(**arguments)
 
 
 @pytest.mark.parametrize(

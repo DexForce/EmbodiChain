@@ -169,14 +169,19 @@ def inspect(action: Any, request: Any, context: Any, plan: Any) -> dict[str, Any
     payload = inspect_payload(action, request, context, plan.joint_trajectory.positions)
     if not payload["valid"]:
         return payload
+    source = getattr(action, "held_command_sources", {}).get(request.invocation_id)
+    revision = 1
+    if source is not None:
+        revision = source.get("command_continuity_revision", 1)
+    else:
+        source = action.staging_contract.retention_source(request.invocation_id)
     commands = inspect_staging_plan(
         action.robot,
         request,
         context,
         plan,
-        retention_source=action.staging_contract.retention_source(
-            request.invocation_id
-        ),
+        retention_source=source,
+        _contract_revision=revision,
     )
     return {**payload, "valid": commands["valid"], "commands": commands}
 

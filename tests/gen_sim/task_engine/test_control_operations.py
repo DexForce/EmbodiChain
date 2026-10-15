@@ -518,9 +518,11 @@ def test_control_resolver_preserves_caller_timeout_and_thresholds(
         goal: object
         motion_policy: object
         recovery_policy: object
+        invocation_id: str | None = None
 
     engine = object.__new__(GenSimActionEngine)
     engine._motion_samples = {}
+    engine._pour_return_calls = frozenset()
     monkeypatch.setattr(
         AtomicActionEngine, "_resolve", lambda self, invocation: invocation
     )
