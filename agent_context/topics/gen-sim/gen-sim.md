@@ -94,6 +94,11 @@ milestone events. New-contract success requires a satisfied TaskSpec evaluation;
 raw program success remains in `runtime_result.program_success`. Unsupported
 observers, incomplete `all` selector universes and sparse temporal/invariant
 windows remain unavailable, not certified. Historical reports are not rewritten.
+Fresh runs also publish `task_group_results.json` beside the unchanged execution
+report schema. It distinguishes failed entered calls, blocked descendants and
+missing qualification; completed commands without a verified historical E
+milestone or complete TaskSpec remain unverified. The summary is read-only and
+does not change execution, state commits, or old receipts.
 The isolated bundle runner uses one PyTorch intraop thread during a single CPU
 episode or initial planning probe, restoring the caller's setting on exit.
 Within that scope, GenSim Pick batches of at least 100 CPU PyTorch IK candidates

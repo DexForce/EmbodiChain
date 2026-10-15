@@ -485,6 +485,35 @@ def execute_bundle(
             row["terminal_reason"] = "initial_plan_rejected"
     write_execution_report(output, report)
     try:
+        from ._task_group_results import task_group_results
+
+        groups = task_group_results(graph, result_metadata, num_envs=len(row_success))
+        for env_id, values in enumerate(groups):
+            for group_id, group in values.items():
+                if (
+                    group["execution_status"] == "passed"
+                    and report["environments"][env_id]["semantic_success"].get(group_id)
+                    is False
+                ):
+                    group.update(status="failed", reason="group_postcondition_failed")
+        (output / "task_group_results.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "gen_sim_task_group_results/v1",
+                    "source": "execution_report.json",
+                    "environments": groups,
+                },
+                indent=2,
+                allow_nan=False,
+            ),
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as evidence_error:
+        print(
+            f"[Task Engine] E-group summary unavailable: {evidence_error}",
+            file=sys.stderr,
+        )
+    try:
         (output / "recovery_summary.json").write_text(
             json.dumps(_recovery_summary(report), indent=2, allow_nan=False) + "\n",
             encoding="utf-8",

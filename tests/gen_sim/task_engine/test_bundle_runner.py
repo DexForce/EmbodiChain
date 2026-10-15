@@ -465,9 +465,19 @@ def test_initial_capture_counts_sequential_workflows_not_segments():
         (False, "success", "grip_nonfinite"),
     ],
 )
+@pytest.mark.parametrize("e_results_write_fails", [False, True])
 def test_bundle_plans_initial_call_once(
-    tmp_path, monkeypatch, probe_only, outcome, evidence_mode
+    tmp_path, monkeypatch, probe_only, outcome, evidence_mode, e_results_write_fails
 ):
+    if e_results_write_fails:
+        original_write_text = Path.write_text
+
+        def write_text(path, *args, **kwargs):
+            if path.name == "task_group_results.json":
+                raise OSError("fixture E-group sidecar unavailable")
+            return original_write_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", write_text)
     import gymnasium
     from dataclasses import dataclass
     from embodichain.lab.gym.envs import demo
@@ -758,6 +768,22 @@ def test_bundle_plans_initial_call_once(
         execution_report = json.loads(
             (tmp_path / "execution/execution_report.json").read_text()
         )
+        if not e_results_write_fails:
+            e_results = json.loads(
+                (tmp_path / "execution/task_group_results.json").read_text()
+            )
+            assert e_results["schema_version"] == "gen_sim_task_group_results/v1"
+            assert e_results["source"] == "execution_report.json"
+            assert len(e_results["environments"]) == 1
+            assert e_results["environments"][0]["step"]["status"] == (
+                "failed"
+                if outcome in {"planning_failure", "velocity_failure"}
+                else "unverified"
+            )
+        else:
+            assert not (tmp_path / "execution/task_group_results.json").exists()
+            assert (tmp_path / "execution/recovery_summary.json").is_file()
+        assert "task_groups" not in execution_report["environments"][0]
         assert execution_report["status"] == (
             "succeeded"
             if outcome == "success"
