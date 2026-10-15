@@ -36,20 +36,42 @@ def _poses(axis: int, values: list[float]) -> np.ndarray:
     return poses
 
 
-def _screen(body_z: list[float], target_rest: float = 0.001) -> ClosingContactScreen:
+def _screen(
+    body_z: list[float], target_rest: float = 0.001, *, revision: int = 1
+) -> ClosingContactScreen:
     body = trimesh.creation.box((0.01, 0.01, 0.01))
     pad = trimesh.creation.box((0.004, 0.02, 0.02))
     parts = (
-        ContactPart("knuckle", (body,), _poses(2, body_z), 0.001, False),
         ContactPart(
-            "negative_pad", (pad,), _poses(0, [-0.02, -0.013, -0.01]), 0.001, True
+            "knuckle",
+            (body,),
+            _poses(2, body_z),
+            0.001,
+            False,
+            **({"contact_offset": 0.006} if revision == 2 else {}),
         ),
         ContactPart(
-            "positive_pad", (pad,), _poses(0, [0.02, 0.013, 0.01]), 0.001, True
+            "negative_pad",
+            (pad,),
+            _poses(0, [-0.02, -0.013, -0.01]),
+            0.001,
+            True,
+            **({"contact_offset": 0.006} if revision == 2 else {}),
+        ),
+        ContactPart(
+            "positive_pad",
+            (pad,),
+            _poses(0, [0.02, 0.013, 0.01]),
+            0.001,
+            True,
+            **({"contact_offset": 0.006} if revision == 2 else {}),
         ),
     )
     return ClosingContactScreen(
-        parts, (trimesh.creation.box((0.02, 0.02, 0.02)),), target_rest
+        parts,
+        (trimesh.creation.box((0.02, 0.02, 0.02)),),
+        target_rest,
+        **({"revision": 2, "target_contact_offset": 0.003} if revision == 2 else {}),
     )
 
 
@@ -72,6 +94,42 @@ def test_nonpenetrating_body_inside_native_rest_envelope_is_rejected() -> None:
 
 def test_threshold_is_actual_pair_offset_not_fixed_two_millimetres() -> None:
     assert _screen([0.01696] * 3, target_rest=0.0005).inspect(np.eye(4))["valid"]
+
+
+def test_contact_envelope_revision_rejects_body_before_bilateral_pad_rest() -> None:
+    assert _screen([0.02] * 3).inspect(np.eye(4))["valid"]
+    result = _screen([0.02] * 3, revision=2).inspect(np.eye(4))
+    assert result["valid"] is False
+    assert result["reason"] == "nonpad_contact_envelope_before_bilateral_pad_rest"
+    assert result["checked_samples"] == 1
+    assert result["native_pair_contact_offset_m"] == pytest.approx(0.009)
+    assert result["minimum_distance_m"] == pytest.approx(0.005)
+
+
+def test_contact_halo_at_first_bilateral_rest_is_not_actual_body_contact() -> None:
+    result = _screen([0.1, 0.02, 0.014], revision=2).inspect(np.eye(4))
+    assert result["valid"] is True
+    assert result["checked_samples"] == 2
+    assert result["potential_nonpad_halo_at_pad_rest_endpoint"] is True
+
+
+def test_actual_body_rest_still_rejects_at_bilateral_endpoint() -> None:
+    result = _screen([0.1, 0.016, 0.014], revision=2).inspect(np.eye(4))
+    assert result["valid"] is False
+    assert result["reason"] == "nonpad_and_pad_order_unresolved_at_sample"
+
+
+@pytest.mark.parametrize("offset", [None, -0.001, 0.0005, float("nan")])
+def test_revision_two_requires_native_contact_offsets(offset: float | None) -> None:
+    legacy = _screen([0.1] * 3)
+    with pytest.raises(ValueError, match="contact offsets"):
+        ClosingContactScreen(
+            legacy.parts,
+            (trimesh.creation.box((0.02, 0.02, 0.02)),),
+            0.001,
+            revision=2,
+            target_contact_offset=offset,
+        )
 
 
 def test_rigid_world_transform_and_pose_batch_do_not_change_result() -> None:
@@ -288,8 +346,9 @@ def test_native_builder_rejects_missing_mimic_command_coverage(
         pick_contact.build_closing_contact_screen(robot, simulation, bindings, request)
 
 
+@pytest.mark.parametrize("revision", [1, 2])
 def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, revision
 ) -> None:
     from embodichain.gen_sim.task_engine._task_program import pick_contact
     from embodichain.utils.math import pose_inv
@@ -320,7 +379,15 @@ def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
                 result[:, index] = tool @ local
         return result
 
-    body = SimpleNamespace(get_rest_offset=lambda: 0.001)
+    contact_reads = []
+
+    def read_contact():
+        contact_reads.append(True)
+        return 0.006
+
+    body = SimpleNamespace(
+        get_rest_offset=lambda: 0.001, get_contact_offset=read_contact
+    )
     native_robot = SimpleNamespace(
         get_name=lambda: "robot",
         arena_name="episode",
@@ -378,8 +445,10 @@ def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
         pick_contact, "_native_meshes", lambda _: (trimesh.creation.box(),)
     )
     screen = pick_contact.build_closing_contact_screen(
-        robot, simulation, bindings, request
+        robot, simulation, bindings, request, revision=revision
     )
+    assert screen.revision == revision
+    assert len(contact_reads) == (len(screen.parts) + 1 if revision == 2 else 0)
     assert screen.identity["native_object_path"] == "episode/physical_payload"
     for part in screen.parts:
         assert np.array_equal(

@@ -122,6 +122,10 @@ rolls and emitted close commands, including after plan transforms; it neither
 changes proposals/RNG nor replaces native acquisition/retention evidence. Both
 markers default to absent for legacy equivalence and are independent of recipe
 composition. Neither discrete screen proves continuous collision freedom.
+`pick_contact_revision=2` additionally rejects nonpad native contact-halo entry
+strictly before the sampled bilateral pad-rest boundary; potential halo overlap
+at that boundary alone does not establish actual contact. Nonpad rest intrusion still
+rejects at the boundary, and runtime bilateral acquisition/holding gates remain.
 Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
 Gradio uses explicit allowed roots and per-session process ownership. A

@@ -241,7 +241,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
-        if self._pick_contact_revision == 1:
+        if self._pick_contact_revision in (1, 2):
             from .pick_contact import build_closing_contact_screen
 
             pick.closing_geometry_factory = (
@@ -250,6 +250,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                     self._simulation,
                     self.task_program_registration.scene_binding,
                     request,
+                    revision=self._pick_contact_revision,
                 )
             )
         engine.register(pick, replace=True)
@@ -655,7 +656,7 @@ def load_deployment(
     support_revision = payload.get("support_contract_revision")
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (
-        type(pick_contact_revision) is not int or pick_contact_revision != 1
+        type(pick_contact_revision) is not int or pick_contact_revision not in (1, 2)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_revision is not None and (

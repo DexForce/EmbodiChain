@@ -328,7 +328,7 @@ def test_strong_bundle_round_trips_through_production_loader(
     assert len(load_config(paths.program)["program"]["items"][-1]["post"]) == 1
 
 
-@pytest.mark.parametrize("revision", [None, 1])
+@pytest.mark.parametrize("revision", [None, 1, 2])
 def test_pick_contact_contract_is_explicit_and_independent_of_support(
     support_scene: PreparedScene, tmp_path: Path, revision: int | None
 ) -> None:
@@ -348,7 +348,7 @@ def test_pick_contact_contract_is_explicit_and_independent_of_support(
     )
 
 
-@pytest.mark.parametrize("revision", [True, 0, 2, "1"])
+@pytest.mark.parametrize("revision", [True, 0, 3, "1"])
 def test_pick_contact_contract_rejects_unknown_revisions(
     support_scene: PreparedScene, tmp_path: Path, revision: object
 ) -> None:

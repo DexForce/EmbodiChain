@@ -41,10 +41,11 @@ class ContactPart:
     tcp_poses: np.ndarray
     rest_offset: float
     pad: bool
+    contact_offset: float | None = None
 
 
 class ClosingContactScreen:
-    """Reject nonpad rest-envelope entry before nominal bilateral pad contact.
+    """Screen native nonpad envelopes before nominal bilateral pad contact.
 
     Only the pre-contact nominal sweep is screened. Continuing the command FK
     after pads touch would simulate penetration that real contact can prevent.
@@ -56,7 +57,12 @@ class ClosingContactScreen:
         parts: tuple[ContactPart, ...],
         target_meshes: tuple[Any, ...],
         target_rest_offset: float,
+        *,
+        revision: int = 1,
+        target_contact_offset: float | None = None,
     ) -> None:
+        if type(revision) is not int or revision not in (1, 2):
+            raise ValueError("Unsupported Pick closing revision")
         if not parts or sum(part.pad for part in parts) != 2 or not target_meshes:
             raise ValueError("Closing screen requires a complete hand and target")
         counts = {len(part.tcp_poses) for part in parts}
@@ -65,6 +71,13 @@ class ClosingContactScreen:
         offsets = [target_rest_offset, *(part.rest_offset for part in parts)]
         if any(not math.isfinite(value) or value < 0 for value in offsets):
             raise ValueError("Native rest offsets must be finite and nonnegative")
+        if revision == 2:
+            contacts = [target_contact_offset, *(part.contact_offset for part in parts)]
+            if any(
+                contact is None or not math.isfinite(contact) or contact < rest
+                for contact, rest in zip(contacts, offsets, strict=True)
+            ):
+                raise ValueError("Native contact offsets must be available and >= rest")
         for part in parts:
             if (
                 part.tcp_poses.shape[1:] != (4, 4)
@@ -75,6 +88,8 @@ class ClosingContactScreen:
                 raise ValueError("Closing link transforms are unavailable")
         self.parts = parts
         self.target_rest_offset = target_rest_offset
+        self.target_contact_offset = target_contact_offset
+        self.revision = revision
         self.steps = min(counts)
         self.target = trimesh.collision.CollisionManager()
         for index, mesh in enumerate(target_meshes):
@@ -109,6 +124,7 @@ class ClosingContactScreen:
         for step in range(self.steps):
             pad_contact = 0
             rejected = None
+            halo = None
             for part, manager in zip(self.parts, self.managers, strict=True):
                 for index in range(len(part.meshes)):
                     manager.set_transform(str(index), pose @ part.tcp_poses[step])
@@ -127,6 +143,16 @@ class ClosingContactScreen:
                             "minimum_distance_m": distance,
                             "native_pair_rest_offset_m": rest,
                         }
+                if self.revision == 2 and not part.pad and halo is None:
+                    contact = part.contact_offset + self.target_contact_offset
+                    if distance <= contact:
+                        halo = {
+                            "valid": False,
+                            "reason": "nonpad_contact_envelope_before_bilateral_pad_rest",
+                            "link": part.name,
+                            "minimum_distance_m": distance,
+                            "native_pair_contact_offset_m": contact,
+                        }
             if rejected is not None:
                 if pad_contact == 2:
                     rejected["reason"] = "nonpad_and_pad_order_unresolved_at_sample"
@@ -134,6 +160,14 @@ class ClosingContactScreen:
                 break
             if pad_contact == 2:
                 outcome = {"valid": True, "reason": "nominal_bilateral_pad_rest_first"}
+                if self.revision == 2:
+                    # Halo overlap alone does not establish actual body contact.
+                    outcome["potential_nonpad_halo_at_pad_rest_endpoint"] = (
+                        halo is not None
+                    )
+                break
+            if halo is not None:
+                outcome = halo
                 break
         outcome["checked_samples"] = step + 1
         outcome["nominal_closing_fraction"] = step / (self.steps - 1)
@@ -163,11 +197,16 @@ class ClosingContactScreen:
 
     def report(self) -> dict[str, Any]:
         return {
-            "revision": 1,
+            "revision": self.revision,
             "identity": dict(self.identity),
             "build_seconds": self.build_seconds,
-            "scope": "discrete_nominal_hand_target_rest_order_not_physical_acquisition",
+            "scope": (
+                "discrete_nominal_hand_target_rest_order_not_physical_acquisition"
+                if self.revision == 1
+                else "discrete_nominal_phase_scoped_contact_order_not_physical_acquisition"
+            ),
             "native_pair_rest_offsets_used": True,
+            "native_pair_contact_offsets_used": self.revision == 2,
             "closing_grid_samples": self.steps,
             "unique_tcp_queries": len(self.cache),
             "query_seconds": self.query_seconds,
@@ -226,7 +265,7 @@ def _native_meshes(body: Any) -> tuple[Any, ...]:
 
 
 def build_closing_contact_screen(
-    robot: Any, simulation: Any, scene_binding: Any, request: Any
+    robot: Any, simulation: Any, scene_binding: Any, request: Any, *, revision: int = 1
 ) -> ClosingContactScreen | None:
     """Capture invocation-owned rigid-target geometry using existing Default APIs.
 
@@ -235,6 +274,7 @@ def build_closing_contact_screen(
         simulation: Current B1 Default simulation, read without stepping.
         scene_binding: Authoritative semantic-to-native rigid identities.
         request: Resolved Pick with explicit motion and complete hand commands.
+        revision: Rest-order only (1), or phase-scoped native contact halo (2).
 
     Returns:
         A fresh candidate screen, or None outside the bound rigid-target scope.
@@ -354,10 +394,17 @@ def build_closing_contact_screen(
                 relative[:, index].detach().cpu().double().numpy(),
                 float(body.get_rest_offset()),
                 name.endswith("finger_pad"),
+                float(body.get_contact_offset()) if revision == 2 else None,
             )
         )
     screen = ClosingContactScreen(
-        tuple(parts), target_meshes, float(target_body.get_rest_offset())
+        tuple(parts),
+        target_meshes,
+        float(target_body.get_rest_offset()),
+        revision=revision,
+        target_contact_offset=(
+            float(target_body.get_contact_offset()) if revision == 2 else None
+        ),
     )
     screen.identity = {
         "object_id": object_id,
