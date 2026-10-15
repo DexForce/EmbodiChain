@@ -797,8 +797,11 @@ finger withdrawal. Park requires that episode's verified withdrawal, released
 button/housing contact, and 40 mm world mesh-AABB separation between every
 finger and target articulation link, not the same axial half-space. This is a
 conservative geometric bound, not exact collision-mesh distance. Rebound does not erase the event; full mechanical
-travel, device activation and self-latching are not claimed. Only the empty symbolic effects
-use projected bookkeeping; these physical post-policies cannot be removed.
+travel, device activation and self-latching are not claimed. New standalone and
+mixed E8/E9 programs use the same authored verified execution policy. Empty
+effect plans project no state claim and need no effect monitor; physical truth
+still belongs to the mandatory contact/release/withdrawal post-policies, which
+cannot be removed. Adding an unrelated E no longer selects a projected policy.
 One environment and unambiguous source-qualified controls are supported. Multiple serial
 press events, mixed recipes and repeat objects retain independent contact/release receipts.
 The old standalone press probe was removed; qualification uses

@@ -565,19 +565,6 @@ def generate_task_program_bundle(
     save_config(paths.embodiment, embodiment_payload)
     drawers = drawer_routes(selected_graph, scene)
     policy_payload = load_config(policy_source)
-    standalone_control = all(
-        g["task_type"] in {"E8", "E9"} for g in selected_graph["task_groups"]
-    )
-    if press_routes and standalone_control:
-        # Press has no symbolic effects. Physical truth is owned by mandatory
-        # contact-event/retreat post-policies, not a vacuous effect projection.
-        policy_payload["policy_id"] = "gen_sim_press_v1"
-        policy_payload["preset_id"] = "gen_sim_press_motion"
-        policy_payload["effect_assurance"] = "projected"
-    if twist_routes and standalone_control:
-        policy_payload["policy_id"] = "gen_sim_twist_v1"
-        policy_payload["preset_id"] = "gen_sim_twist_motion"
-        policy_payload["effect_assurance"] = "projected"
     policy_payload["tracking"]["consecutive_acceptances"] = 5
     policy_payload["tracking"]["terminal_settle_timeout"] = 3.0
     save_config(paths.execution_policy, policy_payload)

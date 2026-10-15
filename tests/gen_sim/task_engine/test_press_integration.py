@@ -711,7 +711,7 @@ def test_qualification_variants_are_declared_and_fingerprinted(
     )
     assert deployment.integration.adapter_factory.press_routes[0].variant == variant
     preset = deployment.integration.registration.robot_profile_binding.presets[0]
-    assert preset.effect_assurance is EffectAssurance.PROJECTED
+    assert preset.effect_assurance is EffectAssurance.VERIFIED
     raw = load_config(paths.scene)
     art = raw["simulation"]["articulation"][0]
     assert ("qpos_limits" in art) is (variant != "original")
