@@ -70,7 +70,10 @@ trajectory time, but the joint planner owns completed-row hold semantics.
 
 Straight-run compression must not accumulate small turns into an unchecked
 shortcut. Blending option compatibility is checked at construction and planning
-entry so mutated options cannot bypass it. Continuous derivative bounds belong
+entry so mutated options cannot bypass it. Exact and near direction reversals
+remain rest points between blended legs; their positions and zero derivatives
+must survive quantity/time sampling and batched padding. A minimum duration
+applies to the complete path, not separately to each leg. Continuous derivative bounds belong
 to `_blend_constraints.py`; inspect algorithm tests instead of duplicating
 thresholds or formulas here.
 

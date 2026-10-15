@@ -54,6 +54,30 @@ gripper schedule. The stationary arm stays fixed during the pickup approach.
 Both hosts use a Robotiq closing target of 0.5 rad to retain the can throughout
 the transfer; the previous 0.4 rad target allowed nominal trajectories to slip.
 
+Press, MoveHeldObject and Pour select
+`components/execution_policies/atomic_trapezoidal_blended.yaml`. Its
+`motion.plan_opts` mapping exposes the existing Trapezoidal waypoint policy:
+
+```yaml
+plan_opts:
+  kind: trapezoidal
+  stop_at_waypoints: false
+  blend_tolerance: 0.01
+  collinearity_tolerance: 0.0001
+```
+
+These tasks keep their 100 Hz control period and the planner's joint velocity
+and acceleration limits. Straight-run compression and corner blending avoid
+stopping at every automatic IK sample. `blend_tolerance` is a joint-space
+deviation (radians for these UR5 arm joints); `collinearity_tolerance` is a
+cosine tolerance. Ordinary interior corners may be rounded within that
+tolerance, while exact/near reversals stop at their original waypoint before
+returning, including Pour's tilt target. Positive blending requires
+`stop_at_waypoints: false` and `motion.strategy: motion_gen`.
+`motion.sample_count` supplies the planner sample count; final command counts
+still follow duration and the environment clock. Task-local integration files
+continue to own grasp/press goals and action options.
+
 The common policy is `components/expansion_policies/atomic_fixed_scene.yaml`.
 Task-local `expansion.yaml` files declare the episode call schedule and output
 location; Repeated Pick/Place and OpenDrawer retain their existing `expansion/`

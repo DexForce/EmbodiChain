@@ -62,6 +62,9 @@ from embodichain.lab.sim.atomic_actions import (
     TwistGoal,
     TwistOptions,
 )
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanOptions,
+)
 from embodichain.lab.scripts.run_env import (
     _create_parser,
     _resolve_expansion_request,
@@ -86,6 +89,30 @@ _DEPLOYMENTS = (
     ("repeated_open_door/task.ur5.yaml", "simulation.open_door"),
     ("repeated_push_object/task.ur5.yaml", "simulation.push_object"),
 )
+
+
+@pytest.mark.parametrize(
+    "task", ["repeated_press", "repeated_move_held_object", "repeated_pour"]
+)
+def test_dense_motion_deployments_use_blending_at_the_original_control_rate(
+    task: str,
+) -> None:
+    path = _TASKS / task / "task.ur5.yaml"
+    physical = _resolve_gym_components(load_config(path), base_dir=path.parent)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    preset = deployment.integration.registration.robot_profile_binding.presets[0]
+    assert deployment.planner_config["type"] == "trapezoidal"
+    assert preset.motion_policy.strategy == "motion_gen"
+    options = preset.motion_policy.plan_opts
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert not options.stop_at_waypoints
+    assert options.blend_tolerance == 0.01
+    assert options.collinearity_tolerance == 0.0001
+    assert physical.config["env"]["sim_steps_per_control"] == 1
 
 
 @pytest.mark.parametrize("relative,semantic_id", _DEPLOYMENTS)

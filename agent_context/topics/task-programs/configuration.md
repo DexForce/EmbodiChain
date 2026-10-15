@@ -99,6 +99,13 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+Per-invocation Trapezoidal options belong to `motion.plan_opts`, with an
+allowlisted `kind`, rather than the planner-construction `planner.config`.
+The configured decoder constructs typed options using `motion.sample_count`
+and enforces the matching preset planner requirement. The blended Atomic
+execution-policy component is a runnable example; unsupported fields/backends
+and interpolation-only strategies fail during configuration decoding.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by

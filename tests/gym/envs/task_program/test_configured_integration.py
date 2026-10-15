@@ -38,6 +38,10 @@ from embodichain.lab.task_program.integrations._configured_services import (
 from embodichain.lab.task_program.integrations.configured import (
     _decode_configured_task_program_integration,
     _decode_grasp_generator,
+    _decode_motion_policy,
+)
+from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
+    TrapezoidalPlanOptions,
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
@@ -1517,6 +1521,92 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         _decode_motion_policy(
             {"sample_count": 40, "velocity_targets": mode}, path="motion"
         )
+
+
+def test_trapezoidal_motion_options_reach_the_runtime_policy() -> None:
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset.pop("required_planner", None)
+    preset["motion"] = {
+        "strategy": "motion_gen",
+        "sample_count": 120,
+        "plan_opts": {
+            "kind": "trapezoidal",
+            "stop_at_waypoints": False,
+            "blend_tolerance": 0.001,
+            "collinearity_tolerance": 0.0001,
+        },
+    }
+    integration = _decode_configured_task_program_integration(payload)
+    decoded = integration.registration.robot_profile_binding.presets[0]
+    options = decoded.motion_policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm", interpolation_dt=0.01
+    )
+    assert decoded.required_planner == "trapezoidal"
+    assert isinstance(options.plan_opts, TrapezoidalPlanOptions)
+    assert not options.plan_opts.stop_at_waypoints
+    assert options.plan_opts.blend_tolerance == 0.001
+    assert options.plan_opts.collinearity_tolerance == 0.0001
+    assert options.plan_opts.sample_interval == options.sample_count == 120
+    assert options.plan_opts.constraints["velocity"] == 0.2
+    assert options.plan_opts.constraints["acceleration"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("options", "error", "message"),
+    [
+        ({"kind": "unknown"}, ValueError, "kind"),
+        ({"kind": "trapezoidal", "unknown": 1}, ValueError, "unsupported"),
+        ({"kind": "trapezoidal", "stop_at_waypoints": "false"}, TypeError, "bool"),
+        ({"kind": "trapezoidal", "blend_tolerance": True}, TypeError, "number"),
+        ({"kind": "trapezoidal", "blend_tolerance": -0.1}, ValueError, "finite"),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": float("nan")},
+            ValueError,
+            "finite",
+        ),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": float("inf")},
+            ValueError,
+            "finite",
+        ),
+        (
+            {"kind": "trapezoidal", "blend_tolerance": 0.001},
+            ValueError,
+            "stop_at_waypoints",
+        ),
+        (
+            {"kind": "trapezoidal", "collinearity_tolerance": 1.0},
+            ValueError,
+            "collinearity",
+        ),
+    ],
+)
+def test_trapezoidal_motion_options_reject_invalid_configuration(
+    options: dict[str, object], error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        _decode_motion_policy(
+            {"strategy": "motion_gen", "sample_count": 120, "plan_opts": options},
+            path="motion",
+        )
+
+
+def test_trapezoidal_motion_options_require_backend_planning() -> None:
+    with pytest.raises(ValueError, match="requires strategy='motion_gen'"):
+        _decode_motion_policy(
+            {"sample_count": 120, "plan_opts": {"kind": "trapezoidal"}}, path="motion"
+        )
+    payload = _integration_payload("repeated_pick_place")
+    preset = payload["robot_profile"]["presets"][0]
+    preset["required_planner"] = "toppra"
+    preset["motion"] = {
+        "strategy": "motion_gen",
+        "sample_count": 120,
+        "plan_opts": {"kind": "trapezoidal"},
+    }
+    with pytest.raises(ValueError, match="requires the trapezoidal planner"):
+        _decode_configured_task_program_integration(payload)
 
 
 @pytest.mark.parametrize(

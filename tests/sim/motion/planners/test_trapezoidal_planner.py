@@ -491,6 +491,104 @@ def test_blend_tolerance_generates_continuous_corner_motion() -> None:
     assert result.constraint_report["peak_jerk"].item() <= 1.5 + 1e-9
 
 
+@pytest.mark.parametrize("profile", ["trapezoidal", "double_s"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize(
+    "method", [TrajectorySampleMethod.QUANTITY, TrajectorySampleMethod.TIME]
+)
+def test_blended_return_path_retains_exact_reversal_stops(
+    profile: str, dtype: torch.dtype, method: TrajectorySampleMethod
+) -> None:
+    waypoints = torch.tensor(
+        [
+            [[0, 0], [0.25, 0], [0.5, 0], [0.25, 0], [0, 0]],
+            [[0, 0], [0.25, 0], [0.5, 0], [0.75, 0.1], [1, 0.2]],
+        ],
+        dtype=dtype,
+    )
+    options = TrapezoidalPlanOptions(
+        profile=profile,
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        sample_method=method,
+        sample_interval=121 if method is TrajectorySampleMethod.QUANTITY else 0.02,
+    )
+    result = _plan_linear_profiles(waypoints, options)
+    assert bool(result.success.all())
+    assert bool(result.constraint_report["within_limits"].all())
+    torch.testing.assert_close(result.positions[:, 0], waypoints[:, 0])
+    torch.testing.assert_close(result.positions[:, -1], waypoints[:, -1])
+    turnaround = (result.positions[0] - waypoints[0, 2]).norm(dim=-1).argmin()
+    torch.testing.assert_close(result.positions[0, turnaround], waypoints[0, 2])
+    torch.testing.assert_close(
+        result.velocities[0, turnaround], torch.zeros(2, dtype=dtype)
+    )
+    torch.testing.assert_close(
+        result.accelerations[0, turnaround], torch.zeros(2, dtype=dtype)
+    )
+    if method is TrajectorySampleMethod.QUANTITY:
+        assert result.positions.shape[1] == 121
+    else:
+        for row in range(2):
+            valid = int((result.dt[row] > 0).sum()) + 1
+            torch.testing.assert_close(
+                result.positions[row, valid - 1 :],
+                waypoints[row, -1:].expand_as(result.positions[row, valid - 1 :]),
+            )
+            assert bool((result.velocities[row, valid - 1 :] == 0).all())
+    assert options.minimum_duration is None
+
+
+def test_near_reversal_blending_does_not_inflate_duration() -> None:
+    # Press follows the incoming joint path almost exactly in reverse.
+    waypoints = torch.tensor([[[0.0, 0.0], [1.0, 0.0], [0.5, 1e-5]]])
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False, blend_tolerance=0.001, sample_interval=121
+        ),
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+    assert result.duration[0] < 10.0
+    assert bool(torch.isfinite(result.positions).all())
+    torch.testing.assert_close(result.positions[:, -1], waypoints[:, -1])
+
+
+def test_reversal_minimum_duration_applies_to_the_complete_path() -> None:
+    waypoints = torch.tensor([[[0.0], [0.5], [0.0]]], dtype=torch.float64)
+    options = TrapezoidalPlanOptions(
+        stop_at_waypoints=False,
+        blend_tolerance=0.001,
+        minimum_duration=12.0,
+        sample_interval=121,
+    )
+    result = _plan_linear_profiles(waypoints, options)
+    torch.testing.assert_close(
+        result.duration, torch.tensor([12.0], dtype=torch.float64)
+    )
+    assert bool(result.constraint_report["within_limits"].all())
+    assert options.minimum_duration == 12.0
+
+
+def test_blended_reversal_and_stationary_rows_keep_independent_timing() -> None:
+    waypoints = torch.tensor([[[0.0], [0.5], [0.0]], [[0.2], [0.2], [0.2]]])
+    result = _plan_linear_profiles(
+        waypoints,
+        TrapezoidalPlanOptions(
+            stop_at_waypoints=False,
+            blend_tolerance=0.001,
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.05,
+        ),
+    )
+    assert result.duration[0] > 0
+    assert result.duration[1] == 0
+    assert bool((result.positions[1] == 0.2).all())
+    assert bool((result.velocities[1] == 0).all())
+    assert bool((result.accelerations[1] == 0).all())
+    assert bool(result.constraint_report["within_limits"].all())
+
+
 def test_blended_paths_support_batched_time_sampling() -> None:
     waypoints = torch.tensor(
         [
