@@ -61,6 +61,8 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     factory._pour_receivers = {}
     factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = False
+    factory._pick_contact_revision = None
+    factory._pick_continuations = ()
     factory._pick_purposes = ()
     factory._coordinated_motion = coordinated
     factory._motion_samples = (("call", 260),)
