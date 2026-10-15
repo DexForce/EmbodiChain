@@ -20,6 +20,12 @@ Keep these boundaries separate:
 2. segment post-policy: environment advancement such as settling; and
 3. segment validator: task or dataset acceptance.
 
+`HandOver` covers pickup, transfer, delivery and final release. Its intermediate
+acquisition gates require attachment, while the terminal effect requires both
+participants detached. Check serialized evidence against the `effect_spec.clauses`
+for that trace's boundary; the participant name and overall call status do not
+determine the expected raw value.
+
 `TaskProgramDemoBridge` never calls `env.step()`. It yields lazy
 `DemoSegment` values so the ordinary Gym executor retains stepping, recording,
 reward, reset, and persistence. Final success is published only after every
