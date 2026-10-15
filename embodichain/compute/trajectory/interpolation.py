@@ -18,11 +18,121 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 import torch
 
-__all__ = ["interpolate_with_distance", "interpolate_with_nums"]
+__all__ = [
+    "interpolate_with_distance",
+    "interpolate_with_nums",
+]
+
+
+def interpolate_minimum_jerk(
+    trajectory: torch.Tensor,
+    minimum_sample_count: int,
+    step_dt: float,
+    velocity_limit: float,
+    acceleration_limit: float,
+) -> torch.Tensor:
+    """Interpolate joint keyframes with rest-to-rest minimum-jerk segments.
+
+    ``minimum_sample_count`` is a lower bound.  Each keyframe interval is
+    expanded as needed so the analytic peak velocity and acceleration of the
+    quintic time law stay within the scalar per-joint limits.  Every input
+    keyframe remains an exact output sample.
+
+    Args:
+        trajectory: Joint keyframes with shape ``(B, N, D)``.
+        minimum_sample_count: Minimum total number of output samples.
+        step_dt: Fixed output interval in seconds.
+        velocity_limit: Positive scalar per-joint velocity limit.
+        acceleration_limit: Positive scalar per-joint acceleration limit.
+
+    Returns:
+        Interpolated joint positions with a shared sample count for the batch.
+
+    Raises:
+        ValueError: If shapes, counts, timing, limits, or values are invalid.
+    """
+    if trajectory.ndim != 3 or not trajectory.is_floating_point():
+        raise ValueError("trajectory must be floating point with shape (B, N, D).")
+    if trajectory.shape[1] == 0 or trajectory.shape[2] == 0:
+        raise ValueError("trajectory must have non-zero N and D dimensions.")
+    if not torch.isfinite(trajectory).all():
+        raise ValueError("trajectory must contain only finite values.")
+    if (
+        isinstance(minimum_sample_count, bool)
+        or not isinstance(minimum_sample_count, int)
+        or minimum_sample_count < trajectory.shape[1]
+    ):
+        raise ValueError(
+            "minimum_sample_count must be an integer at least as large as the "
+            "keyframe count."
+        )
+    for name, value in (
+        ("step_dt", step_dt),
+        ("velocity_limit", velocity_limit),
+        ("acceleration_limit", acceleration_limit),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0.0
+        ):
+            raise ValueError(f"{name} must be a positive finite number.")
+    if trajectory.shape[0] == 0:
+        return trajectory.new_empty((0, minimum_sample_count, trajectory.shape[2]))
+    if trajectory.shape[1] == 1:
+        return trajectory.expand(-1, minimum_sample_count, -1).clone()
+
+    delta = torch.abs(trajectory[:, 1:] - trajectory[:, :-1]).amax(dim=-1)
+    # For p(u)=10u^3-15u^4+6u^5, max(p')=1.875 and
+    # max(abs(p''))=10/sqrt(3) ~= 5.7735.
+    duration_from_velocity = 1.875 * delta / float(velocity_limit)
+    duration_from_acceleration = torch.sqrt(
+        (10.0 / math.sqrt(3.0)) * delta / float(acceleration_limit)
+    )
+    required = torch.ceil(
+        torch.maximum(duration_from_velocity, duration_from_acceleration)
+        / float(step_dt)
+    ).to(torch.int64)
+    interval_counts = required.amax(dim=0).clamp_min(1)
+
+    minimum_intervals = minimum_sample_count - 1
+    missing = minimum_intervals - int(interval_counts.sum().item())
+    if missing > 0:
+        # Allocate spare samples by the worst-row joint displacement rather
+        # than splitting them equally across unequal moves.  This keeps peak
+        # speeds comparable when the caller's minimum count, not a limit, is
+        # what determines the final duration.
+        weights = delta.amax(dim=0)
+        if float(weights.sum().item()) == 0.0:
+            weights = torch.ones_like(weights)
+        quotas = weights / weights.sum() * missing
+        additions = torch.floor(quotas).to(torch.int64)
+        remainder = missing - int(additions.sum().item())
+        if remainder:
+            ranked = torch.argsort(quotas - additions, descending=True, stable=True)
+            additions[ranked[:remainder]] += 1
+        interval_counts += additions
+
+    segments = [trajectory[:, :1]]
+    for index, count in enumerate(interval_counts.tolist()):
+        tau = torch.linspace(
+            0.0,
+            1.0,
+            count + 1,
+            dtype=trajectory.dtype,
+            device=trajectory.device,
+        )[1:]
+        blend = 10.0 * tau**3 - 15.0 * tau**4 + 6.0 * tau**5
+        start = trajectory[:, index : index + 1]
+        end = trajectory[:, index + 1 : index + 2]
+        segments.append(torch.lerp(start, end, blend.view(1, -1, 1)))
+    return torch.cat(segments, dim=1)
 
 
 def _allocate_segment_intervals(

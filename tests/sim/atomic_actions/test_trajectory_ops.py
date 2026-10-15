@@ -401,6 +401,15 @@ def test_interpolate_hand_qpos_preserves_endpoints():
     assert torch.allclose(out[:, -1], end)
 
 
+def test_interpolate_hand_qpos_one_waypoint_reaches_command() -> None:
+    start = torch.tensor([[0.0, 0.0]])
+    end = torch.tensor([[1.0, 1.0]])
+
+    out = interpolate_hand_qpos(start, end, n_waypoints=1)
+
+    assert torch.equal(out[:, 0], end)
+
+
 class TestInterpolateJointTrajectory:
     def test_interpolates_start_to_target(self):
         start = torch.zeros(2, 6)

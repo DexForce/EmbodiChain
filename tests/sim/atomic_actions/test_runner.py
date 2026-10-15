@@ -765,15 +765,13 @@ def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
     assert torch.all(current_payload.positions >= 0.0)
 
 
-def test_runner_uses_the_longest_active_batch_interval_as_a_barrier() -> None:
-    runner, clock, _, _, _ = _make_runner(batch_size=2)
+def test_runner_rejects_mismatched_active_batch_intervals_before_dispatch() -> None:
+    runner, _, _, sink, _ = _make_runner(batch_size=2)
 
-    first = runner.step()
-    clock.advance(2.0 * FIRST_INTERVAL)
-    second = runner.step()
+    with pytest.raises(ValueError, match="share one positive hold duration"):
+        runner.step()
 
-    assert first.wait_duration == pytest.approx(2.0 * FIRST_INTERVAL)
-    assert second.wait_duration == pytest.approx(2.0 * SECOND_INTERVAL)
+    assert sink.sent == []
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:

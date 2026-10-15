@@ -827,6 +827,7 @@ class ExecutionRunner:
                 if bool(tick.command.active_mask.any().item())
                 else CommandOperation.HOLD
             )
+            interval = self._command_interval(tick.command)
             dispatch = self._dispatch(
                 operation,
                 command=(tick.command if operation is CommandOperation.SEND else None),
@@ -850,7 +851,6 @@ class ExecutionRunner:
                 )
             if operation is CommandOperation.SEND:
                 self._command_count += 1
-            interval = self._command_interval(tick.command)
             self._next_step_at = self._clock_now() + interval
         elif tick.hold_targets and (
             tick.pending_effect is None or self.cfg.hold_during_effect_verification
@@ -1094,13 +1094,30 @@ class ExecutionRunner:
 
     def _command_interval(self, command: RuntimeCommandFrame) -> float:
         """Resolve a synchronized batch interval from per-environment durations."""
-        durations = (
-            command.hold_duration[command.active_mask]
-            if command.active_mask.any()
-            else command.hold_duration
-        )
-        requested = float(durations.max().item()) if durations.numel() else 0.0
-        return max(requested, self.cfg.minimum_cycle_time)
+        if not command.active_mask.any():
+            return self.cfg.minimum_cycle_time
+        durations = command.hold_duration[command.active_mask]
+        positive = durations[durations > 0]
+        if not positive.numel():
+            return self.cfg.minimum_cycle_time
+        requested = float(positive[0].item())
+        tolerance = max(1.0e-9, abs(requested) * 1.0e-6)
+        if not torch.allclose(
+            positive,
+            positive[:1].expand_as(positive),
+            rtol=1.0e-6,
+            atol=tolerance,
+        ):
+            raise ValueError(
+                "Active command rows must share one positive hold duration; "
+                "zero-duration terminal padding is the only allowed difference."
+            )
+        if requested + tolerance < self.cfg.minimum_cycle_time:
+            raise ValueError(
+                "Command hold duration is shorter than minimum_cycle_time; "
+                "the runtime may not silently slow a planned trajectory."
+            )
+        return requested
 
     def _remaining_wait(self, now: float) -> float:
         """Return scheduled wait while absorbing float32 timing roundoff."""

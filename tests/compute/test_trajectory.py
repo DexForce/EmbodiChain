@@ -26,6 +26,44 @@ from embodichain.compute.trajectory import (
     interpolate_with_distance,
     resample_with_distance,
 )
+from embodichain.compute.trajectory.interpolation import interpolate_minimum_jerk
+
+
+def test_minimum_jerk_expands_sample_count_and_preserves_limits() -> None:
+    keyframes = torch.tensor([[[0.0], [1.0], [0.5]]])
+    step_dt = 0.05
+
+    result = interpolate_minimum_jerk(
+        keyframes,
+        minimum_sample_count=5,
+        step_dt=step_dt,
+        velocity_limit=0.5,
+        acceleration_limit=1.0,
+    )
+
+    assert result.shape[1] > 5
+    assert torch.equal(result[:, :1], keyframes[:, :1])
+    assert torch.equal(result[:, -1:], keyframes[:, -1:])
+    assert any(
+        torch.equal(result[:, index], keyframes[:, 1])
+        for index in range(1, result.shape[1] - 1)
+    )
+    interval_velocity = result.diff(dim=1) / step_dt
+    interval_acceleration = interval_velocity.diff(dim=1) / step_dt
+    assert interval_velocity.abs().max() <= 0.5 + 1.0e-5
+    assert interval_acceleration.abs().max() <= 1.0 + 1.0e-4
+
+
+def test_minimum_jerk_uses_sample_count_as_a_lower_bound() -> None:
+    result = interpolate_minimum_jerk(
+        torch.tensor([[[0.0], [0.01]]]),
+        minimum_sample_count=20,
+        step_dt=0.1,
+        velocity_limit=1.0,
+        acceleration_limit=2.0,
+    )
+
+    assert result.shape == (1, 20, 1)
 
 
 def test_interpolate_with_distance_preserves_intermediate_keyframe() -> None:

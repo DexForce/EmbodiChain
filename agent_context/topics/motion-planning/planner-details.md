@@ -115,6 +115,12 @@ row's duration up to the destination clock, samples uniform source-path phase,
 and recomputes qvel with zero first/last-valid and padded-hold velocities.
 Source `PlanResult.dt` remains planner timing.
 
+`compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
+keyframes onto a fixed control interval while preserving every keyframe. The
+requested sample count is a minimum; per-segment counts grow to satisfy scalar
+joint velocity and acceleration limits, and spare samples are distributed by
+joint displacement rather than equally across unequal moves.
+
 `motion/execution.py::play_joint_trajectory()` requires `control_dt` to be an
 integer multiple of `physics_dt` and advances that many unchanged substeps.
 Position-plus-velocity command mode is opt-in. Gym execution instead owns its

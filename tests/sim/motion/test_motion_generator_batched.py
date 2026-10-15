@@ -843,6 +843,62 @@ class TestMotionStrategy:
         generator.robot.compute_ik.assert_not_called()
         generator.planner.plan.assert_not_called()
 
+    def test_limited_cartesian_motion_expands_exact_ik_path(self):
+        generator = _mock_generator()
+        generator.robot.compute_fk.return_value = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+
+        def encode_position(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+            continuous: bool = False,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            qpos = joint_seed.clone()
+            qpos[..., 0] = pose[..., 0, 3]
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
+
+        generator.robot.compute_batch_ik.side_effect = encode_position
+        weights = torch.linspace(0.25, 1.0, 4)
+        targets = []
+        for weight in weights:
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = weight
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=5,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=0.05,
+                preserve_cartesian_samples=True,
+                velocity_limit=1.0,
+                acceleration_limit=2.0,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape[1] > 5
+        interval_velocity = result.positions.diff(dim=1) / 0.05
+        boundary_acceleration = (
+            torch.cat(
+                [
+                    interval_velocity[:, :1],
+                    interval_velocity.diff(dim=1),
+                    -interval_velocity[:, -1:],
+                ],
+                dim=1,
+            )
+            / 0.05
+        )
+        assert interval_velocity.abs().max() <= 1.0 + 1.0e-5
+        assert boundary_acceleration.abs().max() <= 2.0 + 1.0e-4
+        assert torch.all(result.positions[:, 1:, 0] >= result.positions[:, :-1, 0])
+        generator.planner.plan.assert_not_called()
+
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
         generator = _mock_generator(
@@ -996,7 +1052,10 @@ def test_ik_interpolation_materializes_reference_velocity() -> None:
         ),
     )
     assert result.velocities is not None
-    torch.testing.assert_close(result.velocities, torch.ones_like(result.positions))
+    expected = torch.ones_like(result.positions)
+    expected[:, 0] = 0.0
+    expected[:, -1] = 0.0
+    torch.testing.assert_close(result.velocities, expected)
 
 
 def test_normalization_preserves_native_derivatives_and_zeros_failed_rows() -> None:
@@ -1403,25 +1462,34 @@ def test_motion_gen_rejects_fixed_cartesian_samples_instead_of_bypassing_limits(
 
 
 @pytest.mark.parametrize(
-    "unused_option",
+    "limit_option",
     [
-        {"plan_opts": TrapezoidalPlanOptions()},
         {"velocity_limit": 0.1},
         {"acceleration_limit": 0.2},
     ],
 )
-def test_ik_interp_rejects_unused_backend_constraints(unused_option: dict) -> None:
+def test_ik_interp_consumes_backend_neutral_motion_limits(limit_option: dict) -> None:
     generator = _trapezoidal_generator()
-    with pytest.raises(ValueError, match="ik_interp"):
-        generator.generate(
-            [PlanState.from_qpos(torch.ones(1, 1))],
-            MotionGenOptions(
-                strategy="ik_interp",
-                start_qpos=torch.zeros(1, 1),
-                sample_count=3,
-                interpolation_dt=0.01,
-                **unused_option,
-            ),
+    result = generator.generate(
+        [PlanState.from_qpos(torch.ones(1, 1))],
+        MotionGenOptions(
+            strategy="ik_interp",
+            start_qpos=torch.zeros(1, 1),
+            sample_count=3,
+            interpolation_dt=0.01,
+            **limit_option,
+        ),
+    )
+
+    assert result.positions is not None
+    assert result.positions.shape[1] > 3
+
+
+def test_ik_interp_still_rejects_backend_specific_plan_options() -> None:
+    with pytest.raises(ValueError, match="plan_opts"):
+        MotionGenOptions(
+            strategy="ik_interp",
+            plan_opts=TrapezoidalPlanOptions(),
         )
 
 

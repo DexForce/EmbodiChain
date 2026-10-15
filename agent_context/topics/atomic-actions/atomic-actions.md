@@ -169,10 +169,10 @@ from the source after adaptation, including near-identical zero-time joins.
 Original action joins and intervals are restored before replay so callbacks
 retain their source indices. MoveJoint compiles each required joint target as
 a separate invocation, preserving its ordered waypoints as action boundaries
-through control-grid retiming and spatial expansion. Pour's single
-rotation/return segment is protected from spatial perturbation because its
-required interior target has no exported
-waypoint boundary; its preceding PickUp free phases remain editable. Slide
+through control-grid retiming and spatial expansion. Pour exports rotation,
+apex dwell and return boundaries; its constrained held-object phases are
+protected from spatial perturbation while the preceding PickUp free phases
+remain editable. Slide
 replans its push from each row's robot/handle observations after pull. Every
 Slide reference remains row-local through expansion and replay, including its
 start, locked contact path, timing and sampling provenance; shared affordance

@@ -224,6 +224,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         context: PlanningContext,
     ) -> ActionPlan:
         """Plan the complete pull/push sequence without stepping simulation."""
+        if request.motion_policy.strategy != "ik_interp":
+            raise ValueError(
+                "Slide requires strategy='ik_interp' because its contact path "
+                "must preserve every Cartesian sample."
+            )
         target = self.require_goal(request)
         affordance = self._require_slide_affordance(target.semantics)
         options = request.skill_options
@@ -508,13 +513,11 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             full[:, offset:stop, hand_joint_ids] = hand_preshape_qpos.unsqueeze(1)
             offset = stop
 
-        if options.preshape_fraction > 0.0:
-            count = min(approach_arm.shape[1], options.hand_interp_steps)
-            full[:, :count, hand_joint_ids] = interpolate_hand_qpos(
-                context.robot.qpos[:, hand_joint_ids],
-                hand_preshape_qpos,
-                n_waypoints=count,
-            )
+        full[:, : approach_arm.shape[1], hand_joint_ids] = interpolate_hand_qpos(
+            context.last_qpos[:, hand_joint_ids],
+            hand_preshape_qpos,
+            n_waypoints=approach_arm.shape[1],
+        )
 
         stop = offset + hand_close.shape[1]
         full[:, offset:stop, arm_joint_ids] = reach_arm[:, -1].unsqueeze(1)
@@ -670,8 +673,12 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         )
         assert isinstance(result.success, torch.Tensor)
         assert result.positions is not None
+        assert result.dt is not None
         return result.success, resample_planned_trajectory(
-            result.positions, sample_count
+            result.positions,
+            sample_count,
+            dt=result.dt,
+            control_dt=interpolation_dt,
         )
 
 

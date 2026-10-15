@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -61,7 +62,13 @@ class MotionPolicy:
     """Motion strategy: ``motion_gen`` or ``ik_interp``."""
 
     sample_count: int = 50
-    """Requested trajectory sample count when the backend does not preserve samples."""
+    """Minimum trajectory sample count when the backend does not preserve samples."""
+
+    velocity_limit: float = 0.2
+    """Scalar per-joint velocity limit in radians or metres per second."""
+
+    acceleration_limit: float = 0.5
+    """Scalar per-joint acceleration limit in radians or metres per second squared."""
 
     velocity_targets: Literal["auto", "zero"] = "auto"
     """Use trajectory velocities or explicit zero velocity targets."""
@@ -87,6 +94,10 @@ class MotionPolicy:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
             raise ValueError("sample_count must be at least 2.")
+        for name in ("velocity_limit", "acceleration_limit"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and greater than zero.")
         mode = self.dynamic_collision_mode
         if isinstance(mode, str):
             try:
@@ -142,6 +153,8 @@ class MotionPolicy:
         return MotionGenOptions(
             strategy=self.strategy,
             sample_count=self.sample_count if sample_count is None else sample_count,
+            velocity_limit=self.velocity_limit,
+            acceleration_limit=self.acceleration_limit,
             start_qpos=start_qpos,
             control_part=control_part,
             plan_opts=self.plan_opts,

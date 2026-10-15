@@ -559,8 +559,8 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     assert torch.equal(options.start_qpos, start_qpos)
     assert options.control_part == "arm"
     assert options.interpolation_dt == pytest.approx(0.02)
-    assert options.velocity_limit is None
-    assert options.acceleration_limit is None
+    assert options.velocity_limit == pytest.approx(0.2)
+    assert options.acceleration_limit == pytest.approx(0.5)
     assert isinstance(options.plan_opts, ToppraPlanOptions)
     assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}
 
@@ -1592,6 +1592,13 @@ def test_timed_trajectory_concatenates_metadata() -> None:
 def test_interpolation_policy_rejects_backend_options_at_construction() -> None:
     with pytest.raises(ValueError, match="plan_opts"):
         MotionPolicy(strategy="ik_interp", plan_opts=ToppraPlanOptions())
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("inf"), float("nan")])
+@pytest.mark.parametrize("name", ["velocity_limit", "acceleration_limit"])
+def test_motion_policy_rejects_invalid_motion_limits(name: str, value: float) -> None:
+    with pytest.raises(ValueError, match=name):
+        MotionPolicy(**{name: value})
 
 
 def test_fixed_cartesian_policy_requires_explicit_interpolation_strategy() -> None:

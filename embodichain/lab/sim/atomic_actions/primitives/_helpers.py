@@ -23,7 +23,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from embodichain.compute.trajectory import resample_with_distance
+from embodichain.compute.trajectory import (
+    resample_with_distance,
+    retime_to_control_grid,
+)
 
 from ..bindings import EndpointBinding
 from ..state import PlanningContext
@@ -98,22 +101,27 @@ def repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
 def resample_planned_trajectory(
     trajectory: torch.Tensor,
     sample_count: int,
+    *,
+    dt: torch.Tensor | None = None,
+    control_dt: float | None = None,
 ) -> torch.Tensor:
-    """Fit a planner path to a composite action's fixed phase length.
+    """Put a planner path on a composite action's control-time grid.
 
     Some planners preserve their native samples instead of honoring the
-    backend-neutral requested count. Composite atomic actions allocate arm and
-    hand phases together, so they need a common count at this boundary. The
-    position-only resampling intentionally happens after planning; native
-    planner derivatives are not used by these position-composed phases.
+    backend-neutral requested count.  When timing is supplied, the requested
+    count is only a lower bound: native duration is quantized without speeding
+    it up, and any remaining samples are terminal holds.  The legacy
+    position-only behavior remains available to callers that have no timing.
 
     Args:
         trajectory: Batched joint path with shape ``(B, N, D)``.
         sample_count: Required number of output samples.
+        dt: Optional native arrival intervals with shape ``(B, N)``.
+        control_dt: Destination control interval, required together with ``dt``.
 
     Returns:
-        The original path when its length already matches, otherwise a
-        cumulative-distance resampling with exactly ``sample_count`` samples.
+        A control-grid path with at least ``sample_count`` samples when timing
+        is supplied, otherwise exactly ``sample_count`` distance samples.
 
     Raises:
         TypeError: If ``trajectory`` is not a floating-point tensor.
@@ -133,6 +141,15 @@ def resample_planned_trajectory(
         raise ValueError("sample_count must be positive.")
     if trajectory.shape[0] == 0:
         return trajectory.new_empty((0, sample_count, trajectory.shape[2]))
+    if (dt is None) != (control_dt is None):
+        raise ValueError("dt and control_dt must be supplied together.")
+    if dt is not None:
+        assert control_dt is not None
+        retimed, _, _, _ = retime_to_control_grid(trajectory, dt, control_dt)
+        if retimed.shape[1] >= sample_count:
+            return retimed
+        padding = retimed[:, -1:].expand(-1, sample_count - retimed.shape[1], -1)
+        return torch.cat([retimed, padding], dim=1)
     if trajectory.shape[1] == sample_count:
         return trajectory
     if trajectory.shape[1] == 1:
@@ -194,7 +211,34 @@ def plan_named_arm_trajectory(
         raise TypeError("Motion planning success must be a torch.Tensor.")
     if result.positions is None:
         raise ValueError("Motion planning result must contain joint positions.")
-    return result.success, resample_planned_trajectory(result.positions, n_waypoints)
+    if result.dt is None:
+        raise ValueError("Motion planning result must contain arrival intervals.")
+    return result.success, resample_planned_trajectory(
+        result.positions,
+        n_waypoints,
+        dt=result.dt,
+        control_dt=interpolation_dt,
+    )
+
+
+def pad_trajectory_to_length(
+    trajectory: torch.Tensor,
+    sample_count: int,
+) -> torch.Tensor:
+    """Pad a joint trajectory with its terminal pose to a shared length."""
+    if trajectory.ndim != 3 or trajectory.shape[1] == 0:
+        raise ValueError("trajectory must have shape (B, N, D) with N > 0.")
+    if sample_count < trajectory.shape[1]:
+        raise ValueError("sample_count cannot shorten a trajectory.")
+    if sample_count == trajectory.shape[1]:
+        return trajectory
+    return torch.cat(
+        [
+            trajectory,
+            trajectory[:, -1:].expand(-1, sample_count - trajectory.shape[1], -1),
+        ],
+        dim=1,
+    )
 
 
 def arm_qpos_from_state(
@@ -213,6 +257,8 @@ def split_joint_trajectory_at_pose(
     control_part: str,
     first_sample_count: int,
     second_sample_count: int,
+    dt: torch.Tensor | None = None,
+    control_dt: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Split and resample a joint path at its closest target-pose sample.
 
@@ -286,15 +332,53 @@ def split_joint_trajectory_at_pose(
         1,
         second_indices.unsqueeze(-1).expand(*gather_shape),
     )
+    if dt is None and control_dt is None:
+        return (
+            resample_with_distance(first, first_sample_count, device=trajectory.device),
+            resample_with_distance(
+                second, second_sample_count, device=trajectory.device
+            ),
+        )
+    if dt is None or control_dt is None:
+        raise ValueError("dt and control_dt must be supplied together.")
+    if dt.shape != trajectory.shape[:2]:
+        raise ValueError("dt must have shape (B, N) matching trajectory.")
+    first_dt = torch.gather(dt, 1, first_indices).clone()
+    first_dt[:, 0] = 0.0
+    first_dt = torch.where(
+        sample_indices[None] <= split_indices[:, None], first_dt, 0.0
+    )
+    second_dt = torch.gather(dt, 1, second_indices).clone()
+    second_dt[:, 0] = 0.0
+    second_dt = torch.where(
+        second_indices < trajectory.shape[1] - 1,
+        second_dt,
+        torch.where(
+            sample_indices[None] <= trajectory.shape[1] - 1 - split_indices[:, None],
+            second_dt,
+            0.0,
+        ),
+    )
     return (
-        resample_with_distance(first, first_sample_count, device=trajectory.device),
-        resample_with_distance(second, second_sample_count, device=trajectory.device),
+        resample_planned_trajectory(
+            first,
+            first_sample_count,
+            dt=first_dt,
+            control_dt=control_dt,
+        ),
+        resample_planned_trajectory(
+            second,
+            second_sample_count,
+            dt=second_dt,
+            control_dt=control_dt,
+        ),
     )
 
 
 __all__ = [
     "arm_qpos_from_state",
     "assemble_full_robot_trajectory",
+    "pad_trajectory_to_length",
     "plan_named_arm_trajectory",
     "resample_planned_trajectory",
     "require_shared_task_state_key",

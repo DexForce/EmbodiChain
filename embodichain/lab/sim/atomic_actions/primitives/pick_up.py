@@ -380,6 +380,7 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         )
         assert isinstance(motion_result.success, torch.Tensor)
         assert motion_result.positions is not None
+        assert motion_result.dt is not None
         approach_arm, lift_arm = split_joint_trajectory_at_pose(
             motion_result.positions,
             grasp_xpos,
@@ -387,7 +388,11 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             control_part=manipulator.control_part,
             first_sample_count=n_approach,
             second_sample_count=n_lift,
+            dt=motion_result.dt,
+            control_dt=interpolation_dt,
         )
+        n_approach = approach_arm.shape[1]
+        n_lift = lift_arm.shape[1]
         grasp_arm_qpos = approach_arm[:, -1, :]
         is_success = motion_result.success
 
@@ -410,8 +415,13 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         full[:, :, :] = last_qpos.unsqueeze(1)
         arm_joint_ids = list(manipulator.joint_ids)
         hand_joint_ids = list(end_effector.joint_ids)
+        approach_hand = interpolate_hand_qpos(
+            last_qpos[:, hand_joint_ids],
+            hand_open_qpos,
+            n_waypoints=n_approach,
+        )
         full[:, :n_approach, arm_joint_ids] = approach_arm
-        full[:, :n_approach, hand_joint_ids] = hand_open_qpos.unsqueeze(1)
+        full[:, :n_approach, hand_joint_ids] = approach_hand
         full[:, close_start:settle_start, arm_joint_ids] = grasp_arm_qpos.unsqueeze(1)
         full[:, close_start:settle_start, hand_joint_ids] = hand_close_path
         if n_settle:

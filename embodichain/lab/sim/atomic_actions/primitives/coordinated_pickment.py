@@ -1393,11 +1393,67 @@ class CoordinatedPickment(
             left_traj[:, keyframe_col] = left_qpos_seed
             right_traj[:, keyframe_col] = right_qpos_seed
 
-        return (
-            success_mask,
-            self._interpolate_qpos_keyframes(left_traj, keyframe_indices, n_waypoints),
-            self._interpolate_qpos_keyframes(right_traj, keyframe_indices, n_waypoints),
+        left_seed = self._interpolate_qpos_keyframes(
+            left_traj, keyframe_indices, n_waypoints
         )
+        right_seed = self._interpolate_qpos_keyframes(
+            right_traj, keyframe_indices, n_waypoints
+        )
+        left_targets = torch.matmul(object_pose_traj, left_object_to_eef[:, None])
+        right_targets = torch.matmul(object_pose_traj, right_object_to_eef[:, None])
+        left_valid, left_projected = self.robot.compute_batch_ik(
+            pose=left_targets,
+            name=resources.left_arm.control_part,
+            joint_seed=left_seed,
+        )
+        right_valid, right_projected = self.robot.compute_batch_ik(
+            pose=right_targets,
+            name=resources.right_arm.control_part,
+            joint_seed=right_seed,
+        )
+        left_valid = torch.as_tensor(left_valid, device=self.device).to(torch.bool)
+        right_valid = torch.as_tensor(right_valid, device=self.device).to(torch.bool)
+        expected_valid_shape = (self.num_envs, n_waypoints)
+        if (
+            left_valid.shape != expected_valid_shape
+            or right_valid.shape != expected_valid_shape
+        ):
+            raise ValueError(
+                "Coordinated object-motion batch IK success must have shape "
+                f"{expected_valid_shape}."
+            )
+        left_projected = torch.as_tensor(
+            left_projected, dtype=torch.float32, device=self.device
+        )
+        right_projected = torch.as_tensor(
+            right_projected, dtype=torch.float32, device=self.device
+        )
+        if (
+            left_projected.shape != left_seed.shape
+            or right_projected.shape != right_seed.shape
+        ):
+            raise ValueError(
+                "Coordinated object-motion batch IK qpos must match its joint seeds."
+            )
+        left_valid &= torch.isfinite(left_projected).all(dim=-1)
+        right_valid &= torch.isfinite(right_projected).all(dim=-1)
+        projected_success = left_valid.all(dim=1) & right_valid.all(dim=1)
+        self._log_ik_failures(
+            resources.left_arm.control_part,
+            "dense object path",
+            success_mask & ~left_valid.all(dim=1),
+        )
+        self._log_ik_failures(
+            resources.right_arm.control_part,
+            "dense object path",
+            success_mask & ~right_valid.all(dim=1),
+        )
+        success_mask &= projected_success
+        left_projected = torch.where(left_valid[:, :, None], left_projected, left_seed)
+        right_projected = torch.where(
+            right_valid[:, :, None], right_projected, right_seed
+        )
+        return success_mask, left_projected, right_projected
 
     def _plan(
         self,
@@ -1477,8 +1533,16 @@ class CoordinatedPickment(
             state,
             left_approach_traj,
             right_approach_traj,
-            self._repeat_qpos(resources.left_hand_open_qpos, segments["approach"]),
-            self._repeat_qpos(resources.right_hand_open_qpos, segments["approach"]),
+            self._interpolate_qpos(
+                state.last_qpos[:, list(resources.left_hand.joint_ids)],
+                resources.left_hand_open_qpos,
+                segments["approach"],
+            ),
+            self._interpolate_qpos(
+                state.last_qpos[:, list(resources.right_hand.joint_ids)],
+                resources.right_hand_open_qpos,
+                segments["approach"],
+            ),
             resources=resources,
         )
 
