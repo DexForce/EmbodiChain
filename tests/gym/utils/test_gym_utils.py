@@ -18,11 +18,13 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium.spaces
+from gymnasium.envs.registration import registry as gym_registry
 import numpy as np
 import pytest
 import torch
@@ -30,7 +32,7 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.task_program.integrations import IntegrationFingerprintMismatch
-from embodichain.lab.gym.utils.registration import get_env_spec
+from embodichain.lab.gym.utils.registration import REGISTERED_ENVS, get_env_spec
 from embodichain.lab.gym.utils.gym_utils import (
     add_env_launcher_args_to_parser,
     build_env_cfg_from_args,
@@ -62,6 +64,7 @@ _TABLEWARE_CONFIG_ROOT = (
 )
 CUBE_ROBOT_PROFILE_ID = "ur5_dh_pgi_140_80"
 CUBE_SCENE_REGISTRY_ID = "task_program_repeated_pick_place"
+_TEST_TASK_PROGRAM_ENV_ID = "GymUtilsConfiguredTaskProgramTest-v1"
 
 
 def test_env_launcher_args_include_physics():
@@ -927,6 +930,17 @@ def test_different_max_episode_steps():
 
 
 class TestConfigToCfgFromFile:
+    @pytest.fixture(autouse=True)
+    def _restore_environment_registrations(self) -> Iterator[None]:
+        """Keep temporary deployments from leaking into later tests or modules."""
+        registrations = REGISTERED_ENVS.copy()
+        gym_registrations = gym_registry.copy()
+        yield
+        REGISTERED_ENVS.clear()
+        REGISTERED_ENVS.update(registrations)
+        gym_registry.clear()
+        gym_registry.update(gym_registrations)
+
     @pytest.mark.parametrize("value", (True, False))
     def test_config_to_cfg_forwards_ignore_terminations(self, value: bool) -> None:
         """The explicit environment field reaches the public typed config."""
@@ -1027,7 +1041,7 @@ class TestConfigToCfgFromFile:
     def _minimal_gym_config() -> dict[str, object]:
         """Return a minimal config that reaches the generic parser."""
         return {
-            "id": "TaskProgramRepeatedPickPlace-v1",
+            "id": _TEST_TASK_PROGRAM_ENV_ID,
             "environment": {"component": "env.yaml"},
             "task_program": {
                 "program": "program.yaml",
@@ -1066,7 +1080,7 @@ class TestConfigToCfgFromFile:
     def _environment_component_gym_config() -> dict[str, object]:
         """Return one runnable deployment selecting a reusable environment."""
         return {
-            "id": "TaskProgramRepeatedPickPlace-v1",
+            "id": _TEST_TASK_PROGRAM_ENV_ID,
             "environment": {"component": "env.yaml"},
             "task_program": {
                 "program": "program.yaml",
