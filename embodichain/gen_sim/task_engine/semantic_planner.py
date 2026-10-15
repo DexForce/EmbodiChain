@@ -502,12 +502,37 @@ class SemanticTaskPlanner:
                     steps_by_id=steps_by_id,
                 )
                 requested = str(step.get("required_arm", "auto"))
+                holder = held_by.get(object_id)
+                if holder == "coordinated":
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} cannot replace the coordinated holding "
+                        f"of {object_id!r} with a single-hand placement."
+                    )
+                occupied_resources = {
+                    resource: entity
+                    for entity, owner in held_by.items()
+                    for resource in (
+                        ("left", "right") if owner == "coordinated" else (owner,)
+                    )
+                }
                 resource = (
-                    held_by.get(object_id)
-                    or self._nearest_resource(object_id, objects, target_id=target_id)
+                    holder
+                    or self._nearest_resource(
+                        object_id,
+                        objects,
+                        target_id=target_id,
+                        occupied_resources=tuple(occupied_resources),
+                    )
                     if requested in {"auto", "none"}
                     else _resource(requested, field="required_arm")
                 )
+                if resource in occupied_resources and (
+                    occupied_resources[resource] != object_id
+                ):
+                    raise UnsupportedSemanticCapabilityError(
+                        f"Step {step_id!r} resource {resource!r} is occupied by "
+                        f"{occupied_resources[resource]!r}; cannot pick {object_id!r}."
+                    )
                 relation = str(step.get("relation", "none"))
                 target_part = _bound_part(step, "target", bindings, steps_by_id)
                 calls = []

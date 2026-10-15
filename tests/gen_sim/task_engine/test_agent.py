@@ -1679,6 +1679,130 @@ def test_handover_then_separate_placement_parks_both_free_arms(
     assert all(n["task_instance_id"] == "step_02" for n in parks)
 
 
+def _placement_after_hold(
+    *,
+    holder: str = "left",
+    object_id: str = "B",
+    reference_kind: str = "scene_ref",
+    required_arm: str = "auto",
+    coordinated: bool = False,
+):
+    source = "right" if holder == "left" else "left"
+    hold = _step(step_id="hold", reference="source")
+    hold.update(
+        task_type="E5" if coordinated else "E4",
+        required_arm="none",
+        orientation_goal="none",
+        terminal_behavior="hold",
+    )
+    if coordinated:
+        hold["direction"] = "up"
+    else:
+        hold.update(transfer_arm=f"{source}_arm", receive_arm=f"{holder}_arm")
+    place = _step(step_id="place", reference="other")
+    place.update(
+        task_type="E1",
+        required_arm=required_arm,
+        orientation_goal="none",
+        target=_selector("scene_ref", reference="table"),
+        relation="on",
+        depends_on=["hold"],
+    )
+    if reference_kind == "step_result":
+        place["object"] = _selector("step_result", step_id="hold")
+    interpreted = _result(hold)
+    interpreted.intent["steps"].append(place)
+    candidate = TaskAgent(interpreter=lambda *_a, **_kw: interpreted).generate(
+        "held_placement", _TEST_INSTRUCTION, candidate_count=1
+    )["candidates"][0]
+    references = {"step_01.object": ["A"], "step_02.target": ["table"]}
+    if reference_kind == "scene_ref":
+        references["step_02.object"] = [object_id]
+    lateral = -0.2 if holder == "left" else 0.2
+    return SemanticTaskPlanner().plan(
+        candidate,
+        {
+            "schema_version": ROLE_BINDINGS_SCHEMA,
+            "task_id": "held_placement",
+            "candidate_id": candidate["candidate_id"],
+            "reference_bindings": references,
+            "role_bindings": {},
+        },
+        [
+            {"runtime_uid": "A", "init_pos": [0.0, -lateral, 0.8]},
+            {"runtime_uid": "B", "init_pos": [0.0, lateral, 0.8]},
+            {"runtime_uid": "table", "init_pos": [0.0, 0.0, 0.72]},
+        ],
+    )
+
+
+@pytest.mark.parametrize("holder", ["left", "right"])
+@pytest.mark.parametrize("required_arm", ["auto", "free"])
+def test_held_placement_of_other_object_uses_free_arm(
+    holder: str, required_arm: str
+) -> None:
+    free = "right" if holder == "left" else "left"
+    graph = _placement_after_hold(
+        holder=holder,
+        required_arm=f"{free}_arm" if required_arm == "free" else "auto",
+    )
+    calls = [
+        node["call"] for node in graph["nodes"] if node["task_instance_id"] == "step_02"
+    ]
+    assert calls[0] == {
+        "kind": "pick",
+        "object": "B",
+        "resources": {"primary": free},
+    }
+    assert all(call["resources"] == {"primary": free} for call in calls)
+    assert calls[-1]["call_id"] == "simulation.park"
+
+
+@pytest.mark.parametrize("holder", ["left", "right"])
+def test_held_placement_of_other_object_rejects_forced_occupied_arm(
+    holder: str,
+) -> None:
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="occupied.*A"):
+        _placement_after_hold(holder=holder, required_arm=f"{holder}_arm")
+
+
+@pytest.mark.parametrize("holder", ["left", "right"])
+@pytest.mark.parametrize("reference_kind", ["scene_ref", "step_result"])
+def test_held_placement_continues_exact_object_without_repick(
+    holder: str, reference_kind: str
+) -> None:
+    graph = _placement_after_hold(
+        holder=holder, object_id="A", reference_kind=reference_kind
+    )
+    calls = [
+        node["call"] for node in graph["nodes"] if node["task_instance_id"] == "step_02"
+    ]
+    assert not any(call["kind"] == "pick" for call in calls)
+    assert calls[0]["call_id"] == "simulation.place_relative"
+    assert calls[0]["resources"] == {"primary": holder}
+    assert calls[0]["arguments"]["object"] == "A"
+
+
+@pytest.mark.parametrize("holder", ["left", "right"])
+def test_held_placement_rejects_implicit_transfer_of_same_object(holder: str) -> None:
+    other = "right" if holder == "left" else "left"
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="explicit hand_over"):
+        _placement_after_hold(holder=holder, object_id="A", required_arm=f"{other}_arm")
+
+
+@pytest.mark.parametrize("required_arm", ["auto", "left_arm", "right_arm"])
+def test_held_placement_cannot_reuse_coordinated_hands(required_arm: str) -> None:
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="No free|occupied"):
+        _placement_after_hold(coordinated=True, required_arm=required_arm)
+
+
+def test_held_placement_cannot_take_single_hand_ownership_of_coordinated_object() -> (
+    None
+):
+    with pytest.raises(UnsupportedSemanticCapabilityError, match="coordinated"):
+        _placement_after_hold(coordinated=True, object_id="A")
+
+
 def test_semantic_planner_preserves_e4_terminal_place() -> None:
     """A handover-place task transfers and then releases at its requested relation."""
 
