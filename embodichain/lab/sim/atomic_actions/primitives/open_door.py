@@ -28,6 +28,7 @@ steps per update.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from numbers import Real
 from typing import ClassVar
@@ -316,6 +317,17 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             hinge_rotation,
             n_open - 1,
         )
+
+        def sample_open_path(progress: torch.Tensor) -> torch.Tensor:
+            return self._opened_link_and_eef_poses_at_fractions(
+                link_pose,
+                grasp_xpos,
+                affordance.rotation_axis,
+                affordance.axis_origin,
+                hinge_rotation,
+                progress,
+            )[1]
+
         rotated_approach_direction = torch.matmul(
             opened_link_poses[:, -1, :3, :3],
             approach_direction_local,
@@ -362,6 +374,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             n_open,
             interpolation_dt=interpolation_dt,
             cartesian_linear=True,
+            cartesian_path_sampler=sample_open_path,
         )
         retract_keyframes = (
             axis_translation_keyframes(
@@ -718,6 +731,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         *,
         interpolation_dt: float,
         cartesian_linear: bool = False,
+        cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -727,6 +741,7 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_linear,
+                cartesian_path_sampler=cartesian_path_sampler,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
@@ -749,8 +764,6 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
         waypoint_count: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Rotate link poses about the hinge and recover corresponding EEF poses."""
-        axis = rotation_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
         fractions = torch.linspace(
             1.0 / waypoint_count,
             1.0,
@@ -758,12 +771,34 @@ class OpenDoor(AtomicAction[OpenDoorGoal, OpenDoorOptions]):
             dtype=torch.float32,
             device=self.device,
         )
+        return self._opened_link_and_eef_poses_at_fractions(
+            link_pose,
+            grasp_xpos,
+            rotation_axis,
+            axis_origin,
+            hinge_rotation,
+            fractions,
+        )
+
+    def _opened_link_and_eef_poses_at_fractions(
+        self,
+        link_pose: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        rotation_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
+        hinge_rotation: torch.Tensor,
+        fractions: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sample the rigid handle path at normalized hinge-angle fractions."""
+        axis = rotation_axis.to(device=self.device, dtype=torch.float32)
+        axis = axis / torch.linalg.vector_norm(axis)
+        fractions = fractions.to(device=self.device, dtype=torch.float32)
         angles = hinge_rotation.to(device=self.device, dtype=torch.float32)[:, None]
         angles = angles * fractions[None]
         rotations = (
             torch.eye(4, dtype=torch.float32, device=self.device)
             .reshape(1, 1, 4, 4)
-            .repeat(link_pose.shape[0], waypoint_count, 1, 1)
+            .repeat(link_pose.shape[0], fractions.numel(), 1, 1)
         )
         rotations[:, :, :3, :3] = axis_angle_to_rotation_matrix(
             angles[:, :, None] * axis

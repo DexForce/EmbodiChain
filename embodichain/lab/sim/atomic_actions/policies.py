@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
@@ -122,6 +123,9 @@ class MotionPolicy:
         sample_count: int | None = None,
         interpolation_dt: float | None = None,
         cartesian_linear: bool = False,
+        cartesian_path_sampler: (
+            Callable[["torch.Tensor"], "torch.Tensor"] | None
+        ) = None,
     ) -> "MotionGenOptions":
         """Translate this atomic policy into motion-generator options.
 
@@ -133,6 +137,9 @@ class MotionPolicy:
                 deterministic interpolation.
             cartesian_linear: Whether every supplied Cartesian keyframe is a
                 required linear-path sample rather than a sparse endpoint.
+            cartesian_path_sampler: Optional exact-path sampler receiving
+                normalized progress values. Use this for constrained curves
+                such as rotations about an external hinge.
 
         Returns:
             Independently owned options for :class:`MotionGenerator`.
@@ -162,6 +169,7 @@ class MotionPolicy:
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear,
             preserve_cartesian_samples=cartesian_linear,
+            cartesian_path_sampler=cartesian_path_sampler,
         )
 
 

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from typing import Literal
 from unittest.mock import Mock, patch
@@ -897,6 +898,68 @@ class TestMotionStrategy:
         assert interval_velocity.abs().max() <= 1.0 + 1.0e-5
         assert boundary_acceleration.abs().max() <= 2.0 + 1.0e-4
         assert torch.all(result.positions[:, 1:, 0] >= result.positions[:, :-1, 0])
+        generator.planner.plan.assert_not_called()
+
+    def test_limited_cartesian_motion_resamples_external_rotation_exactly(self):
+        generator = _mock_generator()
+        start_pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+        start_pose[:, 0, 3] = 1.0
+        generator.robot.compute_fk.return_value = start_pose
+
+        def encode_angle(
+            pose: torch.Tensor,
+            name: str,
+            joint_seed: torch.Tensor,
+            continuous: bool = False,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            del name, continuous
+            qpos = joint_seed.clone()
+            qpos[..., 0] = torch.atan2(pose[..., 1, 3], pose[..., 0, 3])
+            return torch.ones(pose.shape[:2], dtype=torch.bool), qpos
+
+        sampled_paths: list[torch.Tensor] = []
+
+        def sample_quarter_circle(progress: torch.Tensor) -> torch.Tensor:
+            angles = (math.pi / 2.0) * progress
+            poses = torch.eye(4).repeat(BATCH_SIZE, progress.numel(), 1, 1)
+            poses[..., 0, 3] = torch.cos(angles)
+            poses[..., 1, 3] = torch.sin(angles)
+            sampled_paths.append(poses.clone())
+            return poses
+
+        generator.robot.compute_batch_ik.side_effect = encode_angle
+        targets = []
+        for angle in torch.linspace(math.pi / 8.0, math.pi / 2.0, 4):
+            pose = torch.eye(4).repeat(BATCH_SIZE, 1, 1)
+            pose[:, 0, 3] = torch.cos(angle)
+            pose[:, 1, 3] = torch.sin(angle)
+            targets.append(PlanState.from_xpos(pose))
+
+        result = generator.generate(
+            targets,
+            MotionGenOptions(
+                strategy="ik_interp",
+                sample_count=5,
+                start_qpos=torch.zeros(BATCH_SIZE, CONTROLLED_DOF),
+                control_part="arm",
+                is_linear=True,
+                interpolation_dt=0.05,
+                preserve_cartesian_samples=True,
+                cartesian_path_sampler=sample_quarter_circle,
+                velocity_limit=1.0,
+                acceleration_limit=2.0,
+            ),
+        )
+
+        assert result.positions is not None
+        assert result.positions.shape[1] > 5
+        assert sampled_paths
+        radii = torch.linalg.vector_norm(sampled_paths[-1][..., :2, 3], dim=-1)
+        assert torch.allclose(radii, torch.ones_like(radii))
+        assert torch.allclose(
+            result.positions[:, -1, 0],
+            torch.full((BATCH_SIZE,), math.pi / 2.0),
+        )
         generator.planner.plan.assert_not_called()
 
     def test_motion_gen_delegates_and_resamples_backend_result(self):

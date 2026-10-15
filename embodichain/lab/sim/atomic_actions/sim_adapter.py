@@ -503,6 +503,11 @@ class SimulationExecutionAdapter:
         """
         return self._elapsed_time
 
+    @property
+    def sleep_quantum(self) -> float:
+        """Return the smallest representable simulated sleep duration."""
+        return self.physics_dt
+
     def sleep(self, duration: float) -> None:
         """Advance physics by exactly the requested grid-aligned duration.
 

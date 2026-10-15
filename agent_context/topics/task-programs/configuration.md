@@ -99,6 +99,11 @@ Ownership is explicit rather than a generic deep merge:
   effect-assurance policy. Planner collision objects are attached from the
   selected live scene and are not serialized in the policy.
 
+Configured `motion` policies accept optional finite, strictly positive
+`velocity_limit` and `acceleration_limit` values. Configured Pour action options
+accept a finite, non-negative `dwell_duration`; unknown timing keys still fail
+the closed-field decoder.
+
 Grasp generators select toolkit-owned geometry with a string `model` ID;
 an inline mapping is a custom calibration and its `model_id` does not trigger
 catalog lookup. The catalog is owned by

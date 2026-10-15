@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import MISSING
 from typing import Literal
@@ -145,9 +145,18 @@ class MotionGenOptions:
 
     This constrained mode requires exactly ``sample_count - 1`` target states;
     the observed start configuration supplies the first sample. Without motion
-    limits, targets are emitted unchanged. With limits, their Cartesian
-    polyline is resampled by a minimum-jerk progress law and every emitted pose
-    is solved by IK.
+    limits, targets are emitted unchanged. With limits, their Cartesian path is
+    resampled by a minimum-jerk progress law and every emitted pose is solved by
+    IK.
+    """
+
+    cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None
+    """Optional exact-path sampler for normalized progress values.
+
+    The callback receives a one-dimensional tensor spanning zero through one
+    and returns poses with shape ``(B, T, 4, 4)``. Use it for paths whose
+    geometry cannot be recovered from Cartesian chords, such as rotation about
+    an external hinge. It is valid only with ``preserve_cartesian_samples``.
     """
 
     interpolate_position_step: float = 0.002
@@ -163,6 +172,13 @@ class MotionGenOptions:
                 "preserve_cartesian_samples requires strategy='ik_interp'; "
                 "planner backends do not guarantee exact Cartesian samples."
             )
+        if self.cartesian_path_sampler is not None:
+            if not callable(self.cartesian_path_sampler):
+                raise TypeError("cartesian_path_sampler must be callable or None.")
+            if not self.preserve_cartesian_samples:
+                raise ValueError(
+                    "cartesian_path_sampler requires preserve_cartesian_samples=True."
+                )
         if self.strategy == "ik_interp" and self.plan_opts is not None:
             raise ValueError(
                 "strategy='ik_interp' does not consume plan_opts; use "
@@ -1004,6 +1020,7 @@ class MotionGenerator:
                 solved_keyframes,
                 interval_count + 1,
                 options.control_part,
+                path_sampler=options.cartesian_path_sampler,
             )
             iteration_success, solved = self._solve_cartesian_waypoints(
                 sampled_poses[:, 1:],
@@ -1059,8 +1076,10 @@ class MotionGenerator:
         solved_keyframes: torch.Tensor,
         sample_count: int,
         control_part: str,
+        *,
+        path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        """Sample a Cartesian polyline with one global minimum-jerk progress law."""
+        """Sample an exact path or Cartesian polyline with minimum-jerk progress."""
         if self.robot is None:
             raise RuntimeError("MotionGenerator requires a robot before interpolation.")
         start_pose = self.robot.compute_fk(
@@ -1080,6 +1099,33 @@ class MotionGenerator:
             dtype=target_poses.dtype,
         )
         progress = 10.0 * tau**3 - 15.0 * tau**4 + 6.0 * tau**5
+        if path_sampler is not None:
+            result = path_sampler(progress)
+            expected_shape = (target_poses.shape[0], sample_count, 4, 4)
+            if not isinstance(result, torch.Tensor) or result.shape != expected_shape:
+                raise ValueError(
+                    "cartesian_path_sampler must return a tensor with shape "
+                    f"{expected_shape}."
+                )
+            if result.device != target_poses.device:
+                raise ValueError(
+                    "cartesian_path_sampler output must share the target device."
+                )
+            if result.dtype != target_poses.dtype:
+                raise ValueError(
+                    "cartesian_path_sampler output must share the target dtype."
+                )
+            if not torch.isfinite(result).all():
+                raise ValueError("cartesian_path_sampler output must be finite.")
+            if not torch.allclose(
+                result[:, 0], path[:, 0], rtol=1.0e-5, atol=1.0e-6
+            ) or not torch.allclose(
+                result[:, -1], path[:, -1], rtol=1.0e-5, atol=1.0e-6
+            ):
+                raise ValueError(
+                    "cartesian_path_sampler must preserve the requested path endpoints."
+                )
+            return result
         query = total * progress[None]
         segment_index = torch.searchsorted(
             cumulative.contiguous(), query.contiguous(), right=False

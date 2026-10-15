@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -238,6 +239,16 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             n_twist - 1,
         )
 
+        def sample_twist_path(progress: torch.Tensor) -> torch.Tensor:
+            return self._twisted_grasp_poses_at_fractions(
+                link_pose,
+                grasp_xpos,
+                affordance.twist_axis,
+                affordance.require_axis_origin(),
+                options.twist_angle,
+                progress,
+            )
+
         approach_success, approach_arm = self._plan_pose_segment(
             pre_grasp_xpos,
             start_arm_qpos,
@@ -269,6 +280,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             n_twist,
             interpolation_dt=interpolation_dt,
             cartesian_samples=True,
+            cartesian_path_sampler=sample_twist_path,
         )
         retract_success, retract_arm = self._plan_pose_segment(
             pre_grasp_xpos,
@@ -412,6 +424,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         *,
         interpolation_dt: float,
         cartesian_samples: bool = False,
+        cartesian_path_sampler: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         result = self.motion_generator.generate(
             build_pose_plan_states(target_pose),
@@ -421,6 +434,7 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
                 sample_count=sample_count,
                 interpolation_dt=interpolation_dt,
                 cartesian_linear=cartesian_samples,
+                cartesian_path_sampler=cartesian_path_sampler,
             ),
         )
         assert isinstance(result.success, torch.Tensor)
@@ -443,19 +457,40 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
         waypoint_count: int,
     ) -> torch.Tensor:
         """Build Cartesian EEF keyframes that follow the target's twist arc."""
-        axis = twist_axis.to(device=self.device, dtype=torch.float32)
-        axis = axis / torch.linalg.vector_norm(axis)
-        angles = torch.linspace(
-            twist_angle / waypoint_count,
-            twist_angle,
+        fractions = torch.linspace(
+            1.0 / waypoint_count,
+            1.0,
             waypoint_count,
             dtype=torch.float32,
             device=self.device,
         )
+        return self._twisted_grasp_poses_at_fractions(
+            link_pose,
+            grasp_xpos,
+            twist_axis,
+            axis_origin,
+            twist_angle,
+            fractions,
+        )
+
+    def _twisted_grasp_poses_at_fractions(
+        self,
+        link_pose: torch.Tensor,
+        grasp_xpos: torch.Tensor,
+        twist_axis: torch.Tensor,
+        axis_origin: tuple[float, float, float],
+        twist_angle: float,
+        fractions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample the rigid grasp path at normalized twist-angle fractions."""
+        axis = twist_axis.to(device=self.device, dtype=torch.float32)
+        axis = axis / torch.linalg.vector_norm(axis)
+        fractions = fractions.to(device=self.device, dtype=torch.float32)
+        angles = twist_angle * fractions
         rotations = (
             torch.eye(4, dtype=torch.float32, device=self.device)
             .reshape(1, 4, 4)
-            .repeat(waypoint_count, 1, 1)
+            .repeat(fractions.numel(), 1, 1)
         )
         rotations[:, :3, :3] = axis_angle_to_rotation_matrix(angles[:, None] * axis)
         link_to_eef = torch.bmm(pose_inv(link_pose), grasp_xpos)

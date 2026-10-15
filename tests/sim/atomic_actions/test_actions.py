@@ -5231,6 +5231,70 @@ def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     }
 
 
+def test_handover_mixed_directions_pad_each_phase_to_shared_lengths() -> None:
+    action = _bind_action(_dual_motion_generator(), HandOver())
+    semantics, _ = _handover_semantics()
+    object_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+    object_pose[:, 0, 3] = torch.tensor([-0.8, 0.8])
+    context = _handover_context(object_pose)
+    options = HandOverOptions(hand_interp_steps=2)
+    requested = action._compute_segment_lengths(24, options)
+    first_lengths = dict(requested)
+    second_lengths = dict(requested)
+    first_lengths["pickup_approach"] += 2
+    second_lengths["pickup_transport"] += 3
+
+    def directional_plan(
+        lengths: dict[str, int],
+        value_offset: float,
+    ) -> SimpleNamespace:
+        parts = [
+            torch.full(
+                (NUM_ENVS, length, DUAL_ROBOT_DOF),
+                value_offset + index,
+            )
+            for index, length in enumerate(lengths.values())
+        ]
+        pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        return SimpleNamespace(
+            success=torch.ones(NUM_ENVS, dtype=torch.bool),
+            trajectory=torch.cat(parts, dim=1),
+            segment_lengths=lengths,
+            handover_object_to_eef=pose,
+            handover_grasp_xpos=pose,
+            receive_object_to_eef=pose,
+            receive_grasp_xpos=pose,
+            affordance_samples={},
+        )
+
+    action._plan_direction = Mock(
+        side_effect=(
+            directional_plan(first_lengths, 10.0),
+            directional_plan(second_lengths, 20.0),
+        )
+    )
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=HandOverGoal(semantics, target_pose=torch.eye(4)),
+        binding=_dual_binding(action, "source", "destination"),
+        motion_policy=MotionPolicy(sample_count=24),
+        skill_options=options,
+    )
+
+    plan = _plan_action(action, invocation, context)
+
+    shared_lengths = {
+        name: max(first_lengths[name], second_lengths[name]) for name in requested
+    }
+    assert plan.plan_success.tolist() == [True, True]
+    assert {
+        segment.name: segment.waypoint_count for segment in plan.segments
+    } == shared_lengths
+    assert _joint_trajectory(plan).waypoint_count == sum(shared_lengths.values())
+    first_call, second_call = action._plan_direction.call_args_list
+    assert first_call.args[-2] is not second_call.args[-2]
+
+
 def test_handover_can_end_with_receiving_resource_holding_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

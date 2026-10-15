@@ -136,11 +136,18 @@ policies use rest-to-rest minimum-jerk joint segments with scalar velocity and
 acceleration limits; `sample_count` remains a lower bound. Exact Cartesian
 paths use one global minimum-jerk progress law and batch IK for every expanded
 sample, so enforcing limits does not replace contact geometry with joint-space
-interpolation. CoordinatedPickment
+interpolation. Articulated paths whose geometry cannot be reconstructed from
+Cartesian chords provide an exact normalized-progress sampler; OpenDoor and
+Twist regenerate every expanded pose around their configured external axis.
+CoordinatedPickment
 uses sparse IK only as a seed, then batch-projects every shared-object waypoint
 for both arms so joint interpolation cannot break the closed chain.
 
-HandOver holds both closed hands for `hold_steps` before source release. Pour
+HandOver plans the two arm assignments from independent phase-length maps. A
+mixed batch terminal-pads corresponding phases to their shared maximum before
+selecting rows, which preserves handover boundaries when one assignment needs
+more retimed samples. It holds both closed hands for `hold_steps` before source
+release. Pour
 splits rotation and return at the poured pose and inserts a physical-time dwell.
 Actions preserving an existing grasp command the observed hand state until an
 explicit release; free-hand approaches interpolate from the observed state.
@@ -170,4 +177,6 @@ A nonzero damping gain is needed for the velocity error to contribute to trackin
 Active rows in one runtime frame must share one positive hold duration; zero is
 reserved for terminal padding. The runner rejects mismatched durations instead
 of choosing the maximum. Simulation control periods and sleeps must be integer
-multiples of `physics_dt`; the adapter never rounds a request upward.
+multiples of `physics_dt`; the adapter never rounds a motion-command request
+upward. Passive runner polling, including physical-effect waits, rounds the
+configured minimum cycle up to an advertised clock quantum before sleeping.

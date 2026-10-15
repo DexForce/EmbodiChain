@@ -21,7 +21,11 @@ Unconfirmed starts and later poses still require successful IK and FK consistenc
 `interpolate_trajectory()` raises
 on any failed row; `generate()` carries per-row success in a normalized
 `PlanResult`. Fixed Cartesian sample preservation requires explicit `ik_interp`;
-it is not an implicit fallback from backend planning.
+it is not an implicit fallback from backend planning. When velocity or
+acceleration limits expand such a path, `MotionGenOptions.cartesian_path_sampler`
+may regenerate poses from normalized minimum-jerk progress. The callback must
+preserve the requested endpoints, batch, dtype, and device; without it, the
+facade resamples the caller-supplied Cartesian polyline.
 
 Preserve these coupled result rules in `motion_generator.py`:
 

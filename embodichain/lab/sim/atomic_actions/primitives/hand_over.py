@@ -66,6 +66,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     assemble_full_robot_trajectory,
+    pad_trajectory_to_length,
     plan_named_arm_trajectory,
     repeat_qpos,
     require_shared_task_state_key,
@@ -447,9 +448,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 second_root_pose,
                 resources.first,
                 resources.second,
-                segment_lengths,
+                dict(segment_lengths),
                 eligible,
             )
+            segment_lengths = selected.segment_lengths
             success = selected.success & eligible
             full = selected.trajectory
             first_object_to_eef = selected.handover_object_to_eef
@@ -469,9 +471,10 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_root_pose,
                 resources.second,
                 resources.first,
-                segment_lengths,
+                dict(segment_lengths),
                 eligible,
             )
+            segment_lengths = selected.segment_lengths
             success = selected.success & eligible
             full = selected.trajectory
             first_object_to_eef = selected.receive_object_to_eef
@@ -491,7 +494,7 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 second_root_pose,
                 resources.first,
                 resources.second,
-                segment_lengths,
+                dict(segment_lengths),
                 first_is_handover & eligible,
             )
             second_to_first = self._plan_direction(
@@ -505,13 +508,30 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
                 first_root_pose,
                 resources.second,
                 resources.first,
-                segment_lengths,
+                dict(segment_lengths),
                 ~first_is_handover & eligible,
             )
-            if first_to_second.trajectory.shape != second_to_first.trajectory.shape:
+            if tuple(first_to_second.segment_lengths) != tuple(
+                second_to_first.segment_lengths
+            ):
                 raise ValueError(
-                    "Both HandOver arm assignments must produce matching trajectory shapes."
+                    "Both HandOver arm assignments must produce matching segment names."
                 )
+            segment_lengths = {
+                name: max(
+                    first_to_second.segment_lengths[name],
+                    second_to_first.segment_lengths[name],
+                )
+                for name in first_to_second.segment_lengths
+            }
+            first_trajectory = self._pad_directional_trajectory(
+                first_to_second,
+                segment_lengths,
+            )
+            second_trajectory = self._pad_directional_trajectory(
+                second_to_first,
+                segment_lengths,
+            )
             success = (
                 torch.where(
                     first_is_handover,
@@ -522,8 +542,8 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
             )
             full = torch.where(
                 first_is_handover[:, None, None],
-                first_to_second.trajectory,
-                second_to_first.trajectory,
+                first_trajectory,
+                second_trajectory,
             )
             pose_selector = first_is_handover[:, None, None]
             first_object_to_eef = torch.where(
@@ -1997,6 +2017,29 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         selected_midpoint = root_midpoint.gather(1, dominant_axis[:, None])
         middle_position.scatter_(1, dominant_axis[:, None], selected_midpoint)
         return middle
+
+    @staticmethod
+    def _pad_directional_trajectory(
+        plan: _DirectionalPlan,
+        segment_lengths: Mapping[str, int],
+    ) -> torch.Tensor:
+        """Pad corresponding phases without shifting handover boundaries."""
+        if tuple(plan.segment_lengths) != tuple(segment_lengths):
+            raise ValueError(
+                "Both HandOver arm assignments must produce matching segment names."
+            )
+        offset = 0
+        segments: list[torch.Tensor] = []
+        for name, source_length in plan.segment_lengths.items():
+            stop = offset + source_length
+            segment = plan.trajectory[:, offset:stop]
+            segments.append(pad_trajectory_to_length(segment, segment_lengths[name]))
+            offset = stop
+        if offset != plan.trajectory.shape[1]:
+            raise ValueError(
+                "HandOver directional segment lengths do not cover the trajectory."
+            )
+        return torch.cat(segments, dim=1)
 
     @staticmethod
     def _compute_segment_lengths(
