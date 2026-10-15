@@ -122,6 +122,25 @@ on an isolated robot configuration using its environment acquisition setting.
 Concrete defaults live in `embodichain_robots` and reach Gym and online buffers
 through the shared catalog resolver. `URDFCfg.sensors` remains physical sensor
 asset assembly, separate from these runtime camera declarations.
+`TianjiMarvinCfg` converts the pinned ACD assets' CAD mass and inertia together
+to SI through sparse per-link overlays, preserving source COM positions and
+caller overrides. The reusable `tianji_marvin.yaml` embodiment aligns the
+catalog tool convention with GraspKit's opening/approach axes and calibrates
+gripper drives. Reuse that component for Task Programs; the standalone catalog
+retains its documented source-tool TCP convention.
+The gripper-equipped Marvin preset also owns two 640×360 wrist RGB-D cameras,
+`cam_left_wrist` and `cam_right_wrist`, parented to the hand-base links.
+Their nominal 87°×58° optics approximate D405; mounting transforms are measured
+from the bundled single-lens mesh, not calibrated on hardware, and depth is
+ideal rendered geometry. The bare-arm variant declares no cameras. Explicit
+`sensors` overrides replace the suite; standalone creation and Gym acquisition
+continue to use the existing sensor switches. The embodiment's independent
+`sensor` list does not duplicate these mounted declarations.
+Both Marvin variants default to the compact ready pose with lowered elbows;
+the gripper variant appends four open-finger positions. `init_qpos` follows
+source order (interleaved left/right arm joints, then fingers). The shared
+embodiment explicitly pins the same pose, and the official Marvin demos inherit
+it; their deployment files do not duplicate older ready-pose overrides.
 The manager qualifies parent links with the final robot UID without changing
 the declaration. Independent cameras remain deployment/embodiment-owned.
 Creation, attachment and rebuild behavior belong to

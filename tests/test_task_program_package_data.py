@@ -38,6 +38,12 @@ _SETUP_PATH = _REPOSITORY_ROOT / "setup.py"
 _CONFIG_PACKAGE = "embodichain_tasks.configs"
 _CONFIG_SOURCE = _REPOSITORY_ROOT / "extensions" / "embodichain_tasks" / "configs"
 _PROGRAMS = {
+    Path("tasks/manipulation/repeated_pick_place/task_program/program.tabletop.yaml"): (
+        "repeated_tabletop_cube_pick_place"
+    ),
+    Path("tasks/manipulation/hand_over/task_program/program.tabletop.yaml"): (
+        "tabletop_hand_over"
+    ),
     Path(
         "tasks/manipulation/rubiks_cube_pick_place/task_program/program.yaml"
     ): "rubiks_cube_pick_place",
@@ -53,8 +59,26 @@ _PROGRAMS = {
     Path(
         "tasks/manipulation/tableware/pour_water/task_program/program.yaml"
     ): "pour_water_with_right_arm",
+    Path(
+        "tasks/manipulation/tableware/pour_water/task_program/program.tianji_marvin.yaml"
+    ): "pour_water_with_right_arm",
 }
 _DEPLOYMENTS = {
+    Path("tasks/manipulation/repeated_pick_place/task.tianji_marvin.yaml"): (
+        "repeated_tabletop_cube_pick_place",
+        "repeated_pick_place_tabletop",
+        "tianji_marvin",
+    ),
+    Path("tasks/manipulation/hand_over/task.tianji_marvin.yaml"): (
+        "tabletop_hand_over",
+        "tabletop_handover",
+        "tianji_marvin",
+    ),
+    Path("tasks/manipulation/tableware/pour_water/task.tianji_marvin.yaml"): (
+        "pour_water_with_right_arm",
+        "pour_water_tianji_marvin",
+        "tianji_marvin",
+    ),
     Path("tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"): (
         "rubiks_cube_pick_place",
         "task_program_rubiks_cube_pick_place",
@@ -111,6 +135,7 @@ _RESOURCE_PATHS = frozenset(
         Path("components/execution_policies/trajectory_open_loop.yaml"),
         Path("components/execution_policies/trajectory_open_loop_dense.yaml"),
         Path("components/execution_policies/trajectory_open_loop_slow.yaml"),
+        Path("components/execution_policies/trajectory_open_loop_dual_arm_slow.yaml"),
         Path("components/expansion_policies/task_program_episode.yaml"),
         Path("components/randomization_profiles/cube_initial_pose.yaml"),
         Path("components/randomization_profiles/rgb_visual.yaml"),
@@ -120,6 +145,11 @@ _RESOURCE_PATHS = frozenset(
         Path("components/embodiments/tianji_marvin.yaml"),
         Path("components/embodiments/ur5_dh_pgi_140_80.yaml"),
         Path("tasks/manipulation/hand_over/env.yaml"),
+        Path("tasks/manipulation/hand_over/README.md"),
+        Path("tasks/manipulation/hand_over/envs/tabletop.default.yaml"),
+        Path(
+            "tasks/manipulation/hand_over/task_program/integration.tianji_marvin.yaml"
+        ),
         Path("tasks/manipulation/hand_over/task_program/integration.yaml"),
         Path("tasks/manipulation/open_drawer/envs/default.yaml"),
         Path("tasks/manipulation/open_drawer/envs/newton.yaml"),
@@ -127,6 +157,10 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/open_drawer/README.md"),
         Path("tasks/manipulation/open_drawer/task_program/integration.yaml"),
         Path("tasks/manipulation/repeated_pick_place/envs/default.yaml"),
+        Path("tasks/manipulation/repeated_pick_place/envs/tabletop.default.yaml"),
+        Path(
+            "tasks/manipulation/repeated_pick_place/task_program/integration.tianji_marvin.yaml"
+        ),
         Path("tasks/manipulation/repeated_pick_place/envs/newton.yaml"),
         Path(
             "tasks/manipulation/repeated_pick_place/expansion/"
@@ -136,8 +170,12 @@ _RESOURCE_PATHS = frozenset(
         Path("tasks/manipulation/rubiks_cube_pick_place/env.yaml"),
         Path("tasks/manipulation/rubiks_cube_pick_place/task_program/integration.yaml"),
         Path("tasks/manipulation/tableware/pour_water/env.yaml"),
+        Path("tasks/manipulation/tableware/pour_water/env.tianji_marvin.yaml"),
         Path("tasks/manipulation/tableware/pour_water/README.md"),
         Path("tasks/manipulation/tableware/pour_water/task_program/integration.yaml"),
+        Path(
+            "tasks/manipulation/tableware/pour_water/task_program/integration.tianji_marvin.yaml"
+        ),
     }
 )
 

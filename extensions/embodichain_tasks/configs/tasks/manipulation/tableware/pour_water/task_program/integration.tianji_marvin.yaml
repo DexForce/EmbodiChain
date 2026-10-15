@@ -1,0 +1,88 @@
+integration_id: pour_water_tianji_marvin_v1
+program_id: pour_water_with_right_arm
+requires:
+  scene_contract: pour_water_scene_v1
+  embodiment_contract: dual_arm_parallel_gripper
+scene_binding:
+  contract_id: pour_water_scene_v1
+  registry_id: pour_water_tianji_marvin
+  rigid_objects:
+    - entity_id: cup
+      simulation_uid: cup
+      dynamics: dynamic
+      semantic_type: cup
+    - entity_id: bottle
+      simulation_uid: bottle
+      dynamics: dynamic
+      semantic_type: bottle
+      affordances:
+        - entity_id: bottle_grasp
+          kind: antipodal_grasp
+          internal_axis: [0.8665034216893454, 0.49392778336146054, 0.07216068891225036]
+profile:
+  defaults:
+    pick_up:
+      primary: right
+    move_held_object:
+      primary: right
+    pour:
+      primary: right
+    place:
+      primary: right
+  action_options:
+    pick:
+      kind: pick_up
+      hand_interp_steps: 44
+      grasp_settle_steps: 100
+      fixed_object_to_eef:
+        - 0.0
+        - 0.0
+        - 1.0
+        - -0.0175
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+        - -0.02
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    simulation.move_held_object:
+      kind: move_held_object
+    simulation.pour:
+      kind: pour
+      rotate_angle: -1.0471975511965976
+    place:
+      kind: place
+      hand_interp_steps: 44
+      release_settle_steps: 60
+      preserve_current_object_orientation: true
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: move_held_object
+      target_id: cup_pour_pose
+      reference_entity_id: cup
+      relative_pose:
+        - 1.0
+        - 0.0
+        - 0.0
+        - 0.027645135849048517
+        - 0.0
+        - 1.0
+        - 0.0
+        - -0.053564902897726294
+        - 0.0
+        - 0.0
+        - 1.0
+        - 0.18
+        - 0.0
+        - 0.0
+        - 0.0
+        - 1.0
+    - kind: pour
+      object_id: bottle

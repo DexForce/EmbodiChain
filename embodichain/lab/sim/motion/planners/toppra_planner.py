@@ -268,7 +268,7 @@ class ToppraPlanOptions(PlanOptions):
     Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
     """
 
-    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
     """Method for sampling the trajectory.
 
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
@@ -309,7 +309,7 @@ class ToppraPlanner(BasePlanner):
         # __del__ below only handles in-process GC of an abandoned planner.
 
     def default_plan_options(self) -> ToppraPlanOptions:
-        """Return backend-default planning options."""
+        """Return a valid time-sampled default when no count is requested."""
         return ToppraPlanOptions()
 
     @staticmethod

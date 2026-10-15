@@ -1953,17 +1953,28 @@ class HandOver(AtomicAction[HandOverGoal, HandOverOptions]):
         handover_root_pose: torch.Tensor,
         receive_root_pose: torch.Tensor,
     ) -> torch.Tensor:
-        """Move only the dominant root-separation coordinate to its midpoint."""
+        """Use the root midpoint only when the two roots define a separation.
+
+        Some humanoid assets locate both arm-chain roots at the torso origin.
+        Their lifted object pose already has to lie in the shared workspace;
+        choosing an arbitrary axis for coincident roots would pull it into the
+        torso instead.
+        """
         handover_root_position = handover_root_pose[:, :3, 3]
         receive_root_position = receive_root_pose[:, :3, 3]
-        dominant_axis = torch.argmax(
-            torch.abs(handover_root_position - receive_root_position), dim=1
-        )
+        separation = torch.abs(handover_root_position - receive_root_position)
+        dominant_axis = torch.argmax(separation, dim=1)
+        separated = torch.linalg.vector_norm(separation, dim=1) > 1.0e-6
         root_midpoint = 0.5 * (handover_root_position + receive_root_position)
         middle = lifted_object_pose.clone()
         middle_position = middle[:, :3, 3]
         selected_midpoint = root_midpoint.gather(1, dominant_axis[:, None])
-        middle_position.scatter_(1, dominant_axis[:, None], selected_midpoint)
+        selected_position = middle_position.gather(1, dominant_axis[:, None])
+        middle_position.scatter_(
+            1,
+            dominant_axis[:, None],
+            torch.where(separated[:, None], selected_midpoint, selected_position),
+        )
         return middle
 
     @staticmethod

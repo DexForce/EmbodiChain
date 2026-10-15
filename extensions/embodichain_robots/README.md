@@ -18,6 +18,40 @@ remain in `embodichain.lab.sim`. Assets continue to use the core download/cache
 registry. Task deployments, sensor suites, and Task Program skill profiles keep
 their existing owners.
 
+## Tianji Marvin defaults
+
+Both Marvin variants start in the shared compact ready pose: lowered elbows
+and forward-folded forearms. The gripper variant also starts with open jaws.
+`init_qpos` uses source articulation order (L1, R1, …, L7, R7, then four fingers
+when present). Explicit caller overrides remain supported. The official Marvin
+embodiment pins this same pose, and its three demos inherit it.
+
+The gripper-equipped `TianjiMarvinCfg` declares `cam_left_wrist` and
+`cam_right_wrist` on the corresponding `hand_base_link`. Each returns 640×360
+RGB and aligned ideal depth in metres. Nominal intrinsics
+`(337.20964, 324.72860, 320, 180)` approximate the 87°×58° field of view in the
+[RealSense D405 specifications](https://www.realsenseai.com/product-family/d405-series/).
+Near/far render clipping is 0.005/3.0 m. Images update at the host environment's
+observation cadence; the preset does not impose the hardware's frame rate.
+
+The bundled hand mesh has a single-lens housing. The parent-relative position
+`(0.000669, 0.057374, 0.061580)` m lies about 1 mm ahead of its lens face;
+the optical-frame `xyzw` rotation `(0, -0.104528, 0.994522, 0)` follows its 12°
+mounting inclination and places the gripper toward the lower image. Mounted
+`CameraCfg` extrinsics use OpenGL (-Z forward, +Y up), so the stored quaternion
+is the equivalent `(0, 0.994522, 0.104528, 0)`. These are mesh-based
+simulation estimates, not measured D405 extrinsics or an interchangeable
+hardware calibration. Depth comes from rendered geometry, without stereo
+matching, sensor noise or hardware range invalidation. D405's nominal
+0.07–0.50 m ideal working range is useful for preview coloring, not clipping RGB
+or altering the raw simulated depth.
+
+Standalone simulation opts into creation with `enable_sensor=True`. Gym uses
+its environment-level `enable_sensor` switch and enables the suite by default;
+`--disable-sensor` skips acquisition. An explicit `sensors` list replaces the
+defaults, including `sensors=[]`. The bare-arm variant (`with_gripper=False`)
+has no default cameras because it lacks the hand-base mounting links.
+
 ## Shared robot resolution
 
 Gym's `robot.class_type`, `analyze-workspace --robot`, and the dual-arm

@@ -4,6 +4,83 @@ simulation:
   class_type: TianjiMarvin
   uid: TianjiMarvin
   with_gripper: true
+  # Shared ready pose: lowered elbows, forward-folded forearms, open jaws.
+  # Source order is L1, R1, ..., L7, R7, then the four finger joints.
+  # Kept aligned with TianjiMarvinCfg's standalone default.
+  init_qpos:
+    - -1.5875022065801416
+    - 1.5875023792379233
+    - 1.2248796197752276
+    - 1.2248821108425374
+    - 1.0822212035745409
+    - -1.0822204356660736
+    - -2.3307274153917774
+    - -2.3307274153917774
+    - 0.5068066018093935
+    - -0.5068065733236865
+    - 0.8471975511965976
+    - 0.8471975511965976
+    - -1.3707963267948964
+    - 1.3707963267948964
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+  root_props:
+    fixed_base: true
+    min_position_iters: 32
+    min_velocity_iters: 8
+  # Coupled simulation drive calibration, independent of hardware force ratings.
+  joint_drive_props:
+    stiffness:
+      left_eef: 500.0
+      right_eef: 500.0
+    damping:
+      left_eef: 50.0
+      right_eef: 50.0
+    max_effort:
+      left_eef: 40.0
+      right_eef: 40.0
+    max_velocity:
+      left_eef: 0.1
+      right_eef: 0.1
+  # These merge into the preset's SI inertial overlays for the same links.
+  link_attrs:
+    left_hand_finger_1_link:
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+    left_hand_finger_2_link:
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+    right_hand_finger_1_link:
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+    right_hand_finger_2_link:
+      attrs:
+        material_props:
+          static_friction: 2.0
+          dynamic_friction: 2.0
+  # GraspKit X opens the jaws and Z approaches. Align the tool rotation and
+  # place its origin at the centre of the physical finger span (112.5 mm).
+  solver_cfg:
+    left_arm:
+      tcp:
+        - [0.0, 0.0, 1.0, 0.1125]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
+    right_arm:
+      tcp:
+        - [0.0, 0.0, 1.0, 0.1125]
+        - [1.0, 0.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0, 1.0]
 
 sensor: []
 
@@ -54,3 +131,8 @@ skill_profile:
       right_eef:
         kind: antipodal_parallel_jaw
         model: tianji_marvin_gripper
+    control_part_evidence:
+      kind: joint_position_constraint
+      control_parts: [left_eef, right_eef]
+      open_qpos: [0.0, 0.0]
+      minimum_displacement: 0.004
