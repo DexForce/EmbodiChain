@@ -300,6 +300,12 @@ native target position/velocity prove it; changed or unavailable targets still
 fail the original boundary checks. This does not certify contact force.
 Extra detours preserve the legacy-stop RNG state. Other calls and safe original
 plans do not acquire this recovery implicitly.
+Unrelated `DrawerRoute` declarations cannot clear explicitly verified ordinary
+staging authority. Owned drawer transports still opt out through their actual
+invocation-local direct-transport scope and retain their payload-aware route.
+Mixed-route authority changes invalidate old integration fingerprints; regenerate
+new bundles rather than resealing historical ones. This is an authorization
+boundary, not full articulated-world or continuous-collision qualification.
 Generated released-hand cleanup uses `task_engine/_task_program/clearance_recovery.py`.
 An adjacent same-object, same-resource verified Place/clearance followed by one
 or two distinct sequential Parks including the owning arm enables its bounded

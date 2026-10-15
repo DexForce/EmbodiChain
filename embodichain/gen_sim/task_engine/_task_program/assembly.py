@@ -855,11 +855,9 @@ def load_deployment(
     articulation_calls = bind_articulation_calls(compiled)
     from .staging_recovery import STAGING_RECOVERY_REVISION
 
-    staging_calls = (
-        tuple(str(value) for value in payload.get("staging_calls", ()))
-        if not drawers
-        else ()
-    )
+    # Owned drawer transports opt out at the call boundary; unrelated routes
+    # must not revoke verified ordinary-call retention authority.
+    staging_calls = tuple(str(value) for value in payload.get("staging_calls", ()))
     staging_retention_sources = tuple(
         tuple(str(value) for value in source)
         for source in payload.get("staging_retention_sources", ())
@@ -875,12 +873,10 @@ def load_deployment(
     )
     staging_contract = StagingContract(
         rigid_entity_ids=frozenset(
-            ()
-            if drawers
-            else (item.entity_id for item in registration.scene_binding.rigid_objects)
+            item.entity_id for item in registration.scene_binding.rigid_objects
         ),
-        invocation_ids=frozenset() if drawers else frozenset(verified_sources),
-        retention_sources={} if drawers else verified_sources,
+        invocation_ids=frozenset(verified_sources),
+        retention_sources=verified_sources,
     )
     from .clearance_recovery import CLEARANCE_RECOVERY_REVISION, bind_clearance_calls
 
@@ -931,7 +927,7 @@ def load_deployment(
             ),
             **(
                 {"staging_recovery_revision": STAGING_RECOVERY_REVISION}
-                if staging_calls
+                if staging_calls or (drawers and verified_sources)
                 else {}
             ),
             **(

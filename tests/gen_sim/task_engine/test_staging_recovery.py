@@ -826,18 +826,11 @@ def test_nonstaging_transform_does_not_add_boundary_search(
     assert result.plan_success.all()
 
 
-@pytest.mark.parametrize("preserve_yaw", [False, True])
-def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unchanged(
-    monkeypatch, tmp_path, preserve_yaw
-):
+@pytest.fixture
+def staging_bundle_scene(tmp_path):
     import trimesh
 
-    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
     from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
-    from embodichain.gen_sim.task_engine.task_program_bundle import (
-        generate_task_program_bundle,
-    )
-    from embodichain.utils.utility import load_config
 
     mesh_path = tmp_path / "item.glb"
     trimesh.creation.box(extents=(0.06, 0.24, 0.06)).export(mesh_path)
@@ -912,7 +905,7 @@ def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unc
                     "arguments": {
                         "object": "item",
                         "target": "staging",
-                        "preserve_yaw": preserve_yaw,
+                        "preserve_yaw": False,
                     },
                     "resources": {"primary": "left"},
                 },
@@ -964,6 +957,21 @@ def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unc
             }
         )
     graph["task_groups"][0]["node_ids"] = [node["id"] for node in graph["nodes"]]
+    return graph, scene
+
+
+@pytest.mark.parametrize("preserve_yaw", [False, True])
+def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unchanged(
+    monkeypatch, tmp_path, staging_bundle_scene, preserve_yaw
+):
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config
+
+    graph, scene = staging_bundle_scene
+    graph["nodes"][1]["call"]["arguments"]["preserve_yaw"] = preserve_yaw
     original = deepcopy(graph)
     _, paths = generate_task_program_bundle(
         graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
@@ -998,8 +1006,122 @@ def test_staging_revision_fingerprint_is_conditional_and_caller_owned_inputs_unc
     assert arguments["skill_profile"] == profile
 
 
+@pytest.mark.parametrize("scope", ["verified", "preserve_yaw", "missing_pick_monitor"])
+@pytest.mark.parametrize("sources_only", [False, True])
+def test_loader_staging_scope_is_invariant_to_unrelated_drawer_routes(
+    monkeypatch, tmp_path, staging_bundle_scene, scope, sources_only
+):
+    from embodichain.gen_sim.task_engine._task_program.articulation_binding import (
+        PrismaticBinding,
+    )
+    from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
+    from embodichain.gen_sim.task_engine._task_program.drawer_binding import DrawerRoute
+    from embodichain.gen_sim.task_engine.task_program_bundle import (
+        generate_task_program_bundle,
+    )
+    from embodichain.utils.utility import load_config, save_config
+
+    graph, scene = staging_bundle_scene
+    graph["nodes"][1]["call"]["arguments"]["preserve_yaw"] = scope == "preserve_yaw"
+    _, paths = generate_task_program_bundle(
+        graph, scene, tmp_path / "bundle", robot_profile="dual_franka"
+    )
+    physical_scene = paths.scene.read_bytes()
+    embodiment = paths.embodiment.read_bytes()
+    integration = load_config(paths.integration)
+    bindings = tuple(
+        PrismaticBinding(
+            object_id="cabinet",
+            joint=f"slide_{index}",
+            link=f"drawer_{index}",
+            parent="cabinet_root",
+            handle_path=f"/drawer_{index}/handle",
+            source_sha256="0" * 64,
+            scale=1.0,
+            axis=(0.0, 1.0, 0.0),
+            limits=(-0.1, 0.0),
+            part_id=f"part_{index}",
+        )
+        for index in (1, 2)
+    )
+    routes = tuple(
+        DrawerRoute(
+            f"inside__cabinet__item__{binding.part_id}",
+            "item",
+            binding,
+            (-0.1, -0.1, 0.0),
+            (0.1, 0.1, 0.1),
+        )
+        for binding in bindings
+    )
+    # Fixed declaration-only E6 capabilities exercise the strict loader, not physics.
+    integration["scene_binding"]["articulations"] = [
+        {"entity_id": "cabinet", "simulation_uid": "cabinet"}
+    ]
+    integration["scene_binding"]["links"] = [
+        {
+            "entity_id": route.binding.link_id,
+            "articulation_id": "cabinet",
+            "native_link_name": route.binding.link,
+            "affordances": [
+                {
+                    "entity_id": route.affordance,
+                    "kind": "container",
+                    "native_name": route.affordance,
+                    "release_clearance": 0.0,
+                }
+            ],
+        }
+        for route in routes
+    ]
+    integration["runtime_services"]["registered_semantic_lowerers"].extend(
+        {"kind": kind, "bindings": [binding.payload() for binding in bindings]}
+        for kind in ("articulation_slide", "articulation_withdraw")
+    )
+    if scope == "missing_pick_monitor":
+        integration["profile"]["effect_monitors"].pop("gen_sim.pick.group")
+    save_config(paths.integration, integration)
+    arguments = dict(
+        task_program=load_config(paths.deployment)["task_program"],
+        skill_profile=load_config(paths.embodiment)["skill_profile"],
+        base_dir=paths.deployment.parent,
+    )
+    constraint_path = paths.deployment.parent / "task_program" / "constraints.json"
+    payload = load_config(constraint_path)
+    if sources_only:
+        payload["staging_calls"] = []
+    save_config(constraint_path, payload)
+    first = load_deployment(**arguments)
+    expected = first.integration.adapter_factory.staging_contract
+    assert expected.rigid_entity_ids == frozenset({"item", "table"})
+    assert bool(expected.invocation_ids) is (scope == "verified")
+    assert set(expected.retention_sources) == expected.invocation_ids
+    if scope == "verified":
+        source = next(iter(expected.retention_sources.values()))
+        assert source["predecessor_call_id"] == "gen_sim.pick.group"
+        assert source["entity_id"] == "item"
+        assert source["resource_id"] == "left"
+    revision = _module().STAGING_RECOVERY_REVISION
+    for declared in (routes[:1], routes, routes[::-1], routes[1:], ()):
+        payload["drawers"] = [route.payload() for route in declared]
+        save_config(constraint_path, payload)
+        loaded = load_deployment(**arguments)
+        factory = loaded.integration.adapter_factory
+        assert factory.drawer_routes == declared
+        assert factory.staging_contract == expected
+        monkeypatch.setattr(_module(), "STAGING_RECOVERY_REVISION", 999)
+        changed = load_deployment(**arguments)
+        assert (
+            loaded.integration.integration_fingerprint
+            != changed.integration.integration_fingerprint
+        ) is bool(payload["staging_calls"] or (declared and expected.invocation_ids))
+        monkeypatch.setattr(_module(), "STAGING_RECOVERY_REVISION", revision)
+    assert paths.scene.read_bytes() == physical_scene
+    assert paths.embodiment.read_bytes() == embodiment
+
+
 @pytest.mark.parametrize("has_drawers", [False, True])
-def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capability(
+def test_factory_binds_native_rigids_and_compiled_calls_independent_of_drawer_routes(
     monkeypatch, has_drawers
 ):
     from unittest.mock import Mock
@@ -1033,9 +1155,7 @@ def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capa
         factory._robot_profile_binding = SimpleNamespace(profile_id="profile")
         factory._grasp_pose_generators = {}
         factory._create_motion_generator = Mock(
-            return_value=SimpleNamespace(
-                robot=robot, direct_transport_planning=has_drawers
-            )
+            return_value=SimpleNamespace(robot=robot, direct_transport_planning=False)
         )
 
     monkeypatch.setattr(assembly.SimulationTaskProgramFactory, "__init__", initialize)
@@ -1049,23 +1169,15 @@ def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capa
     factory = assembly._TaskFactory(
         constraints={},
         staging_contract=StagingContract(
-            rigid_entity_ids=(frozenset() if has_drawers else frozenset({"rigid"})),
-            invocation_ids=(
-                frozenset() if has_drawers else frozenset({"compiled/align:0"})
-            ),
+            rigid_entity_ids=frozenset({"rigid"}),
+            invocation_ids=frozenset({"compiled/align:0"}),
             retention_sources={
-                **(
-                    {}
-                    if has_drawers
-                    else {
-                        "compiled/align:0": {
-                            "predecessor_call_id": "simulation.pick",
-                            "predecessor_invocation_id": "compiled/pick:0",
-                            "entity_id": "rigid",
-                            "resource_id": "active",
-                        }
-                    }
-                ),
+                "compiled/align:0": {
+                    "predecessor_call_id": "simulation.pick",
+                    "predecessor_invocation_id": "compiled/pick:0",
+                    "entity_id": "rigid",
+                    "resource_id": "active",
+                }
             },
         ),
         runtime_preset="verified",
@@ -1090,12 +1202,29 @@ def test_factory_binds_only_native_rigids_and_compiled_calls_without_drawer_capa
         for call in engine.register.call_args_list
         if isinstance(call.args[0], actions.GenSimMoveHeldObject)
     )
-    assert transport.staging_contract.rigid_entity_ids == (
-        frozenset() if has_drawers else frozenset({"rigid"})
+    assert transport.staging_contract == factory._staging_contract
+
+
+def test_active_drawer_transport_excludes_ordinary_staging(staging_inputs):
+    from embodichain.gen_sim.task_engine._task_program.drawer_curobo import (
+        DrawerMotionGenerator,
     )
-    assert transport.staging_contract.invocation_ids == (
-        frozenset() if has_drawers else frozenset({"compiled/align:0"})
+
+    probe = staging_inputs
+    generator = object.__new__(DrawerMotionGenerator)
+    generator._transport = None
+    contract = probe.action.staging_contract
+    arguments = (
+        probe.request,
+        probe.context,
+        contract.rigid_entity_ids,
+        contract.invocation_ids,
+        generator,
     )
+    assert _module().owns_staging(*arguments)
+    with generator.transport(None, None, None):
+        assert not _module().owns_staging(*arguments)
+    assert _module().owns_staging(*arguments)
 
 
 @pytest.mark.parametrize(
