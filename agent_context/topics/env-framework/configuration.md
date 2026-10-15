@@ -88,6 +88,18 @@ an explicit native renderer or extend `BaseEnv._requires_native_renderer()`
 before constructing the environment. See the owning
 [render selection contract](../simulation-system/rendering.md#norender-initialization).
 
+The deployment-owned top-level `ground_plane_visible` controls native default
+ground rendering through `EmbodiedEnvCfg`; `expansion.runtime` may override it
+without duplicating physical environment fields. Explicit booleans take precedence.
+Omission/`null` hides the ground for a configured HDR
+`randomize_indirect_lighting` event that survives visual-randomization filtering,
+and shows it otherwise. Emissive randomization and fixed environment maps do
+not trigger this default. `EmbodiedEnv` resolves its own config copy before scene
+preparation and applies the native setting before camera creation; collisions,
+custom floor objects and the Viser grid retain their existing behavior.
+`SimulationManager.set_ground_plane_visibility()` also retains settings for
+deferred plane binding and avoids native visual calls under NoRender.
+
 Device selection is one shared runtime value. The typed physics config supplies
 the backend default (`cpu` for Default, `cuda:0` for Newton), an optional
 top-level Gym `device` overrides it, and an explicitly supplied CLI `--device`
@@ -100,16 +112,21 @@ The component boundary is implemented in
 is consumed only by a configured Task Program deployment. Scene components are
 always physical-only; semantic entity mappings and affordances live in the
 task integration's nested `scene_binding`. The shared
-`cobotmagic.yaml` component owns a top-view RGB camera, two wrist
-RGB cameras, and an optional right-arm skill profile. Tableware handwritten and
-configured Task Program deployments reuse that same embodiment.
+`cobotmagic.yaml` component owns a top-view RGB camera and an optional right-arm
+skill profile. Its selected `CobotMagicCfg` owns the two mounted wrist cameras.
+Tableware handwritten and configured Task Program deployments reuse the combined
+suite. Gym copies the selected robot configuration and overrides its
+`enable_sensor` with the environment-wide switch. `cfg.sensor` retains
+independent declarations; effective sensors combine those with
+`cfg.robot.sensors` and reject duplicate UIDs before resource creation.
 The runnable Gym config may set `enable_sensor: false` while selecting an
-embodiment with cameras. The component still owns the sensor declarations, but
+embodiment with cameras. Both declaration sources remain available, but
 `EmbodiedEnv` skips their creation and sensor observations; the run launcher
 provides `--disable_sensor` / `--disable-sensor` as a one-run override. The
 shared online-data rollout buffer also omits image allocation for a disabled
-inline sensor suite. Sensor-dependent event and observation functors are
-removed before their managers are constructed, including nested
+sensor suite. Online buffer allocation uses the same robot decoder and combined
+declarations, including default mounted cameras. Sensor-dependent event and
+observation functors are removed before their managers are constructed, including nested
 `SceneEntityCfg` references, `all_sensors` selectors, sensor output paths and
 camera-keyed observation descriptors.
 

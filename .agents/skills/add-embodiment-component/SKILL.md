@@ -20,7 +20,7 @@ It owns exactly:
 
 - `embodiment_id`;
 - one `simulation` robot mapping;
-- the complete `sensor` list;
+- the independent `sensor` list (mounted defaults belong to `RobotCfg.sensors`);
 - optional `skill_profile`.
 
 It does not own a task, physical scene, Task Program, execution policy,
@@ -46,8 +46,11 @@ If an existing registered robot config can express the request, select it in
 `RobotCfg`/URDF/control-part implementation is required, invoke `$add-robot`
 first. This skill does not duplicate robot registration logic in YAML.
 
-Keep the sensor suite atomic with the embodiment. Sensor parent link names must
-exist on the selected robot.
+Keep robot-mounted camera calibration in the robot configuration. The component
+selects that robot and declares additional independent sensors; do not repeat
+mounted defaults in `sensor`. Sensor UIDs must be unique across both sources.
+Gym initializes both sources by default and uses `enable_sensor: false` to
+disable both, overriding the robot's standalone initialization switch.
 
 ## Add `skill_profile` only when needed
 
@@ -104,7 +107,7 @@ At minimum:
 
 1. decode the YAML as a closed embodiment component;
 2. build the selected robot config and verify control parts;
-3. verify sensor parent links and shapes;
+3. verify the combined independent/mounted sensor UIDs, parent links and shapes;
 4. verify every profile endpoint/control part/capability and command preset;
 5. compose at least one intended task deployment;
 6. for Task Program use, run
@@ -113,7 +116,7 @@ At minimum:
 
 ## Checklist
 
-- [ ] Component owns exactly one robot and one atomic sensor suite
+- [ ] Component selects exactly one robot and declares only additional sensors
 - [ ] Existing robot config was reused, or `$add-robot` was completed first
 - [ ] Profile is omitted when no semantic consumer needs it
 - [ ] Contract/profile/resource/preset IDs are stable and unversioned

@@ -109,7 +109,9 @@ The isolation cases are in `tests/gym/envs/test_embodied_env_joint_setup.py`.
 Construction seeds before scene setup, constructs the robot and enabled sensors, then
 initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is
-owned by [randomization](../randomization/randomization.md).
+owned by [randomization](../randomization/randomization.md). Robot-mounted cameras
+use the same acquisition switch and participate in the environment sensor
+registry; see [configuration](configuration.md) for declaration ownership.
 
 The policy step order is:
 

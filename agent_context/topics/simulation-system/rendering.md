@@ -13,13 +13,19 @@ nonempty validation cameras, the original window intent, Viser, forced Newton
 render synchronization, and custom environment demand hooks reserve
 rendering. Existing sensor/visual filters run before preflight; disabled dataset
 managers do not contribute demand. Contact-only environments do not require it.
+Camera demand includes `RobotCfg.sensors` from the selected backend preset,
+even when the independent Gym `sensor` list is empty. This selection and
+disabled-sensor filtering run before the World is constructed.
 
 `BaseEnv._requires_native_renderer()` is the extension hook. Its result reaches
 `SimulationManager(..., requires_native_renderer=...)` before Gym temporarily
 sets headless for scene setup. With auto, no global default override and demand
 explicitly false, the manager selects NoRender without probing the GPU. Explicit
 renderer selections and global defaults retain precedence. The default demand
-`None` preserves standalone GPU selection. Custom camera/visual code, including
+`None` preserves standalone GPU selection. The run-task/run-env launcher scopes
+its native auto preference through `utility/render_utils.py`; this preference is
+consulted only after NoRender demand selection and explicit global overrides,
+and is restored on launcher exit. Custom camera/visual code, including
 cameras added after startup, must reserve rendering before construction; no
 runtime renderer switching or speculative constructors are used.
 

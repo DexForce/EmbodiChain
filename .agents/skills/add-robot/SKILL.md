@@ -146,12 +146,16 @@ must match the matching `control_parts` entry (the test stub asserts this).
 ## Reusable embodiment handoff
 
 `RobotCfg` owns simulation construction, control parts, solvers, and physical
-properties. It does not own a task, sensor suite, or Task Program skill
-profile.
+properties, plus optional mounted camera configurations in `sensors`.
+Use robot-local parent link names and stable sensor UIDs. Standalone simulation
+creates these cameras only with `enable_sensor=True`; Gym overrides that
+switch with its environment acquisition setting. An explicit sensor list
+replaces defaults and `sensors: []` clears them. Keep independent cameras,
+task declarations and Task Program skill profiles outside the robot class.
 
 If the user also wants the robot selectable from task deployments, invoke
 `$add-embodiment-component` after the robot config passes its own tests. That
-component selects the robot, owns its sensors, and optionally maps stable
+component selects the robot, declares additional independent sensors, and maps stable
 logical resources/endpoints/capabilities/commands into `skill_profile`.
 Do not copy those semantic declarations into the robot class.
 

@@ -396,10 +396,10 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
         )
 
 
-def test_embodiment_owns_the_deployed_sensor_suite(
+def test_embodiment_and_robot_compose_the_deployed_sensor_suite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sensors are selected with the physical embodiment, not the task scene."""
+    """Independent and robot-mounted cameras retain the deployed sensor suite."""
     monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     path = _tableware_config_path("pour_water")
     config = _tableware_gym_config("pour_water")
@@ -409,22 +409,17 @@ def test_embodiment_owns_the_deployed_sensor_suite(
     assert type(sensor_config[0]) is dict
     cfg = config_to_cfg(config, source_path=path)
 
-    assert [sensor["sensor_type"] for sensor in sensor_config] == [
-        "Camera",
-        "Camera",
-        "Camera",
-    ]
-    assert [sensor["uid"] for sensor in sensor_config] == [
+    assert [sensor["sensor_type"] for sensor in sensor_config] == ["Camera"]
+    assert [sensor["uid"] for sensor in sensor_config] == ["cam_high"]
+    assert cfg.robot.enable_sensor is True
+    assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
         "cam_high",
         "cam_right_wrist",
         "cam_left_wrist",
     ]
-    assert [sensor.uid for sensor in cfg.sensor] == [
-        "cam_high",
-        "cam_right_wrist",
-        "cam_left_wrist",
-    ]
-    assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+    assert all(
+        type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
+    )
 
 
 def test_pour_water_commands_preserve_idle_left_arm_targets(

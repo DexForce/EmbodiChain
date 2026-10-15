@@ -332,6 +332,80 @@ def test_config_to_cfg_applies_explicit_cpu_to_newton() -> None:
 class TestInitRolloutBufferFromConfig:
     """Tests for init_rollout_buffer_from_config function."""
 
+    @pytest.mark.parametrize("enabled", [False, True])
+    def test_mounted_sensors_share_runtime_and_recording_declarations(
+        self, enabled: bool
+    ) -> None:
+        config = {
+            "id": "EmbodiedEnv-v1",
+            "physics": "default",
+            "enable_sensor": enabled,
+            "env": {},
+            "robot": {
+                "uid": "robot",
+                "enable_sensor": not enabled,
+                "sensors": [
+                    {
+                        "sensor_type": "StereoCamera",
+                        "uid": "wrist",
+                        "width": 16,
+                        "height": 12,
+                        "enable_mask": True,
+                        "extrinsics": {"parent": "tool"},
+                    }
+                ],
+            },
+            "sensor": [
+                {"sensor_type": "Camera", "uid": "fixed", "width": 8, "height": 6}
+            ],
+        }
+        cfg = config_to_cfg(config)
+        assert cfg.robot.enable_sensor is enabled
+        assert config["robot"]["enable_sensor"] is not enabled
+        buffer = init_rollout_buffer_from_config(
+            config, max_episode_steps=2, batch_size=1, state_dim=7
+        )
+        if enabled:
+            assert set(buffer["obs", "sensor"].keys()) == {"fixed", "wrist"}
+            assert buffer["obs", "sensor", "wrist", "color"].shape == (1, 2, 12, 16, 4)
+            assert buffer["obs", "sensor", "wrist", "color_right"].shape == (
+                1,
+                2,
+                12,
+                16,
+                4,
+            )
+            assert buffer["obs", "sensor", "wrist", "mask"].shape == (1, 2, 12, 16)
+        else:
+            assert "sensor" not in buffer["obs"]
+
+    def test_robot_default_sensors_are_included_in_component_buffer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "embodichain_robots.cobotmagic.get_data_path", lambda value: value
+        )
+        config = {
+            "embodiment": {
+                "component": "embodichain_tasks/configs/components/embodiments/cobotmagic.yaml"
+            },
+            "env": {},
+        }
+        buffer = init_rollout_buffer_from_config(
+            config, max_episode_steps=1, batch_size=1, state_dim=16
+        )
+        assert set(buffer["obs", "sensor"].keys()) == {
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist",
+        }
+        assert buffer["obs", "sensor", "cam_right_wrist", "mask"].shape == (
+            1,
+            1,
+            480,
+            640,
+        )
+
     def test_basic_rollout_buffer(self):
         """Test that basic rollout buffer is created correctly."""
         config = {
@@ -1550,12 +1624,15 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.robot.uid == "CobotMagic"
-        assert [sensor.uid for sensor in cfg.sensor] == [
+        assert [sensor.uid for sensor in cfg.sensor] == ["cam_high"]
+        assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",
             "cam_right_wrist",
             "cam_left_wrist",
         ]
-        assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+        assert all(
+            type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
+        )
 
     def test_official_handwritten_config_can_disable_shared_embodiment_sensors(
         self,
@@ -1572,7 +1649,8 @@ class TestConfigToCfgFromFile:
         )
 
         assert cfg.enable_sensor is False
-        assert [sensor.uid for sensor in cfg.sensor] == [
+        assert cfg.robot.enable_sensor is False
+        assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
             "cam_high",
             "cam_right_wrist",
             "cam_left_wrist",

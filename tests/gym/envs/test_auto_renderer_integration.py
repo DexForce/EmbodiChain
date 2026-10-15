@@ -31,10 +31,18 @@ pytestmark = [pytest.mark.subprocess_sim, pytest.mark.gpu]
 
 
 @pytest.mark.parametrize(
-    ("backend", "with_camera"),
-    [("default", False), ("newton", False), ("default", True)],
+    ("backend", "with_camera", "mounted"),
+    [
+        ("default", False, False),
+        ("newton", False, False),
+        ("default", True, False),
+        ("default", True, True),
+        ("newton", True, True),
+    ],
 )
-def test_auto_renderer_environment_lifecycle(backend, with_camera, tmp_path) -> None:
+def test_auto_renderer_environment_lifecycle(
+    backend, with_camera, mounted, tmp_path
+) -> None:
     urdf = tmp_path / "slider.urdf"
     urdf.write_text(
         """<robot name="slider">
@@ -61,6 +69,7 @@ def test_auto_renderer_environment_lifecycle(backend, with_camera, tmp_path) -> 
             backend,
             str(int(with_camera)),
             str(urdf),
+            str(int(mounted)),
         ],
         env=os.environ.copy(),
         text=True,
@@ -70,7 +79,9 @@ def test_auto_renderer_environment_lifecycle(backend, with_camera, tmp_path) -> 
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def _run_environment(backend: str, with_camera: bool, urdf_path: str) -> None:
+def _run_environment(
+    backend: str, with_camera: bool, urdf_path: str, mounted: bool
+) -> None:
     import torch
 
     from embodichain.lab.gym.envs import EmbodiedEnv, EmbodiedEnvCfg
@@ -101,12 +112,23 @@ def _run_environment(backend: str, with_camera: bool, urdf_path: str) -> None:
         if backend == "newton"
         else DefaultPhysicsCfg(device="cpu")
     )
+    camera_cfg = CameraCfg(
+        uid="camera",
+        width=32,
+        height=32,
+        extrinsics=CameraCfg.ExtrinsicsCfg(parent="child" if mounted else None),
+    )
     config = EmbodiedEnvCfg(
         sim_cfg=SimulationManagerCfg(
             headless=True, physics_cfg=physics, startup_summary="off"
         ),
-        robot=RobotCfg(uid="slider", fpath=urdf_path, init_pos=(0.0, 0.0, 0.5)),
-        sensor=[CameraCfg(uid="camera", width=32, height=32)] if with_camera else [],
+        robot=RobotCfg(
+            uid="slider",
+            fpath=urdf_path,
+            init_pos=(0.0, 0.0, 0.5),
+            sensors=[camera_cfg] if mounted else [],
+        ),
+        sensor=[camera_cfg] if with_camera and not mounted else [],
         background=[
             RigidObjectCfg(uid="background", shape=CubeCfg(), body_type="static")
         ],
@@ -136,6 +158,12 @@ def _run_environment(backend: str, with_camera: bool, urdf_path: str) -> None:
         if with_camera:
             image = obs["sensor"]["camera"]["color"]
             assert image.shape == (1, 32, 32, 4)
+        if mounted:
+            assert env.cfg.sensor == []
+            assert env.robot.cfg.enable_sensor is True
+            assert config.robot.enable_sensor is False
+            assert env.sensors["camera"].is_attached
+            assert camera_cfg.extrinsics.parent == "child"
         env.reset()
         print(
             f"{backend}: auto renderer environment lifecycle passed; camera={with_camera}",
@@ -152,4 +180,6 @@ def _run_environment(backend: str, with_camera: bool, urdf_path: str) -> None:
 if __name__ == "__main__":
     faulthandler.enable()
     faulthandler.dump_traceback_later(120)
-    _run_environment(sys.argv[1], bool(int(sys.argv[2])), sys.argv[3])
+    _run_environment(
+        sys.argv[1], bool(int(sys.argv[2])), sys.argv[3], bool(int(sys.argv[4]))
+    )

@@ -2398,3 +2398,29 @@ kernel policy; callers log and apply that seed to their own generators.
    :hidden:
 
    object_asset_bundles
+
+
+embodichain.lab.sim.cfg.robot
+-----------------------------
+
+Robot construction and complete backend alternatives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Robot configurations include optional mounted camera declarations.
+Standalone simulation initializes them only when ``enable_sensor`` is true;
+Gym uses its environment-wide sensor switch, which defaults to enabled.
+
+.. currentmodule:: embodichain.lab.sim.cfg.robot
+
+.. autosummary::
+   :nosignatures:
+
+   RobotCfg
+   RobotPresetCfg
+
+.. autoclass:: RobotCfg
+   :members: sensors, enable_sensor
+   :noindex:
+
+.. autoclass:: RobotPresetCfg
+   :noindex:

@@ -28,6 +28,12 @@ validation, and conversion across Python/LeRobot versions.
 
 ## Online worker contract
 
+Shared image buffers are allocated by `init_rollout_buffer_from_config()` in
+`gym/utils/gym_utils.py`. It expands physical components and combines independent
+sensors with the selected robot's mounted defaults, without constructing a
+simulation. The environment acquisition switch controls both sources. See
+[environment configuration](../env-framework/configuration.md) for ownership.
+
 Online batches also carry engine-local, append-only task/subtask IDs. The shared
 registry and `resolve_language(batch)` expose the frozen texts separately from
 TensorDict data, without tying old samples to reused trajectory rows. See

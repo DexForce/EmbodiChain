@@ -775,7 +775,7 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
     assert env.events == [abort_event, ("reset", None), abort_event, ("close", None)]
 
 
-def test_cli_uses_program_already_loaded_by_config_builder(
+def test_cli_uses_loaded_program_with_scoped_renderer_default(
     monkeypatch,
 ) -> None:
     """The CLI attaches the strict program config to the environment config."""
@@ -790,7 +790,18 @@ def test_cli_uses_program_already_loaded_by_config_builder(
     )
     parser = MagicMock()
     parser.parse_args.return_value = args
-    make = MagicMock(return_value=env)
+    from embodichain.lab.sim import cfg
+    from embodichain.lab.sim.utility.render_utils import select_default_renderer
+
+    monkeypatch.setattr(cfg, "DEFAULT_RENDERER", "auto")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _: "NVIDIA RTX 4090")
+
+    def make_task(**kwargs):
+        assert select_default_renderer() == "fast-rt"
+        return env
+
+    make = MagicMock(side_effect=make_task)
 
     monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
     monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
@@ -813,6 +824,7 @@ def test_cli_uses_program_already_loaded_by_config_builder(
 
     assert env_cfg.task_program is decoded_program
     make.assert_called_once_with(id=GYM_ID, cfg=env_cfg)
+    assert select_default_renderer() == "hybrid"
 
 
 def test_close_durability_failure_is_not_swallowed() -> None:
