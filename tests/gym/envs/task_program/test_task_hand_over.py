@@ -616,17 +616,26 @@ def test_real_sim_expert_episode_reports_runtime_and_validation(
     transfer_effect = runtime["calls"][0]["effects"][-1]
     assert transfer_effect["effect_spec"]["semantic_id"] == "hand_over"
     evidence_ids = set(transfer_effect["evidence"])
-    expected_evidence_ids = {"source.constraint", "destination.constraint"}
+    expected_constraint_values = {
+        "source.constraint": False,
+        "destination.constraint": True,
+    }
+    expected_evidence_ids = set(expected_constraint_values)
     assert evidence_ids
     if runtime_succeeded:
         assert evidence_ids == expected_evidence_ids
     else:
         assert evidence_ids <= expected_evidence_ids
-    for evidence in transfer_effect["evidence"].values():
+    # Failed transfers can retain a source grasp or acquire a destination grasp
+    # before another phase fails; their diagnosed failure is checked above.
+    for evidence_id, evidence in transfer_effect["evidence"].items():
         assert evidence["valid_mask"] == [True]
         assert evidence["acquisition_errors"] == [None]
         assert evidence["env_ids"] == [0]
-        assert evidence["values"] == [False]
+        assert len(evidence["values"]) == 1
+        assert type(evidence["values"][0]) is bool
+        if runtime_succeeded:
+            assert evidence["values"] == [expected_constraint_values[evidence_id]]
 
     post_policies = metadata["post_policies"]
     post_policy_succeeded = False
