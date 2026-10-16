@@ -118,7 +118,14 @@ class PickPlaceEnv(EmbodiedEnv):
     def compute_task_state(
         self, **kwargs: Any
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, Any]]:
-        """Return cached measured outcomes without advancing the evidence clock."""
+        """Return cached measured outcomes without advancing the evidence clock.
+
+        Args:
+            **kwargs: Reserved environment evaluation options.
+
+        Returns:
+            Per-row success, failure and measured lift/goal-error metrics.
+        """
         cube = self.sim.get_rigid_object("cube").get_local_pose()
         success = getattr(
             self,
@@ -137,7 +144,14 @@ class PickPlaceEnv(EmbodiedEnv):
         )
 
     def is_task_success(self, **kwargs: Any) -> torch.Tensor:
-        """Return the same measured success used by student evaluation."""
+        """Return the same measured success used by student evaluation.
+
+        Args:
+            **kwargs: Reserved completion-query options.
+
+        Returns:
+            An independently owned boolean mask, one value per environment.
+        """
         return self.compute_task_state()[0]
 
     def _engine(self) -> Any:
@@ -154,7 +168,12 @@ class PickPlaceEnv(EmbodiedEnv):
 
             self._expert_engine = AtomicActionEngine(
                 MotionGenerator(
-                    MotionGenCfg(planner_cfg=ToppraPlannerCfg(robot_uid=self.robot.uid))
+                    MotionGenCfg(
+                        planner_cfg=ToppraPlannerCfg(
+                            robot_uid=self.robot.uid,
+                            sim_instance_id=self.sim.instance_id,
+                        )
+                    )
                 ),
                 control_profiles={
                     "eef": ControlPartCommandProfile.joint_positions(

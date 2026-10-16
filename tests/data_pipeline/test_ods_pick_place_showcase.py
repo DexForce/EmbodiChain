@@ -75,3 +75,19 @@ def test_policy_rejects_wrong_width_and_invalid_normalization() -> None:
         RecurrentBC(torch.zeros(27), torch.ones(27), -torch.ones(8), torch.ones(8))
     with pytest.raises(ValueError):
         RecurrentBC(torch.zeros(28), torch.zeros(28), -torch.ones(8), torch.ones(8))
+
+
+def test_failed_producer_is_not_retried_as_an_empty_sampling_window() -> None:
+    from types import SimpleNamespace
+    from examples.data_pipeline.ods_pick_place_showcase import _sample
+    from embodichain.data_pipeline.engine.data import OnlineDataEngineState
+
+    error = RuntimeError("No unlocked valid chunk: terminal producer failure")
+
+    def fail(*args):
+        raise error
+
+    source = SimpleNamespace(state=OnlineDataEngineState.FAILED, sample_batch=fail)
+    with pytest.raises(RuntimeError) as caught:
+        _sample(source, 2, 32)
+    assert caught.value is error

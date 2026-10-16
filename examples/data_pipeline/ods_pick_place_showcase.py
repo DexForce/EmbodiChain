@@ -42,7 +42,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from embodichain.data_pipeline.engine.data import OnlineDataEngine, OnlineDataEngineCfg
+from embodichain.data_pipeline.engine.data import (
+    OnlineDataEngine,
+    OnlineDataEngineCfg,
+    OnlineDataEngineState,
+)
 
 TASK_CONFIG = (
     Path(__file__).resolve().parents[2]
@@ -347,7 +351,10 @@ def _sample(engine: OnlineDataEngine, batch: int, length: int) -> tuple[Any, flo
         try:
             return engine.sample_batch(batch, length), time.monotonic() - started
         except RuntimeError as error:
-            if "No unlocked valid chunk" not in str(error):
+            if (
+                engine.state is not OnlineDataEngineState.READY
+                or "No unlocked valid chunk" not in str(error)
+            ):
                 raise
             if time.monotonic() - started >= 30:
                 raise TimeoutError("No eligible ODS window for 30 seconds") from error
@@ -530,6 +537,12 @@ def main() -> None:
             }
         )
         initial_report = _receive(evaluator, results)
+        for name in ("success_rate", "lift_rate", "goal_error", "episode_length"):
+            writer.add_scalar(f"eval/{name}", initial_report[name], step)
+        initial_parameters = {
+            name: value.detach().cpu().clone()
+            for name, value in model.named_parameters()
+        }
         best_rate, best_path = -1.0, baseline
         consumed: dict[int, int] = {}
         for round_index in range(args.rounds):
@@ -539,9 +552,12 @@ def main() -> None:
             model.train()
             for update_index in range(args.updates_per_round):
                 update_started = time.monotonic()
+                generation_wait = 0.0
                 if update_index == args.updates_per_round - 1:
                     engine.wait_for_generation(generation, timeout=1800)
+                    generation_wait = time.monotonic() - update_started
                 batch, waited = _sample(engine, args.batch_size, 32)
+                waited += generation_wait
                 generations, counts = batch["ods_generation"].unique(return_counts=True)
                 for version, count in zip(generations.tolist(), counts.tolist()):
                     consumed[version] = consumed.get(version, 0) + count
@@ -577,7 +593,13 @@ def main() -> None:
             report = _receive(evaluator, results)
             for name in ("success_rate", "lift_rate", "goal_error", "episode_length"):
                 writer.add_scalar(f"eval/{name}", report[name], step)
-            for name, value in engine.get_stats().items():
+            stats = engine.get_stats()
+            writer.add_scalar(
+                "ods/generated_frames_per_second",
+                stats["generated_frames"] / max(stats["production_seconds"], 1e-9),
+                step,
+            )
+            for name, value in stats.items():
                 if name != "run_id":
                     writer.add_scalar(f"ods/{name}", value, step)
             writer.flush()
@@ -609,6 +631,11 @@ def main() -> None:
             "best_checkpoint": str(best_path),
             "final_success_rate": final["success_rate"],
             "initial_success_rate": initial_test_rate,
+            "parameters_updated": any(
+                not torch.equal(initial_parameters[name], value.detach().cpu())
+                for name, value in model.named_parameters()
+            ),
+            "training_step": step,
             "learning_target_met": not args.smoke
             and final["success_rate"] >= 0.8
             and final["success_rate"] > initial_test_rate,
