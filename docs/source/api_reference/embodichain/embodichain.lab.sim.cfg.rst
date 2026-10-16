@@ -249,11 +249,13 @@ Configuration implementation modules
 The implementation modules expose the same configuration types as the public
 ``cfg`` namespace, plus the link-override dictionary loader.
 
-.. autoclass:: embodichain.lab.sim.cfg.articulation.ArticulationRootPropertiesCfg
-.. autoclass:: embodichain.lab.sim.cfg.articulation.LinkPhysicsOverrideCfg
-.. autofunction:: embodichain.lab.sim.cfg.articulation.link_attrs_from_dict
-.. autoclass:: embodichain.lab.sim.cfg.articulation.JointDrivePropertiesCfg
-.. autoclass:: embodichain.lab.sim.cfg.articulation.NewtonJointDrivePropertiesCfg
-.. autoclass:: embodichain.lab.sim.cfg.articulation.ArticulationCfg
-.. autoclass:: embodichain.lab.sim.cfg.rigid_object.RigidObjectCfg
-.. autoclass:: embodichain.lab.sim.cfg.rigid_object.RigidObjectGroupCfg
+.. autosummary::
+
+   embodichain.lab.sim.cfg.articulation.ArticulationRootPropertiesCfg
+   embodichain.lab.sim.cfg.articulation.LinkPhysicsOverrideCfg
+   embodichain.lab.sim.cfg.articulation.link_attrs_from_dict
+   embodichain.lab.sim.cfg.articulation.JointDrivePropertiesCfg
+   embodichain.lab.sim.cfg.articulation.NewtonJointDrivePropertiesCfg
+   embodichain.lab.sim.cfg.articulation.ArticulationCfg
+   embodichain.lab.sim.cfg.rigid_object.RigidObjectCfg
+   embodichain.lab.sim.cfg.rigid_object.RigidObjectGroupCfg
