@@ -278,6 +278,122 @@ def test_scene_export_uses_usdc_for_articulated_runtime_and_glb_for_editing(
     assert imported_drawer.articulated_usdc_scale == [1.25, 2.5, 3.75]
 
 
+@pytest.fixture
+def readable_scene_export(tmp_path: Path) -> Path:
+    """Create a portable two-object export with all required final assets."""
+    objects = []
+    for object_id, kind, body_type in [
+        ("table", "table", "kinematic"),
+        ("cup", "asset", "dynamic"),
+    ]:
+        glb_path = tmp_path / f"{object_id}.glb"
+        glb_path.write_bytes(f"glTF-{object_id}".encode())
+        objects.append(
+            _scene_object(
+                object_id=object_id,
+                kind=kind,
+                glb_path=glb_path,
+                physics=_physics(body_type),
+            )
+        )
+    scene = Scene(objects=objects)
+    output_root = tmp_path / "output"
+    SceneExporter(
+        scene=scene,
+        scene_graph=_scene_graph(scene),
+        output_root=output_root,
+    ).export()
+    return output_root
+
+
+@pytest.mark.parametrize("has_debug_snapshot", [True, False])
+def test_scene_export_read_preserves_source_files(
+    readable_scene_export: Path, has_debug_snapshot: bool
+) -> None:
+    """Read-only consumers may load an export without rewriting its snapshot."""
+    scene_export = readable_scene_export / "scene_export"
+    scene_json = scene_export / "scene.json"
+    if has_debug_snapshot:
+        # Preserve even a non-canonical snapshot instead of regenerating it.
+        scene_json.write_text('{"debug": "keep verbatim"}\n', encoding="utf-8")
+    else:
+        scene_json.unlink()
+    original_files = {
+        path.relative_to(scene_export): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_export.rglob("*")
+        if path.is_file()
+    }
+
+    scene, graph = SceneExportImporter(
+        output_root=readable_scene_export
+    ).read_scene_and_graph()
+
+    assert [scene_object.id for scene_object in scene.objects] == ["table", "cup"]
+    assert np.allclose(scene.assets[0].pos, [1.0, 2.0, 3.0])
+    assert graph.node_by_id()["cup"].parent_id == "table"
+    assert {
+        path.relative_to(scene_export): (path.read_bytes(), path.stat().st_mtime_ns)
+        for path in scene_export.rglob("*")
+        if path.is_file()
+    } == original_files
+
+
+def test_scene_export_read_rejects_mismatched_graph(
+    readable_scene_export: Path,
+) -> None:
+    scene_export = readable_scene_export / "scene_export"
+    graph_path = scene_export / "scene_graph.json"
+    graph_data = json.loads(graph_path.read_text(encoding="utf-8"))
+    graph_data["nodes"] = graph_data["nodes"][:1]
+    graph_path.write_text(json.dumps(graph_data), encoding="utf-8")
+    scene_json = scene_export / "scene.json"
+    original_snapshot = scene_json.read_bytes()
+
+    with pytest.raises(ValueError, match="nodes must match"):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
+
+    assert scene_json.read_bytes() == original_snapshot
+
+
+def test_scene_export_read_requires_final_asset(readable_scene_export: Path) -> None:
+    glb_path = readable_scene_export / "scene_export/mesh_assets/cup/cup.glb"
+    glb_path.unlink()
+
+    with pytest.raises(FileNotFoundError, match="GLB not found"):
+        SceneExportImporter(output_root=readable_scene_export).read_scene_and_graph()
+
+
+def test_scene_export_read_accepts_explicit_export_directory(
+    readable_scene_export: Path,
+) -> None:
+    """Export identity comes from its files rather than its directory name."""
+    export_root = readable_scene_export / "renamed_portable_scene"
+    (readable_scene_export / "scene_export").rename(export_root)
+    original_snapshot = (export_root / "scene.json").read_bytes()
+
+    scene, graph = SceneExportImporter(
+        output_root=export_root.parent,
+        scene_export_root=export_root,
+    ).read_scene_and_graph()
+
+    assert [asset.id for asset in scene.assets] == ["cup"]
+    assert graph.node_by_id()["cup"].parent_id == "table"
+    assert scene.assets[0].simready_glb_path == str(
+        export_root / "mesh_assets/cup/cup.glb"
+    )
+    assert (export_root / "scene.json").read_bytes() == original_snapshot
+
+
+def test_scene_export_importer_rejects_explicit_directory_outside_output_root(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="must stay within output root"):
+        SceneExportImporter(
+            output_root=tmp_path / "output",
+            scene_export_root=tmp_path / "outside",
+        )
+
+
 def test_scene_usd_manifest_restores_only_declared_scene_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
