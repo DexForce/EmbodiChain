@@ -17,14 +17,9 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
-import torch
-
-from embodichain.lab.sim.objects.robot import Robot
 
 from embodichain.lab.sim.cfg import NewtonJointDrivePropertiesCfg
 from embodichain.lab.sim.robots.dual_arm import (
@@ -35,61 +30,6 @@ from embodichain.lab.sim.robots.dual_arm import (
 )
 from embodichain_robots.ur_robot import URRobotCfg
 from embodichain.lab.sim.motion.solvers import URSolverCfg
-from embodichain.utils.string import resolve_matching_names_values
-
-
-@pytest.mark.parametrize("limits", [None, 0.8, {"arm": 0.8}, {"joint[12]": 0.6}])
-def test_dual_arm_preserves_planning_acceleration_metadata(
-    limits: dict[str, float] | float | None,
-) -> None:
-    base = URRobotCfg.from_dict({"robot_type": "ur5"})
-    base.joint_acceleration_limits = limits
-    cfg = build_dual_arm_cfg(base, resolve_mounts({}))
-    if limits == {"arm": 0.8}:
-        assert cfg.joint_acceleration_limits == {"left_arm": 0.8, "right_arm": 0.8}
-    elif limits == {"joint[12]": 0.6}:
-        _, names, values = resolve_matching_names_values(
-            cfg.joint_acceleration_limits, cfg.control_parts["dual_arm"]
-        )
-        assert dict(zip(names, values)) == {
-            f"{side}_joint{joint}": 0.6
-            for side in ("left", "right")
-            for joint in (1, 2)
-        }
-    else:
-        assert cfg.joint_acceleration_limits == limits
-
-
-@pytest.mark.no_sim
-@pytest.mark.parametrize(
-    "pattern", [r"^joint[12]$", r"joint1|joint2", r"(?:^joint1$|^joint2$)"]
-)
-def test_dual_arm_acceleration_expressions_keep_their_source_meaning(
-    pattern: str,
-) -> None:
-    base = URRobotCfg.from_dict({"robot_type": "ur5"})
-    base.joint_acceleration_limits = {pattern: 0.6}
-    cfg = build_dual_arm_cfg(base, resolve_mounts({}))
-    names = cfg.control_parts["dual_arm"]
-    robot = object.__new__(Robot)
-    robot._spawn_result = object()
-    robot._data = SimpleNamespace(articulation_view=SimpleNamespace(joint_names=names))
-    robot._mimic_info = SimpleNamespace(
-        mimic_id=np.array([], dtype=int),
-        mimic_parent=np.array([], dtype=int),
-        mimic_multiplier=np.array([]),
-    )
-    robot.cfg = cfg
-    robot.get_qvel_limits = Mock(
-        return_value=torch.ones(1, len(names), dtype=torch.float64)
-    )
-    limits = robot.get_joint_motion_limits()["acceleration"][0]
-    for name, limit in zip(names, limits):
-        if name in {"left_joint1", "left_joint2", "right_joint1", "right_joint2"}:
-            assert limit.item() == pytest.approx(0.6)
-        else:
-            assert torch.isinf(limit)
-
 
 # --------------------------------------------------------------------------- #
 # resolve_mounts
@@ -296,20 +236,6 @@ def test_dual_arm_roundtrip():
     assert cfg2.control_parts == cfg.control_parts
     assert isinstance(cfg2.solver_cfg["left_arm"], URSolverCfg)
     assert cfg2.solver_cfg["left_arm"].ur_type == "ur5"
-
-
-def test_dual_arm_roundtrip_preserves_explicit_acceleration_clear() -> None:
-    cfg = DualArmRobotCfg.from_dict(
-        {
-            "base_robot": {"type": "ur5", "init": {"joint_acceleration_limits": 0.8}},
-            "joint_acceleration_limits": None,
-        }
-    )
-    assert cfg.joint_acceleration_limits is None
-    serialized = cfg.to_dict()
-    assert "joint_acceleration_limits" in serialized
-    assert serialized["joint_acceleration_limits"] is None
-    assert DualArmRobotCfg.from_dict(serialized).joint_acceleration_limits is None
 
 
 # --------------------------------------------------------------------------- #

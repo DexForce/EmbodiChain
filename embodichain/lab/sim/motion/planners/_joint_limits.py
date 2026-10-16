@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -30,6 +31,43 @@ __all__: list[str] = []
 
 _DEFAULT_VELOCITY = 0.2
 _DEFAULT_ACCELERATION = 0.5
+
+
+def _joint_velocity_limits(robot: Robot) -> torch.Tensor:
+    """Read runtime speeds in state order and apply mimic follower caps."""
+    limits = (
+        robot.get_qvel_limits(joint_ids=list(range(len(robot.joint_names))))
+        .detach()
+        .to(device="cpu", dtype=torch.float64)
+    )
+    if limits.ndim != 2 or limits.shape[1] != len(robot.joint_names):
+        raise ValueError("Robot velocity limits must have shape (B, robot DOF).")
+    limits = torch.where(
+        torch.isfinite(limits) & (limits >= 0) & (limits < 1e9), limits, torch.inf
+    )
+    mimics = dict(
+        zip(
+            robot.mimic_ids,
+            zip(robot.mimic_parents, robot.mimic_multipliers, strict=True),
+            strict=True,
+        )
+    )
+    for child in mimics:
+        bound = limits[:, child].clone()
+        visited = {child}
+        while child in mimics:
+            parent, multiplier = mimics[child]
+            if not math.isfinite(multiplier) or parent in visited:
+                raise ValueError(
+                    "Mimic multipliers must be finite and relations acyclic."
+                )
+            if multiplier == 0:
+                break
+            bound = bound / abs(multiplier)
+            limits[:, parent] = torch.minimum(limits[:, parent], bound)
+            visited.add(parent)
+            child = parent
+    return limits
 
 
 def _plan_joint_ids(robot: Robot, control_part: str | None, dof: int) -> list[int]:
@@ -84,16 +122,19 @@ def _resolve_joint_constraints(
     control_part: str | None = None,
     batch_size: int | None = None,
 ) -> dict[str, object]:
-    """Apply planner fallbacks and requests to the strictest participating caps."""
+    """Resolve robot speed caps and planner-owned acceleration requests."""
     ids = _plan_joint_ids(robot, control_part, dof)
-    limits = robot.get_joint_motion_limits()
-    if batch_size is not None and limits["velocity"].shape[0] < batch_size:
+    limits = _joint_velocity_limits(robot)
+    if batch_size is not None and limits.shape[0] < batch_size:
         raise ValueError("Robot velocity limits do not cover the planning batch.")
     resolved = dict(constraints)
-    for key, fallback in (
-        ("velocity", _DEFAULT_VELOCITY),
-        ("acceleration", _DEFAULT_ACCELERATION),
-    ):
-        caps = limits[key][:batch_size, ids].amin(dim=0)
-        resolved[key] = _merge_limit(constraints.get(key), caps, fallback)
+    caps = limits[:batch_size, ids].amin(dim=0)
+    resolved["velocity"] = _merge_limit(
+        constraints.get("velocity"), caps, _DEFAULT_VELOCITY
+    )
+    resolved["acceleration"] = _merge_limit(
+        constraints.get("acceleration"),
+        torch.full_like(caps, torch.inf),
+        _DEFAULT_ACCELERATION,
+    )
     return resolved

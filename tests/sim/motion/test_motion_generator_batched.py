@@ -23,8 +23,6 @@ from unittest.mock import Mock, patch
 import pytest
 import torch
 
-from embodichain.lab.sim.objects.robot import Robot
-
 from embodichain.lab.sim.motion.planners.base_planner import (
     CollisionWorldInfo,
     PlanOptions,
@@ -118,13 +116,9 @@ def _trapezoidal_generator(robot: object | None = None) -> MotionGenerator:
             mimic_ids=(),
             mimic_parents=(),
             mimic_multipliers=(),
-            cfg=SimpleNamespace(fpath="", joint_acceleration_limits=None),
             num_instances=1,
             get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
         )
-    )
-    planner.robot.get_joint_motion_limits = (
-        lambda **kwargs: Robot.get_joint_motion_limits(planner.robot, **kwargs)
     )
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
@@ -1076,7 +1070,6 @@ class _CartesianRobot:
     mimic_parents = ()
     mimic_multipliers = ()
     joint_names = ["joint"]
-    cfg = SimpleNamespace(fpath="", joint_acceleration_limits=None)
 
     device = torch.device("cpu")
     num_instances = 2

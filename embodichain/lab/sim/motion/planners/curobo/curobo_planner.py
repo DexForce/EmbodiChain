@@ -37,7 +37,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -356,6 +356,12 @@ class CuroboPlannerCfg(BasePlannerCfg):
     """
 
     planner_type: str = "curobo"
+
+    max_acceleration: float | None = field(default=None, kw_only=True)
+    """Planning acceleration budget [rad/s^2 or m/s^2].
+
+    ``None`` preserves cuRobo's default budget of 15.0.
+    """
 
     log_level: str = "error"
     """Log level for cuRobo's Python logger.
@@ -1832,6 +1838,7 @@ class CuroboPlanner(BasePlanner):
             surface_radius=auto.surface_radius,
             iterations=auto.iterations,
             collision_sphere_buffer=auto.collision_sphere_buffer,
+            max_acceleration=self.cfg.max_acceleration,
             device=str(self._curobo_device),
         )
 
@@ -1858,7 +1865,13 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
-        hasher.update(repr(_curobo_joint_limits(self.robot)).encode("utf-8"))
+        hasher.update(
+            repr(
+                _curobo_joint_limits(
+                    self.robot, max_acceleration=self.cfg.max_acceleration
+                )
+            ).encode("utf-8")
+        )
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":

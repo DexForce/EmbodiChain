@@ -93,7 +93,7 @@ class MotionGenOptions:
     """Scalar speed request for TOPPRA/Trapezoidal, capped by robot limits."""
 
     acceleration_limit: float | None = None
-    """Scalar acceleration request for TOPPRA/Trapezoidal, capped by robot limits."""
+    """Scalar planning acceleration budget for TOPPRA/Trapezoidal."""
 
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.

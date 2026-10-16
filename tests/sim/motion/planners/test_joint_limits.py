@@ -23,8 +23,6 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.objects.robot import Robot
-
 from embodichain.lab.sim.motion.motion_generator import MotionGenerator
 from embodichain.lab.sim.motion.planners._joint_limits import _resolve_joint_constraints
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
@@ -46,7 +44,6 @@ pytestmark = pytest.mark.no_sim
 
 
 class _Robot:
-    get_joint_motion_limits = Robot.get_joint_motion_limits
     mimic_ids = ()
     mimic_parents = ()
     mimic_multipliers = ()
@@ -58,7 +55,7 @@ class _Robot:
     def __init__(self) -> None:
         self.joint_names = ["shoulder", "finger", "elbow"]
         self.control_parts = {"arm": ["elbow", "shoulder"], "eef": ["finger"]}
-        self.cfg = SimpleNamespace(fpath="", joint_acceleration_limits=None)
+        self.cfg = SimpleNamespace(fpath="")
         self.velocities = torch.tensor(
             [[0.8, 0.03, 1.6], [0.6, 0.02, 1.2]], dtype=torch.float64
         )
@@ -74,8 +71,7 @@ class _Robot:
 
 def test_part_limits_follow_waypoint_order_and_strictest_environment() -> None:
     robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"elbow": 0.9, "shoulder": 1.4}
-    constraints = {"velocity": None, "acceleration": None}
+    constraints = {"velocity": None, "acceleration": [0.9, 1.4]}
     resolved = _resolve_joint_constraints(robot, constraints, control_part="arm", dof=2)
     torch.testing.assert_close(
         resolved["velocity"], torch.tensor([1.2, 0.6], dtype=torch.float64)
@@ -83,7 +79,7 @@ def test_part_limits_follow_waypoint_order_and_strictest_environment() -> None:
     torch.testing.assert_close(
         resolved["acceleration"], torch.tensor([0.9, 1.4], dtype=torch.float64)
     )
-    assert constraints == {"velocity": None, "acceleration": None}
+    assert constraints == {"velocity": None, "acceleration": [0.9, 1.4]}
 
 
 def test_single_row_planning_does_not_read_other_environment_caps() -> None:
@@ -264,12 +260,14 @@ def test_planning_uses_effective_limits_without_reopening_asset(
     assert result["velocity"].item() == pytest.approx(0.1)
 
 
+@pytest.mark.parametrize("missing", [float("nan"), float("inf"), -1.0, 1e10])
 @pytest.mark.parametrize("velocity_request", [None, 0.4])
 def test_missing_velocity_metadata_uses_request_or_compatibility_fallback(
     velocity_request: float | None,
+    missing: float,
 ) -> None:
     robot = _Robot()
-    robot.velocities[:] = torch.nan
+    robot.velocities[:] = missing
     result = _resolve_joint_constraints(robot, {"velocity": velocity_request}, dof=3)
     assert (
         result["velocity"].tolist()
@@ -278,14 +276,15 @@ def test_missing_velocity_metadata_uses_request_or_compatibility_fallback(
     assert result["acceleration"].tolist() == [0.5] * 3
 
 
-def test_explicit_limits_cannot_exceed_available_robot_caps() -> None:
-    robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"arm": 1.0}
+def test_speed_requests_are_capped_while_acceleration_is_planner_owned() -> None:
     result = _resolve_joint_constraints(
-        robot, {"velocity": [5.0, 0.1], "acceleration": 3.0}, control_part="arm", dof=2
+        _Robot(),
+        {"velocity": [5.0, 0.1], "acceleration": 3.0},
+        control_part="arm",
+        dof=2,
     )
     assert result["velocity"].tolist() == [1.2, 0.1]
-    assert result["acceleration"].tolist() == [1.0, 1.0]
+    assert result["acceleration"].tolist() == [3.0, 3.0]
 
 
 @pytest.mark.parametrize("velocity_scale", [0.5, 2.0])
@@ -303,13 +302,9 @@ def test_constraint_check_resolves_default_robot_limits(velocity_scale: float) -
     ) is (velocity_scale <= 1.0)
 
 
-def test_partial_acceleration_metadata_keeps_explicit_request_for_other_joints() -> (
-    None
-):
-    robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"shoulder": 0.3}
+def test_per_joint_acceleration_requests_follow_trajectory_order() -> None:
     result = _resolve_joint_constraints(
-        robot, {"acceleration": 1.5}, control_part="arm", dof=2
+        _Robot(), {"acceleration": [1.5, 0.3]}, control_part="arm", dof=2
     )
     assert result["acceleration"].tolist() == [1.5, 0.3]
 
@@ -329,24 +324,14 @@ def test_ambiguous_control_part_requires_explicit_joint_mapping() -> None:
 
 
 @pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
-def test_invalid_acceleration_metadata_fails_before_planning(value: float) -> None:
-    robot = _Robot()
-    robot.cfg.joint_acceleration_limits = value
-    with pytest.raises(ValueError, match="finite positive"):
-        _resolve_joint_constraints(robot, {}, dof=3)
-
-
-def test_overlapping_acceleration_rules_are_rejected() -> None:
-    robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"arm": 1.0, "should.*": 0.5}
-    with pytest.raises(ValueError, match="Multiple matches"):
-        _resolve_joint_constraints(robot, {}, dof=3)
+def test_invalid_acceleration_request_fails_before_planning(value: float) -> None:
+    with pytest.raises(ValueError, match="finite|positive"):
+        _resolve_joint_constraints(_Robot(), {"acceleration": value}, dof=3)
 
 
 @pytest.mark.parametrize("planner_type", ["toppra", "trapezoidal"])
 def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
     robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"elbow": 0.9, "shoulder": 1.4}
     planner_class, cfg_class = (
         (ToppraPlanner, ToppraPlannerCfg)
         if planner_type == "toppra"
@@ -369,6 +354,7 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         planner.default_plan_options(),
         generator.resolve_plan_options(None, sample_count=101),
     ):
+        options.constraints["acceleration"] = [0.9, 1.4]
         options = planner.with_motion_context(
             options, start_qpos=None, control_part="arm"
         )
@@ -390,12 +376,15 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         assert options.constraints["velocity"] is None
 
 
-def test_curobo_export_uses_effective_velocity_and_acceleration_caps() -> None:
-    robot = _Robot()
-    robot.cfg.joint_acceleration_limits = {"arm": 1.5}
-    exported = _curobo_joint_limits(robot)
+@pytest.mark.parametrize(
+    ("acceleration_request", "expected"), [(None, 15.0), (1.5, 1.5)]
+)
+def test_curobo_export_uses_robot_speeds_and_planner_acceleration(
+    acceleration_request: float | None, expected: float
+) -> None:
+    exported = _curobo_joint_limits(_Robot(), max_acceleration=acceleration_request)
     assert exported["max_velocity"] == pytest.approx([0.6, 0.02, 1.2])
-    assert exported["max_acceleration"] == [1.5, 0.5, 1.5]
+    assert exported["max_acceleration"] == [expected] * 3
 
 
 def test_toppra_spawn_workers_receive_resolved_joint_limits() -> None:
@@ -438,26 +427,26 @@ def test_mimic_follower_caps_constrain_curobo_active_joint() -> None:
     assert len(exported["max_acceleration"]) == 2
 
 
-def test_mimic_runtime_and_acceleration_overrides_constrain_leader() -> None:
+def test_mimic_speed_caps_preserve_planner_acceleration_request() -> None:
     robot = _Robot()
     robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = [1], [0], [-2.0]
-    robot.cfg.joint_acceleration_limits = {"finger": 0.2}
-    result = _resolve_joint_constraints(robot, {}, control_part="arm", dof=2)
+    result = _resolve_joint_constraints(
+        robot, {"acceleration": 1.0}, control_part="arm", dof=2
+    )
     assert result["velocity"].tolist() == pytest.approx([1.2, 0.01])
-    assert result["acceleration"].tolist() == pytest.approx([0.5, 0.1])
+    assert result["acceleration"].tolist() == [1.0, 1.0]
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 def test_nested_mimic_caps_do_not_depend_on_relation_order(reverse: bool) -> None:
     robot = _Robot()
     robot.velocities[:] = torch.tensor([2.0, 1.0, 0.12])
-    robot.cfg.joint_acceleration_limits = {"elbow": 0.6}
     robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = (
         ([1, 2], [0, 1], [3.0, -2.0]) if reverse else ([2, 1], [1, 0], [-2.0, 3.0])
     )
     result = _resolve_joint_constraints(robot, {}, dof=3)
     assert result["velocity"].tolist() == pytest.approx([0.02, 0.06, 0.12])
-    assert result["acceleration"].tolist() == pytest.approx([0.1, 0.3, 0.6])
+    assert result["acceleration"].tolist() == [0.5] * 3
 
 
 @pytest.mark.parametrize("multiplier", [float("nan"), float("inf")])
@@ -469,7 +458,7 @@ def test_nonfinite_runtime_mimic_multiplier_is_rejected(multiplier: float) -> No
         [multiplier],
     )
     with pytest.raises(ValueError, match="finite"):
-        robot.get_joint_motion_limits()
+        _resolve_joint_constraints(robot, {}, dof=3)
 
 
 def test_cyclic_runtime_mimic_relations_are_rejected() -> None:
@@ -480,10 +469,11 @@ def test_cyclic_runtime_mimic_relations_are_rejected() -> None:
         [1.0, 1.0],
     )
     with pytest.raises(ValueError, match="acyclic"):
-        robot.get_joint_motion_limits()
+        _resolve_joint_constraints(robot, {}, dof=3)
 
 
-def test_curobo_cache_changes_with_robot_metadata_and_closes_stale_backend() -> None:
+@pytest.mark.parametrize("change", ["velocity", "acceleration"])
+def test_curobo_cache_changes_with_limits_and_closes_stale_backend(change: str) -> None:
     robot = _Robot()
     planner = CuroboPlanner.__new__(CuroboPlanner)
     planner.robot = robot
@@ -493,7 +483,10 @@ def test_curobo_cache_changes_with_robot_metadata_and_closes_stale_backend() -> 
     backend_key = ("arm", 2, False, MoveType.EEF_MOVE)
     planner._backend_cache = {backend_key: cached}
     assert planner._get_backend("arm", 2) is cached
-    robot.cfg.joint_acceleration_limits = 0.2
+    if change == "velocity":
+        robot.velocities[:, 0] = 0.2
+    else:
+        planner.cfg.max_acceleration = 0.2
     assert planner._robot_yaml_cache_key("", "arm", None, planner.cfg.auto_gen) != key
     planner._materialize_profile = Mock(side_effect=RuntimeError("rebuild backend"))
     with pytest.raises(RuntimeError, match="rebuild backend"):
@@ -507,7 +500,11 @@ def test_curobo_regenerates_cache_when_motion_urdf_is_missing(
 ) -> None:
     planner = CuroboPlanner.__new__(CuroboPlanner)
     planner.robot = _Robot()
-    planner.cfg = CuroboPlannerCfg(robot_uid="robot")
+    # The new budget must not shift existing positional configuration arguments.
+    planner.cfg = CuroboPlannerCfg(
+        "robot", "curobo", 0, "warning", max_acceleration=0.8
+    )
+    assert planner.cfg.log_level == "warning"
     planner.cfg.auto_gen.cache_dir = str(tmp_path)
     planner._curobo_device = torch.device("cpu")
     key = planner._robot_yaml_cache_key("", "arm", "tool", planner.cfg.auto_gen)
@@ -525,3 +522,12 @@ def test_curobo_regenerates_cache_when_motion_urdf_is_missing(
     motion_path.unlink()
     assert planner._auto_generate_robot_yaml("arm", "tool") == str(yaml_path)
     generate.assert_called_once()
+    assert generate.call_args.kwargs["max_acceleration"] == 0.8
+
+
+def test_unknown_mimic_follower_speed_does_not_freeze_known_leader() -> None:
+    robot = _Robot()
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = [1], [0], [-2.0]
+    robot.velocities[:, 1] = torch.inf
+    result = _resolve_joint_constraints(robot, {}, control_part="arm", dof=2)
+    assert result["velocity"].tolist() == pytest.approx([1.2, 0.6])

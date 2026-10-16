@@ -430,7 +430,8 @@ class BasePlanner(ABC):
             vels: Velocity tensor (..., DOF) where the last dimension is DOF
             accs: Acceleration tensor (..., DOF) where the last dimension is DOF
             constraints: Dictionary containing 'velocity' and 'acceleration'
-                limits. ``None`` entries resolve the robot's planning limits.
+                limits. ``None`` velocity resolves robot speed caps;
+                ``None`` acceleration uses the planner default.
             control_part: Control group for resolving unspecified joint limits.
 
         Returns:

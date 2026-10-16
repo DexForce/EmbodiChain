@@ -68,9 +68,9 @@ class TrapezoidalPlanOptions(PlanOptions):
     Args:
         profile: Scalar time profile used for every linear joint-path segment.
         constraints: Scalar or per-joint ``velocity``, ``acceleration``, and
-            ``jerk`` limits. ``None`` velocity/acceleration values resolve robot
-            limits at planning time. Requests are capped by available robot
-            limits. Jerk is required by the ``double_s`` profile.
+            ``jerk`` limits. ``None`` velocity resolves robot speed caps;
+            ``None`` acceleration uses the planner default. Explicit speeds
+            are capped by robot limits. Jerk is required by ``double_s``.
         sample_method: Fixed output quantity or approximately fixed time step.
         sample_interval: Output count for ``QUANTITY`` or seconds for ``TIME``.
         minimum_duration: Optional lower bound on each environment trajectory's

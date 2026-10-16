@@ -797,6 +797,10 @@ def test_graph_capture_mode_rejects_unknown_value():
         (0.0, 1.0, 1.0, None),
         (0.05, 0.3, 0.3, None),
         (0.4, 0.3, 0.15, -2.0),
+        pytest.param(0.05, 0.05, 0.05, None, id="alohamini-lift"),
+        pytest.param(1.0, 0.25, 0.25, None, id="cobotmagic-gripper-override"),
+        pytest.param(0.0, float("inf"), 0.2, None, id="unspecified-gripper-speed"),
+        pytest.param(0.0, float("inf"), 0.2, -2.0, id="unspecified-mimic-speeds"),
     ],
 )
 def test_robot_yaml_preserves_limits_through_curobo_loading(
@@ -813,7 +817,6 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
     import dexsim.kit.meshproc as meshproc
     from curobo._src.types.robot import RobotCfg as CuroboRobotCfg
     from curobo._src.types.device_cfg import DeviceCfg
-    from embodichain.lab.sim.objects.robot import Robot
 
     urdf_path = tmp_path / "assets" / "robot.urdf"
     urdf_path.parent.mkdir()
@@ -826,14 +829,13 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
             "</robot>",
             f'<link name="finger"/><joint name="follower" type="revolute">'
             '<parent link="base"/><child link="finger"/><axis xyz="0 0 1"/>'
-            '<limit effort="100" lower="-3.14" upper="3.14" velocity="0.4"/>'
+            f'<limit effort="100" lower="-3.14" upper="3.14" velocity="{authored_velocity}"/>'
             f'<mimic joint="joint1" multiplier="{mimic_multiplier}"/>'
             "</joint></robot>",
         )
     urdf_path.write_text(source_xml, encoding="utf-8")
 
     class FakeRobot:
-        get_joint_motion_limits = Robot.get_joint_motion_limits
         mimic_ids = [1] if mimic_multiplier is not None else []
         mimic_parents = [0] if mimic_multiplier is not None else []
         mimic_multipliers = [mimic_multiplier] if mimic_multiplier is not None else []
@@ -844,7 +846,6 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
             {
                 "fpath": str(urdf_path),
                 "init_qpos": [0.0, 0.0] if mimic_multiplier is not None else [0.0],
-                "joint_acceleration_limits": 0.4,
             },
         )()
         joint_names = (
@@ -883,13 +884,15 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
     if expected_velocity == 0:
         with pytest.raises(ValueError, match="zero velocity"):
             generate_curobo_robot_yaml(
-                FakeRobot(), "arm", str(output_path), device="cpu"
+                FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
             )
         assert urdf_path.read_text(encoding="utf-8") == source_xml
         assert not output_path.exists()
         return
 
-    generate_curobo_robot_yaml(FakeRobot(), "arm", str(output_path), device="cpu")
+    generate_curobo_robot_yaml(
+        FakeRobot(), "arm", str(output_path), max_acceleration=0.4, device="cpu"
+    )
 
     assert len(calls) == 1
     _, kwargs = calls[0]
@@ -911,6 +914,9 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
         load_collision_spheres=False,
     )
     expected = torch.tensor([[-expected_velocity], [expected_velocity]])
+    torch.testing.assert_close(
+        model.kinematics.get_joint_limits().acceleration, torch.tensor([[-0.4], [0.4]])
+    )
     torch.testing.assert_close(model.kinematics.get_joint_limits().velocity, expected)
     # Reinitialize copied native limits with the CPU device preserved. cuRobo's
     # clone() omits device_cfg and otherwise assumes CUDA even for a CPU model.

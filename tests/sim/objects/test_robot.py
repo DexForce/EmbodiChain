@@ -58,37 +58,6 @@ W1_ACTIVE_DOF = 40  # Dexforce W1 v021 scalar active-DOF count.
 
 
 @pytest.mark.no_sim
-def test_joint_motion_limits_preserve_batch_and_runtime_state() -> None:
-    robot = object.__new__(Robot)
-    robot._spawn_result = object()
-    robot._data = SimpleNamespace(
-        articulation_view=SimpleNamespace(joint_names=["leader", "follower"])
-    )
-    robot.cfg = SimpleNamespace(
-        joint_acceleration_limits={"follower": 0.2},
-        control_parts={"arm": ["leader"]},
-    )
-    robot._mimic_info = SimpleNamespace(
-        mimic_id=np.array([1]),
-        mimic_parent=np.array([0]),
-        mimic_multiplier=np.array([-2.0]),
-    )
-    runtime = torch.tensor([[1e10, 0.3], [1e10, 0.1]], dtype=torch.float64)
-    robot.get_qvel_limits = Mock(return_value=runtime)
-    limits = robot.get_joint_motion_limits()
-    torch.testing.assert_close(
-        limits["velocity"],
-        torch.tensor([[0.15, 0.3], [0.05, 0.1]], dtype=torch.float64),
-    )
-    torch.testing.assert_close(
-        limits["acceleration"],
-        torch.tensor([[0.1, 0.2], [0.1, 0.2]], dtype=torch.float64),
-    )
-    assert set(limits) == {"velocity", "acceleration"}
-    assert (runtime[:, 0] == 1e10).all()
-
-
-@pytest.mark.no_sim
 def test_default_mujoco_mimic_solref_preserves_damping_and_timestep_floor():
     np.testing.assert_allclose(
         _default_mujoco_mimic_solref(physics_dt=0.01, num_substeps=10),

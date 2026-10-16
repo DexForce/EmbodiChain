@@ -18,10 +18,7 @@ from __future__ import annotations
 
 import torch
 import numpy as np
-import math
-import re
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
@@ -468,81 +465,6 @@ class Robot(Articulation):
             joint_ids=resolved_joint_ids,
             env_ids=env_ids,
         )
-
-    def get_joint_motion_limits(self) -> dict[str, torch.Tensor]:
-        """Query robot motion caps independently of planner defaults or requests.
-
-        Speeds and mimic relations come from the bound articulation. Speeds
-        include asset defaults, configuration overrides and runtime changes.
-
-        Returns:
-            CPU float64 tensors in final state order, each shaped ``(B, DOF)``:
-            ``velocity`` applies mimic coupling to effective runtime caps;
-            ``acceleration`` resolves configured metadata and mimic coupling;
-            Unavailable caps are infinite so callers can select their fallback.
-            Zero velocity is a hard cap: the joint must remain stationary.
-        """
-        names = list(self.joint_names)
-        velocity = (
-            self.get_qvel_limits(joint_ids=list(range(len(names))))
-            .detach()
-            .to(device="cpu", dtype=torch.float64)
-        )
-        if velocity.ndim != 2 or velocity.shape[1] != len(names):
-            raise ValueError("Robot velocity limits must have shape (B, robot DOF).")
-        velocity = torch.where(
-            torch.isfinite(velocity) & (velocity >= 0) & (velocity < 1e9),
-            velocity,
-            torch.inf,
-        )
-        acceleration = velocity.new_full((len(names),), torch.inf)
-        configured = getattr(self.cfg, "joint_acceleration_limits", None)
-        if configured is not None:
-            ids = list(range(len(names)))
-            if isinstance(configured, Mapping):
-                parts = self.control_parts or {}
-                rules = {
-                    (
-                        "(?:" + "|".join(map(re.escape, parts[key])) + ")"
-                        if key in parts
-                        else key
-                    ): value
-                    for key, value in configured.items()
-                }
-                ids, _, configured = resolve_matching_names_values(rules, names)
-            values = velocity.new_tensor(configured)
-            if not bool(torch.isfinite(values).all()) or bool((values <= 0).any()):
-                raise ValueError(
-                    "joint_acceleration_limits must contain finite positive values."
-                )
-            acceleration[ids] = values
-        caps = torch.stack((velocity, acceleration.expand_as(velocity)), dim=1)
-        mimics = dict(
-            zip(
-                self.mimic_ids,
-                zip(self.mimic_parents, self.mimic_multipliers, strict=True),
-                strict=True,
-            )
-        )
-        for child in mimics:
-            bound = caps[:, :, child].clone()
-            visited = {child}
-            while child in mimics:
-                parent, multiplier = mimics[child]
-                if not math.isfinite(multiplier) or parent in visited:
-                    raise ValueError(
-                        "Mimic multipliers must be finite and relations acyclic."
-                    )
-                if multiplier == 0:
-                    break
-                bound = bound / abs(multiplier)
-                caps[:, :, parent] = torch.minimum(caps[:, :, parent], bound)
-                visited.add(parent)
-                child = parent
-        return {
-            "velocity": caps[:, 0],
-            "acceleration": caps[:, 1],
-        }
 
     def get_qf_limits(
         self,

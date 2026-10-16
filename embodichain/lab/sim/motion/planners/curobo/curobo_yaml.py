@@ -40,7 +40,11 @@ import torch
 from dexsim.types import RigidBodyShape
 
 from embodichain.lab.sim.objects.rigid_object import CollisionShapeDesc
-from .._joint_limits import _DEFAULT_ACCELERATION, _DEFAULT_VELOCITY, _merge_limit
+from .._joint_limits import (
+    _DEFAULT_VELOCITY,
+    _joint_velocity_limits,
+    _merge_limit,
+)
 from embodichain.utils import logger
 from embodichain.utils.math import (
     matrix_from_quat,
@@ -62,6 +66,7 @@ __all__ = [
 
 
 _ROBOT_MAX_CONVEX_HULL_NUM = 2
+_DEFAULT_CUROBO_ACCELERATION = 15.0
 
 
 def _curobo_joint_limits(
@@ -73,14 +78,12 @@ def _curobo_joint_limits(
     ids = robot.active_joint_ids
     if not ids:
         return {"max_velocity": [], "max_acceleration": []}
-    limits = robot.get_joint_motion_limits()
-    velocity = _merge_limit(
-        None, limits["velocity"][:, ids].amin(dim=0), _DEFAULT_VELOCITY
-    )
+    limits = _joint_velocity_limits(robot)[:, ids].amin(dim=0)
+    velocity = _merge_limit(None, limits, _DEFAULT_VELOCITY)
     acceleration = _merge_limit(
         max_acceleration,
-        limits["acceleration"][:, ids].amin(dim=0),
-        _DEFAULT_ACCELERATION,
+        torch.full_like(limits, torch.inf),
+        _DEFAULT_CUROBO_ACCELERATION,
     )
     return {
         "max_velocity": velocity.tolist(),
@@ -203,8 +206,8 @@ def generate_curobo_robot_yaml(
         surface_radius: Fixed radius used by MorphIt's surface fallback.
         iterations: Adam iterations for MorphIt.
         collision_sphere_buffer: Padding added to every sphere's radius (m).
-        max_acceleration: Optional cspace acceleration request, capped by robot
-            metadata. ``None`` uses robot metadata or the shared fallback.
+        max_acceleration: Planning acceleration budget for active cspace joints.
+            ``None`` preserves cuRobo's default budget of 15.0.
         max_jerk: cspace maximum jerk.
         device: CUDA device for sphere fitting.
 

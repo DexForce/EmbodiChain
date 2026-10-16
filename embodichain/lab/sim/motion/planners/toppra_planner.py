@@ -280,8 +280,9 @@ class ToppraPlanOptions(PlanOptions):
     """Constraints for the planner, including velocity and acceleration limits.
 
     Values may be scalars, per-joint magnitudes, or signed bounds. ``None``
-    resolves robot limits at planning time. Explicit requests are capped by
-    available robot limits; missing limits use compatibility fallbacks.
+    velocity resolves robot speed caps at planning time. Acceleration is a
+    planning budget; ``None`` uses its compatibility default. Explicit speed
+    requests are capped by available robot limits.
     """
 
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY

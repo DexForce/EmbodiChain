@@ -21,8 +21,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from embodichain.lab.sim.objects.robot import Robot
-
 from embodichain.lab.sim.motion.planners.bezier import (
     compose_quintic_blend_jerk,
     compose_quintic_blend_state,
@@ -1134,11 +1132,7 @@ def test_planner_adapts_batched_plan_states() -> None:
         mimic_ids=(),
         mimic_parents=(),
         mimic_multipliers=(),
-        cfg=SimpleNamespace(fpath="", joint_acceleration_limits=None),
         get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
-    )
-    planner.robot.get_joint_motion_limits = (
-        lambda **kwargs: Robot.get_joint_motion_limits(planner.robot, **kwargs)
     )
     states = [
         PlanState.from_qpos(torch.tensor([[0.0, 0.0]])),

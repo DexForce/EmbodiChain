@@ -78,15 +78,6 @@ class RobotCfg(ArticulationCfg):
     )
     """Joint drive, limit, friction, and armature properties."""
 
-    joint_acceleration_limits: dict[str, float] | float | None = None
-    """Optional planning acceleration caps [rad/s^2 or m/s^2].
-
-    A scalar applies to every joint; mapping keys are control parts or joint
-    name expressions, with no overlapping rules. Unconfigured joints use the
-    planner's explicit request or its fallback. This metadata does not configure
-    a physics drive or derive acceleration from effort limits.
-    """
-
     asset_physics_mode: AssetPhysicsMode = "overlay"
     """Apply configured robot physics on top of source-authored values."""
 
@@ -204,11 +195,7 @@ class RobotCfg(ArticulationCfg):
                     setattr(
                         cfg, key, attr.from_dict(value)
                     )  # Call from_dict on the attribute
-                elif (
-                    key == "solver_cfg"
-                    and isinstance(value, dict)
-                    and "class_type" in value
-                ):
+                elif isinstance(value, dict) and "class_type" in value:
                     setattr(
                         cfg,
                         key,
@@ -216,10 +203,8 @@ class RobotCfg(ArticulationCfg):
                             value
                         ),
                     )
-                elif (
-                    key == "solver_cfg"
-                    and isinstance(value, dict)
-                    and key_in_nested_dict(value, "class_type")
+                elif isinstance(value, dict) and key_in_nested_dict(
+                    value, "class_type"
                 ):
                     setattr(
                         cfg,
@@ -259,13 +244,8 @@ class RobotCfg(ArticulationCfg):
         """
         return None
 
-    def to_dict(self) -> dict:
-        """Serialize config, preserving explicit planning-limit clearing overrides.
-
-        Returns:
-            Plain config dictionary. Planning acceleration limits retain
-            ``None`` so reloading cannot restore a derived robot's defaults.
-        """
+    def to_dict(self):
+        """Serialize config to a plain dict (enums, numpy, nested configclass)."""
 
         def serialize(obj, _visited=None):
             if _visited is None:
@@ -297,7 +277,7 @@ class RobotCfg(ArticulationCfg):
                     return {
                         k: serialize(v, _visited)
                         for k, v in obj.__dict__.items()
-                        if v is not None or k == "joint_acceleration_limits"
+                        if v is not None
                     }
                 return obj
             finally:
