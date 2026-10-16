@@ -282,6 +282,12 @@ def test_config_buffer_allocates_independent_action_width() -> None:
     assert legacy["actions"].shape == (2, 5, 9)
 
 
+def test_new_config_options_preserve_legacy_positional_arguments() -> None:
+    cfg = OnlineDataEngineCfg(16, 300, 9, "cpu")
+    assert cfg.state_dim == 9 and cfg.buffer_device == "cpu"
+    assert cfg.action_dim is None and cfg.refill_policy == "sample_threshold"
+
+
 def _install_fake_starting_worker(
     engine: OnlineDataEngine, *, initialize: bool = True
 ) -> MagicMock:

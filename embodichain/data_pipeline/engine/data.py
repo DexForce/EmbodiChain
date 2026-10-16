@@ -220,15 +220,6 @@ class OnlineDataEngineCfg:
     state_dim: int = 14
     """Dimensionality of the state space."""
 
-    action_dim: int | None = None
-    """Stored expert action width; None preserves the historical state_dim width."""
-
-    refill_policy: Literal["sample_threshold", "manual"] = "sample_threshold"
-    """Automatic sample-count refill or owner-requested refill."""
-
-    include_provenance: bool = False
-    """Include numeric ods_run_id, ods_episode_id and ods_generation fields."""
-
     buffer_device: str = "cpu"
     """Device on which the shared buffer is allocated."""
 
@@ -257,6 +248,15 @@ class OnlineDataEngineCfg:
     """Append-only task/subtask dictionary capacity in UTF-8 bytes. Descriptions
     remain available for copied samples after trajectory slots are reused.
     Exhaustion fails the worker explicitly; increase this for many unique tasks."""
+
+    action_dim: int | None = None
+    """Stored expert action width; None preserves the historical state_dim width."""
+
+    refill_policy: Literal["sample_threshold", "manual"] = "sample_threshold"
+    """Automatic sample-count refill or owner-requested refill."""
+
+    include_provenance: bool = False
+    """Include numeric ods_run_id, ods_episode_id and ods_generation fields."""
 
 
 class _ProducerProgress:

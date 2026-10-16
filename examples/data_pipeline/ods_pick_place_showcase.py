@@ -302,6 +302,8 @@ def _evaluate_worker(
                 )
             report = {
                 "name": request["name"],
+                "checkpoint": request.get("checkpoint"),
+                "policy_step": model_step,
                 "records": records,
                 "success_rate": sum(r["success"] for r in records) / len(records),
                 "lift_rate": sum(r["lifted"] for r in records) / len(records),
@@ -397,6 +399,21 @@ def main() -> None:
     torch.manual_seed(args.seed)
     config = load_task_config(args.sim_device)
     config["seed"] = args.seed
+    (args.output / "task_config.json").write_text(json.dumps(config, indent=2))
+    from importlib.metadata import version
+
+    environment = {
+        "python": sys.version,
+        "torch": torch.__version__,
+        "dexsim": version("dexsim-engine"),
+    }
+    try:
+        environment["commit"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=TASK_CONFIG.parents[5], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        environment["commit"] = None
+    (args.output / "environment.json").write_text(json.dumps(environment, indent=2))
     (args.output / "config.json").write_text(
         json.dumps(vars(args), default=str, indent=2)
     )
@@ -598,6 +615,10 @@ def main() -> None:
             "stats": engine.get_stats(),
         }
         (args.output / "summary.json").write_text(json.dumps(summary, indent=2))
+        print(
+            f'Final student success: {final["success_rate"]:.1%}; initial: {initial_test_rate:.1%}; learning target met: {summary["learning_target_met"]}',
+            flush=True,
+        )
     finally:
         cleanup_error = None
         if engine is not None:
