@@ -46,7 +46,7 @@
 
 `action_dim` optionally separates stored expert command width from robot-state
 width; omitted values preserve `state_dim` for both. Explicit widths are checked
-against the live expert action spec and full robot qpos before generation.
+against the live expert action spec and observed proprioception before generation.
 `include_provenance` adds numeric run/episode/generation IDs while rows remain
 excluded from readers. `get_stats()` returns detached production/consumption
 counters and excludes the active write window from valid-frame counts. These

@@ -288,6 +288,24 @@ def test_new_config_options_preserve_legacy_positional_arguments() -> None:
     assert cfg.action_dim is None and cfg.refill_policy == "sample_threshold"
 
 
+def test_worker_width_validation_uses_observation_selection_and_expert_layout() -> None:
+    from types import SimpleNamespace
+
+    attrs = {
+        "expert_action_spec": SimpleNamespace(width=8),
+        "single_observation_space": {"robot": {"qpos": SimpleNamespace(shape=(7,))}},
+    }
+    env = SimpleNamespace(get_wrapper_attr=lambda name: attrs[name])
+    cfg = OnlineDataEngineCfg(state_dim=7, action_dim=8)
+    engine_module._validate_worker_dimensions(env, cfg)
+    cfg.action_dim = 9
+    with pytest.raises(ValueError, match="widths disagree"):
+        engine_module._validate_worker_dimensions(env, cfg)
+    cfg.action_dim, cfg.state_dim = 8, 9
+    with pytest.raises(ValueError, match="widths disagree"):
+        engine_module._validate_worker_dimensions(env, cfg)
+
+
 def _install_fake_starting_worker(
     engine: OnlineDataEngine, *, initialize: bool = True
 ) -> MagicMock:

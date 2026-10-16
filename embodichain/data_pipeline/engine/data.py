@@ -271,6 +271,19 @@ class _ProducerProgress:
             self.values[index] += value
 
 
+def _validate_worker_dimensions(env: object, cfg: OnlineDataEngineCfg) -> None:
+    """Check the stored proprioception and expert layout before writing rows."""
+    if cfg.action_dim is None:
+        return
+    spec = env.get_wrapper_attr("expert_action_spec")
+    space = env.get_wrapper_attr("single_observation_space")
+    if (
+        spec.width != cfg.action_dim
+        or space["robot"]["qpos"].shape[-1] != cfg.state_dim
+    ):
+        raise ValueError("ODS state/action widths disagree with the live environment")
+
+
 def _populate_language_indices(
     buffer: TensorDict,
     result: "DemoEpisodeResult",
@@ -449,16 +462,7 @@ def _run_sim_worker(
 
     # --- Main loop: wait for fill signal, then fill the entire buffer -------
     try:
-        if cfg.action_dim is not None:
-            spec = env.get_wrapper_attr("expert_action_spec")
-            robot = env.get_wrapper_attr("robot")
-            if (
-                spec.width != cfg.action_dim
-                or robot.get_qpos().shape[-1] != cfg.state_dim
-            ):
-                raise ValueError(
-                    "ODS state/action widths disagree with the live environment"
-                )
+        _validate_worker_dimensions(env, cfg)
         while True:
             fill_signal.wait()
             fill_signal.clear()

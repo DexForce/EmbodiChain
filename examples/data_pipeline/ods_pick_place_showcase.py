@@ -461,7 +461,7 @@ def main() -> None:
             return
         from torch.utils.tensorboard import SummaryWriter
 
-        writer = SummaryWriter(str(args.output / "events"))
+        writer = SummaryWriter(str(args.output / "events"), flush_secs=5)
         if not args.no_viewer:
             tensorboard = subprocess.Popen(
                 [
