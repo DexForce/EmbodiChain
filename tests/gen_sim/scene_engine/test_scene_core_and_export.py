@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from collections.abc import Iterator
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -1176,3 +1178,84 @@ def test_preview_initial_display_does_not_integrate_physics(
     if not headless:
         expected += ["open", "explicit_preview_step"]
     assert events == expected + ["destroy", "flush"]
+
+
+@pytest.mark.parametrize("backend", ["none", "viser"])
+def test_preview_pose_playback_renders_without_physics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli import preview
+
+    root = tmp_path / "export"
+    (root / "scene_export").mkdir(parents=True)
+    (root / "scene_export" / "scene_config.json").write_text("{}")
+    events: list[str] = []
+    callback_count = 0
+
+    class FakeSimulation:
+        def __init__(self, cfg: object) -> None:
+            self.sim_config = SimpleNamespace(
+                visualization=SimpleNamespace(backend=backend)
+            )
+
+        def prepare(self) -> None:
+            events.append("prepare")
+
+        def sync_render_state(self) -> None:
+            events.append("publish")
+
+        def open_window(self) -> None:
+            events.append("open")
+
+        @contextmanager
+        def render_frame(
+            self, *, force_visualization: bool, capture_camera_images: bool
+        ) -> Iterator[None]:
+            assert not capture_camera_images
+            events.append(f"render:{force_visualization}")
+            yield
+
+        def update(self, **kwargs: object) -> None:
+            pytest.fail("Pose playback must not integrate physics.")
+
+        def destroy(self, **kwargs: object) -> None:
+            events.append("destroy")
+
+        @staticmethod
+        def flush_cleanup_queue() -> None:
+            events.append("flush")
+
+    def on_frame(sim: object) -> bool:
+        nonlocal callback_count
+        assert isinstance(sim, FakeSimulation)
+        callback_count += 1
+        if callback_count == 3:
+            raise KeyboardInterrupt
+        events.append(f"callback:{callback_count}")
+        return callback_count == 2
+
+    monkeypatch.setattr(preview, "SimulationManager", FakeSimulation)
+    monkeypatch.setattr(
+        preview, "load_scene_export_into_sim", lambda **_: events.append("load") or []
+    )
+    monkeypatch.setattr(preview.time, "sleep", lambda _: None)
+    preview.preview_scene_export(
+        output_root=root,
+        headless=backend == "viser",
+        visualization=VisualizationCfg(backend=backend),
+        joint_control=False,
+        on_frame=on_frame,
+        advance_physics=False,
+    )
+
+    initial = ["load", "prepare"]
+    if backend == "none":
+        initial += ["publish", "open"]
+    assert events == initial + [
+        "callback:1",
+        "render:False",
+        "callback:2",
+        "render:True",
+        "destroy",
+        "flush",
+    ]
