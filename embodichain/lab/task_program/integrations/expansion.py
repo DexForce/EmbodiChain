@@ -469,6 +469,11 @@ class CombinedTaskProgramExpansionFactory:
         row_specs: list[tuple[CandidateSpec, ...]] = []
         row_templates: list[tuple[TrajectoryTemplate, ...]] = []
         for row in range(context.batch_size):
+            # A planning failure is already a hold, not an augmentation source.
+            if not bool(plan.plan_success[row]):
+                positions.append(trajectory.positions[row].clone())
+                dts.append(trajectory.dt[row].clone())
+                continue
             recipe = self._recipe_for_row(row)
             qpos = context.robot.qpos[row]
             digest = hashlib.sha256(
@@ -640,9 +645,10 @@ class CombinedTaskProgramExpansionFactory:
                 dt=torch.stack(dts),
             ),
         )
-        for row, (specs, templates, record) in enumerate(
-            zip(row_specs, row_templates, row_records, strict=True)
+        for specs, templates, record in zip(
+            row_specs, row_templates, row_records, strict=True
         ):
+            row = int(record["row_index"])
             self._records.append(
                 TaskProgramExpansionRecord(
                     workflow_id=call_request.workflow_id,

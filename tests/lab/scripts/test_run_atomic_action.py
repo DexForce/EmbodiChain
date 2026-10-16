@@ -748,6 +748,7 @@ def _compiled(rows: int = 3) -> SimpleNamespace:
         )
 
     return SimpleNamespace(
+        plan_success=torch.ones(rows, dtype=torch.bool),
         trajectory=TimedTrajectory(
             positions, None, None, intervals, torch.arange(rows)
         ),
@@ -801,9 +802,11 @@ def test_both_spatial_operators_keep_contacts_hands_clock_and_action_joins() -> 
 
 @pytest.mark.parametrize("moving_arm", ("left_arm", "right_arm"))
 @pytest.mark.parametrize("operator", ("joint_residual", "via_points"))
+@pytest.mark.parametrize("failed_rows", ((), (0,), (1,), (0, 1, 2)))
 def test_handover_expansion_locks_pre_grasp_and_all_transfer_waypoints(
     moving_arm: str,
     operator: str,
+    failed_rows: tuple[int, ...],
 ) -> None:
     lengths = {
         "pickup_approach": 25,
@@ -824,9 +827,15 @@ def test_handover_expansion_locks_pre_grasp_and_all_transfer_waypoints(
     positions[:, :, moving_joints[1]] = positions[:, :, moving_joints[0]] * 0.5
     positions[:, 25:, :4] += 0.3
     positions[:, 35:125, 4] = 0.04
+    plan_success = torch.ones(3, dtype=torch.bool)
+    for row in failed_rows:
+        plan_success[row] = False
+        positions[row] = torch.tensor([0.1 * (row + 1), -0.1, 0.2, -0.2, 0.02])
     source = TimedTrajectory.from_uniform_step(
         positions, env_ids=torch.arange(3), step_dt=0.01
     )
+    for row in failed_rows:
+        source.dt[row, 1:] *= row + 2
     segments = []
     offset = 0
     for name, length in lengths.items():
@@ -838,6 +847,7 @@ def test_handover_expansion_locks_pre_grasp_and_all_transfer_waypoints(
         diagnostics=SimpleNamespace(metadata={}),
     )
     compiled = SimpleNamespace(
+        plan_success=plan_success,
         trajectory=source,
         action_plans=(plan,),
         segment=lambda _index, name: next(s for s in segments if s.name == name),
@@ -864,8 +874,18 @@ def test_handover_expansion_locks_pre_grasp_and_all_transfer_waypoints(
         expanded.positions[:, :, stationary_joints],
         source.positions[:, :, stationary_joints],
     )
-    assert {record["operator"] for record in records[1:]} == {operator}
+    assert [record["operator"] for record in records] == [
+        "none" if row == 0 or row in failed_rows else operator for row in range(3)
+    ]
+    for row in failed_rows:
+        assert torch.equal(expanded.positions[row], source.positions[row])
+        assert records[row]["reference_row"] == row
+    for row, record in enumerate(records):
+        if row not in failed_rows:
+            assert record["reference_row"] not in failed_rows
     for row in (1, 2):
+        if row in failed_rows:
+            continue
         assert not torch.equal(
             expanded.positions[row, 1:24, moving_joints],
             source.positions[row, 1:24, moving_joints],
@@ -1115,6 +1135,7 @@ def _compiled_slide_push() -> SimpleNamespace:
         return next(value for value in segments if value.name == name)
 
     return SimpleNamespace(
+        plan_success=torch.ones(3, dtype=torch.bool),
         trajectory=TimedTrajectory(positions, None, None, intervals, torch.arange(3)),
         action_plans=(
             SimpleNamespace(

@@ -146,12 +146,15 @@ def _augment(
         plan.skill_id == "slide" for plan in compiled.action_plans
     )
     for row, (branch, variant_index) in enumerate(args._recipes):
+        failed = not bool(compiled.plan_success[row])
         # Slide plans against each row's measured robot and handle state,
         # including after pull replay. Its branch identity remains shared in
         # affordance sampling, while geometry, timing and provenance stay local.
         # Other sample scenes retain one reference within each grasp branch.
         reference_row = (
-            row if row_local_reference else reference_rows.setdefault(branch, row)
+            row
+            if row_local_reference or failed
+            else reference_rows.setdefault(branch, row)
         )
         record = {
             "row": row,
@@ -162,7 +165,8 @@ def _augment(
             "operator": "none",
             "rejected": {},
         }
-        if variant_index == 0:
+        # Failed plans retain their own source hold and cannot seed a branch.
+        if failed or variant_index == 0:
             rows.append(trajectory.positions[reference_row].clone())
         else:
             template, restore = _template(

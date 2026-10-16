@@ -630,3 +630,105 @@ def test_handover_variants_fix_waypoints_held_phases_and_stationary_arm(
             source.positions[row, 1:pre_grasp, moving_joints],
         )
         assert torch.equal(expanded.positions[row, 0], source.positions[row, 0])
+
+
+@pytest.mark.parametrize("operator", ("joint_residual", "via_points"))
+@pytest.mark.parametrize("variant", (0, 1))
+@pytest.mark.parametrize("successful_rows", ((), (0,), (1,)))
+def test_handover_expansion_skips_failed_rows_and_keeps_valid_row_provenance(
+    operator: str,
+    variant: int,
+    successful_rows: tuple[int, ...],
+) -> None:
+    """Planning failures retain their holds even when requesting recipe zero."""
+    success = torch.tensor([row in successful_rows for row in range(2)])
+
+    class PartiallyFailedHandOver(_WaypointHandOverAction):
+        binding_contract: ClassVar[SkillBindingContract] = (
+            _WaypointHandOverAction.binding_contract
+        )
+
+        def _plan(self, request, context):
+            planned = super()._plan(request, context)
+            return self.build_plan(
+                request,
+                context,
+                success=success,
+                trajectory=planned.joint_trajectory,
+                segment_lengths={
+                    segment.name: segment.stop - segment.start
+                    for segment in planned.segments
+                },
+            )
+
+    engine, _ = _engine(batch_size=2)
+    engine.robot.dof = 5
+    engine.robot.joint_names = ("l0", "l1", "r0", "r1", "hand")
+    initial = torch.zeros(2, 5)
+    for row in range(2):
+        if row not in successful_rows:
+            initial[row] = torch.tensor([0.1 * (row + 1), -0.1, 0.2, -0.2, 0.02])
+    engine.robot.get_qpos.return_value = initial
+    engine.robot.get_qvel.return_value = torch.zeros_like(initial)
+    engine.robot.get_joint_ids.return_value = [0, 1, 2, 3]
+    engine.robot.body_data.qpos_limits = torch.tensor([[[-2.0, 2.0]] * 5])
+    action = PartiallyFailedHandOver()
+    engine.register(action)
+    invocation = ActionInvocation(
+        skill_id="hand_over",
+        goal=JointPositionGoal(torch.ones(2, 5)),
+        binding=engine.bind_control_parts("hand_over", {"primary": {"motion": "all"}}),
+        motion_policy=MotionPolicy(sample_count=130),
+        invocation_id="handover-call",
+    )
+    context = replace(
+        engine.initial_context(control_dt=CONTROL_DT), env_ids=torch.tensor([7, 3])
+    )
+    plan = engine.plan(invocation, context)
+    source = plan.joint_trajectory
+    payload = _combined_profile_with_spatial(scale=0.005, tolerance=0.002).to_dict()
+    payload["trajectory"]["spatial"]["operators"] = [operator]
+    factory = CombinedTaskProgramExpansionFactory(
+        CombinedExpansionProfile.from_mapping(payload),
+        candidate_index=variant,
+        recipe_indices=(variant, variant),
+        program_id="repeated_cube_pick_place",
+        integration_id="handover_v1",
+        robot_profile_id="dual_arm",
+    )
+    request = replace(
+        _plan_request(invocation, skill_id="hand_over"), analysis_call_index=1
+    )
+    rebuilt = factory.create_plan_transform(request, engine=engine)(
+        action.resolve_request(invocation), context, plan
+    )
+    expanded = rebuilt.joint_trajectory
+    assert torch.equal(rebuilt.plan_success, success)
+    assert torch.equal(expanded.dt, source.dt)
+    assert torch.equal(expanded.env_ids, source.env_ids)
+    for row in range(2):
+        if row not in successful_rows:
+            assert torch.equal(
+                source.positions[row], initial[row].expand_as(source.positions[row])
+            )
+            assert torch.equal(expanded.positions[row], source.positions[row])
+        elif variant == 0:
+            assert torch.equal(expanded.positions[row], source.positions[row])
+        else:
+            pre_grasp = plan.segment("pickup_approach").stop - 1
+            assert not torch.equal(
+                expanded.positions[row, 1:pre_grasp], source.positions[row, 1:pre_grasp]
+            )
+            assert torch.equal(
+                expanded.positions[row, pre_grasp:], source.positions[row, pre_grasp:]
+            )
+    assert [record.env_id for record in factory.records] == [
+        int(context.env_ids[row]) for row in successful_rows
+    ]
+    assert [record.trajectory_selected for record in factory.records] == [
+        variant for _ in successful_rows
+    ]
+    assert [
+        record["row_index"]
+        for record in rebuilt.diagnostics.metadata["expansion"]["rows"]
+    ] == list(successful_rows)
