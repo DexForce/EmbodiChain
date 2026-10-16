@@ -14,23 +14,31 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Prepare and persist a scene randomization baseline from configuration."""
+"""Sample grouped scene layouts in memory using the shared scene generator."""
 
 from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
 
+__all__ = ["main"]
+
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run baseline preparation without starting scene generation or simulation.
+    """Prepare a baseline and sample layouts with validated YAML parameters.
+
+    Exhausting the attempt budget is a normal result, including when no
+    layouts were found. The sampling status reports whether the target was met.
 
     Args:
         argv: Arguments excluding the command name; defaults to ``sys.argv``.
     """
     parser = argparse.ArgumentParser(
         prog="embodichain scene-randomization",
-        description="Prepare a reusable scene randomization baseline YAML.",
+        description=(
+            "Prepare a reusable baseline and sample grouped XY layouts in memory "
+            "using validated YAML parameters. Candidate layouts are not saved."
+        ),
     )
     parser.add_argument(
         "--output_root",
@@ -43,20 +51,34 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    from embodichain.gen_sim.scene_engine.randomization import (
+    from embodichain.gen_sim.scene_engine.randomization.cfg import (
         load_randomization_config,
-        prepare_scene_baseline,
+    )
+    from embodichain.gen_sim.scene_engine.randomization.generation import (
+        randomize_scene,
     )
 
     try:
         cfg = load_randomization_config(args.config, output_root=args.output_root)
-        result = prepare_scene_baseline(cfg, rebuild=args.rebuild)
+        result = randomize_scene(cfg, rebuild=args.rebuild)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
-    print(f"Baseline YAML: {result.path}")
-    print(f"Groups: {len(result.data['groups'])}")
-    print(f"Cache: {'reused' if result.cache_hit else 'rebuilt'}")
+    print(f"Baseline YAML: {result.baseline.path}")
+    print(f"Groups: {len(result.baseline.data['groups'])}")
+    print(f"Cache: {'reused' if result.baseline.cache_hit else 'rebuilt'}")
+    print(f"Sampling: {result.status}")
+    print(f"Attempts: {result.attempts}")
+    print(f"Layouts: {len(result.candidates)} (in memory; not saved)")
+    print(
+        "Solver statuses: "
+        + ", ".join(
+            f"{status}={count}"
+            for status, count in sorted(result.solver_status_counts.items())
+        )
+    )
+    if result.status not in ("completed", "budget_exhausted"):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -41,41 +41,50 @@ def _run_script(script: str) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.mark.parametrize(
-    "statement",
+    ("statement", "loads_configuration"),
     [
-        f"import {_PACKAGE}",
-        f"from {_PACKAGE}.cfg import SceneRandomizationCfg, load_randomization_config",
+        (f"import {_PACKAGE}", False),
+        (
+            f"from {_PACKAGE}.cfg import SceneRandomizationCfg, load_randomization_config",
+            True,
+        ),
     ],
 )
-def test_configuration_imports_do_not_load_geometry(statement: str) -> None:
+def test_configuration_imports_do_not_load_geometry(
+    statement: str, loads_configuration: bool
+) -> None:
     _run_script(f"""
 import sys
 {statement}
+assert ({_PACKAGE + '.cfg'!r} in sys.modules) is {loads_configuration!r}
 assert {_PACKAGE + '.baseline'!r} not in sys.modules
 assert {_PACKAGE + '._geometry'!r} not in sys.modules
+assert {_PACKAGE + '.generation'!r} not in sys.modules
 assert 'trimesh' not in sys.modules
 """)
 
 
-def test_public_api_exports_are_available_and_unknown_names_raise() -> None:
+def test_public_api_exports_are_available_from_owning_modules() -> None:
     _run_script(f"""
-import {_PACKAGE} as randomization
-from {_PACKAGE} import (
+from {_PACKAGE}.cfg import (
     SceneRandomizationCfg,
     load_randomization_config,
+)
+from {_PACKAGE}.baseline import (
     PreparedSceneBaseline,
     prepare_scene_baseline,
 )
-assert randomization.SceneRandomizationCfg is SceneRandomizationCfg
-assert randomization.load_randomization_config is load_randomization_config
-assert randomization.PreparedSceneBaseline is PreparedSceneBaseline
-assert randomization.prepare_scene_baseline is prepare_scene_baseline
-try:
-    randomization.unknown_randomization_attribute
-except AttributeError as exc:
-    assert 'unknown_randomization_attribute' in str(exc)
-else:
-    raise AssertionError('Unknown package attributes must raise AttributeError.')
+from {_PACKAGE}.generation import (
+    SceneRandomizationResult,
+    randomize_scene,
+)
+for symbols, owner in (
+    ((SceneRandomizationCfg, load_randomization_config), {_PACKAGE + '.cfg'!r}),
+    ((PreparedSceneBaseline, prepare_scene_baseline), {_PACKAGE + '.baseline'!r}),
+    ((SceneRandomizationResult, randomize_scene), {_PACKAGE + '.generation'!r}),
+):
+    for symbol in symbols:
+        assert symbol.__module__ == owner
 """)
 
 
@@ -89,8 +98,10 @@ except SystemExit as exc:
     assert exc.code == 0
 else:
     raise AssertionError('CLI help must exit successfully.')
+assert {_PACKAGE + '.cfg'!r} not in sys.modules
 assert {_PACKAGE + '.baseline'!r} not in sys.modules
 assert {_PACKAGE + '._geometry'!r} not in sys.modules
+assert {_PACKAGE + '.generation'!r} not in sys.modules
 """)
     assert "--config" in result.stdout
     assert "--output_root" in result.stdout

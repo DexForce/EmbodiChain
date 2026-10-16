@@ -14,11 +14,12 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Strict configuration for preparing a scene randomization baseline."""
+"""Strict configuration for scene baselines and grouped layout generation."""
 
 from __future__ import annotations
 
 from dataclasses import MISSING
+import math
 from pathlib import Path
 from typing import Any
 
@@ -26,20 +27,60 @@ import yaml
 
 from embodichain.utils import configclass
 
+__all__ = ["SceneRandomizationCfg", "load_randomization_config"]
+
+_GENERATION_FIELDS = (
+    "seed",
+    "candidate_count",
+    "max_attempts",
+    "collision_margin_m",
+)
+
 
 @configclass
 class SceneRandomizationCfg:
-    """Resolved paths used to prepare a reusable scene baseline.
+    """Resolved scene paths and grouped layout generation parameters.
 
     Attributes:
         scene_path: Absolute path to a portable ``scene_export`` directory.
         base_data_path: Absolute destination for the baseline YAML file.
         schema_version: Supported input configuration schema, currently 1.
+        seed: Nonnegative seed for reproducible layout proposals.
+        candidate_count: Positive number of successful layouts requested.
+        max_attempts: Total proposal budget, at least ``candidate_count``.
+        collision_margin_m: Finite, nonnegative clearance between group AABBs.
     """
 
     scene_path: Path = MISSING
     base_data_path: Path = MISSING
     schema_version: int = 1
+    seed: int = 0
+    candidate_count: int = 10
+    max_attempts: int = 1000
+    collision_margin_m: float = 0.02
+
+
+def _validate_generation_parameters(
+    *, seed: int, candidate_count: int, max_attempts: int, collision_margin_m: float
+) -> None:
+    """Validate YAML values and Python overrides before accessing scene files."""
+    for name, value, minimum in (
+        ("seed", seed, 0),
+        ("candidate_count", candidate_count, 1),
+        ("max_attempts", max_attempts, 1),
+    ):
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{name} must be an integer >= {minimum}.")
+    if candidate_count > max_attempts:
+        raise ValueError("max_attempts must be at least candidate_count.")
+    if type(collision_margin_m) not in (int, float) or collision_margin_m < 0:
+        raise ValueError("collision_margin_m must be finite and nonnegative.")
+    try:
+        finite = math.isfinite(collision_margin_m)
+    except OverflowError:
+        finite = False
+    if not finite:
+        raise ValueError("collision_margin_m must be finite and nonnegative.")
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -75,8 +116,10 @@ def load_randomization_config(
 ) -> SceneRandomizationCfg:
     """Load the closed version-1 YAML configuration.
 
-    The configuration accepts only ``schema_version: 1``. The scene workspace
-    is supplied separately through ``output_root``: its ``scene_export/``
+    The configuration requires ``schema_version: 1`` and accepts optional
+    ``seed``, ``candidate_count``, ``max_attempts`` and ``collision_margin_m``.
+    Omitted parameters use :class:`SceneRandomizationCfg` defaults. The scene
+    workspace is supplied separately through ``output_root``: its ``scene_export/``
     directory is always the source, and ``scene_randomization_base.yaml`` in
     that directory is always the baseline destination. Export contents are
     validated during baseline preparation.
@@ -109,7 +152,9 @@ def load_randomization_config(
             "The baseline is written to "
             "scene_export/scene_randomization_base.yaml within that workspace."
         )
-    root = _mapping(payload, name="configuration", allowed={"schema_version"})
+    root = _mapping(
+        payload, name="configuration", allowed={"schema_version", *_GENERATION_FIELDS}
+    )
     version = root.get("schema_version")
     if type(version) is not int or version != 1:
         raise ValueError("schema_version must be the integer 1.")
@@ -123,7 +168,16 @@ def load_randomization_config(
     if base_data_path.resolve() == config_path:
         raise ValueError("Baseline output must not overwrite the input configuration.")
     cfg = SceneRandomizationCfg(
-        scene_path=scene_path, base_data_path=base_data_path, schema_version=version
+        scene_path=scene_path,
+        base_data_path=base_data_path,
+        schema_version=version,
+        **{key: root[key] for key in _GENERATION_FIELDS if key in root},
     )
     cfg.validate()
+    _validate_generation_parameters(
+        seed=cfg.seed,
+        candidate_count=cfg.candidate_count,
+        max_attempts=cfg.max_attempts,
+        collision_margin_m=cfg.collision_margin_m,
+    )
     return cfg

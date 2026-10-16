@@ -27,9 +27,7 @@ import trimesh
 import yaml
 
 from embodichain.gen_sim.scene_engine.randomization import baseline
-from embodichain.gen_sim.scene_engine.randomization import (
-    SceneRandomizationCfg,
-)
+from embodichain.gen_sim.scene_engine.randomization.cfg import SceneRandomizationCfg
 
 
 def _export(tmp_path: Path) -> tuple[Path, SceneRandomizationCfg]:

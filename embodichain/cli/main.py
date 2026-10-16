@@ -56,7 +56,7 @@ COMMANDS = (
     Command(
         name="scene-randomization",
         target="embodichain.gen_sim.scene_engine.cli.randomization:main",
-        help="Prepare a scene randomization baseline from an existing output root.",
+        help="Sample grouped scene layouts in memory from an existing output root.",
     ),
     Command(
         name="preview-scene",
