@@ -16,9 +16,17 @@
 """Prototype: live Franka grasp/pour/place solved by DexUni, then DFSPH.
 
 Same scene, planning and qualification as ``franka_dfsph_pour_demo.py``. The
-physics solver is DexUni (MuJoCo articulation + VBD rigid cup) on a
-particle-free view; one DFSPH step then advances the water against the live
-body boundaries. Coupling is one-way.
+physics solver is DexUni on a particle-free view: every joint, the cup's free
+joint included, is MuJoCo-owned, so DexUni runs its pure-MuJoCo backend and
+VBD is skipped. One DFSPH step advances the water against the live body
+boundaries, overlapping the MuJoCo substeps on a second CUDA stream. Coupling
+is one-way.
+
+Defaults: DFSPH at 480 Hz (two steps per 1/240 s physics step) with 15 MuJoCo
+substeps each (7,200 Hz). A stiffer cup contact (``ke`` x4, ``kd`` x2) offsets
+the extra frictional creep of the coarser MuJoCo step, so the pour matches
+the PR's 10,080 Hz MuJoCo result. Requires a DexSim build with the DexUni
+DFSPH prototype options (``DexUniSolverCfg.sph_cfg``).
 """
 
 from __future__ import annotations
@@ -65,22 +73,51 @@ TASK = (
 )
 
 
+# The PR's MuJoCo rigid solver settings DexUni accepts.
+_DEXUNI_MUJOCO_OPTIONS = (
+    "solver",
+    "integrator",
+    "iterations",
+    "ls_iterations",
+    "cone",
+    "impratio",
+)
+# Cup contact stiffness/damping (env.fluid.yaml: 4e5 / 1265): timeconst
+# 0.79 ms at damping ratio 1, against frictional creep at 7,200 Hz.
+_CUP_CONTACT_KE = 1.6e6
+_CUP_CONTACT_KD = 2530.0
+
+
 def _use_dexuni(cfg, args) -> None:
     """Replace the SPH+MuJoCo composition with DexUni followed by DFSPH."""
-    solver = cfg.sim_cfg.physics_cfg.solver_cfg
+    physics = cfg.sim_cfg.physics_cfg
+    solver = physics.solver_cfg
+    rigid = solver.get("rigid_solver_cfg") or {}
     sph = {
         k: v
         for k, v in solver.items()
         if k not in ("rigid_solver_cfg", "rigid_solver_substeps")
     }
-    cfg.sim_cfg.physics_cfg.solver_cfg = {
+    mujoco_options = {k: rigid[k] for k in _DEXUNI_MUJOCO_OPTIONS if k in rigid}
+    # One contact per geom pair and 10 GJK/EPA iterations leave the pour
+    # unchanged; multi-point CCD over the cup's convex pieces is not needed.
+    mujoco_options["enable_multiccd"] = False
+    mujoco_options["ccd_iterations"] = 10
+    physics.num_substeps = args.fluid_substeps
+    physics.solver_cfg = {
         "solver_type": "dexuni",
         "joint_mode": "dynamic",
         "contact_mode": "auto",
-        "coupling": args.coupling,
-        "vbd_options": {"iterations": args.vbd_iterations},
+        "mujoco_options": mujoco_options,
+        "sph_rigid_substeps": args.rigid_substeps,
+        # Body accelerations are unused, so skip MuJoCo's post-constraint RNE.
+        "sph_rne_mode": "disabled",
+        "sph_concurrent": True,
         "sph_cfg": sph,
     }
+    cup = next(o for o in cfg.rigid_object if o.uid == "cup")
+    cup.attrs.material_props.ke = _CUP_CONTACT_KE
+    cup.attrs.material_props.kd = _CUP_CONTACT_KD
 
 
 def main() -> None:
@@ -96,9 +133,21 @@ def main() -> None:
         "--renderer", choices=["fast-rt", "no-render"], default="fast-rt"
     )
     parser.add_argument("--headless", action="store_true")
-    parser.add_argument("--vbd-iterations", type=int, default=12)
-    parser.add_argument("--coupling", choices=["one_way", "two_way"], default="one_way")
+    parser.add_argument(
+        "--fluid-substeps",
+        type=int,
+        default=2,
+        help="DFSPH steps per 1/240 s physics step (the PR uses 6)",
+    )
+    parser.add_argument(
+        "--rigid-substeps",
+        type=int,
+        default=15,
+        help="MuJoCo substeps per DFSPH step (the PR uses 7 at 6 DFSPH steps)",
+    )
     args = parser.parse_args()
+    if args.fluid_substeps < 1 or args.rigid_substeps < 1:
+        parser.error("substep counts must be positive")
     if args.seconds is not None and (
         not np.isfinite(args.seconds) or args.seconds <= 0
     ):
