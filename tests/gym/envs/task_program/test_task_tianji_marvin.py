@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import hashlib
+import xml.etree.ElementTree as ET
 
 import pytest
 import torch
@@ -64,6 +66,47 @@ _DEPLOYMENTS = (
     ("hand_over", "HandOver-TianjiMarvin-v1", 1),
     ("tableware/pour_water", "PourWater-TianjiMarvin-v1", 4),
 )
+
+
+def test_marvin_embodiment_explicitly_opts_into_pinned_simulation_inertials() -> None:
+    """Check recorded demo overlays, without certifying the asset's units."""
+    source = TianjiMarvinCfg.from_dict({})
+    asset = Path(source.fpath)
+    # The calibration belongs to this model snapshot, not arbitrary robot files.
+    assert hashlib.sha256(asset.read_bytes()).hexdigest() == (
+        "691a5f5a08d3335a1e1a50487b0f886f17eb30da4ea7703bf320a0bf9eac874f"
+    )
+    path = _CONFIGS / "tableware/pour_water/task.tianji_marvin.yaml"
+    deployed = config_to_cfg(load_config(path), source_path=path).robot
+    inertials = {
+        link.get("name"): link.find("inertial")
+        for link in ET.parse(asset).getroot().findall("link")
+        if link.find("inertial") is not None
+    }
+    assert source.link_attrs == {}
+    assert set(deployed.link_attrs) == set(inertials)
+    for name, inertial in inertials.items():
+        assert deployed.link_attrs[name].link_names_expr == [name]
+        props = deployed.link_attrs[name].attrs.mass_props
+        assert props.mass == pytest.approx(
+            float(inertial.find("mass").get("value")) * 1000
+        )
+        values = inertial.find("inertia").attrib
+        xx, xy, xz, yy, yz, zz = (
+            float(values[k]) for k in ("ixx", "ixy", "ixz", "iyy", "iyz", "izz")
+        )
+        expected = (
+            torch.tensor(
+                [[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]], dtype=torch.float64
+            )
+            * 1000
+        )
+        actual = torch.tensor(props.inertia, dtype=torch.float64)
+        torch.testing.assert_close(actual, expected)
+        assert torch.linalg.eigvalsh(actual).min() > 0
+        assert props.com_position is None
+        assert props.com_quaternion is None
+        assert deployed.link_attrs[name].attrs.collision_props is None
 
 
 def _deployment(task: str):

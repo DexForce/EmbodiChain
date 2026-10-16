@@ -1,10 +1,16 @@
+# Parameter provenance: see extensions/embodichain_robots/README.md.
+# This is a simulation-calibrated embodiment, not a factory hardware profile.
+# Asset source: DexForceAI/embodichain_data, revision
+# 48317bd8733182f36d306cc2a7a60ae5e47ed2c9/robot_assets/TianjiMarvin.zip.
+# robot_with_ee_acd.urdf SHA-256:
+# 691a5f5a08d3335a1e1a50487b0f886f17eb30da4ea7703bf320a0bf9eac874f
 embodiment_id: tianji_marvin
 
 simulation:
   class_type: TianjiMarvin
   uid: TianjiMarvin
   with_gripper: true
-  # Shared ready pose: lowered elbows, forward-folded forearms, open jaws.
+  # Designed and simulation-validated ready pose [rad; finger positions in m]: lowered elbows, forward-folded forearms, open jaws.
   # Source order is L1, R1, ..., L7, R7, then the four finger joints.
   # Kept aligned with TianjiMarvinCfg's standalone default.
   init_qpos:
@@ -26,11 +32,13 @@ simulation:
     - 0.0
     - 0.0
     - 0.0
+  # Simulation anchoring and solver iteration counts; not servo specifications.
   root_props:
     fixed_base: true
     min_position_iters: 32
     min_velocity_iters: 8
-  # Coupled simulation drive calibration, independent of hardware force ratings.
+  # Tuned prismatic drives: stiffness [N/m], damping [N*s/m],
+  # max_effort [N] and max_velocity [m/s]. These are not hardware ratings.
   joint_drive_props:
     stiffness:
       left_eef: 500.0
@@ -44,30 +52,216 @@ simulation:
     max_velocity:
       left_eef: 0.1
       right_eef: 0.1
-  # These merge into the preset's SI inertial overlays for the same links.
+  # Explicit opt-in simulation inertials: mass [kg], inertia [kg*m^2].
+  # Values below use 1000 x the pinned URDF numbers as a DEMO CALIBRATION.
+  # Source units are unconfirmed; this is NOT a verified tonnes-to-SI conversion.
+  # Preserve source COMs, collision envelopes and unrelated materials.
+  # Finger friction 2.0 is a simulation tuning value, not measured material data.
   link_attrs:
-    left_hand_finger_1_link:
+    base_link:
+      link_names_expr: [base_link]
       attrs:
+        mass_props:
+          mass: 109.24916672943885
+          inertia:
+            - [17.76149514025449, 0.0592945593866503, -0.15472877847083466]
+            - [0.0592945593866503, 17.781653971041884, 0.3135716580764859]
+            - [-0.15472877847083466, 0.3135716580764859, 7.660437480320593]
+    shoulder_pitch_l_j1_link:
+      link_names_expr: [shoulder_pitch_l_j1_link]
+      attrs:
+        mass_props:
+          mass: 1.022387748937657
+          inertia:
+            - [0.002274199017700984, 4.4572217887609065e-08, 4.256867307550405e-06]
+            - [4.4572217887609065e-08, 0.0026383092580492358, 3.086859756190181e-06]
+            - [4.256867307550405e-06, 3.086859756190181e-06, 0.0012274419227592162]
+    shoulder_roll_l_j2_link:
+      link_names_expr: [shoulder_roll_l_j2_link]
+      attrs:
+        mass_props:
+          mass: 1.5613550419125903
+          inertia:
+            - [0.0073728181458601535, 1.4628326041106542e-06, -5.616330102546891e-07]
+            - [1.4628326041106542e-06, 0.0032862791094052254, -8.381610151926439e-05]
+            - [-5.616330102546891e-07, -8.381610151926439e-05, 0.006315734372884065]
+    elbow_pitch_l_j3_link:
+      link_names_expr: [elbow_pitch_l_j3_link]
+      attrs:
+        mass_props:
+          mass: 1.3059921871783955
+          inertia:
+            - [0.004501135554908207, -1.0848693891764643e-05, -0.00048026619592085086]
+            - [-1.0848693891764643e-05, 0.004851240558686273, 4.0689221271008406e-06]
+            - [-0.00048026619592085086, 4.0689221271008406e-06, 0.001556160395236958]
+    elbow_yaw_l_j4_link:
+      link_names_expr: [elbow_yaw_l_j4_link]
+      attrs:
+        mass_props:
+          mass: 1.12584630882031
+          inertia:
+            - [0.0038015495243392014, 0.0003466448828163349, -9.826594874564532e-07]
+            - [0.0003466448828163349, 0.002071810521652473, -5.9073104754785455e-05]
+            - [-9.826594874564532e-07, -5.9073104754785455e-05, 0.003195734373507308]
+    wrist_pitch_l_j5_link:
+      link_names_expr: [wrist_pitch_l_j5_link]
+      attrs:
+        mass_props:
+          mass: 1.503691797829414
+          inertia:
+            - [0.005751031732044275, -2.5904888247073936e-07, 4.026195832536665e-07]
+            - [-2.5904888247073936e-07, 0.004987934208007358, 2.064893001799057e-05]
+            - [4.026195832536665e-07, 2.064893001799057e-05, 0.0023796446815271795]
+    wrist_yaw_l_j6_link:
+      link_names_expr: [wrist_yaw_l_j6_link]
+      attrs:
+        mass_props:
+          mass: 0.33757609437364744
+          inertia:
+            - [0.0002733482366338966, -2.2833520541392008e-07, -3.1795918936992453e-07]
+            - [-2.2833520541392008e-07, 0.00027408020333217483, -1.5791932475640234e-07]
+            - [-3.1795918936992453e-07, -1.5791932475640234e-07, 0.00024348435168531837]
+    wrist_roll_l_j7_link:
+      link_names_expr: [wrist_roll_l_j7_link]
+      attrs:
+        mass_props:
+          mass: 0.5118967491441608
+          inertia:
+            - [0.0012664986236408558, 1.614407785456914e-06, 8.114255674948263e-07]
+            - [1.614407785456914e-06, 0.0007361544652919328, -5.947798513626531e-05]
+            - [8.114255674948263e-07, -5.947798513626531e-05, 0.0009161128992529859]
+    left_hand_base_link:
+      link_names_expr: [left_hand_base_link]
+      attrs:
+        mass_props:
+          mass: 0.5706945509411907
+          inertia:
+            - [0.0006817814849934279, -7.553873634438599e-07, 1.9630032314867962e-06]
+            - [-7.553873634438599e-07, 0.0007633192554885682, 2.972394751654703e-05]
+            - [1.9630032314867962e-06, 2.972394751654703e-05, 0.0008952781270801772]
+    left_hand_finger_1_link:
+      link_names_expr: [left_hand_finger_1_link]
+      attrs:
+        mass_props:
+          mass: 0.06432025198309782
+          inertia:
+            - [3.8466244513762665e-05, -4.277021130990905e-06, 2.4439175482705916e-08]
+            - [-4.277021130990905e-06, 1.0717005614605897e-05, 4.838032509823553e-07]
+            - [2.4439175482705916e-08, 4.838032509823553e-07, 3.5771614244097385e-05]
         material_props:
           static_friction: 2.0
           dynamic_friction: 2.0
     left_hand_finger_2_link:
+      link_names_expr: [left_hand_finger_2_link]
       attrs:
+        mass_props:
+          mass: 0.06445177772551064
+          inertia:
+            - [3.9074701022922084e-05, -4.329744436331003e-06, 3.923325311590611e-08]
+            - [-4.329744436331003e-06, 1.0641228322216665e-05, 6.284110620435163e-07]
+            - [3.923325311590611e-08, 6.284110620435163e-07, 3.643957391478125e-05]
         material_props:
           static_friction: 2.0
           dynamic_friction: 2.0
-    right_hand_finger_1_link:
+    shoulder_pitch_r_j1_link:
+      link_names_expr: [shoulder_pitch_r_j1_link]
       attrs:
+        mass_props:
+          mass: 1.0388907393414968
+          inertia:
+            - [0.0022912313829652146, -4.0762249292438064e-07, -2.24933123723361e-06]
+            - [-4.0762249292438064e-07, 0.002662801711231245, 3.999662533996741e-06]
+            - [-2.24933123723361e-06, 3.999662533996741e-06, 0.0012585631995266217]
+    shoulder_roll_r_j2_link:
+      link_names_expr: [shoulder_roll_r_j2_link]
+      attrs:
+        mass_props:
+          mass: 1.5644293828819305
+          inertia:
+            - [0.007376375347592197, 3.8011835684804915e-06, -1.8219275300411277e-06]
+            - [3.8011835684804915e-06, 0.0032872541279977308, -5.043663793282001e-05]
+            - [-1.8219275300411277e-06, -5.043663793282001e-05, 0.006319800251755691]
+    elbow_pitch_r_j3_link:
+      link_names_expr: [elbow_pitch_r_j3_link]
+      attrs:
+        mass_props:
+          mass: 1.2687073893219853
+          inertia:
+            - [0.00443050296043865, -1.6890291984965971e-07, -0.0004946254655039799]
+            - [-1.6890291984965971e-07, 0.004761640175470552, -5.779222016876809e-06]
+            - [-0.0004946254655039799, -5.779222016876809e-06, 0.0014811059931891834]
+    elbow_yaw_r_j4_link:
+      link_names_expr: [elbow_yaw_r_j4_link]
+      attrs:
+        mass_props:
+          mass: 1.0931425767976868
+          inertia:
+            - [0.0037541450952375053, 0.0003477543608933041, 4.167232978450985e-06]
+            - [0.0003477543608933041, 0.002025962030826252, -6.822503239864959e-05]
+            - [4.167232978450985e-06, -6.822503239864959e-05, 0.003132841388935162]
+    wrist_pitch_r_j5_link:
+      link_names_expr: [wrist_pitch_r_j5_link]
+      attrs:
+        mass_props:
+          mass: 1.5247527828858187
+          inertia:
+            - [0.005909636956547121, 9.294917505819594e-07, -1.2483013908963513e-07]
+            - [9.294917505819594e-07, 0.005143985607270804, 3.889847432748663e-05]
+            - [-1.2483013908963513e-07, 3.889847432748663e-05, 0.0024076634119053063]
+    wrist_yaw_r_j6_link:
+      link_names_expr: [wrist_yaw_r_j6_link]
+      attrs:
+        mass_props:
+          mass: 0.3362919439905476
+          inertia:
+            - [0.0002737716593909605, 6.827144303567213e-07, 4.833264015227659e-07]
+            - [6.827144303567213e-07, 0.00027738382367963646, -2.2244024340749914e-07]
+            - [4.833264015227659e-07, -2.2244024340749914e-07, 0.0002404273401922962]
+    wrist_roll_r_j7_link:
+      link_names_expr: [wrist_roll_r_j7_link]
+      attrs:
+        mass_props:
+          mass: 0.5264684248123573
+          inertia:
+            - [0.0012966698102777334, -1.0298122275393345e-06, 2.467162868318493e-07]
+            - [-1.0298122275393345e-06, 0.0007644983667638317, -5.150908869794302e-05]
+            - [2.467162868318493e-07, -5.150908869794302e-05, 0.0009370760313372811]
+    right_hand_base_link:
+      link_names_expr: [right_hand_base_link]
+      attrs:
+        mass_props:
+          mass: 0.5671668441461823
+          inertia:
+            - [0.0006739459688996716, -3.143827796835931e-07, 4.7111769453855286e-07]
+            - [-3.143827796835931e-07, 0.0007581116623344932, 2.597034636852609e-05]
+            - [4.7111769453855286e-07, 2.597034636852609e-05, 0.0008875084645081255]
+    right_hand_finger_1_link:
+      link_names_expr: [right_hand_finger_1_link]
+      attrs:
+        mass_props:
+          mass: 0.06450518918135029
+          inertia:
+            - [3.851965101412703e-05, -4.27190814017143e-06, 3.255329391529175e-08]
+            - [-4.27190814017143e-06, 1.076789443151807e-05, 4.716062172705686e-07]
+            - [3.255329391529175e-08, 4.716062172705686e-07, 3.5780957577847677e-05]
         material_props:
           static_friction: 2.0
           dynamic_friction: 2.0
     right_hand_finger_2_link:
+      link_names_expr: [right_hand_finger_2_link]
       attrs:
+        mass_props:
+          mass: 0.06434099481731989
+          inertia:
+            - [3.845594144584061e-05, -4.2688504883546195e-06, 2.900274830102174e-08]
+            - [-4.2688504883546195e-06, 1.0733351535663621e-05, 4.968814181794604e-07]
+            - [2.900274830102174e-08, 4.968814181794604e-07, 3.574877223220902e-05]
         material_props:
           static_friction: 2.0
           dynamic_friction: 2.0
-  # GraspKit X opens the jaws and Z approaches. Align the tool rotation and
-  # place its origin at the centre of the physical finger span (112.5 mm).
+  # Model-derived simulation TCP [m], not factory tool calibration.
+  # GraspKit X opens the jaws and Z approaches. The 112.5 mm offset places
+  # its origin at the model finger span used for the qualified demos.
   solver_cfg:
     left_arm:
       tcp:
@@ -112,6 +306,7 @@ skill_profile:
           control_part: right_eef
           capabilities: [interaction.grasp]
           command_preset: right_parallel_gripper
+  # Position commands [m] follow the pinned URDF joint limits [-0.05, 0].
   command_presets:
     - preset_id: left_parallel_gripper
       control_part: left_eef
@@ -135,4 +330,5 @@ skill_profile:
       kind: joint_position_constraint
       control_parts: [left_eef, right_eef]
       open_qpos: [0.0, 0.0]
+      # Tuned evidence threshold [m]; not a force/contact sensor measurement.
       minimum_displacement: 0.004

@@ -23,8 +23,36 @@ their existing owners.
 Both Marvin variants start in the shared compact ready pose: lowered elbows
 and forward-folded forearms. The gripper variant also starts with open jaws.
 `init_qpos` uses source articulation order (L1, R1, …, L7, R7, then four fingers
-when present). Explicit caller overrides remain supported. The official Marvin
+when present). Explicit caller overrides remain supported. The bundled Marvin
 embodiment pins this same pose, and its three demos inherit it.
+
+`TianjiMarvinCfg` preserves the authored URDF mass, inertia and COM values.
+It does not infer the source units or apply automatic mass/inertia scaling,
+including when `fpath` points to a custom asset. The bundled Task Program
+embodiment explicitly opts into simulation inertial overrides using **1000 ×
+the pinned asset's raw mass and tensor entries**. This is an engineering
+assumption used for the qualified demos; the manufacturer has not confirmed
+the source units, and this is not a certified tonnes-to-SI conversion.
+The asset revision and URDF SHA-256 are recorded in the embodiment; regression
+tests bind its recorded values to that snapshot and preserve source COMs.
+
+| Parameter group | Provenance and meaning |
+| --- | --- |
+| Ready-pose joint positions | Designed and simulation-validated pose; arm values in radians and finger values in metres, not a factory home pose |
+| Fixed base and 32/8 solver iterations | Simulation anchoring and numerical solver settings, not hardware controller parameters |
+| Gripper stiffness 500 and damping 50 | Simulation tuning in N/m and N*s/m for the prismatic joints |
+| Gripper effort 40 and velocity 0.1 | Per-joint simulated force/velocity limits in N and m/s, not rated gripping force or hardware speed |
+| Finger friction 2.0 | Simulation tuning, not measured material friction |
+| Task TCP offset 0.1125 m and rotation | Model-derived simulation reference frame aligned with GraspKit, not a measured hardware TCP |
+| Finger commands 0 and -0.05 m | Joint bounds from the pinned URDF, not independently verified manufacturer specifications |
+| Grasp evidence threshold 0.004 m | Tuned joint-displacement predicate, not measured contact force |
+
+The source model is the DexForce-hosted
+[TianjiMarvin asset snapshot](https://huggingface.co/datasets/DexForceAI/embodichain_data/blob/48317bd8733182f36d306cc2a7a60ae5e47ed2c9/robot_assets/TianjiMarvin.zip).
+Asset traceability and simulation qualification do not establish manufacturer
+certification or hardware calibration. Select the bundled embodiment for the
+qualified demo settings; use source-preserving robot defaults or explicit
+caller overlays for other assets.
 
 The gripper-equipped `TianjiMarvinCfg` declares `cam_left_wrist` and
 `cam_right_wrist` on the corresponding `hand_base_link`. Each returns 640×360

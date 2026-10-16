@@ -671,33 +671,39 @@ def test_aloha_mini_pk_chains_follow_overridden_asset(tmp_path):
 
 @pytest.mark.no_sim
 @pytest.mark.parametrize("with_gripper", [True, False])
-def test_tianji_marvin_converts_cad_mass_and_inertia_to_si(with_gripper):
+def test_tianji_marvin_preserves_source_inertials_without_overlays(with_gripper):
+    """Selecting the robot alone does not assert unverified source units."""
     cfg = TianjiMarvinCfg.from_dict({"with_gripper": with_gripper})
-    source = ET.parse(cfg.fpath).getroot()
-    total_mass = 0.0
-    source_links = set()
-    for link in source.findall("link"):
-        inertial = link.find("inertial")
-        if inertial is None:
-            continue
-        name = link.get("name")
-        source_links.add(name)
-        props = cfg.link_attrs[name].attrs.mass_props
-        mass = float(inertial.find("mass").get("value"))
-        tensor = inertial.find("inertia").attrib
-        ixx, ixy, ixz, iyy, iyz, izz = (
-            float(tensor[key]) for key in ("ixx", "ixy", "ixz", "iyy", "iyz", "izz")
-        )
-        expected = np.array([[ixx, ixy, ixz], [ixy, iyy, iyz], [ixz, iyz, izz]])
-        assert props.mass == pytest.approx(mass * 1000.0)
-        np.testing.assert_allclose(props.inertia, expected * 1000.0)
-        # Preserve source COMs and outer collision/material ownership.
-        assert props.com_position is None
-        assert cfg.link_attrs[name].attrs.collision_props is None
-        assert cfg.link_attrs[name].attrs.material_props is None
-        total_mass += props.mass
-    assert set(cfg.link_attrs) == source_links
-    assert 100.0 < total_mass < 150.0
+    assert cfg.link_attrs == {}
+    assert cfg.attrs.mass_props is None
+
+
+@pytest.mark.no_sim
+def test_tianji_marvin_custom_asset_does_not_inherit_demo_inertials(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+    )
+    asset = tmp_path / "custom.urdf"
+    asset.write_text('<robot name="custom"/>')
+    cfg = TianjiMarvinCfg.from_dict({"fpath": str(asset)})
+    assert cfg.fpath == str(asset)
+    assert cfg.link_attrs == {}
+    custom = TianjiMarvinCfg.from_dict(
+        {
+            "fpath": str(asset),
+            "link_attrs": {
+                "custom_base": {
+                    "link_names_expr": ["custom_base"],
+                    "attrs": {"mass_props": {"mass": 2.0}},
+                }
+            },
+        }
+    )
+    assert set(custom.link_attrs) == {"custom_base"}
+    assert custom.link_attrs["custom_base"].attrs.mass_props.mass == 2.0
+    assert TianjiMarvinCfg.from_dict(custom.to_dict()).to_dict() == custom.to_dict()
 
 
 @pytest.mark.parametrize("with_gripper", [True, False])

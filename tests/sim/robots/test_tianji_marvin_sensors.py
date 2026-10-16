@@ -24,7 +24,7 @@ import torch
 from pathlib import Path
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.cfg import RenderCfg, RigidObjectCfg
+from embodichain.lab.sim.cfg import DenoisingCfg, RenderCfg, RigidObjectCfg
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain_robots import TianjiMarvinCfg
@@ -39,7 +39,11 @@ class TestTianjiMarvinSensors:
                 headless=True,
                 device="cpu",
                 num_envs=1,
-                render_cfg=RenderCfg(renderer="hybrid"),
+                # This geometry test must not require optional NGX/DLSS support.
+                render_cfg=RenderCfg(
+                    renderer="hybrid",
+                    denoising=DenoisingCfg(window="off", offscreen="off"),
+                ),
             )
         )
         self.cfg = TianjiMarvinCfg.from_dict(

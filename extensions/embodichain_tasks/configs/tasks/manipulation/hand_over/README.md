@@ -29,7 +29,7 @@ python -m embodichain run-env \
 ```
 
 Use `--no-headless` without `--viser` for the native window. The shared Marvin
-embodiment supplies the calibrated TCPs, gripper commands and joint-position
+embodiment supplies simulation-calibrated TCPs, gripper commands and joint-position
 constraint evidence. Sensor-enabled runs expose the robot preset's
 `cam_left_wrist` and `cam_right_wrist`: 640×360 RGB with aligned ideal depth.
 These use D405-equivalent nominal optics and mesh-estimated mounts, not

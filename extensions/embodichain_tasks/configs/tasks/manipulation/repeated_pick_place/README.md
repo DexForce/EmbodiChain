@@ -127,8 +127,10 @@ python -m embodichain run-env \
 
 Use `--no-headless` without `--viser` for the native simulation window. The
 shared Marvin embodiment owns the gripper-frame and drive calibration. The
-robot preset normalizes source mass and inertia to SI; the simulation retains
-gravity and physical gripper contacts.
+robot preset preserves source inertials. This embodiment explicitly supplies
+simulation-calibrated mass/inertia overlays with an assumed 1000× scale of the
+pinned URDF entries; its source units are not manufacturer-confirmed. The
+simulation retains gravity and physical gripper contacts.
 
 Sensor-enabled runs expose `cam_left_wrist` and `cam_right_wrist`, each with
 640×360 RGB and aligned ideal depth. The robot preset owns their
