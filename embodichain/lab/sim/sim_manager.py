@@ -942,6 +942,23 @@ class SimulationManager:
         return self.physics.solver_type if self.is_newton_backend else None
 
     @property
+    def _newton_solves_fluids(self) -> bool:
+        """Whether the Newton solver advances fluid particles with DFSPH.
+
+        Standalone SPH does; the DexUni prototype does when it carries an
+        ``sph_cfg`` that steps particles after the rigid/articulated solve.
+        """
+        solver_type = self._active_newton_solver_type
+        if solver_type == "sph":
+            return True
+        if solver_type != "dexuni":
+            return False
+        solver_cfg = self.sim_config.physics_cfg.solver_cfg
+        if isinstance(solver_cfg, Mapping):
+            return solver_cfg.get("sph_cfg") is not None
+        return getattr(solver_cfg, "sph_cfg", None) is not None
+
+    @property
     def newton_manager(self):
         """Compatibility accessor for the removed NewtonManager API.
 
@@ -2757,10 +2774,12 @@ class SimulationManager:
                 "Batch fluids require a DexSim SPH build with world isolation and selected-world reset."
             )
         if (
-            self._active_newton_solver_type != "sph"
+            not self._newton_solves_fluids
             or self.sim_config.physics_cfg.requires_grad
         ):
-            raise NotImplementedError("Fluid objects require non-differentiable SPH.")
+            raise NotImplementedError(
+                "Fluid objects require non-differentiable SPH or DexUni with sph_cfg."
+            )
         if self.spawn_result is not None:
             raise NotImplementedError("Declare fluids before prepare().")
         if not isinstance(cfg, FluidObjectCfg):

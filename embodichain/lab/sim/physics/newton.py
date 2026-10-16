@@ -156,7 +156,7 @@ class NewtonPhysicsBackend(PhysicsBackend):
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(self._manager._world)
-        if backend is None or backend.solver_type != "sph":
+        if backend is None or getattr(backend, "sph_solver", None) is None:
             raise RuntimeError("Prepared SPH backend required.")
         backend.invalidate_cuda_graph("fluid state write")
         solver = getattr(backend, "sph_solver", backend.solver)
@@ -174,6 +174,9 @@ class NewtonPhysicsBackend(PhysicsBackend):
         boundary = solver.sdf_boundary
         if boundary is not None and boundary._body_q_prev is not None:
             boundary._body_q_prev.assign(backend.state_0.body_q)
+        reset_warm_start = getattr(solver, "reset_dfsph_warm_start", None)
+        if reset_warm_start is not None:
+            reset_warm_start()
 
     def fluid_diagnostics(self, fluid: FluidObject) -> dict[str, object]:
         """Read detached native SPH diagnostics without publishing or stepping."""
