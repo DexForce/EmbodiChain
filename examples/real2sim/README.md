@@ -104,3 +104,53 @@ pytest tests/lab/task_program/test_semantic_executor.py tests/gym/envs/task_prog
 
 Tests exercise production contracts. No tutorial, experiment outputs, local
 recording path or reconstructed asset is a CI dependency.
+
+## Four-panel kinematic video
+
+`render_preview.py` adds a native EmbodiChain renderer preview for the optional
+Franka arm recording. It shows the source camera, nominal arm qpos, and two
+seeded joint-residual variants. The small plots show **flange XY paths**, not a
+calibrated gripper TCP. The source NPZ must explicitly contain seven Franka
+`joint_positions` columns in `fr3_joint1`–`fr3_joint7` order and `timestamps` in
+milliseconds. The source video must be 640×360 with N or N−1 frames.
+
+```bash
+PYTHONPATH="$PWD:$PWD/extensions" python examples/real2sim/render_preview.py \
+  --input /path/to/gt_action_full.npz \
+  --video /path/to/camera_rgb.mp4 \
+  --output outputs/real2sim-preview/run01 \
+  --free-stop 60 --scale 0.025
+```
+
+Choose `--free-stop` only after reviewing the recording: it is the exclusive
+source sample index of a conservative free-motion prefix. For the selected
+sample, 60 protects the final approach and all later contact, transport and
+release motion. The protected suffix uses a conservative contact classification;
+it does not claim to have finely segmented those actions. The editable window
+is inset to preserve boundary positions and velocity stencils.
+
+The preview deliberately remains outside qualified source admission: calibration
+and annotations remain unverified, `Real2SimSourceAdapter` is not relaxed, and the
+example applies the existing `joint_residual` operator directly to a diagnostic
+`TrajectoryTemplate`. It does not claim a `CandidateCoordinator` acceptance or
+an `EpisodeSink` receipt. Synthetic production tests cover the qualified adapter
+separately.
+
+Three render arenas display the same official Franka arm and Robotiq 2F85 assets,
+assembled inside the output directory. There are no reconstructed scene objects.
+The gripper is fixed open because its recorded scalar encoding is unresolved;
+the mount is an uncalibrated identity transform. Robot states are written for
+kinematic inspection and rendered without physics stepping. Joint-position and
+velocity limits, protected qpos/qvel and runtime qpos readback are checked;
+collisions, tracking under dynamics and task success are not qualified.
+
+The video follows the state clock, not the camera file's nominal 30 FPS. Default
+video frame i maps to source state i; `--video-state-offset -1|0|1` makes that
+assumption explicit. Nearest source samples and endpoint clamping handle N−1
+frames. The offset still requires independent projection-based calibration.
+
+Outputs include `comparison.mp4`, review stills, `trajectories.npz` (all three
+paths, qvel, FK, protected mask and render/source/video mappings), `report.json`
+(provenance, asset hashes, amplitude/limit metrics and limitations), and the
+assembled robot asset. `--max-frames 1` runs a bounded render smoke check. Outputs
+must be in a new directory outside the original recording directory.
