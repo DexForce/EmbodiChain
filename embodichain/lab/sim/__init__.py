@@ -27,7 +27,7 @@ from .material import (
     VisualMaterialInst,
     ReuseSegmentState,
 )
-from .cfg import DLSSCfg
+from .cfg import DenoisingCfg, DenoisingMode, DLSSCfg, NRDCfg
 from .common import BatchEntity
 from .profiler import Profiler, ProfilerCfg
 
@@ -43,7 +43,10 @@ __all__ = [
     "ProfilerCfg",
     "SimulationManager",
     "SimulationManagerCfg",
+    "DenoisingCfg",
+    "DenoisingMode",
     "DLSSCfg",
+    "NRDCfg",
     "SIM_CACHE_DIR",
     "MATERIAL_CACHE_DIR",
     "CONVEX_DECOMP_DIR",

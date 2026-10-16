@@ -24,6 +24,35 @@ from embodichain.data.constants import (
     EMBODICHAIN_DEFAULT_DATA_ROOT,
 )
 
+__all__ = [
+    "ShopTableSimple",
+    "CircleTableSimple",
+    "PlasticBin",
+    "Chair",
+    "ContainerMetal",
+    "SimpleBoxDrawer",
+    "AdrianoTable",
+    "CoffeeCup",
+    "SlidingBoxDrawer",
+    "AluminumTable",
+    "ToyDuck",
+    "PaperCup",
+    "ChainRainSec",
+    "TableWare",
+    "ScannedBottle",
+    "SugarBox",
+    "SodaCan",
+    "MicrowaveOven",
+    "Microwave",
+    "PlasticTray",
+    "WaterBasin",
+    "Drawer",
+    "Cow",
+    "BakeTextureObj",
+    "DrawerUSD",
+    "PourWaterAssets",
+]
+
 obj_assets = "obj_assets"
 
 
@@ -353,3 +382,31 @@ class DrawerUSD(EmbodiChainDataset):
         path = EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root
 
         super().__init__(prefix, data_descriptor, path)
+
+
+class PourWaterAssets(EmbodiChainDataset):
+    """Open-neck bottle, cup and tabletop bundle used by PourWater.
+
+    The archive retains upstream sources, attribution, licenses and a SHA-256
+    manifest. Model files live at its root, for example
+    ``get_data_path("PourWaterAssets/bottle.glb")``.
+
+    Args:
+        data_root: Optional cache root; defaults to ``EMBODICHAIN_DATA_ROOT``.
+    """
+
+    def __init__(self, data_root: str | None = None) -> None:
+        filename = f"{obj_assets}/PourWaterAssets.zip"
+        hub_prefix = (
+            "https://huggingface.co/datasets/DexForceAI/embodichain_data/resolve/main/"
+        )
+        urls = [f"{EMBODICHAIN_DOWNLOAD_PREFIX}{filename}"]
+        # Newly uploaded assets can precede mirror synchronization.
+        if EMBODICHAIN_DOWNLOAD_PREFIX != hub_prefix:
+            urls.append(f"{hub_prefix}{filename}")
+        descriptor = o3d.data.DataDescriptor(urls, "7267053763ed8e1b84f3da3e49d39f01")
+        super().__init__(
+            type(self).__name__,
+            descriptor,
+            EMBODICHAIN_DEFAULT_DATA_ROOT if data_root is None else data_root,
+        )

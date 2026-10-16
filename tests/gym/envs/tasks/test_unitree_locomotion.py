@@ -70,7 +70,9 @@ def test_contract_dimensions_and_action_mapping(
 
 
 def test_contract_package_has_no_backend_imports():
-    root = Path("embodichain_tasks/embodichain_tasks/locomotion/velocity/contracts")
+    root = Path(
+        "extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/contracts"
+    )
     forbidden = ("embodichain.lab", "dexsim")
     imports: set[str] = set()
     for path in root.rglob("*.py"):
@@ -125,7 +127,38 @@ def test_locomotion_state_binds_new_action_term_buffers() -> None:
         position_bias=torch.full((2, 3), 0.1),
     )
     env = SimpleNamespace(
-        action_manager=SimpleNamespace(get_term=lambda name: term),
+        action_manager=SimpleNamespace(get_term_by_contract=lambda contract: term),
+    )
+
+    EmbodiChainVelocityEnv._bind_locomotion_action_state(env)
+
+    assert env.locomotion_action is term.raw_actions
+    assert env.last_locomotion_action is term.previous_raw_actions
+    assert env.encoder_bias is term.position_bias
+
+
+def test_locomotion_state_keeps_legacy_named_action_binding() -> None:
+    """A compatible named custom action remains valid without a contract ID."""
+    from types import SimpleNamespace
+
+    from embodichain_tasks.locomotion.velocity._embodichain import (
+        EmbodiChainVelocityEnv,
+    )
+
+    term = SimpleNamespace(
+        raw_actions=torch.ones(2, 3),
+        previous_raw_actions=torch.full((2, 3), 2.0),
+        position_bias=torch.full((2, 3), 0.1),
+    )
+
+    def unexpected_contract_lookup(contract: str) -> None:
+        raise AssertionError(f"unexpected contract lookup: {contract}")
+
+    env = SimpleNamespace(
+        action_manager=SimpleNamespace(
+            get_term=lambda name: term,
+            get_term_by_contract=unexpected_contract_lookup,
+        ),
     )
 
     EmbodiChainVelocityEnv._bind_locomotion_action_state(env)
@@ -147,7 +180,7 @@ def test_unitree_deployments_preserve_task_physics(
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
     name = "env.yaml" if backend == "default" else "env.newton.yaml"
     path = Path(
-        f"embodichain_tasks/configs/tasks/locomotion/velocity/{robot}_flat/{name}"
+        f"extensions/embodichain_tasks/configs/tasks/locomotion/velocity/{robot}_flat/{name}"
     )
     config = config_to_cfg(
         load_config(str(path)),
@@ -162,7 +195,10 @@ def test_unitree_deployments_preserve_task_physics(
     )
     assert isinstance(config.sim_cfg.physics_cfg, physics_type)
     assert config.sim_cfg.physics_dt == pytest.approx(0.005)
-    assert config.sim_cfg.scene_node_capacity == 262144
+    expected_capacity = (
+        262144 if backend == "newton" and robot in {"g1", "h1_2"} else 131071
+    )
+    assert config.sim_cfg.scene_node_capacity == expected_capacity
     if backend == "default":
         assert config.sim_cfg.physics_cfg.to_dexsim_args()["cache_material"] is True
     else:
@@ -186,7 +222,9 @@ def test_velocity_env_injects_one_ordered_joint_selector(
     from embodichain_tasks.locomotion.velocity.go1_flat import UnitreeGo1FlatEnv
 
     monkeypatch.setattr(sim_cfg, "get_data_path", lambda value: value)
-    path = Path("embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.yaml")
+    path = Path(
+        "extensions/embodichain_tasks/configs/tasks/locomotion/velocity/go1_flat/env.yaml"
+    )
     cfg = config_to_cfg(
         load_config(path),
         source_path=path,

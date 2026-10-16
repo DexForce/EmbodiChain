@@ -64,10 +64,20 @@ COMMANDS = (
         help="Preview a USD, URDF, or mesh asset in simulation.",
     ),
     Command(
+        name="preview-robot",
+        target="embodichain.lab.scripts.preview_robot:cli",
+        help="Preview a robot with control-part Gizmos and Viser joint controls.",
+    ),
+    Command(
         name="run-env",
         target="embodichain.lab.scripts.run_env:cli",
         help="Run an environment for data generation or preview.",
         aliases=("run-task",),
+    ),
+    Command(
+        name="run-atomic-action",
+        target="embodichain.lab.scripts.run_atomic_action:cli",
+        help="Replay Atomic Skill scenes with grasp and trajectory expansion.",
     ),
     Command(
         name="list-task",
@@ -75,9 +85,19 @@ COMMANDS = (
         help="List tasks by category, deployment, and capability.",
     ),
     Command(
+        name="list-robot",
+        target="embodichain.cli.list_robot:main",
+        help="List robot families, variants, independent control DOFs, and mimic joints.",
+    ),
+    Command(
         name="show-task",
         target="embodichain.cli.show_task:main",
         help="Inspect a logical task and its deployments.",
+    ),
+    Command(
+        name="dataset",
+        target="embodichain.cli.dataset:main",
+        help="Validate, split, and recover recorded expert datasets.",
     ),
     Command(
         name="preview_lerobot_data",

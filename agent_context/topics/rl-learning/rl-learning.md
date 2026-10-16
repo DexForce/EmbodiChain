@@ -13,7 +13,7 @@
 | Lightweight env registry | `embodichain/learning/rl/env.py` |
 | Standard trainer | `embodichain/learning/rl/utils/trainer.py` → `Trainer` |
 | Differentiable trainer | `embodichain/learning/rl/differentiable_trainer.py` |
-| Official configs | `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
+| Official configs | `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` |
 
 The compatibility module entry point is:
 
@@ -61,8 +61,12 @@ Select this path with `trainer.gym_config`.
 1. The CLI discovers installed task packages and executes their init hooks.
 2. `train_from_config()` loads the gym config.
 3. `config_to_cfg()` builds the environment config and manager functors.
-4. Trainer runtime fields override simulation device, GPU, renderer, headless
-   mode, environment count, and optional profiling.
+4. Trainer runtime fields override simulation device, GPU, headless mode,
+   environment count, and optional profiling. An explicit `trainer.renderer`
+   overrides rendering; omission preserves the task's render configuration.
+   Active train events and rank-zero enabled eval events are resolved before
+   the first World; built-in recording and nonempty validation cameras reserve
+   a native renderer when the effective task renderer is auto.
 5. `build_env()` constructs the registered Gym environment.
 6. A sample reset determines flattened observation and action dimensions.
 
@@ -99,11 +103,23 @@ but currently rejects distributed training and environment profiling.
 
 ### Native locomotion tasks
 
-Official velocity tasks live in `embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
+Official velocity tasks live in `extensions/embodichain_tasks/embodichain_tasks/locomotion/velocity/`;
 Humanoid Run lives under `classic_control/humanoid/`. Matching task config
 directories own default/Newton environment and PPO files. The package init hook
 registers locomotion observations and rewards; joint actions and root-velocity
 randomization use the standard manager components.
+
+The six flat velocity tasks omit renderer overrides in both environment and
+PPO files. Their headless, contact-only environments resolve auto to NoRender;
+custom viewers can still request a native renderer. Default deployments budget
+131,071 scene nodes for physical-link replication. G1 and MicroDuck Default PPO use 2,048
+environments with matching minibatch sizes to fit that native limit; other
+Default batches retain 4,096 environments. Newton deployments retain their
+existing batches. NoRender keeps their template nodes, but camera recording
+and Viewer paths still need capacity for native replicas. Newton configs
+reserve native capacity for those paths; automatic NoRender selection applies
+its own lower capacity limit without changing the training batch. See
+[render selection](../simulation-system/rendering.md#norender-initialization).
 
 Contact sampling and selective history reset follow the sensor-owned
 [contact history contract](../sensor-system/contact-history.md). Root-velocity
@@ -168,6 +184,10 @@ consume observations and write action, log-probability, entropy, and value
 fields needed by their algorithm. Differentiable policies must expose
 graph-preserving action sampling.
 
+Trainer throughput counts transitions collected during the current `train()`
+call. Restored `global_step` remains a cumulative checkpoint counter and is
+excluded from that call's SPS numerator.
+
 For actor-critic policies, `policy.obs_groups.actor` and `.critic` select ordered
 observation groups. The collector and standard buffer preserve separate
 `critic_obs` when configured; evaluation applies the same selection. The PPO
@@ -183,6 +203,11 @@ distributed ownership, official examples and adding algorithms/policies/envs.
 DexSim's Motion Policy Evaluator, preserving the original task's reset, step,
 observation and action path. Supplying an Environment means the adapter owns
 its camera lifecycle; Kit's default flat-ground camera is not applied to it.
+
+Headless evaluation accepts `--renderer no-render`. When a saved training
+configuration uses NoRender, Viewer evaluation defaults to Hybrid; an explicit
+native renderer overrides that choice. `--viewer --renderer no-render` is
+rejected before creating the simulation.
 
 Tasks opt in through `PolicyViewerCameraCfg` and
 `get_policy_viewer_target_pose()` (world XYZ + XYZW). The six bundled flat

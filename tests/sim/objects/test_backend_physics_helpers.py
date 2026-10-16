@@ -454,3 +454,39 @@ def test_lifecycle_initial_state_helpers_preserve_backend_reset_policy(
     apply_rigid_initial_state(rigid)
 
     assert calls[-1] == "clear"
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("is_spawn_bound", [False, True], ids=["legacy", "spawn"])
+@pytest.mark.parametrize("device", ["cpu", "cuda"], ids=["processor", "accelerator"])
+def test_rigid_initialization_publishes_without_advancing_physics(
+    is_spawn_bound: bool, device: str
+) -> None:
+    """Initialization may publish pending transforms but cannot integrate time."""
+    state = SimpleNamespace(elapsed=0.0, other_position=1.0, published=False)
+    resets: list[float] = []
+
+    def publish(dt: float) -> None:
+        state.elapsed += dt
+        state.other_position += 2.0 * dt
+        state.published = True
+
+    def reset() -> None:
+        # The legacy GPU path still needs publication before restoring state.
+        assert is_spawn_bound or device == "cpu" or state.published
+        resets.append(state.elapsed)
+
+    rigid = SimpleNamespace(
+        is_spawn_bound=is_spawn_bound,
+        _spawn_result=SimpleNamespace(backend="dexsim"),
+        _ps=object(),
+        device=torch.device(device),
+        _world=SimpleNamespace(update=publish),
+        reset=reset,
+    )
+
+    apply_rigid_initial_state(rigid)
+
+    assert resets == [0.0]
+    assert state.elapsed == 0.0
+    assert state.other_position == 1.0

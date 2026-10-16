@@ -149,6 +149,38 @@ def test_retime_zero_duration_returns_one_hold_sample() -> None:
     assert torch.equal(valid_counts, torch.tensor([1]))
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("source_padding", [False, True])
+@pytest.mark.parametrize("short_count", [7, 8, 13, 31])
+def test_retime_unequal_durations_keep_exact_terminal_holds(
+    dtype: torch.dtype, source_padding: bool, short_count: int
+) -> None:
+    control_dt = 1.0 / 60.0
+    long_count = short_count + 1
+    positions = torch.arange(long_count, dtype=dtype)[None, :, None].repeat(2, 1, 1)
+    dt = torch.full((2, long_count), control_dt, dtype=dtype)
+    dt[:, 0] = 0.0
+    if source_padding:
+        positions[0, -1] = positions[0, -2]
+        dt[0, -1] = 0.0
+    else:
+        dt[0, 1:] *= (short_count - 1) / (long_count - 1)
+
+    retimed, velocities, intervals, valid_counts = trajectory.retime_to_control_grid(
+        positions, dt, control_dt
+    )
+
+    assert valid_counts.tolist() == [short_count, long_count]
+    for row, count in enumerate(valid_counts.tolist()):
+        terminal_holds = retimed[row, count - 1 :]
+        assert torch.equal(terminal_holds, positions[row, -1].expand_as(terminal_holds))
+        assert torch.count_nonzero(velocities[row, count - 1 :]) == 0
+        assert torch.count_nonzero(intervals[row, count:]) == 0
+        torch.testing.assert_close(
+            intervals[row, 1:count], torch.full((count - 1,), control_dt, dtype=dtype)
+        )
+
+
 def test_retime_positive_sub_tolerance_duration_still_uses_one_interval() -> None:
     positions = torch.tensor([[[0.0], [1.0]]], dtype=torch.float64)
     dt = torch.tensor([[0.0, 1.0e-12]], dtype=torch.float64)

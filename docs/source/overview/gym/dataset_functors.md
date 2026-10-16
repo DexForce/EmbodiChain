@@ -15,6 +15,10 @@ This page covers structured dataset export. If you only need human-viewable debu
 
 ## Recording Functors
 
+Declare overall language on the task/program, and finer language on its
+segments. These recorder blocks configure persistence; see
+{doc}`/guides/expert_task_language` for complete configuration examples.
+
 ```{list-table} Dataset Recording Functors
 :header-rows: 1
 :widths: 25 75
@@ -28,7 +32,6 @@ This page covers structured dataset export. If you only need human-viewable debu
     {"func": "LeRobotRecorder", "mode": "save",
      "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
-                "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
                           "data_type": "sim"},
@@ -41,7 +44,6 @@ This page covers structured dataset export. If you only need human-viewable debu
     {"func": "AsyncLeRobotRecorder", "mode": "save",
      "save_failed_episodes": true,
      "params": {"robot_meta": {"robot_type": "CobotMagic"},
-                "instruction": {"lang": "Pour water from bottle to cup"},
                 "extra": {"scene_type": "Commercial",
                           "task_description": "Pour water",
                           "data_type": "sim"},
@@ -76,8 +78,9 @@ is ``false``. During ``run-env`` expert generation:
   row contains at least one frame. The saved sidecar records ``success=false``
   and the terminal reason;
 - empty plans and exceptions are always discarded; and
-- a saved failure counts toward ``max_episodes``, so the requested dataset size
-  is not exceeded.
+- a saved failure counts toward ``collection.target_episodes`` (with legacy
+  ``max_episodes`` mapped to that target), so the requested dataset size is
+  not exceeded.
 
 When several save-mode functors are configured, enabling this option on any of
 them makes the Dataset Manager submit failed rows to all save-mode functors so
@@ -94,7 +97,7 @@ their outputs stay aligned.
 * - ``robot_meta``
   - Robot identity metadata for the dataset (for example, ``robot_type``). Timing is derived from the environment and must not be configured here.
 * - ``instruction``
-  - Optional task instruction (e.g., {"lang": "pick the cube"})
+  - Legacy overall-task fallback, as a string or {"lang": "pick the cube"}. Prefer the program's root ``instruction`` or ``env.task_instruction``. An explicit episode instruction takes precedence over these defaults.
 * - ``extra``
   - Optional extra metadata (scene_type, task_description, episode_info)
 * - ``use_videos``
@@ -103,6 +106,10 @@ their outputs stay aligned.
   - Number of background threads for per-frame PNG writing (lerobot ``AsyncImageWriter``). When > 0, ``add_frame`` no longer blocks on ``PIL.Image.save``. Applies to both recorders. Try 4 threads per camera as a starting point.
 * - ``image_writer_processes``
   - Number of background processes for image writing (alternative to threads; higher spawn cost, more isolation). Use 0 to rely on threads only.
+* - ``metadata_buffer_size``
+  - Positive LeRobot episode-metadata batch size, default ``1``. Supported by both recorders; larger values can delay visibility of recent metadata. The commit journal still requires on-disk evidence during recovery.
+* - ``async_queue_maxsize``
+  - ``AsyncLeRobotRecorder`` only: maximum pending payload count. Default ``0`` is unbounded; positive values apply producer backpressure. This is a payload count, not a byte limit.
 * - ``depth_video``
   - Optional :class:`~embodichain.data_pipeline.depth_video.DepthVideoCfg` (or dict) to store camera depth as compressed ``gray12le``/HEVC sidecar videos instead of dense numeric arrays. See {ref}`compressed-depth-sidecar`.
 ```
@@ -115,13 +122,30 @@ an integer FPS, so the recorder rejects a non-integer derived control frequency
 rather than writing inaccurate metadata.
 ```
 
+### Task and segment language
+
+The recorder consumes the overall instruction frozen for the actual episode.
+Task Programs own it at the program root; handwritten/direct-control experts
+use ``env.task_instruction``. ``DemoSegment.instruction`` or a Task Program
+segment's ``instruction`` describes the finer subgoal. Missing segment labels
+fall back to the episode goal and carry ``instruction_source="task_fallback"``
+in sidecar metadata.
+
+Both synchronous and asynchronous recorders preserve both levels for full
+episodes and segment fragments. LeRobot ``sample["task"]`` returns the overall
+goal, and ``sample["subtask"]`` returns the segment text. Consumers that used
+``task`` for segment conditioning in older action-contract recordings must use
+``subtask`` for new recordings. See {doc}`/guides/expert_task_language` for
+resolution order, provenance, readback examples, and migration.
+
 ### Recorded Data
 
 The LeRobotRecorder saves the following data for each frame:
 
-- ``task``: The episode-level task instruction, constant across its frames
+- ``task_index``: Vocabulary index of the episode-level instruction;
+  the LeRobot reader exposes its text as ``task``, constant across episode frames
 - ``subtask_index``: Dataset-global index of the active segment instruction;
-  descriptions are stored in ``meta/subtasks.parquet``
+  descriptions are stored in ``meta/subtasks.parquet`` and resolved as ``subtask``
 - ``observation.state``: Joint positions (proprioceptive state)
 - ``action``: Applied action
 - ``observation.images.{sensor_name}``: Camera images (if sensors present)
@@ -149,6 +173,21 @@ episode-local and is therefore not required to have the same numeric value.
 Episode-level completion, success, terminal reason, per-segment status and
 segment metadata are additionally written to
 ``meta/embodichain_episodes.jsonl``.
+
+### Recording identity, validation, and recovery
+
+New episode sidecars carry run/episode/source UUIDs, available configuration
+and program fingerprints, runtime timing/version provenance, and optional
+expansion/replay links. A natural fragment retains its source identity and
+source frame offsets. The recorder prepares a durable journal before frame
+submission and advances it around SDK, depth, and sidecar commits.
+
+Use {doc}`/guides/offline_expert_datasets` to inspect reports, create grouped
+quality partitions, and diagnose interrupted commits. Repair restores missing
+sidecars only when committed artifacts verify; it does not reconstruct videos
+or resume collection. Finalize before normal validation/splitting and stop all
+writers before recovery. For Python 3.12/LeRobot 0.6.1 conversion, language
+recipes and native depth, see {doc}`/guides/lerobot_export`.
 
 ### Previewing Recorded Episodes
 
@@ -183,7 +222,7 @@ lerobot-dataset-viz \
 The LeRobot 0.4.4 viewer does not render `subtask_index` or EmbodiChain's
 `annotation.*` fields; use the terminal preview to verify segment boundaries,
 episode steps, and terminal flags. See
-{ref}`Inspect Recorded LeRobot Data <tutorial_data_generation_preview>` for the
+{ref}`Inspect Recorded LeRobot Data <tutorial_data_expansion_preview>` for the
 complete three-segment example, exit codes, local-root behavior, and `.rrd`
 export commands.
 

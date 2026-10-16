@@ -74,9 +74,10 @@ program payload, owns the corresponding lowerer. See {doc}`scene_registry` and
 ## Program schema
 
 An in-memory {class}`TaskProgramCfg` contains one `program_id`, an exact trusted
-{class}`TaskProgramIntegrationCfg` selection, optional named targets, and one
-bounded program tree. A program authored for a componentized deployment omits
-the integration selection from its serialized YAML. The deployment injects
+{class}`TaskProgramIntegrationCfg` selection, an optional overall `instruction`,
+optional named targets, and one bounded program tree. A program authored for a
+componentized deployment omits the integration selection from its serialized
+YAML. The deployment injects
 the selected scene-registry, robot-profile, and policy-preset IDs before strict
 decoding, which keeps the source program portable across compatible
 embodiments.
@@ -91,6 +92,7 @@ Example:
 
 ```yaml
 program_id: repeated_cube_pick_place
+instruction: Move the cube between the two target positions three times.
 targets:
   drop_pose:
     kind: cyclic_pose
@@ -103,21 +105,33 @@ program:
   kind: repeat
   count: 3
   body:
-    kind: segment
-    name: move_cube
-    steps:
-      kind: sequence
-      items:
-        - kind: invoke
+    kind: sequence
+    items:
+      - kind: segment
+        name: pick_cube
+        instruction: Grasp and lift the cube.
+        steps:
+          kind: invoke
           call:
             kind: pick
             object: cube
-        - kind: invoke
+      - kind: segment
+        name: place_cube
+        instruction: Place the cube at the next target position and release it.
+        steps:
+          kind: invoke
           call:
             kind: place
             object: cube
             at: {kind: target_ref, target: drop_pose}
 ```
+
+The root instruction describes the complete episode; each segment instruction
+describes its own subgoal. This example expands into six segment occurrences
+with two reusable subtask descriptions. The compiler preserves both language
+levels, while post-policies and validators independently determine acceptance.
+See {doc}`/guides/expert_task_language` for overrides, fallback, handwritten
+experts, recording, and training examples.
 
 Serialized input is strict: unknown fields, duplicate keys, non-finite values,
 invalid discriminators, excessive depth or expansion, executable values, and
@@ -158,24 +172,30 @@ registration still matches the compiled scene/profile/catalog snapshots.
 ## Configure a simulation environment
 
 Configuration-defined Task Programs separate the reusable physical environment
-from the runnable task deployment:
+from the runnable task deployment. An augmented deployment can add a
+task-facing expansion declaration alongside the core owners:
 
 ```text
 repeated_pick_place/
-├── env.yaml
+├── envs/
+│   ├── default.yaml
+│   └── newton.yaml
 ├── task.franka.yaml
 ├── task.ur5.yaml
+├── expansion/
+│   └── repeated_pick_place.yaml
 └── task_program/
     ├── integration.yaml
     └── program.yaml
 ```
 
-`env.yaml` owns the physical scene and ordinary environment values. It has an
-`environment_id` for component identity but deliberately has no runnable `id`,
-robot, sensor, or Task Program selection:
+Each file under `envs/` owns one physical backend and ordinary
+environment values. It has an `environment_id` for component identity but
+deliberately has no runnable `id`, robot, sensor, or Task Program selection:
 
 ```yaml
 environment_id: repeated_pick_place
+physics: default
 max_episode_steps: 1200
 simulation:
   rigid_object:
@@ -184,23 +204,40 @@ simulation:
 env:
   sim_steps_per_control: 4
   events: {}
-  dataset: {}
+  dataset:
+    lerobot:
+      func: LeRobotRecorder
+      mode: save
+      params:
+        save_path: /tmp/repeated-pick-place/datasets
+        # robot_type is filled from the selected embodiment.
 ```
 
-A runnable `task.<embodiment>.yaml` selects the environment, all three Task
-Program components, and one reusable embodiment:
+A runnable `task.<embodiment>.yaml` selects the environment variants, all three
+Task Program components, and one reusable embodiment. The UR5 deployment can
+also reference the task-facing expansion declaration:
 
 ```yaml
 id: TaskProgramRepeatedPickPlace-v1
 environment:
-  component: env.yaml
+  default: envs/default.yaml
+  newton: envs/newton.yaml
 task_program:
   program: task_program/program.yaml
   integration: task_program/integration.yaml
   execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
 embodiment:
   component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+expansion:
+  config: expansion/repeated_pick_place.yaml
 ```
+
+The referenced expansion file is task-facing configuration rather than a
+second environment deployment. It owns batch runtime values, the shared
+expansion policy, task-specific augmentation overrides, and the collection
+target and recipe selection; the runner merges it after selecting the physical
+backend. `collection.target_episodes` is the final committed row count, while
+`num_envs` only controls the width of each batch.
 
 The callable-free `integration.yaml` owns the semantic scene binding and
 task-specific profile additions. Its canonical identities map explicitly to
@@ -230,7 +267,7 @@ profile:
 ```
 
 The abbreviated profile mappings above must be populated for the calls used by
-the program. See `env.yaml`, `task.ur5.yaml`, and
+the program. See `envs/default.yaml`, `task.ur5.yaml`, and
 `task_program/integration.yaml` under
 `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` for the
 complete reference composition.
@@ -254,12 +291,12 @@ imports or arbitrary callables. The configured integration loader lives in
 concern of `gym/envs/task_program/registration.py`.
 
 `config_to_cfg()` resolves every component reference relative to the runnable
-deployment, expands the physical environment and embodiment, validates each
-semantic `simulation_uid` against the physical scene, composes the immutable
-integration catalog, validates the program, and registers the common
-`EmbodiedEnv` under the deployment-owned ID. A task-specific Python environment
-module is not required. The pure `env.yaml` can also be selected by a
-handwritten task because it contains no Task Program fields.
+deployment, expands the selected physical environment variant and embodiment,
+validates each semantic `simulation_uid` against the physical scene, composes
+the immutable integration catalog, validates the program, and registers the
+common `EmbodiedEnv` under the deployment-owned ID. A task-specific Python
+environment module is not required. A handwritten task can select the same
+environment variant mapping because those files contain no Task Program fields.
 
 Run a selected program with:
 

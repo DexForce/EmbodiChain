@@ -20,10 +20,24 @@ Keep these boundaries separate:
 2. segment post-policy: environment advancement such as settling; and
 3. segment validator: task or dataset acceptance.
 
+`HandOver` covers pickup, transfer, delivery and final release. Its intermediate
+acquisition gates require attachment, while the terminal effect requires both
+participants detached. Check serialized evidence against the `effect_spec.clauses`
+for that trace's boundary; the participant name and overall call status do not
+determine the expected raw value.
+
 `TaskProgramDemoBridge` never calls `env.step()`. It yields lazy
 `DemoSegment` values so the ordinary Gym executor retains stepping, recording,
 reward, reset, and persistence. Final success is published only after every
 segment lifecycle completes normally.
+
+Sequential segments reuse one static workflow analysis per uninterrupted
+sequential stretch; parallel barriers stop this reuse across branches. Each
+executed call still grounds from a fresh observation and checks compiler/catalog
+ownership. Runtime results capture an append-only history prefix and materialize
+independent history tuples when read or serialized, keeping history copying out
+of status-only control steps. Synchronous observer or clock failures abort through
+the runner's cancel-then-hold boundary and retain any safe-stop failure details.
 
 The environment-owned expert `joint_command_mode` is propagated through the
 simulation factory and adapter into `RuntimeCommandFrameEncoder`. Position mode
@@ -31,6 +45,11 @@ retains the tensor qpos action. Position-velocity mode emits structured qpos and
 qvel targets, requires velocity-bearing joint payloads, and assigns zero qvel to
 idle, wait, inactive-row, and abort-safe holds. This changes neither Task Program
 language nor the policy action space.
+
+On active rows, normal joint-position frames retain unaddressed qpos targets
+by stable environment ID. Inactive rows use measured holds and invalidate
+retained targets; explicit safe stops rebase them to measured qpos. A new
+episode creates a fresh encoder.
 
 The bridge declares `progress_total_steps` only for deterministic open-loop
 Pick/Place segments with fixed interpolation samples and no recovery, runner

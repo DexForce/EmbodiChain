@@ -131,7 +131,7 @@ def create_robot(sim):
         "arm": [
             "joint[1-6]",  # Matches JOINT1, JOINT2, ..., JOINT6
         ],
-        "hand": ["LEFT_.*"],  # Matches all joints starting with L_
+        "eef": ["LEFT_.*"],  # Matches all joints starting with L_
     }
 
     # Define transformation for hand attachment
@@ -225,8 +225,8 @@ def run_simulation(
     )
 
     # Get joint IDs for the hand.
-    hand_joint_ids = robot.get_joint_ids("hand")
-    active_hand_joint_ids = robot.get_joint_ids("hand", remove_mimic=True)
+    hand_joint_ids = robot.get_joint_ids("eef")
+    active_hand_joint_ids = robot.get_joint_ids("eef", remove_mimic=True)
     # Drive mimic joints toward the pose implied by their active parent instead of
     # sending each joint to its independent limit. Newton keeps drives on mimic
     # joints, so inconsistent targets otherwise compete with the mimic constraints.

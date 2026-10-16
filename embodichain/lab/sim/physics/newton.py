@@ -102,6 +102,8 @@ class NewtonPhysicsBackend(PhysicsBackend):
 
     def sync_render_state(self, result: "dexsim.scene.Scene") -> None:
         """Publish Newton state through DexSim's render bridge without stepping."""
+        if not self._manager.has_native_renderer:
+            return
         from dexsim.engine.newton_physics.backend_registry import get_newton_backend
 
         backend = get_newton_backend(result.world)

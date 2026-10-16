@@ -227,3 +227,37 @@ def test_articulation_joint_validator_requires_an_ordered_bound(
             joint="cabinet_to_drawer",
             **kwargs,
         )
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True])
+def test_segment_cfg_rejects_invalid_instruction(instruction: object) -> None:
+    with pytest.raises(ValueError, match="instruction"):
+        SegmentCfg(
+            name="pick_cube",
+            steps=InvokeCfg(call=PickCfg(object="cube")),
+            instruction=instruction,
+        )
+
+
+@pytest.mark.parametrize("instruction", [None, "Move the cube to the target."])
+def test_program_cfg_accepts_optional_overall_instruction(
+    instruction: str | None,
+) -> None:
+    config = TaskProgramCfg(
+        program_id="move_cube",
+        integration=_integration(),
+        program=_pick_invoke(),
+        instruction=instruction,
+    )
+    assert config.instruction == instruction
+
+
+@pytest.mark.parametrize("instruction", ["", "   ", " padded ", 7, True, ["pick"]])
+def test_program_cfg_rejects_invalid_overall_instruction(instruction: object) -> None:
+    with pytest.raises(ValueError, match="instruction"):
+        TaskProgramCfg(
+            program_id="move_cube",
+            integration=_integration(),
+            program=_pick_invoke(),
+            instruction=instruction,
+        )

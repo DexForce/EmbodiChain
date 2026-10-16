@@ -12,6 +12,9 @@ once before physics. Each term writes only its selected non-mimic joints.
 
 - Configure each term with {class}`~cfg.ActionTermCfg`; action terms have no
   `mode` field.
+- Persisted configurations should use a versioned semantic `contract` ID. The
+  contract selects the current implementation without storing its Python
+  class name in the policy interface.
 - The config attribute name becomes the stable term name and descriptor name.
 - The policy width is the sum of term `action_dim` values in config order.
 - Terms writing the same command type cannot own overlapping joint IDs.
@@ -38,7 +41,7 @@ action term with the project protocol and tests.
 * - {class}`~actions.RelativeJointPositionAction`
   - Scaled offsets added to the current selected-joint positions.
 * - {class}`~actions.DefaultJointPositionAction`
-  - Normalized locomotion offsets around a configured default pose, with
+  - Normalized offsets around a configured default pose, with
     current/previous raw buffers and encoder bias.
 * - {class}`~actions.JointVelocityAction`
   - Scaled selected-joint velocity targets.
@@ -59,7 +62,7 @@ Relative joint control:
 ```yaml
 actions:
   arm_action:
-    func: RelativeJointPositionAction
+    contract: joint_position.relative@1
     params: {part_name: arm, scale: 0.1}
 ```
 
@@ -69,10 +72,10 @@ Composed Cartesian arm and parallel gripper control:
 control_parts: [arm, hand]
 actions:
   arm_action:
-    func: EefPoseAction
+    contract: eef_pose.absolute@1
     params: {part_name: arm, pose_representation: xyz_rpy}
   gripper_action:
-    func: ParallelGripperAction
+    contract: gripper.parallel@1
     params:
       part_name: hand
       command_mode: continuous
@@ -95,5 +98,8 @@ Every action term exposes:
 - `process_actions(actions)`, `apply_actions()`, and selected-row `reset()`.
 
 The manager binds term descriptors to flat slices as `ActionDescriptor` values.
-Dataset policy contracts use these descriptors directly; they do not infer
-semantics from class names.
+Descriptors carry the versioned semantic contract ID. Dataset and policy
+contracts use these descriptors directly; they do not infer semantics from
+implementation class names. The built-in locomotion mapping is
+`joint_position.default_offset@1`, which is also valid for non-locomotion
+joint-position policies.

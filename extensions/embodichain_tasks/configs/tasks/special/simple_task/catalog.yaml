@@ -1,0 +1,10 @@
+task_key: simple_task
+title: Simple Task
+summary: Run the simple UR10 oscillatory-motion data collection task.
+tags:
+- special
+- data_collection
+default_deployment: default
+deployments:
+  default:
+    config: env_ur10.json

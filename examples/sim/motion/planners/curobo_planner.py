@@ -199,7 +199,7 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
     CuroboWorldCfg,
 )
 import numpy as np
-from embodichain.lab.sim.robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
+from embodichain_robots import FrankaPandaCfg, URRobotCfg, DexforceW1Cfg
 from embodichain.lab.sim.shapes import CubeCfg, MeshCfg
 
 __all__ = ["main"]
@@ -342,7 +342,7 @@ def _build_scene(
                         ]
                     },
                     "control_parts": {
-                        "hand": [
+                        "eef": [
                             "LEFT_HAND_THUMB1",
                             "LEFT_HAND_THUMB2",
                             "LEFT_HAND_INDEX",

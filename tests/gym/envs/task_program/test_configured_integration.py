@@ -30,6 +30,7 @@ import torch
 
 from embodichain.lab.task_program import load_task_program
 from embodichain.lab.gym.envs import EmbodiedEnv
+from embodichain.lab.gym.envs.task_program.bridge import RuntimeCommandFrameEncoder
 from embodichain.lab.task_program.integrations._configured_services import (
     _MoveHeldObjectLowerer,
     _PourLowerer,
@@ -40,6 +41,7 @@ from embodichain.lab.task_program.integrations.configured import (
 )
 from embodichain.lab.task_program.integrations._configured_composition import (
     _compose_integration_payload,
+    _decode_planner_config,
     _load_configured_task_program_deployment,
     _resolve_task_program_components,
 )
@@ -58,7 +60,14 @@ from embodichain.lab.sim.atomic_actions import (
     PourGoal,
     PourOptions,
 )
+from embodichain.lab.sim.atomic_actions.bindings import JointPositionTarget
+from embodichain.lab.sim.atomic_actions.runtime_commands import (
+    EndpointCommand,
+    JointPositionPayload,
+    RuntimeCommandFrame,
+)
 from embodichain.lab.sim.sensors import CameraCfg
+from embodichain_robots import TianjiMarvinCfg
 from embodichain.lab.task_program.semantics import (
     RegisteredSemanticCall,
     SceneObjectRef,
@@ -66,9 +75,16 @@ from embodichain.lab.task_program.semantics import (
 from embodichain.lab.gym.utils.gym_utils import config_to_cfg
 from embodichain.lab.gym.utils.registration import REGISTERED_ENVS
 from embodichain.utils.utility import load_config
+from embodichain.toolkits.graspkit.pg_grasp import (
+    AntipodalGraspPoseGeneratorCfg,
+    GraspAnnotationCfg,
+    ParallelJawGraspCollisionCfg,
+)
 
 _REPOSITORY_ROOT = Path(__file__).parents[4]
-_CONFIG_DIRECTORY = _REPOSITORY_ROOT / "embodichain_tasks/configs/tasks/manipulation"
+_CONFIG_DIRECTORY = (
+    _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs/tasks/manipulation"
+)
 _TABLEWARE_CONFIG_DIRECTORY = _CONFIG_DIRECTORY / "tableware"
 _TASKS = {
     "rubiks_cube_pick_place": (
@@ -252,6 +268,44 @@ def test_all_examples_decode_through_one_composable_integration_schema(
     assert integration.adapter_factory.registration is registration
 
 
+def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
+    """The policy-owned planner selection stays outside semantic payloads."""
+    deployment = _deployment_from_path(
+        _CONFIG_DIRECTORY / "hand_over" / "task.dual_ur5_dh_pgi_140_80.yaml"
+    )
+
+    assert deployment.planner_config == {"type": "toppra", "config": {}}
+    delegate = deployment.integration.adapter_factory.delegate
+    assert delegate._planner_config == deployment.planner_config
+    assert (
+        deployment.integration.registration.robot_profile_binding.presets[
+            0
+        ].required_planner
+        == "toppra"
+    )
+
+
+def test_planner_policy_decoder_validates_backend_and_options() -> None:
+    """Planner backends remain closed while typed options stay configurable."""
+    assert _decode_planner_config(
+        {"type": "toppra", "config": {"max_workers": 2}},
+        path="execution policy.planner",
+    ) == {"type": "toppra", "config": {"max_workers": 2}}
+
+    with pytest.raises(ValueError, match="execution policy.planner.type"):
+        _decode_planner_config(
+            {"type": "custom_callable", "config": {}},
+            path="execution policy.planner",
+        )
+
+    for field_name in ("world", "auto_gen"):
+        with pytest.raises(TypeError, match="must be a mapping"):
+            _decode_planner_config(
+                {"type": "curobo", "config": {field_name: None}},
+                path="execution policy.planner",
+            )
+
+
 @pytest.mark.parametrize("task_name", ("repeated_pick_place", "open_drawer"))
 def test_single_task_program_composes_with_ur5_and_franka(
     task_name: str,
@@ -277,7 +331,10 @@ def test_single_task_program_composes_with_ur5_and_franka(
     assert (
         ur5_config["environment"]
         == franka_config["environment"]
-        == {"component": "env.yaml"}
+        == {
+            "default": "envs/default.yaml",
+            "newton": "envs/newton.yaml",
+        }
     )
     assert ur5_config["task_program"] == franka_config["task_program"]
     assert ur5.program_path == franka.program_path
@@ -295,8 +352,8 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     repeated = _integration_payload("repeated_pick_place")
     drawer = _integration_payload("open_drawer")
 
-    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["hand"]
-    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["hand"]
+    repeated_generator = repeated["runtime_services"]["grasp_pose_generators"]["eef"]
+    drawer_generator = drawer["runtime_services"]["grasp_pose_generators"]["eef"]
 
     repeated_embodiment = repeated_config["embodiment"]
     drawer_embodiment = drawer_config["embodiment"]
@@ -304,9 +361,11 @@ def test_shared_embodiment_keeps_task_grasp_override_local() -> None:
     assert type(drawer_embodiment) is dict
     assert repeated_embodiment["component"] == drawer_embodiment["component"]
     repeated_environment = load_config(
-        _config_path("repeated_pick_place").parent / "env.yaml"
+        _config_path("repeated_pick_place").parent / "envs/default.yaml"
     )
-    drawer_environment = load_config(_config_path("open_drawer").parent / "env.yaml")
+    drawer_environment = load_config(
+        _config_path("open_drawer").parent / "envs/default.yaml"
+    )
     assert (
         repeated_environment["environment_id"] != drawer_environment["environment_id"]
     )
@@ -339,10 +398,10 @@ def test_task_rejects_embodiment_with_an_incompatible_contract() -> None:
         )
 
 
-def test_embodiment_owns_the_deployed_sensor_suite(
+def test_embodiment_and_robot_compose_the_deployed_sensor_suite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sensors are selected with the physical embodiment, not the task scene."""
+    """Independent and robot-mounted cameras retain the deployed sensor suite."""
     monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
     path = _tableware_config_path("pour_water")
     config = _tableware_gym_config("pour_water")
@@ -352,22 +411,79 @@ def test_embodiment_owns_the_deployed_sensor_suite(
     assert type(sensor_config[0]) is dict
     cfg = config_to_cfg(config, source_path=path)
 
-    assert [sensor["sensor_type"] for sensor in sensor_config] == [
-        "Camera",
-        "Camera",
-        "Camera",
-    ]
-    assert [sensor["uid"] for sensor in sensor_config] == [
+    assert [sensor["sensor_type"] for sensor in sensor_config] == ["Camera"]
+    assert [sensor["uid"] for sensor in sensor_config] == ["cam_high"]
+    assert cfg.robot.enable_sensor is True
+    assert [sensor.uid for sensor in [*cfg.sensor, *cfg.robot.sensors]] == [
         "cam_high",
         "cam_right_wrist",
         "cam_left_wrist",
     ]
-    assert [sensor.uid for sensor in cfg.sensor] == [
-        "cam_high",
-        "cam_right_wrist",
-        "cam_left_wrist",
-    ]
-    assert all(type(sensor) is CameraCfg for sensor in cfg.sensor)
+    assert all(
+        type(sensor) is CameraCfg for sensor in [*cfg.sensor, *cfg.robot.sensors]
+    )
+
+
+def test_pour_water_commands_preserve_idle_left_arm_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh measured holds for full actions must not retarget the idle arm."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    path = _tableware_config_path("pour_water")
+    cfg = config_to_cfg(_tableware_gym_config("pour_water"), source_path=path)
+    parts = {
+        "left_arm": [0, 2, 4, 6, 8, 10],
+        "left_eef": [12],
+        "right_arm": [1, 3, 5, 7, 9, 11],
+        "right_eef": [13],
+    }
+    measured = torch.zeros(1, 16)
+    targets = measured.clone()
+
+    def set_qpos(*, qpos: torch.Tensor, joint_ids: list[int]) -> None:
+        targets[:, joint_ids] = qpos
+
+    env = object.__new__(EmbodiedEnv)
+    env.cfg = cfg
+    env.sim = SimpleNamespace(device=torch.device("cpu"))
+    env.robot = SimpleNamespace(
+        control_parts=parts,
+        get_joint_ids=lambda *, name, remove_mimic: parts[name],
+        build_pk_serial_chain=lambda: None,
+        body_data=SimpleNamespace(qpos_limits=torch.tensor([[[-3.0, 3.0]] * 16])),
+        get_qpos=lambda: measured.clone(),
+        set_qpos=set_qpos,
+    )
+    env._setup_robot()
+    assert len(env.active_joint_ids) == 14
+    encoder = RuntimeCommandFrameEncoder(
+        SimpleNamespace(current_qpos=lambda env_ids: measured.clone())
+    )
+
+    for step in range(6):
+        # Reproduce gravity deflection entering the bridge's observed-qpos base.
+        if step:
+            measured[:, parts["left_arm"]] -= 0.001
+        frame = RuntimeCommandFrame(
+            commands=(
+                EndpointCommand(
+                    target=JointPositionTarget(
+                        control_part="right_arm", joint_ids=tuple(parts["right_arm"])
+                    ),
+                    payload=JointPositionPayload(
+                        positions=torch.full((1, 6), step * 0.1)
+                    ),
+                ),
+            ),
+            active_mask=torch.tensor([True]),
+            env_ids=torch.tensor([0]),
+            hold_duration=torch.tensor([0.04]),
+        )
+        env._apply_controller_action(encoder.encode(frame))
+
+    assert torch.equal(targets[:, parts["left_arm"]], torch.zeros(1, 6))
+    assert torch.equal(targets[:, parts["left_eef"]], torch.zeros(1, 1))
+    assert torch.equal(targets[:, parts["right_arm"]], torch.full((1, 6), 0.5))
 
 
 @pytest.mark.parametrize(
@@ -409,10 +525,12 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     options = preset.action_option_templates
     factories = registration.registered_semantic_lowerer_factories
 
-    assert grasp.internal_axis == pytest.approx((1.0, 0.0, 0.0))
+    grasp_rotation = options["pick"].fixed_object_to_eef[:3, :3]
+    wrist_roll_axis = grasp_rotation[:, 2] / torch.linalg.norm(grasp_rotation[:, 2])
+    assert grasp.internal_axis == pytest.approx(wrist_roll_axis.tolist())
     assert type(options["pick"]) is PickUpOptions
-    assert options["pick"].hand_interp_steps == 11
-    assert options["pick"].grasp_settle_steps == 25
+    assert options["pick"].hand_interp_steps == 44
+    assert options["pick"].grasp_settle_steps == 100
     assert options["pick"].rotate_upright is None
     assert options["pick"].fixed_object_to_eef is not None
     assert options["pick"].fixed_object_to_eef == pytest.approx(
@@ -429,14 +547,98 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
     assert type(options["simulation.pour"]) is PourOptions
     assert options["simulation.pour"].rotate_angle == pytest.approx(-torch.pi / 3)
     assert type(options["place"]) is PlaceOptions
-    assert options["place"].hand_interp_steps == 11
-    assert options["place"].release_settle_steps == 15
+    assert options["place"].hand_interp_steps == 44
+    assert options["place"].release_settle_steps == 60
     assert options["place"].preserve_current_object_orientation is True
     assert {factory.call_id for factory in factories} == {
         "simulation.move_held_object",
         "simulation.pour",
     }
-    assert "grasp_pose_generators" not in integration_payload["runtime_services"]
+    assert integration_payload["runtime_services"]["grasp_pose_generators"] == {
+        "right_eef": {
+            "kind": "antipodal_parallel_jaw",
+            "model": "cobotmagic_v100_gripper",
+        }
+    }
+
+
+def test_pour_water_mouth_alignment_and_measured_checkpoints() -> None:
+    """The tilted mouth clears the cup and a missed grasp stops before pouring."""
+    deployment = _tableware_deployment("pour_water")
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=deployment.integration.registration.catalog,
+    )
+    picking, positioning, pouring, returning = program.program.items
+    checkpoint = positioning.validators[0]
+    assert checkpoint.object == "bottle"
+    assert checkpoint.position_tolerance <= 0.01
+    assert picking.steps.call.kind == "pick"
+    assert positioning.steps.call.call_id == "simulation.move_held_object"
+    assert pouring.steps.call.call_id == "simulation.pour"
+    placement = returning.steps.call
+    release_position = program.targets[placement.at.target].values[0].position
+    rest_position = program.targets["bottle_return_pose"].values[0].position
+    assert release_position[:2] == rest_position[:2]
+    assert 0.006 <= release_position[2] - rest_position[2] <= 0.01
+    cup_check = next(check for check in returning.validators if check.object == "cup")
+    assert cup_check.position_tolerance <= 0.002
+
+    integration = _tableware_integration_payload("pour_water")
+    lowerer = integration["runtime_services"]["registered_semantic_lowerers"][0]
+    relative = torch.tensor(lowerer["relative_pose"], dtype=torch.float64).reshape(4, 4)
+    registration = deployment.integration.registration
+    axis = torch.tensor(
+        registration.scene_binding.antipodal_grasps[0].internal_axis,
+        dtype=torch.float64,
+    )
+    angle = (
+        registration.robot_profile_binding.presets[0]
+        .action_option_templates["simulation.pour"]
+        .rotate_angle
+    )
+    mouth = torch.tensor([0.0, 0.0, 0.069724626839], dtype=torch.float64)
+    theta = mouth.new_tensor(angle)
+    rotated = (
+        mouth * torch.cos(theta)
+        + torch.linalg.cross(axis, mouth) * torch.sin(theta)
+        + axis * torch.dot(axis, mouth) * (1 - torch.cos(theta))
+    )
+    torch.testing.assert_close(
+        (relative[:3, 3] + rotated)[:2],
+        torch.zeros(2, dtype=torch.float64),
+        atol=1e-7,
+        rtol=0,
+    )
+    assert float(relative[2, 3] + rotated[2]) >= 0.21
+    cup_position = torch.tensor(program.targets[cup_check.target].values[0].position)
+    bottle_position = torch.tensor(
+        program.targets[checkpoint.target].values[0].position
+    )
+    torch.testing.assert_close(bottle_position, cup_position + relative[:3, 3].float())
+
+
+def test_pour_water_uses_shared_calibrated_embodiment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pouring reuses the base robot with its qualified force and control cadence."""
+    monkeypatch.setattr("embodichain.data.get_data_path", lambda value: value)
+    path = _tableware_config_path("pour_water")
+    config = _tableware_gym_config("pour_water")
+    cfg = config_to_cfg(config, source_path=path)
+    assert Path(config["embodiment"]["component"]).name == "cobotmagic.yaml"
+    assert cfg.robot.joint_drive_props.max_effort["right_joint[7-8]"] == 40.0
+    assert cfg.robot.joint_drive_props.max_effort["left_joint[7-8]"] == 40.0
+    assert cfg.robot.joint_drive_props.max_velocity["right_joint[7-8]"] == 0.25
+    assert cfg.robot.joint_drive_props.stiffness["right_joint6"] == 4000.0
+    assert cfg.target_control_frequency == 100
+    assert cfg.expert_trajectory.joint_command_mode == "position"
+    preset = _tableware_deployment(
+        "pour_water"
+    ).integration.registration.robot_profile_binding.presets[0]
+    assert preset.motion_policy.sample_count == 480
+    assert preset.effect_assurance.value == "projected"
 
 
 def test_pour_water_registered_lowerers_build_only_typed_goals() -> None:
@@ -699,6 +901,115 @@ def test_grasp_generator_inline_model_uses_geometry_defaults() -> None:
     assert factory.finger_width == pytest.approx(0.03)
     assert factory.finger_thickness == pytest.approx(0.01)
     assert factory.palm_depth == pytest.approx(0.09)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "control_part", "model_id", "opening_margin"),
+    [
+        (
+            "repeated_pick_place/task.franka.yaml",
+            "eef",
+            "franka_panda_hand",
+            0.01,
+        ),
+        ("open_drawer/task.franka.yaml", "eef", "franka_panda_hand", 0.03),
+        (
+            "tableware/pour_water/task.cobotmagic.yaml",
+            "right_eef",
+            "cobotmagic_v100_gripper",
+            0.01,
+        ),
+    ],
+)
+def test_embodiment_grasp_defaults_reach_composed_deployments(
+    relative_path: str, control_part: str, model_id: str, opening_margin: float
+) -> None:
+    """Embodiments select geometry; tasks can still override collision policy."""
+    path = _CONFIG_DIRECTORY / relative_path
+    physical = _physical_components(path, load_config(path))
+    profile = physical.embodiment_skill_profile
+    assert profile is not None
+    declaration = profile["runtime_services"]["grasp_pose_generators"][control_part]
+    assert declaration == {"kind": "antipodal_parallel_jaw", "model": model_id}
+
+    deployment = _deployment_from_path(path)
+    delegate = deployment.integration.adapter_factory.delegate
+    factory = delegate._grasp_pose_generator_factories[control_part]
+    generator = factory()
+
+    assert generator.gripper_model.model_id == model_id
+    assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
+    assert generator.collision_cfg == ParallelJawGraspCollisionCfg(
+        opening_margin=opening_margin
+    )
+    assert generator.annotation_cfg == GraspAnnotationCfg()
+    assert factory() is not generator
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
+    side: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both Marvin hands use source joint commands and toolkit policy defaults."""
+    monkeypatch.setattr(
+        "embodichain_robots.tianji_marvin.get_data_path", lambda value: value
+    )
+    path = _config_path("hand_over")
+    config = _gym_config("hand_over")
+    config["embodiment"] = {
+        "component": "../../../components/embodiments/tianji_marvin.yaml"
+    }
+    physical = _physical_components(path, config)
+    robot_values = dict(physical.config["robot"])
+    assert robot_values.pop("class_type") == "TianjiMarvin"
+    robot = TianjiMarvinCfg.from_dict(robot_values)
+    assert robot.with_gripper is True
+    assert len(robot.control_parts[f"{side}_arm"]) == 7
+    assert len(robot.control_parts[f"{side}_eef"]) == 2
+    assert physical.config["sensor"] == []
+
+    profile = physical.embodiment_skill_profile
+    assert profile is not None
+    assert profile["profile_id"] == "tianji_marvin"
+    resource = next(
+        resource for resource in profile["resources"] if resource["resource_id"] == side
+    )
+    assert {
+        endpoint["endpoint_id"]: endpoint["control_part"]
+        for endpoint in resource["endpoints"]
+    } == {"motion": f"{side}_arm", "grasp": f"{side}_eef"}
+    commands = next(
+        preset["commands"]
+        for preset in profile["command_presets"]
+        if preset["control_part"] == f"{side}_eef"
+    )
+    # Both source prismatic joints span [-0.05, 0]; decreasing qpos closes.
+    assert commands == {"open": [0.0, 0.0], "grasp": [-0.05, -0.05]}
+    services = profile["runtime_services"]["grasp_pose_generators"]
+    assert set(services) == {"left_eef", "right_eef"}
+    assert services[f"{side}_eef"] == {
+        "kind": "antipodal_parallel_jaw",
+        "model": "tianji_marvin_gripper",
+    }
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=profile,
+        base_dir=path.parent,
+    )
+    registration = deployment.integration.registration
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=registration.catalog,
+    )
+    registration.catalog.preflight(program)
+    delegate = deployment.integration.adapter_factory.delegate
+    factory = delegate._grasp_pose_generator_factories[f"{side}_eef"]
+    generator = factory()
+    assert generator.gripper_model.model_id == "tianji_marvin_gripper"
+    assert generator.algorithm_cfg == AntipodalGraspPoseGeneratorCfg()
+    assert generator.collision_cfg == ParallelJawGraspCollisionCfg()
+    assert generator.annotation_cfg == GraspAnnotationCfg()
 
 
 def test_grasp_generator_rejects_unknown_models_and_removed_viser_port() -> None:
@@ -1201,3 +1512,74 @@ def test_motion_velocity_target_policy_rejects_unknown_mode(mode: str) -> None:
         _decode_motion_policy(
             {"sample_count": 40, "velocity_targets": mode}, path="motion"
         )
+
+
+@pytest.mark.parametrize(
+    ("task_name", "backend"),
+    [
+        ("rubiks_cube_pick_place", "default"),
+        ("repeated_pick_place", "default"),
+        ("repeated_pick_place", "newton"),
+        ("open_drawer", "default"),
+        ("open_drawer", "newton"),
+        ("hand_over", "default"),
+        ("pour_water", "default"),
+    ],
+)
+def test_segmented_examples_preserve_overall_and_segment_instructions(
+    task_name: str,
+    backend: str,
+    registered_test_ids: list[str],
+) -> None:
+    """Production composition retains both language levels for every backend."""
+    path = (
+        _tableware_config_path(task_name)
+        if task_name in _TABLEWARE_TASKS
+        else _config_path(task_name)
+    )
+    config = load_config(path)
+    if backend == "newton":
+        config["environment"] = {"component": config["environment"][backend]}
+    config["id"] = _TEST_ENV_ID
+    registered_test_ids.append(_TEST_ENV_ID)
+    cfg = config_to_cfg(config, source_path=path)
+    assert cfg.task_program is not None
+    overall = cfg.task_program.instruction
+    assert "instruction" not in cfg.dataset.lerobot.params
+    assert isinstance(overall, str) and overall.strip()
+    assert overall != "unknown_task"
+
+    physical = _physical_components(path, config)
+    deployment = _load_configured_task_program_deployment(
+        task_program=physical.config["task_program"],
+        skill_profile=physical.embodiment_skill_profile,
+        base_dir=path.parent,
+    )
+    catalog = deployment.integration.registration.catalog
+    program = load_task_program(
+        deployment.program_path,
+        integration=deployment.selection,
+        validation_context=catalog,
+    )
+    compiled = catalog.preflight(program)
+    assert compiled.instruction == overall
+    segments = tuple(compiled.iter_segments())
+    expected_names = {
+        "rubiks_cube_pick_place": ["pick_rubiks_cube", "place_rubiks_cube"] * 3,
+        "repeated_pick_place": ["pick_cube", "place_cube"] * 3,
+        "open_drawer": ["open_drawer"],
+        "hand_over": ["hand_over_can"],
+        "pour_water": [
+            "pick_bottle",
+            "move_bottle_above_cup",
+            "pour_water",
+            "return_bottle",
+        ],
+    }
+    assert [segment.name for segment in segments] == expected_names[task_name]
+    if task_name == "pour_water":
+        assert [len(segment.post_policies) for segment in segments] == [0, 0, 0, 2]
+        assert [len(segment.validators) for segment in segments] == [0, 1, 0, 2]
+    for segment in segments:
+        assert isinstance(segment.instruction, str) and segment.instruction.strip()
+        assert segment.instruction != overall

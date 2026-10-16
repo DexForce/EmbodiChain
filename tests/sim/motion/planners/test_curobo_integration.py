@@ -37,7 +37,7 @@ pytestmark = [pytest.mark.requires_sim, pytest.mark.gpu]
 
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
+from embodichain_robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.sim.motion.motion_generator import (

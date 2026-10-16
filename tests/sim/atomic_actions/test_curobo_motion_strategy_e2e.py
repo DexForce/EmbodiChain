@@ -35,7 +35,7 @@ if not torch.cuda.is_available():
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg  # noqa: E402
 from embodichain.lab.sim.cfg import RigidBodyPhysicsCfg  # noqa: E402
 from embodichain.lab.sim.objects import RigidObjectCfg  # noqa: E402
-from embodichain.lab.sim.robots import FrankaPandaCfg  # noqa: E402
+from embodichain_robots import FrankaPandaCfg  # noqa: E402
 from embodichain.lab.sim.shapes import CubeCfg  # noqa: E402
 from embodichain.lab.sim.motion.motion_generator import MotionGenCfg, MotionGenerator
 from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (  # noqa: E402

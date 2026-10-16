@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Simulation-thread articulation controls used by asset preview frontends."""
+"""Simulation-thread articulation controls used by asset and robot previews."""
 
 from __future__ import annotations
 
@@ -62,16 +62,22 @@ class ArticulationPreviewController:
     target state so preview behavior does not depend on an asset's drive type.
 
     Args:
-        articulations: Articulations loaded by ``preview-asset``.
+        articulations: Articulations or robots loaded by a preview frontend.
         runtime: Active Viser runtime receiving the exported controls.
+        follow_external_targets: Read drive targets before browser commands so
+            IK/Gizmo updates persist across preview steps. Defaults to False
+            to preserve asset-preview pose holding.
     """
 
     def __init__(
         self,
         articulations: Sequence[Articulation],
         runtime: VisualizationRuntime,
+        *,
+        follow_external_targets: bool = False,
     ) -> None:
         self._runtime = runtime
+        self._follow_external_targets = follow_external_targets
         self._bindings: dict[str, _JointBinding] = {}
         self._articulation_bindings: list[
             tuple[Articulation, tuple[_JointBinding, ...]]
@@ -320,12 +326,34 @@ class ArticulationPreviewController:
                 env_ids=env_ids,
             )
 
+    def _follow_drive_targets(self) -> None:
+        """Adopt IK drive targets without creating controls for mimic joints."""
+        for articulation, bindings in self._articulation_bindings:
+            targets = to_numpy_array(
+                articulation.get_qpos(target=True), np.float32, copy=False
+            )
+            if (
+                targets.ndim != 2
+                or targets.shape[0] < 1
+                or targets.shape[1] != articulation.dof
+            ):
+                raise ValueError("Preview drive targets must have shape (N, dof).")
+            for binding in bindings:
+                value = float(targets[0, binding.spec.joint_id])
+                if not np.isfinite(value):
+                    raise ValueError(
+                        f"Invalid drive target for joint {binding.spec.joint_name!r}."
+                    )
+                binding.desired_value = self._clamp_value(binding.spec, value)
+
     def update(self) -> int:
         """Consume browser commands and hold desired poses before one sim step.
 
         Returns:
             Number of valid commands accepted during this update.
         """
+        if self._follow_external_targets:
+            self._follow_drive_targets()
         accepted = self._apply_commands(self._runtime.drain_joint_control_commands())
         self._hold_desired_positions()
         return accepted

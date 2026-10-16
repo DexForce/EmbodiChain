@@ -91,7 +91,7 @@ from embodichain.lab.sim.motion.planners import (
     ToppraPlannerCfg,
 )
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 
 RECORD_WIDTH = 1920
 RECORD_HEIGHT = 1080

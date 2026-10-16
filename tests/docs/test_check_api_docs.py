@@ -175,6 +175,33 @@ def test_collect_documented_exports_parses_all_api_pages(tmp_path: Path) -> None
     }
 
 
+def test_python_class_declarations_cover_explicit_public_imports(
+    tmp_path: Path,
+) -> None:
+    api_root = tmp_path / "api_reference"
+    modules = (
+        PublicModule("sample", ("Alpha", "Beta", "Missing"), tmp_path / "sample"),
+    )
+    _write(
+        api_root / "classes.rst",
+        """.. currentmodule:: sample
+
+.. py:class:: Alpha(value=None)
+
+   The configurable alpha implementation.
+
+.. py:class:: sample.Beta
+
+   The beta implementation. See :class:`Missing` for another type.
+""",
+    )
+
+    assert collect_documented_exports(api_root, modules) == {
+        "sample.Alpha",
+        "sample.Beta",
+    }
+
+
 def test_find_missing_exports_reports_public_import_path(tmp_path: Path) -> None:
     modules = (PublicModule("sample", ("Alpha", "Beta"), tmp_path / "sample.py"),)
 

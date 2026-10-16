@@ -1026,7 +1026,7 @@ def benchmark_franka_solver_comparison() -> (
     """Compare Franka's default FEP and former Pytorch solver on shared inputs."""
     from scipy.spatial.transform import Rotation
 
-    from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
+    from embodichain_robots.franka_panda import FrankaPandaCfg
 
     perf_rows: list[dict[str, object]] = []
     metric_rows: list[dict[str, object]] = []

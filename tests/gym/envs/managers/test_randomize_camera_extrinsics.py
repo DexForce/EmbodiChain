@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 import weakref
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -30,13 +31,18 @@ from embodichain.lab.gym.envs.managers.randomization import visual
 from embodichain.lab.gym.envs.managers.randomization.visual import (
     randomize_camera_extrinsics,
 )
+from embodichain.utils.math import (
+    euler_xyz_from_quat,
+    matrix_from_quat,
+    quat_from_euler_xyz,
+)
 
 
 def _make_env(extrinsics: SimpleNamespace) -> SimpleNamespace:
     camera = MagicMock()
     camera.cfg.extrinsics = extrinsics
     sim = SimpleNamespace(get_sensor=lambda uid: camera)
-    return SimpleNamespace(sim=sim, device="cpu", camera=camera)
+    return SimpleNamespace(sim=sim, device="cpu", num_envs=2, camera=camera)
 
 
 def _look_at_extrinsics() -> SimpleNamespace:
@@ -48,6 +54,25 @@ def _look_at_extrinsics() -> SimpleNamespace:
 def _attach_extrinsics() -> SimpleNamespace:
     return SimpleNamespace(
         parent="link", eye=None, pos=[0.0, 0.0, 0.1], quat=[1.0, 0.0, 0.0, 0.0]
+    )
+
+
+def _arena_pose_extrinsics() -> SimpleNamespace:
+    return SimpleNamespace(
+        parent=None,
+        eye=None,
+        pos=[0.0, 0.0, 0.1],
+        # A non-identity starting orientation makes Euler perturbations observable.
+        quat=[0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)],
+    )
+
+
+def _parented_look_at_extrinsics() -> SimpleNamespace:
+    return SimpleNamespace(
+        parent="link",
+        eye=[0.0, 0.0, 1.0],
+        target=[0.0, 0.0, 0.0],
+        up=[0.0, 1.0, 0.0],
     )
 
 
@@ -128,3 +153,91 @@ def test_attached_camera_warns_about_look_at_ranges(warnings) -> None:
     assert "cam_wrist" in warnings[0]
     assert "eye_range is ignored" in warnings[0]
     env.camera.set_local_pose.assert_called_once()
+
+
+@pytest.mark.no_sim
+def test_arena_pose_camera_uses_nonzero_pose_ranges(warnings, monkeypatch) -> None:
+    def midpoint_sample(*, lower, upper, size, device):
+        midpoint = (lower + upper) / 2
+        row_delta = (upper - lower) * 0.25
+        return torch.stack((midpoint, midpoint + row_delta), dim=0).to(device)
+
+    monkeypatch.setattr(visual, "sample_uniform", midpoint_sample)
+    env = _make_env(_arena_pose_extrinsics())
+    randomize_camera_extrinsics(
+        env,
+        env_ids=None,
+        entity_cfg=SceneEntityCfg(uid="cam_fixed"),
+        pos_range=([0.02, -0.03, 0.01], [0.06, -0.01, 0.05]),
+        euler_range=([0.02, -0.04, 0.03], [0.08, 0.02, 0.09]),
+    )
+
+    assert warnings == []
+    env.camera.set_local_pose.assert_called_once()
+    (pose,) = env.camera.set_local_pose.call_args.args
+    assert pose.shape == (2, 4, 4)
+    expected_position = torch.tensor([[0.04, -0.02, 0.13], [0.05, -0.015, 0.14]])
+    assert torch.allclose(pose[:, :3, 3], expected_position)
+
+    # Arena-frame poses are converted to the OpenGL frame just like Camera.reset.
+    base_quat = torch.tensor(_arena_pose_extrinsics().quat).unsqueeze(0)
+    base_euler = torch.stack(euler_xyz_from_quat(base_quat), dim=1)
+    euler_delta = torch.tensor([[0.05, -0.01, 0.06], [0.065, 0.005, 0.075]])
+    expected_euler = base_euler + euler_delta
+    roll, pitch, yaw = expected_euler.unbind(dim=1)
+    expected_rotation = matrix_from_quat(quat_from_euler_xyz(roll, pitch, yaw))
+    expected_rotation[:, :, 1] *= -1
+    expected_rotation[:, :, 2] *= -1
+    assert torch.allclose(pose[:, :3, :3], expected_rotation)
+
+
+@pytest.mark.no_sim
+def test_arena_pose_camera_warns_about_look_at_ranges(warnings) -> None:
+    env = _make_env(_arena_pose_extrinsics())
+    randomize_camera_extrinsics(
+        env,
+        torch.arange(2),
+        SceneEntityCfg(uid="cam_fixed"),
+        eye_range=([-0.01] * 3, [0.01] * 3),
+    )
+
+    assert len(warnings) == 1
+    assert "cam_fixed" in warnings[0]
+    assert "eye_range is ignored" in warnings[0]
+    env.camera.set_local_pose.assert_called_once()
+
+
+@pytest.mark.no_sim
+def test_look_at_camera_defaults_missing_up_vector(warnings) -> None:
+    extrinsics = _look_at_extrinsics()
+    extrinsics.up = None
+    env = _make_env(extrinsics)
+
+    randomize_camera_extrinsics(
+        env,
+        torch.arange(2),
+        SceneEntityCfg(uid="cam_high"),
+        eye_range=([-0.01] * 3, [0.01] * 3),
+    )
+
+    assert warnings == []
+    env.camera.look_at.assert_called_once()
+    _, _, up = env.camera.look_at.call_args.args
+    assert torch.allclose(up, torch.tensor([[0.0, 0.0, 1.0]]).repeat(2, 1))
+
+
+@pytest.mark.no_sim
+def test_parented_look_at_camera_is_rejected(warnings) -> None:
+    env = _make_env(_parented_look_at_extrinsics())
+
+    with pytest.raises(ValueError, match="cannot combine parent-attached"):
+        randomize_camera_extrinsics(
+            env,
+            torch.arange(2),
+            SceneEntityCfg(uid="cam_invalid"),
+            eye_range=([-0.01] * 3, [0.01] * 3),
+        )
+
+    assert warnings == []
+    env.camera.look_at.assert_not_called()
+    env.camera.set_local_pose.assert_not_called()

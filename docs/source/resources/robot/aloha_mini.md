@@ -9,7 +9,7 @@ renaming its joints or assembling separate arms.
 </div>
 
 ```python
-from embodichain.lab.sim.robots import AlohaMiniCfg
+from embodichain_robots import AlohaMiniCfg
 
 cfg = AlohaMiniCfg.from_dict({"uid": "aloha_mini"})
 robot = sim.add_robot(cfg=cfg)
@@ -19,8 +19,8 @@ robot = sim.add_robot(cfg=cfg)
 | --- | --- | --- |
 | `left_arm` | 6 | Shoulder through wrist; `left_tcp` |
 | `right_arm` | 6 | Shoulder through wrist; `right_tcp` |
-| `left_hand` | 1 | `left_gripper` |
-| `right_hand` | 1 | `right_gripper` |
+| `left_eef` | 1 | `left_gripper` |
+| `right_eef` | 1 | `right_gripper` |
 | `torso` | 1 | `vertical_move` |
 
 The arms use `PytorchSolverCfg` with the TCP frames authored in the asset.
@@ -39,7 +39,7 @@ arm chains describe the grasp TCPs.
 Run a headless construction smoke check with:
 
 ```bash
-python -m embodichain.lab.sim.robots.aloha_mini --headless --device cpu
+python -m embodichain_robots.aloha_mini --headless --device cpu
 ```
 
 Omit `--headless` for the interactive simulation window. Select the physics

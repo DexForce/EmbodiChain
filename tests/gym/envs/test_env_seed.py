@@ -26,6 +26,7 @@ import torch
 
 import embodichain.lab.gym.envs.base_env as base_env_module
 from embodichain.lab.gym.envs import BaseEnv
+from embodichain.lab.sim import SimulationManager
 
 
 class _ProfilerStub:
@@ -142,6 +143,41 @@ def test_headless_reset_leaves_publication_to_visual_consumers() -> None:
         "get_obs",
         "capture",
     ]
+
+
+def test_reset_keeps_sensor_uid_exclusions_out_of_physical_registries() -> None:
+    """A sensor sharing a robot UID resets once without skipping the robot."""
+    env = _ResetEnv()
+    robot = MagicMock()
+    sensor = MagicMock(uid="shared")
+    manager_sensor = MagicMock(uid="manager_only")
+    env.sensors = {"observation": sensor}
+    env.sim.physics = SimpleNamespace(name="default")
+    env.sim._robots = {"shared": robot}
+    for registry in (
+        "_articulations",
+        "_rigid_objects",
+        "_rigid_object_groups",
+        "_deformable_objects",
+        "_lights",
+    ):
+        setattr(env.sim, registry, {})
+    env.sim._sensors = {"shared": sensor, "manager_only": manager_sensor}
+    env.sim.reset_objects_state = (
+        lambda **kwargs: SimulationManager.reset_objects_state(env.sim, **kwargs)
+    )
+
+    env.reset()
+
+    assert robot.reset.call_count == 1
+    assert sensor.reset.call_count == 1
+    assert manager_sensor.reset.call_count == 1
+    torch.testing.assert_close(
+        robot.reset.call_args.args[0], torch.tensor([0], dtype=torch.int32)
+    )
+    torch.testing.assert_close(
+        sensor.reset.call_args.kwargs["env_ids"], torch.tensor([0], dtype=torch.int32)
+    )
 
 
 def test_named_component_stream_rewinds_on_explicit_seed_and_is_independent():

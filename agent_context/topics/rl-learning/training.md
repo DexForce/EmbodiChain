@@ -64,10 +64,10 @@ currently support this distributed path.
 
 | Example | Environment path | Config location |
 |---------|------------------|-----------------|
-| CartPole | registered simulator Gym env | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
-| PushCube | registered simulator Gym env | `embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
-| PointMass PPO | registered lightweight env, standard rollout | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
-| PointMass APG | differentiable lightweight env | `embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
+| CartPole | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/` |
+| PushCube | registered simulator Gym env | `extensions/embodichain_tasks/configs/tasks/manipulation/push_cube/agents/` |
+| PointMass PPO | registered lightweight env, standard rollout | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/ppo.yaml` |
+| PointMass APG | differentiable lightweight env | `extensions/embodichain_tasks/configs/tasks/classic_control/point_mass/agents/apg.yaml` |
 | Newton planar reach | experimental differentiable FK reference | `embodichain/learning/rl/experimental/newton/` |
 
 `PointMassRL` is the reference environment for comparing standard and
@@ -101,7 +101,7 @@ example is an experimental gradient reference, not a general simulator task.
 5. Expose `observation_normalize_mask` when semantic dimensions must remain
    raw during normalization.
 6. Add an official config under
-   `embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
+   `extensions/embodichain_tasks/configs/tasks/<domain>/<task>/agents/` when it is a
    bundled task.
 
 Use `add-task-env` for simulator-backed task environments and

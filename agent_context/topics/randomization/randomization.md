@@ -43,6 +43,12 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 
 ### Visual (`visual.py`)
 
+Gym filters disabled sensor and configured visual-randomization terms before
+predicting renderer demand. If the World uses NoRender, it also skips built-in
+native visual effects, including deterministic material setters; physical
+randomization remains active. See the owning
+[render selection contract](../simulation-system/rendering.md#norender-initialization).
+
 | Function | Target | Key params |
 |---|---|---|
 | `set_rigid_object_visual_material` | Deterministic material set | `mat_cfg` (`VisualMaterialCfg` or dict) |
@@ -54,9 +60,12 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 | `randomize_emission_light` | Emission light props | (varies) |
 | `randomize_indirect_lighting` | Indirect lighting | (varies) |
 
-- Camera extrinsics auto-detect mode: if `extrinsics.parent` is set → attach mode (pos/euler perturbation via `set_local_pose`); if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`).
+- Camera extrinsics auto-detect the representation and frame: if `extrinsics.eye` is set → look-at mode (eye/target/up perturbation via `look_at`); otherwise → pose mode (pos/euler perturbation via `set_local_pose`), with `extrinsics.parent` selecting parent-relative pose and `parent=None` selecting arena-frame pose.
 - `set_rigid_object_visual_material` is deterministic (not random) but uses the same functor mechanism for fixed material assignment at reset.
 - Light randomization applies the **same values across all envs** (documented limitation).
+- HDR indirect-lighting events inform the environment's automatic native-ground
+  visibility; emissive mode does not. See the deployment-owned
+  [ground visibility configuration](../env-framework/configuration.md#reusable-gym-deployment-components).
 - ``position_range`` is ignored for global scene lights (``"sun"``, ``"direction"``). Use ``direction_range`` instead.
 - ``direction_range`` is only applicable for directional light types (``"sun"``, ``"direction"``, ``"spot"``, ``"rect"``, ``"mesh"``).
 - Global lights (``"sun"``, ``"direction"``) have ``num_instances == 1``; all other types are batched per environment.
@@ -76,6 +85,17 @@ The `__init__.py` of the randomization package re-exports everything via `from .
 - `relative_position=True` (default) adds offset to initial position; `relative_rotation=False` (default) replaces rotation.
 - After setting pose, `clear_dynamics()` is called to zero out velocities.
 - `physics_update_step > 0` triggers `env.sim.update(step=N)` to let physics settle after randomization.
+- Robot joint/end-effector randomizers restore current positions and matching
+  drive targets, clear dynamics only in selected environments, and publish
+  through `SimulationManager.sync_render_state()` without stepping physics.
+  End-effector randomization requires named `SceneEntityCfg.control_parts` and
+  passes the same `env_ids` to FK/IK and state writes.
+
+`register_info_to_env` publishes state before reading attributes and defaults to
+`sim_update=False`. Explicit `sim_update=True` retains the legacy 100-step
+settle, but requires all environments because physics advances the whole World.
+For configurable physical settling, use `wait_for_dynamic_objects_to_settle`,
+which rejects partial selections unless `allow_partial_envs=True` is explicit.
 
 ### Geometry (`geometry.py`)
 

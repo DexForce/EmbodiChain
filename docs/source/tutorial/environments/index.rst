@@ -12,4 +12,4 @@ composition concepts introduced by ``EmbodiedEnv``.
    ../basic_env
    ../modular_env
    ../task_program
-   ../data_generation
+   ../data_expansion

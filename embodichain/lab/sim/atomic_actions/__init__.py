@@ -38,8 +38,8 @@ from .articulation_geometry import (
 from .affordance import (
     Affordance,
     AntipodalAffordance,
-    AssembleAffordance,
     AxisAlignAffordance,
+    AssembleAffordance,
     InteractionPoints,
     OpenDoorAffordance,
     PressAffordance,
@@ -64,6 +64,7 @@ from .control import (
     GRASP_COMMAND,
     JointPositionCommand,
     OPEN_COMMAND,
+    PARK_COMMAND,
 )
 from .core import AtomicAction, ObjectSemantics, SkillDescriptor
 from .effects import StateDelta
@@ -73,7 +74,7 @@ from .evidence import (
     PhysicalEvidenceProvider,
     PhysicalEvidenceRequest,
 )
-from .engine import AtomicActionEngine
+from .engine import AtomicActionEngine, PlanTransform
 from .execution import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -134,6 +135,7 @@ from .runtime_commands import (
     TimedCommandSequence,
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
+from .trajectory_adapter import ActionPlanTemplateAdapter
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -219,6 +221,7 @@ from .primitives import (
     PushObjectToolCalibration,
     Slide,
     SlideGoal,
+    SlideJointTarget,
     SlideOptions,
     Twist,
     TwistGoal,
@@ -282,16 +285,17 @@ __all__ = [
     "ArticulationAffordanceGeometry",
     "ArticulationGeometryProvider",
     "ArticulationJointGeometry",
+    "AxisAlignAffordance",
     "create_rigidized_articulation_antipodal_affordance",
     "ArticulationJointState",
     "AssembleAffordance",
     "AssembleGoal",
     "AxisAlign",
-    "AxisAlignAffordance",
     "AxisAlignGoal",
     "AxisAlignOptions",
     "AtomicAction",
     "AtomicActionEngine",
+    "PlanTransform",
     "BUILTIN_ACTION_TYPES",
     "BATCH_INVERSE_KINEMATICS_CAPABILITY",
     "CARTESIAN_POSE_CAPABILITY",
@@ -321,6 +325,7 @@ __all__ = [
     "EndpointCommand",
     "EndpointCommandRouter",
     "EndpointCommandTransport",
+    "ActionPlanTemplateAdapter",
     "EntityState",
     "EffectExpectationResult",
     "EffectVerificationRequest",
@@ -390,6 +395,7 @@ __all__ = [
     "OPEN_COMMAND",
     "ObservationProvider",
     "ObservedArticulationJointState",
+    "PARK_COMMAND",
     "PickUp",
     "PickUpOptions",
     "Place",
@@ -415,6 +421,7 @@ __all__ = [
     "SlideAffordance",
     "Slide",
     "SlideGoal",
+    "SlideJointTarget",
     "SlideOptions",
     "Twist",
     "TwistGoal",
