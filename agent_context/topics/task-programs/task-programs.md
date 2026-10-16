@@ -32,6 +32,7 @@ Semantic Calls and their scene/profile/effect contracts live inside
 | Compiled program model and AST expansion | `embodichain/lab/task_program/compiler/program.py` |
 | Semantic Call analysis and lowering | `embodichain/lab/task_program/compiler/lowering.py` |
 | Semantic Call execution | `embodichain/lab/task_program/runtime/executor.py`, `results.py` |
+| Trusted nominal plan source hook | `runtime/expansion.py`: `TaskProgramNominalPlanFactory`; `integrations/environment.py`: runtime/bridge assembly |
 | Grounded call plan-transform request | `embodichain/lab/task_program/runtime/expansion.py` |
 | Parallel scheduling and safety boundary | `embodichain/lab/task_program/runtime/parallel.py`, `parallel_executor.py` |
 | Semantic Calls, scene, profile, effects, evidence | `embodichain/lab/task_program/semantics/` |
@@ -79,6 +80,15 @@ grounded, the runtime asks `TaskProgramPlanTransformFactory` for that call's
 Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
+
+A trusted `TaskProgramNominalPlanFactory` can provide a complete call-scoped
+plan before ordinary Atomic planning. The engine snapshots and validates that
+plan, then applies any existing plan transform. Execution sessions retain the
+source during recovery and invocation revisions; source errors do not fall back
+to another planner. The optional Python assembly/bridge hook currently rejects
+parallel program segments. It is not a registered configured service: catalog
+registration, capability preflight and source-specific Skill assembly remain
+separate work. Do not insert executable provider syntax into program YAML.
 
 The configured combined transform supports batches and Pick Affordance
 expansion; timing expansion is not connected to this transform. Batch expansion

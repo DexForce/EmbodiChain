@@ -99,7 +99,11 @@ from .results import (
     _snapshot_event,
     _snapshot_task_state,
 )
-from .expansion import TaskProgramPlanRequest, TaskProgramPlanTransformFactory
+from .expansion import (
+    TaskProgramPlanRequest,
+    TaskProgramPlanTransformFactory,
+    TaskProgramNominalPlanFactory,
+)
 from ..compiler.lowering import (
     GroundedHeldObjectGuard,
     GroundedPhaseEffectGate,
@@ -267,6 +271,7 @@ class SemanticCallExecutor:
         clock: ExecutionClock | None = None,
         runner_cfg: ExecutionRunnerCfg | None = None,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        nominal_plan_factory: TaskProgramNominalPlanFactory | None = None,
     ) -> None:
         if not isinstance(compiler, SemanticCallCompiler):
             raise TypeError("compiler must be a SemanticCallCompiler.")
@@ -290,6 +295,13 @@ class SemanticCallExecutor:
                 "plan_transform_factory must implement "
                 "TaskProgramPlanTransformFactory or be None."
             )
+        if nominal_plan_factory is not None and not isinstance(
+            nominal_plan_factory, TaskProgramNominalPlanFactory
+        ):
+            raise TypeError(
+                "nominal_plan_factory must implement TaskProgramNominalPlanFactory or be None."
+            )
+        self._nominal_plan_factory = nominal_plan_factory
         integration = compiler.integration
         engine = integration.engine
         if not isinstance(engine, AtomicActionEngine):
@@ -1037,7 +1049,11 @@ class SemanticCallExecutor:
                     "Grounded semantic call preset must own an ExecutionRunnerCfg."
                 )
         plan_transform = None
-        if self._plan_transform_factory is not None:
+        nominal_plan_provider = None
+        if (
+            self._plan_transform_factory is not None
+            or self._nominal_plan_factory is not None
+        ):
             if self._workflow_id is None:
                 raise RuntimeError("A grounded call requires an active workflow ID.")
             plan_request = TaskProgramPlanRequest(
@@ -1047,6 +1063,7 @@ class SemanticCallExecutor:
                 call=call,
                 invocation=invocation,
             )
+        if self._plan_transform_factory is not None:
             prepare_context = getattr(
                 self._plan_transform_factory,
                 "prepare_planning_context",
@@ -1075,11 +1092,25 @@ class SemanticCallExecutor:
                 raise TypeError(
                     "create_plan_transform() must return a callable or None."
                 )
+        if self._nominal_plan_factory is not None:
+            nominal_plan_provider = (
+                self._nominal_plan_factory.create_nominal_plan_provider(
+                    plan_request,
+                    engine=self._engine,
+                )
+            )
+            if nominal_plan_provider is not None and not callable(
+                nominal_plan_provider
+            ):
+                raise TypeError(
+                    "create_nominal_plan_provider() must return a callable or None."
+                )
         session = self._engine.start(
             (invocation,),
             context,
             eligible_mask=active_mask,
             plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
         )
         primed = _PrimedObservationProvider(context, self._observation_provider)
         runner = ExecutionRunner(

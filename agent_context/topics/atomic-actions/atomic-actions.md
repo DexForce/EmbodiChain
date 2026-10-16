@@ -43,6 +43,13 @@ ActionInvocation                       semantic program
         EndpointCommandRouter + transports + clock
 ```
 
+`NominalPlanProvider` is an optional trusted complete-plan source on engine
+planning/start calls. It bypasses ordinary action planning without bypassing
+plan validation, and remains attached to the execution session for replans and
+invocation revisions. Existing transforms run after nominal validation. A
+replay-only source must return a non-replannable plan; the hook does not itself
+supply Skill-specific semantic assembly or certify source capabilities.
+
 Planning never steps simulation and never treats command completion as proof of
 a physical effect.
 

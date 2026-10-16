@@ -928,3 +928,54 @@ def test_rebuild_plan_validates_source_plan_identity() -> None:
             replace(plan, invocation_id="different"),
             plan.joint_trajectory,
         )
+
+
+def test_nominal_provider_bypasses_ordinary_planning_and_owns_result(monkeypatch):
+    engine = _engine()
+    action = StubAction()
+    engine.register(action)
+    invocation = _invocation(engine, torch.ones(2, 3))
+    retained = []
+
+    def provide(request, context):
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack([context.robot.qpos, context.robot.qpos + 0.1], dim=1),
+            env_ids=context.env_ids,
+            step_dt=ACTION_DT,
+        )
+        result = action.build_plan(
+            request, context, success=True, trajectory=trajectory, replannable=False
+        )
+        retained.append(result)
+        return result
+
+    monkeypatch.setattr(
+        action,
+        "_plan",
+        Mock(side_effect=AssertionError("ordinary planning must not run")),
+    )
+    result = engine.plan(invocation, nominal_plan_provider=provide)
+    assert result.success_all and not result.replannable
+    retained[0].joint_trajectory.positions.fill_(42.0)
+    assert result.joint_trajectory.positions[0, -1, 0] == pytest.approx(0.1)
+    action._plan.assert_not_called()
+
+
+def test_nominal_provider_failure_and_invalid_result_do_not_fall_back(monkeypatch):
+    engine = _engine()
+    action = StubAction()
+    engine.register(action)
+    monkeypatch.setattr(
+        action, "_plan", Mock(side_effect=AssertionError("unexpected fallback"))
+    )
+    invocation = _invocation(engine, torch.ones(2, 3))
+    with pytest.raises(RuntimeError, match="source failure"):
+        engine.plan(
+            invocation,
+            nominal_plan_provider=Mock(side_effect=RuntimeError("source failure")),
+        )
+    with pytest.raises(TypeError, match="return an ActionPlan"):
+        engine.plan(invocation, nominal_plan_provider=lambda request, context: None)
+    with pytest.raises(TypeError, match="callable"):
+        engine.plan(invocation, nominal_plan_provider=object())
+    action._plan.assert_not_called()

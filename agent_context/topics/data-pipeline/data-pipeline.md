@@ -14,6 +14,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
+| Real joint recordings and auditable normalization | `embodichain/data_pipeline/real2sim/`; optional external-file example in `examples/real2sim/` |
 | Depth sidecars | `embodichain/data_pipeline/depth_video/writer.py`, `reader.py` |
 | Offline collection retries and final partial batch | `embodichain/lab/scripts/run_env.py` |
 | File-only validation and grouped quality splits | `embodichain/data_pipeline/datasets/inspection.py`; `embodichain dataset validate\|split` |
@@ -25,6 +26,20 @@ errors, continuity and DataLoader behavior. Read [persistence](persistence.md)
 for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
+
+## Real trajectory inputs
+
+`real2sim/contracts.py` owns dataset-independent, immutable source/joint/phase
+values. `normalization.py` maps explicit units and joint names onto a supplied
+full-robot layout; missing independent joints require declared holds, and mimic
+values derive from drivers. The host supplies the control clock. Pure anchored
+resampling lives in `compute/trajectory/anchored.py`; reports reference array
+keys/hashes while the unit retains the actual bidirectional timing maps.
+Unverified inputs may be normalized diagnostically but cannot enter
+`motion.expansion.Real2SimSourceAdapter`. That adapter exports narrower free
+permission windows to protect derivative stencils; full semantic phase ranges
+remain in the normalized unit. Raw EEF evidence has explicit measured/derived
+provenance. These contracts own no scene reconstruction, reset or persistence.
 
 ## Online worker contract
 

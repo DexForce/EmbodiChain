@@ -11,6 +11,8 @@
 | Cartesian geometry and scalar timing | `embodichain/lab/sim/motion/planners/se3.py`, `bezier.py`, `_scalar_time_law.py`, `_blend_constraints.py` in that directory |
 | Collision planning and scene conversion | `embodichain/lab/sim/motion/planners/curobo/` |
 | NMG policy rollout and export metadata | `embodichain/lab/sim/motion/planners/neural_planner.py` |
+| Anchored source-time resampling and audit maps | `embodichain/compute/trajectory/anchored.py` |
+| Real2sim qpos source adaptation | `embodichain/lab/sim/motion/expansion/real2sim.py`; raw contracts belong to [data pipeline](../data-pipeline/data-pipeline.md) |
 | Pure interpolation, resampling and retiming | `embodichain/compute/trajectory/` |
 | Standalone playback and B=1 expansion host lifecycle | `embodichain/lab/sim/motion/execution.py` |
 | Expansion Profile loading, source adapters, candidate coordination and coverage | `embodichain/lab/sim/motion/expansion/` |

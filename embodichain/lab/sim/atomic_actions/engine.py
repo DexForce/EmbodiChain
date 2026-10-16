@@ -49,6 +49,10 @@ PlanTransform = Callable[
 ]
 
 
+NominalPlanProvider = Callable[[ResolvedActionRequest, PlanningContext], ActionPlan]
+"""Supply a complete nominal plan without invoking ordinary action planning."""
+
+
 class AtomicActionEngine:
     """Own planning resources and coordinate side-effect-free atomic actions."""
 
@@ -324,12 +328,15 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
         Args:
             request: Immutable request previously returned by :meth:`resolve`.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
             plan_transform: Optional callback scoped to this planning call. The
                 callback receives and must return independently owned plan values.
 
@@ -340,6 +347,7 @@ class AtomicActionEngine:
             request,
             context,
             plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
         )
 
     def _resolve(
@@ -374,6 +382,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -384,6 +393,8 @@ class AtomicActionEngine:
         Args:
             request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
 
         Returns:
             Validated side-effect-free action plan.
@@ -397,7 +408,15 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
+        if nominal_plan_provider is None:
+            plan = action.plan(request, current)
+        else:
+            if not callable(nominal_plan_provider):
+                raise TypeError("nominal_plan_provider must be callable or None.")
+            supplied = nominal_plan_provider(request, current)
+            if not isinstance(supplied, ActionPlan):
+                raise TypeError("nominal_plan_provider must return an ActionPlan.")
+            plan = supplied.snapshot()
         self._validate_plan(plan, current, request)
         if plan_transform is not None:
             if not callable(plan_transform):
@@ -416,12 +435,15 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
         Args:
             invocation: Grounded request for a registered skill.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
 
         Returns:
             Validated action plan.
@@ -431,7 +453,12 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current, plan_transform=plan_transform)
+        return self._plan_request(
+            request,
+            current,
+            plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
+        )
 
     def initial_context(
         self,
@@ -573,6 +600,7 @@ class AtomicActionEngine:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -583,6 +611,8 @@ class AtomicActionEngine:
             eligible_mask: Optional per-environment cohort allowed to execute.
                 Ineligible rows remain excluded for the whole session. All rows
                 are eligible when omitted.
+            nominal_plan_provider: Optional source retained for initial planning,
+                invocation revisions and recovery throughout the session.
             plan_transform: Optional transform scoped to every planning call in
                 the returned execution session.
 
@@ -598,6 +628,7 @@ class AtomicActionEngine:
             initial,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:

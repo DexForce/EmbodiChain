@@ -56,7 +56,7 @@ from .tracking import (
 )
 
 if TYPE_CHECKING:
-    from .engine import AtomicActionEngine, PlanTransform
+    from .engine import AtomicActionEngine, PlanTransform, NominalPlanProvider
 
 
 class ExecutionStatus(str, Enum):
@@ -326,6 +326,7 @@ class ExecutionSession:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> None:
         if not invocations:
             raise ValueError("ExecutionSession requires at least one invocation.")
@@ -334,6 +335,9 @@ class ExecutionSession:
             raise TypeError("plan_transform must be callable or None.")
         self._engine = engine
         self._plan_transform = plan_transform
+        if nominal_plan_provider is not None and not callable(nominal_plan_provider):
+            raise TypeError("nominal_plan_provider must be callable or None.")
+        self._nominal_plan_provider = nominal_plan_provider
         self._requests: tuple[ResolvedActionRequest, ...] = tuple(
             engine._resolve(invocation) for invocation in invocations
         )
@@ -612,6 +616,7 @@ class ExecutionSession:
             replacement,
             replacement_context,
             plan_transform=self._plan_transform,
+            nominal_plan_provider=self._nominal_plan_provider,
         )
         self._validate_destination_continuity(
             replacement_plan,
@@ -1157,6 +1162,7 @@ class ExecutionSession:
             request,
             context,
             plan_transform=self._plan_transform,
+            nominal_plan_provider=self._nominal_plan_provider,
         )
         self._install_plan(plan, context, event_kind)
 

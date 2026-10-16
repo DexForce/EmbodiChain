@@ -941,6 +941,7 @@ def _system(
     runtime_runner_cfg: ExecutionRunnerCfg | None = None,
     install_effect_monitor: bool = True,
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+    nominal_plan_factory: object | None = None,
 ) -> _System:
     robot = Mock()
     robot.device = torch.device("cpu")
@@ -979,6 +980,7 @@ def _system(
         clock=clock,
         runner_cfg=runtime_runner_cfg,
         plan_transform_factory=plan_transform_factory,
+        nominal_plan_factory=nominal_plan_factory,
     )
     return _System(
         runtime,
@@ -2578,3 +2580,77 @@ def test_split_grasp_and_place_preserve_verified_held_state_across_workflows() -
         "pick",
         "place",
     ]
+
+
+def test_nominal_factory_bypasses_ordinary_planning_and_preserves_effect_verification(
+    monkeypatch,
+):
+    requests = []
+
+    class Factory:
+        def create_nominal_plan_provider(self, request, *, engine):
+            requests.append(request)
+            action = engine.actions[request.invocation.skill_id]
+
+            def provide(resolved, context):
+                goal = action.require_goal(resolved)
+                position = torch.full(
+                    (context.batch_size, 1),
+                    goal.target_position,
+                    device=context.robot.qpos.device,
+                )
+                return action.build_command_plan(
+                    resolved,
+                    context,
+                    success=goal.plan_success,
+                    commands=TimedCommandSequence((), context.env_ids),
+                    expected_effects=StateDelta(
+                        articulation_joint_updates={
+                            ("fixture", "joint"): ArticulationJointState(position)
+                        }
+                    ),
+                    effect_verification=EffectVerificationRequirement(
+                        "semantic_effect"
+                    ),
+                    replannable=False,
+                    scene_dependency_monitor_until={"fixture": 0},
+                )
+
+            return provide
+
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        nominal_plan_factory=Factory(),
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("ordinary action planning must not run")
+
+    monkeypatch.setattr(system.action, "_plan", forbidden)
+    result = system.runtime.start(_call("external"), workflow_id="external-workflow")
+    for _ in range(10):
+        if result.terminal:
+            break
+        if result.wait_duration:
+            system.clock.sleep(result.wait_duration)
+        result = system.runtime.step()
+    assert system.action.plan_count == 0
+    assert len(requests) == 1 and requests[0].workflow_id == "external-workflow"
+    assert requests[0].workflow_call_index == 0
+    assert result.success_mask.tolist() == [True, True], result.to_metadata()
+    assert result.effects
+
+
+def test_nominal_factory_rejects_noncallable_provider():
+    class Factory:
+        def create_nominal_plan_provider(self, request, *, engine):
+            return object()
+
+    system = _system(
+        (EffectMonitorDecision(_mask(True, True), _mask(False, False)),),
+        nominal_plan_factory=Factory(),
+    )
+    result = system.runtime.start(_call("external"), workflow_id="external-workflow")
+    assert result.terminal and not result.success_mask.any()
+    assert "callable or None" in json.dumps(result.to_metadata())
+    assert system.action.plan_count == 0
