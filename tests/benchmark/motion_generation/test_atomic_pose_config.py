@@ -113,8 +113,16 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
 
 
 def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
-    """Every Franka task skill gets only its meaningful spatial domains."""
+    """Every Franka task skill gets its meaningful spatial or asset domains."""
     suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    asset_domain_ids = {
+        "nominal",
+        "cube_uniform_40mm",
+        "cube_uniform_60mm",
+        "cube_aspect_x",
+        "cube_aspect_y",
+        "cube_aspect_z",
+    }
     expected = {
         "spatial-rigid-object": (
             {"pick_up", "pour", "axis_align"},
@@ -167,6 +175,16 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_relative_shell",
             },
         ),
+        "asset-cube-rigid-object": (
+            {"pick_up", "pour", "axis_align"},
+            asset_domain_ids,
+        ),
+        "asset-cube-held-pose-target": (
+            {"move_held_object"},
+            asset_domain_ids,
+        ),
+        "asset-cube-place-target": ({"place"}, asset_domain_ids),
+        "asset-cube-position-target": ({"push_object"}, asset_domain_ids),
         "spatial-microwave-controls": (
             {"press", "twist"},
             {
@@ -208,14 +226,88 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v7"
-    assert len(suite.evaluation_tracks()) == 55
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v8"
+    assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
         skills, domain_ids = expected[track.id]
         assert {entry["id"] for entry in track.config["skills"]} == skills
         assert {domain.id for domain in track.domains} == domain_ids
         assert all(set(domain.applicability) == skills for domain in track.domains)
+
+
+def test_cube_asset_domains_override_only_geometry_for_every_cube_skill() -> None:
+    """Every cube skill receives one nominal and five isolated asset variants."""
+    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    expected_sizes = {
+        "nominal": [0.05, 0.05, 0.05],
+        "cube_uniform_40mm": [0.04, 0.04, 0.04],
+        "cube_uniform_60mm": [0.06, 0.06, 0.06],
+        "cube_aspect_x": [0.07, 0.042258, 0.042258],
+        "cube_aspect_y": [0.042258, 0.07, 0.042258],
+        "cube_aspect_z": [0.042258, 0.042258, 0.07],
+    }
+    cube_groups = {
+        "asset-cube-rigid-object",
+        "asset-cube-held-pose-target",
+        "asset-cube-place-target",
+        "asset-cube-position-target",
+    }
+    cube_skills = {
+        "pick_up",
+        "move_held_object",
+        "place",
+        "pour",
+        "axis_align",
+        "push_object",
+    }
+    nominal_object = suite.tracks[0].config["objects"][0]
+    asset_tracks = [
+        track
+        for track in suite.evaluation_tracks()
+        if track.domain.metadata.get("generalization_axis") == "asset_geometry"
+    ]
+
+    assert len(asset_tracks) == len(cube_groups) * len(expected_sizes)
+    assert {track.group_id for track in asset_tracks} == cube_groups
+    assert {
+        skill["id"] for track in asset_tracks for skill in track.config["skills"]
+    } == cube_skills
+    for group_id in cube_groups:
+        assert {
+            track.domain.id for track in asset_tracks if track.group_id == group_id
+        } == set(expected_sizes)
+
+    for track in asset_tracks:
+        object_config = track.config["objects"]
+        assert len(object_config) == 1
+        object_config = object_config[0]
+        expected_size = expected_sizes[track.domain.id]
+        assert object_config["id"] == "cube_subject"
+        assert object_config["kind"] == "cube"
+        assert object_config["size"] == expected_size
+        assert track.domain.objects == ["cube_subject"]
+        assert track.domain.perturbations == {"asset_size_m": expected_size}
+        assert track.domain.metadata["asset_family"] == "cube"
+        assert track.domain.metadata["nominal_size_m"] == [0.05, 0.05, 0.05]
+        assert track.domain.case_generator == "configured_asset_geometry"
+        assert resolve_atomic_batch_sizes(track) == [1]
+        assert resolve_atomic_pose_randomization(track).enabled is False
+        for field in (
+            "position",
+            "mass",
+            "dynamic_friction",
+            "static_friction",
+            "contact_offset",
+            "rest_offset",
+            "enable_ccd",
+        ):
+            assert object_config[field] == nominal_object[field]
+        assert {
+            case["object"]
+            for skill in track.config["skills"]
+            for case in skill["cases"]
+        } == {"cube_subject"}
 
 
 @pytest.mark.parametrize(
@@ -348,6 +440,14 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
                 assert settings.enabled is False
                 assert resolve_atomic_batch_sizes(track) == [1]
                 assert "control_parts" in track.config
+                continue
+            if track.domain.case_generator == "configured_asset_geometry":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                assert track.domain.metadata["generalization_axis"] == "asset_geometry"
+                assert track.config["objects"][0]["size"] == (
+                    track.domain.perturbations["asset_size_m"]
+                )
                 continue
             assert settings.enabled is True
             assert resolve_atomic_batch_sizes(track) == [8]

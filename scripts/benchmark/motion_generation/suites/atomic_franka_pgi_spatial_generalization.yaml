@@ -1,6 +1,6 @@
 schema_version: 1
 name: atomic_skill_franka_pgi_spatial_generalization
-suite_version: atomic_franka_pgi_spatial_generalization_v7
+suite_version: atomic_franka_pgi_spatial_generalization_v8
 profile: coverage
 
 # Reusable strict-spatial domain definitions. Every track below selects only
@@ -402,7 +402,7 @@ x-gripper-contact: &gripper_contact
   grasp_qpos: [0.040]
 
 x-cube: &cube
-  id: cube_50mm
+  id: cube_subject
   kind: cube
   size: [0.05, 0.05, 0.05]
   position: [-0.42, -0.08, 0.05]
@@ -413,6 +413,130 @@ x-cube: &cube
   rest_offset: 0.001
   enable_ccd: true
   settle_steps: 10
+
+x-cube-uniform-40mm: &cube_uniform_40mm
+  <<: *cube
+  size: [0.04, 0.04, 0.04]
+
+x-cube-uniform-60mm: &cube_uniform_60mm
+  <<: *cube
+  size: [0.06, 0.06, 0.06]
+
+# The elongated variants keep approximately the nominal cube volume while
+# moving the long axis between X, Y, and Z.
+x-cube-aspect-x: &cube_aspect_x
+  <<: *cube
+  size: [0.07, 0.042258, 0.042258]
+
+x-cube-aspect-y: &cube_aspect_y
+  <<: *cube
+  size: [0.042258, 0.07, 0.042258]
+
+x-cube-aspect-z: &cube_aspect_z
+  <<: *cube
+  size: [0.042258, 0.042258, 0.07]
+
+x-domain-cube-nominal: &domain_cube_nominal
+  id: nominal
+  version: v1
+  kind: nominal
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.05, 0.05, 0.05]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: nominal_50mm
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube]
+
+x-domain-cube-uniform-40mm: &domain_cube_uniform_40mm
+  id: cube_uniform_40mm
+  version: v1
+  kind: robustness
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.04, 0.04, 0.04]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: uniform_40mm
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube_uniform_40mm]
+
+x-domain-cube-uniform-60mm: &domain_cube_uniform_60mm
+  id: cube_uniform_60mm
+  version: v1
+  kind: robustness
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.06, 0.06, 0.06]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: uniform_60mm
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube_uniform_60mm]
+
+x-domain-cube-aspect-x: &domain_cube_aspect_x
+  id: cube_aspect_x
+  version: v1
+  kind: robustness
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.07, 0.042258, 0.042258]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: elongated_x
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube_aspect_x]
+
+x-domain-cube-aspect-y: &domain_cube_aspect_y
+  id: cube_aspect_y
+  version: v1
+  kind: robustness
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.042258, 0.07, 0.042258]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: elongated_y
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube_aspect_y]
+
+x-domain-cube-aspect-z: &domain_cube_aspect_z
+  id: cube_aspect_z
+  version: v1
+  kind: robustness
+  case_generator: configured_asset_geometry
+  objects: [cube_subject]
+  perturbations:
+    asset_size_m: [0.042258, 0.042258, 0.07]
+  metadata:
+    generalization_axis: asset_geometry
+    asset_family: cube
+    asset_variant: elongated_z
+    nominal_size_m: [0.05, 0.05, 0.05]
+  overrides:
+    batch_sizes: [1]
+    objects: [*cube_aspect_z]
 
 x-microwave-controls: &microwave_controls
   id: microwave
@@ -471,7 +595,7 @@ x-skill-pick-up: &skill_pick_up
   pre_action_settle_steps: 50
   cases:
     - name: spatial_cube_pick
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: medium
       grasp_offset_m: [0.0, 0.0, 0.0]
 
@@ -489,7 +613,7 @@ x-skill-move-held-object: &skill_move_held_object
   object_position_threshold_m: 0.04
   cases:
     - name: spatial_cube_transport
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: medium
 
 x-skill-place: &skill_place
@@ -507,7 +631,7 @@ x-skill-place: &skill_place
   object_position_threshold_m: 0.05
   cases:
     - name: spatial_cube_place
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: medium
 
 x-skill-press: &skill_press
@@ -607,15 +731,15 @@ x-skill-pour: &skill_pour
   minimum_object_lift_m: 0.04
   cases:
     - name: spatial_cube_pour_30deg
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: simple
       rotate_angle_rad: 0.5236
     - name: spatial_cube_pour_45deg
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: simple
       rotate_angle_rad: 0.7854
     - name: spatial_cube_pour_90deg
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: medium
       rotate_angle_rad: 1.5708
 
@@ -636,11 +760,11 @@ x-skill-axis-align: &skill_axis_align
   minimum_object_lift_m: 0.04
   cases:
     - name: spatial_cube_upright
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: medium
       target_axis: [0.0, 0.0, 1.0]
     - name: spatial_cube_horizontal
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: simple
       target_axis: [0.0, 1.0, 0.0]
 
@@ -656,12 +780,12 @@ x-skill-push-object: &skill_push_object
   object_tilt_threshold_rad: 0.0873
   cases:
     - name: spatial_cube_push_lateral_10cm
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: simple
       contact_distance_m: 0.042
       target_object_offset_m: [0.0, 0.10, 0.0]
     - name: spatial_cube_push_toward_base_8cm
-      object: cube_50mm
+      object: cube_subject
       task_difficulty: simple
       contact_distance_m: 0.052
       target_object_offset_m: [0.08, 0.0, 0.0]
@@ -851,6 +975,128 @@ tracks:
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
       - <<: *domain_target_relative_shell
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_cube
+      objects: [*cube]
+      skills: [*skill_push_object]
+
+  # Asset tracks keep their own nominal population so asset-geometry summaries
+  # are not mixed with the position and orientation domains above.
+  - id: asset-cube-rigid-object
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_cube_nominal
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_40mm
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_60mm
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_x
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_y
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_z
+        applicability: [pick_up, pour, axis_align]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_contact
+      objects: [*cube]
+      skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
+
+  - id: asset-cube-held-pose-target
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_cube_nominal
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_40mm
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_60mm
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_x
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_y
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_z
+        applicability: [move_held_object]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_cube
+      objects: [*cube]
+      skills: [*skill_move_held_object]
+
+  - id: asset-cube-place-target
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_cube_nominal
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_40mm
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_60mm
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_x
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_y
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_z
+        applicability: [place]
+        scene_layout: franka_pgi_cube_table_v1
+    config:
+      batch_sizes: [1]
+      seeds: [11, 23, 47]
+      physics: *physics
+      gripper: *gripper_cube
+      objects: [*cube]
+      skills: [*skill_place]
+
+  - id: asset-cube-position-target
+    scenario: atomic_task
+    enabled: true
+    domains:
+      - <<: *domain_cube_nominal
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_40mm
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_uniform_60mm
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_x
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_y
+        applicability: [push_object]
+        scene_layout: franka_pgi_cube_table_v1
+      - <<: *domain_cube_aspect_z
         applicability: [push_object]
         scene_layout: franka_pgi_cube_table_v1
     config:
