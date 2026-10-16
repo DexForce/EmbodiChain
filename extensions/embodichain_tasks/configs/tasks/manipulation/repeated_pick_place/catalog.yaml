@@ -10,3 +10,5 @@ deployments:
     config: task.ur5.yaml
   ur5_objective:
     config: task.ur5.objective.yaml
+  tianji_marvin:
+    config: task.tianji_marvin.yaml

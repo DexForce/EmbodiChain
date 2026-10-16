@@ -5138,6 +5138,33 @@ def _handover_context(
     )
 
 
+@pytest.mark.no_sim
+def test_handover_midpoint_preserves_coincident_roots_per_row() -> None:
+    """Torso-rooted arms retain their lifted pose in a mixed embodiment batch."""
+    lifted = torch.eye(4).repeat(4, 1, 1)
+    lifted[:, :3, 3] = torch.tensor([0.45, 0.12, 0.95])
+    source = torch.eye(4).repeat(4, 1, 1)
+    destination = source.clone()
+    source[0, 0, 3] = -0.3
+    destination[0, 0, 3] = 0.3
+    source[1, 1, 3] = -0.3
+    destination[1, 1, 3] = 0.3
+    # Include numerical noise below the one-micrometre separation boundary.
+    destination[3, 0, 3] = 1.0e-6
+    original = lifted.clone()
+
+    middle = HandOver._middle_object_pose(lifted, source, destination)
+
+    expected = lifted.clone()
+    expected[0, 0, 3] = 0.0
+    expected[1, 1, 3] = 0.0
+    torch.testing.assert_close(middle, expected)
+    torch.testing.assert_close(lifted, original)
+    torch.testing.assert_close(
+        HandOver._middle_object_pose(lifted, destination, source), expected
+    )
+
+
 def test_handover_picks_with_nearer_arm_and_preserves_waypoint_rotations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

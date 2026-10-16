@@ -48,6 +48,11 @@ Shared pose and backend contracts belong to
 [simulation](../simulation-system/simulation-system.md). Camera offsets are
 parent-relative; `parent=None` leaves manager-created views in arena space.
 The camera's extrinsics decoder owns look-at versus explicit-pose precedence.
+For explicit camera poses, `Camera.reset()` passes parent-mounted transforms
+to the native OpenGL view unchanged (-Z forward, +Y up). Unparented explicit
+poses are converted from optical axes (+Z forward, +Y down) by flipping Y/Z.
+Convert optical-frame mount calibration before storing a parented `pos/quat`;
+do not infer image direction from `get_arena_pose()` without this conversion.
 
 ## Camera attachment boundary
 

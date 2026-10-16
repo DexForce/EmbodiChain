@@ -2058,6 +2058,40 @@ def test_default_plane_authors_repeated_uv_before_spawn() -> None:
     )
 
 
+@pytest.mark.parametrize("num_envs", [1, 8])
+def test_default_lighting_only_updates_environment_fill(num_envs: int) -> None:
+    sim = object.__new__(SimulationManager)
+    sim._require_native_renderer = MagicMock()
+    sim._env = MagicMock()
+    sim._arenas = [MagicMock() for _ in range(num_envs)]
+    task_key = MagicMock()
+    task_fill = MagicMock()
+    existing_lights = {"task_key": task_key, "task_fill": task_fill}
+    sim._lights = dict(existing_lights)
+    sim.add_light = MagicMock()
+
+    sim.set_default_global_lighting()
+    sim.set_default_global_lighting()
+
+    assert sim._lights == existing_lights
+    assert task_key.mock_calls == []
+    assert task_fill.mock_calls == []
+    sim.add_light.assert_not_called()
+    sim._env.create_light.assert_not_called()
+    for arena in sim._arenas:
+        arena.create_light.assert_not_called()
+    expected_emission = [0.92, 0.95, 1.0]
+    expected_intensity = 80.0
+    assert sim._env.set_env_light_emission.call_args_list == [
+        call(expected_emission),
+        call(expected_emission),
+    ]
+    assert sim._env.set_env_light_intensity.call_args_list == [
+        call(expected_intensity),
+        call(expected_intensity),
+    ]
+
+
 @pytest.mark.parametrize("native_renderer", [False, True])
 @pytest.mark.parametrize("visible", [False, True])
 def test_ground_visibility_only_accesses_native_visuals(

@@ -125,6 +125,14 @@ with absolute `joint_position` goals. Its configured Slide lowerer derives the
 prismatic joint name, limits and axis sign from native articulation geometry;
 the Atomic planner grounds each target against fresh row-local joint state.
 
+Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
+`repeated_handover` and `tableware/pour_water`. The first two select verified tabletop
+programs; pouring selects a 750 mm table variant that lowers the scene and
+absolute targets by 125 mm while retaining the four-segment program behavior,
+dual-arm slow policy and independent measured checkpoints. All three inherit
+the shared compact ready pose. The shared embodiment owns calibrated
+grasp-frame TCPs and gripper evidence, not task-local object IDs.
+
 ## Recommended change sites
 
 | Requested change | Start here |

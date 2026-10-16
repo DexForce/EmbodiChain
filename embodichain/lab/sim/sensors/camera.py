@@ -47,6 +47,10 @@ class CameraCfg(SensorCfg):
 
         SimulationManager resolves ``parent`` as a Robot or Articulation link
         name. Use ``"<asset_uid>/<link_name>"`` when the link name is ambiguous.
+        Explicit mounted poses use OpenGL axes (-Z forward, +Y up).
+        Unparented explicit poses use optical axes (+Z forward, +Y down) and
+        are converted in :meth:`Camera.reset`. Look-at inputs specify viewing
+        direction directly in either case.
         """
 
         eye: Tuple[float, float, float] | None = None
@@ -316,7 +320,8 @@ class Camera(BaseSensor):
     ) -> None:
         """Set the local pose of the camera.
 
-        Note: The pose should be in the OpenGL coordinate system, which means the Y is up and Z is forward.
+        Note:
+            The pose uses OpenGL camera axes: +Y is up and -Z is forward.
 
         Args:
             pose (torch.Tensor): The local pose as ``(N, 4, 4)`` matrices or
