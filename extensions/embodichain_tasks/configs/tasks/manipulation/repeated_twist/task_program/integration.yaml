@@ -1,0 +1,33 @@
+integration_id: repeated_twist_v1
+program_id: repeated_twist
+requires:
+  scene_contract: repeated_twist_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_twist_scene_v1
+  registry_id: repeated_twist_scene
+  articulations:
+    - entity_id: microwave
+      simulation_uid: microwave
+      dynamics: dynamic
+  links:
+    - entity_id: microwave_twist_target
+      articulation_id: microwave
+      native_link_name: knob_link
+      dynamics: dynamic
+profile:
+  defaults:
+    twist:
+      primary: primary_manipulator
+  action_options:
+    simulation.twist:
+      kind: twist
+      hand_interp_steps: 20
+      twist_angle: -0.7853981633974483
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: twist
+      articulation_id: microwave
+      articulation_simulation_uid: microwave
+      link_entity_id: microwave_twist_target

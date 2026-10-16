@@ -1,0 +1,34 @@
+integration_id: repeated_axis_align_v1
+program_id: repeated_axis_align
+requires:
+  scene_contract: repeated_axis_align_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_axis_align_scene_v1
+  registry_id: repeated_axis_align_scene
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+          internal_axis: [1.0, 0.0, 0.0]
+profile:
+  defaults:
+    axis_align:
+      primary: primary_manipulator
+  action_options:
+    simulation.axis_align:
+      kind: axis_align
+      pre_grasp_distance: 0.15
+      lift_height: 0.16
+      hand_interp_steps: 12
+      approach_direction: [0.0, 0.0, -1.0]
+      target_axis: [0.0, 0.0, 1.0]
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: axis_align
+      object_id: cube

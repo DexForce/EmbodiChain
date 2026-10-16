@@ -1,0 +1,11 @@
+program_id: repeated_pickup
+instruction: Pick up the cube
+targets: {}
+program:
+  kind: segment
+  name: pickup
+  steps:
+    kind: invoke
+    call:
+      kind: pick
+      object: cube

@@ -1,0 +1,26 @@
+runtime:
+  num_envs: 2
+  max_episode_steps: 4000
+  env:
+    dataset:
+      lerobot:
+        params:
+          save_path: /tmp/embodichain-manipulation/repeated_move_held_object/datasets
+          extra:
+            task_description: repeated_move_held_object
+policy:
+  component: ../../../components/expansion_policies/atomic_fixed_scene.yaml
+overrides:
+  source:
+    source_id: repeated_move_held_object
+    source_revision: config:repeated_move_held_object
+    template_id: repeated_move_held_object_episode
+    call_count: 3
+    affordance_call_indices:
+    - 0
+    trajectory_call_indices:
+    - 0
+    - 1
+    - 2
+  persistence:
+    output_dir: /tmp/embodichain-manipulation/repeated_move_held_object/expansion

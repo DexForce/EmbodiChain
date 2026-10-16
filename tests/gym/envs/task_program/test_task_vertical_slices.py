@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -64,6 +65,7 @@ from embodichain.lab.sim.atomic_actions import (
     ObjectSemantics,
     Slide,
     SlideAffordance,
+    SlideJointTarget,
     SlideOptions,
     TaskState,
     TimedTerminalAcceptance,
@@ -97,9 +99,11 @@ _REPEATED_CUBE_GYM_CONFIG = Path("tasks/manipulation/repeated_pick_place/task.ur
 _RUBIKS_CUBE_GYM_CONFIG = Path(
     "tasks/manipulation/rubiks_cube_pick_place/task.ur5.yaml"
 )
-_OPEN_DRAWER_PROGRAM = Path("tasks/manipulation/open_drawer/task_program/program.yaml")
-_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/open_drawer/task.ur5.yaml")
-_TRAJECTORY_POLICY = Path("components/execution_policies/trajectory_open_loop.yaml")
+_OPEN_DRAWER_PROGRAM = Path(
+    "tasks/manipulation/repeated_slide/task_program/program.yaml"
+)
+_OPEN_DRAWER_GYM_CONFIG = Path("tasks/manipulation/repeated_slide/task.ur5.yaml")
+_TRAJECTORY_POLICY = Path("components/execution_policies/atomic_trapezoidal.yaml")
 _UR5_COMPONENT = Path("components/embodiments/ur5_dh_pgi_140_80.yaml")
 _OPEN_DRAWER_CALL_ID = "simulation.articulation_link_slide"
 _OPEN_DRAWER_ENTITY_ID = "drawer"
@@ -110,8 +114,8 @@ _OPEN_DRAWER_PROFILE_ID = "ur5_dh_pgi_140_80"
 _LIFECYCLE_BATCH_SIZE = 2
 _LIFECYCLE_ROBOT_DOF = 3
 _LIFECYCLE_STEP_DT = 0.02
-_EXPECTED_TRAJECTORY_SAMPLE_COUNT = 40
-_EXPECTED_GRASP_SAMPLES = 1_000
+_EXPECTED_TRAJECTORY_SAMPLE_COUNT = 120
+_EXPECTED_GRASP_SAMPLES = 10_000
 
 
 def _drawer_handle_point_cloud_geometry() -> dict[str, torch.Tensor]:
@@ -652,7 +656,7 @@ def test_cube_variant_extends_by_data_without_motion_generation_code() -> None:
 
 
 def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
-    """The drawer config supplies one registered call with no acceptance hooks."""
+    """One round opens and closes the drawer before the host resets the scene."""
     payload = _read_payload(_OPEN_DRAWER_PROGRAM)
     config = _decode_deployed_program(
         payload,
@@ -664,21 +668,24 @@ def test_open_drawer_program_compiles_to_registered_slide_call() -> None:
 
     segments = tuple(_drawer_compiler().compile(config))
 
-    assert len(segments) == 1
-    assert segments[0].name == "open_drawer"
-    assert len(segments[0].calls) == 1
-    call = segments[0].calls[0].call
-    assert type(call) is RegisteredSemanticCall
-    assert call.call_id == _OPEN_DRAWER_CALL_ID
-    assert dict(call.arguments) == {
-        "handle": "drawer_handle",
-    }
-    assert dict(call.resources) == {}
-    assert segments[0].post_policies == ()
-    assert segments[0].validators == ()
+    assert len(segments) == 2
+    for index, segment in enumerate(segments):
+        assert segment.name == ("open_drawer" if index % 2 == 0 else "close_drawer")
+        assert len(segment.calls) == 1
+        call = segment.calls[0].call
+        assert type(call) is RegisteredSemanticCall
+        assert call.call_id == _OPEN_DRAWER_CALL_ID
+        assert dict(call.arguments) == {
+            "handle": "drawer_handle",
+            "joint_position": 0.18 if index % 2 == 0 else 0.0,
+        }
+        assert dict(call.resources) == {}
+        assert segment.post_policies == ()
+        assert segment.validators == ()
 
 
-def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
+@pytest.mark.parametrize("axis_sign", (1, -1))
+def test_open_drawer_config_owns_registered_lowerer_factory(axis_sign: int) -> None:
     """The decoded registration owns call discovery and fresh live lowerers."""
     registration = _drawer_integration().registration
 
@@ -699,6 +706,17 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
             init_qpos=(0.0,),
             body_scale=(1.0, 1.0, 1.0),
         )
+
+        @staticmethod
+        def get_parent_joint_chain(name):
+            assert name == _OPEN_DRAWER_HANDLE_LINK_NAME
+            return (
+                SimpleNamespace(
+                    name="drawer_joint",
+                    joint_type="prismatic",
+                    joint_limits=(0.0, 0.3),
+                ),
+            )
 
         @staticmethod
         def get_link_vert_face(name: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -734,6 +752,10 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         get_articulation=lambda identifier: drawer if identifier == "drawer" else None
     )
     sampled_geometry = _drawer_handle_articulation_geometry()
+    sampled_geometry = replace(
+        sampled_geometry,
+        prismatic_joint_axis=sampled_geometry.prismatic_joint_axis * axis_sign,
+    )
 
     with patch(
         "embodichain.lab.task_program.integrations._configured_services."
@@ -779,6 +801,10 @@ def test_open_drawer_config_owns_registered_lowerer_factory() -> None:
         first_affordance.translation_axis,
         torch.tensor([0.0, 1.0, 0.0]),
     )
+    assert first_affordance.joint_name == "drawer_joint"
+    assert first_affordance.joint_limits == (0.0, 0.3)
+    assert first[0]._joint_target_template.articulation_id == _OPEN_DRAWER_ENTITY_ID
+    assert first[0]._joint_target_template.axis_sign == axis_sign
 
 
 def test_open_drawer_lowerer_keeps_optional_legacy_axis_compatibility() -> None:
@@ -799,7 +825,7 @@ def test_open_drawer_lowerer_keeps_optional_legacy_axis_compatibility() -> None:
         path="runtime_services.lowerer",
     )
 
-    assert automatic.revision == "4"
+    assert automatic.revision == "5"
     assert automatic.translation_axis is None
     assert legacy.translation_axis == (0.0, 1.0, 0.0)
 
@@ -919,6 +945,17 @@ def test_open_drawer_lowerer_accepts_only_canonical_payload() -> None:
     )
     assert lowering.goal.target_pose.entity_id == _OPEN_DRAWER_HANDLE_ID
 
+    with pytest.raises(ValueError, match="unambiguous prismatic"):
+        lowerer.lower(
+            RegisteredSemanticCall(
+                call_id=_OPEN_DRAWER_CALL_ID,
+                arguments={**minimal, "joint_position": 0.18},
+            ),
+            context=None,
+            bound=None,
+            option_template=options,
+        )
+
     with pytest.raises(ValueError, match="motion options belong"):
         lowerer.lower(
             RegisteredSemanticCall(
@@ -977,6 +1014,57 @@ def test_open_drawer_lowerer_owns_a_snapshot_of_the_current_target_pose() -> Non
     assert torch.equal(lowering.goal.target_pose, torch.eye(4))
 
 
+@pytest.mark.parametrize("position", (0.0, 0.18))
+def test_slide_lowerer_grounds_absolute_joint_intent_without_overriding_options(
+    position: float,
+) -> None:
+    from embodichain.lab.task_program.integrations._configured_services import (
+        _ArticulationLinkSlideLowerer,
+    )
+
+    lowerer = _ArticulationLinkSlideLowerer(
+        ObjectSemantics(
+            label="drawer_handle",
+            entity_id=_OPEN_DRAWER_HANDLE_ID,
+            geometry=_drawer_handle_point_cloud_geometry(),
+            affordance=SlideAffordance(
+                mesh_vertices=torch.tensor(
+                    [[-0.1, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.0, 0.0]]
+                ),
+                mesh_triangles=torch.tensor([[0, 1, 2]]),
+                joint_name="drawer_joint",
+                joint_limits=(0.0, 0.3),
+            ),
+        ),
+        _OPEN_DRAWER_HANDLE_ID,
+        joint_target_template=SlideJointTarget(
+            _OPEN_DRAWER_ENTITY_ID, "drawer_joint", 0.0, axis_sign=-1
+        ),
+    )
+    options = SlideOptions(translation_distance=0.18)
+    call = RegisteredSemanticCall(
+        _OPEN_DRAWER_CALL_ID,
+        {"handle": _OPEN_DRAWER_HANDLE_ID, "joint_position": position},
+    )
+    lowering = lowerer.lower(call, context=None, bound=None, option_template=options)
+    target = lowering.goal.joint_target
+    assert target.position == position
+    assert target.articulation_id == _OPEN_DRAWER_ENTITY_ID
+    assert target.joint_name == "drawer_joint"
+    assert target.axis_sign == -1
+    assert lowering.skill_options is None
+    assert options.direction == "pull"
+
+    for invalid in (True, "0.1", float("nan"), float("inf"), -0.01, 0.31):
+        with pytest.raises(ValueError, match="finite|joint limits"):
+            lowerer.lower(
+                replace(call, arguments={**call.arguments, "joint_position": invalid}),
+                context=None,
+                bound=None,
+                option_template=options,
+            )
+
+
 def test_cube_config_registers_embodied_env_with_its_integration_factory() -> None:
     """Repeated Pick/Place needs no environment subclass or task module."""
     payload, cfg, spec = _configure_cube_environment()
@@ -1012,7 +1100,11 @@ def test_example_profiles_execute_only_open_loop_trajectories(
     preset = binding.presets[0]
 
     assert preset.preset_id == "trajectory"
-    assert preset.motion_policy.sample_count == _EXPECTED_TRAJECTORY_SAMPLE_COUNT
+    assert preset.motion_policy.sample_count == (
+        140
+        if create_binding is _drawer_robot_profile_binding
+        else _EXPECTED_TRAJECTORY_SAMPLE_COUNT
+    )
     assert preset.motion_policy.dynamic_collision_mode is DynamicCollisionMode.OFF
     assert preset.tracking_policy.in_flight is None
     assert isinstance(preset.tracking_policy.terminal, TimedTerminalAcceptance)
@@ -1054,7 +1146,7 @@ def test_cube_registration_has_no_contact_evidence_route() -> None:
     (
         Path("tasks/manipulation/repeated_pick_place/task.ur5.yaml"),
         _RUBIKS_CUBE_GYM_CONFIG,
-        Path("tasks/manipulation/open_drawer/task.ur5.yaml"),
+        Path("tasks/manipulation/repeated_slide/task.ur5.yaml"),
     ),
 )
 def test_example_gym_configs_keep_minimal_recording_configuration(
@@ -1062,7 +1154,7 @@ def test_example_gym_configs_keep_minimal_recording_configuration(
 ) -> None:
     """Runnable examples retain deterministic physics and LeRobot recording."""
     payload = _read_payload(relative_path)
-    if relative_path.parent.name in {"repeated_pick_place", "open_drawer"}:
+    if relative_path.parent.name in {"repeated_pick_place", "repeated_slide"}:
         environment = _read_payload(relative_path.parent / "envs/default.yaml")
         assert payload["environment"] == {
             "default": "envs/default.yaml",
@@ -1082,7 +1174,12 @@ def test_example_gym_configs_keep_minimal_recording_configuration(
     assert "task_program_path" not in payload
     assert "task_program_integration_path" not in payload
     assert "task_program_runtime" not in payload
-    assert environment["env"]["events"] == {}
+    events = environment["env"].get("events", {})
+    if relative_path.parent.name == "repeated_pick_place":
+        assert events["settle_cube"]["mode"] == "reset"
+        assert set(events) == {"settle_cube"}
+    else:
+        assert events == {}
     assert set(environment["env"]["dataset"]) == {"lerobot"}
     recorder = environment["env"]["dataset"]["lerobot"]
     assert recorder["func"] == "LeRobotRecorder"

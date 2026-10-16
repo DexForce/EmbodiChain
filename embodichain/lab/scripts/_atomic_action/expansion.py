@@ -38,31 +38,12 @@ from embodichain.utils import logger
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
 
-# The host grants permissions by the actual skill's segment names, never by
-# guessing from a global waypoint index. Unlisted phases remain exact.
-FREE_PHASES = {
-    "pick_up": {"approach", "lift"},
-    "place": {"approach", "retract"},
-    # Pour's single segment contains the required rotated target between its
-    # outward and return legs. Protect it until the plan exports that boundary;
-    # preserving only the segment endpoints would change the requested angle.
-    "pour": set(),
-    "press": {"approach", "retract"},
-    "slide": {"approach", "return"},
-    "twist": {"approach", "retract"},
-    "hand_over": {
-        "pickup_approach",
-        "pickup_transport",
-        "receive_approach",
-        "source_retreat",
-        "place",
-    },
-    # The sample makes each required joint target a separate invocation, so
-    # every required waypoint is an endpoint of its editable motion phase.
-    "move_joints": {"move_joints"},
-    "axis_align": {"approach", "manipulate"},
-    "open_door": {"approach", "retract"},
-}
+from embodichain.lab.sim.atomic_actions._expansion_phases import (
+    FREE_PHASES,
+    _canonical_samples,
+    _free_joint_indices,
+)
+
 OPERATORS = ("joint_residual", "via_points")
 
 
@@ -83,22 +64,10 @@ def _template(
     skill: str,
     branch: int,
 ) -> tuple[TrajectoryTemplate, torch.Tensor]:
-    positions = compiled.trajectory.positions[row].detach().cpu()
-    dt = compiled.trajectory.dt[row].detach().cpu().clone()
-    dt[0] = 0
-    keep = torch.ones(len(dt), dtype=torch.bool)
-    for index in range(1, len(dt)):
-        if float(dt[index]) == 0:
-            if not torch.allclose(
-                positions[index], positions[index - 1], atol=1e-5, rtol=0
-            ):
-                raise ValueError("Atomic action has a position change in zero time")
-            keep[index] = False
-    counts = torch.cumsum(keep.long(), 0)
-    boundaries = torch.cat((torch.zeros(1, dtype=torch.long), counts))
-    # Restore action joins after expansion, retaining callback indices and
-    # exactly the source intervals. No temporal factor is enabled here.
-    restore = counts - 1
+    positions, dt, boundaries, restore = _canonical_samples(
+        compiled.trajectory.positions[row],
+        compiled.trajectory.dt[row],
+    )
     phases = []
     for action_index, plan in enumerate(compiled.action_plans):
         editable = FREE_PHASES.get(plan.skill_id)
@@ -126,11 +95,15 @@ def _template(
         source_revision="example_scene_v1",
         template_id=f"{skill}:grasp:{branch}",
         joint_names=joint_names,
-        positions=positions[keep],
-        dt=dt[keep],
+        positions=positions,
+        dt=dt,
         phases=tuple(phases),
         allowed_operators=OPERATORS,
-        controlled_joint_indices=joint_ids,
+        controlled_joint_indices=(
+            _free_joint_indices(positions, tuple(phases), joint_ids)
+            if skill == "handover"
+            else joint_ids
+        ),
     )
     return template, restore
 
@@ -173,12 +146,15 @@ def _augment(
         plan.skill_id == "slide" for plan in compiled.action_plans
     )
     for row, (branch, variant_index) in enumerate(args._recipes):
+        failed = not bool(compiled.plan_success[row])
         # Slide plans against each row's measured robot and handle state,
         # including after pull replay. Its branch identity remains shared in
         # affordance sampling, while geometry, timing and provenance stay local.
         # Other sample scenes retain one reference within each grasp branch.
         reference_row = (
-            row if row_local_reference else reference_rows.setdefault(branch, row)
+            row
+            if row_local_reference or failed
+            else reference_rows.setdefault(branch, row)
         )
         record = {
             "row": row,
@@ -189,7 +165,8 @@ def _augment(
             "operator": "none",
             "rejected": {},
         }
-        if variant_index == 0:
+        # Failed plans retain their own source hold and cannot seed a branch.
+        if failed or variant_index == 0:
             rows.append(trajectory.positions[reference_row].clone())
         else:
             template, restore = _template(
@@ -236,13 +213,23 @@ def _augment(
                 device=trajectory.positions.device,
                 dtype=trajectory.positions.dtype,
             )
+            protected_ids = [
+                index
+                for index in range(trajectory.robot_dof)
+                if index not in template.controlled_joint_indices
+            ]
+            restored[:, protected_ids] = trajectory.positions[
+                reference_row, :, protected_ids
+            ]
             # Canonicalization may merge near-identical zero-time samples.
             # Restore immutable phases from their actual source indices so
             # neither that merge nor resampling can alter a required target.
             for action_index, plan in enumerate(compiled.action_plans):
                 for segment in plan.segments:
+                    absolute = compiled.segment(action_index, segment.name)
+                    for index in (absolute.start, absolute.stop - 1):
+                        restored[index] = trajectory.positions[reference_row, index]
                     if segment.name not in FREE_PHASES[plan.skill_id]:
-                        absolute = compiled.segment(action_index, segment.name)
                         restored[absolute.start : absolute.stop] = trajectory.positions[
                             reference_row, absolute.start : absolute.stop
                         ]

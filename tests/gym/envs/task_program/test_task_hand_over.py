@@ -78,9 +78,9 @@ _CAN_ID = "can"
 _CAN_SIMULATION_UID = "handover_object"
 _SUPPORT_SURFACE_UID = "support_surface"
 _SCENE_ID = "dual_ur5_handover_v1"
-_PROFILE_ID = "dual_ur5_dh_pgi_140_80"
+_PROFILE_ID = "dual_ur5_robotiq_2f_140"
 _OPEN_QPOS = 0.0
-_GRASP_QPOS = 0.04
+_GRASP_QPOS = 0.5
 _CONSTRAINT_QPOS_THRESHOLD = 0.004
 _PRODUCTION_POSITION_TOLERANCE = 0.12
 _REPOSITORY_ROOT = Path(__file__).parents[4]
@@ -93,13 +93,18 @@ _RUN_REAL_SIM_EPISODE = (
     "Path(sys.argv[2]).write_text(json.dumps(metadata), encoding='utf-8'); "
     "sys.stdout.flush(); sys.stderr.flush(); os._exit(0)"
 )
+_RUN_REAL_SIM_EXPANDED_EPISODES = (
+    "import runpy, sys; from pathlib import Path; "
+    "module = runpy.run_path(sys.argv[1]); "
+    "module['_run_real_sim_expanded_episodes'](Path(sys.argv[2]))"
+)
 
 
 def _gym_config_path() -> Path:
     """Return the installed-source dual-UR5 Gym config path."""
     return (
         Path(__file__).parents[4]
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/"
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_handover/"
         "task.dual_ur5_dh_pgi_140_80.yaml"
     )
 
@@ -138,7 +143,7 @@ def test_hand_over_registers_plain_embodied_env_from_config() -> None:
     assert __all__ == []
     assert importlib.util.find_spec("embodichain_tasks.manipulation.hand_over") is None
     assert spec.cls is EmbodiedEnv
-    assert spec.max_episode_steps == 1200
+    assert spec.max_episode_steps == 2000
     assert spec.task_program_registration is not None
     assert spec.task_program_adapter_factory is not None
     assert spec.task_program_adapter_factory.registration is (
@@ -157,19 +162,19 @@ def test_hand_over_gym_config_selects_packaged_program_without_contact_sensor() 
         "program": "task_program/program.yaml",
         "integration": "task_program/integration.yaml",
         "execution_policy": (
-            "../../../components/execution_policies/motion_gen_verified.yaml"
+            "../../../components/execution_policies/atomic_handover.yaml"
         ),
     }
     assert payload["environment"] == {"component": "env.yaml"}
     assert payload["embodiment"] == {
-        "component": ("../../../components/embodiments/dual_ur5_dh_pgi_140_80.yaml")
+        "component": ("../../../components/embodiments/dual_ur5_robotiq_2f_140.yaml")
     }
     embodiment = load_config(
         _gym_config_path().parent / payload["embodiment"]["component"]
     )
-    evidence = embodiment["skill_profile"]["runtime_services"]["control_part_evidence"]
+    services = embodiment["skill_profile"]["runtime_services"]
     assert embodiment["embodiment_id"] == _PROFILE_ID
-    assert "object_ids" not in evidence
+    assert "control_part_evidence" not in services
     assert "task_program" not in environment
     assert environment["physics"] == "default"
     assert environment["physics_config"] == {"enable_ccd": True}
@@ -196,16 +201,16 @@ def test_hand_over_gym_config_rejects_newton_override() -> None:
         config_to_cfg(payload, source_path=_gym_config_path())
 
 
-def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
+def test_hand_over_gym_config_builds_dual_ur5_robotiq_scene() -> None:
     """Config parsing preserves the tutorial robot, can, and support geometry."""
     cfg = _configured_env_cfg()
 
     assert type(cfg.robot) is RobotCfg
-    assert cfg.robot.uid == "DualUR5"
+    assert cfg.robot.uid == "DualUR5HandOver"
     assert cfg.robot.control_parts["left_arm"] == ["left_joint[0-9]"]
     assert cfg.robot.control_parts["right_arm"] == ["right_joint[0-9]"]
-    assert cfg.robot.control_parts["left_eef"] == ["left_gripper_finger1_joint_1"]
-    assert cfg.robot.control_parts["right_eef"] == ["right_gripper_finger1_joint_1"]
+    assert cfg.robot.control_parts["left_eef"] == ["left_.*(?:finger|knuckle)_joint"]
+    assert cfg.robot.control_parts["right_eef"] == ["right_.*(?:finger|knuckle)_joint"]
     assert set(cfg.robot.urdf_cfg.components) == {
         "left_arm",
         "right_arm",
@@ -224,26 +229,10 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.robot.solver_cfg["left_arm"].end_link_name == "left_ee_link"
     assert cfg.robot.solver_cfg["right_arm"].root_link_name == "right_base_link"
     assert cfg.robot.solver_cfg["right_arm"].end_link_name == "right_ee_link"
-    assert cfg.robot.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.155)
+    assert cfg.robot.solver_cfg["right_arm"].tcp[2][3] == pytest.approx(0.21)
     assert list(cfg.robot.init_qpos) == pytest.approx(
-        [
-            0.0,
-            0.0,
-            -1.57,
-            -1.57,
-            1.57,
-            1.57,
-            -1.57,
-            -1.57,
-            -1.57,
-            -1.57,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ]
+        [0.0, 0.0, -1.57, -1.57, 1.57, 1.57, -1.57, -1.57, -1.57, -1.57, 0.0, 0.0]
+        + [0.0] * 12
     )
     assert [item.uid for item in cfg.background] == [_SUPPORT_SURFACE_UID]
     assert [item.uid for item in cfg.rigid_object] == [_CAN_SIMULATION_UID]
@@ -252,34 +241,23 @@ def test_hand_over_gym_config_builds_dual_ur5_pgi_scene() -> None:
     assert cfg.task_program.program_id == "dual_ur5_hand_over"
 
 
-def test_hand_over_config_owns_tuned_can_and_pgi_physics() -> None:
-    """The sole config source retains the tuned object and gripper dynamics."""
-    cfg = _configured_env_cfg()
+def test_hand_over_config_owns_tuned_can_and_robotiq_physics() -> None:
+    """The can and Robotiq fixture retain the direct Atomic sample's values."""
+    from embodichain.lab.scripts._atomic_action.handover import HAND_CLOSE_QPOS
 
+    assert _GRASP_QPOS == pytest.approx(HAND_CLOSE_QPOS)
+    cfg = _configured_env_cfg()
     assert cfg.rigid_object[0].attrs.mass_props.mass == pytest.approx(0.33)
     drive = cfg.robot.joint_drive_props
-    expected_values = {
-        "stiffness": 1e3,
-        "damping": 1e2,
-        "max_effort": 1e4,
-    }
-    for property_name, master_value in expected_values.items():
-        values = getattr(drive, property_name)
-        for side in ("left", "right"):
-            assert values[f"{side}_gripper_finger1_joint_1"] == pytest.approx(
-                master_value
-            )
-            assert values[f"{side}_gripper_finger2_joint_1"] == pytest.approx(0.0)
-    finger_attrs = cfg.robot.link_attrs["gripper_fingers"].attrs
-    assert finger_attrs.material_props.dynamic_friction == pytest.approx(2.0)
-    assert finger_attrs.material_props.static_friction == pytest.approx(2.0)
-    assert isinstance(finger_attrs.collision_props, NewtonCollisionPropertiesCfg)
-    assert finger_attrs.collision_props.condim == 4
-    assert isinstance(finger_attrs.material_props, NewtonRigidBodyMaterialCfg)
-    assert finger_attrs.material_props.ke == pytest.approx(4.0e4)
-    assert finger_attrs.material_props.kd == pytest.approx(4.0e2)
-    assert finger_attrs.material_props.torsional_friction == pytest.approx(0.1)
-    assert finger_attrs.material_props.rolling_friction == pytest.approx(0.01)
+    for name, value in {"stiffness": 1e3, "damping": 1e2, "max_effort": 1e4}.items():
+        assert getattr(drive, name)[
+            "(left|right)_.*(?:finger|knuckle)_joint"
+        ] == pytest.approx(value)
+    binding = _integration().registration.robot_profile_binding
+    for preset in binding.command_presets:
+        assert list(preset.commands["grasp"]) == pytest.approx(
+            [0.5, -0.5, -0.5, -0.5, 0.5, 0.5]
+        )
 
 
 def test_hand_over_composition_owns_scene_pose_and_evidence_services() -> None:
@@ -302,16 +280,17 @@ def test_hand_over_composition_owns_scene_pose_and_evidence_services() -> None:
     assert type(provider) is ConfiguredHandOverPoseProvider
     assert provider.final_position == pytest.approx((0.0, -0.2, 0.6))
 
-    declaration = registration.catalog.control_part_evidence_declaration
-    assert declaration is not None
-    assert declaration.provider_id == CONTROL_PART_EVIDENCE_PROVIDER_ID
-    assert declaration.revision == CONTROL_PART_EVIDENCE_PROVIDER_REVISION
+    assert registration.catalog.control_part_evidence_declaration is None
 
 
 def test_dual_ur5_evidence_scope_follows_graspable_scene_objects() -> None:
     """The generic embodiment derives object scope from the selected task scene."""
-    factory = _integration().registration.control_part_evidence_factory
-    assert type(factory) is _JointPositionConstraintEvidenceProviderFactory
+    factory = _JointPositionConstraintEvidenceProviderFactory(
+        control_parts=("left_eef", "right_eef"),
+        open_qpos=(0.0,),
+        minimum_displacement=0.004,
+        object_ids=None,
+    )
     assert factory.object_ids is None
 
     class StateProvider:
@@ -424,31 +403,31 @@ def test_hand_over_profile_binds_unified_left_to_right_transfer() -> None:
         "destination": "right",
     }
     preset = binding.presets[0]
-    assert preset.preset_id == "safe"
+    assert preset.preset_id == "trajectory"
     assert preset.motion_policy.strategy == "motion_gen"
-    assert preset.motion_policy.sample_count == 140
-    assert preset.tracking_policy.in_flight is not None
-    assert preset.tracking_policy.in_flight.metrics[0].tolerance == pytest.approx(1.0)
-    assert preset.tracking_policy.terminal.metrics[0].tolerance == pytest.approx(1.0)
+    assert preset.motion_policy.sample_count == 220
+    assert preset.tracking_policy.in_flight is None
     assert preset.recovery_policy.max_action_retries == 0
-    assert preset.recovery_policy.goal_rotation_threshold == pytest.approx(0.5)
-    assert preset.workflow_recovery_policy.max_recovery_attempts == 2
-    assert preset.runner_cfg.minimum_cycle_time == pytest.approx(0.04)
-    assert preset.runner_cfg.hold_during_effect_verification is False
-    assert preset.runner_cfg.hold_on_completion is False
-    assert preset.effect_monitors["hand_over"].params["consecutive_samples"] == 10
+    assert preset.recovery_policy.action_timeout == 120.0
+    assert preset.workflow_recovery_policy.max_recovery_attempts == 0
+    assert preset.runner_cfg.minimum_cycle_time == 0.0
+    assert not preset.runner_cfg.hold_during_effect_verification
+    assert not preset.runner_cfg.hold_on_completion
+    assert not preset.effect_monitors
     hand_over_options = preset.action_option_templates["hand_over"]
     assert type(hand_over_options) is HandOverOptions
     assert hand_over_options.pre_grasp_distance == pytest.approx(0.08)
-    assert hand_over_options.lift_height == pytest.approx(0.08)
+    assert hand_over_options.lift_height == pytest.approx(0.15)
     assert hand_over_options.hand_interp_steps == 10
     assert dict(binding.grounding_providers) == {
         "hand_over": ConfiguredHandOverPoseProvider.provider_id,
     }
     for side, command_preset in zip(("left", "right"), binding.command_presets):
         assert command_preset.control_part == f"{side}_eef"
-        assert tuple(command_preset.commands["open"]) == (_OPEN_QPOS,)
-        assert tuple(command_preset.commands["grasp"]) == (_GRASP_QPOS,)
+        assert tuple(command_preset.commands["open"]) == (_OPEN_QPOS,) * 6
+        assert tuple(command_preset.commands["grasp"]) == pytest.approx(
+            (0.5, -0.5, -0.5, -0.5, 0.5, 0.5)
+        )
 
 
 def test_hand_over_program_preflights_against_configured_registration() -> None:
@@ -461,16 +440,15 @@ def test_hand_over_program_preflights_against_configured_registration() -> None:
     segments = tuple(compiled)
 
     assert len(segments) == 1
-    assert segments[0].name == "hand_over_can"
-    assert [type(call.call) for call in segments[0].calls] == [HandOver]
-    hand_over = segments[0].calls[0].call
-    assert hand_over.final_target is not None
-    pose_provider = registration.handover_pose_providers[0]
-    assert hand_over.final_target.position.tolist() == pytest.approx(
-        pose_provider.final_position
-    )
-    assert len(segments[0].post_policies) == 1
-    assert len(segments[0].validators) == 1
+    targets = ([0.0, -0.2, 0.6],)
+    for segment, target in zip(segments, targets):
+        assert segment.name == "hand_over_can"
+        assert [type(call.call) for call in segment.calls] == [HandOver]
+        hand_over = segment.calls[0].call
+        assert hand_over.final_target is not None
+        assert hand_over.final_target.position.tolist() == pytest.approx(target)
+        assert not segment.post_policies
+        assert not segment.validators
 
 
 def _initialize_child_sim_engine() -> None:
@@ -500,7 +478,8 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
     from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 
     _initialize_child_sim_engine()
-    cfg = _configured_env_cfg()
+    objective_path = _gym_config_path().with_name("task.ur5.objective.yaml")
+    cfg = config_to_cfg(load_config(objective_path), source_path=objective_path)
     cfg.seed = 0
     cfg.num_envs = 1
     cfg.sim_cfg = SimulationManagerCfg(
@@ -524,13 +503,138 @@ def _run_real_sim_expert_episode() -> dict[str, object]:
 
     env: EmbodiedEnv | None = None
     try:
-        env = REGISTERED_ENVS[_ENV_ID].make(cfg=cfg)
+        env = REGISTERED_ENVS["HandOver-Objective-v1"].make(cfg=cfg)
         env.reset(seed=0)
         return execute_demo_episode(env).to_metadata()
     finally:
         if env is not None:
             env.close(exit_process=False)
         SimulationManager.flush_cleanup_queue()
+
+
+def _run_real_sim_expanded_episodes(metadata_path: Path) -> None:
+    """Measure holding through handover for one branch's four real variants."""
+    from embodichain.lab.gym.envs.base_env import BaseEnv
+    from embodichain.lab.scripts import run_env
+    from embodichain.lab.task_program.integrations import (
+        CombinedTaskProgramExpansionFactory,
+    )
+
+    _initialize_child_sim_engine()
+    original_transform = CombinedTaskProgramExpansionFactory._transform
+    original_step = BaseEnv.step
+    original_main = run_env.main
+    current: dict[str, object] = {}
+    report = {"episodes": 0, "expanded_variants": 0, "held_checks": 0}
+
+    def inspect_transform(self, call_request, engine, resolved, context, plan):
+        expanded = original_transform(
+            self, call_request, engine, resolved, context, plan
+        )
+        source = plan.joint_trajectory.positions
+        positions = expanded.joint_trajectory.positions
+        pre_grasp = plan.segment("pickup_approach").stop - 1
+        assert torch.equal(positions[:, pre_grasp:], source[:, pre_grasp:])
+        assert torch.equal(expanded.joint_trajectory.dt, plan.joint_trajectory.dt)
+        for row in range(context.batch_size):
+            fixed = (source[row, :pre_grasp] == source[row, :1]).all(dim=0)
+            assert torch.equal(positions[row, :, fixed], source[row, :, fixed])
+            report["expanded_variants"] += int(
+                not torch.equal(positions[row], source[row])
+            )
+        initial_z = context.scene.entities[resolved.goal.semantics.entity_id].pose[
+            :, 2, 3
+        ]
+        current.update(
+            start=plan.segment("pickup_transport").stop,
+            stop=plan.segment("handover_release").stop,
+            # Retain 70% of the requested lift throughout receiving closure
+            # and source release. A can that falls to the table fails this.
+            minimum_z=initial_z + resolved.skill_options.lift_height * 0.7,
+        )
+        report["episodes"] += context.batch_size
+        return expanded
+
+    def inspect_step(self, action, **kwargs):
+        result = original_step(self, action, **kwargs)
+        if current:
+            steps = self._elapsed_steps
+            mask = (steps >= current["start"]) & (steps <= current["stop"])
+            if bool(mask.any()):
+                z = self.sim.get_rigid_object(_CAN_SIMULATION_UID).get_local_pose()[
+                    :, 2
+                ]
+                assert bool((z[mask] >= current["minimum_z"][mask]).all()), (
+                    steps.tolist(),
+                    z.tolist(),
+                    current["minimum_z"].tolist(),
+                )
+                report["held_checks"] += int(mask.sum())
+        return result
+
+    def inspect_main(*args, **kwargs):
+        original_main(*args, **kwargs)
+        metadata_path.write_text(json.dumps(report), encoding="utf-8")
+
+    CombinedTaskProgramExpansionFactory._transform = inspect_transform
+    BaseEnv.step = inspect_step
+    run_env.main = inspect_main
+    try:
+        run_env.cli(
+            [
+                "--gym_config",
+                str(_gym_config_path()),
+                "--headless",
+                "--disable-sensor",
+                "--num-envs",
+                "2",
+                "--max_episodes",
+                "4",
+                "--expansion-recipe-indices",
+                "0",
+                "1",
+                "2",
+                "3",
+                "--output-dir",
+                str(metadata_path.parent / "expansion"),
+                "--dataset-dir",
+                str(metadata_path.parent / "datasets"),
+            ]
+        )
+    finally:
+        CombinedTaskProgramExpansionFactory._transform = original_transform
+        BaseEnv.step = original_step
+        run_env.main = original_main
+
+
+@pytest.mark.requires_sim
+@pytest.mark.subprocess_sim
+@pytest.mark.gpu
+@pytest.mark.slow
+def test_real_sim_expansion_holds_can_and_fixes_transfer_waypoints(
+    tmp_path: Path,
+) -> None:
+    """All four variants retain the can until the receiving arm holds it."""
+    metadata_path = tmp_path / "expanded_handover.json"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _RUN_REAL_SIM_EXPANDED_EPISODES,
+            str(Path(__file__).resolve()),
+            str(metadata_path),
+        ],
+        cwd=_REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    report = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert report["episodes"] == 4
+    assert report["expanded_variants"] == 3
+    assert report["held_checks"] > 0
 
 
 def _assert_transfer_constraint_evidence(
@@ -686,36 +790,8 @@ def test_real_sim_expert_episode_reports_runtime_and_validation(
         }
         assert call["plan_attempts"]
         assert call["plan_attempts"][-1]["plan_success_mask"] == [True]
-        assert call["effects"]
-        decision = call["effects"][-1]["decision"]
-        assert decision["success_mask"] == [runtime_succeeded]
-        assert decision["failure_mask"] == [not runtime_succeeded]
-        if runtime_succeeded:
-            assert {
-                expectation["expectation_id"]
-                for expectation in decision["expectations"]
-                if expectation["satisfied_mask"] == [True]
-            } == {"source", "destination"}
-        else:
-            # Physical failure may be reported by the phase gate, the terminal
-            # effect verifier, or the held-object guard depending on when the
-            # backend observes the failed transfer.  All paths must still
-            # provide a diagnosed failure and an explicit recovery outcome.
-            terminal_event_kinds = {event["kind"] for event in runtime["events"]}
-            assert terminal_event_kinds & {
-                "phase_effect_gate_failed",
-                "effect_verification_failed",
-                "held_object_lost",
-            }
-            assert terminal_event_kinds & {
-                "recovery_required",
-                "recovery_exhausted",
-            }
-
-    transfer_effect = runtime["calls"][0]["effects"][-1]
-    _assert_transfer_constraint_evidence(
-        transfer_effect, runtime_succeeded=runtime_succeeded
-    )
+        # Projected sample completion has no measured effect evidence.
+        assert call["effects"] == []
 
     post_policies = metadata["post_policies"]
     post_policy_succeeded = False

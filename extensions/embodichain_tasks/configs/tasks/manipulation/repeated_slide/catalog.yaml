@@ -1,0 +1,13 @@
+task_key: repeated_slide
+title: Repeated Slide
+summary: Repeatedly open and close a drawer with full scene and robot resets between episodes.
+tags:
+- manipulation
+- drawer
+- task_program
+default_deployment: ur5
+deployments:
+  franka:
+    config: task.franka.yaml
+  ur5:
+    config: task.ur5.yaml

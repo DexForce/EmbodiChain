@@ -1,0 +1,46 @@
+integration_id: repeated_move_held_object_v1
+program_id: repeated_move_held_object
+requires:
+  scene_contract: repeated_move_held_object_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_move_held_object_scene_v1
+  registry_id: repeated_move_held_object_scene
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+      semantic_type: cube
+      affordances:
+        - entity_id: cube_grasp
+          kind: antipodal_grasp
+    - entity_id: push_target
+      simulation_uid: push_target
+      dynamics: static
+profile:
+  defaults:
+    pick_up:
+      primary: primary_manipulator
+    move_held_object:
+      primary: primary_manipulator
+    place:
+      primary: primary_manipulator
+  action_options:
+    pick:
+      kind: pick_up
+      pre_grasp_distance: 0.15
+      lift_height: 0.16
+      hand_interp_steps: 12
+      approach_direction: [0.0, 0.0, -1.0]
+    simulation.move_held_object:
+      kind: move_held_object
+    place:
+      kind: place
+      hand_interp_steps: 12
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: move_held_object
+      target_id: transport_pose
+      reference_entity_id: push_target
+      relative_pose: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.25, 0.0, 0.0, 0.0, 1.0]

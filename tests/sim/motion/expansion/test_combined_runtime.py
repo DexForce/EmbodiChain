@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import torch
 
@@ -36,30 +34,10 @@ from embodichain.lab.sim.motion.expansion import (
     round_robin_recipes,
 )
 from embodichain.utils.config_paths import resolve_config_path
-from embodichain.utils.utility import load_config
-from embodichain.lab.scripts.run_env import _create_parser, _resolve_expansion_request
-
-_ROOT = Path(__file__).parents[4]
-_TASK_ROOT = (
-    _ROOT
-    / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place"
-)
-
-
-def _profile() -> CombinedExpansionProfile:
-    task_config = _TASK_ROOT / "task.ur5.yaml"
-    args = _create_parser().parse_args(
-        ["--gym-config", str(task_config), "--headless", "--device", "cpu"]
-    )
-    request = _resolve_expansion_request(args, load_config(task_config))
-    assert request is not None
-    profile = request[0]
-    assert isinstance(profile, CombinedExpansionProfile)
-    return profile
 
 
 def test_visual_registry_resolves_seeded_visual_profiles() -> None:
-    profile = _profile()
+    profile = CombinedExpansionProfile.from_mapping({})
     registry = VisualProfileRegistry.from_yaml(
         resolve_config_path(profile.visual.profile_file)
     )
@@ -169,7 +147,7 @@ def test_visual_registry_applies_global_sun_once_for_all_rows() -> None:
 
 
 def test_round_robin_coordinator_releases_slots_and_counts_terminal_states() -> None:
-    profile = _profile()
+    profile = CombinedExpansionProfile.from_mapping({})
     recipes = enumerate_candidate_recipes(
         profile,
         families=CubeInitialPoseProvider().enumerate(4),
@@ -192,13 +170,17 @@ def test_round_robin_coordinator_releases_slots_and_counts_terminal_states() -> 
 
 
 def test_round_robin_accepts_a_batch_crossing_family_boundaries() -> None:
-    profile = _profile()
+    profile = CombinedExpansionProfile.from_mapping({})
     recipes = enumerate_candidate_recipes(
         profile,
         families=CubeInitialPoseProvider().enumerate(4),
     )
     ordered = round_robin_recipes(recipes[1:17], family_count=2)
     assert len(ordered) == 16
+    assert {recipe.candidate_id for recipe in ordered} == {
+        recipe.candidate_id for recipe in recipes[1:17]
+    }
+    assert ordered[0].reference_family_id != ordered[1].reference_family_id
 
 
 def test_measured_validator_requires_three_cycle_target_evidence() -> None:

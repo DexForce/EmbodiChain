@@ -1,0 +1,13 @@
+program_id: repeated_press
+instruction: Press the microwave
+targets: {}
+program:
+  kind: segment
+  name: press
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.press
+      arguments:
+        target: microwave_press_target

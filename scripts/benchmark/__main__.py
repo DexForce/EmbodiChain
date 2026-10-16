@@ -135,7 +135,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     atomic_action_parser = subparsers.add_parser(
         "atomic-action",
         add_help=False,
-        help="Benchmark atomic actions over object presets and positions.",
+        help="Benchmark independent Atomic skills with affordance and trajectory expansion.",
     )
     atomic_action_parser.set_defaults(func=_run_atomic_action_cli)
 

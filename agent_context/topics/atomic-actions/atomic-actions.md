@@ -159,8 +159,14 @@ kinematic tool frame, not physical geometry.
 The matching tutorial files are compatibility entry points to those same scenes.
 Affordance branch overrides stay independent of physical slots, then the host
 adapts each compiled reference to `motion.expansion` for spatial variants.
-Contact phases and hand columns stay exact; protected phase samples are copied
-from the source after adaptation, including near-identical zero-time joins.
+The two sample hosts share conservative phase permissions in
+`atomic_actions/_expansion_phases.py`. Contact phases and hand columns stay
+exact; protected phase samples are copied from the source after adaptation,
+including near-identical zero-time joins. Handover's editable pickup approach
+ends at an explicit pre-grasp waypoint; its final reach and every subsequent
+grasp, held transport, receiving approach, source retreat and placement phase
+remain exact. Only joints moving in that empty-hand approach may be augmented,
+so the other arm remains stationary even though the binding includes both.
 Original action joins and intervals are restored before replay so callbacks
 retain their source indices. MoveJoint compiles each required joint target as
 a separate invocation, preserving its ordered waypoints as action boundaries
@@ -174,6 +180,18 @@ start, locked contact path, timing and sampling provenance; shared affordance
 branch identity does not imply equivalent measured states. Output status records
 planning/playback completion, with no measured physical-success authority or
 Gym dataset collection. Usage lives in the host's `README.md`.
+
+`embodichain benchmark atomic-action --robot ... --skill ... --planner ...`
+uses independent scenes and direct Atomic invocations through
+`scripts/benchmark/atomic_action/reference_benchmark.py`, `scenes.py` and
+`execution.py`, without a Gym or Task Program host. Shared sample helpers own
+assets, robot compatibility and protected expansion phases; Handover retains
+both Robotiq 2F-140 grippers. `evaluation.py` scores measured physical stages,
+separately from planning success, with fresh scenes for batches and repetitions.
+Per-row provenance records actual expansion deltas and protected-sample checks.
+Cartesian `ik_interp` paths bypass the selected planner. The explicit
+`--action` selector keeps the legacy benchmarks.
+See the [benchmark guide](../../../scripts/benchmark/atomic_action/README.md).
 
 ## Recommended change sites
 

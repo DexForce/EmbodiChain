@@ -1,0 +1,13 @@
+program_id: repeated_twist
+instruction: Twist the microwave
+targets: {}
+program:
+  kind: segment
+  name: twist
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.twist
+      arguments:
+        target: microwave_twist_target

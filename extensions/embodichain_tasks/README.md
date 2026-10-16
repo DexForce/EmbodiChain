@@ -128,7 +128,7 @@ Installing `embodichain` registers the bundled `embodichain_tasks` entry point
 so the unified CLI can discover every official task it ships. Repository-style
 paths beginning with `extensions/embodichain_tasks/configs/` resolve from either a source
 checkout or the installed wheel.
-The legacy `embodichain_tasks/configs/` prefix remains supported. Sources now
+The legacy `extensions/embodichain_tasks/configs/` prefix remains supported. Sources now
 live under `extensions/`; refresh existing editable installations from the
 repository root with `pip install -e . --no-deps`.
 
@@ -153,7 +153,7 @@ python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/
 python -m embodichain.lab.scripts.run_env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml
 
 # Newton variant selected from the same deployment
-python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml --physics newton
+python -m embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml --physics newton
 ```
 
 ## How registration works

@@ -1,0 +1,29 @@
+integration_id: repeated_push_object_v1
+program_id: repeated_push_object
+requires:
+  scene_contract: repeated_push_object_scene_v1
+  embodiment_contract: single_arm_parallel_gripper
+scene_binding:
+  contract_id: repeated_push_object_scene_v1
+  registry_id: repeated_push_object_scene
+  rigid_objects:
+    - entity_id: cube
+      simulation_uid: cube
+      dynamics: dynamic
+    - entity_id: push_target
+      simulation_uid: push_target
+      dynamics: static
+profile:
+  defaults:
+    push_object:
+      primary: primary_manipulator
+  action_options:
+    simulation.push_object:
+      kind: push_object
+  effect_monitors: {}
+runtime_services:
+  registered_semantic_lowerers:
+    - kind: push_object
+      routes:
+        - object_id: cube
+          target_entity_id: push_target

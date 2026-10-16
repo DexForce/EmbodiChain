@@ -34,10 +34,10 @@ from scripts.benchmark.task_program.demo_success import (
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _TASK_CONFIG_ROOT = _REPOSITORY_ROOT / "extensions/embodichain_tasks/configs"
 _OPEN_DRAWER_GYM_CONFIG = (
-    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task.ur5.yaml"
+    _TASK_CONFIG_ROOT / "tasks/manipulation/repeated_slide/task.ur5.yaml"
 )
 _OPEN_DRAWER_TASK_PROGRAM = (
-    _TASK_CONFIG_ROOT / "tasks/manipulation/open_drawer/task_program/program.yaml"
+    _TASK_CONFIG_ROOT / "tasks/manipulation/repeated_slide/task_program/program.yaml"
 )
 _CASE_ID = "open_drawer_live"
 _SEED = 0
@@ -187,25 +187,25 @@ def test_live_open_drawer_benchmark_writes_successful_decodable_artifacts(
 
     segments = trial.episode_result["segments"]
     assert isinstance(segments, list)
-    assert len(segments) == 1
-    segment = segments[0]
-    assert isinstance(segment, dict)
-    assert segment["name"] == "open_drawer"
-    runtime = segment["metadata"]["runtime"]
-    assert runtime["kind"] == "skill_result"
-    assert runtime["status"] == "completed"
-    calls = runtime["calls"]
-    assert isinstance(calls, list)
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["semantic_id"] == "simulation.articulation_link_slide"
-    assert call["skill_id"] == "slide"
-    assert call["status"] == "completed"
-    assert call["effects"] == []
-    assert segment["metadata"]["post_policies"] == []
-    validation = segment["metadata"]["validation"]
-    assert validation["accepted_mask"] == [True]
-    assert validation["validators"] == []
+    assert len(segments) == 2
+    for segment, name in zip(segments, ("open_drawer", "close_drawer")):
+        assert isinstance(segment, dict)
+        assert segment["name"] == name
+        runtime = segment["metadata"]["runtime"]
+        assert runtime["kind"] == "skill_result"
+        assert runtime["status"] == "completed"
+        calls = runtime["calls"]
+        assert isinstance(calls, list)
+        assert len(calls) == 1
+        call = calls[0]
+        assert call["semantic_id"] == "simulation.articulation_link_slide"
+        assert call["skill_id"] == "slide"
+        assert call["status"] == "completed"
+        assert call["effects"] == []
+        assert segment["metadata"]["post_policies"] == []
+        validation = segment["metadata"]["validation"]
+        assert validation["accepted_mask"] == [True]
+        assert validation["validators"] == []
 
     aggregates = aggregate_demo_success_trials(decoded_trials)
     assert len(aggregates.success_and_metrics) == 1

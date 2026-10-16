@@ -80,13 +80,17 @@ Atomic plan transform; the bridge exposes immutable
 `TaskProgramExpansionRecord` provenance. Nonmatching calls and episodes
 without a profile keep the ordinary path.
 
-The configured combined transform supports batches and Pick Affordance
-expansion; timing expansion is not connected to this transform. Batch expansion
-records retain the stable environment IDs from the planning context, including
-reordered batches. Generic profile decoding, source adapters, candidate
-identity and coordination are owned by the
-[Motion Planning augmentation boundary](../motion-planning/motion-planning.md#trajectory-augmentation-boundary),
-not by Task Program or Gym.
+The configured combined transform uses the episode's analysis call index across
+Gym segment boundaries. Affordance and trajectory call selections apply to all
+configured Atomic Skills. One row-local transform preserves original command
+intervals, phase endpoints and non-motion joint columns; bound motion endpoints
+supply joint indices for single, dual and custom control parts. Sample phase
+permissions are shared with the Atomic launcher in
+`atomic_actions/_expansion_phases.py`; explicit declarations remain supported.
+Handover uses the Atomic host's
+[pre-grasp and held-motion protection](../atomic-actions/atomic-actions.md#semantic-integration-boundary).
+Generic profiles and candidate coordination stay in
+[Motion Planning](../motion-planning/motion-planning.md#trajectory-augmentation-boundary).
 
 ## Read on demand
 
@@ -104,24 +108,30 @@ not by Task Program or Gym.
 | `TaskProgramRepeatedPickPlace-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/` |
 | `TaskProgramRepeatedPickPlace-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml` with `--physics newton` |
 | `TaskProgramRepeatedPickPlace-Franka-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` with `--physics newton` |
-| `TaskProgramOpenDrawer-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/` |
-| `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/open_drawer/task.ur5.yaml` with `--physics newton` |
-| `HandOver-v1` | verified | `extensions/embodichain_tasks/configs/tasks/manipulation/hand_over/` |
+| `TaskProgramOpenDrawer-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/` |
+| `TaskProgramOpenDrawer-Newton-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_slide/task.ur5.yaml` with `--physics newton` |
+| `HandOver-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/repeated_handover/` |
 | `PourWater-v1` | projected | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/` |
 
+The [packaged manipulation guide](../../../extensions/embodichain_tasks/configs/tasks/manipulation/README.md)
+routes the ten Atomic reference scenes and existing MoveHeldObject/PushObject
+calls to runnable Gym deployments. The default expansion policy keeps the
+physical scene fixed and selects independent Affordance/trajectory recipes.
+Handover's measured landing validator remains in its objective deployment;
+projected sample completion does not certify physical task success.
+Handover and OpenDrawer repeat through cyclic host collection with full resets
+between independent episodes. One OpenDrawer episode contains open/close calls
+with absolute `joint_position` goals. Its configured Slide lowerer derives the
+prismatic joint name, limits and axis sign from native articulation geometry;
+the Atomic planner grounds each target against fresh row-local joint state.
+
 Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
-`hand_over` and `tableware/pour_water`. The first two select verified tabletop
+`repeated_handover` and `tableware/pour_water`. The first two select verified tabletop
 programs; pouring selects a 750 mm table variant that lowers the scene and
 absolute targets by 125 mm while retaining the four-segment program behavior,
 dual-arm slow policy and independent measured checkpoints. All three inherit
 the shared compact ready pose. The shared embodiment owns calibrated
 grasp-frame TCPs and gripper evidence, not task-local object IDs.
-
-The task-local configured expansion example is bound through the deployment's
-shared expansion policy; its README routes to
-`examples/sim/motion/repeated_pick_place_expansion_showcase.py`. That showcase
-reports projected completion and candidate provenance, not measured physical
-success or receipt-confirmed coverage.
 
 ## Recommended change sites
 

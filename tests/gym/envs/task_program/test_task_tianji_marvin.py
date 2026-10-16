@@ -63,7 +63,7 @@ _CONFIGS = (
 )
 _DEPLOYMENTS = (
     ("repeated_pick_place", "TaskProgramRepeatedPickPlace-TianjiMarvin-v1", 6),
-    ("hand_over", "HandOver-TianjiMarvin-v1", 1),
+    ("repeated_handover", "HandOver-TianjiMarvin-v1", 1),
     ("tableware/pour_water", "PourWater-TianjiMarvin-v1", 4),
 )
 
@@ -175,7 +175,7 @@ def test_marvin_deployments_preflight_and_register(
 def test_marvin_task_resource_roles_and_effect_authority() -> None:
     """Task defaults bind existing logical hands and keep assurance explicit."""
     _, _, _, pick = _deployment("repeated_pick_place")
-    _, _, _, handover = _deployment("hand_over")
+    _, _, _, handover = _deployment("repeated_handover")
     _, _, _, pour = _deployment("tableware/pour_water")
     pick_profile = pick.integration.registration.robot_profile_binding
     handover_profile = handover.integration.registration.robot_profile_binding

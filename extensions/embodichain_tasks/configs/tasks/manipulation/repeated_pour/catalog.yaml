@@ -1,0 +1,8 @@
+task_key: repeated_pour
+title: Pick up and tilt the cube
+summary: Pick up and tilt the cube with fixed-scene Atomic trajectory expansion.
+tags: [atomic_skill, task_program, trajectory_expansion]
+default_deployment: ur5
+deployments:
+  ur5:
+    config: task.ur5.yaml

@@ -1,0 +1,24 @@
+policy_id: atomic_handover_v1
+preset_id: trajectory
+requires:
+  embodiment_contract: dual_arm_parallel_gripper
+motion:
+  strategy: motion_gen
+  velocity_targets: auto
+  sample_count: 220
+  dynamic_collision_mode: 'off'
+tracking:
+  kind: timed
+recovery:
+  max_replans: 0
+  max_action_retries: 0
+  action_timeout: 120.0
+workflow_recovery:
+  max_recovery_attempts: 0
+runner:
+  minimum_cycle_time: 0.0
+  hold_on_completion: false
+  hold_during_effect_verification: false
+effect_assurance: projected
+planner:
+  type: trapezoidal

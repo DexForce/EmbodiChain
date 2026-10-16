@@ -1,0 +1,14 @@
+program_id: repeated_push_object
+instruction: Push the cube along the ground
+targets: {}
+program:
+  kind: segment
+  name: push
+  steps:
+    kind: invoke
+    call:
+      kind: registered
+      call_id: simulation.push_object
+      arguments:
+        object: cube
+        target: push_target

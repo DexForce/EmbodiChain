@@ -66,15 +66,21 @@ _ACTIVITY_BAR_WIDTH = 10
 
 @dataclass(frozen=True)
 class CollectionSelection:
-    """Select logical recipes without encoding batch boundaries."""
+    """Select logical recipes without encoding batch boundaries.
+
+    Cyclic selection revisits the finite recipe bank across independent
+    reset episodes. Explicit selections remain unique and finite.
+    """
 
     mode: str = "sequential"
     start_recipe_index: int = 0
     recipe_indices: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.mode not in {"sequential", "explicit"}:
-            raise ValueError("collection.selection.mode must be sequential or explicit")
+        if self.mode not in {"sequential", "explicit", "cyclic"}:
+            raise ValueError(
+                "collection.selection.mode must be sequential, explicit or cyclic"
+            )
         if type(self.start_recipe_index) is not int or self.start_recipe_index < 0:
             raise ValueError("start_recipe_index must be a non-negative integer")
         indices = tuple(self.recipe_indices)
@@ -84,12 +90,23 @@ class CollectionSelection:
             raise ValueError("recipe_indices must be unique")
         if self.mode == "explicit" and not indices:
             raise ValueError("explicit selection requires recipe_indices")
-        if self.mode == "sequential" and indices:
-            raise ValueError("sequential selection cannot declare recipe_indices")
+        if self.mode != "explicit" and indices:
+            raise ValueError(f"{self.mode} selection cannot declare recipe_indices")
         object.__setattr__(self, "recipe_indices", indices)
 
-    def take(self, cursor: int, count: int) -> tuple[int, ...]:
-        """Return the next logical recipe IDs for one batch."""
+    def take(
+        self, cursor: int, count: int, *, recipe_count: int | None = None
+    ) -> tuple[int, ...]:
+        """Return recipe IDs for the next independent collection episodes.
+
+        Args:
+            cursor: Number of episodes already selected.
+            count: Number of recipe IDs requested for this batch.
+            recipe_count: Size of the finite recipe bank, required in cyclic mode.
+
+        Returns:
+            Recipe IDs in collection order, wrapping only in cyclic mode.
+        """
         if type(cursor) is not int or cursor < 0:
             raise ValueError("selection cursor must be a non-negative integer")
         if type(count) is not int or count < 0:
@@ -101,6 +118,13 @@ class CollectionSelection:
                     "explicit recipe selection is shorter than target_episodes"
                 )
             return selected
+        if self.mode == "cyclic":
+            if type(recipe_count) is not int or recipe_count < 1:
+                raise ValueError("cyclic selection requires a positive recipe_count")
+            return tuple(
+                (self.start_recipe_index + cursor + offset) % recipe_count
+                for offset in range(count)
+            )
         return tuple(
             self.start_recipe_index + cursor + offset for offset in range(count)
         )
@@ -202,6 +226,8 @@ def resolve_collection_plan(
         )
     else:
         selection = CollectionSelection()
+    if selection.mode == "cyclic" and not expansion:
+        raise ValueError("cyclic collection requires an expansion profile")
     return CollectionPlan(target, attempts, selection)
 
 
@@ -762,7 +788,10 @@ def _resolve_expansion_request(
         profile_data.pop("collection", None)
         profile = CombinedExpansionProfile.from_mapping(merge(profile_data, overrides))
         profile_path = expansion_config_path or task_path
-        expansion_collection = binding.get("collection", policy_collection)
+        expansion_collection = merge(
+            policy_collection,
+            _mapping_or_empty(binding.get("collection"), "expansion.collection"),
+        )
     else:
         if (
             not isinstance(profile_value, str)
@@ -815,6 +844,16 @@ def _resolve_expansion_request(
             )
     if not isinstance(expansion_collection, Mapping):
         raise ValueError("expansion.collection must be a mapping")
+    if (
+        isinstance(profile, CombinedExpansionProfile)
+        and getattr(args, "num_envs", None) is not None
+    ):
+        # Explicit runtime capacity owns both Gym rows and expansion slots.
+        from dataclasses import replace
+
+        profile = replace(
+            profile, execution=replace(profile.execution, max_inflight=args.num_envs)
+        )
     return profile, candidate_indices, profile_path, expansion_collection
 
 
@@ -843,6 +882,11 @@ def _validate_expansion_collection_plan(
     if plan.selection.mode == "sequential":
         if plan.selection.start_recipe_index + plan.target_episodes > total:
             raise ValueError("collection selection exceeds the expansion recipe budget")
+    elif plan.selection.mode == "cyclic":
+        if plan.selection.start_recipe_index >= total:
+            raise ValueError(
+                "collection selection starts outside the expansion recipe budget"
+            )
     elif any(index >= total for index in plan.selection.recipe_indices):
         raise ValueError("collection selection contains an out-of-range recipe")
 
@@ -901,12 +945,6 @@ def _run_expansion(
             profile.scene_randomization.reference_family_count
         )
     recipes = enumerate_candidate_recipes(profile, families=families)
-    if plan.selection.mode == "sequential":
-        if plan.selection.start_recipe_index + plan.target_episodes > len(recipes):
-            raise ValueError("collection selection exceeds the expansion recipe budget")
-    elif any(index >= len(recipes) for index in plan.selection.recipe_indices):
-        raise ValueError("collection selection contains an out-of-range recipe")
-
     output_dir = getattr(args, "expansion_output_dir", None)
     if output_dir is None:
         output_dir = profile.persistence.output_dir
@@ -940,7 +978,7 @@ def _run_expansion(
     cursor = 0
     while committed < plan.target_episodes:
         batch_size = min(num_envs, plan.target_episodes - committed)
-        selected = plan.selection.take(cursor, batch_size)
+        selected = plan.selection.take(cursor, batch_size, recipe_count=len(recipes))
         if any(index >= len(recipes) for index in selected):
             raise ValueError("collection selection contains an out-of-range recipe")
         full_recipe_indices = _pad_expansion_recipe_indices(selected, num_envs=num_envs)

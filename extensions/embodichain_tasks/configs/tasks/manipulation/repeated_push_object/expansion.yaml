@@ -1,0 +1,21 @@
+runtime:
+  num_envs: 2
+policy:
+  component: ../../../components/expansion_policies/atomic_fixed_scene.yaml
+overrides:
+  source:
+    source_id: repeated_push_object
+    source_revision: config:repeated_push_object
+    template_id: repeated_push_object_episode
+    call_count: 1
+    affordance_call_indices: []
+    trajectory_call_indices: [0]
+  persistence:
+    output_dir: /tmp/embodichain-manipulation/repeated_push_object/expansion
+  affordance:
+    enabled: false
+    branches_per_family: 1
+  scheduling:
+    candidate_budget: 4
+collection:
+  target_episodes: 4

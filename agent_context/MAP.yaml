@@ -329,8 +329,13 @@ topics:
   - embodichain/lab/sim/atomic_actions/primitives/
   - embodichain/lab/scripts/run_atomic_action.py
   - embodichain/lab/scripts/_atomic_action/
+  - scripts/benchmark/atomic_action/reference_benchmark.py
+  - scripts/benchmark/atomic_action/scenes.py
+  - scripts/benchmark/atomic_action/execution.py
+  - scripts/benchmark/atomic_action/evaluation.py
   watch_paths: [embodichain/lab/sim/atomic_actions/, tests/sim/atomic_actions/, scripts/tutorials/atomic_action/,
-    embodichain/lab/scripts/run_atomic_action.py, embodichain/lab/scripts/_atomic_action/, tests/lab/scripts/test_run_atomic_action.py]
+    embodichain/lab/scripts/run_atomic_action.py, embodichain/lab/scripts/_atomic_action/, tests/lab/scripts/test_run_atomic_action.py,
+    scripts/benchmark/atomic_action/, tests/benchmark/atomic_action/]
   related_topics: [simulation-system, motion-planning, robot-system, ik-solvers, task-programs]
   status: active
 - id: task-programs

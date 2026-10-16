@@ -1,0 +1,22 @@
+program_id: repeated_pour
+instruction: Pick up and tilt the cube
+targets: {}
+program:
+  kind: sequence
+  items:
+    - kind: segment
+      name: pick
+      steps:
+        kind: invoke
+        call:
+          kind: pick
+          object: cube
+    - kind: segment
+      name: pour
+      steps:
+        kind: invoke
+        call:
+          kind: registered
+          call_id: simulation.pour
+          arguments:
+            object: cube
