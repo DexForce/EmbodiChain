@@ -117,6 +117,16 @@ _TASKS = {
 }
 _TEST_ENV_ID = "ConfiguredTaskProgramIntegrationTest-v1"
 _TABLEWARE_TASKS = {
+    "stack_blocks_two": (
+        "task_program_stack_blocks_two",
+        "cobotmagic",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
+    "blocks_ranking_rgb": (
+        "task_program_blocks_ranking_rgb",
+        "cobotmagic",
+        frozenset({"pick", "place", "hand_over"}),
+    ),
     "pour_water": (
         "task_program_pour_water",
         "cobotmagic",
@@ -555,10 +565,11 @@ def test_pour_water_integration_declares_live_transport_and_axis_aware_pour() ->
         "simulation.pour",
     }
     assert integration_payload["runtime_services"]["grasp_pose_generators"] == {
-        "right_eef": {
+        f"{side}_eef": {
             "kind": "antipodal_parallel_jaw",
             "model": "cobotmagic_v100_gripper",
         }
+        for side in ("right", "left")
     }
 
 

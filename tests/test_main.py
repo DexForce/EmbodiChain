@@ -265,9 +265,9 @@ def test_list_task_discovers_and_prints_task_tree(
             list_task._EnvironmentListEntry(
                 "BlocksRankingRGB-v1",
                 ("manipulation", "tableware", "blocks_ranking_rgb"),
-                {list_task._HANDWRITTEN_DEMO},
+                {list_task._TASK_PROGRAM},
                 {"cobotmagic"},
-                {"env.json"},
+                {"task.cobotmagic.yaml"},
             ),
             list_task._EnvironmentListEntry(
                 "StackCups-v1",
@@ -318,7 +318,7 @@ def test_list_task_discovers_and_prints_task_tree(
     ):
         assert value in environment_column
     for value in (
-        "Expert Demo: Handwritten Trajectory",
+        "Expert Demo: Task Program",
         "Environment Only",
     ):
         assert re.sub(r"\s+", "", value) in re.sub(r"\s+", "", capability_column)
@@ -425,9 +425,13 @@ def test_handwritten_demo_detection_uses_environment_hooks() -> None:
     from embodichain_tasks.manipulation.tableware.blocks_ranking_size import (
         BlocksRankingSizeEnv,
     )
-    from embodichain_tasks.special.simple_task import SimpleTaskEnv
+    from embodichain.lab.gym.envs import EmbodiedEnv
 
-    assert list_task._implements_handwritten_demo(SimpleTaskEnv)
+    class HandwrittenDemoEnv(EmbodiedEnv):
+        def create_demo_segments(self, **kwargs: object) -> tuple[()]:
+            return ()
+
+    assert list_task._implements_handwritten_demo(HandwrittenDemoEnv)
     assert not list_task._implements_handwritten_demo(BlocksRankingSizeEnv)
 
 

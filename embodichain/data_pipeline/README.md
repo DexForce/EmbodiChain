@@ -96,5 +96,5 @@ python -m scripts.benchmark.data_pipeline.benchmark_segment_annotations \
 
 The benchmark verifies exact annotation equivalence and reports lookup time and
 sampled process RSS. It does not measure simulation throughput or disk saving.
-The existing `benchmark_lerobot_save` script measures complete recording with a
-real environment.
+For complete recording measurements, run a surviving manipulation deployment
+with the Gym launcher profiler and dataset saving enabled.

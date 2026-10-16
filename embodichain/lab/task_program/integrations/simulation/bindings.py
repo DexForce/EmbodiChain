@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+import hashlib
 import math
 from types import MappingProxyType
 from typing import Any, TYPE_CHECKING
@@ -70,6 +71,7 @@ from embodichain.lab.task_program.semantics.scene import (
     SceneDynamics,
     SceneEntityRef,
     SceneEntityRegistration,
+    SceneEntityStateProvider,
     SceneGeometryProvider,
     SceneLinkRef,
     SceneObjectRef,
@@ -470,6 +472,8 @@ def _validate_placement_binding(value: object) -> None:
     if not 0.0 <= minimum_confidence <= 1.0:
         raise ValueError("minimum_confidence must be in [0, 1].")
     object.__setattr__(value, "minimum_confidence", minimum_confidence)
+    if getattr(value, "object_target_frame") not in {"parent", "world_axes"}:
+        raise ValueError("object_target_frame must be 'parent' or 'world_axes'.")
     if type(getattr(value, "is_default")) is not bool:
         raise TypeError("is_default must be a bool.")
 
@@ -484,6 +488,9 @@ class SupportSurfaceAffordanceBinding:
         native_name: Stable native name of this target frame.
         aliases: Optional non-authoritative lookup aliases.
         object_target_pose: Desired object pose relative to the parent.
+        object_target_frame: ``parent`` composes the complete parent transform;
+            ``world_axes`` adds its translation to the parent position while
+            keeping the declared orientation and offset in world axes.
         minimum_confidence: Minimum parent/affordance observation confidence.
         is_default: Whether this is the parent's default ``Place(on=...)`` frame.
     """
@@ -495,6 +502,7 @@ class SupportSurfaceAffordanceBinding:
     object_target_pose: tuple[float, ...] = _IDENTITY_POSE
     minimum_confidence: float = 0.0
     is_default: bool = False
+    object_target_frame: str = "parent"
 
     def __post_init__(self) -> None:
         _validate_placement_binding(self)
@@ -510,6 +518,8 @@ class ContainerAffordanceBinding:
         native_name: Stable native name of this target frame.
         aliases: Optional non-authoritative lookup aliases.
         object_target_pose: Desired object pose relative to the parent.
+        object_target_frame: ``parent`` composes the parent transform;
+            ``world_axes`` uses its position with world-oriented target axes.
         minimum_confidence: Minimum parent/affordance observation confidence.
         is_default: Whether this is the parent's default ``Place(inside=...)`` frame.
     """
@@ -521,9 +531,38 @@ class ContainerAffordanceBinding:
     object_target_pose: tuple[float, ...] = _IDENTITY_POSE
     minimum_confidence: float = 0.0
     is_default: bool = False
+    object_target_frame: str = "parent"
 
     def __post_init__(self) -> None:
         _validate_placement_binding(self)
+
+
+@dataclass(frozen=True, slots=True)
+class _WorldAxesPlacementStateProvider:
+    """Follow a parent's measured position without inheriting its orientation."""
+
+    parent: SceneEntityStateProvider
+    target_pose: tuple[float, ...]
+
+    def observe(self, *, timestamp: float, env_ids: torch.Tensor) -> EntityState:
+        state = self.parent.observe(timestamp=timestamp, env_ids=env_ids)
+        parent_pose = state.pose
+        target = _pose_tensor(self.target_pose).to(
+            device=parent_pose.device, dtype=parent_pose.dtype
+        )
+        pose = target.expand_as(parent_pose).clone()
+        pose[..., :3, 3] += parent_pose[..., :3, 3]
+        return EntityState(pose, confidence=state.confidence)
+
+
+def _placement_pose_source_revision(
+    binding: SupportSurfaceAffordanceBinding | ContainerAffordanceBinding,
+) -> str | None:
+    """Retain provider-backed target declarations in static/live scene identity."""
+    if binding.object_target_frame == "parent":
+        return None
+    digest = hashlib.sha256(repr(binding.object_target_pose).encode()).hexdigest()
+    return f"world_axes:{digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -984,7 +1023,12 @@ class SimulationSceneBinding:
                         affordance_capabilities=frozenset({capability}),
                         affordance_payload_type=payload_type,
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
-                        relative_pose=_pose_metadata(binding.object_target_pose),
+                        pose_source_revision=_placement_pose_source_revision(binding),
+                        relative_pose=(
+                            _pose_metadata(binding.object_target_pose)
+                            if binding.object_target_frame == "parent"
+                            else None
+                        ),
                     )
                 )
 
@@ -1220,6 +1264,14 @@ class SimulationSceneBinding:
                     articulations=articulations,
                     links=links,
                 )
+                parent_provider = next(
+                    item.state_provider for item in registrations if item.ref == parent
+                )
+                world_axes = binding.object_target_frame == "world_axes"
+                if world_axes and parent_provider is None:
+                    raise ValueError(
+                        f"Placement parent {parent.entity_id!r} has no state provider."
+                    )
                 registrations.append(
                     SceneEntityRegistration(
                         ref=SceneAffordanceRef(binding.entity_id),
@@ -1231,7 +1283,19 @@ class SimulationSceneBinding:
                         ),
                         affordance_capabilities=frozenset({capability}),
                         affordance_revision=PLACEMENT_TARGET_AFFORDANCE_REVISION,
-                        relative_pose=_pose_tensor(binding.object_target_pose),
+                        pose_source_revision=_placement_pose_source_revision(binding),
+                        relative_pose=(
+                            None
+                            if world_axes
+                            else _pose_tensor(binding.object_target_pose)
+                        ),
+                        state_provider=(
+                            _WorldAxesPlacementStateProvider(
+                                parent_provider, binding.object_target_pose
+                            )
+                            if world_axes
+                            else None
+                        ),
                     )
                 )
 
