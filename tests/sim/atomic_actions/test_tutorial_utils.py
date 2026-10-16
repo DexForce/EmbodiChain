@@ -42,6 +42,7 @@ from embodichain.lab.sim.cfg import (
     RigidBodyMaterialCfg,
 )
 from embodichain.lab.sim.motion.solvers import BaseSolver
+from embodichain.lab.sim.spawn.descriptors import articulation_desc_from_cfg
 from scripts.tutorials.atomic_action.dynamic_obstacle_recovery import (
     _animate_obstacle_to_pose,
     _blocking_obstacle_pose,
@@ -1180,7 +1181,10 @@ def test_articulation_contact_tutorials_author_newton_material_before_spawn(
     assert result is sim.add_articulation.return_value
     cfg = sim.add_articulation.call_args.kwargs["cfg"]
     assert cfg.asset_physics_mode == "overlay"
-    assert cfg.root_props.fixed_base is True
+    assert (
+        articulation_desc_from_cfg(cfg, newton_solver_type="mujoco_warp").fixed_base
+        is True
+    )
     override = cfg.link_attrs[group_name]
     assert override.link_names_expr == [contact_link]
     assert override.attrs.material_props.ke == pytest.approx(
