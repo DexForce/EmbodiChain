@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import math
 import time
-from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -63,6 +62,11 @@ from embodichain.lab.sim.motion.planners.utils import PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 
+from ..atomic_skill import AtomicSkillCaseProvider
+from ..contracts import (
+    ExecutionObservation as _ExecutionObservation,
+    validate_physical_evaluations,
+)
 from ..config import (
     SuiteCfg,
     TrackCfg,
@@ -70,7 +74,7 @@ from ..config import (
     resolve_atomic_pose_randomization,
 )
 from ..metrics.trajectory import compute_case_outcomes
-from ..models import BenchmarkCase, CaseOutcome
+from ..models import BenchmarkCase, CaseOutcome, with_physical_evaluation
 from ..registry import register_scenario_provider
 from ..video import VideoRecordCfg, build_video_path, record_with_window
 from .atomic_objects import (
@@ -113,23 +117,6 @@ _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
 
 
 @dataclass(frozen=True)
-class _ExecutionObservation:
-    """Common-execution measurements used by skill-specific task rules."""
-
-    execution_success: torch.Tensor
-    final_tcp_pose: torch.Tensor
-    joint_tracking_rmse_rad: torch.Tensor
-    execution_time_ms: float
-    task_completion_time_s: float
-    object_lift_delta_m: torch.Tensor | None = None
-    final_arm_qpos: torch.Tensor | None = None
-    final_object_pose: torch.Tensor | None = None
-    articulation_joint_initial: torch.Tensor | None = None
-    articulation_joint_final: torch.Tensor | None = None
-    articulation_joint_peak_signed_delta: torch.Tensor | None = None
-
-
-@dataclass(frozen=True)
 class _ReplayMetrics:
     """Tracking and articulation-effect accumulators from one replay."""
 
@@ -148,66 +135,6 @@ class _PhysicsReplaySettings:
     hold_steps: int
     hold_sim_steps: int
     joint_tracking_tolerance_rad: float
-
-
-class AtomicSkillCaseProvider(ABC):
-    """Generate and ground one Atomic Action without planner-specific logic."""
-
-    skill_id: str
-    requires_gripper = False
-
-    @abstractmethod
-    def generate_case(
-        self,
-        scenario: "AtomicTaskScenario",
-        suite: SuiteCfg,
-        track: TrackCfg,
-        config: Mapping[str, object],
-        *,
-        seed: int,
-        batch_size: int,
-    ) -> BenchmarkCase:
-        """Generate one frozen case and independent IK validity evidence."""
-
-    @abstractmethod
-    def build_invocation(
-        self,
-        scenario: "AtomicTaskScenario",
-        case: BenchmarkCase,
-        adapter: "PlannerAdapter",
-    ) -> ActionInvocation:
-        """Ground the case into one planner-independent action invocation."""
-
-    def object_id(self, case: BenchmarkCase) -> str | None:
-        """Return the manipulated object identifier when one exists."""
-        return case.object_id
-
-    def lift_segment_start(self, compiled: CompiledTrajectory) -> int | None:
-        """Return the first lift waypoint that should release object dynamics."""
-        return None
-
-    def articulation_effect_segment(self, case: BenchmarkCase) -> str | None:
-        """Return the segment whose live articulation displacement is scored."""
-        del case
-        return None
-
-    def initial_task_state(
-        self, scenario: "AtomicTaskScenario", case: BenchmarkCase
-    ) -> TaskState | None:
-        """Return an optional symbolic precondition for isolated action testing."""
-        del scenario, case
-        return None
-
-    @abstractmethod
-    def task_result(
-        self,
-        scenario: "AtomicTaskScenario",
-        case: BenchmarkCase,
-        compiled: CompiledTrajectory,
-        observation: _ExecutionObservation,
-        motion_outcomes: tuple[CaseOutcome, ...],
-    ) -> tuple[torch.Tensor, str]:
-        """Return per-environment task success and its stable failure code."""
 
 
 AtomicSkillProviderType = type[AtomicSkillCaseProvider]
@@ -3248,6 +3175,7 @@ class AtomicTaskScenario(ScenarioProvider):
         suite: SuiteCfg,
         *,
         planning_time_ms: float,
+        timing_is_solved: bool = True,
     ) -> ScenarioEvaluation:
         """Validate motion, replay physics, and evaluate physical task success."""
         if not isinstance(result, CompiledTrajectory):
@@ -3267,9 +3195,17 @@ class AtomicTaskScenario(ScenarioProvider):
             position_threshold_m=suite.protocol.position_threshold_m,
             rotation_threshold_rad=suite.protocol.rotation_threshold_rad,
             joint_limit_tolerance_rad=suite.protocol.joint_limit_tolerance_rad,
+            joint_velocity_limit_rad_s=suite.protocol.joint_velocity_limit_rad_s,
+            joint_acceleration_limit_rad_s2=(
+                suite.protocol.joint_acceleration_limit_rad_s2
+            ),
+            joint_jerk_limit_rad_s3=suite.protocol.joint_jerk_limit_rad_s3,
+            dynamic_limit_tolerance=suite.protocol.dynamic_limit_tolerance,
+            timing_is_solved=timing_is_solved,
         )
         provider = self._case_providers[case.case_id]
         observation = self._execute(result, case, provider)
+        physical_results = ()
         if observation is None:
             execution_success = torch.zeros(
                 case.batch_size, dtype=torch.bool, device=robot.device
@@ -3285,9 +3221,29 @@ class AtomicTaskScenario(ScenarioProvider):
             task_failure_code = "task_goal_miss"
         else:
             execution_success = observation.execution_success
-            task_success, task_failure_code = provider.task_result(
-                self, case, result, observation, motion_outcomes
-            )
+            evaluator = provider.physical_evaluator()
+            if evaluator is None:
+                task_success, task_failure_code = provider.task_result(
+                    self, case, result, observation, motion_outcomes
+                )
+            else:
+                physical_results = validate_physical_evaluations(
+                    evaluator.evaluate(case, observation, motion_outcomes),
+                    batch_size=case.batch_size,
+                )
+                task_success = (
+                    torch.tensor(
+                        [row.task_success for row in physical_results],
+                        dtype=torch.bool,
+                        device=execution_success.device,
+                    )
+                    & execution_success
+                    & _motion_valid_mask(
+                        motion_outcomes,
+                        device=execution_success.device,
+                    )
+                )
+                task_failure_code = "physical_stages_incomplete"
             execution_time_ms = observation.execution_time_ms
             tracking = observation.joint_tracking_rmse_rad
             object_lift = observation.object_lift_delta_m
@@ -3320,7 +3276,11 @@ class AtomicTaskScenario(ScenarioProvider):
             elif not executed:
                 failure_code = "controller_tracking_failure"
             elif not task_done:
-                failure_code = task_failure_code
+                failure_code = (
+                    physical_results[index].failure_code
+                    if physical_results
+                    else task_failure_code
+                )
             else:
                 failure_code = None
             tracking_value = float(tracking[index].item())
@@ -3329,6 +3289,12 @@ class AtomicTaskScenario(ScenarioProvider):
                     outcome,
                     execution_success=executed,
                     task_success=task_done,
+                    stages=physical_results[index].stages if physical_results else (),
+                    failure_stage=(
+                        physical_results[index].failure_stage
+                        if physical_results
+                        else None
+                    ),
                     task_completion_time_s=(
                         observation.task_completion_time_s
                         if observation is not None and task_done
@@ -3376,6 +3342,11 @@ class AtomicTaskScenario(ScenarioProvider):
                     ),
                 )
             )
+        if physical_results:
+            outcomes = [
+                with_physical_evaluation(outcome, physical, skill_id=case.skill_id)
+                for outcome, physical in zip(outcomes, physical_results)
+            ]
         trajectory_duration = (
             float(durations.mean().item()) if durations.numel() else None
         )

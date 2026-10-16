@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import replace
 from unittest.mock import Mock
 
@@ -41,8 +43,9 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import CuroboPlan
 from embodichain.lab.sim.motion.planners.utils import MoveType, PlanResult
 from embodichain.toolkits.graspkit import GraspPoseGenerator
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.config import load_suite
+from scripts.benchmark.motion_generation.config import DomainCfg, load_suite
 from scripts.benchmark.motion_generation.metrics.trajectory import (
+    _trajectory_derivatives,
     compute_case_outcomes,
     compute_waypoint_errors,
     match_ordered_joint_waypoints,
@@ -259,10 +262,19 @@ class _MetricRobot:
     device = torch.device("cpu")
     limit_lo = -1.0
     limit_hi = 1.0
+    qvel_limit = 1.0e6
+    """Permissive by default so geometry fixtures do not trip dynamic limits.
+
+    Dynamic-limit tests set a realistic value explicitly; FR3 publishes 2.62
+    rad/s for its slowest joint.
+    """
 
     def get_qpos_limits(self, name: str):  # noqa: ARG002
         limits = torch.tensor([[self.limit_lo, self.limit_hi]]).repeat(7, 1)
         return limits.unsqueeze(0)
+
+    def get_qvel_limits(self, name: str):  # noqa: ARG002
+        return torch.full((1, 7), self.qvel_limit)
 
     def compute_batch_fk(
         self, qpos: torch.Tensor, name: str, to_matrix: bool
@@ -301,6 +313,608 @@ def _timed_plan_result(
         positions=positions,
         dt=dt,
     )
+
+
+class _DynamicLimitRobot(_MetricRobot):
+    """FR3-like stub whose slowest joint bounds velocity at 2.62 rad/s."""
+
+    qvel_limit = 2.62
+
+
+def _dynamic_outcomes(positions: torch.Tensor | None = None, **overrides):
+    """Validate a synthetic path against the configured dynamic limits."""
+    case, default_positions = _valid_motion_case_and_positions()
+    return compute_case_outcomes(
+        _timed_plan_result(
+            default_positions if positions is None else positions, success=True
+        ),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+        **overrides,
+    )
+
+
+def _decelerating_path() -> torch.Tensor:
+    """Return a three-sample path that stops, so acceleration is non-zero."""
+    positions = torch.zeros(1, 3, 7)
+    positions[0, 1, 0] = 0.1
+    positions[0, 2, 0] = 0.1
+    return positions
+
+
+def test_velocity_violation_fails_motion_valid_and_reports_utilization():
+    # 0.1 rad over 0.025 s is 4 rad/s, which exceeds the 2.62 rad/s joint limit.
+    outcome = _dynamic_outcomes()[0]
+    assert outcome.ordered_waypoints_reached is True
+    assert outcome.joint_limit_violation is False
+    assert outcome.velocity_limit_violation is True
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
+    assert outcome.dynamic_limits_satisfied is False
+    assert outcome.motion_valid is False
+    assert outcome.failure_code == "dynamic_limit_violation"
+
+
+def test_unset_acceleration_and_jerk_limits_report_not_applicable():
+    outcome = _dynamic_outcomes(_decelerating_path())[0]
+    # 4 rad/s to rest within one 0.025 s step.
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(160.0)
+    assert outcome.acceleration_utilization is None
+    assert outcome.acceleration_limit_violation is None
+    assert outcome.jerk_utilization is None
+    assert outcome.jerk_limit_violation is None
+
+
+def test_dynamics_are_not_smoothed_across_a_reversing_path():
+    # A path that reverses every step: each step moves 4 rad/s and the rate
+    # flips by 8 rad/s per step. A central difference averages adjacent steps
+    # and would read this path as nearly at rest.
+    positions = torch.zeros(1, 6, 7)
+    positions[0, 1::2, 0] = 0.1
+    outcome = _dynamic_outcomes(positions)[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(320.0)
+    assert outcome.max_joint_jerk_rad_s3 == pytest.approx(25600.0)
+
+
+def test_jerk_uses_the_effective_spacing_for_unequal_intervals():
+    times = torch.tensor([0.0, 1.0, 3.0, 4.0], dtype=torch.float64)
+    positions = (0.001 * times.pow(3)).unsqueeze(-1)
+    dt = torch.tensor([0.0, 1.0, 2.0, 1.0], dtype=torch.float64)
+
+    _, _, jerk = _trajectory_derivatives(positions, dt)
+
+    assert jerk.item() == pytest.approx(0.006)
+
+
+def test_zero_interval_duplicates_do_not_change_the_dynamics():
+    # A junction sample repeated at zero elapsed time adds no motion.
+    case, _ = _valid_motion_case_and_positions()
+    positions = torch.zeros(1, 4, 7)
+    positions[0, 1:, 0] = 0.1
+    positions[0, 3, 0] = 0.2
+    dt = torch.tensor([[0.0, 0.025, 0.0, 0.025]])
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 == pytest.approx(0.0)
+
+
+def test_a_two_sample_path_does_not_report_a_measured_acceleration():
+    # One step resolves a velocity but no change in it. Reporting zero would
+    # certify an acceleration limit the samples cannot speak to.
+    outcome = _dynamic_outcomes(joint_acceleration_limit_rad_s2=1.0)[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.max_joint_acceleration_rad_s2 is None
+    assert outcome.acceleration_limit_violation is None
+
+
+def test_configured_acceleration_limit_is_enforced_per_joint():
+    path = _decelerating_path()
+    generous = _dynamic_outcomes(path, joint_acceleration_limit_rad_s2=1.0e6)[0]
+    assert generous.acceleration_limit_violation is False
+    strict = _dynamic_outcomes(path, joint_acceleration_limit_rad_s2=[1.0e-3] * 7)[0]
+    assert strict.acceleration_limit_violation is True
+    assert strict.dynamic_limits_satisfied is False
+
+
+def test_dynamic_limits_stay_satisfied_within_configured_limits():
+    case, _ = _valid_motion_case_and_positions()
+    # Long enough for every derivative up to jerk to be measured.
+    positions = torch.zeros(1, 4, 7)
+    positions[0, :, 0] = torch.linspace(0.0, 0.1, 4)
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _MetricRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+        joint_acceleration_limit_rad_s2=1.0e6,
+        joint_jerk_limit_rad_s3=1.0e9,
+    )[0]
+    assert outcome.dynamic_limits_satisfied is True
+    assert outcome.motion_valid is True
+    assert outcome.failure_code is None
+
+
+def _dynamic_trial(outcomes) -> TrialRecord:
+    """Wrap outcomes in a measured trial for aggregation assertions."""
+    return TrialRecord(
+        suite_version="test_v1",
+        track="free-space-common",
+        scenario_id="reach",
+        case_id="case-1",
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        model_revision="curobo-v2",
+        planner_config_hash="abc",
+        seed=11,
+        repeat=0,
+        batch_size=1,
+        waypoint_count=1,
+        path_shape="direct",
+        start_state_bin="nominal",
+        phase=TrialPhase.MEASURED,
+        cost_time_ms=10.0,
+        outcomes=outcomes,
+    )
+
+
+def _json_round_tripped_outcomes(trial: TrialRecord) -> tuple[CaseOutcome, ...]:
+    """Rebuild outcomes after the strict-JSON artifact boundary."""
+    payload = json.loads(json.dumps(trial.to_dict(), allow_nan=False))
+    outcomes = []
+    for row in payload["outcomes"]:
+        row.pop("end_to_end_success")
+        outcomes.append(CaseOutcome(**row))
+    return tuple(outcomes)
+
+
+def test_motion_across_a_zero_interval_is_an_unbounded_velocity_violation(tmp_path):
+    from scripts.benchmark.motion_generation.artifacts import (
+        TrialJsonlWriter,
+        write_json,
+    )
+
+    case, positions = _valid_motion_case_and_positions()
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.velocity_limit_violation is True
+    assert outcome.max_joint_velocity_rad_s == math.inf
+    assert outcome.dynamic_measurement_status == "unbounded"
+    assert outcome.dynamic_limits_satisfied is False
+    assert outcome.failure_code == "dynamic_limit_violation"
+
+    raw_path = tmp_path / "trials.jsonl"
+    TrialJsonlWriter(raw_path).append(_dynamic_trial((outcome,)))
+    raw = json.loads(
+        raw_path.read_text(),
+        parse_constant=lambda value: pytest.fail(f"non-standard JSON: {value}"),
+    )
+    assert raw["outcomes"][0]["max_joint_velocity_rad_s"] is None
+    assert raw["outcomes"][0]["dynamic_measurement_status"] == "unbounded"
+    assert raw["outcomes"][0]["velocity_limit_violation"] is True
+
+    aggregate_path = write_json(
+        tmp_path / "aggregate.json",
+        {
+            "max_joint_velocity_rad_s": math.inf,
+            "velocity_limit_violation": True,
+            "dynamic_measurement_status": "unbounded",
+        },
+    )
+    aggregate = json.loads(
+        aggregate_path.read_text(),
+        parse_constant=lambda value: pytest.fail(f"non-standard JSON: {value}"),
+    )
+    assert aggregate == {
+        "max_joint_velocity_rad_s": None,
+        "velocity_limit_violation": True,
+        "dynamic_measurement_status": "unbounded",
+    }
+
+
+class _PlaceholderLimitRobot(_MetricRobot):
+    """Backend that reports the float32 maximum instead of a real limit."""
+
+    qvel_limit = float(torch.finfo(torch.float32).max)
+
+
+def test_placeholder_velocity_limit_leaves_a_zero_interval_move_unjudged():
+    # With no velocity limit configured anywhere, an unbounded velocity has
+    # nothing to violate; it is reported as a peak, not as a failed check.
+    case, positions = _valid_motion_case_and_positions()
+    dt = torch.zeros(positions.shape[:2], device=positions.device)
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == math.inf
+    assert outcome.velocity_utilization is None
+    assert outcome.velocity_limit_violation is None
+    assert outcome.dynamic_limits_satisfied is None
+
+
+def test_placeholder_asset_velocity_limit_reads_as_not_applicable():
+    # A backend that does not carry the URDF's limits reports float32 max.
+    # Treating that as a limit would make every velocity check pass.
+    case, positions = _valid_motion_case_and_positions()
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.velocity_utilization is None
+    assert outcome.velocity_limit_violation is None
+
+
+def test_suite_stated_velocity_limit_overrides_a_placeholder_asset():
+    case, positions = _valid_motion_case_and_positions()
+    outcome = compute_case_outcomes(
+        _timed_plan_result(positions, success=True),
+        case,
+        _PlaceholderLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+        joint_velocity_limit_rad_s=[2.62] * 7,
+    )[0]
+    assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
+    assert outcome.velocity_limit_violation is True
+
+
+def _nmg_adapter(**config):
+    """Build an NMG adapter against a stub context, without loading a policy."""
+    from scripts.benchmark.motion_generation.config import PlannerSpecCfg
+    from scripts.benchmark.motion_generation.planners.base import PlannerContext
+    from scripts.benchmark.motion_generation.planners.nmg_onnx import NmgOnnxAdapter
+
+    robot = Mock(device=torch.device("cpu"))
+    robot.get_qvel_limits = Mock(
+        return_value=torch.tensor([[2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]])
+    )
+    if config.pop("placeholder_velocity", False):
+        robot.get_qvel_limits = Mock(
+            return_value=torch.full((1, 7), float(torch.finfo(torch.float32).max))
+        )
+    context = PlannerContext(
+        robot=robot,
+        control_part="arm",
+        device=torch.device("cpu"),
+        sample_interval=40,
+        joint_velocity_limit_rad_s=config.pop("velocity_limit", None),
+        joint_acceleration_limit_rad_s2=config.pop("acceleration_limit", 10.0),
+    )
+    spec = PlannerSpecCfg(
+        id="nmg", adapter="nmg_onnx", role="candidate", enabled=True, config=config
+    )
+    return NmgOnnxAdapter(spec, context)
+
+
+def test_nmg_rows_declare_timing_by_whether_they_retime():
+    assert _nmg_adapter().native_timing is False
+    assert _nmg_adapter(retime=True).native_timing is True
+
+
+def test_nmg_retimes_against_the_same_limits_the_metrics_check():
+    # A self-assigned limit would make a satisfied result meaningless, so the
+    # adapter reads velocity from the asset and acceleration from the protocol
+    # -- the two sources compute_case_outcomes validates against.
+    constraints = _nmg_adapter(retime=True)._retiming_constraints()
+    assert constraints["velocity"] == pytest.approx(
+        [2.62, 2.62, 2.62, 2.62, 5.26, 4.18, 5.26]
+    )
+    assert constraints["acceleration"] == pytest.approx(10.0)
+
+
+def test_nmg_retiming_refuses_a_placeholder_velocity_limit():
+    # Retiming against float32 max would leave velocity unconstrained while
+    # reporting the row as limit-respecting.
+    adapter = _nmg_adapter(retime=True, placeholder_velocity=True)
+    with pytest.raises(ValueError, match="no usable joint velocity limit"):
+        adapter._retiming_constraints()
+
+    stated = _nmg_adapter(
+        retime=True, placeholder_velocity=True, velocity_limit=[2.62] * 7
+    )
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
+
+
+def test_nmg_retiming_requires_one_velocity_limit_for_every_environment():
+    # One set of retiming limits serves the whole batch, while the metrics
+    # check each environment against its own.
+    adapter = _nmg_adapter(retime=True)
+    differing = torch.tensor([[2.62] * 7, [1.0] * 7])
+    adapter.context.robot.get_qvel_limits = Mock(return_value=differing)
+    with pytest.raises(ValueError, match="differ across environments"):
+        adapter._retiming_constraints()
+
+    shared = _nmg_adapter(retime=True)
+    shared.context.robot.get_qvel_limits = Mock(
+        return_value=torch.tensor([[2.62] * 7, [2.62] * 7])
+    )
+    assert shared._retiming_constraints()["velocity"] == pytest.approx([2.62] * 7)
+
+    # A suite-stated limit applies to every environment alike.
+    stated = _nmg_adapter(retime=True, velocity_limit=[2.0] * 7)
+    stated.context.robot.get_qvel_limits = Mock(return_value=differing)
+    assert stated._retiming_constraints()["velocity"] == pytest.approx([2.0] * 7)
+
+
+def test_nmg_retiming_requires_a_suite_acceleration_limit():
+    adapter = _nmg_adapter(retime=True, acceleration_limit=None)
+    with pytest.raises(ValueError, match="joint_acceleration_limit_rad_s2"):
+        adapter._retiming_constraints()
+
+
+def test_nmg_cli_overrides_reach_every_nmg_row():
+    # A checkpoint supplied on the command line must reach the paired row too;
+    # otherwise its availability check skips it and no comparison runs.
+    suite = load_suite("scripts/benchmark/motion_generation/suites/smoke.yaml")
+    _apply_overrides(suite, nmg_onnx_path="/tmp/policy.onnx", nmg_pos_eps=0.02)
+    rows = {
+        spec.id: (spec.config["onnx_model_path"], spec.config["pos_eps"])
+        for spec in suite.planners
+        if spec.adapter == "nmg_onnx"
+    }
+    assert set(rows) == {"nmg", "nmg_retimed"}
+    assert rows["nmg"] == rows["nmg_retimed"] == ("/tmp/policy.onnx", 0.02)
+
+
+@pytest.mark.parametrize("suite_name", ["coverage", "smoke"])
+def test_free_space_suites_pair_a_nominal_and_a_retimed_nmg_row(suite_name):
+    suite = load_suite(f"scripts/benchmark/motion_generation/suites/{suite_name}.yaml")
+    rows = {
+        spec.id: bool(spec.config.get("retime", False))
+        for spec in suite.planners
+        if spec.adapter == "nmg_onnx"
+    }
+    assert rows == {"nmg": False, "nmg_retimed": True}
+    # The paired arm must not diverge from the baseline anywhere else, or the
+    # comparison would measure the configuration difference too.
+    specs = {spec.id: dict(spec.config) for spec in suite.planners if spec.id in rows}
+    baseline = specs["nmg"]
+    retimed = {k: v for k, v in specs["nmg_retimed"].items() if k != "retime"}
+    assert retimed == baseline
+
+
+def test_hold_padded_batch_row_still_evaluates():
+    # A batched planner pads a short row by repeating its final pose at a zero
+    # interval. Differentiating straight through that hold steps the velocity
+    # across zero elapsed time, which the next stage rejects outright.
+    case = _case()
+    case.target_waypoints[0, 0, 0, 3] = 0.1
+    positions = torch.zeros(1, 4, 7)
+    positions[0, 1:, 0] = 0.1
+    dt = torch.tensor([[0.0, 0.025, 0.0, 0.0]])
+    outcome = compute_case_outcomes(
+        PlanResult(success=True, positions=positions, dt=dt),
+        case,
+        _DynamicLimitRobot(),
+        "arm",
+        validation_samples=8,
+        position_threshold_m=1.0e-4,
+        rotation_threshold_rad=1.0e-4,
+        joint_limit_tolerance_rad=1.0e-5,
+    )[0]
+    assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+    assert outcome.velocity_limit_violation is True
+
+
+def test_nominal_timing_reports_dynamics_without_deciding_validity():
+    # The same trajectory, judged under a clock the planner solved and under
+    # one it merely assumed.
+    solved = _dynamic_outcomes()[0]
+    nominal = _dynamic_outcomes(timing_is_solved=False)[0]
+
+    # Diagnostics describe the reported timing either way.
+    for outcome in (solved, nominal):
+        assert outcome.max_joint_velocity_rad_s == pytest.approx(4.0)
+        assert outcome.velocity_utilization == pytest.approx(4.0 / 2.62)
+        assert outcome.velocity_limit_violation is True
+
+    # Only a solved clock produces a verdict that can fail the trajectory.
+    assert solved.dynamic_limits_satisfied is False
+    assert solved.motion_valid is False
+    assert solved.failure_code == "dynamic_limit_violation"
+    assert nominal.dynamic_limits_satisfied is None
+    assert nominal.motion_valid is True
+    assert nominal.failure_code is None
+
+
+def test_nominal_timing_planner_reports_no_comparable_duration():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="nmg",
+            algorithm_role=AlgorithmRole.CANDIDATE,
+            adapter="nmg_onnx",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+            native_timing=False,
+        )
+    ]
+    trial = replace(
+        _dynamic_trial((_outcome(),)),
+        algorithm_id="nmg",
+        algorithm_role=AlgorithmRole.CANDIDATE,
+        trajectory_duration_s=1.5,
+    )
+    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
+        "time_and_memory"
+    ][0]
+    assert row["native_timing"] is False
+    assert row["trajectory_duration_s"] is None
+
+
+def test_unset_dynamic_limit_aggregates_to_none_not_a_zero_violation_rate():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+    trial = _dynamic_trial(
+        (
+            replace(
+                _outcome(),
+                velocity_limit_violation=True,
+                acceleration_limit_violation=None,
+            ),
+        )
+    )
+    row = aggregate_results([trial], metadata, [case], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
+    assert row["velocity_violation_rate"] == pytest.approx(1.0)
+    # An unconfigured acceleration limit must not read as a clean result.
+    assert row["acceleration_violation_rate"] is None
+    assert row["jerk_violation_rate"] is None
+
+
+def test_an_unbounded_peak_is_not_averaged_away():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+            native_timing=True,
+        )
+    ]
+    trial = _dynamic_trial(
+        (
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=2.0,
+                velocity_utilization=0.5,
+                dynamic_measurement_status="finite",
+            ),
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=math.inf,
+                velocity_utilization=math.inf,
+                velocity_limit_violation=True,
+                dynamic_measurement_status="unbounded",
+            ),
+        )
+    )
+    round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
+    for record in (trial, round_tripped):
+        row = aggregate_results([record], metadata, [case], measured_trials=1)[
+            "success_and_metrics"
+        ][0]
+        assert row["max_joint_velocity_rad_s"] == math.inf
+        assert row["velocity_utilization"] == math.inf
+        assert row["dynamic_measurement_status"] == "unbounded"
+
+
+def test_json_round_trip_keeps_unbounded_peak_without_a_configured_limit():
+    case = _case()
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+            native_timing=True,
+        )
+    ]
+    trial = _dynamic_trial(
+        (
+            replace(
+                _outcome(),
+                max_joint_velocity_rad_s=math.inf,
+                velocity_utilization=None,
+                velocity_limit_violation=None,
+                dynamic_measurement_status="unbounded",
+            ),
+        )
+    )
+    round_tripped = replace(trial, outcomes=_json_round_tripped_outcomes(trial))
+
+    row = aggregate_results([round_tripped], metadata, [case], measured_trials=1)[
+        "success_and_metrics"
+    ][0]
+
+    assert row["max_joint_velocity_rad_s"] == math.inf
+    assert row["velocity_utilization"] is None
+    assert row["velocity_violation_rate"] is None
+    assert row["dynamic_measurement_status"] == "unbounded"
+
+
+@pytest.mark.parametrize("tolerance", [math.nan, math.inf, -0.1])
+def test_dynamic_limit_tolerance_must_be_finite_and_non_negative(tolerance):
+    suite = load_suite("smoke")
+    suite.protocol.dynamic_limit_tolerance = tolerance
+
+    with pytest.raises(ValueError, match="dynamic_limit_tolerance"):
+        suite.validate_benchmark()
+
+
+def test_only_planners_that_solve_timing_declare_it():
+    from scripts.benchmark.motion_generation.planners.base import PlannerAdapter
+    from scripts.benchmark.motion_generation.planners.curobo import CuroboAdapter
+    from scripts.benchmark.motion_generation.planners.ik_interpolate import (
+        IkInterpolateAdapter,
+    )
+    from scripts.benchmark.motion_generation.planners.toppra import ToppraAdapter
+
+    # An adapter that declares nothing is not judged on an unsolved clock.
+    assert PlannerAdapter.native_timing is False
+    assert CuroboAdapter.native_timing is True
+    assert ToppraAdapter.native_timing is True
+    # Assigns a constant interval that no limit informs.
+    assert IkInterpolateAdapter.native_timing is False
+    # NMG depends on its row: nominal unless `retime` solves the timing.
+    assert _nmg_adapter().native_timing is False
+    assert _nmg_adapter(retime=True).native_timing is True
 
 
 def test_motion_valid_ignores_planner_reported_failure_in_outcomes_and_aggregates():
@@ -1332,6 +1946,37 @@ def test_suite_loads_tracks_and_keeps_mutable_free_space_config():
     assert suite.enabled_tracks()[0].config["batch_sizes"] == [1, 8]
 
 
+def test_free_space_domain_overrides_change_the_generated_case_matrix():
+    suite = load_suite("smoke")
+    suite.enabled_tracks()[0].domains = [
+        DomainCfg(
+            id="shifted",
+            version="v1",
+            kind="held_out",
+            overrides={
+                "batch_sizes": [2],
+                "waypoint_counts": [1],
+                "path_shapes": ["orientation_only"],
+                "start_state_bins": ["near_limit"],
+                "seeds": [23],
+            },
+        )
+    ]
+    suite.validate_benchmark()
+    track = suite.evaluation_tracks()[0]
+    provider = create_scenario_provider("free_space")
+
+    assert provider.batch_sizes(suite, track) == [2]
+    cases = provider.generate_cases(
+        suite, track, _FrankaLimitRobot(), "arm", batch_size=2
+    )
+    assert len(cases) == 1
+    assert cases[0].seed == 23
+    assert cases[0].num_waypoints == 1
+    assert cases[0].path_shape == "orientation_only"
+    assert cases[0].start_state_bin == "near_limit"
+
+
 class _Ur5LimitRobot(_MetricRobot):
     """FK stub with six bounded UR5 joints for free-space case generation."""
 
@@ -2228,6 +2873,7 @@ def test_runner_capability_gate_and_fake_adapter_lifecycle(tmp_path):
         robot.get_qpos_limits = Mock(
             return_value=torch.tensor([[-2.0, 2.0]]).repeat(7, 1).unsqueeze(0)
         )
+        robot.get_qvel_limits = Mock(return_value=torch.full((1, 7), 1.0e6))
         robot.compute_batch_fk = Mock(
             side_effect=lambda qpos, name, to_matrix: (  # noqa: ARG005
                 torch.eye(4).repeat(qpos.shape[0], qpos.shape[1], 1, 1).to(qpos.device)

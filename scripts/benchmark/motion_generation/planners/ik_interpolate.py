@@ -36,6 +36,8 @@ class IkInterpolateAdapter(PlannerAdapter):
     """Use the robot IK solver followed by fixed-count joint interpolation."""
 
     capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    # Timing stays nominal (the base default): every interpolated step is
+    # assigned the configured `interpolation_dt`, which no limit informs.
 
     def build(self) -> None:
         """No planner object is required beyond the benchmark robot."""

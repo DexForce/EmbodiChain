@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 
 from embodichain.lab.sim.motion.motion_generator import (
     MotionGenCfg,
@@ -45,15 +44,16 @@ class ToppraAdapter(PlannerAdapter):
     """Pre-interpolate EEF targets through IK, then run TOPPRA."""
 
     capabilities = frozenset({"eef_waypoint", "batched", "empty_world"})
+    native_timing = True
+    """TOPPRA solves the time parameterization under velocity and acceleration
+    limits."""
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
 
     def availability(self) -> tuple[bool, str | None]:
-        """Report whether the optional TOPPRA package is installed."""
-        if importlib.util.find_spec("toppra") is None:
-            return False, "TOPPRA is not installed."
+        """The in-tree TOPPRA implementation is always available."""
         return True, None
 
     def build(self) -> None:

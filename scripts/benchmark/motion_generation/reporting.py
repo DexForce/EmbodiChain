@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,7 @@ TIME_COLUMNS = (
     "peak_gpu_mb",
     "execution_time_ms",
     "end_to_end_time_ms",
+    "native_timing",
     "trajectory_duration_s",
     "trajectory_waypoints",
 )
@@ -77,6 +79,10 @@ METRIC_COLUMNS = (
     "motion_valid_rate",
     "execution_success_rate",
     "task_success_rate",
+    "physical_skill_success_rate",
+    "end_to_end_success_rate",
+    "evaluation_protocols",
+    "physical_evaluation_coverage_rate",
     "ordered_waypoint_success_rate",
     "waypoint_completion_rate",
     "final_pos_err_mm",
@@ -84,6 +90,16 @@ METRIC_COLUMNS = (
     "waypoint_pos_err_mm_p95",
     "waypoint_rot_err_deg_p95",
     "joint_violation_rate",
+    "velocity_violation_rate",
+    "acceleration_violation_rate",
+    "jerk_violation_rate",
+    "velocity_utilization",
+    "acceleration_utilization",
+    "jerk_utilization",
+    "dynamic_measurement_status",
+    "max_joint_velocity_rad_s",
+    "max_joint_acceleration_rad_s2",
+    "max_joint_jerk_rad_s3",
     "joint_path_length_rad",
     "cartesian_path_length_m",
     "path_efficiency",
@@ -93,6 +109,8 @@ METRIC_COLUMNS = (
     "articulation_joint_delta",
     "articulation_joint_peak_signed_delta",
     "replan_count",
+    "stage_success_rates",
+    "stage_counts",
     "top_failure",
 )
 
@@ -127,6 +145,8 @@ def _format_value(column: str, value: object) -> str:
         if column.endswith("_rate") or column in {"path_efficiency"}:
             return f"{value:.2%}"
         return f"{value:.6f}"
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
     return str(value)
 
 
@@ -187,6 +207,40 @@ def write_markdown_report(
         ]
     )
     lines.extend(_format_table(aggregates["success_and_metrics"], METRIC_COLUMNS))
+    domain_rows = aggregates.get("generalization", [])
+    if domain_rows:
+        lines.extend(
+            [
+                "",
+                "## Generalization summary",
+                "",
+                "Domain statistics are computed from the raw trial records. "
+                "Unsupported capability cases lower coverage and are excluded "
+                "from success denominators.",
+                "",
+            ]
+        )
+        for row in domain_rows:
+            lines.append(
+                "- "
+                + "; ".join(
+                    f"{name}={_format_value(name, row.get(name))}"
+                    for name in (
+                        "track",
+                        "algorithm",
+                        "domain_id",
+                        "domain_version",
+                        "domain_kind",
+                        "coverage_rate",
+                        "success_rate",
+                        "domain_mean_success_rate",
+                        "domain_worst_success_rate",
+                        "domain_success_variance",
+                        "domain_retention",
+                        "generalization_eligible",
+                    )
+                )
+            )
     lines.extend(["", "## Leaderboard", ""])
     lines.extend(_format_table(aggregates["leaderboard"], LEADERBOARD_COLUMNS))
     if notes:
