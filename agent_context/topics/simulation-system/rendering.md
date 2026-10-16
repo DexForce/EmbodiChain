@@ -1,7 +1,74 @@
 # Rendering, attachment and startup diagnostics
 
-Read this for physics/render synchronization, native-window/DLSS configuration
-and readiness reporting. Return to the [simulation overview](simulation-system.md).
+Read this for physics/render synchronization, native-window/offscreen image
+processing and readiness reporting. Return to the
+[simulation overview](simulation-system.md).
+
+## NoRender initialization
+
+`RenderCfg(renderer="no-render")` selects `Renderer.NORENDER` and requires
+headless mode. Task environments preflight native render demand before World
+construction: enabled Camera/StereoCamera subclasses, built-in recording or
+nonempty validation cameras, the original window intent, Viser, forced Newton
+render synchronization, and custom environment demand hooks reserve
+rendering. Existing sensor/visual filters run before preflight; disabled dataset
+managers do not contribute demand. Contact-only environments do not require it.
+Camera demand includes `RobotCfg.sensors` from the selected backend preset,
+even when the independent Gym `sensor` list is empty. This selection and
+disabled-sensor filtering run before the World is constructed.
+
+`BaseEnv._requires_native_renderer()` is the extension hook. Its result reaches
+`SimulationManager(..., requires_native_renderer=...)` before Gym temporarily
+sets headless for scene setup. With auto, no global default override and demand
+explicitly false, the manager selects NoRender without probing the GPU. Explicit
+renderer selections and global defaults retain precedence. The default demand
+`None` preserves standalone GPU selection. The run-task/run-env launcher scopes
+its native auto preference through `utility/render_utils.py`; this preference is
+consulted only after NoRender demand selection and explicit global overrides,
+and is restored on launcher exit. Custom camera/visual code, including
+cameras added after startup, must reserve rendering before construction; no
+runtime renderer switching or speculative constructors are used.
+
+DexSim keeps its process renderer after World cleanup. Subsequent auto Worlds
+reuse an initialized native renderer, including camera-free Worlds. A process
+initialized with NoRender cannot later create native render consumers: the
+manager rejects that combination before constructing another World and asks
+for a new process with rendering reserved from its first environment. Process
+configuration, rather than the per-World requested renderer, owns this check.
+
+Native-renderer scene-node reservations may exceed NoRender's 131,071-node
+limit. The manager caps the effective NoRender World capacity at that limit
+while preserving the authored native-renderer reservation. This also applies
+to explicit NoRender selections and global defaults. Smaller reservations are
+retained, and physical replication must still fit the effective capacity.
+
+The manager skips native background, light and visual-material setup, keeps
+physical ground, and skips Newton render-state publication. Gym additionally
+skips configured lights/IBL and built-in native visual effects; background
+objects and collision geometry remain. DexSim uses its existing package and
+device-free NoRender engine. Native camera and window operations require a
+native renderer. Viser retains native rendering because its current exporter
+reads visual meshes. Checkpoint evaluation with `--viewer` defaults to Hybrid
+when the saved training configuration uses NoRender.
+
+## Default scene presentation
+
+`SimulationManager.set_default_background()` authors the native ground material
+before Spawn declares the plane, using the bundled `PlaneDark` color and
+roughness textures. Viser owns its separate browser grid and does not mirror
+native lights or PBR materials.
+
+`set_default_global_lighting()` initializes only environment emission; it does
+not create direct lights or change existing scene lights. Standalone callers
+declare direct lights through `SimulationManager.add_light()`. Task deployments
+own them through `light.direct`; `light.indirect` can override the initial
+environment emission or select IBL. Each explicitly declared light controls
+its own shadows through `LightCfg.enable_shadow`. NoRender skips native visual
+setup while retaining physical ground.
+
+`RenderCfg` owns final RGB tone mapping and fixed exposure for native windows
+and offscreen cameras. Tone mapping is disabled by default; explicit
+`tone_mapping_enabled=True` enables the tone-mapping curve.
 
 ## Rendering does not advance physics
 
@@ -21,6 +88,9 @@ An independent camera/capture call still publishes fresh state. No publication
 cache survives a frame, so paused edits and direct writes between frames do not
 need mutation counters. State edits inside a read-only frame require an explicit
 `sync_render_state()` before further reads; that API always publishes.
+Default publishes native transforms with `World.update(0.0)`, without advancing
+physics. Pose-editing tools and display initialization use this publication
+boundary; they must not use positive-duration updates merely to refresh a view.
 
 The Newton backend step hook suppresses automatic DexSim publication during
 manager-owned updates to avoid publishing twice. The manager honors explicit
@@ -51,22 +121,31 @@ Completion is marked only after all attachments succeed, so partial failures
 retry. The camera registry is the sole attachment-intent store. Detailed
 sensor behavior belongs to [sensors](../sensor-system/sensor-system.md).
 
-## Renderer and DLSS configuration
+## Renderer, denoising and reconstruction configuration
 
-`cfg/simulation.py:RenderCfg.apply_to_dexsim_config()` translates rendering and
-`DLSSCfg` into WorldConfig after automatic renderer resolution. Forward the
-DLSS master switch even when false, and retain config during headless startup
-for offscreen cameras or a later window. Native window/offscreen behavior can
-differ; settings not authored by EmbodiChain retain DexSim defaults.
+`cfg/rendering.py:RenderCfg.apply_to_dexsim_config()` translates rendering,
+`DenoisingCfg`, `DLSSCfg` and `NRDCfg` into WorldConfig after automatic renderer
+resolution. `DenoisingCfg` independently selects the window and offscreen
+pipelines from `off`, `optix`, `dlss` and `nrd`; `dlss` maps to DLSS Ray
+Reconstruction and `nrd` maps to standalone NRD RELAX. Native SR/REBLUR
+variants are not part of the EmbodiChain public contract. Retain the
+complete configuration during headless startup for offscreen cameras or a later
+window.
+
+`RenderCfg` owns the general ray-tracing bounce limits, including the depth
+at which Russian Roulette termination is permitted. `NRDCfg` separately owns
+the indirect continuation budget for NRD; matching general bounce limits
+does not imply matching light-transport budgets across denoising modes.
 
 The actual camera/window owns output dimensions; compatibility target fields
 must not resize it. Internal dimensions/upsample ratio affect FastRT/OfflineRT
 windows; hybrid/offscreen sizes derive from output size and quality.
 `frame_time_delta_ms` is render cadence, not physics/control cadence.
-`gym/utils/gym_utils.py:config_to_cfg()` decodes nested DLSS mappings. Scalar
-validation runs at construction and conversion after mutable edits. Configuration
-tests do not prove GPU/NGX support, which initializes on a rendered frame.
-Read exact renderer/quality defaults in the config source.
+`gym/utils/gym_utils.py:config_to_cfg()` decodes all three nested mappings.
+Scalar validation runs at construction and conversion after mutable edits.
+Configuration tests do not prove GPU/NGX/NRD runtime support, which initializes
+on a rendered frame. Read exact renderer and algorithm defaults in the config
+source.
 
 ## Startup summaries
 
@@ -87,7 +166,7 @@ and graph status are separate; pending must never be reported as captured.
 ## Change sites and validation
 
 Use `sim_manager.py` for synchronization/readiness and window sequencing,
-`physics/newton.py` for render bridging, `cfg/simulation.py` for conversion,
+`physics/newton.py` for render bridging, `cfg/rendering.py` for conversion,
 `sensors/attachment.py` for parent lookup, and `_startup_summary.py` for reporting.
 Focused tests: `tests/sim/test_sim_manager.py`, `tests/sim/test_startup_summary.py`,
 `tests/sim/test_cfg.py`, `tests/sim/sensors/test_attachment.py`, and

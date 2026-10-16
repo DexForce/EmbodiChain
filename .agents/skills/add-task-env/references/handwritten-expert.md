@@ -8,8 +8,8 @@ scripted/handwritten demonstration.
 ## Owned files
 
 ```text
-embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
-embodichain_tasks/configs/tasks/<category_path>/<task_name>/
+extensions/embodichain_tasks/embodichain_tasks/<category_path>/<task_name>.py
+extensions/embodichain_tasks/configs/tasks/<category_path>/<task_name>/
 tests/gym/envs/tasks/test_<task_name>.py
 ```
 
@@ -97,6 +97,6 @@ use the project's resource markers and clean up `SimulationManager`.
 
 Reference implementations:
 
-- `embodichain_tasks/embodichain_tasks/manipulation/tableware/blocks_ranking_rgb.py`
-- `embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py`
+- `extensions/embodichain_tasks/embodichain_tasks/manipulation/tableware/blocks_ranking_rgb.py`
+- `extensions/embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py`
 - `embodichain/lab/gym/envs/demo.py`

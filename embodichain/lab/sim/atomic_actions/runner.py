@@ -980,7 +980,7 @@ class ExecutionRunner:
                 Without one, the method returns the running boundary so the
                 caller can verify externally.
             physical_effect_verifier: Evidence-aware alternative to
-                ``effect_verifier``.
+                ``effect_verifier``, receiving the synchronized evidence frame.
             phase_effect_gate_verifier: Optional synchronous callback used on
                 fresh observations while a trajectory-segment entry is gated.
             physical_phase_effect_gate_verifier: Evidence-aware alternative to

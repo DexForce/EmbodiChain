@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from embodichain.lab.gym.envs.managers import ActionManager, ActionTermCfg
@@ -298,14 +299,15 @@ def test_binary_parallel_gripper_has_one_policy_dimension() -> None:
     torch.testing.assert_close(term.processed_actions[1], term.open_command)
 
 
-def test_arm_plus_gripper_dimensions_follow_resolved_arm_width() -> None:
-    """UR and Franka layouts derive 6+1 and 7+1 widths without literals."""
+@pytest.mark.parametrize("part_name", ["eef", "hand", "custom_claw"])
+def test_arm_plus_gripper_dimensions_follow_resolved_arm_width(part_name: str) -> None:
+    """Default and custom part names derive action widths from resolved joints."""
     for arm_width, expected in ((6, 7), (7, 8)):
         joint_names = tuple(f"arm_{index}" for index in range(arm_width)) + ("finger",)
         env = make_action_env(
             num_envs=1,
             joint_names=joint_names,
-            parts={"arm": tuple(range(arm_width)), "hand": (arm_width,)},
+            parts={"arm": tuple(range(arm_width)), part_name: (arm_width,)},
         )
         manager = ActionManager(
             {
@@ -316,7 +318,7 @@ def test_arm_plus_gripper_dimensions_follow_resolved_arm_width() -> None:
                 "gripper_action": ActionTermCfg(
                     func=ParallelGripperAction,
                     params={
-                        "part_name": "hand",
+                        "part_name": part_name,
                         "command_mode": "continuous",
                         "use_joint_limits": True,
                     },

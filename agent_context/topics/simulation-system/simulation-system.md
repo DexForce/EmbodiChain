@@ -32,6 +32,11 @@ to Spawn, not per-object collision-group calculations. Backend differences
 belong in physics hooks/capabilities or object adapters, not task-side native
 access. Contact sensors use the finalized Scene's `ContactQuery` boundary.
 
+[Scene services](../scene-services/scene-services.md) compose existing configs,
+propose layouts and read/change physical state through these owners. They do
+not add a registry or commit topology. Runtime scene services currently accept
+only B=1 selections; Spawn still owns replication and isolation.
+
 ## Lifecycle
 
 ```text
@@ -96,7 +101,7 @@ tests need non-symmetric rotations to expose component-order mistakes.
 | Backend/device selection, source overlays, collision/mass policy | [Physics configuration](physics-configuration.md); `cfg/`, `spawn/descriptors.py` |
 | Joint state order, drive lowering, mimic coupling, native adaptation | [Articulation and batch adapters](articulation-adapters.md); `objects/backends/`, `objects/articulation.py` |
 | Volume/surface state, topology and kinematic nodes | [Deformables](deformables.md); `cfg/deformable.py`, `objects/deformable/` |
-| Camera synchronization, native window, DLSS, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
+| Camera synchronization, native window/offscreen denoising, startup readiness | [Rendering and diagnostics](rendering.md); manager, `cfg/simulation.py`, `_startup_summary.py` |
 | Robot definition, control parts, robot presets | [Robot system](../robot-system/robot-system.md) |
 | Camera attachment resolution or contact sensors | [Sensor system](../sensor-system/sensor-system.md) |
 | Browser export or native gizmos | [Visualization](../sim-visualization/sim-visualization.md), [native gizmos](../sim-visualization/native-gizmos.md) |

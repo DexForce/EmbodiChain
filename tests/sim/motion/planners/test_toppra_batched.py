@@ -133,7 +133,7 @@ class TestToppraPlanBatched:
             ToppraPlannerCfg,
         )
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain.lab.sim.robots import CobotMagicCfg
+        from embodichain_robots import CobotMagicCfg
 
         sim = SimulationManager(
             SimulationManagerCfg(headless=True, device="cpu", num_envs=2)
@@ -247,7 +247,7 @@ class TestToppraPlanBatched:
             ToppraPlanOptions,
         )
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain.lab.sim.robots import CobotMagicCfg
+        from embodichain_robots import CobotMagicCfg
 
         sim = SimulationManager(
             SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
@@ -310,7 +310,7 @@ class TestToppraPlanBatched:
             ToppraPlanOptions,
         )
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain.lab.sim.robots import CobotMagicCfg
+        from embodichain_robots import CobotMagicCfg
 
         sim = SimulationManager(
             SimulationManagerCfg(headless=True, device="cpu", num_envs=3)
@@ -380,7 +380,7 @@ class TestToppraNumericalRegression:
             TrajectorySampleMethod,
         )
         from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-        from embodichain.lab.sim.robots import CobotMagicCfg
+        from embodichain_robots import CobotMagicCfg
 
         sim = SimulationManager(
             SimulationManagerCfg(headless=True, device="cpu", num_envs=4)

@@ -4,6 +4,10 @@ Workspace analysis caches kinematic reachability; runtime sampling reuses cached
 joint configurations with the current robot base. This does not establish
 collision-free motion, grasp validity or task success.
 
+[Scene expansion](../scene-expansion/scene-expansion.md) owns scene proposals
+and the Task Program attempt boundary. Workspace results alone do not supply
+physical preparation or acceptance of those proposals.
+
 ## Entry points
 
 Paths below are relative to `embodichain/lab/sim/` unless qualified.
@@ -26,6 +30,11 @@ Offline: robot preset/asset → control part and joint limits → joint/Cartesia
 plane sampling → FK/IK → metrics → result cache. Runtime: `workspace_cfg`
 → lazy per-part cache load → cached qpos selection → current-base batch FK
 → bounded-position filtering.
+
+The CLI's `--robot` choices and preset construction use the shared
+[robot catalog](../robot-system/robot-system.md). Installed provider IDs and
+variant presets are supported without a separate CLI class map;
+`--robot-params` overrides the selected catalog defaults.
 
 `Robot.get_workspace()` loads `RobotWorkspace.from_cache(cache_path, ...)` on
 first use. `cache_path` may be a cache-entry directory (selecting `results.npz`)

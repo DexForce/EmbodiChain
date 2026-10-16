@@ -14,10 +14,16 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Online datasets and samplers that stream trajectories from a running simulation for online RL/IL training."""
+"""Online datasets and offline inspection with lazy simulation dependencies."""
 
-from .online_data import OnlineDataset
-from .sampler import ChunkSizeSampler, UniformChunkSampler, GMMChunkSampler
+from __future__ import annotations
+
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .online_data import OnlineDataset
+    from .sampler import ChunkSizeSampler, GMMChunkSampler, UniformChunkSampler
 
 __all__ = [
     "ChunkSizeSampler",
@@ -25,3 +31,16 @@ __all__ = [
     "OnlineDataset",
     "UniformChunkSampler",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name = "online_data" if name == "OnlineDataset" else "sampler"
+    value = getattr(import_module(f"{__name__}.{module_name}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

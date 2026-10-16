@@ -16,11 +16,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 import torch
 
 from embodichain.utils import logger
 
 __all__ = ["select_default_renderer"]
+
+# A launcher can prefer a native renderer without overriding NoRender demand
+# selection or leaking its policy into subsequent standalone simulations.
+_NATIVE_AUTO_RENDERER: ContextVar[str | None] = ContextVar(
+    "native_auto_renderer", default=None
+)
+
+
+@contextmanager
+def _native_auto_renderer(renderer: str) -> Iterator[None]:
+    """Scope a launcher's native auto default, below explicit global overrides."""
+    token = _NATIVE_AUTO_RENDERER.set(renderer)
+    try:
+        yield
+    finally:
+        _NATIVE_AUTO_RENDERER.reset(token)
+
 
 # GPU name fragments that map to a fully ray-traced ('fast-rt') default. These
 # are datacenter accelerators where ray tracing throughput is preferred over the
@@ -36,6 +57,8 @@ def select_default_renderer(gpu_id: int = 0) -> str:
     - If :data:`embodichain.lab.sim.cfg.DEFAULT_RENDERER` is set to a concrete
       value (anything other than ``"auto"``), that value is honored. This lets
       callers (e.g. test fixtures) force a renderer regardless of hardware.
+    - During ``run-task`` / ``run-env``, native auto selection uses ``"fast-rt"``
+      independently of hardware. Outside that launcher scope, GPU selection applies.
     - RTX-series cards use ``"hybrid"`` (ray tracing for shadows/reflections with
       rasterized primary rendering).
     - Datacenter cards (A100/A800, H100/H800/H200/H20) use ``"fast-rt"`` (fully
@@ -55,6 +78,9 @@ def select_default_renderer(gpu_id: int = 0) -> str:
     # Explicit override takes precedence over hardware auto-detection.
     if cfg.DEFAULT_RENDERER != "auto":
         return cfg.DEFAULT_RENDERER
+
+    if (renderer := _NATIVE_AUTO_RENDERER.get()) is not None:
+        return renderer
 
     if not torch.cuda.is_available():
         logger.log_debug("No CUDA device available; defaulting renderer to 'hybrid'.")

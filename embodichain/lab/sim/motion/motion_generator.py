@@ -64,6 +64,12 @@ from .planners.utils import (
 
 __all__ = ["MotionGenerator", "MotionGenCfg", "MotionGenOptions"]
 
+# Limit flattened targets before numerical solvers expand their multi-start
+# seeds. One environment with many waypoints must not create an unbounded solve.
+# Also bound the path span between seed anchors for single-environment requests.
+_MAX_IK_BATCH_TARGETS = 512
+_MAX_IK_BATCH_WAYPOINTS = 32
+
 
 @configclass
 class MotionGenCfg:
@@ -718,44 +724,130 @@ class MotionGenerator:
         poses: torch.Tensor,
         start_qpos: torch.Tensor,
         control_part: str,
+        *,
+        known_start: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Solve required poses in order, retaining every row and IK failure."""
+        """Batch required poses, retaining FK-confirmed starts and IK failures.
+
+        Solvers with continuous candidate selection receive an initial path
+        seed. Other solvers first solve each chunk's endpoint from the preceding
+        chunk, then solve its interior together using interpolated joint seeds.
+        These seeds encourage a consistent branch without claiming continuous
+        selection for solvers that do not support it.
+        """
         device = self._runtime_device()
         start_qpos = start_qpos.to(device)
         batch_size, controlled_dof = start_qpos.shape
         if poses.ndim != 4 or poses.shape[0] != batch_size or poses.shape[2:] != (4, 4):
             raise ValueError("Cartesian waypoints must have shape (B, N, 4, 4).")
+        if poses.shape[1] == 0:
+            raise ValueError("Cartesian waypoints must contain at least one pose.")
+        poses = poses.to(device)
+        solver = self.robot.get_solver(control_part)
+        continuous = solver is not None and solver.supports_continuous_batch_ik
+        chunk_size = max(
+            1, min(_MAX_IK_BATCH_WAYPOINTS, _MAX_IK_BATCH_TARGETS // batch_size)
+        )
         success = torch.ones(batch_size, dtype=torch.bool, device=device)
         qpos_seed = start_qpos
-        solved_waypoints = []
-        for index in range(poses.shape[1]):
-            step_success, qpos = self.robot.compute_ik(
-                pose=poses[:, index].to(device),
-                name=control_part,
-                joint_seed=qpos_seed,
-            )
-            step_success = normalize_success_mask(
-                step_success,
-                num_envs=batch_size,
-                device=device,
-                name=f"IK success for target state {index}",
-            )
-            qpos = torch.as_tensor(qpos, dtype=start_qpos.dtype, device=device)
-            if qpos.shape != (batch_size, controlled_dof):
-                raise ValueError(
-                    "IK qpos must have shape "
-                    f"({batch_size}, {controlled_dof}), got {tuple(qpos.shape)}."
+        solved_waypoints: list[torch.Tensor] = []
+        first_index = 0
+        if known_start is not None:
+            known_start = known_start.to(device)
+            if bool(known_start.all()):
+                # FK already grounded this pose, including at singularities
+                # where IK may fail. Keep it outside the solver batches.
+                solved_waypoints.append(start_qpos[:, None, :])
+                first_index = 1
+        for offset in range(first_index, poses.shape[1], chunk_size):
+            chunk = poses[:, offset : offset + chunk_size]
+            count = chunk.shape[1]
+            if continuous:
+                valid, qpos = self._compute_cartesian_ik_batch(
+                    chunk, qpos_seed, control_part, continuous=True
                 )
-            step_success = step_success & torch.isfinite(qpos).all(dim=1)
-            qpos = torch.where(step_success[:, None], qpos, qpos_seed)
-            success &= step_success
+            else:
+                end_valid, end_qpos = self._compute_cartesian_ik_batch(
+                    chunk[:, -1:], qpos_seed[:, None, :], control_part
+                )
+                if count == 1:
+                    valid, qpos = end_valid, end_qpos
+                else:
+                    safe_end = torch.where(end_valid, end_qpos[:, 0], qpos_seed)
+                    weights = (
+                        torch.arange(1, count, dtype=start_qpos.dtype, device=device)
+                        / count
+                    )
+                    seeds = torch.lerp(
+                        qpos_seed[:, None, :],
+                        safe_end[:, None, :],
+                        weights[None, :, None],
+                    )
+                    inner_valid, inner_qpos = self._compute_cartesian_ik_batch(
+                        chunk[:, :-1], seeds, control_part
+                    )
+                    valid = torch.cat((inner_valid, end_valid), dim=1)
+                    qpos = torch.cat((inner_qpos, end_qpos), dim=1)
+
+            if offset == 0 and known_start is not None:
+                # Mixed rows still solve the unconfirmed first poses. Only
+                # confirmed rows may disregard that first sample's IK failure.
+                qpos = qpos.clone()
+                valid = valid.clone()
+                qpos[:, 0] = torch.where(known_start[:, None], start_qpos, qpos[:, 0])
+                valid[:, 0] |= known_start
+
+            # Invalid/nonfinite solutions hold the preceding valid seed, even
+            # across chunks. A later reachable pose never rescues a failed row.
+            indices = torch.arange(1, count + 1, device=device).expand(batch_size, -1)
+            previous_valid = torch.where(valid, indices, 0).cummax(dim=1).values
+            candidates = torch.cat((qpos_seed[:, None, :], qpos), dim=1)
+            qpos = candidates.gather(
+                1, previous_valid[:, :, None].expand(-1, -1, controlled_dof)
+            )
+            success &= valid.all(dim=1)
             solved_waypoints.append(qpos)
-            qpos_seed = qpos
-        positions = torch.stack(solved_waypoints, dim=1)
+            qpos_seed = qpos[:, -1]
+        positions = torch.cat(solved_waypoints, dim=1)
         positions = torch.where(
             success[:, None, None], positions, start_qpos[:, None, :]
         )
         return success, positions
+
+    def _compute_cartesian_ik_batch(
+        self,
+        poses: torch.Tensor,
+        joint_seed: torch.Tensor,
+        control_part: str,
+        *,
+        continuous: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Validate per-waypoint batch results and reject nonfinite solutions."""
+        valid, qpos = self.robot.compute_batch_ik(
+            pose=poses,
+            joint_seed=joint_seed,
+            name=control_part,
+            **({"continuous": True} if continuous else {}),
+        )
+        batch_size, count = poses.shape[:2]
+        if isinstance(valid, torch.Tensor) and valid.shape != (batch_size, count):
+            raise ValueError(
+                f"IK success must have shape ({batch_size}, {count}), "
+                f"got {tuple(valid.shape)}."
+            )
+        valid = normalize_success_mask(
+            valid.flatten() if isinstance(valid, torch.Tensor) else valid,
+            num_envs=batch_size * count,
+            device=joint_seed.device,
+            name="Batch IK success",
+        ).reshape(batch_size, count)
+        qpos = torch.as_tensor(qpos, dtype=joint_seed.dtype, device=joint_seed.device)
+        expected_shape = (batch_size, count, joint_seed.shape[-1])
+        if qpos.shape != expected_shape:
+            raise ValueError(
+                f"IK qpos must have shape {expected_shape}, got {tuple(qpos.shape)}."
+            )
+        return valid & torch.isfinite(qpos).all(dim=2), qpos
 
     def _generate_ik_interpolation(
         self,
@@ -1394,8 +1486,23 @@ class MotionGenerator:
 
             if control_part is None:
                 raise ValueError("Cartesian interpolation requires control_part.")
+            # The observed start is already grounded by FK. Re-solving it with
+            # analytic IK can fail at a wrist singularity despite later poses
+            # being reachable. Preserve it only for rows whose whole pose agrees.
+            start_pose = self.robot.compute_fk(
+                qpos=qpos_seed, name=control_part, to_matrix=True
+            )
+            known_start = torch.isclose(
+                total_interpolated_poses[:, 0],
+                start_pose.to(total_interpolated_poses),
+                rtol=0.0,
+                atol=1e-6,
+            ).all(dim=(-2, -1))
             success, qpos_batch = self._solve_cartesian_waypoints(
-                total_interpolated_poses, qpos_seed, control_part
+                total_interpolated_poses,
+                qpos_seed,
+                control_part,
+                known_start=known_start,
             )
             # Keep the FK consistency guard, but never remove required poses.
             fk_batch = self.robot.compute_batch_fk(

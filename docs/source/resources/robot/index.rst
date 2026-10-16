@@ -5,6 +5,11 @@ EmbodiChain provides configuration classes for the robot families and composed
 layouts below. Each page documents construction, control parts, kinematics, and
 the currently supported variants.
 
+Run ``embodichain list-robot`` to discover installed families, variants,
+independent control DOFs, default control parts, and mimic followers without
+loading simulation or downloading assets. See :ref:`cli-list-robots` for the
+command reference and :doc:`/guides/robot_catalog` for variant selection.
+
 .. list-table::
    :header-rows: 1
    :widths: 24 25 51
@@ -13,8 +18,8 @@ the currently supported variants.
      - Configuration class
      - Current coverage
    * - :doc:`Franka Panda <franka_panda>`
-     - ``FrankaPandaCfg``
-     - Panda arm and gripper with numerical FK/IK.
+     - ``FrankaPandaCfg``, ``FrankaPandaPgiCfg``
+     - Panda arm with the Panda hand or a DH PGI gripper, with numerical FK/IK.
    * - :doc:`UR family <ur_robot>`
      - ``URRobotCfg``
      - UR3, UR3e, UR5, UR5e, UR10, and UR10e with analytic IK.
@@ -27,6 +32,12 @@ the currently supported variants.
    * - :doc:`Dual-arm composition <dual_arm>`
      - ``DualArmRobotCfg``
      - Registry-based composition of compatible single-arm configs in multiple layouts.
+   * - :doc:`Aloha Mini 2 Pro <aloha_mini>`
+     - ``AlohaMiniCfg``
+     - Mobile dual-arm platform with torso, arms, and grippers.
+   * - :doc:`Tianji Marvin <tianji_marvin>`
+     - ``TianjiMarvinCfg``
+     - Dual 7-DOF arms with optional parallel-jaw grippers.
 
 .. toctree::
    :maxdepth: 1
@@ -37,17 +48,8 @@ the currently supported variants.
    dexforce_w1
    cobotmagic
    dual_arm
+   aloha_mini
+   tianji_marvin
 
 To add another model, follow :doc:`/guides/add_robot` and include its page in
 this catalog and toctree.
-
-.. toctree::
-   :maxdepth: 1
-
-   aloha_mini
-
-
-.. toctree::
-   :maxdepth: 1
-
-   tianji_marvin

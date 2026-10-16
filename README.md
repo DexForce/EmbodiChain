@@ -11,6 +11,10 @@
 
 EmbodiChain is an end-to-end, GPU-accelerated framework for Embodied AI. It streamlines research and development by unifying high-performance simulation, automated generative data pipelines, modular model architectures, and efficient training workflows. This integration enables rapid experimentation, seamless deployment of intelligent agents, and effective Sim2Real transfer for real-world robotic systems.
 
+Official task and robot modules live under [extensions/](extensions/README.md)
+and ship with the main distribution. Their Python imports remain
+`embodichain_tasks` and `embodichain_robots`.
+
 > [!NOTE]
 > EmbodiChain is in Alpha and under active development:
 > * More features will be continually added in the coming months. You can find more details in the [roadmap](https://dexforce.github.io/EmbodiChain/main/resources/roadmap.html).
@@ -67,7 +71,7 @@ may instead compose the common environment from reusable `env.yaml`,
 embodiment, integration, and policy components. In either case, add a runnable
 gym config with `id`, install with `pip install -e .`, and launch it with
 `embodichain run-env`. See the
-[embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md)
+[embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/README.md)
 for details.
 EmbodiChain environments can also be used with the optional
 [RLinf integration](https://dexforce.github.io/EmbodiChain/main/guides/rlinf.html);

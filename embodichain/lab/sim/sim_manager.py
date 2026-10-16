@@ -304,7 +304,10 @@ class SimulationManagerCfg:
     """Maximum scene nodes, or None to retain the DexSim World default.
 
     Large batches of articulated robots may require more nodes than the
-    default 65,536. This changes allocation capacity, not physics settings.
+    default 65,536. NoRender caps larger native-renderer reservations at its
+    131,071-node limit while retaining the authored capacity in this config.
+    Physical scene replication must fit the effective capacity. This changes
+    allocation capacity, not physics settings.
     """
 
     height: int = 1080
@@ -503,9 +506,17 @@ class SimulationManager:
         sim_config (SimulationManagerCfg, optional): simulation configuration. Defaults to SimulationManagerCfg().
         defer_startup_summary: Let an owning environment emit one combined table
             after task and manager initialization. Standalone callers keep False.
+        requires_native_renderer: Predeclared native render demand. False permits
+            auto to select NoRender; None preserves standalone GPU selection.
+            Windows, Viser, forced synchronization and renderer overrides retain
+            precedence. The renderer is fixed before the World is constructed.
     """
 
     _instances = {}
+    # World cleanup does not reset DexSim's process-wide renderer.
+    _initialized_process_renderer = False
+    # DexSim NoRender uses the 17-bit EntityManager node allocator.
+    _NO_RENDER_SCENE_NODE_CAPACITY = 131071
 
     _cleanup_queue: queue.Queue = queue.Queue()
     _DEFAULT_PLANE_GIZMO_TARGET_ID = (1 << 64) - 1
@@ -521,6 +532,7 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ):
         """Create or return the instance based on instance_id."""
         n_instance = 0
@@ -539,8 +551,64 @@ class SimulationManager:
         sim_config: SimulationManagerCfg = SimulationManagerCfg(),
         *,
         defer_startup_summary: bool = False,
+        requires_native_renderer: bool | None = None,
     ) -> None:
+        """Construct the simulation World with a fixed renderer selection.
+
+        Failed construction queues cleanup for its owned World without exiting
+        the process. Flush the cleanup queue after constructor frames unwind.
+        Failures before World creation remove only their own registry entry.
+
+        Args:
+            sim_config: Simulation, physics and rendering configuration.
+            defer_startup_summary: Let the owning environment emit the summary.
+            requires_native_renderer: Predeclared render demand. ``False`` allows
+                auto to select NoRender when there are no window, browser or
+                forced-sync consumers. ``None`` preserves standalone GPU-based
+                selection. Explicit and global renderer overrides take precedence.
+        """
+        try:
+            self._initialize_simulation(
+                sim_config,
+                defer_startup_summary=defer_startup_summary,
+                requires_native_renderer=requires_native_renderer,
+            )
+        except BaseException:
+            if getattr(self, "_world", None) is not None:
+                try:
+                    self.destroy(exit_process=False)
+                except Exception as error:
+                    logger.log_warning(
+                        f"Failed to queue constructor cleanup: {error!r}"
+                    )
+            elif type(self)._instances.get(self.instance_id) is self:
+                type(self)._instances.pop(self.instance_id)
+            raise
+
+    def _initialize_simulation(
+        self,
+        sim_config: SimulationManagerCfg,
+        *,
+        defer_startup_summary: bool,
+        requires_native_renderer: bool | None,
+    ) -> None:
+        """Initialize resources with teardown state ready before native allocation."""
+        self._world: dexsim.World | None = None
+        self._env = None
+        self._spawn_scene: SpawnScene | None = None
+        self._window_record_state: _WindowRecordState | None = None
+        self._window_record_save_threads: list[threading.Thread] = []
+        self._visualization_runtime = None
+        self._arenas: list[dexsim.environment.Arena] = []
+        self._gizmos: dict[str, object] = {}
+        self._markers: dict[str, _AxisMarkerGroup] = {}
+        self._constraints: dict[str, RigidConstraint] = {}
+        self._visual_materials: dict[str, VisualMaterial] = {}
+        self._texture_cache: dict[str, torch.Tensor | list[torch.Tensor]] = {}
+
         self._defer_startup_summary = defer_startup_summary
+        self._requires_native_renderer = requires_native_renderer
+        self._renderer_selection_reason: str | None = None
         self._startup_summary_logged = False
         self._scene_summary_logged = False
         self._requested_renderer = sim_config.render_cfg.renderer
@@ -550,8 +618,6 @@ class SimulationManager:
             if isinstance(solver_cfg, Mapping)
             else getattr(solver_cfg, "solver_type", "auto")
         )
-        instance_id = self.instance_id
-
         # Cache paths
         self._sim_cache_dir = SIM_CACHE_DIR
         self._material_cache_dir = MATERIAL_CACHE_DIR
@@ -592,13 +658,13 @@ class SimulationManager:
                 if render_device.ordinal == sim_config.gpu_id:
                     self._render_device_name = render_device.name
                     break
-        self._world: dexsim.World = dexsim.World(world_config)
+        self._world = dexsim.World(world_config)
+        SimulationManager._initialized_process_renderer = True
         # The caller owns physics time, including while the scene is assembled.
         self._world.set_manual_update(True)
 
         self._window: Windows | None = None
         self._auto_entity_gizmo_pending = sim_config.enable_entity_gizmo
-        self._window_record_state: _WindowRecordState | None = None
         self._window_record_camera: object | None = None
         wr = sim_config.window_record
         self._window_record_hotkey_cfg: dict[str, object] | None = (
@@ -612,7 +678,6 @@ class SimulationManager:
             else None
         )
         self._window_record_input_control: ObjectManipulator | None = None
-        self._window_record_save_threads: list[threading.Thread] = []
         wcp = sim_config.window_camera_pose
         self._window_camera_pose_hotkey_cfg: dict[str, object] | None = (
             {"convert_to_look_at": wcp.convert_to_look_at}
@@ -632,22 +697,14 @@ class SimulationManager:
 
         self._env = self._world.get_env()
 
-        # arena is used as a standalone space for robots to simulate in.
-        self._arenas: List[dexsim.environment.Arena] = []
-
         # gizmo management
-        self._gizmos: Dict[str, object] = dict()  # Store active gizmos
         self._disabled_robot_gizmos: set[str] = set()
         # ``(uid, control_part)`` of the Gizmo currently owned by the Viser
         # click-to-pick feature, or ``None``. Only one picker Gizmo is kept at a
         # time and user-created Gizmos are never touched.
         self._picker_gizmo: tuple[str, str | None] | None = None
 
-        # marker management
-        self._markers: dict[str, _AxisMarkerGroup] = {}
-
         self._rigid_objects: Dict[str, RigidObject] = dict()
-        self._constraints: Dict[str, RigidConstraint] = dict()
         self._rigid_object_groups: Dict[str, RigidObjectGroup] = dict()
         self._deformable_objects: Dict[str, DeformableObject] = dict()
         self._articulations: Dict[str, Articulation] = dict()
@@ -669,7 +726,6 @@ class SimulationManager:
         self._render_state_published: bool | None = None
         self._pending_record_dt = 0.0
 
-        self._visualization_runtime = None
         self._visualization_overlays: SceneOverlays | None = None
         self._visualization_topology_revision = 0
         self._visualization_manifest_topology_revision = -1
@@ -677,22 +733,17 @@ class SimulationManager:
         self._visualization_sim_time = 0.0
         self._visualization_error_reported = False
 
-        # material placeholder.
-        self._visual_materials: Dict[str, VisualMaterial] = dict()
-
-        # Global texture cache for material creation or randomization.
-        # The structure is keys to the loaded texture data. The keys represent the texture group.
-        self._texture_cache: Dict[str, Union[torch.Tensor, List[torch.Tensor]]] = dict()
-
-        self._init_sim_resources()
-
         # The plane material and visibility are authored before declaration so
         # both eager Default loading and deferred Newton loading see them.
         self._spawn_default_plane_visibility = True
+        self._spawn_default_plane_material = None
         self._default_plane = None
-        self.set_default_background()
+        if self.has_native_renderer:
+            self._init_sim_resources()
+            self.set_default_background()
         self._declare_spawn_default_plane()
-        self.set_default_global_lighting()
+        if self.has_native_renderer:
+            self.set_default_global_lighting()
 
         # SpawnScene has already prepared the configured Arenas. Start the
         # optional browser runtime after default resources are declared.
@@ -811,7 +862,7 @@ class SimulationManager:
         from embodichain.lab.sim import cfg
         from embodichain.lab.sim.utility.render_utils import select_default_renderer
 
-        valid = {"auto", "hybrid", "fast-rt", "rt"}
+        valid = {"auto", "no-render", "hybrid", "fast-rt", "rt"}
         if renderer not in valid:
             logger.log_error(
                 f"Invalid renderer '{renderer}'. Must be one of {sorted(valid)}."
@@ -827,6 +878,20 @@ class SimulationManager:
         cfg.DEFAULT_RENDERER = resolved
         logger.log_info(f"Default renderer set to '{resolved}'.")
         return resolved
+
+    @property
+    def has_native_renderer(self) -> bool:
+        """Whether the World owns a native renderer and visual resources."""
+        return self.sim_config.render_cfg.renderer != "no-render"
+
+    def _require_native_renderer(self, operation: str) -> None:
+        if not self.has_native_renderer:
+            raise RuntimeError(
+                f"{operation} requires a native renderer; the World uses no-render. "
+                "Explicitly select renderer='hybrid', 'fast-rt', or 'rt' before "
+                "construction, or override BaseEnv._requires_native_renderer() "
+                "to reserve rendering for custom cameras."
+            )
 
     @cached_property
     def num_envs(self) -> int:
@@ -1011,8 +1076,8 @@ class SimulationManager:
             SceneExporter(self, visualization_cfg),
             visualization_cfg,
         )
-        runtime.start()
         self._visualization_runtime = runtime
+        runtime.start()
         self._visualization_manifest_topology_revision = (
             self._visualization_topology_revision
         )
@@ -1123,6 +1188,24 @@ class SimulationManager:
                     cancel("viser:")
             self._visualization_runtime = None
 
+    @staticmethod
+    def _get_process_renderer() -> str | None:
+        """Read the engine configuration, which outlives individual Worlds."""
+        renderer = dexsim.get_world_config().renderer
+        # Before engine initialization get_world_config returns the default
+        # (Hybrid); NoRender therefore also identifies an externally initialized
+        # engine after all of its Worlds have been released.
+        if not (
+            SimulationManager._initialized_process_renderer
+            or dexsim.get_world_num() > 0
+            or renderer == dexsim.types.Renderer.NORENDER
+        ):
+            return None
+        for name in ("no-render", "hybrid", "fast-rt", "rt"):
+            if RenderCfg(renderer=name).to_dexsim_flags() == renderer:
+                return name
+        raise RuntimeError(f"Unsupported DexSim process renderer: {renderer}.")
+
     def _convert_sim_config(
         self, sim_config: SimulationManagerCfg
     ) -> dexsim.WorldConfig:
@@ -1141,18 +1224,72 @@ class SimulationManager:
         world_config.thread_mode = sim_config.thread_mode
         world_config.cache_path = str(self._material_cache_dir)
 
+        process_renderer = SimulationManager._get_process_renderer()
+
         if sim_config.render_cfg.renderer == "auto":
+            from embodichain.lab.sim import cfg
             from embodichain.lab.sim.utility.render_utils import (
                 select_default_renderer,
             )
 
-            resolved_renderer = select_default_renderer(sim_config.gpu_id)
+            if (
+                cfg.DEFAULT_RENDERER == "auto"
+                and process_renderer is not None
+                and process_renderer != "no-render"
+            ):
+                resolved_renderer = process_renderer
+                self._renderer_selection_reason = "reuse process renderer"
+            elif (
+                cfg.DEFAULT_RENDERER == "auto"
+                and getattr(self, "_requires_native_renderer", None) is False
+                and sim_config.headless
+                and sim_config.visualization.backend == "none"
+                and getattr(sim_config.physics_cfg, "sync_to_renderer", None)
+                is not True
+            ):
+                resolved_renderer = process_renderer or "no-render"
+                self._renderer_selection_reason = (
+                    "reuse process renderer"
+                    if process_renderer
+                    else "no native render consumers"
+                )
+            else:
+                resolved_renderer = select_default_renderer(sim_config.gpu_id)
             logger.log_debug(
                 f"Auto-selected '{resolved_renderer}' renderer for gpu_id={sim_config.gpu_id}."
             )
             sim_config.render_cfg.renderer = resolved_renderer
 
+        if process_renderer is not None and (
+            sim_config.render_cfg.renderer == "no-render"
+        ) != (process_renderer == "no-render"):
+            raise RuntimeError(
+                f"DexSim's process renderer is already '{process_renderer}', but this "
+                f"environment requires '{sim_config.render_cfg.renderer}'. Closing a "
+                "World does not reset the process renderer. Start a new process to "
+                "change renderer. If any environment needs cameras, select a native "
+                "renderer before constructing its first World."
+            )
+
+        if (
+            sim_config.render_cfg.renderer == "no-render"
+            and world_config.scene_node_capacity
+            > SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+        ):
+            world_config.scene_node_capacity = (
+                SimulationManager._NO_RENDER_SCENE_NODE_CAPACITY
+            )
+            logger.log_debug(
+                f"NoRender limits scene node capacity to {world_config.scene_node_capacity}; "
+                f"native-renderer reservation was {sim_config.scene_node_capacity}."
+            )
+
         sim_config.render_cfg.apply_to_dexsim_config(world_config)
+        if sim_config.render_cfg.renderer == "no-render":
+            if not sim_config.headless:
+                raise ValueError("renderer='no-render' requires headless=True.")
+            if getattr(sim_config.physics_cfg, "sync_to_renderer", None) is True:
+                raise ValueError("sync_to_renderer=True requires a native renderer.")
 
         if type(sim_config.device) is str:
             self.device = torch.device(sim_config.device)
@@ -2068,22 +2205,22 @@ class SimulationManager:
     def _bind_default_plane(self, plane: Any) -> None:
         """Retain the spawned ground plane and apply its visibility."""
         self._default_plane = plane
-        plane.set_visible(self._spawn_default_plane_visibility)
+        if self.has_native_renderer:
+            plane.set_visible(self._spawn_default_plane_visibility)
 
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
 
-        Configures both the environment emission (ambient) light and a
-        directional light to provide default scene illumination. The
-        directional light is a global scene light (infinite distance)
-        pointing downward along the -Z axis.
+        Initialize environment emission without creating direct lights or
+        changing existing scene lights. Add direct lights explicitly through
+        :meth:`add_light` or the task's lighting configuration.
         """
-        # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
+        self._require_native_renderer("Default global lighting")
+        self.set_emission_light([0.92, 0.95, 1.0], 80.0)
 
     def set_default_background(self) -> None:
         """Set default background."""
-
+        self._require_native_renderer("Default background")
         mat_name = "plane_mat"
         mat_path = self._default_resources.get_material_path("PlaneDark")
         color_texture = os.path.join(mat_path, "PlaneDark_2K_Color.jpg")
@@ -2105,13 +2242,17 @@ class SimulationManager:
         self._visual_materials[mat_name] = mat
 
     def set_ground_plane_visibility(self, visible: bool) -> None:
-        """_summary_
+        """Set native ground rendering visibility while preserving collisions.
+
+        Applies to native windows and cameras. The setting is retained until
+        the ground is materialized, and does not control the Viser grid.
+        NoRender stores the setting without accessing native visual resources.
 
         Args:
-            visible (bool): _description_
+            visible: Whether the default ground plane is rendered.
         """
         self._spawn_default_plane_visibility = bool(visible)
-        if self._default_plane is None:
+        if self._default_plane is None or not self.has_native_renderer:
             return
         self._default_plane.set_visible(bool(visible))
 
@@ -3077,7 +3218,8 @@ class SimulationManager:
         Args:
             cfg: A concrete robot configuration or a replace-only backend
                 preset. Presets are resolved from ``physics_cfg`` before the
-                robot is declared.
+                robot is declared. Mounted cameras are created only when
+                ``cfg.enable_sensor`` is True and attach during preparation.
 
         Returns:
             Robot | None: The added robot instance handle, or None if failed.
@@ -3118,11 +3260,37 @@ class SimulationManager:
             logger.log_error(f"Robot {uid} already exists.")
             return self._robots[uid]
 
+        mounted_sensors = []
+        if cfg.enable_sensor:
+            sensor_uids = set(self._sensors)
+            for sensor_cfg in cfg.sensors:
+                if not isinstance(sensor_cfg, CameraCfg):
+                    raise TypeError("RobotCfg.sensors supports mounted cameras only.")
+                if not isinstance(sensor_cfg.uid, str) or not sensor_cfg.uid.strip():
+                    raise ValueError("Mounted sensors require a non-empty uid.")
+                if sensor_cfg.uid in sensor_uids:
+                    raise ValueError(f"Sensor {sensor_cfg.uid!r} already exists.")
+                sensor_uids.add(sensor_cfg.uid)
+                parent = sensor_cfg.extrinsics.parent
+                if not isinstance(parent, str) or not parent.strip():
+                    raise ValueError("Mounted sensors require a parent link.")
+                link_name = parent.removeprefix(f"{uid}/")
+                if not link_name or "/" in link_name:
+                    raise ValueError(
+                        f"Mounted sensor {sensor_cfg.uid!r} must refer to a "
+                        f"local link on robot {uid!r}."
+                    )
+                bound_cfg = deepcopy(sensor_cfg)
+                bound_cfg.extrinsics.parent = f"{uid}/{link_name}"
+                mounted_sensors.append(bound_cfg)
+
         was_materialized = self.spawn_result is not None
         robot = self._declare_spawn_articulation(cfg, Robot)
         self._robots[uid] = robot
         if was_materialized:
             self.prepare()
+        for sensor_cfg in mounted_sensors:
+            self.add_sensor(sensor_cfg)
         return robot
 
     def _declare_spawn_articulation(
@@ -3188,7 +3356,7 @@ class SimulationManager:
 
     def get_robot_uid_list(self) -> List[str]:
         """
-        Retrieves a list of unique identifiers (UIDs) for all robots in the V2 system.
+        Retrieves a list of unique identifiers (UIDs) for all robots in the simulation system.
 
         Returns:
             list: A list containing the UIDs of the robots.
@@ -3739,7 +3907,8 @@ class SimulationManager:
         """Remove an asset by its UID.
 
         Native render lights are not removed by this method. Sensors and
-        Spawn-owned physical assets are supported.
+        Spawn-owned physical assets are supported. Removing a robot also
+        destroys its automatically initialized mounted cameras.
 
         Args:
             uid (str): The UID of the asset.
@@ -3760,12 +3929,22 @@ class SimulationManager:
         if uid == "default_plane":
             raise ValueError("The Spawn-owned default plane cannot be removed.")
 
+        robot = self._robots.get(uid)
+        if robot is not None and robot.cfg.enable_sensor:
+            for sensor_cfg in robot.cfg.sensors:
+                sensor = self._sensors.get(sensor_cfg.uid)
+                if (
+                    isinstance(sensor, Camera)
+                    and sensor.cfg.extrinsics.parent is not None
+                    and sensor.cfg.extrinsics.parent.startswith(f"{uid}/")
+                ):
+                    self.remove_asset(sensor_cfg.uid)
+
         was_materialized = scene.builder.is_finalized
         scene.remove(uid)
         if was_materialized:
             self.prepare()
 
-        robot = self._robots.get(uid)
         if robot is not None:
             for key, gizmo in self.get_gizmo_items():
                 if gizmo.target is robot:
@@ -4031,7 +4210,7 @@ class SimulationManager:
             state.record_camera.render()
             rgb = np.asarray(state.record_camera.get_rgb_map())
             if rgb.size != 0:
-                frame = np.ascontiguousarray(rgb[..., :3])
+                frame = np.array(rgb[..., :3], copy=True, order="C")
 
         if frame is None:
             return state.task_status
@@ -4478,6 +4657,7 @@ class SimulationManager:
             VisualMaterial: the created visual material instance handle.
         """
 
+        self._require_native_renderer("Native visual materials")
         if cfg.uid in self._visual_materials:
             logger.log_warning(
                 f"Visual material {cfg.uid} already exists. Returning the existing one."
@@ -4511,14 +4691,19 @@ class SimulationManager:
         self,
         env_ids: Sequence[int] | None = None,
         excluded_uids: Sequence[str] | None = None,
+        *,
+        excluded_sensor_uids: Sequence[str] | None = None,
     ) -> None:
         """Reset the state of the simulated assets given the environment IDs and excluded UIDs.
 
         Args:
             env_ids (Sequence[int] | None): The environment IDs to reset. If None, reset all environments.
             excluded_uids (Sequence[str] | None): List of asset UIDs to exclude from resetting. If None, reset all assets.
+            excluded_sensor_uids: Sensor UIDs to exclude without excluding
+                physical assets with the same UID.
         """
         excluded_uids = set(excluded_uids) if excluded_uids is not None else set()
+        excluded_sensor_uids = set(excluded_sensor_uids or ())
         articulation_uids = tuple(self._robots) + tuple(self._articulations)
         reset_articulation_uids = tuple(
             uid for uid in articulation_uids if uid not in excluded_uids
@@ -4574,7 +4759,7 @@ class SimulationManager:
             if uid not in excluded_uids:
                 light.reset(env_ids)
         for uid, sensor in self._sensors.items():
-            if uid not in excluded_uids:
+            if uid not in excluded_uids and uid not in excluded_sensor_uids:
                 sensor.reset(env_ids)
         if use_coordinated_newton_clear:
             self._clear_newton_articulation_dynamics(newton_articulation_batch)
@@ -4772,7 +4957,8 @@ class SimulationManager:
 
         # REMOVE INSTANCE FROM POOL
         instance_id = getattr(self, "instance_id", 0)
-        SimulationManager.reset(instance_id)
+        if SimulationManager._instances.get(instance_id) is self:
+            SimulationManager.reset(instance_id)
 
         # Helper to aggressively decouple C++ wrapped objects
         def _sever_wrapper_refs(obj_registry):
@@ -4818,7 +5004,8 @@ class SimulationManager:
         self._gizmos.clear()
         self._constraints.clear()
 
-        SimulationManager.reset(self.instance_id)
+        if SimulationManager._instances.get(self.instance_id) is self:
+            SimulationManager.reset(self.instance_id)
 
         # Forcefully drop underlying C++ object wrappers
         self._env = None

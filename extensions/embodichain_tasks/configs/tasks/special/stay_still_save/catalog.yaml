@@ -1,0 +1,12 @@
+task_key: stay_still_save
+title: Stay Still Save
+summary: Collect stationary UR10 episodes with synchronous or asynchronous recording.
+tags:
+- special
+- data_collection
+default_deployment: default
+deployments:
+  default:
+    config: env_ur10.json
+  async:
+    config: env_async_ur10.json

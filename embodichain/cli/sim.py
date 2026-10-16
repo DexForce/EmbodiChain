@@ -62,9 +62,11 @@ def add_sim_args_to_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--renderer",
         type=str,
-        choices=["auto", "hybrid", "fast-rt", "rt"],
+        choices=["auto", "no-render", "hybrid", "fast-rt", "rt"],
         default="auto",
-        help="Renderer backend; omission preserves the launcher/config default.",
+        help="Renderer backend; auto uses no-render for task environments without "
+        "native render consumers, otherwise selects by GPU (run-task/run-env "
+        "uses fast-rt on every platform). Omission preserves the launcher/config default.",
     )
 
     parser.add_argument(

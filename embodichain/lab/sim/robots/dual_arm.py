@@ -29,8 +29,8 @@ single-arm cfg class, the engine duplicates the parts/solver/drive properties,
 and the result plugs straight into ``sim.add_robot(cfg=...)`` and round-trips via
 ``to_dict()`` / ``from_dict()``.
 
-Adding a future two-arm robot (e.g. Franka) only requires writing Franka's
-single-arm cfg and one registry line -- no dual-arm class, no mixin.
+Additional single-arm robots are selected through the shared robot catalog;
+the composition engine has no dependency on concrete robot configurations.
 
 Example:
 
@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import field
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List
 
 import numpy as np
 import torch
@@ -56,8 +56,7 @@ from embodichain.lab.sim.cfg import (
 )
 from embodichain.lab.sim.motion.solvers import SolverCfg
 from embodichain.lab.sim.utility.cfg_utils import merge_robot_cfg
-from embodichain.lab.sim.robots.franka_panda import FrankaPandaCfg
-from embodichain.lab.sim.robots.ur_robot import URRobotCfg
+from embodichain.robot_registry import resolve_robot_cfg
 from embodichain.utils import configclass
 
 if TYPE_CHECKING:
@@ -73,19 +72,6 @@ _PRESETS = ("side_by_side", "facing_inward", "mirrored_rz")
 
 #: Default mount used when none is specified.
 _DEFAULT_MOUNT: dict = {"preset": "side_by_side", "separation": 0.6}
-
-#: Registry mapping a ``base_robot`` key to ``(single-arm cfg class, init dict)``.
-#: Adding a new single-arm robot here is all that is needed to make it
-#: dual-arm-able: e.g. ``"franka": (FrankaPandaCfg, {"robot_type": "panda"})``.
-_BASE_ROBOT_REGISTRY: Dict[str, tuple] = {
-    "franka": (FrankaPandaCfg, {"robot_type": "panda"}),
-    "ur3": (URRobotCfg, {"robot_type": "ur3"}),
-    "ur3e": (URRobotCfg, {"robot_type": "ur3e"}),
-    "ur5": (URRobotCfg, {"robot_type": "ur5"}),
-    "ur5e": (URRobotCfg, {"robot_type": "ur5e"}),
-    "ur10": (URRobotCfg, {"robot_type": "ur10"}),
-    "ur10e": (URRobotCfg, {"robot_type": "ur10e"}),
-}
 
 #: Drive-property fields that may be scalar or a regex->value dict.
 _DRIVE_PROPS = (
@@ -243,7 +229,7 @@ def _resolve_base_cfg(base_robot: str | dict) -> RobotCfg:
         A constructed single-arm :class:`RobotCfg`.
 
     Raises:
-        ValueError: If the key is not in :data:`_BASE_ROBOT_REGISTRY`.
+        ValueError: If the key is not in the shared robot catalog.
     """
     if isinstance(base_robot, dict):
         key = base_robot.get("type")
@@ -251,14 +237,7 @@ def _resolve_base_cfg(base_robot: str | dict) -> RobotCfg:
     else:
         key = base_robot
         init = {}
-    if key not in _BASE_ROBOT_REGISTRY:
-        raise ValueError(
-            f"Unknown base_robot {key!r}. Registered base robots: "
-            f"{sorted(_BASE_ROBOT_REGISTRY)}."
-        )
-    cls_, default_init = _BASE_ROBOT_REGISTRY[key]
-    merged_init = {**default_init, **init}
-    return cls_.from_dict(merged_init)
+    return resolve_robot_cfg(key, init)
 
 
 # --------------------------------------------------------------------------- #
@@ -467,7 +446,7 @@ class DualArmRobotCfg(RobotCfg):
         robot = sim.add_robot(cfg=cfg)
     """
 
-    base_robot: Union[str, dict] = "ur10"
+    base_robot: str | dict = "ur10"
     """Registry key (e.g. ``"ur5"``) or ``{"type": ..., "init": {...}}``."""
 
     arm_part: str = "arm"

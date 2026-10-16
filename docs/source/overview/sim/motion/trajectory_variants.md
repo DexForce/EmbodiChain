@@ -339,6 +339,6 @@ tutorial does, so no permutation is needed anywhere.
   own end; use `CandidateTrajectoryBatch.valid_mask` before recording.
 - Task Program, Gym lifecycle, dataset persistence and the collection
   bookkeeping in
-  {class}`~embodichain.lab.sim.motion.expansion.GenerationSession` are
+  {class}`~embodichain.lab.sim.motion.expansion.ExpansionSession` are
   deliberately out of scope. This is a direct-simulation contract: the host
   owns execution, reset, validation and storage.

@@ -188,6 +188,8 @@ Log/
 # tensorboard logs
 *.pth
 outputs
+# Default artifact directory of the runnable examples under examples/.
+/output/
 test_configs/*
 embodichain_data/
 scripts/tutorials/atomic_action/*.glb

@@ -898,10 +898,18 @@ class CuroboPlanner(BasePlanner):
 
         The samples are not replanned or replaced. They are mapped from the
         simulator's control-part order into the exact cuRobo model, then checked
-        against joint bounds, self-collision, and the live world collision
-        checker. Calling the configuration validator once per horizon sample
-        works around cuRobo 0.8's configuration-only ``validate`` contract while
-        retaining batched environments.
+        against joint bounds and the live world collision model. Self-collision
+        is disabled consistently with motion planning. Each sample uses cuRobo's
+        kinematics and public costs directly to accommodate its 0.8 state and
+        buffer contracts while retaining batched environments.
+
+        Args:
+            trajectory: Joint positions with shape ``(B, T, D)``.
+            control_part: Configured part whose joint order the samples use.
+            obstacle_poses: Current world poses for configured dynamic obstacles.
+
+        Returns:
+            A boolean ``(B, T)`` mask on the trajectory device.
         """
         if (
             not isinstance(trajectory, torch.Tensor)
@@ -912,11 +920,18 @@ class CuroboPlanner(BasePlanner):
         ):
             raise ValueError("trajectory must be finite floating shape (B, T, D).")
         batch_size, horizon, dof = trajectory.shape
-        backend = self._get_backend(
-            control_part,
-            batch_size,
-            MoveType.JOINT_MOVE,
+        backend = next(
+            (
+                cached
+                for (part, batch, _graph, _mode), cached in getattr(
+                    self, "_backend_cache", {}
+                ).items()
+                if part == control_part and batch == batch_size
+            ),
+            None,
         )
+        if backend is None:
+            backend = self._get_backend(control_part, batch_size, MoveType.JOINT_MOVE)
         if dof != len(backend.sim_joint_names):
             raise ValueError(
                 f"Trajectory for {control_part!r} has {dof} joints, expected "
@@ -949,12 +964,15 @@ class CuroboPlanner(BasePlanner):
 
         if backend.collision_checker is None:
             checker_cfg = self._bindings.RobotCollisionCheckerCfg.load_from_config(
-                robot_config=backend.profile.robot_config_path,
+                robot_config=self._load_runtime_robot_config(
+                    backend.profile.robot_config_path
+                ),
                 scene_collision_checker=backend.planner.scene_collision_checker,
                 device_cfg=self._bindings.DeviceCfg(device=self._curobo_device),
                 num_envs=batch_size,
                 collision_activation_distance=self.cfg.collision_activation_distance,
             )
+            checker_cfg.self_collision_cost = None
             backend.collision_checker = self._bindings.RobotCollisionChecker(
                 checker_cfg
             )
@@ -978,11 +996,26 @@ class CuroboPlanner(BasePlanner):
         )
         with device_context:
             for sample_index in range(horizon):
-                sample = curobo_trajectory[:, sample_index : sample_index + 1]
-                valid = backend.collision_checker.validate(
-                    sample,
-                    env_query_idx=env_query_idx,
-                )
+                sample = curobo_trajectory[
+                    :, sample_index : sample_index + 1
+                ].contiguous()
+                checker = backend.collision_checker
+                state = checker.get_kinematics(sample)
+                valid = checker.get_bound(sample).sum(dim=-1) == 0.0
+                # cuRobo 0.8's validate() passes raw sphere tensors to a cost
+                # that now expects KinematicsState. Use its public costs with
+                # that state and the same world/limits as the planner.
+                if checker.collision_constraint is not None:
+                    if sample_index == 0:
+                        checker.collision_constraint.update_num_spheres(
+                            state.robot_spheres.shape[-2],
+                            batch_size=batch_size,
+                            horizon=1,
+                        )
+                    world_cost = checker.collision_constraint.forward(
+                        state, idxs_env_query=env_query_idx
+                    )
+                    valid &= (world_cost == 0.0).reshape(batch_size, 1, -1).all(dim=-1)
                 samples.append(valid[:, 0].to(torch.bool))
         return torch.stack(samples, dim=1).to(trajectory.device)
 

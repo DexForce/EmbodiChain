@@ -215,6 +215,15 @@ def _clone_untrusted_value(
             raise _error("non_finite_number", path, "Floats must be finite.")
         return value
     if type(value) is str:
+        # Instructions are inert text. A registered call's arguments remain
+        # subject to the executable-payload checks even if a key has this name.
+        if path == ("instruction",) or (
+            path
+            and path[0] == "program"
+            and path[-1] == "instruction"
+            and "call" not in path
+        ):
+            return value
         stripped = value.strip()
         lowered = stripped.lower()
         if lowered.startswith(("__import__(", "eval(", "exec(", "import ", "from ")):
@@ -819,7 +828,9 @@ def _decode_program_node(
     if kind == "segment":
         _validate_fields(
             mapping,
-            allowed=frozenset({"kind", "name", "steps", "post", "validators"}),
+            allowed=frozenset(
+                {"kind", "name", "steps", "post", "validators", "instruction"}
+            ),
             required=frozenset({"kind", "name", "steps"}),
             path=path,
         )
@@ -847,6 +858,13 @@ def _decode_program_node(
             path=path,
             kind=kind,
             name=_expect_identifier(mapping["name"], path=(*path, "name")),
+            instruction=(
+                None
+                if mapping.get("instruction") is None
+                else _expect_identifier(
+                    mapping["instruction"], path=(*path, "instruction")
+                )
+            ),
             steps=_decode_program_node(
                 mapping["steps"],
                 path=(*path, "steps"),
@@ -1079,7 +1097,9 @@ def decode_task_program(
     mapping = _expect_mapping(owned, path=())
     _validate_fields(
         mapping,
-        allowed=frozenset({"program_id", "integration", "targets", "program"}),
+        allowed=frozenset(
+            {"program_id", "integration", "targets", "program", "instruction"}
+        ),
         required=frozenset({"program_id", "integration", "targets", "program"}),
         path=(),
     )
@@ -1130,6 +1150,11 @@ def decode_task_program(
         TaskProgramCfg,
         path=(),
         program_id=_expect_identifier(mapping["program_id"], path=("program_id",)),
+        instruction=(
+            None
+            if mapping.get("instruction") is None
+            else _expect_identifier(mapping["instruction"], path=("instruction",))
+        ),
         integration=integration,
         targets=targets,
         program=program,

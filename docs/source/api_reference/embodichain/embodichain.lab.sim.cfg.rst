@@ -32,6 +32,7 @@ UV seams and render detail.
 .. autosummary::
 
    AssetPhysicsMode
+   DenoisingMode
    MeshCollisionApproximation
 
 .. rubric:: Classes
@@ -39,6 +40,9 @@ UV seams and render detail.
 .. autosummary::
 
    RenderCfg
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
    PhysicsBackendCfg
    DefaultPhysicsCfg
    NewtonPhysicsCfg
@@ -105,20 +109,60 @@ properties are grouped under ``attrs.surface_props``. Volume elasticity uses
 ``youngs`` and ``poissons``. Configuration dictionaries serialize this same
 schema; no legacy aliases or field migration are provided.
 
-World-level configuration module
---------------------------------
+Rendering configuration module
+------------------------------
 
-The same world-level configuration types and backend selectors are available
-from ``embodichain.lab.sim.cfg.simulation``. For manager-owned Newton steps,
-``sync_to_renderer=None`` or ``False`` publishes only for visual consumers;
-``True`` additionally requests publication on steps without consumers. An open
-window remains a consumer regardless of this automatic policy.
+Rendering types live in ``embodichain.lab.sim.cfg.rendering``. The public
+``dlss`` path maps to DLSS Ray Reconstruction and ``nrd`` maps to standalone
+NRD RELAX.
+
+.. currentmodule:: embodichain.lab.sim.cfg.rendering
+
+.. autosummary::
+
+   DenoisingMode
+   DenoisingCfg
+   DLSSCfg
+   NRDCfg
+   RenderCfg
+
+Physics configuration module
+----------------------------
+
+Physics backend types live in ``embodichain.lab.sim.cfg.physics``. The legacy
+``embodichain.lab.sim.cfg.simulation`` module remains a compatibility facade.
+For manager-owned Newton steps, ``sync_to_renderer=None`` or ``False`` publishes
+only for visual consumers; ``True`` additionally requests publication on steps
+without consumers.
+
+.. currentmodule:: embodichain.lab.sim.cfg.physics
+
+.. autosummary::
+
+   GPUMemoryCfg
+   PhysicsBackendCfg
+   DefaultPhysicsCfg
+   NewtonCollisionPipelineCfg
+   NewtonPhysicsCfg
+   physics_cfg_for_backend
+   physics_backend_from_cfg
+   validate_physics_cfg
+
+Compatibility facade
+--------------------
+
+The historical ``embodichain.lab.sim.cfg.simulation`` module re-exports the
+rendering and physics configuration types for callers that have not migrated
+to the split modules.
 
 .. currentmodule:: embodichain.lab.sim.cfg.simulation
 
 .. autosummary::
 
+   DenoisingMode
+   DenoisingCfg
    DLSSCfg
+   NRDCfg
    RenderCfg
    GPUMemoryCfg
    PhysicsBackendCfg
@@ -128,3 +172,25 @@ window remains a consumer regardless of this automatic policy.
    physics_cfg_for_backend
    physics_backend_from_cfg
    validate_physics_cfg
+
+Rigid-body property module
+--------------------------
+
+The rigid-body configuration types are also available from
+``embodichain.lab.sim.cfg.rigid``. They describe mass, collision properties,
+materials, and backend-specific overrides. ``NewtonCollisionPropertiesCfg``
+accepts an optional ``priority`` for MuJoCo contact-parameter selection;
+``None`` preserves the source value.
+
+.. currentmodule:: embodichain.lab.sim.cfg.rigid
+
+.. autosummary::
+
+   MassPropertiesCfg
+   DefaultRigidBodyPropertiesCfg
+   CollisionPropertiesCfg
+   DefaultCollisionPropertiesCfg
+   NewtonCollisionPropertiesCfg
+   RigidBodyMaterialCfg
+   NewtonRigidBodyMaterialCfg
+   RigidBodyPhysicsCfg

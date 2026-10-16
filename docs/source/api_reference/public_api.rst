@@ -557,6 +557,27 @@ embodichain.lab.scripts.preview_lerobot_data
    main
    resolve_dataset_root
 
+embodichain.lab.scripts.preview_robot
+-------------------------------------
+
+.. currentmodule:: embodichain.lab.scripts.preview_robot
+
+Load a catalog robot or a standalone configuration and run a native or Viser
+preview with managed control-part Gizmos and optional joint controls.
+
+.. autosummary::
+
+   build_robot_cfg
+   cli
+   main
+
+.. autofunction:: build_robot_cfg
+
+.. autofunction:: cli
+
+.. autofunction:: main
+
+
 embodichain.lab.scripts.run_env
 -------------------------------
 
@@ -690,6 +711,7 @@ embodichain.lab.sim.atomic_actions.control
    GRASP_COMMAND
    JointPositionCommand
    OPEN_COMMAND
+   PARK_COMMAND
 
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
@@ -1243,66 +1265,6 @@ embodichain.lab.sim.motion.planners.utils
    interpolate_xpos
    interpolate_xpos_batched
 
-embodichain.lab.sim.robots.cobotmagic
--------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.cobotmagic
-
-.. autosummary::
-
-   CobotMagicCfg
-
-embodichain.lab.sim.robots.dexforce_w1.hand_specs
--------------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.hand_specs
-
-.. autosummary::
-
-   W1HandSideSpec
-   W1HandSpec
-   get_default_w1_hand_version
-   get_w1_hand_spec
-   normalize_w1_hand_mappings
-
-embodichain.lab.sim.robots.dexforce_w1.specs
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.specs
-
-.. autosummary::
-
-   W1VersionSpec
-   get_w1_version_spec
-
-embodichain.lab.sim.robots.dexforce_w1.types
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.types
-
-.. autosummary::
-
-   DexforceW1Version
-   DexforceW1HandVersion
-   DexforceW1ArmSide
-   DexforceW1Type
-   DexforceW1HandBrand
-
-embodichain.lab.sim.robots.dexforce_w1.utils
---------------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.dexforce_w1.utils
-
-.. autosummary::
-
-   ChassisManager
-   TorsoManager
-   HeadManager
-   ArmManager
-   HandManager
-   EyesManager
-   build_dexforce_w1_assembly_urdf_cfg
-
 embodichain.lab.sim.robots.dual_arm
 -----------------------------------
 
@@ -1313,24 +1275,6 @@ embodichain.lab.sim.robots.dual_arm
    DualArmRobotCfg
    build_dual_arm_cfg
    resolve_mounts
-
-embodichain.lab.sim.robots.franka_panda
----------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.franka_panda
-
-.. autosummary::
-
-   FrankaPandaCfg
-
-embodichain.lab.sim.robots.ur_robot
------------------------------------
-
-.. currentmodule:: embodichain.lab.sim.robots.ur_robot
-
-.. autosummary::
-
-   URRobotCfg
 
 embodichain.lab.sim.sensors.camera
 ----------------------------------
@@ -1604,6 +1548,20 @@ embodichain.lab.sim.spawn.usd
 
    articulation_desc_from_usd
    rigid_desc_from_usd
+
+embodichain.lab.sim.utility.dynamic_pybind
+----------------------------------------
+
+Install the projective UV helper on DexSim render bodies. The helper projects
+vertices across mesh segments and adapts UV storage to the pinned DexSim
+0.5.1rc1 binding before writing each segment.
+
+.. currentmodule:: embodichain.lab.sim.utility.dynamic_pybind
+
+.. autosummary::
+
+   set_projective_uv
+   init_dynamic_pybind
 
 embodichain.lab.sim.utility.render_utils
 ----------------------------------------
@@ -2306,8 +2264,6 @@ joint-position action variants.
 
 .. autosummary::
 
-   RepeatedPickPlaceRlinfEnv
-   RepeatedPickPlaceRlinfJointEnv
 
 embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
 -----------------------------------------------------------
@@ -2402,6 +2358,15 @@ embodichain_tasks.special.stay_still_save
 
    StayStillSaveEnv
 
+embodichain_tasks.special.stay_still_save_3cam
+----------------------------------------------
+
+.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
+
+.. autosummary::
+
+   StayStillSave3CamEnv
+
 embodichain_tasks.utils.importer
 --------------------------------
 
@@ -2433,3 +2398,35 @@ kernel policy; callers log and apply that seed to their own generators.
 .. autofunction:: add_seed_arg_to_parser
 
 .. autofunction:: resolve_seed
+
+
+.. toctree::
+   :hidden:
+
+   object_asset_bundles
+
+
+embodichain.lab.sim.cfg.robot
+-----------------------------
+
+Robot construction and complete backend alternatives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Robot configurations include optional mounted camera declarations.
+Standalone simulation initializes them only when ``enable_sensor`` is true;
+Gym uses its environment-wide sensor switch, which defaults to enabled.
+
+.. currentmodule:: embodichain.lab.sim.cfg.robot
+
+.. autosummary::
+   :nosignatures:
+
+   RobotCfg
+   RobotPresetCfg
+
+.. autoclass:: RobotCfg
+   :members: sensors, enable_sensor
+   :noindex:
+
+.. autoclass:: RobotPresetCfg
+   :noindex:

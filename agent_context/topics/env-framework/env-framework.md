@@ -14,7 +14,8 @@ Lightweight RL environments have a separate owner in
 | Launch / CLI overrides | `embodichain/lab/scripts/run_env.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
-| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `embodichain_tasks/embodichain_tasks/` |
+| Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
+| Import registration | `embodichain/lab/gym/utils/registration.py`; official task imports under `extensions/embodichain_tasks/embodichain_tasks/` |
 | Environment timing and loop | `embodichain/lab/gym/envs/base_env.py`: `EnvCfg`, `BaseEnv` |
 | Scene, manager and demonstration integration | `embodichain/lab/gym/envs/embodied_env.py` |
 | Expert trajectory control and stored-action schema | `embodichain/lab/gym/envs/expert_trajectory.py` |
@@ -42,6 +43,16 @@ Standalone examples use `add_sim_args_to_parser()` and opt into seed separately.
 config's `enable_sensor` switch to false; this keeps reusable embodiment sensor
 declarations available to the config while skipping their instantiation and
 image acquisition.
+
+Environment construction predicts native render demand before creating the
+World, so auto can use NoRender for headless tasks without visual consumers.
+BaseEnv owns a copy of the configuration; filtering and renderer resolution do
+not change the caller's reusable configuration. Filters run before the demand
+hook, including when a subclass replaces that hook without calling super.
+Custom camera/visual code selects an explicit native renderer or reserves
+rendering through `BaseEnv._requires_native_renderer()`.
+See [render selection](../simulation-system/rendering.md#norender-initialization)
+for precedence, manager cameras, Viser and filter ordering.
 
 ## Timing contract
 
@@ -89,7 +100,9 @@ The isolation cases are in `tests/gym/envs/test_embodied_env_joint_setup.py`.
 Construction seeds before scene setup, constructs the robot and enabled sensors, then
 initializes simulation state and configured managers. An explicit effective
 seed on reset also reaches the event manager; scoped randomization behavior is
-owned by [randomization](../randomization/randomization.md).
+owned by [randomization](../randomization/randomization.md). Robot-mounted cameras
+use the same acquisition switch and participate in the environment sensor
+registry; see [configuration](configuration.md) for declaration ownership.
 
 The policy step order is:
 

@@ -1,4 +1,4 @@
-﻿embodichain.lab.sim
+embodichain.lab.sim
 =====================
 
 .. automodule:: embodichain.lab.sim
@@ -130,6 +130,22 @@ Atomic Actions
 
    embodichain.lab.sim.atomic_actions
 
+Scene Services
+--------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene
+
+Scene Expansion Compatibility
+-----------------------------
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.sim.scene_expansion
+
 Shared Types
 ------------
 
@@ -146,15 +162,27 @@ Utility
 
    embodichain.lab.sim.utility
 
-DLSS Configuration
-------------------
+Ray-Tracing Denoising and Reconstruction
+----------------------------------------
 
 .. currentmodule:: embodichain.lab.sim
 
-Configure window and offscreen Ray Reconstruction and Super Resolution through
-``SimulationManagerCfg.render_cfg.dlss``. Output resolution remains owned by the
-window or camera configuration.
+Select independent window and offscreen image-processing paths through
+``SimulationManagerCfg.render_cfg.denoising``. The public ``dlss`` path maps to
+DLSS Ray Reconstruction and ``nrd`` maps to standalone NRD RELAX. DLSS and NRD
+tuning remain in their dedicated nested configs; output resolution stays owned
+by the window or camera configuration.
+
+.. autodata:: DenoisingMode
+
+.. autoclass:: DenoisingCfg
+   :members:
+   :undoc-members:
 
 .. autoclass:: DLSSCfg
+   :members:
+   :undoc-members:
+
+.. autoclass:: NRDCfg
    :members:
    :undoc-members:

@@ -143,26 +143,75 @@ def test_generic_hierarchy_contains_no_concrete_eef_name() -> None:
     assert "pgi" not in type(generator.gripper_model).__name__.lower()
 
 
-def test_named_gripper_model_returns_the_pgi_geometry() -> None:
-    model = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+@pytest.mark.parametrize(
+    ("model_id", "expected"),
+    [
+        ("dh_pgi_140_80", (0.005, 0.1, 0.12, 0.04, 0.01, 0.096)),
+        # Versioned URDF limits and collision-mesh extents;
+        # see graspkit/README.md for the source hashes and axis mapping.
+        ("franka_panda_hand", (0.001, 0.08, 0.054, 0.022, 0.027, 0.092)),
+        ("cobotmagic_v100_gripper", (0.001, 0.1, 0.077, 0.056, 0.025, 0.074)),
+        ("tianji_marvin_gripper", (0.001, 0.095, 0.103, 0.043, 0.034, 0.082)),
+    ],
+)
+def test_named_gripper_model_returns_reviewed_geometry(
+    model_id: str, expected: tuple[float, ...]
+) -> None:
+    model = get_parallel_jaw_gripper_model(model_id)
 
-    assert model.model_id == "dh_pgi_140_80"
-    assert model.min_opening_width == pytest.approx(0.005)
-    assert model.max_opening_width == pytest.approx(0.1)
-    assert model.finger_length == pytest.approx(0.12)
-    assert model.finger_width == pytest.approx(0.04)
-    assert model.finger_thickness == pytest.approx(0.01)
-    assert model.palm_depth == pytest.approx(0.096)
+    assert model.model_id == model_id
+    assert (
+        model.min_opening_width,
+        model.max_opening_width,
+        model.finger_length,
+        model.finger_width,
+        model.finger_thickness,
+        model.palm_depth,
+    ) == pytest.approx(expected)
 
 
-def test_named_gripper_model_returns_independent_configs() -> None:
-    first = get_parallel_jaw_gripper_model("dh_pgi_140_80")
-    second = get_parallel_jaw_gripper_model("dh_pgi_140_80")
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "dh_pgi_140_80",
+        "franka_panda_hand",
+        "cobotmagic_v100_gripper",
+        "tianji_marvin_gripper",
+    ],
+)
+def test_named_gripper_model_returns_independent_configs(model_id: str) -> None:
+    first = get_parallel_jaw_gripper_model(model_id)
+    second = get_parallel_jaw_gripper_model(model_id)
+    expected = second.to_dict()
 
     first.palm_depth = 1.0
+    first.max_opening_width = 2.0
 
     assert first is not second
-    assert second.palm_depth == pytest.approx(0.096)
+    assert second.to_dict() == expected
+    assert get_parallel_jaw_gripper_model(model_id).to_dict() == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("min_opening_width", -0.001, ValueError),
+        ("min_opening_width", 0.08, ValueError),
+        ("max_opening_width", float("nan"), ValueError),
+        ("finger_length", float("inf"), ValueError),
+        ("finger_width", 0.0, ValueError),
+        ("finger_thickness", True, TypeError),
+        ("palm_depth", -0.01, ValueError),
+    ],
+)
+def test_named_geometry_rejects_invalid_calibration(
+    field: str, value: float | bool, error: type[Exception]
+) -> None:
+    values = get_parallel_jaw_gripper_model("franka_panda_hand").to_dict()
+    values[field] = value
+
+    with pytest.raises(error, match=field):
+        ParallelJawGripperModelCfg(**values)
 
 
 def test_named_gripper_model_rejects_unknown_ids() -> None:
@@ -223,6 +272,50 @@ def test_prepare_mesh_reuses_backend_and_returns_owned_pairs(
     assert torch.equal(second, torch.ones(1, 2, 3))
 
 
+def test_candidate_metadata_keeps_pose_width_and_cost_aligned(
+    backend: type[_Backend], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def candidates(self, **kwargs):
+        poses = kwargs["object_pose"].repeat(2, 1, 1)
+        poses[:, 0, 3] += torch.tensor([0.1, 0.2])
+        return True, poses, torch.tensor([0.02, 0.06]), torch.tensor([4.0, 1.0])
+
+    monkeypatch.setattr(backend, "get_valid_grasp_poses", candidates)
+    vertices, triangles = _geometry()
+    generator = _generator()
+    kwargs = dict(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4).repeat(2, 1, 1),
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    rows = generator.get_grasp_candidates(**kwargs)
+    legacy_rows = generator.get_valid_grasp_poses(**kwargs)
+    assert len(rows) == 2
+    for (poses, widths, costs), (legacy_poses, legacy_costs) in zip(rows, legacy_rows):
+        assert torch.allclose(poses[:, 0, 3], torch.tensor([0.1, 0.2]))
+        assert torch.equal(widths, torch.tensor([0.02, 0.06]))
+        assert torch.equal(costs, torch.tensor([4.0, 1.0]))
+        assert torch.equal(poses, legacy_poses)
+        assert torch.equal(costs, legacy_costs)
+
+
+def test_candidate_metadata_preserves_failed_row_sentinel(
+    backend: type[_Backend],
+) -> None:
+    vertices, triangles = _geometry()
+    rows = _generator().get_grasp_candidates(
+        mesh_vertices=vertices,
+        mesh_triangles=triangles,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    poses, widths, costs = rows[0]
+    assert poses.shape == (1, 4, 4)
+    assert widths.shape == costs.shape == (1,)
+    assert torch.isinf(costs).all()
+
+
 def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     backend: type[_Backend],
 ) -> None:
@@ -253,6 +346,7 @@ def test_direct_best_grasp_configures_and_reuses_private_mesh_backend(
     assert sampler_cfg.n_sample == 321
     assert sampler_cfg.min_length == 0.004
     assert sampler_cfg.max_length == 0.12
+    assert sampler_cfg.center_mode == "bounds"
     assert configured.options["max_candidates"] == 7
     assert configured.options["filter_ground_collision"] is False
     assert collision_cfg.finger_length == 0.09
@@ -295,6 +389,7 @@ def test_backend_cache_key_includes_sampling_and_annotation_policy() -> None:
     vertices, triangles = _geometry()
     generator = object.__new__(_AntipodalMeshBackend)
     generator._sampler_cfg = AntipodalSamplerCfg()
+    generator._center_mode = generator._sampler_cfg.center_mode
     generator._interactive_annotation = False
     generator._use_largest_connected_component = False
     baseline = generator._get_cache_dir(vertices, triangles)

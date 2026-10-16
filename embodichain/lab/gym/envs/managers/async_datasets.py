@@ -29,6 +29,7 @@ from __future__ import annotations
 import copy
 import queue
 import threading
+import time
 from typing import TYPE_CHECKING, Dict, Optional, Union
 
 import torch
@@ -41,6 +42,7 @@ __all__ = ["AsyncLeRobotRecorder"]
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
+    from .cfg import DatasetFunctorCfg
 
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset  # noqa: F401
@@ -93,11 +95,12 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
       flushes the image writer and finalizes the dataset.
 
     .. note::
-        The clone copies each episode's camera frames into host RAM. Memory
-        use is bounded by how far the worker falls behind (typically it keeps
-        up, since per-frame PNG write is the only heavy step and can itself be
-        offloaded via ``image_writer_threads``). For very high resolutions or
-        many envs, monitor RSS.
+        The clone copies each episode's camera frames into host RAM. The
+        default queue is unbounded. A positive ``async_queue_maxsize`` limits
+        waiting payloads; the active worker payload, caller's current clone,
+        rollout buffer and image-writer queue consume additional memory.
+        When the queue is full, committing an episode blocks until space is
+        available, allowing storage to catch up without dropping data.
 
     Args:
         cfg: :class:`~embodichain.lab.gym.envs.managers.cfg.DatasetFunctorCfg`
@@ -105,11 +108,16 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
             ``image_writer_threads`` / ``image_writer_processes`` params are
             honored and combine with the background worker (two levels of
             async: episode conversion off the sim thread, PNG writes off the
-            worker thread).
+            worker thread). ``async_queue_maxsize`` optionally bounds the
+            number of committed payloads waiting for the worker; zero keeps
+            the historical unbounded queue behavior.
         env: The environment instance.
     """
 
-    def __init__(self, cfg, env: EmbodiedEnv):
+    def __init__(self, cfg: DatasetFunctorCfg, env: EmbodiedEnv) -> None:
+        queue_maxsize = cfg.params.get("async_queue_maxsize", 0)
+        if type(queue_maxsize) is not int or queue_maxsize < 0:
+            raise ValueError("async_queue_maxsize must be a non-negative integer")
         if not LEROBOT_AVAILABLE:
             logger.log_error(
                 "LeRobot is not installed. Please install it with: pip install lerobot"
@@ -123,8 +131,17 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
 
         # Single-worker queue. A single worker guarantees LeRobotDataset is
         # only ever touched from one thread (it is not thread-safe) and keeps
-        # episode ordering deterministic.
-        self._save_queue: "queue.Queue[Optional[tuple]]" = queue.Queue()
+        # episode ordering deterministic. A bounded queue provides optional
+        # backpressure so high-resolution payload clones cannot grow memory
+        # without limit while the writer falls behind.
+        self.async_queue_maxsize = queue_maxsize
+        self._save_queue: "queue.Queue[Optional[tuple]]" = queue.Queue(
+            maxsize=self.async_queue_maxsize
+        )
+        self._queue_metrics_lock = threading.Lock()
+        self._max_queue_depth = 0
+        self._backpressure_events = 0
+        self._backpressure_s = 0.0
         self._background_error_lock = threading.Lock()
         self._background_errors: list[tuple[int, str]] = []
         self._async_finalize_lock = threading.Lock()
@@ -272,7 +289,53 @@ class AsyncLeRobotRecorder(LeRobotRecorder):
                         "eligible segment spans."
                     )
                 for payload in payloads:
-                    self._save_queue.put(payload)
+                    self._enqueue_payload(payload)
+
+    def _enqueue_payload(self, payload: tuple) -> None:
+        """Enqueue one payload and account for bounded-queue backpressure."""
+
+        enqueue_elapsed = 0.0
+        queue_was_full = False
+        try:
+            self._save_queue.put_nowait(payload)
+        except queue.Full:
+            queue_was_full = True
+            enqueue_start = time.perf_counter()
+            self._save_queue.put(payload)
+            enqueue_elapsed = time.perf_counter() - enqueue_start
+        with self._queue_metrics_lock:
+            self._max_queue_depth = max(
+                self._max_queue_depth,
+                (
+                    self.async_queue_maxsize
+                    if queue_was_full
+                    else self._save_queue.qsize()
+                ),
+            )
+            if queue_was_full:
+                self._backpressure_events += 1
+                self._backpressure_s += enqueue_elapsed
+
+    @property
+    def async_stats(self) -> dict[str, float | int]:
+        """Return a snapshot of queue depth and producer waiting time.
+
+        Queue sizes and their sampled peak are approximate. Backpressure
+        counts attempts that found the queue full and measures only time
+        waiting to enqueue, excluding payload cloning and finalization.
+
+        Returns:
+            Queue size/limit/peak, blocked enqueue count and waiting seconds.
+        """
+
+        with self._queue_metrics_lock:
+            return {
+                "queue_size": self._save_queue.qsize(),
+                "queue_maxsize": self.async_queue_maxsize,
+                "queue_peak": self._max_queue_depth,
+                "backpressure_events": self._backpressure_events,
+                "backpressure_s": self._backpressure_s,
+            }
 
     def finalize(self) -> Optional[str]:
         """Drain committed writes, finalize storage, and surface all failures.

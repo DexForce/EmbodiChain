@@ -53,7 +53,7 @@ silver-arm e-series renders.
 
 ```python
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
-from embodichain.lab.sim.robots import URRobotCfg
+from embodichain_robots import URRobotCfg
 
 sim = SimulationManager(SimulationManagerCfg(headless=True, num_envs=4))
 cfg = URRobotCfg.from_dict({"robot_type": "ur5"})

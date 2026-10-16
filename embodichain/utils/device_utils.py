@@ -14,9 +14,39 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Union
+
 import torch
 
-from typing import Union
+if TYPE_CHECKING:
+    import warp as wp
+
+__all__ = ["standardize_device_string", "current_warp_stream"]
+
+
+def current_warp_stream(device: torch.device) -> wp.Stream | None:
+    """Use the current Torch stream for Warp operations.
+
+    Args:
+        device: Device used by the caller's tensors.
+
+    Returns:
+        The registered Warp stream when it shares Torch's current native handle,
+        otherwise a Warp wrapper of the current Torch stream. CPU returns None.
+    """
+    if device.type != "cuda":
+        return None
+    import warp as wp
+
+    current = torch.cuda.current_stream(device)
+    stream = wp.get_stream(str(device))
+    # A temporary second Warp wrapper unregisters the shared native handle on
+    # destruction in Warp 1.17, invalidating an enclosing capture.
+    if stream.cuda_stream == current.cuda_stream:
+        return stream
+    return wp.stream_from_torch(current)
 
 
 def standardize_device_string(device: Union[str, torch.device]) -> str:
