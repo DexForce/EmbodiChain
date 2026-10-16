@@ -1,5 +1,8 @@
 # Franka online PickPlace showcase
 
+See [validation results](VALIDATION.md) for the measured engineering checks and
+the reference learner's unmet task-learning target.
+
 This task physically grasps a 5 cm cube, lifts it, places it at the marked goal,
 opens the gripper and withdraws. The expert and student use the same measured
 success predicate: at least 5 cm of lift, goal error at most 3 cm, ground-height
