@@ -55,13 +55,45 @@ _PART_FRAMES = {
 }
 
 
+# Source articulation order: L1, R1, ..., L7, R7. Keep the embodiment's
+# explicit ready-pose declaration aligned with this standalone default.
+_READY_ARM_QPOS = (
+    -1.5875022065801416,
+    1.5875023792379233,
+    1.2248796197752276,
+    1.2248821108425374,
+    1.0822212035745409,
+    -1.0822204356660736,
+    -2.3307274153917774,
+    -2.3307274153917774,
+    0.5068066018093935,
+    -0.5068065733236865,
+    0.8471975511965976,
+    0.8471975511965976,
+    -1.3707963267948964,
+    1.3707963267948964,
+)
+
+
 @configclass
 class TianjiMarvinCfg(RobotCfg):
     """Configure Tianji Marvin with or without its parallel-jaw grippers.
 
     Both variants expose seven-joint ``left_arm`` and ``right_arm`` parts.
+    Source mass, inertia and COM values are preserved without automatic unit
+    conversion, including for custom assets. Their authored units have not been
+    confirmed by the manufacturer. The bundled Task Program embodiment opts
+    into explicit simulation-calibrated inertial overlays.
     With grippers, ``left_eef`` and ``right_eef`` each include the two
     finger joints; finger 2 mimics finger 1. Hands use joint-space control.
+    Both variants start with lowered elbows and forward-folded forearms;
+    the gripper-equipped variant starts with open fingers. Explicit
+    ``init_qpos`` overrides replace this ready pose in source joint order.
+    This variant also declares two mounted RGB-D cameras with D405-equivalent
+    nominal fields of view. Their extrinsics are estimates from the bundled
+    hand mesh, not hardware calibration; depth is ideal rendered geometry.
+    The bare-arm variant has no default cameras. The existing ``enable_sensor``
+    switch controls creation, and an explicit ``sensors`` list replaces defaults.
     Both variants apply an additional TCP transform to their source end links:
     a translation of 0.13 m along the end link's +X axis and a +90 degree
     rotation about its Y axis. With grippers the source end links are
@@ -100,6 +132,8 @@ class TianjiMarvinCfg(RobotCfg):
 
     def _build_defaults(self, init_dict: dict[str, Any] | None = None) -> None:
         """Populate the selected asset, joint groups, solvers, and physics."""
+        from embodichain.lab.sim.sensors import CameraCfg
+
         init_dict = init_dict or {}
         self.with_gripper = init_dict.get("with_gripper", self.with_gripper)
         if not isinstance(self.with_gripper, bool):
@@ -107,6 +141,39 @@ class TianjiMarvinCfg(RobotCfg):
 
         self.uid = "TianjiMarvin"
         self.fpath = self._pk_urdf_path
+        self.init_qpos = list(_READY_ARM_QPOS) + (
+            [0.0, 0.0, 0.0, 0.0] if self.with_gripper else []
+        )
+        # Nominal D405 FOV: 87 x 58 degrees at half-HD resolution.
+        # https://www.realsenseai.com/product-family/d405-series/
+        # The ACD hand mesh has a single-lens housing. Estimate the optical
+        # origin 1 mm ahead of its lens face, tilted 12 degrees toward the jaws;
+        # rotate the image so the gripper occupies its lower side. Mounted
+        # CameraCfg poses use OpenGL (-Z forward, +Y up), so convert the optical
+        # (+Z forward, +Y down) estimate by a local half-turn about X. This is an
+        # aligned ideal RGB-D approximation, not a model of stereo matching.
+        self.sensors = (
+            [
+                CameraCfg(
+                    uid=f"cam_{side}_wrist",
+                    width=640,
+                    height=360,
+                    intrinsics=(337.20964, 324.72860, 320.0, 180.0),
+                    near=0.005,
+                    far=3.0,
+                    enable_color=True,
+                    enable_depth=True,
+                    extrinsics=CameraCfg.ExtrinsicsCfg(
+                        parent=f"{side}_hand_base_link",
+                        pos=(0.000669, 0.057374, 0.061580),
+                        quat=(0.0, 0.994522, 0.104528, 0.0),
+                    ),
+                )
+                for side in ("left", "right")
+            ]
+            if self.with_gripper
+            else []
+        )
         self.control_parts = {
             f"{side}_arm": [
                 f"SHOULDER_PITCH_{label}_J1",
@@ -138,6 +205,9 @@ class TianjiMarvinCfg(RobotCfg):
             )
             for part, (root, end) in _PART_FRAMES[self.with_gripper].items()
         }
+        # Preserve source inertials; opt into task-specific simulation overlays
+        # through the bundled embodiment or explicit caller link_attrs.
+        self.link_attrs = {}
         # Simulation gains follow Aloha Mini, not factory motor specifications.
         self.joint_drive_props = JointDrivePropertiesCfg(
             drive_type="force",

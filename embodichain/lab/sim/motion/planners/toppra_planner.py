@@ -34,7 +34,11 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     _infer_batch_size,
 )
 from .utils import PlanState, PlanResult
-from ._joint_limits import _resolve_joint_constraints
+from ._joint_limits import (
+    _DEFAULT_ACCELERATION,
+    _DEFAULT_VELOCITY,
+    _resolve_joint_constraints,
+)
 
 try:
     import toppra as ta
@@ -48,7 +52,11 @@ ta.setup_logging(level="WARN")
 
 
 def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndarray]:
-    """Expand scalar limits to (dofs, 2) arrays; pass through arrays as-is."""
+    """Expand limits, using compatibility defaults for standalone ``None`` inputs."""
+    if value is None:
+        value = _DEFAULT_VELOCITY
+    if acc is None:
+        acc = _DEFAULT_ACCELERATION
     if isinstance(value, (float, int)):
         vlims = np.array([[-value, value] for _ in range(dofs)])
     else:
@@ -71,7 +79,9 @@ def _toppra_solve_one_env(
 
     Args:
         waypoints: ``(N, DOF)`` numpy array of joint waypoints.
-        vel_constraint / acc_constraint: scalar or per-DoF array limits.
+        vel_constraint / acc_constraint: Resolved scalar or per-DOF limits.
+            Standalone ``None`` inputs use compatibility defaults. Robot-backed
+            planning resolves effective limits before dispatching this worker.
         sample_method: TIME or QUANTITY.
         sample_interval: seconds (TIME) or sample count (QUANTITY).
 
@@ -285,13 +295,13 @@ class ToppraPlanOptions(PlanOptions):
     requests are capped by available robot limits.
     """
 
-    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.QUANTITY
+    sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
     """Method for sampling the trajectory.
 
     Options are 'time' for uniform time intervals or 'quantity' for a fixed number of samples.
     """
 
-    sample_interval: float | int = 100
+    sample_interval: float | int = 0.01
     """Interval for sampling the trajectory.
 
     If sample_method is 'time', this is the time interval in seconds.
@@ -326,7 +336,7 @@ class ToppraPlanner(BasePlanner):
         # __del__ below only handles in-process GC of an abandoned planner.
 
     def default_plan_options(self) -> ToppraPlanOptions:
-        """Return backend-default planning options."""
+        """Return a valid time-sampled default when no count is requested."""
         return ToppraPlanOptions()
 
     @staticmethod

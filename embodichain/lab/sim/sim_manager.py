@@ -2211,14 +2211,12 @@ class SimulationManager:
     def set_default_global_lighting(self) -> None:
         """Set default global lighting for the scene.
 
-        Configures both the environment emission (ambient) light and a
-        directional light to provide default scene illumination. The
-        directional light is a global scene light (infinite distance)
-        pointing downward along the -Z axis.
+        Initialize environment emission without creating direct lights or
+        changing existing scene lights. Add direct lights explicitly through
+        :meth:`add_light` or the task's lighting configuration.
         """
         self._require_native_renderer("Default global lighting")
-        # Environment emission light
-        self.set_emission_light([1.0, 1.0, 1.0], 100.0)
+        self.set_emission_light([0.92, 0.95, 1.0], 80.0)
 
     def set_default_background(self) -> None:
         """Set default background."""

@@ -34,6 +34,27 @@ from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 # raise during path/constraint construction and are caught by the
 # ``except Exception`` -> ``_empty_failure`` path.
 class TestToppraWorker:
+    @pytest.mark.no_sim
+    def test_backend_defaults_plan_without_an_explicit_sample_count(self):
+        from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanner
+
+        planner = object.__new__(ToppraPlanner)
+        planner._pool = None
+        options = planner.default_plan_options()
+        assert options.sample_method is TrajectorySampleMethod.TIME
+        assert options.sample_interval == 0.01
+        out = _toppra_solve_one_env(
+            waypoints=np.array([[0.0] * 7, [0.2] * 7]),
+            vel_constraint=options.constraints["velocity"],
+            acc_constraint=options.constraints["acceleration"],
+            sample_method=options.sample_method,
+            sample_interval=options.sample_interval,
+        )
+        assert out["success"] is True
+        assert out["dt"].sum() > 0.0
+        assert np.max(out["dt"]) <= options.sample_interval + 1e-6
+        np.testing.assert_allclose(out["positions"][-1], 0.2)
+
     def test_solve_one_env_quantity(self):
         # 2-waypoint, 6-DOF
         wp = np.array([[0.0] * 6, [0.5] * 6])

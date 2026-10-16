@@ -38,7 +38,11 @@ from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     TrapezoidalPlanner,
     TrapezoidalPlannerCfg,
 )
-from embodichain.lab.sim.motion.planners.utils import MoveType, PlanState
+from embodichain.lab.sim.motion.planners.utils import (
+    MoveType,
+    PlanState,
+    TrajectorySampleMethod,
+)
 
 pytestmark = pytest.mark.no_sim
 
@@ -127,11 +131,13 @@ def test_zero_speed_joint_can_hold_while_another_joint_moves(planner_type: str) 
     goal = start.clone()
     goal[:, 0] = 0.4
     options = planner.default_plan_options()
+    options.sample_method = TrajectorySampleMethod.QUANTITY
     options.sample_interval = 101
     result = planner.plan(
         [PlanState.from_qpos(start), PlanState.from_qpos(goal)], options
     )
     assert result.is_all_success()
+    assert result.positions.shape[1] == 101
     assert bool((result.positions[..., 2] == start[:, 2:3]).all())
     assert torch.count_nonzero(result.velocities[..., 2]) == 0
     if result.constraint_report is not None:
@@ -151,6 +157,7 @@ def test_zero_speed_joint_cannot_be_commanded_to_move(
     goal[:, 2] = displacement
     states = [PlanState.from_qpos(start), PlanState.from_qpos(goal)]
     options = planner.default_plan_options()
+    options.sample_method = TrajectorySampleMethod.QUANTITY
     options.sample_interval = 101
     if planner_type == "trapezoidal":
         with pytest.raises(ValueError, match="zero velocity"):
@@ -360,7 +367,12 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         )
         result = planner.plan(states, options)
         assert result.is_all_success()
-        assert result.positions.shape[1] in (100, 101)
+        if options.sample_method == TrajectorySampleMethod.QUANTITY:
+            assert result.positions.shape[1] == options.sample_interval
+        else:
+            assert result.positions.shape[1] > 2
+            assert bool((result.dt[:, 1:] <= options.sample_interval + 1e-6).all())
+        torch.testing.assert_close(result.positions[:, -1], states[-1].qpos)
         assert bool(
             (
                 result.velocities.abs().amax(dim=(0, 1))
@@ -397,6 +409,8 @@ def test_toppra_spawn_workers_receive_resolved_joint_limits() -> None:
     planner._mp_context = "spawn"
     options = planner.default_plan_options()
     options.control_part = "arm"
+    options.sample_method = TrajectorySampleMethod.QUANTITY
+    options.sample_interval = 100
     try:
         result = planner.plan(
             [
