@@ -55,7 +55,6 @@ from embodichain.lab.sim.motion.planners.curobo.curobo_planner import (
 from embodichain.lab.sim.motion.planners.curobo.curobo_yaml import (
     _curobo_pose_to_components,
     _convex_hull_to_voxel_entry,
-    _parse_mimic_joint_names,
     _world_collision_sphere_data,
     generate_curobo_robot_yaml,
     generate_curobo_world_scene,
@@ -70,34 +69,6 @@ _SIM_ROBOT_UID = "curobo_franka_inprocess_test"
 _SIM_CONTROL_PART = "arm"
 _SIM_BLOCK_DIMS = [0.18, 0.40, 0.36]
 _SIM_BLOCK_POS = (0.45, 0.0, 0.18)
-
-# Minimal URDF mirroring the Franka Panda hand: finger joint 2 mimics joint 1.
-_MIMIC_URDF = """\
-<?xml version="1.0"?>
-<robot name="panda_hand">
-  <link name="base"/>
-  <link name="fr3_hand"/>
-  <link name="fr3_leftfinger"/>
-  <link name="fr3_rightfinger"/>
-  <joint name="fr3_hand_joint" type="fixed">
-    <parent link="base"/>
-    <child link="fr3_hand"/>
-  </joint>
-  <joint name="fr3_finger_joint1" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_leftfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-  </joint>
-  <joint name="fr3_finger_joint2" type="prismatic">
-    <parent link="fr3_hand"/>
-    <child link="fr3_rightfinger"/>
-    <axis xyz="0 1 0"/>
-    <limit effort="100" lower="0.0" upper="0.04" velocity="0.2"/>
-    <mimic joint="fr3_finger_joint1"/>
-  </joint>
-</robot>
-"""
 
 _NO_MIMIC_URDF = """\
 <?xml version="1.0"?>
@@ -815,37 +786,26 @@ def test_graph_capture_mode_rejects_unknown_value():
 # Robot YAML generation
 
 
-def test_parse_mimic_joint_names_detects_mimic_joint(tmp_path):
-    urdf = tmp_path / "panda_hand.urdf"
-    urdf.write_text(_MIMIC_URDF, encoding="utf-8")
-
-    assert _parse_mimic_joint_names(str(urdf)) == {"fr3_finger_joint2"}
-
-
-def test_parse_mimic_joint_names_returns_empty_without_mimic(tmp_path):
-    urdf = tmp_path / "arm.urdf"
-    urdf.write_text(_NO_MIMIC_URDF, encoding="utf-8")
-
-    assert _parse_mimic_joint_names(str(urdf)) == set()
-
-
-def test_parse_mimic_joint_names_handles_missing_file(tmp_path):
-    assert _parse_mimic_joint_names(str(tmp_path / "does_not_exist.urdf")) == set()
-
-
 @pytest.mark.no_sim
 @pytest.mark.parametrize(
-    ("source_velocity", "runtime_velocity", "expected_velocity"),
+    ("authored_velocity", "runtime_velocity", "expected_velocity", "mimic_multiplier"),
     [
-        (2.0, 0.3, 0.3),
-        (1e10, 0.3, 0.3),
-        (None, float("inf"), 0.2),
-        (2.0, 0.0, 0.0),
-        (0.0, 1.0, 0.0),
+        (2.0, 0.3, 0.3, None),
+        (1e10, 0.3, 0.3, None),
+        (None, float("inf"), 0.2, None),
+        (2.0, 0.0, 0.0, None),
+        (0.0, 1.0, 1.0, None),
+        (0.05, 0.3, 0.3, None),
+        (0.4, 0.3, 0.15, -2.0),
     ],
 )
 def test_robot_yaml_preserves_limits_through_curobo_loading(
-    tmp_path, monkeypatch, source_velocity, runtime_velocity, expected_velocity
+    tmp_path,
+    monkeypatch,
+    authored_velocity,
+    runtime_velocity,
+    expected_velocity,
+    mimic_multiplier,
 ):
     from dataclasses import replace
 
@@ -859,26 +819,43 @@ def test_robot_yaml_preserves_limits_through_curobo_loading(
     urdf_path.parent.mkdir()
     source_xml = _NO_MIMIC_URDF.replace(
         'velocity="2.0"',
-        f'velocity="{source_velocity}"' if source_velocity is not None else "",
+        f'velocity="{authored_velocity}"' if authored_velocity is not None else "",
     )
+    if mimic_multiplier is not None:
+        source_xml = source_xml.replace(
+            "</robot>",
+            f'<link name="finger"/><joint name="follower" type="revolute">'
+            '<parent link="base"/><child link="finger"/><axis xyz="0 0 1"/>'
+            '<limit effort="100" lower="-3.14" upper="3.14" velocity="0.4"/>'
+            f'<mimic joint="joint1" multiplier="{mimic_multiplier}"/>'
+            "</joint></robot>",
+        )
     urdf_path.write_text(source_xml, encoding="utf-8")
 
     class FakeRobot:
         get_joint_motion_limits = Robot.get_joint_motion_limits
+        mimic_ids = [1] if mimic_multiplier is not None else []
+        mimic_parents = [0] if mimic_multiplier is not None else []
+        mimic_multipliers = [mimic_multiplier] if mimic_multiplier is not None else []
+        active_joint_ids = [0]
         cfg = type(
             "Cfg",
             (),
             {
                 "fpath": str(urdf_path),
-                "init_qpos": [0.0],
+                "init_qpos": [0.0, 0.0] if mimic_multiplier is not None else [0.0],
                 "joint_acceleration_limits": 0.4,
             },
         )()
-        joint_names = ["joint1"]
+        joint_names = (
+            ["joint1", "follower"] if mimic_multiplier is not None else ["joint1"]
+        )
         control_parts = {"arm": ["joint1"]}
 
         def get_qvel_limits(self, **kwargs):
-            return torch.tensor([[runtime_velocity]], dtype=torch.float64)
+            return torch.full(
+                (1, len(self.joint_names)), runtime_velocity, dtype=torch.float64
+            )
 
         def get_link_names(self):
             return ["base"]

@@ -115,6 +115,9 @@ def _trapezoidal_generator(robot: object | None = None) -> MotionGenerator:
         if robot is not None
         else SimpleNamespace(
             joint_names=["first", "second"],
+            mimic_ids=(),
+            mimic_parents=(),
+            mimic_multipliers=(),
             cfg=SimpleNamespace(fpath="", joint_acceleration_limits=None),
             num_instances=1,
             get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
@@ -1069,6 +1072,9 @@ def test_normalization_resamples_by_time_and_recomputes_derivatives() -> None:
 class _CartesianRobot:
     """CPU kinematics double: one joint translates the TCP along x."""
 
+    mimic_ids = ()
+    mimic_parents = ()
+    mimic_multipliers = ()
     joint_names = ["joint"]
     cfg = SimpleNamespace(fpath="", joint_acceleration_limits=None)
 

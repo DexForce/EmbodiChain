@@ -829,7 +829,7 @@ def test_move_joint_expansion_preserves_required_mid_waypoint(
         ),
         get_joint_motion_limits=lambda **kwargs: {
             key: torch.full(qpos.shape, torch.inf, dtype=torch.float64)
-            for key in ("velocity", "acceleration", "source_velocity")
+            for key in ("velocity", "acceleration")
         },
     )
     planner = object.__new__(TrapezoidalPlanner)

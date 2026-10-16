@@ -68,19 +68,12 @@ def _curobo_joint_limits(
     robot: Robot,
     *,
     max_acceleration: float | None = None,
-    urdf_path: str | None = None,
 ) -> dict[str, list[float]]:
     """Export effective caps in active cspace order rather than source order."""
-    urdf_path = urdf_path if urdf_path is not None else robot.cfg.fpath
-    mimic_joints = _parse_mimic_joint_names(urdf_path)
-    ids = [
-        index
-        for index, name in enumerate(robot.joint_names)
-        if name not in mimic_joints
-    ]
+    ids = robot.active_joint_ids
     if not ids:
         return {"max_velocity": [], "max_acceleration": []}
-    limits = robot.get_joint_motion_limits(urdf_path=urdf_path)
+    limits = robot.get_joint_motion_limits()
     velocity = _merge_limit(
         None, limits["velocity"][:, ids].amin(dim=0), _DEFAULT_VELOCITY
     )
@@ -128,44 +121,6 @@ def _named_rigid_objects(
         (getattr(obj, "uid", None) or f"obstacle_{index}", obj)
         for index, obj in enumerate(rigid_objects or ())
     ]
-
-
-def _parse_mimic_joint_names(urdf_path: str) -> set[str]:
-    """Return the names of URDF joints that mimic another joint.
-
-    cuRobo's URDF parser folds each ``<mimic>`` joint into its active joint: the
-    mimic joint's body takes the active joint's name, so the mimic joint has no
-    independent entry in the kinematics tree. cuRobo therefore rejects mimic
-    joints in ``cspace`` and ``lock_joints`` - locking one raises ``KeyError``
-    because cuRobo finds no body for it. They must be excluded from both, so
-    cuRobo drives them from their active joint instead.
-
-    cuRobo's ``UrdfRobotParser`` exposes no public accessor for mimic joints (a
-    prior ``get_mimic_joint_map`` call did not exist on this cuRobo version and
-    silently left the set empty), so they are read directly from the URDF XML -
-    the same ``<mimic>`` tags cuRobo itself parses.
-
-    Args:
-        urdf_path: Path to the robot URDF file.
-
-    Returns:
-        The set of joint names declared with a ``<mimic>`` child element. Empty
-        if the URDF cannot be parsed (a warning is logged).
-    """
-    import xml.etree.ElementTree as ET
-
-    mimic_joints: set[str] = set()
-    try:
-        root = ET.parse(urdf_path).getroot()
-    except Exception as exc:  # noqa: BLE001
-        logger.log_warning(f"Could not parse mimic joints from URDF ({exc}).")
-        return mimic_joints
-    for joint in root.findall("joint"):
-        if joint.find("mimic") is not None:
-            name = joint.get("name")
-            if name is not None:
-                mimic_joints.add(name)
-    return mimic_joints
 
 
 def _to_open3d_legacy_mesh(
@@ -239,7 +194,8 @@ def generate_curobo_robot_yaml(
             caller already resolved the URDF (the planner does, so the on-disk
             cache key and the generation use the same file). Must be the full
             assembled URDF, not a solver's sub-chain URDF, or gripper links are
-            silently dropped from the collision model.
+            silently dropped from the collision model. Motion caps and active
+            joint selection always come from the bound robot.
         num_spheres: Per-link sphere count. If ``None``, DexSim auto-estimates
             it from the link's bounding-box volume.
         sphere_density: Multiplier on the auto sphere count (ignored when
@@ -272,14 +228,11 @@ def generate_curobo_robot_yaml(
     if not torch.cuda.is_available():
         raise RuntimeError("generate_curobo_robot_yaml requires a CUDA GPU.")
     urdf_path = urdf_path or robot.cfg.fpath
-    mimic_joints = _parse_mimic_joint_names(urdf_path)
-    limits = _curobo_joint_limits(
-        robot, max_acceleration=max_acceleration, urdf_path=urdf_path
-    )
+    limits = _curobo_joint_limits(robot, max_acceleration=max_acceleration)
     control_joints = set((robot.control_parts or {}).get(control_part, []))
     velocity_caps = dict(
         zip(
-            (name for name in robot.joint_names if name not in mimic_joints),
+            (robot.joint_names[index] for index in robot.active_joint_ids),
             limits["max_velocity"],
         )
     )
@@ -296,10 +249,8 @@ def generate_curobo_robot_yaml(
     #    ``robot.root_link_name`` is avoided because it touches an uninitialized
     #    ``entities`` attribute on some Robot instances; cuRobo's parser resolves
     #    the root link directly from the URDF.
-    #    Mimic joints are detected from the URDF XML (not cuRobo's parser, which
-    #    exposes no mimic accessor) so they can be excluded from cspace/lock_joints
-    #    below - cuRobo folds them into their active joint and raises
-    #    KeyError if they are locked.
+    #    Robot's active_joint_ids already excludes mimic followers, which cuRobo
+    #    folds into their leader and cannot represent in cspace/lock_joints.
     base_link: str | None = None
     try:
         parser = UrdfRobotParser(urdf_path, load_meshes=False, build_scene_graph=True)
@@ -363,9 +314,8 @@ def generate_curobo_robot_yaml(
         except Exception:  # noqa: BLE001
             init_qpos = [0.0] * len(joint_names)
     cspace_pairs = [
-        (jname, float(val))
-        for jname, val in zip(joint_names, init_qpos)
-        if jname not in mimic_joints
+        (joint_names[index], float(init_qpos[index]))
+        for index in robot.active_joint_ids
     ]
     cspace = {
         "joint_names": [j for j, _ in cspace_pairs],

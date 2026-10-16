@@ -45,7 +45,8 @@ Preserve these coupled result rules in `motion_generator.py`:
 and applies supported generic timing constraints. Atomic Skills call this facade
 rather than branching on concrete planner option classes.
 
-`Robot.get_joint_motion_limits()` owns asset/runtime and mimic-coupled caps.
+`Robot.get_joint_motion_limits()` aggregates effective runtime speeds,
+configured acceleration caps and existing articulation mimic metadata.
 `planners/_joint_limits.py` only selects trajectory joints, reduces a shared
 planning batch to its strictest caps, and merges requests and fallbacks. TOPPRA
 and Trapezoidal resolve unspecified limits after the control part is known;

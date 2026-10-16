@@ -74,6 +74,11 @@ def test_dual_arm_acceleration_expressions_keep_their_source_meaning(
     robot = object.__new__(Robot)
     robot._spawn_result = object()
     robot._data = SimpleNamespace(articulation_view=SimpleNamespace(joint_names=names))
+    robot._mimic_info = SimpleNamespace(
+        mimic_id=np.array([], dtype=int),
+        mimic_parent=np.array([], dtype=int),
+        mimic_multiplier=np.array([]),
+    )
     robot.cfg = cfg
     robot.get_qvel_limits = Mock(
         return_value=torch.ones(1, len(names), dtype=torch.float64)

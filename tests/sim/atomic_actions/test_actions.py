@@ -367,7 +367,7 @@ def _robot() -> Mock:
     robot.compute_batch_fk.side_effect = compute_batch_fk
     robot.get_joint_motion_limits.return_value = {
         key: torch.full((NUM_ENVS, ROBOT_DOF), torch.inf, dtype=torch.float64)
-        for key in ("velocity", "acceleration", "source_velocity")
+        for key in ("velocity", "acceleration")
     }
     return robot
 

@@ -1131,6 +1131,9 @@ def test_planner_adapts_batched_plan_states() -> None:
     planner.cfg = SimpleNamespace(planner_type="trapezoidal")
     planner.robot = SimpleNamespace(
         joint_names=["first", "second"],
+        mimic_ids=(),
+        mimic_parents=(),
+        mimic_multipliers=(),
         cfg=SimpleNamespace(fpath="", joint_acceleration_limits=None),
         get_qvel_limits=lambda **kwargs: torch.tensor([[0.2, 0.2]]),
     )

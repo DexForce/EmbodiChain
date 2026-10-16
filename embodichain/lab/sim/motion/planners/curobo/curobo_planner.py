@@ -1858,9 +1858,7 @@ class CuroboPlanner(BasePlanner):
         hasher.update(str(auto.surface_radius).encode("utf-8"))
         hasher.update(str(auto.iterations).encode("utf-8"))
         hasher.update(str(auto.collision_sphere_buffer).encode("utf-8"))
-        hasher.update(
-            repr(_curobo_joint_limits(self.robot, urdf_path=urdf_path)).encode("utf-8")
-        )
+        hasher.update(repr(_curobo_joint_limits(self.robot)).encode("utf-8"))
         return hasher.hexdigest()
 
     def _auto_generate_world_scene(self, world_cfg: CuroboWorldCfg) -> "Any":

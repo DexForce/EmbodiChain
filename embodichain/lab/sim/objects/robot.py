@@ -20,11 +20,8 @@ import torch
 import numpy as np
 import math
 import re
-import xml.etree.ElementTree as ET
 
 from collections.abc import Mapping
-from functools import lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Literal, Sequence, Tuple
 from dataclasses import dataclass, field
 from tensordict import TensorDict
@@ -64,24 +61,6 @@ class ControlGroup:
 
     def __post_init__(self):
         pass
-
-
-@lru_cache(maxsize=32)
-def _read_motion_limits(
-    contents: bytes,
-) -> tuple[dict[str, float], dict[str, tuple[str, float]]]:
-    """Cache asset metadata by content so rapid same-size edits stay visible."""
-    velocities, mimics = {}, {}
-    for joint in ET.fromstring(contents).findall("joint"):
-        name = joint.attrib["name"]
-        limit, mimic = joint.find("limit"), joint.find("mimic")
-        if limit is not None and "velocity" in limit.attrib:
-            velocities[name] = float(limit.attrib["velocity"])
-        if mimic is not None:
-            mimics[name] = mimic.attrib["joint"], abs(
-                float(mimic.get("multiplier", "1"))
-            )
-    return velocities, mimics
 
 
 class Robot(Articulation):
@@ -490,19 +469,16 @@ class Robot(Articulation):
             env_ids=env_ids,
         )
 
-    def get_joint_motion_limits(
-        self, *, urdf_path: str | None = None
-    ) -> dict[str, torch.Tensor]:
+    def get_joint_motion_limits(self) -> dict[str, torch.Tensor]:
         """Query robot motion caps independently of planner defaults or requests.
 
-        Args:
-            urdf_path: Optional source URDF override; otherwise use ``cfg.fpath``.
+        Speeds and mimic relations come from the bound articulation. Speeds
+        include asset defaults, configuration overrides and runtime changes.
 
         Returns:
             CPU float64 tensors in final state order, each shaped ``(B, DOF)``:
-            ``velocity`` combines asset/runtime caps and mimic coupling;
+            ``velocity`` applies mimic coupling to effective runtime caps;
             ``acceleration`` resolves configured metadata and mimic coupling;
-            ``source_velocity`` preserves raw asset speeds for backend export.
             Unavailable caps are infinite so callers can select their fallback.
             Zero velocity is a hard cap: the joint must remain stationary.
         """
@@ -518,24 +494,6 @@ class Robot(Articulation):
             torch.isfinite(velocity) & (velocity >= 0) & (velocity < 1e9),
             velocity,
             torch.inf,
-        )
-        source, mimics = {}, {}
-        path = urdf_path if urdf_path is not None else getattr(self.cfg, "fpath", None)
-        if isinstance(path, str) and Path(path).suffix.lower() == ".urdf":
-            try:
-                source, mimics = _read_motion_limits(Path(path).read_bytes())
-            except OSError:
-                pass
-        source_velocity = velocity.new_tensor(
-            [source.get(name, math.inf) for name in names]
-        )
-        source = {
-            name: value
-            for name, value in source.items()
-            if math.isfinite(value) and 0 <= value < 1e9
-        }
-        source_caps = velocity.new_tensor(
-            [source.get(name, math.inf) for name in names]
         )
         acceleration = velocity.new_full((len(names),), torch.inf)
         configured = getattr(self.cfg, "joint_acceleration_limits", None)
@@ -558,40 +516,32 @@ class Robot(Articulation):
                     "joint_acceleration_limits must contain finite positive values."
                 )
             acceleration[ids] = values
-        caps = torch.stack(
-            (
-                torch.minimum(velocity, source_caps),
-                acceleration.expand_as(velocity),
-            ),
-            dim=1,
-        )
-        indices = {name: index for index, name in enumerate(names)}
-        for child in mimics:
-            bound = (
-                caps[:, :, indices[child]].clone()
-                if child in indices
-                else velocity.new_tensor([source.get(child, math.inf), math.inf])
+        caps = torch.stack((velocity, acceleration.expand_as(velocity)), dim=1)
+        mimics = dict(
+            zip(
+                self.mimic_ids,
+                zip(self.mimic_parents, self.mimic_multipliers, strict=True),
+                strict=True,
             )
+        )
+        for child in mimics:
+            bound = caps[:, :, child].clone()
             visited = {child}
             while child in mimics:
                 parent, multiplier = mimics[child]
                 if not math.isfinite(multiplier) or parent in visited:
                     raise ValueError(
-                        "URDF mimic multipliers must be finite and relations acyclic."
+                        "Mimic multipliers must be finite and relations acyclic."
                     )
                 if multiplier == 0:
                     break
-                bound = bound / multiplier
-                if parent in indices:
-                    caps[:, :, indices[parent]] = torch.minimum(
-                        caps[:, :, indices[parent]], bound
-                    )
+                bound = bound / abs(multiplier)
+                caps[:, :, parent] = torch.minimum(caps[:, :, parent], bound)
                 visited.add(parent)
                 child = parent
         return {
             "velocity": caps[:, 0],
             "acceleration": caps[:, 1],
-            "source_velocity": source_velocity.expand_as(velocity),
         }
 
     def get_qf_limits(

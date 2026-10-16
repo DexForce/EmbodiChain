@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -59,22 +58,20 @@ W1_ACTIVE_DOF = 40  # Dexforce W1 v021 scalar active-DOF count.
 
 
 @pytest.mark.no_sim
-def test_joint_motion_limits_preserve_batch_source_and_runtime_state(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "coupled.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="leader"><limit velocity="1"/></joint><joint name="follower"><limit velocity="0.4"/><mimic joint="leader" multiplier="-2"/></joint></robot>'
-    )
+def test_joint_motion_limits_preserve_batch_and_runtime_state() -> None:
     robot = object.__new__(Robot)
     robot._spawn_result = object()
     robot._data = SimpleNamespace(
         articulation_view=SimpleNamespace(joint_names=["leader", "follower"])
     )
     robot.cfg = SimpleNamespace(
-        fpath=str(path),
         joint_acceleration_limits={"follower": 0.2},
         control_parts={"arm": ["leader"]},
+    )
+    robot._mimic_info = SimpleNamespace(
+        mimic_id=np.array([1]),
+        mimic_parent=np.array([0]),
+        mimic_multiplier=np.array([-2.0]),
     )
     runtime = torch.tensor([[1e10, 0.3], [1e10, 0.1]], dtype=torch.float64)
     robot.get_qvel_limits = Mock(return_value=runtime)
@@ -87,10 +84,7 @@ def test_joint_motion_limits_preserve_batch_source_and_runtime_state(
         limits["acceleration"],
         torch.tensor([[0.1, 0.2], [0.1, 0.2]], dtype=torch.float64),
     )
-    torch.testing.assert_close(
-        limits["source_velocity"],
-        torch.tensor([[1.0, 0.4], [1.0, 0.4]], dtype=torch.float64),
-    )
+    assert set(limits) == {"velocity", "acceleration"}
     assert (runtime[:, 0] == 1e10).all()
 
 

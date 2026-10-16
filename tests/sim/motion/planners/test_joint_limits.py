@@ -47,6 +47,13 @@ pytestmark = pytest.mark.no_sim
 
 class _Robot:
     get_joint_motion_limits = Robot.get_joint_motion_limits
+    mimic_ids = ()
+    mimic_parents = ()
+    mimic_multipliers = ()
+
+    @property
+    def active_joint_ids(self) -> list[int]:
+        return [i for i in range(len(self.joint_names)) if i not in self.mimic_ids]
 
     def __init__(self) -> None:
         self.joint_names = ["shoulder", "finger", "elbow"]
@@ -88,20 +95,12 @@ def test_single_row_planning_does_not_read_other_environment_caps() -> None:
     )
 
 
-@pytest.mark.parametrize("source", ["runtime", "asset"])
 @pytest.mark.parametrize("velocity_request", [None, 1.0])
 def test_zero_speed_caps_survive_limit_resolution(
-    tmp_path: Path, source: str, velocity_request: float | None
+    velocity_request: float | None,
 ) -> None:
     robot = _Robot()
-    if source == "runtime":
-        robot.velocities[:, 2] = 0.0
-    else:
-        path = tmp_path / "robot.urdf"
-        path.write_text(
-            '<robot name="test"><joint name="elbow"><limit velocity="0"/></joint></robot>'
-        )
-        robot.cfg.fpath = str(path)
+    robot.velocities[:, 2] = 0.0
     constraints = _resolve_joint_constraints(
         robot, {"velocity": velocity_request}, dof=3
     )
@@ -218,48 +217,51 @@ def test_toppra_signed_requests_preserve_zero_speed_caps(displacement: float) ->
         assert torch.count_nonzero(result.velocities[..., 2]) == 0
 
 
-def test_zero_speed_mimic_follower_freezes_its_leader(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("multiplier", "leader_cap"), [(-2.0, 0.0), (0.0, 0.6)])
+def test_zero_speed_follower_respects_mimic_ratio(
+    multiplier: float, leader_cap: float
+) -> None:
     robot = _Robot()
-    path = tmp_path / "robot.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="elbow"><limit velocity="0"/><mimic joint="shoulder" multiplier="-2"/></joint></robot>'
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = (
+        [2],
+        [0],
+        [multiplier],
     )
-    robot.cfg.fpath = str(path)
+    robot.velocities[:, 2] = 0.0
     result = _resolve_joint_constraints(robot, {}, dof=3)
-    assert result["velocity"].tolist() == [0.0, 0.02, 0.0]
+    assert result["velocity"].tolist() == [leader_cap, 0.02, 0.0]
 
 
-@pytest.mark.parametrize("source", ["runtime", "asset"])
-def test_curobo_exports_zero_velocity_cap(tmp_path: Path, source: str) -> None:
+def test_curobo_exports_zero_velocity_cap() -> None:
     robot = _Robot()
-    if source == "runtime":
-        robot.velocities[:, 2] = 0.0
-    else:
-        path = tmp_path / "robot.urdf"
-        path.write_text(
-            '<robot name="test"><joint name="elbow"><limit velocity="0"/></joint></robot>'
-        )
-        robot.cfg.fpath = str(path)
+    robot.velocities[:, 2] = 0.0
     exported = _curobo_joint_limits(robot)
     assert exported["max_velocity"][2] == 0.0
     assert bool(torch.isfinite(torch.tensor(exported["max_velocity"])).all())
 
 
-def test_asset_caps_survive_unbounded_drive_overlays(tmp_path: Path) -> None:
+def test_planning_uses_effective_limits_without_reopening_asset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     robot = _Robot()
     path = tmp_path / "robot.urdf"
     path.write_text(
-        '<robot name="test"><joint name="finger" type="prismatic"><limit velocity="0.05"/></joint></robot>'
+        '<robot name="test"><joint name="finger"><limit velocity="0.05"/></joint></robot>'
     )
     robot.cfg.fpath = str(path)
-    robot.velocities[:, 1] = 1e10
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        Mock(side_effect=AssertionError("Planner reopened the asset")),
+    )
+    robot.velocities[:, 1] = 0.3
     result = _resolve_joint_constraints(
         robot, {"velocity": 1.0}, control_part="eef", dof=1
     )
-    assert result["velocity"].item() == pytest.approx(0.05)
-    path.write_text(path.read_text().replace("0.05", "0.04"))
+    assert result["velocity"].item() == pytest.approx(0.3)
+    robot.velocities[:, 1] = 0.1
     result = _resolve_joint_constraints(robot, {}, control_part="eef", dof=1)
-    assert result["velocity"].item() == pytest.approx(0.04)
+    assert result["velocity"].item() == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize("velocity_request", [None, 0.4])
@@ -388,22 +390,10 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
         assert options.constraints["velocity"] is None
 
 
-@pytest.mark.parametrize("override_path", [False, True])
-def test_curobo_export_uses_effective_velocity_and_acceleration_caps(
-    tmp_path: Path,
-    override_path: bool,
-) -> None:
+def test_curobo_export_uses_effective_velocity_and_acceleration_caps() -> None:
     robot = _Robot()
-    path = tmp_path / "robot.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="elbow"><limit velocity="3"/></joint><joint name="shoulder"><limit velocity="2"/></joint><joint name="finger"><limit velocity="0.04"/></joint></robot>'
-    )
-    if not override_path:
-        robot.cfg.fpath = str(path)
     robot.cfg.joint_acceleration_limits = {"arm": 1.5}
-    exported = _curobo_joint_limits(
-        robot, urdf_path=str(path) if override_path else None
-    )
+    exported = _curobo_joint_limits(robot)
     assert exported["max_velocity"] == pytest.approx([0.6, 0.02, 1.2])
     assert exported["max_acceleration"] == [1.5, 0.5, 1.5]
 
@@ -439,44 +429,58 @@ def test_toppra_spawn_workers_receive_resolved_joint_limits() -> None:
         planner.close()
 
 
-def test_mimic_follower_caps_constrain_curobo_active_joint(tmp_path: Path) -> None:
+def test_mimic_follower_caps_constrain_curobo_active_joint() -> None:
     robot = _Robot()
-    robot.velocities[:, 1] = 1.0
-    path = tmp_path / "robot.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="shoulder"><limit velocity="2"/></joint><joint name="finger"><limit velocity="0.2"/><mimic joint="shoulder" multiplier="-2"/></joint><joint name="elbow"><limit velocity="3"/></joint></robot>'
-    )
-    robot.cfg.fpath = str(path)
+    robot.velocities[:, 1] = 0.2
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = [1], [0], [-2.0]
     exported = _curobo_joint_limits(robot)
     assert exported["max_velocity"] == pytest.approx([0.1, 1.2])
     assert len(exported["max_acceleration"]) == 2
 
 
-def test_large_authored_speed_keeps_raw_value_and_runtime_cap(tmp_path: Path) -> None:
+def test_mimic_runtime_and_acceleration_overrides_constrain_leader() -> None:
     robot = _Robot()
-    path = tmp_path / "robot.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="elbow"><limit velocity="1e10"/></joint></robot>'
-    )
-    robot.cfg.fpath = str(path)
-    limits = robot.get_joint_motion_limits()
-    assert limits["source_velocity"][:, 2].tolist() == [1e10, 1e10]
-    assert limits["velocity"][:, 2].tolist() == [1.6, 1.2]
-
-
-def test_mimic_runtime_and_acceleration_overrides_constrain_leader(
-    tmp_path: Path,
-) -> None:
-    robot = _Robot()
-    path = tmp_path / "robot.urdf"
-    path.write_text(
-        '<robot name="test"><joint name="finger"><mimic joint="shoulder" multiplier="-2"/></joint></robot>'
-    )
-    robot.cfg.fpath = str(path)
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = [1], [0], [-2.0]
     robot.cfg.joint_acceleration_limits = {"finger": 0.2}
     result = _resolve_joint_constraints(robot, {}, control_part="arm", dof=2)
     assert result["velocity"].tolist() == pytest.approx([1.2, 0.01])
     assert result["acceleration"].tolist() == pytest.approx([0.5, 0.1])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_nested_mimic_caps_do_not_depend_on_relation_order(reverse: bool) -> None:
+    robot = _Robot()
+    robot.velocities[:] = torch.tensor([2.0, 1.0, 0.12])
+    robot.cfg.joint_acceleration_limits = {"elbow": 0.6}
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = (
+        ([1, 2], [0, 1], [3.0, -2.0]) if reverse else ([2, 1], [1, 0], [-2.0, 3.0])
+    )
+    result = _resolve_joint_constraints(robot, {}, dof=3)
+    assert result["velocity"].tolist() == pytest.approx([0.02, 0.06, 0.12])
+    assert result["acceleration"].tolist() == pytest.approx([0.1, 0.3, 0.6])
+
+
+@pytest.mark.parametrize("multiplier", [float("nan"), float("inf")])
+def test_nonfinite_runtime_mimic_multiplier_is_rejected(multiplier: float) -> None:
+    robot = _Robot()
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = (
+        [1],
+        [0],
+        [multiplier],
+    )
+    with pytest.raises(ValueError, match="finite"):
+        robot.get_joint_motion_limits()
+
+
+def test_cyclic_runtime_mimic_relations_are_rejected() -> None:
+    robot = _Robot()
+    robot.mimic_ids, robot.mimic_parents, robot.mimic_multipliers = (
+        [1, 0],
+        [0, 1],
+        [1.0, 1.0],
+    )
+    with pytest.raises(ValueError, match="acyclic"):
+        robot.get_joint_motion_limits()
 
 
 def test_curobo_cache_changes_with_robot_metadata_and_closes_stale_backend() -> None:
