@@ -45,7 +45,7 @@ from embodichain.lab.sim.atomic_actions import (
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordancePoseCandidates,
 )
-from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics
+from embodichain.lab.sim.atomic_actions.plans import PlannerDiagnostics, PlanningFailure
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp
 
 
@@ -465,3 +465,267 @@ def test_raw_retry_shares_old_four_candidate_budget(monkeypatch):
     assert (
         action._recover_raw_pick_candidates(request, context, first, selection) is first
     )
+
+
+def _fixed_fixture(monkeypatch):
+    from embodichain.gen_sim.task_engine._task_program import (
+        actions,
+        articulation_collision,
+        pick_continuation,
+    )
+    from embodichain.lab.sim.atomic_actions import goals
+
+    action, request, context, grasp, direction, calls = _fixture(monkeypatch)
+    request.skill_options = replace(request.skill_options, fixed_object_to_eef=grasp[0])
+    action.pick_purposes = {request.invocation_id: "ordinary"}
+    screen = NS(mask=lambda *args: torch.ones(1, 1, 1, dtype=torch.bool))
+    action.closing_geometry_factory = lambda *args: screen
+    monkeypatch.setattr(
+        goals, "_resolve_object_pose", lambda *a, **kw: torch.eye(4)[None]
+    )
+    monkeypatch.setattr(action, "_qualify_closing_plan", lambda r, c, plan: plan)
+    inspect = Mock(return_value={"valid": True})
+    scene = Mock(return_value={"valid": True})
+    preview = Mock(return_value={"valid": True})
+    monkeypatch.setattr(actions, "_inspect_pick_plan", inspect)
+    monkeypatch.setattr(articulation_collision, "check_free_motion", scene)
+    monkeypatch.setattr(pick_continuation, "preview_place", preview)
+    action.continuation_previews = {request.invocation_id: object()}
+    built = []
+
+    def build(self, selected, current):
+        assert selected is request and current is context
+        exact = _PICK_SELECTION.get().trajectory
+        assert exact is not None
+        built.append(exact)
+        success, positions, lengths = exact
+        return Plan(
+            success,
+            PlannerDiagnostics(backend="mock", metadata={"builder_identity": "same"}),
+            NS(positions=positions),
+            (NS(name="approach", stop=lengths["approach"]),),
+        )
+
+    builder = Mock(side_effect=build)
+    monkeypatch.setattr(PickUp, "_plan", lambda self, r, c: builder(self, r, c))
+    failed = Plan(
+        torch.tensor([False]),
+        PlannerDiagnostics(
+            backend="mock",
+            failure=PlanningFailure("gen_sim_fixed_pick_unqualified", retryable=False),
+        ),
+    )
+    action.failed_plan = Mock(return_value=failed)
+    for name in (
+        "_recover_raw_pick_candidates",
+        "_retry_ordinary_pick_candidates",
+        "_recover_constrained_pick_roll",
+        "_resolve_grasp_pose",
+    ):
+        monkeypatch.setattr(
+            action,
+            name,
+            Mock(side_effect=AssertionError("fixed Pick must not resample")),
+        )
+    return action, request, context, grasp, builder, built, inspect, scene, preview
+
+
+def test_fixed_main_route_keeps_exact_candidate_builder_and_canonical_identity(
+    monkeypatch,
+):
+    action, request, context, grasp, builder, built, inspect, scene, preview = (
+        _fixed_fixture(monkeypatch)
+    )
+    original_options = request.skill_options
+    rng = torch.random.get_rng_state().clone()
+    result = action._plan(request, context)
+    certificate = result.diagnostics.metadata["gen_sim_fixed_pick"]
+    assert result.plan_success.all() and certificate["accepted"]
+    assert (
+        certificate["resampled"] is False and certificate["physical_evidence"] is False
+    )
+    assert certificate["selected_pose"] == grasp.tolist()
+    assert certificate["fixed_object_to_eef"] == grasp[0].tolist()
+    assert len(built) == 1 and builder.call_count == 1
+    assert torch.equal(result.joint_trajectory.positions, built[0][1])
+    assert result.diagnostics.metadata["builder_identity"] == "same"
+    assert request.skill_options is original_options
+    assert torch.equal(rng, torch.random.get_rng_state())
+    assert _PICK_SELECTION.get() is None
+    assert inspect.call_args.args[1] is request
+    assert scene.call_args.args[1] is action.path_simulation
+    assert torch.equal(
+        scene.call_args.args[2], built[0][1][0, : built[0][2]["approach"]]
+    )
+    assert preview.call_args.args[1] is request
+    assert (
+        preview.call_args.args[4] is action.continuation_previews[request.invocation_id]
+    )
+    assert preview.call_args.kwargs == {"safety": True}
+    action.failed_plan.assert_not_called()
+
+
+def test_fixed_route_uses_original_pick_effects_and_phase_builder(monkeypatch):
+    from embodichain.lab.sim.atomic_actions.primitives import pick_up
+
+    original_plan = PickUp._plan
+    action, request, context, grasp, builder, built, inspect, scene, preview = (
+        _fixed_fixture(monkeypatch)
+    )
+    monkeypatch.setattr(PickUp, "_plan", original_plan)
+    monkeypatch.setattr(action, "require_goal", lambda selected: selected.goal)
+    monkeypatch.setattr(
+        pick_up, "_resolve_object_pose", lambda *args, **kw: torch.eye(4)[None]
+    )
+    monkeypatch.setattr(
+        PickUp,
+        "_get_full_pickup_trajectory",
+        Mock(side_effect=AssertionError("must consume the already qualified branch")),
+    )
+    context.last_qpos = context.robot.qpos
+    context.coordinated_held_objects = {}
+    action.robot.get_qpos = lambda: context.robot.qpos
+    action.planning_services.planner_name = "mock"
+    request.phase_effect_gates = object()
+    declared_gates = request.phase_effect_gates
+    captured = {}
+
+    def build(selected, current, **kwargs):
+        assert selected is request and current is context
+        assert selected.phase_effect_gates is declared_gates
+        captured.update(kwargs)
+        lengths = kwargs["segment_lengths"]
+        return Plan(
+            kwargs["success"],
+            kwargs["diagnostics"],
+            kwargs["trajectory"],
+            (NS(name="approach", stop=lengths["approach"]),),
+        )
+
+    monkeypatch.setattr(action, "build_plan", build)
+    result = action._plan(request, context)
+    assert result.plan_success.all()
+    held = captured["expected_effects"].held_object_updates["arm"]
+    assert held.semantics is request.goal.semantics
+    assert torch.equal(held.grasp_xpos, grasp)
+    assert torch.equal(
+        held.object_to_eef, request.skill_options.fixed_object_to_eef[None]
+    )
+    assert captured["segment_lengths"] == {"approach": 9, "close": 5, "lift": 6}
+    assert captured["scene_dependency_monitor_until"] == {"item": 9}
+    assert torch.equal(
+        result.joint_trajectory.positions[:, -1, :3], torch.tensor([[0.2, 0.0, 0.1]])
+    )
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        "trajectory",
+        "closing",
+        "velocity",
+        "scene",
+        "preview",
+        "alignment",
+        "missing_scene",
+        "missing_closing",
+        "unavailable",
+    ],
+)
+def test_fixed_main_route_rejects_each_gate_without_another_grasp(monkeypatch, gate):
+    action, request, context, grasp, builder, built, inspect, scene, preview = (
+        _fixed_fixture(monkeypatch)
+    )
+    if gate == "trajectory":
+        monkeypatch.setattr(
+            candidate,
+            "trajectory",
+            Mock(
+                return_value=(
+                    None,
+                    {"valid": False, "reason": "lift_continuity_rejected"},
+                )
+            ),
+        )
+    if gate == "closing":
+        monkeypatch.setattr(
+            action,
+            "_qualify_closing_plan",
+            lambda r, c, plan: replace(plan, plan_success=torch.tensor([False])),
+        )
+    if gate == "velocity":
+        inspect.return_value = {"valid": False, "reason": "final_velocity_rejected"}
+    if gate == "scene":
+        scene.return_value = {"valid": False}
+    if gate == "preview":
+        preview.return_value = {"valid": False}
+    if gate == "alignment":
+        monkeypatch.setattr(
+            action, "_approach_alignment_mask", lambda *a: torch.tensor([False])
+        )
+    if gate == "missing_scene":
+        action.path_simulation = None
+    if gate == "missing_closing":
+        action.closing_geometry_factory = None
+    if gate == "unavailable":
+        scene.side_effect = ValueError("scene certificate unavailable")
+    result = action._plan(request, context)
+    certificate = result.diagnostics.metadata["gen_sim_fixed_pick"]
+    assert not result.plan_success.any() and not certificate["accepted"]
+    assert certificate["resampled"] is False
+    assert result.diagnostics.failure.code == "gen_sim_fixed_pick_unqualified"
+    assert result.diagnostics.failure.retryable is False
+    assert builder.call_count <= 1
+    action.failed_plan.assert_called_once()
+    assert _PICK_SELECTION.get() is None
+
+
+@pytest.mark.parametrize(
+    "excluded",
+    [
+        "default",
+        "unmarked",
+        "pour",
+        "ends",
+        "constrained",
+        "explicit",
+        "upright",
+        "excluded",
+    ],
+)
+def test_fixed_main_route_does_not_take_over_other_pick_contracts(
+    monkeypatch, excluded
+):
+    from embodichain.gen_sim.task_engine._task_program.pick_safety import (
+        _PICK_GRASP_RULE,
+    )
+
+    action, request, context, grasp, direction, calls = _fixture(monkeypatch)
+    action.pick_purposes = {request.invocation_id: "ordinary"}
+    request.skill_options = replace(request.skill_options, fixed_object_to_eef=grasp[0])
+    if excluded == "default":
+        request.skill_options = replace(request.skill_options, fixed_object_to_eef=None)
+    if excluded == "unmarked":
+        action.pick_purposes = None
+    if excluded in {"pour", "ends"}:
+        action.pick_purposes[request.invocation_id] = excluded
+    if excluded == "constrained":
+        request.goal.semantics.affordance.set_custom_config(
+            _PICK_GRASP_RULE, ("item", "upright")
+        )
+    if excluded == "explicit":
+        request.goal = replace(request.goal, grasp_xpos=grasp)
+    if excluded == "upright":
+        request.skill_options = replace(request.skill_options, rotate_upright=0.5)
+    if excluded == "excluded":
+        action.path_excluded_invocations = frozenset({request.invocation_id})
+    first = Plan(torch.tensor([True]), PlannerDiagnostics(backend="mock"))
+    original = Mock(return_value=first)
+    monkeypatch.setattr(PickUp, "_plan", original)
+    monkeypatch.setattr(
+        action,
+        "_plan_fixed_pick_candidate",
+        Mock(side_effect=AssertionError("protected contract")),
+    )
+    assert action._plan(request, context) is first
+    original.assert_called_once_with(request, context)

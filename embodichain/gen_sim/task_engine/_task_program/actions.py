@@ -46,7 +46,11 @@ from embodichain.lab.sim.atomic_actions.primitives.move_held_object import (
     MoveHeldObject,
 )
 from embodichain.lab.sim.atomic_actions.primitives.pour import Pour
-from embodichain.lab.sim.atomic_actions.primitives.place import Place, PlaceGoal
+from embodichain.lab.sim.atomic_actions.primitives.place import (
+    Place,
+    PlaceGoal,
+    PlaceOptions,
+)
 from embodichain.lab.sim.atomic_actions.primitives.pick_up import PickUp, PickUpOptions
 from embodichain.lab.sim.atomic_actions.primitives.hand_over import HandOver
 from embodichain.lab.sim.atomic_actions.plans import (
@@ -394,6 +398,10 @@ class GenSimPickUp(PickUp):
         token = _PICK_SELECTION.set(selection)
         try:
             with robot_collision_scope():
+                from .pick_candidate_path import owns_fixed
+
+                if owns_fixed(self, request, context):
+                    return self._plan_fixed_pick_candidate(request, context, selection)
                 first = finish(super()._plan(request, context))
                 preview = (self.continuation_previews or {}).get(
                     getattr(request, "invocation_id", None)
@@ -431,11 +439,133 @@ class GenSimPickUp(PickUp):
         finally:
             _PICK_SELECTION.reset(token)
 
+    def _qualify_pick_candidate(self, request, context, selection, pose, direction):
+        """Use the shared builder only after qualifying this exact Pick branch."""
+        from .articulation_collision import check_free_motion
+        from .pick_candidate_path import trajectory
+        from .pick_continuation import preview_place
+
+        exact, receipt = trajectory(self, request, context, pose, direction)
+        record = {"trajectory": receipt}
+        if exact is None:
+            return None, record
+        prior = selection.request, selection.trajectory, selection.direction
+        selection.request, selection.trajectory, selection.direction = (
+            request,
+            exact,
+            direction,
+        )
+        try:
+            # Retain PickUp's effects, phase guards and original command timing.
+            candidate = self._qualify_closing_plan(
+                request, context, super()._plan(request, context)
+            )
+            record["emitted_plan"] = _inspect_pick_plan(
+                self.robot, request, context, candidate
+            )
+            if not candidate.plan_success.all() or not record["emitted_plan"]["valid"]:
+                return None, record
+            arm = request.binding.endpoint("primary", "motion").require_target(
+                JointPositionTarget
+            )
+            stop = next(
+                segment.stop
+                for segment in candidate.segments
+                if segment.name == "approach"
+            )
+            record["approach_scene"] = check_free_motion(
+                self.robot,
+                self.path_simulation,
+                candidate.joint_trajectory.positions[0, :stop],
+                arm.control_part,
+            )
+            if not record["approach_scene"]["valid"]:
+                return None, record
+            preview = (self.continuation_previews or {}).get(request.invocation_id)
+            if preview is not None:
+                record["place_preview"] = preview_place(
+                    self, request, context, candidate, preview, safety=True
+                )
+                if not record["place_preview"]["valid"]:
+                    return None, record
+            return candidate, record
+        finally:
+            selection.request, selection.trajectory, selection.direction = prior
+
+    def _plan_fixed_pick_candidate(self, request, context, selection):
+        """Qualify one declared grasp as the main route, without resampling."""
+        from embodichain.lab.sim.atomic_actions.goals import _resolve_object_pose
+
+        state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
+        record = {}
+        candidate = None
+        try:
+            if self.path_simulation is None or selection.closing_geometry is None:
+                raise ValueError(
+                    "Fixed Pick requires scene and native closing screens."
+                )
+            object_pose = _resolve_object_pose(
+                request.goal.semantics, context, name="pickup_object_pose"
+            ).to(device=self.device, dtype=context.robot.qpos.dtype)
+            pose = object_pose @ request.skill_options.fixed_object_to_eef.to(
+                object_pose
+            )
+            direction = request.skill_options.approach_direction.to(pose)
+            direction = (direction / torch.linalg.vector_norm(direction))[None]
+            selection.object_pose = object_pose
+            record["selected_pose"] = pose.detach().cpu().tolist()
+            record["approach_direction"] = direction.detach().cpu().tolist()
+            if self._approach_alignment_mask(
+                pose[:, None, None], request.skill_options, direction[:, None, None]
+            ).all():
+                candidate, qualification = self._qualify_pick_candidate(
+                    request, context, selection, pose, direction
+                )
+                record.update(qualification)
+            else:
+                record["reason"] = "approach_alignment_rejected"
+        except (
+            ImportError,
+            ValueError,
+            RuntimeError,
+            AttributeError,
+            KeyError,
+            TypeError,
+        ) as error:
+            record["unavailable"] = str(error)
+        finally:
+            state.restore()
+        accepted = candidate is not None
+        if not accepted:
+            candidate = self.failed_plan(
+                request,
+                context,
+                message="The declared fixed Pick was not qualified.",
+                failure_code="gen_sim_fixed_pick_unqualified",
+                retryable=False,
+            )
+        return replace(
+            candidate,
+            diagnostics=replace(
+                candidate.diagnostics,
+                metadata={
+                    **candidate.diagnostics.metadata,
+                    "gen_sim_fixed_pick": {
+                        "accepted": accepted,
+                        "fixed_object_to_eef": request.skill_options.fixed_object_to_eef.detach()
+                        .cpu()
+                        .tolist(),
+                        **record,
+                        "resampled": False,
+                        "physical_evidence": False,
+                    },
+                },
+            ),
+        )
+
     def _recover_raw_pick_candidates(self, request, context, first, selection):
         """Qualify legal geometry discarded by the coarse endpoint-IK screen."""
-        from .articulation_collision import check_free_motion
-        from .pick_candidate_path import geometric_variants, trajectory
-        from .pick_continuation import preview_place
+        from .pick_candidate_path import geometric_variants
         from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
         previous = first.diagnostics.metadata.get("gen_sim_pick_candidate_retry", {})
@@ -512,62 +642,19 @@ class GenSimPickUp(PickUp):
                             obj_upright_direction=None,
                         ),
                     )
-                    exact, receipt = trajectory(
-                        self, selected, context, pose, direction
+                    candidate, qualification = self._qualify_pick_candidate(
+                        selected, context, selection, pose, direction
                     )
                     record = {
                         "strategy": strategy,
                         "candidate_id": index // 2,
                         "roll_variant": index % 2,
                         "selected_pose": pose.detach().cpu().tolist(),
-                        "trajectory": receipt,
+                        **qualification,
                     }
                     attempts.append(record)
-                    if exact is None:
+                    if candidate is None:
                         continue
-                    selection.request, selection.trajectory, selection.direction = (
-                        selected,
-                        exact,
-                        direction,
-                    )
-                    # Shared PickUp builds commands/effects from the screened
-                    # trajectory; do not lose its accepted IK branch by replanning.
-                    candidate = self._qualify_closing_plan(
-                        selected, context, super()._plan(selected, context)
-                    )
-                    record["emitted_plan"] = _inspect_pick_plan(
-                        self.robot, selected, context, candidate
-                    )
-                    if (
-                        not candidate.plan_success.all()
-                        or not record["emitted_plan"]["valid"]
-                    ):
-                        continue
-                    arm = selected.binding.endpoint("primary", "motion").require_target(
-                        JointPositionTarget
-                    )
-                    stop = next(
-                        segment.stop
-                        for segment in candidate.segments
-                        if segment.name == "approach"
-                    )
-                    record["approach_scene"] = check_free_motion(
-                        self.robot,
-                        self.path_simulation,
-                        candidate.joint_trajectory.positions[0, :stop],
-                        arm.control_part,
-                    )
-                    if not record["approach_scene"]["valid"]:
-                        continue
-                    preview = (self.continuation_previews or {}).get(
-                        request.invocation_id
-                    )
-                    if preview is not None:
-                        record["place_preview"] = preview_place(
-                            self, selected, context, candidate, preview, safety=True
-                        )
-                        if not record["place_preview"]["valid"]:
-                            continue
                     chosen = replace(
                         candidate,
                         diagnostics=replace(
@@ -1752,6 +1839,19 @@ class GenSimPlace(Place):
     OptionsType = Place.OptionsType
     binding_contract = Place.binding_contract
     recovery_scene_vertices: dict | None = None
+    ordinary_on_invocations: frozenset[str] = frozenset()
+
+    def _translation_keyframes(
+        self,
+        start_xpos: torch.Tensor,
+        target_xpos: torch.Tensor,
+        options: PlaceOptions,
+    ) -> torch.Tensor:
+        from .place_branch import capture_keyframes
+
+        return capture_keyframes(
+            self, super()._translation_keyframes(start_xpos, target_xpos, options)
+        )
 
     @staticmethod
     def _with_contact_monitor_boundary(plan: ActionPlan) -> ActionPlan:
@@ -1783,6 +1883,23 @@ class GenSimPlace(Place):
             place_ik_recovery,
         )
         from .place_recovery import eligible, recover
+        from . import place_branch
+
+        if place_branch.owns(self, request, context):
+            build = lambda selected, current: super(GenSimPlace, self)._plan(
+                selected, current
+            )
+            with place_ik_recovery(defer_retries=True):
+                original = build(request, context)
+            accepted = place_branch.inspect_emitted(self, request, context, original)
+            plan = (
+                original
+                if accepted["valid"]
+                else place_branch.plan(self, request, context, build)
+            )
+            return require_release_effect(
+                self._with_contact_monitor_boundary(plan), handoff.resource
+            )
 
         early = bool(self.recovery_scene_vertices) and eligible(self, request, context)
         before = (

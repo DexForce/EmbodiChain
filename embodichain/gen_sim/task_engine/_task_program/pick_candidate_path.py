@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Failure-only qualification before endpoint IK empties a GenSim grasp pool."""
+"""Continuous qualification for one selected GenSim grasp or a legal raw pool."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from typing import Any
 
 import torch
 
-from embodichain.lab.sim.atomic_actions import JointPositionTarget
+from embodichain.lab.sim.atomic_actions import AntipodalAffordance, JointPositionTarget
 from embodichain.lab.sim.atomic_actions.affordance_sampling import (
     AffordancePoseCandidates,
 )
@@ -40,11 +40,40 @@ from embodichain.lab.sim.motion.motion_generator import MotionGenOptions
 from embodichain.lab.sim.motion.planners.utils import interpolate_xpos_batched
 from embodichain.utils.math import pose_inv
 
+from .adaptive_grasp import ADAPTIVE_GRASP
 from .motion import _cartesian_samples, resolve_continuous_ik_path
 from .pick_path import _pose_path_valid
 from .pick_safety import _PICK_GRASP_RULE
 
 __all__: list[str] = []
+
+
+def owns_fixed(action: Any, request: Any, context: Any) -> bool:
+    """Own only an ordinary fixed grasp, never another call's grasp contract."""
+    if not action.is_bound:
+        return False
+    options, goal = request.skill_options, request.goal
+    affordance = goal.semantics.affordance
+    invocation_id = getattr(request, "invocation_id", None)
+    return bool(
+        options.fixed_object_to_eef is not None
+        and (getattr(action, "pick_purposes", None) or {}).get(invocation_id)
+        == "ordinary"
+        and invocation_id not in getattr(action, "path_excluded_invocations", ())
+        and context.batch_size == 1
+        and context.env_ids.tolist() == [0]
+        and goal.object_pose is None
+        and goal.grasp_xpos is None
+        and isinstance(affordance, AntipodalAffordance)
+        and affordance.get_custom_config(_PICK_GRASP_RULE) is None
+        and affordance.get_custom_config(ADAPTIVE_GRASP) in {None, "ordinary"}
+        and options.rotate_upright is None
+        and options.obj_upright_direction is None
+        and options.pick_object_part == "center"
+        and request.motion_policy.strategy == "ik_interp"
+        and request.motion_policy.dynamic_collision_mode == "off"
+        and not getattr(action.motion_generator, "direct_transport_planning", False)
+    )
 
 
 def eligible(action: Any, request: Any, context: Any, selection: Any) -> bool:

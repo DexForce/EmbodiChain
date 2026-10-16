@@ -227,6 +227,11 @@ def generate_task_program_bundle(
         pick_contact_revision: Explicit native rigid Pick closing screen. None
             preserves legacy sampling; 1 rejects nonpad-rest-first closure;
             2 also rejects nonpad contact-halo entry before bilateral pad rest.
+            3 retains revision 2 closing and screens nominal hand-opening
+            geometry for an ordinary adjacent on-Place. 4 combines revision 1
+            rest-order closing with diagnostic-only contact halo and revision 3
+            opening screening. Opening screening is not physical release
+            verification; all revisions retain native acquisition requirements.
         verify_pick_phases: Explicit registered Pick acquisition/lift contract.
             False preserves legacy lowerer declarations and fingerprints.
 
@@ -897,7 +902,8 @@ def _task_stability_payload(
     """Declare task conditions without adding public validator or runtime types."""
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     if pick_contact_revision is not None and (
-        type(pick_contact_revision) is not int or pick_contact_revision not in (1, 2)
+        type(pick_contact_revision) is not int
+        or pick_contact_revision not in (1, 2, 3, 4)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_contract_revision is not None and (

@@ -382,6 +382,100 @@ def _inside_plan(kind: str, part: str | None):
     )
 
 
+def _builtin_on_plan():
+    source = candidate(
+        step(
+            "E1",
+            "cube",
+            target=selector("support"),
+            relation="on",
+            required_arm="left_arm",
+        )
+    )
+    bindings = {
+        "schema_version": "action_engine_role_bindings_v1",
+        "task_id": "demo",
+        "candidate_id": source["candidate_id"],
+        "reference_bindings": {"step_01.object": ["a"], "step_01.target": ["support"]},
+        "role_bindings": {},
+    }
+    plan = SemanticTaskPlanner().plan_spec(
+        source,
+        bindings,
+        [
+            {"runtime_uid": uid, "init_pos": [0.1, -0.2, 0.8], "init_rot": [0.0] * 3}
+            for uid in ("a", "support")
+        ],
+    )
+    graph = deepcopy(plan.graph)
+    place = next(
+        node
+        for node in graph["nodes"]
+        if node["call"].get("call_id") == "simulation.place_relative"
+    )
+    place["call"] = {
+        "kind": "place",
+        "object": "a",
+        "on": "on__support__a",
+        "resources": {"primary": "left"},
+    }
+    return plan, graph, place["call"]
+
+
+def test_builtin_on_covers_exact_support_and_subject_without_changing_taskspec():
+    plan, graph, _ = _builtin_on_plan()
+    original = plan.task_spec.to_dict()
+
+    report = _coverage(plan, graph=graph)
+
+    assert report["status"] == "covered"
+    assert plan.task_spec.to_dict() == original
+    assert plan.task_spec.semantic_hash == original["semantic_hash"]
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "support",
+        "subject",
+        "object",
+        "affordance_part",
+        "reference_part",
+        "object_part",
+        "arm",
+    ],
+)
+def test_builtin_on_rejects_foreign_identity_part_and_explicit_arm(damage):
+    plan, graph, call = _builtin_on_plan()
+    bindings = deepcopy(plan.role_bindings)
+    lineage = deepcopy(plan.lineage)
+    if damage == "support":
+        call["on"] = "on__other__a"
+    elif damage == "subject":
+        call["on"] = "on__support__other"
+    elif damage == "object":
+        call["object"] = "other"
+    elif damage == "affordance_part":
+        call["on"] = "on__support__a__part_0"
+    elif damage == "reference_part":
+        bindings["role_bindings"]["step_01.target"] = "part_0"
+    elif damage == "object_part":
+        bindings["role_bindings"]["step_01.object"] = "part_0"
+        lineage["step_01"][0]["object_part_id"] = "part_0"
+    else:
+        call["resources"]["primary"] = "right"
+
+    report = _coverage(plan, graph=graph, role_bindings=bindings, lineage=lineage)
+
+    expected = (
+        {"code": "required_resource_not_covered", "owner": "step_01.required_arm"}
+        if damage == "arm"
+        else {"code": "required_relation_not_covered", "owner": "step_01"}
+    )
+    assert report["status"] == "uncovered"
+    assert expected in report["issues"]
+
+
 @pytest.mark.parametrize(
     "kind,part", [("E1", None), ("E4", None), ("E1", "part_0"), ("E4", "part_0")]
 )

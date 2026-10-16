@@ -1013,9 +1013,13 @@ def _strong_placement_matches(
         if raw_call.get("kind") == "place":
             from .drawer_binding import inside_parts
 
-            if predicate.arguments.get("relation") != "inside" or inside_parts(
-                raw_call.get("inside", "")
-            ) != (reference, uid, None):
+            relation = predicate.arguments.get("relation")
+            if not (
+                relation == "inside"
+                and inside_parts(raw_call.get("inside", "")) == (reference, uid, None)
+                or relation == "on"
+                and raw_call.get("on") == f"on__{reference}__{uid}"
+            ):
                 return False
         source = segments[group["node_ids"][-1]]
         recorded = metrics["observation_kind"] == "recorded"

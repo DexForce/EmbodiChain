@@ -23,6 +23,7 @@ import pytest
 import torch
 import trimesh
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from embodichain.gen_sim.task_engine._task_program.pick_contact import (
     ClosingContactScreen,
@@ -48,7 +49,7 @@ def _screen(
             _poses(2, body_z),
             0.001,
             False,
-            **({"contact_offset": 0.006} if revision == 2 else {}),
+            **({"contact_offset": 0.006} if revision >= 2 else {}),
         ),
         ContactPart(
             "negative_pad",
@@ -56,7 +57,7 @@ def _screen(
             _poses(0, [-0.02, -0.013, -0.01]),
             0.001,
             True,
-            **({"contact_offset": 0.006} if revision == 2 else {}),
+            **({"contact_offset": 0.006} if revision >= 2 else {}),
         ),
         ContactPart(
             "positive_pad",
@@ -64,14 +65,15 @@ def _screen(
             _poses(0, [0.02, 0.013, 0.01]),
             0.001,
             True,
-            **({"contact_offset": 0.006} if revision == 2 else {}),
+            **({"contact_offset": 0.006} if revision >= 2 else {}),
         ),
     )
     return ClosingContactScreen(
         parts,
         (trimesh.creation.box((0.02, 0.02, 0.02)),),
         target_rest,
-        **({"revision": 2, "target_contact_offset": 0.003} if revision == 2 else {}),
+        revision=revision,
+        **({"target_contact_offset": 0.003} if revision >= 2 else {}),
     )
 
 
@@ -119,15 +121,101 @@ def test_actual_body_rest_still_rejects_at_bilateral_endpoint() -> None:
     assert result["reason"] == "nonpad_and_pad_order_unresolved_at_sample"
 
 
+def test_revision_four_records_only_first_halo_without_rejecting_source() -> None:
+    screen = _screen([0.02, 0.018, 0.014], revision=4)
+    result = screen.inspect(np.eye(4))
+    assert result["valid"] is True
+    assert result["reason"] == "nominal_bilateral_pad_rest_first"
+    assert result["checked_samples"] == 2
+    assert result["first_nonpad_contact_halo_link"] == "knuckle"
+    assert result["first_nonpad_contact_halo_minimum_distance_m"] == pytest.approx(
+        0.005
+    )
+    assert result["first_nonpad_contact_halo_sample_index"] == 0
+    assert result["first_nonpad_contact_halo_native_pair_contact_offset_m"] == (
+        pytest.approx(0.009)
+    )
+    assert screen.report()["nonpad_contact_halo_is_veto"] is False
+    result["first_nonpad_contact_halo_link"] = "changed"
+    assert screen.inspect(np.eye(4))["first_nonpad_contact_halo_link"] == "knuckle"
+
+
+@pytest.mark.parametrize(
+    ("body_z", "reason", "step"),
+    [
+        ([0.016] * 3, "nonpad_rest_before_bilateral_pad", 0),
+        ([0.1, 0.016, 0.014], "nonpad_and_pad_order_unresolved_at_sample", 1),
+    ],
+)
+def test_revision_four_keeps_native_rest_order_veto(body_z, reason, step) -> None:
+    screen = _screen(body_z, revision=4)
+    screen.opening_screen = Mock()
+    assert screen.mask(torch.eye(4)[None, None], torch.eye(4)[None]).tolist() == [
+        [False]
+    ]
+    result = screen.inspect(np.eye(4))
+    assert result["reason"] == reason
+    assert result["first_nonpad_contact_halo_sample_index"] == step
+    screen.opening_screen.inspect.assert_not_called()
+
+
+@pytest.mark.parametrize("height, valid", [(0.025, True), (0.012, False)])
+def test_revision_four_retains_real_opening_screen_after_source_halo(height, valid):
+    from embodichain.gen_sim.task_engine._task_program.release_contact import (
+        OpeningContactScreen,
+    )
+
+    screen = _screen([0.02] * 3, revision=4)
+    target = np.eye(4)
+    target[2, 3] = height
+    screen.opening_screen = OpeningContactScreen(
+        screen,
+        (trimesh.creation.box((0.1, 0.1, 0.02)),),
+        np.eye(4),
+        target,
+        0.001,
+        0.003,
+        identity={"reference_entity_id": "support"},
+    )
+    poses = torch.eye(4, dtype=torch.float64)[None, None]
+    before, rng = poses.clone(), torch.random.get_rng_state().clone()
+    assert screen.mask(poses, torch.eye(4)[None]).tolist() == [[valid]]
+    assert torch.equal(poses, before)
+    assert torch.equal(torch.random.get_rng_state(), rng)
+    assert screen.inspect(np.eye(4))["valid"] is True
+    opening = screen.report()["opening"]
+    assert opening["physical_evidence"] is False
+    assert opening["accepted_queries"] == int(valid)
+    assert opening["rejected_queries"] == int(not valid)
+    if not valid:
+        assert opening["reasons"][0]["reason"] == "hand_support_rest_envelope_overlap"
+
+
+@pytest.mark.parametrize("revision, valid", [(1, True), (2, False), (3, False)])
+def test_legacy_source_halo_decisions_and_report_keys_stay_unchanged(revision, valid):
+    screen = _screen([0.02] * 3, revision=revision)
+    result = screen.inspect(np.eye(4))
+    assert result["valid"] is valid
+    assert not any(key.startswith("first_nonpad_contact_halo") for key in result)
+    assert "nonpad_contact_halo_is_veto" not in screen.report()
+    if revision == 3:
+        assert screen.report()["opening"] is None
+    else:
+        assert "opening" not in screen.report()
+
+
 @pytest.mark.parametrize("offset", [None, -0.001, 0.0005, float("nan")])
-def test_revision_two_requires_native_contact_offsets(offset: float | None) -> None:
+@pytest.mark.parametrize("revision", [2, 3, 4])
+def test_contact_revisions_require_native_contact_offsets(
+    offset: float | None, revision: int
+) -> None:
     legacy = _screen([0.1] * 3)
     with pytest.raises(ValueError, match="contact offsets"):
         ClosingContactScreen(
             legacy.parts,
             (trimesh.creation.box((0.02, 0.02, 0.02)),),
             0.001,
-            revision=2,
+            revision=revision,
             target_contact_offset=offset,
         )
 
@@ -161,8 +249,9 @@ def test_invalid_native_offsets_are_not_defaulted(value: float) -> None:
         _screen([0.1, 0.1, 0.014], target_rest=value)
 
 
-def test_missing_bilateral_pad_contact_is_not_accepted() -> None:
-    screen = _screen([0.1] * 3)
+@pytest.mark.parametrize("revision", [1, 2, 3, 4])
+def test_missing_bilateral_pad_contact_is_not_accepted(revision) -> None:
+    screen = _screen([0.1] * 3, revision=revision)
     distant = np.eye(4)
     distant[2, 3] = 1.0
     assert screen.inspect(distant)["reason"] == "bilateral_pad_rest_not_reached"
@@ -346,7 +435,7 @@ def test_native_builder_rejects_missing_mimic_command_coverage(
         pick_contact.build_closing_contact_screen(robot, simulation, bindings, request)
 
 
-@pytest.mark.parametrize("revision", [1, 2])
+@pytest.mark.parametrize("revision", [1, 2, 3, 4])
 def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
     monkeypatch, tmp_path, revision
 ) -> None:
@@ -444,11 +533,39 @@ def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
     monkeypatch.setattr(
         pick_contact, "_native_meshes", lambda _: (trimesh.creation.box(),)
     )
+    from embodichain.gen_sim.task_engine._task_program import release_contact
+
+    opening = Mock()
+    build_opening = Mock(return_value=opening)
+    monkeypatch.setattr(release_contact, "build_opening_screen", build_opening)
+    context, preview = object(), object()
     screen = pick_contact.build_closing_contact_screen(
-        robot, simulation, bindings, request, revision=revision
+        robot,
+        simulation,
+        bindings,
+        request,
+        revision=revision,
+        context=context,
+        preview=preview,
+        purpose="ordinary",
     )
     assert screen.revision == revision
-    assert len(contact_reads) == (len(screen.parts) + 1 if revision == 2 else 0)
+    assert len(contact_reads) == (len(screen.parts) + 1 if revision >= 2 else 0)
+    if revision in (3, 4):
+        assert screen.opening_screen is opening
+        build_opening.assert_called_once_with(
+            screen,
+            robot,
+            simulation,
+            bindings,
+            request,
+            context,
+            preview,
+            purpose="ordinary",
+        )
+    else:
+        assert screen.opening_screen is None
+        build_opening.assert_not_called()
     assert screen.identity["native_object_path"] == "episode/physical_payload"
     for part in screen.parts:
         assert np.array_equal(
@@ -466,3 +583,73 @@ def test_native_builder_keeps_float32_relative_poses_exactly_homogeneous(
         next(p for p in screen.parts if p.name == "positive_finger_pad").tcp_poses[0],
         expected.numpy(),
     )
+
+
+@pytest.mark.parametrize("revision", [None, 1, 2, 3, 4])
+def test_engine_factory_passes_live_opening_context_only_for_revisions_three_four(
+    monkeypatch, revision
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program import (
+        assembly,
+        pick_contact,
+        place_recovery,
+    )
+    from embodichain.gen_sim.task_engine._task_program.actions import GenSimPickUp
+    from embodichain.gen_sim.task_engine._task_program.state_handoff import (
+        StagingContract,
+    )
+    from embodichain.lab.task_program.semantics import RobotSkillProfile
+
+    profile = Mock(spec=RobotSkillProfile)
+    profile.profile_id = "test.robot"
+    profile.action_control_profiles.return_value = {}
+    robot, simulation, binding = object(), object(), object()
+    factory = object.__new__(assembly._TaskFactory)
+    factory._robot, factory._simulation = robot, simulation
+    factory._robot_profile_binding = profile
+    factory._registration = SimpleNamespace(
+        scene_binding=binding, validate_engine=Mock()
+    )
+    factory._create_motion_generator = Mock(return_value=SimpleNamespace(robot=robot))
+    for name in (
+        "_drawers",
+        "_motion_samples",
+        "_cartesian_calls",
+        "_articulation_calls",
+        "_pour_return_calls",
+        "_press_routes",
+        "_twist_routes",
+        "_clearance_routes",
+        "_alignment_continuation_routes",
+        "_pick_continuations",
+    ):
+        setattr(factory, name, ())
+    factory._grasp_pose_generators = factory._pour_receivers = {}
+    factory._adaptive_pick = factory._handover_scene_clearance = False
+    factory._coordinated_motion = False
+    factory._staging_contract = StagingContract.empty()
+    factory._pick_contact_revision = revision
+    factory._pick_purposes = (("pick", "ordinary"),)
+    engine, screen = Mock(), object()
+    monkeypatch.setattr(assembly, "GenSimActionEngine", Mock(return_value=engine))
+    monkeypatch.setattr(place_recovery, "scene_vertices", lambda *args: ())
+    build = Mock(return_value=screen)
+    monkeypatch.setattr(pick_contact, "build_closing_contact_screen", build)
+    assert factory.create_atomic_action_engine(profile) is engine
+    pick = next(
+        call.args[0]
+        for call in engine.register.call_args_list
+        if isinstance(call.args[0], GenSimPickUp)
+    )
+    if revision is None:
+        assert pick.closing_geometry_factory is None
+        build.assert_not_called()
+        return
+    request = SimpleNamespace(invocation_id="pick")
+    context, preview = object(), object()
+    pick.continuation_previews = {"pick": preview}
+    assert pick.closing_geometry_factory(request, context) is screen
+    kwargs = {"revision": revision}
+    if revision in (3, 4):
+        kwargs.update(context=context, preview=preview, purpose="ordinary")
+    build.assert_called_once_with(robot, simulation, binding, request, **kwargs)

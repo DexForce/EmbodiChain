@@ -252,18 +252,31 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
-        if self._pick_contact_revision in (1, 2):
+        if self._pick_contact_revision in (1, 2, 3, 4):
             from .pick_contact import build_closing_contact_screen
 
-            pick.closing_geometry_factory = (
-                lambda request, context: build_closing_contact_screen(
+            def closing_geometry(request: Any, context: Any) -> Any:
+                opening = {}
+                if self._pick_contact_revision in (3, 4):
+                    opening = {
+                        "context": context,
+                        "preview": (pick.continuation_previews or {}).get(
+                            request.invocation_id
+                        ),
+                        "purpose": (pick.pick_purposes or {}).get(
+                            request.invocation_id
+                        ),
+                    }
+                return build_closing_contact_screen(
                     self._robot,
                     self._simulation,
                     self.task_program_registration.scene_binding,
                     request,
                     revision=self._pick_contact_revision,
+                    **opening,
                 )
-            )
+
+            pick.closing_geometry_factory = closing_geometry
         engine.register(pick, replace=True)
         handover = GenSimHandOver()
         if self._handover_scene_clearance:
@@ -293,6 +306,13 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(transport, replace=True)
         place = GenSimPlace()
         place.recovery_scene_vertices = transport.held_path_scene_vertices
+        from .place_branch import bind_on_invocations
+
+        place.ordinary_on_invocations = bind_on_invocations(
+            self._pick_continuations,
+            self._pick_purposes,
+            self.task_program_registration.scene_binding,
+        )
         engine.register(place, replace=True)
         engine.register(GenSimPour(self._pour_receivers), replace=True)
         if self._coordinated_motion:
@@ -693,7 +713,8 @@ def load_deployment(
     support_revision = payload.get("support_contract_revision")
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (
-        type(pick_contact_revision) is not int or pick_contact_revision not in (1, 2)
+        type(pick_contact_revision) is not int
+        or pick_contact_revision not in (1, 2, 3, 4)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_revision is not None and (

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+import json
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,9 @@ from .test_twist import knob_scene
 from embodichain.gen_sim.task_engine import task_program_bundle as bundle
 from embodichain.gen_sim.task_engine._task_program.assembly import load_deployment
 from embodichain.gen_sim.task_engine._task_program.stability import StabilityConstraint
+from embodichain.gen_sim.task_engine._task_program.physical_inputs import (
+    load_frozen_physical_input,
+)
 from embodichain.gen_sim.task_engine.orchestration.source_scene import PreparedScene
 from embodichain.utils.utility import load_config, save_config
 
@@ -328,7 +332,7 @@ def test_strong_bundle_round_trips_through_production_loader(
     assert len(load_config(paths.program)["program"]["items"][-1]["post"]) == 1
 
 
-@pytest.mark.parametrize("revision", [None, 1, 2])
+@pytest.mark.parametrize("revision", [None, 1, 2, 3, 4])
 def test_pick_contact_contract_is_explicit_and_independent_of_support(
     support_scene: PreparedScene, tmp_path: Path, revision: int | None
 ) -> None:
@@ -348,7 +352,7 @@ def test_pick_contact_contract_is_explicit_and_independent_of_support(
     )
 
 
-@pytest.mark.parametrize("revision", [True, 0, 3, "1"])
+@pytest.mark.parametrize("revision", [True, False, 0, 5, 3.0, 4.0, "3", "4"])
 def test_pick_contact_contract_rejects_unknown_revisions(
     support_scene: PreparedScene, tmp_path: Path, revision: object
 ) -> None:
@@ -360,6 +364,49 @@ def test_pick_contact_contract_rejects_unknown_revisions(
             robot_profile="dual_franka",
             pick_contact_revision=revision,
         )
+
+
+def test_pick_contact_revision_only_changes_its_explicit_constraint_marker(
+    support_scene: PreparedScene, tmp_path: Path
+) -> None:
+    graph = _placement_graph(reference="tray")
+    _, reference = bundle.generate_task_program_bundle(
+        graph, support_scene, tmp_path / "reference", robot_profile="dual_franka"
+    )
+    frozen = load_frozen_physical_input(
+        support_scene, reference.root, robot_profile="dual_franka"
+    )
+    original_components = None
+    original_constraints = None
+    for revision in (None, 1, 2, 3, 4):
+        _, paths = bundle.generate_task_program_bundle(
+            graph,
+            frozen,
+            tmp_path / f"revision_{revision}",
+            robot_profile="dual_franka",
+            support_contract_revision=1,
+            pick_contact_revision=revision,
+        )
+        components = {
+            name: getattr(paths, name).read_bytes()
+            for name in (
+                "program",
+                "integration",
+                "scene",
+                "embodiment",
+                "execution_policy",
+                "deployment",
+            )
+        }
+        constraints = load_config(paths.root / "task_program/constraints.json")
+        assert constraints.pop("pick_contact_revision", None) == revision
+        encoded = json.dumps(constraints, ensure_ascii=False, indent=2).encode()
+        if revision is None:
+            original_components, original_constraints = components, encoded
+        else:
+            assert components == original_components
+            assert encoded == original_constraints
+        frozen.assert_unchanged()
 
 
 def _articulation_bundles(

@@ -300,6 +300,123 @@ def test_strong_rigid_placement_collects_and_certifies(tmp_path, relation, refer
     assert record["measurements"]["reference_uid"] == reference
 
 
+def _strong_builtin_on_case(tmp_path):
+    case = _strong_case(tmp_path, relation="on", reference="stack_base")
+    plan, contract, _runtime, _program, constraints, _env, deployment = case.data
+    case.placement["call"] = {
+        "kind": "place",
+        "object": "cube",
+        "on": "on__stack_base__cube",
+        "resources": {"primary": "left"},
+    }
+    deployment.integration.registration.scene_binding.support_surfaces = (
+        SimpleNamespace(entity_id="on__stack_base__cube", parent_id="stack_base"),
+    )
+    preset = case.policy["result"]["preset"]
+    cfg = StabilityConstraint(
+        entity="cube",
+        reference="stack_base",
+        kind="supported_placement",
+        displacement=(0.0, 0.0, 0.045),
+        duration=STABLE_STEPS * CONTROL_DT,
+        support_contract_revision=1,
+    )
+    constraints["presets"][preset] = asdict(cfg)
+    deployment.integration.adapter_factory.constraints = ((preset, cfg),)
+    case.policy["result"]["kind"] = cfg.kind
+    case.policy["result"]["measurements"].pop("landing_region")
+    contract["coverage"] = _coverage(plan)
+    contract["graph_digest"] = canonical_hash(plan.graph)
+    contract["constraints_digest"] = canonical_hash(constraints)
+    save_config(tmp_path / "task_program/constraints.json", constraints)
+    return case
+
+
+def test_strong_builtin_on_collects_and_certifies_exact_rigid_support(tmp_path):
+    case = _strong_builtin_on_case(tmp_path)
+    spec = case.data[0].task_spec.to_dict()
+
+    final, history = _records(tmp_path, case)
+    result = _evaluate(case, final, history)
+
+    assert result["certificate_ready"] is True
+    assert result["goal"][0]["status"] == "satisfied"
+    assert result["milestones"][0]["status"] == "satisfied"
+    assert case.data[0].task_spec.to_dict() == spec
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "alias",
+        "parent",
+        "subject",
+        "object",
+        "affordance_part",
+        "part",
+        "subject_part",
+    ],
+)
+def test_strong_builtin_on_rejects_foreign_or_part_specific_targets(tmp_path, damage):
+    case = _strong_builtin_on_case(tmp_path)
+    final, history = _records(tmp_path, case)
+    call = case.placement["call"]
+    if damage == "alias":
+        call["on"] = "support_alias"
+    elif damage == "parent":
+        call["on"] = "on__other__cube"
+    elif damage == "subject":
+        call["on"] = "on__stack_base__other"
+    elif damage == "object":
+        call["object"] = "other"
+    elif damage == "affordance_part":
+        call["on"] = "on__stack_base__cube__part_0"
+    elif damage == "part":
+        role = case.data[0].task_spec.goal[0].arguments["reference"]
+        case.data[1]["coverage"]["roles"][role][0]["part_id"] = "part_0"
+    else:
+        role = case.data[0].task_spec.goal[0].arguments["subject"]
+        case.data[1]["coverage"]["roles"][role][0]["part_id"] = "part_0"
+        next(iter(final.values()))["members"][0]["part_id"] = "part_0"
+        next(iter(history.values()))["part_id"] = "part_0"
+    case.data[1]["graph_digest"] = canonical_hash(case.data[0].graph)
+
+    assert _evaluate(case, final, history)["certificate_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "historical_support",
+        "final_support",
+        "release",
+        "release_resource",
+        "unverified_release",
+        "unstable",
+    ],
+)
+def test_strong_builtin_on_still_requires_native_support_and_verified_release(
+    tmp_path, damage
+):
+    case = _strong_builtin_on_case(tmp_path)
+    if damage == "release":
+        case.call["effects"] = []
+    elif damage == "release_resource":
+        expectation = case.call["effects"][0]["effect_spec"]["state_expectations"][0]
+        expectation["resource_id"] = "right"
+    elif damage == "unverified_release":
+        case.call["effects"][0]["decision"]["success_mask"] = [False]
+    elif damage == "unstable":
+        case.policy["result"]["accepted_mask"] = [False]
+    else:
+        native = case.source if damage == "historical_support" else case.live
+        native["rows"][0]["raw_contacts"]["impulse"] = [0.0] * 3
+
+    final, history = _records(tmp_path, case)
+
+    assert _evaluate(case, final, history)["certificate_ready"] is False
+
+
 @pytest.mark.parametrize(
     "scope", ["measured_planar_landing_region", "native_contact_support"]
 )

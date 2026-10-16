@@ -135,6 +135,16 @@ composition. Neither discrete screen proves continuous collision freedom.
 strictly before the sampled bilateral pad-rest boundary; potential halo overlap
 at that boundary alone does not establish actual contact. Nonpad rest intrusion still
 rejects at the boundary, and runtime bilateral acquisition/holding gates remain.
+`pick_contact_revision=3` retains revision 2 and additionally screens the nominal
+opening prefix against the exact rigid support of a bound ordinary on-Place.
+Only source-qualified candidates enter this check. Native rest-envelope overlap
+rejects; contact-halo proximity is diagnostic. This discrete geometric screen
+does not replace measured release, separation, retreat or support evidence.
+Explicit revision 4 combines revision 1's source rest-contact ordering with
+revision 3's opening screen. The first nonpad contact halo before or at pad rest
+remains diagnostic, not a collision certificate or standalone veto. Nonpad rest intrusion,
+missing bilateral pad rest and all measured acquisition/release/support gates
+still reject. Revisions 1/2/3 and the normal workflow's selection are unchanged.
 Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
@@ -188,6 +198,15 @@ checks final emitted velocity/joint limits, discrete robot meshes, and the held
 object's conservative scene envelopes through approach. Explicit Cartesian
 routes, dynamic collision policies, drawer routes and E2 z caps are not overridden.
 Missing bound rigid geometry or bound articulation obstacles disable this fallback.
+Motion validation revision 13 separately owns positively bound ordinary on-Place
+calls with `preserve_current_object_orientation=false`, B1 and `ik_interp/off`,
+excluding explicit Cartesian, custom-grasp, pour, upright and direct routes.
+It retains a qualified initial dense plan unchanged. Otherwise one goal-seeded
+waypoint solve replaces the density/local-IK/via recovery chain for that call.
+The shared builder still owns commands, tracking and effects; phase composition
+retains every mandatory pose and the original timing. Emitted FK, joint/velocity,
+robot-mesh, payload-envelope and release-resource checks reject unsafe results
+without another retry. This is not continuous collision or physical certification.
 Ordinary held transport in `held_path.py` first measures exact required endpoints.
 Only qualified free-space endpoints own its discrete carried-mesh sweep and
 bounded continuous-path recovery; external transforms recheck final samples.

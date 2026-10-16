@@ -43,7 +43,7 @@ from embodichain.lab.sim.motion.planners.utils import (
 
 __all__: list[str] = []
 
-MOTION_VALIDATION_REVISION = 11
+MOTION_VALIDATION_REVISION = 13
 VELOCITY_RETIME_SAMPLES = (260, 320)
 
 _CPU_BATCH_THREADS: ContextVar[int | None] = ContextVar(
@@ -318,6 +318,19 @@ class CheckedMotionGenerator(MotionGenerator):
         if scope is not None:
             scope.record(target_states, options)
         return screen_alignment_result(self, result, options, targets=target_states)
+
+    def _solve_cartesian_waypoints(
+        self,
+        poses: torch.Tensor,
+        start_qpos: torch.Tensor,
+        control_part: str,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        from .place_branch import solve_waypoints
+
+        result = solve_waypoints(self, poses, start_qpos, control_part)
+        if result is not None:
+            return result
+        return super()._solve_cartesian_waypoints(poses, start_qpos, control_part)
 
     def _generate_checked(
         self, target_states: list[PlanState], options: MotionGenOptions | None = None

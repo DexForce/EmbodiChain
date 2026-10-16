@@ -289,6 +289,17 @@ def validate_graph_coverage(
                             for target in role_members[target_role]
                         }
                     )
+                    or (
+                        step["relation"] == "on"
+                        and c["kind"] == "place"
+                        and entry["object_part_id"] is None
+                        and any(
+                            target["part_id"] is None
+                            and c.get("on")
+                            == f"on__{target['uid']}__{entry['object_uid']}"
+                            for target in role_members[target_role]
+                        )
+                    )
                     for c in subject_calls
                 ):
                     issue("required_relation_not_covered", group_id)
