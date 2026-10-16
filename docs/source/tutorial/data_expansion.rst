@@ -99,15 +99,10 @@ and dataset frames stay causally aligned.
 Paradigm 1: Handwritten Trajectories
 ------------------------------------
 
-A handwritten expert lives beside its registered task entry point, for example:
-
-* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py``;
-* ``embodichain_tasks/embodichain_tasks/manipulation/tableware/blocks_ranking_rgb.py``.
-
-Both examples build a ``MotionGenerator`` backed by TOPPRA and pass it to an
-``AtomicActionEngine``. The engine then plans reusable PickUp and Place
-invocations while the task retains control over scene queries, command timing,
-segment metadata, and success checks.
+A handwritten expert lives beside its task's registered Python entry point.
+The task owns scene queries, command timing, segment metadata, and success
+checks. The official stacking and RGB-ranking experts use the configured Task
+Program route described below; they no longer provide Python task subclasses.
 
 Direct Motion Generator or Atomic Skills
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,88 +125,41 @@ match its active action space. If the environment controls more joints than
 the planned arm, merge the arm plan with hold or gripper commands before
 yielding it; do not silently rely on incompatible dimensions.
 
-Build the planning services
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The two-block stacking task demonstrates the recommended Atomic Skills setup:
-
-.. dropdown:: Motion Generator and AtomicActionEngine setup
-   :icon: code
-
-   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-      :language: python
-      :start-at:     def _initialize_atomic_actions(self) -> None:
-      :end-before:     def create_demo_segments(
-      :linenos:
-
-The task constructs the motion generator once, declares command profiles for
-the gripper, and reuses the engine for every episode. Object semantics are
-explicit inputs to the skills rather than being inferred from simulator names.
-
 Return semantic demonstration segments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``create_demo_segments()`` is the preferred handwritten expert API:
+``create_demo_segments()`` is the preferred handwritten expert API. This
+schematic subclass method assumes an existing planner and physical validators:
 
-.. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-   :language: python
-   :start-at:     def create_demo_segments(
-   :end-before:     def _plan_stack(
-   :linenos:
+.. code-block:: python
 
-The two segments keep three outcomes separate:
+   from embodichain.lab.gym.envs import DemoSegment
 
-* ``actions`` is the controller-command stream consumed by the common runner;
-* ``planning_success`` records whether PickUp and Place were planned; and
-* ``validator`` checks measured lift after the grasp, then planning success and
-  the physical stack after placement and settling.
+   def create_demo_segments(self, **kwargs):
+       pick_actions, place_actions = self.plan_pick_and_place(**kwargs)
+       yield DemoSegment(
+           actions=pick_actions,
+           name="pick_object",
+           instruction="Grasp and lift the object.",
+           validator=self.validate_lift,
+       )
+       yield DemoSegment(
+           actions=place_actions,
+           name="place_object",
+           instruction="Place the object, release it, and let it settle.",
+           validator=self.validate_placement,
+       )
 
-The task creates typed PickUp and Place requests and threads the projected
-held-object state from the first plan into the second:
-
-.. dropdown:: Compile the PickUp and Place trajectory
-   :icon: code
-
-   .. literalinclude:: ../../../embodichain_tasks/embodichain_tasks/manipulation/tableware/stack_blocks_two.py
-      :language: python
-      :start-at:         pick_compiled = self._action_engine.compile(
-      :end-before:     def _insert_grasp_hold(self, trajectory: torch.Tensor) -> torch.Tensor:
-      :linenos:
-
-For a multi-object episode, yield segments lazily. The
-``BlocksRankingRGBEnv.create_demo_segments()`` example yields the red-block
-grasp and placement first, then queries the updated reference-block pose before
-planning the blue-block grasp and placement. This avoids planning later
-subtasks against stale scene state.
+The planner must merge arm, gripper and hold commands into the environment's
+active action layout. Keep release settling in the placement iterable and
+measure its physical outcome independently of planning success. For a
+multi-object episode, yield lazily so later planning reads the updated scene.
+See :doc:`atomic_actions` for reusable Atomic Skill planning and execution.
 
 Legacy tasks implementing ``create_demo_action_list()`` remain supported and
-are wrapped as one segment named ``legacy``. New tasks should implement
-``create_demo_segments()`` so subtask boundaries, language, metadata, and
-validators remain explicit.
-
-Try the handwritten expert
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The shipped stacking config includes a dataset recorder. First smoke-test the
-expert while suppressing dataset writes:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
-       --headless \
-       --filter_dataset_saving \
-       --max_episodes 1
-
-To collect it, run the same config without ``--filter_dataset_saving``. Customize
-the recorder using `Configure Dataset Recording`_:
-
-.. code-block:: bash
-
-   embodichain run-env \
-       --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json \
-       --headless \
-       --max_episodes 5
+are wrapped as one segment named ``legacy``. New handwritten experts should
+provide explicit semantic segments; configured tasks should declare those
+boundaries in their Task Program.
 
 Paradigm 2: Task Program
 ------------------------
@@ -220,6 +168,19 @@ Task Program replaces the task-specific expert method with declarative task
 intent. It does not introduce a second rollout or recording API: the configured
 adapter compiles the program, creates lazy demonstration segments, and returns
 them to the same executor used by handwritten tasks.
+
+The migrated two-block stacking and RGB-ranking experts use the same configured
+route. For example, smoke-test stacking without writing a dataset:
+
+.. code-block:: bash
+
+   embodichain run-env \
+       --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml \
+       --headless --filter_dataset_saving --max_episodes 1
+
+To collect demonstrations, remove ``--filter_dataset_saving`` and configure
+the recorder using `Configure Dataset Recording`_. The deployment selects the
+physical scene, embodiment, execution policy, and declarative program.
 
 The current Pour Water example is a complete configuration-defined task:
 

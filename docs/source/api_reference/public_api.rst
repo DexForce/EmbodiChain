@@ -2259,15 +2259,6 @@ joint-position action variants.
 .. autosummary::
 
 
-embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
------------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.blocks_ranking_rgb
-
-.. autosummary::
-
-   BlocksRankingRGBEnv
-
 embodichain_tasks.manipulation.tableware.blocks_ranking_size
 ------------------------------------------------------------
 
@@ -2295,24 +2286,6 @@ embodichain_tasks.manipulation.tableware.place_object_drawer
 
    PlaceObjectDrawerEnv
 
-embodichain_tasks.manipulation.tableware.scoop_ice
---------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.scoop_ice
-
-.. autosummary::
-
-   ScoopIce
-
-embodichain_tasks.manipulation.tableware.stack_blocks_two
----------------------------------------------------------
-
-.. currentmodule:: embodichain_tasks.manipulation.tableware.stack_blocks_two
-
-.. autosummary::
-
-   StackBlocksTwoEnv
-
 embodichain_tasks.manipulation.tableware.stack_cups
 ---------------------------------------------------
 
@@ -2333,33 +2306,6 @@ kinematics route used by analytic policy-gradient experiments.
 .. autosummary::
 
    FrankaReachApgEnv
-
-embodichain_tasks.special.simple_task
--------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.simple_task
-
-.. autosummary::
-
-   SimpleTaskEnv
-
-embodichain_tasks.special.stay_still_save
------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save
-
-.. autosummary::
-
-   StayStillSaveEnv
-
-embodichain_tasks.special.stay_still_save_3cam
-----------------------------------------------
-
-.. currentmodule:: embodichain_tasks.special.stay_still_save_3cam
-
-.. autosummary::
-
-   StayStillSave3CamEnv
 
 embodichain_tasks.utils.importer
 --------------------------------
