@@ -117,6 +117,28 @@ class ProtocolCfg:
     confidence_level: float = 0.95
     report_schema_version: str = "1"
     seeds: list[int] = []
+    joint_velocity_limit_rad_s: float | list[float] | None = None
+    """Per-joint or scalar velocity limit overriding the asset's.
+
+    The asset is the preferred source, but a backend that does not carry the
+    URDF's limits reports a placeholder instead, which would make the velocity
+    check vacuous. Stating the limit here restores it. FR3 publishes
+    2.62 / 2.62 / 2.62 / 2.62 / 5.26 / 4.18 / 5.26 rad/s.
+    """
+    joint_acceleration_limit_rad_s2: float | list[float] | None = None
+    """Per-joint or scalar acceleration limit, or ``None`` to report N/A.
+
+    URDF carries no acceleration field and :class:`Robot` exposes no
+    ``qacc_limits``, so this limit has no asset source and must be stated by the
+    suite. FR3 publishes 10 rad/s^2 uniformly across its seven joints.
+    """
+    joint_jerk_limit_rad_s3: float | list[float] | None = None
+    """Per-joint or scalar jerk limit, or ``None`` to report N/A.
+
+    FR3 publishes 5000 rad/s^3 uniformly across its seven joints.
+    """
+    dynamic_limit_tolerance: float = 1.0e-3
+    """Relative slack on dynamic-limit utilization before a violation is flagged."""
 
 
 @configclass
@@ -290,11 +312,14 @@ class SuiteCfg:
                 effective_id = track.id
                 if len(domains) > 1:
                     effective_id = f"{track.id}@{domain.id}"
+                config = _merge_mappings(track.config, domain.overrides)
+                if track.scenario == _FREE_SPACE_SCENARIO:
+                    _validate_free_space(FreeSpaceTrackCfg(**config))
                 expanded.append(
                     replace(
                         track,
                         id=effective_id,
-                        config=_merge_mappings(track.config, domain.overrides),
+                        config=config,
                         domain=domain,
                         domains=[],
                         group_id=group_id,
@@ -403,6 +428,33 @@ class SuiteCfg:
             raise TypeError("protocol.seeds must contain integers.")
         if len(self.protocol.seeds) != len(set(self.protocol.seeds)):
             raise ValueError("protocol.seeds must not contain duplicates.")
+        for field_name in (
+            "joint_velocity_limit_rad_s",
+            "joint_acceleration_limit_rad_s2",
+            "joint_jerk_limit_rad_s3",
+        ):
+            limit = getattr(self.protocol, field_name)
+            if limit is None:
+                continue
+            values = limit if isinstance(limit, (list, tuple)) else [limit]
+            if not values or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or float(value) <= 0.0
+                for value in values
+            ):
+                raise ValueError(f"{field_name} entries must be finite and > 0.")
+        # NaN fails every comparison, so `tolerance < 0` would let it through
+        # and `utilization > 1 + nan` would then never report a violation.
+        tolerance = self.protocol.dynamic_limit_tolerance
+        if (
+            not isinstance(tolerance, (int, float))
+            or isinstance(tolerance, bool)
+            or not math.isfinite(float(tolerance))
+            or float(tolerance) < 0.0
+        ):
+            raise ValueError("dynamic_limit_tolerance must be finite and >= 0.")
         if any(track.scenario == _FREE_SPACE_SCENARIO for track in self.tracks):
             _validate_free_space(self.free_space)
         for track in self.tracks:

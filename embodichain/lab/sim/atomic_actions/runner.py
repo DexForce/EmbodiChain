@@ -1015,9 +1015,13 @@ class ExecutionRunner:
                 effect_verifier=effect_verifier,
                 physical_effect_verifier=physical_effect_verifier,
                 phase_effect_gate_verifier=phase_effect_gate_verifier,
-                physical_phase_effect_gate_verifier=physical_phase_effect_gate_verifier,
+                physical_phase_effect_gate_verifier=(
+                    physical_phase_effect_gate_verifier
+                ),
                 held_object_guard_verifier=held_object_guard_verifier,
-                physical_held_object_guard_verifier=physical_held_object_guard_verifier,
+                physical_held_object_guard_verifier=(
+                    physical_held_object_guard_verifier
+                ),
             )
             if on_step is not None:
                 try:
@@ -1182,19 +1186,29 @@ class ExecutionRunner:
             self._last_evidence = None
             return None
         self._observation_revision += 1
-        frame = provider.collect(
-            context,
-            PhysicalEvidenceRequest(
-                timestamp=context.robot.timestamp,
-                observation_revision=self._observation_revision,
-                env_ids=context.env_ids,
-            ),
+        request = PhysicalEvidenceRequest(
+            timestamp=context.robot.timestamp,
+            observation_revision=self._observation_revision,
+            env_ids=context.env_ids,
         )
+        frame = provider.collect(context, request)
         if type(frame) is not PhysicalEvidenceFrame:
             raise TypeError(
                 "PhysicalEvidenceProvider.collect() must return exactly "
                 "PhysicalEvidenceFrame."
             )
+        if frame.timestamp != request.timestamp:
+            raise ValueError(
+                "Physical evidence frame timestamp does not match request."
+            )
+        if frame.observation_revision != request.observation_revision:
+            raise ValueError(
+                "Physical evidence frame observation_revision does not match request."
+            )
+        if frame.env_ids.device != request.env_ids.device or not torch.equal(
+            frame.env_ids, request.env_ids
+        ):
+            raise ValueError("Physical evidence frame env_ids do not match request.")
         self._last_evidence = frame.snapshot()
         return self._last_evidence
 

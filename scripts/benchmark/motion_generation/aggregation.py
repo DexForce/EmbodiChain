@@ -39,6 +39,81 @@ def _mean(values: Iterable[float | None]) -> float | None:
     return sum(finite) / len(finite) if finite else None
 
 
+def _mean_unbounded(values: Iterable[float | None]) -> float | None:
+    """Return the mean of measured values, keeping an unbounded one unbounded.
+
+    A position change across a zero interval is recorded as an infinite peak.
+    :func:`_mean` would drop it as non-finite and summarize the remaining
+    trajectories as if it had never happened, so here any infinite value makes
+    the mean infinite. NaN still carries no measurement and is ignored.
+    """
+    measured = [
+        float(value)
+        for value in values
+        if value is not None and not math.isnan(float(value))
+    ]
+    if not measured:
+        return None
+    if any(math.isinf(value) for value in measured):
+        return math.inf
+    return sum(measured) / len(measured)
+
+
+def _mean_dynamic(
+    outcomes: Iterable[CaseOutcome],
+    attribute: str,
+    *,
+    violation_attribute: str | None = None,
+) -> float | None:
+    """Average one dynamic metric while restoring JSON-safe unbounded rows.
+
+    Raw artifacts encode non-finite numbers as ``null`` and retain
+    ``dynamic_measurement_status="unbounded"``. Peak fields are therefore
+    unbounded whenever any such row is present. Utilization fields additionally
+    require their matching limit to apply; otherwise ``null`` means N/A rather
+    than an infinite utilization.
+    """
+    rows = list(outcomes)
+    if any(
+        outcome.dynamic_measurement_status == "unbounded"
+        and (
+            violation_attribute is None or getattr(outcome, violation_attribute) is True
+        )
+        for outcome in rows
+    ):
+        return math.inf
+    return _mean_unbounded(getattr(outcome, attribute) for outcome in rows)
+
+
+def _dynamic_measurement_status(outcomes: Iterable[CaseOutcome]) -> str:
+    """Summarize whether dynamic measurements are finite or unbounded."""
+    rows = list(outcomes)
+    numeric_fields = (
+        "max_joint_velocity_rad_s",
+        "max_joint_acceleration_rad_s2",
+        "max_joint_jerk_rad_s3",
+        "velocity_utilization",
+        "acceleration_utilization",
+        "jerk_utilization",
+    )
+    if any(
+        outcome.dynamic_measurement_status == "unbounded"
+        or any(
+            value is not None and math.isinf(float(value))
+            for value in (getattr(outcome, field) for field in numeric_fields)
+        )
+        for outcome in rows
+    ):
+        return "unbounded"
+    if any(
+        outcome.dynamic_measurement_status == "finite"
+        or any(getattr(outcome, field) is not None for field in numeric_fields)
+        for outcome in rows
+    ):
+        return "finite"
+    return "unavailable"
+
+
 def _case_macro_rate(
     measured: list[TrialRecord],
     track_cases: list[BenchmarkCase],
@@ -75,6 +150,42 @@ def _case_macro_rate(
             / max(len(outcomes), case.batch_size * measured_trials)
         )
     return sum(case_rates) / len(case_rates)
+
+
+def _case_macro_rate_optional(
+    measured: list[TrialRecord],
+    track_cases: list[BenchmarkCase],
+    attribute: str,
+) -> float | None:
+    """Macro-average a tri-state outcome attribute, reporting N/A as ``None``.
+
+    Unlike :func:`_case_macro_rate`, a ``None`` outcome means the check did not
+    apply rather than that it passed, so it is excluded from the average and a
+    case with no applicable outcome is skipped entirely. When no case applies
+    the metric is ``None``, which keeps an unconfigured limit from being
+    reported as a zero violation rate.
+    """
+    if not track_cases:
+        return None
+
+    outcomes_by_case: dict[str, list[CaseOutcome]] = defaultdict(list)
+    for record in measured:
+        outcomes_by_case[record.case_id].extend(record.outcomes)
+
+    case_rates: list[float] = []
+    for case in track_cases:
+        applicable = [
+            outcome
+            for outcome in outcomes_by_case.get(case.case_id, [])
+            if getattr(outcome, attribute) is not None
+        ]
+        if not applicable:
+            continue
+        case_rates.append(
+            sum(bool(getattr(outcome, attribute)) for outcome in applicable)
+            / len(applicable)
+        )
+    return sum(case_rates) / len(case_rates) if case_rates else None
 
 
 def _case_supports_attribute(case: BenchmarkCase, attribute: str) -> bool:
@@ -446,8 +557,13 @@ def _performance_rows(
                 "end_to_end_time_ms": _mean(
                     record.end_to_end_time_ms for record in group
                 ),
-                "trajectory_duration_s": _mean(
-                    record.trajectory_duration_s for record in group
+                "native_timing": info.native_timing,
+                # A planner that never solves timing reports a nominal dt, so
+                # its duration is not comparable with a solved one.
+                "trajectory_duration_s": (
+                    _mean(record.trajectory_duration_s for record in group)
+                    if info.native_timing
+                    else None
                 ),
                 "trajectory_waypoints": _mean(
                     (
@@ -787,6 +903,45 @@ def _metric_rows(
                         excluded_case_ids=excluded_case_ids,
                         measured_trials=measured_trials,
                     ),
+                    "velocity_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "velocity_limit_violation"
+                    ),
+                    "acceleration_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "acceleration_limit_violation"
+                    ),
+                    "jerk_violation_rate": _case_macro_rate_optional(
+                        measured, group_cases, "jerk_limit_violation"
+                    ),
+                    # Dynamics are summarized over every measured outcome, not
+                    # the motion-valid subset: exceeding a limit can make an
+                    # outcome invalid, so restricting the population here would
+                    # drop exactly the trajectories with the largest peaks and
+                    # pair a modest peak with a nonzero violation rate.
+                    "max_joint_velocity_rad_s": _mean_dynamic(
+                        outcomes, "max_joint_velocity_rad_s"
+                    ),
+                    "max_joint_acceleration_rad_s2": _mean_dynamic(
+                        outcomes, "max_joint_acceleration_rad_s2"
+                    ),
+                    "max_joint_jerk_rad_s3": _mean_dynamic(
+                        outcomes, "max_joint_jerk_rad_s3"
+                    ),
+                    "velocity_utilization": _mean_dynamic(
+                        outcomes,
+                        "velocity_utilization",
+                        violation_attribute="velocity_limit_violation",
+                    ),
+                    "acceleration_utilization": _mean_dynamic(
+                        outcomes,
+                        "acceleration_utilization",
+                        violation_attribute="acceleration_limit_violation",
+                    ),
+                    "jerk_utilization": _mean_dynamic(
+                        outcomes,
+                        "jerk_utilization",
+                        violation_attribute="jerk_limit_violation",
+                    ),
+                    "dynamic_measurement_status": _dynamic_measurement_status(outcomes),
                     "joint_path_length_rad": _mean(
                         outcome.joint_path_length_rad for outcome in valid_outcomes
                     ),

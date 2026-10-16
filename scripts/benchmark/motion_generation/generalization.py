@@ -52,6 +52,7 @@ def _unsupported_case_ids(records: Iterable[TrialRecord]) -> set[str]:
 def _case_success(
     records: Iterable[TrialRecord],
     case: BenchmarkCase,
+    measured_trials: int,
 ) -> tuple[float, int]:
     """Return a case-macro success rate and the number of observed rows."""
     outcomes = [
@@ -64,7 +65,8 @@ def _case_success(
         return 0.0, 0
     attribute = case.primary_success
     values = [bool(getattr(outcome, attribute, False)) for outcome in outcomes]
-    return sum(values) / len(values), len(outcomes)
+    expected = case.batch_size * measured_trials
+    return sum(values) / max(len(values), expected), len(outcomes)
 
 
 def _population_stats(
@@ -163,7 +165,9 @@ def aggregate_generalization(
             case_rates: list[float] = []
             for case in applicable_cases:
                 rate, _ = _case_success(
-                    by_algorithm_case[(planner.algorithm_id, case.case_id)], case
+                    by_algorithm_case[(planner.algorithm_id, case.case_id)],
+                    case,
+                    measured_trials,
                 )
                 case_rates.append(rate)
             success_rate = sum(case_rates) / len(case_rates) if case_rates else None

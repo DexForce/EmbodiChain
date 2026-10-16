@@ -210,6 +210,40 @@ class FakePhysicalEvidenceProvider:
         )
 
 
+class MismatchedPhysicalEvidenceProvider(FakePhysicalEvidenceProvider):
+    """Evidence provider that returns one well-formed but unrelated frame."""
+
+    def __init__(self, mismatch: str) -> None:
+        super().__init__()
+        self.mismatch = mismatch
+
+    def collect(
+        self,
+        context: PlanningContext,
+        request: PhysicalEvidenceRequest,
+    ) -> PhysicalEvidenceFrame:
+        del context
+        self.requests.append(request.snapshot())
+        timestamp = (
+            request.timestamp + 1.0
+            if self.mismatch == "timestamp"
+            else request.timestamp
+        )
+        revision = (
+            request.observation_revision + 1
+            if self.mismatch == "observation_revision"
+            else request.observation_revision
+        )
+        env_ids = (
+            request.env_ids.flip(0) if self.mismatch == "env_ids" else request.env_ids
+        )
+        return PhysicalEvidenceFrame(
+            timestamp=timestamp,
+            observation_revision=revision,
+            env_ids=env_ids,
+        )
+
+
 class FakeCommandSink:
     """Recording command sink with configurable acknowledgements and tracking."""
 
@@ -1169,6 +1203,38 @@ def test_runner_collects_evidence_for_an_effect_aware_verifier() -> None:
     assert completed.status is RunnerStatus.COMPLETED
     assert seen
     assert seen[0].get("arm_qpos").evidence_id == "arm_qpos"
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("timestamp", "timestamp"),
+        ("observation_revision", "observation_revision"),
+        ("env_ids", "env_ids"),
+    ],
+)
+def test_runner_rejects_evidence_from_a_different_observation(
+    mismatch: str,
+    message: str,
+) -> None:
+    evidence_provider = MismatchedPhysicalEvidenceProvider(mismatch)
+    runner, _, _, sink, _ = _make_runner(
+        with_effect=True,
+        batch_size=2,
+        physical_evidence_provider=evidence_provider,
+    )
+    verifier = Mock()
+
+    failed = runner.run_until_blocked(physical_effect_verifier=verifier)
+
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.message is not None and message in failed.message
+    assert verifier.call_count == 0
+    assert [dispatch.operation for dispatch in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
 
 
 def test_runner_holds_while_effect_verification_is_pending_by_default() -> None:

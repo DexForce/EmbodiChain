@@ -139,9 +139,22 @@ physical task success.
 - updates rollout state through FK, which is a kinematic model loop rather than
   sensor-driven simulation or real-robot recovery;
 - reports a fixed nominal `dt`, with velocity and acceleration estimated from
-  joint-position finite differences;
+  joint-position finite differences. `PlanResult` requires `dt` whenever it
+  carries positions, so the nominal value cannot be withheld; adapters instead
+  declare `native_timing`, and a row that does not solve timing reports no
+  comparable duration. The default is nominal: only cuRobo and TOPPRA declare
+  solved timing, while IK interpolation assigns a configured constant interval
+  and stays nominal like NMG;
 - has no explicit obstacle, collision, multimodal-sampling, or APG-refinement
   input/output interface yet.
+
+The simulator does not carry the asset's joint velocity limits: a measured
+Franka run reports the float32 maximum on all seven joints, and effort limits
+as a flat 1e5, rather than the URDF's 2.62-5.26 rad/s and 12-87 Nm. A limit at
+that magnitude is a placeholder, so the suites state the published FR3 values
+and the metrics treat an unusable asset limit as not applicable rather than as
+satisfied. A velocity check that silently always passes is worse than one
+reported as unavailable.
 
 The v1 benchmark must run within these constraints while reserving
 capability-gated tracks for future features. An unsupported capability must be
@@ -161,7 +174,7 @@ However, it currently uses one Franka start state, fixed waypoint offsets, and
 one environment. Repeating a deterministic case mostly measures runtime
 variance, not workspace coverage or generalization. It also lacks:
 
-- joint-limit, velocity, acceleration, jerk, collision, and clearance checks;
+- collision and clearance checks;
 - path length, path efficiency, and smoothness;
 - physics execution and controller tracking;
 - Atomic Action task completion;
@@ -369,6 +382,19 @@ IK interpolation and TOPPRA should be enabled only through
 `--extra-baselines` or suite configuration. If enabled, they must still appear
 in reports and the leaderboard with role `diagnostic_baseline`.
 
+The free-space suites additionally carry a paired NMG arm, `nmg` and
+`nmg_retimed`, which differ only by `retime`. The retimed row re-parameterizes
+the same rollout under velocity from the asset and acceleration from the
+protocol, read from the sources `compute_case_outcomes` uses so that a
+satisfied result is not self-assigned. Retiming constrains those two only: the
+suites also state a jerk limit and the metrics validate against it, so a
+retimed row can still be reported as exceeding jerk. That is a real result
+about the policy's path, which retiming cannot smooth, rather than a failure of
+the velocity and acceleration guarantee. The pair separates the policy's path, which both rows share,
+from its timing, which only one row solves; because the nominal row reports no
+solved timing, its dynamic diagnostics are published but do not decide
+`motion_valid`.
+
 Use three paired tracks:
 
 1. **Free-space common input**: cuRobo uses an empty collision world. Both
@@ -559,6 +585,14 @@ not select unrelated best samples.
 - path curvature and path-only smoothness;
 - time-indexed integrated squared acceleration and jerk;
 - endpoint settling error and hold stability.
+
+Velocity, acceleration and jerk are recomputed from each planner's positions
+and reported timing with compact divided differences, not read from the
+planner. A central difference averages neighboring steps and reads a path that
+reverses every step as nearly at rest; the compact second difference equals the
+true acceleration somewhere in its window, so it neither overstates nor hides
+the peak. A derivative the path is too short to resolve is reported as not
+applicable rather than zero.
 
 Define `motion_valid` independently:
 

@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -65,6 +66,18 @@ class PlannerContext:
     device: torch.device
     sample_interval: int
     robot_id: str = "unknown"
+    joint_velocity_limit_rad_s: float | Sequence[float] | None = None
+    """The suite's velocity limit override, or ``None`` to use the asset's."""
+    joint_acceleration_limit_rad_s2: float | Sequence[float] | None = None
+    """The suite's acceleration limit, or ``None`` when it states none.
+
+    An adapter that constrains its own output must use the same limits the
+    metrics check it against, or a satisfied result says nothing. Velocity
+    limits come from ``robot.get_qvel_limits()``, which the metrics also use;
+    acceleration has no asset source and is suite-owned.
+    """
+    joint_jerk_limit_rad_s3: float | Sequence[float] | None = None
+    """The suite's jerk limit, or ``None`` when it states none."""
 
 
 class PlannerAdapter(ABC):
@@ -74,6 +87,14 @@ class PlannerAdapter(ABC):
     model_revision: str = "N/A"
     separate_prepare: bool = False
     """Whether this backend exposes a distinct lazy preparation phase."""
+    native_timing: bool = False
+    """Whether this backend solves trajectory timing instead of assuming it.
+
+    Defaults to nominal, so a backend that has not declared otherwise is not
+    judged on a clock it may never have solved: its dynamic-limit verdict
+    reads N/A, which is visible, rather than passing or failing silently. A
+    backend sets this only when its timing comes from a solve under limits.
+    """
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         self.spec = spec
@@ -89,6 +110,7 @@ class PlannerAdapter(ABC):
             config_hash=stable_hash(self.spec.config),
             capabilities=self.capabilities,
             model_revision=self._resolved_model_revision(),
+            native_timing=self.native_timing,
             supported_robots=(self.context.robot_id,),
             parameters=dict(self.spec.config),
         )

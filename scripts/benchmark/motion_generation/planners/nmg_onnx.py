@@ -35,6 +35,7 @@ from embodichain.lab.sim.motion.planners import (
 )
 
 from ..config import PlannerSpecCfg
+from ..metrics.trajectory import resolve_velocity_limits
 from ..models import BenchmarkCase
 from ..registry import register_planner_adapter
 from .base import PlannerAdapter, PlannerContext
@@ -58,6 +59,72 @@ class NmgOnnxAdapter(PlannerAdapter):
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)
         self.motion_generator: MotionGenerator | None = None
+
+    @property
+    def retime(self) -> bool:
+        """Whether this row re-parameterizes the rollout under dynamic limits."""
+        return bool(self.spec.config.get("retime", False))
+
+    @property
+    def native_timing(self) -> bool:
+        """Whether reported timing is solved rather than nominal.
+
+        Without retiming the policy integrates a joint delta per step and never
+        solves a duration, so its ``dt`` carries no executable timing and the
+        row must be reported as N/A. Retiming replaces that constant with a
+        solved parameterization, which makes the duration comparable.
+        """
+        return self.retime
+
+    def _retiming_constraints(self) -> dict[str, object]:
+        """Resolve the limits to retime against, matching the metric limits.
+
+        Velocity comes from the asset through ``robot.get_qvel_limits()`` and
+        acceleration from the suite protocol, which are the same sources
+        ``compute_case_outcomes`` validates against. Reading them from one
+        place is what keeps a satisfied result from being self-assigned.
+
+        Returns:
+            A ``ToppraPlanOptions``-shaped constraints mapping.
+
+        Raises:
+            ValueError: If the suite states no acceleration limit, which leaves
+                nothing to retime against, or if no stated velocity limit exists
+                and the asset's limits differ across environments.
+        """
+        acceleration = self.context.joint_acceleration_limit_rad_s2
+        if acceleration is None:
+            raise ValueError(
+                "retime requires protocol.joint_acceleration_limit_rad_s2; the "
+                "asset supplies no acceleration limit."
+            )
+        num_joints = int(self.spec.config.get("num_arm_joints", 7))
+        per_env_limits = self.context.robot.get_qvel_limits(
+            name=self.context.control_part
+        )[:, :num_joints]
+        asset_limits = per_env_limits[0]
+        stated = self.context.joint_velocity_limit_rad_s
+        # `NeuralPlannerCfg.constraints` holds one set of limits for the whole
+        # batch, while the metrics read each environment's own. Using the first
+        # environment's limits is only sound when every environment shares them.
+        if stated is None and not bool((per_env_limits == asset_limits).all()):
+            raise ValueError(
+                "retime needs one velocity limit for the batch, but the asset's "
+                "joint velocity limits differ across environments; state "
+                "protocol.joint_velocity_limit_rad_s instead."
+            )
+        velocity = resolve_velocity_limits(asset_limits, stated, asset_limits)
+        if velocity is None:
+            raise ValueError(
+                "retime found no usable joint velocity limit: the asset reports a "
+                "placeholder and protocol.joint_velocity_limit_rad_s is unset. "
+                "Retiming against a placeholder would leave velocity "
+                "unconstrained while reporting the result as limit-respecting."
+            )
+        return {
+            "velocity": velocity.detach().cpu().tolist(),
+            "acceleration": acceleration,
+        }
 
     def _resolved_model_revision(self) -> str:
         """Use an explicit revision or derive one from the runtime ONNX path."""
@@ -132,6 +199,7 @@ class NmgOnnxAdapter(PlannerAdapter):
             policy_frame_from_world=values.get("policy_frame_from_world"),
             runtime_tcp_from_policy_tcp=values.get("runtime_tcp_from_policy_tcp"),
             dt=float(values.get("dt", 0.01)),
+            constraints=self._retiming_constraints() if self.retime else None,
         )
         self.motion_generator = MotionGenerator(MotionGenCfg(planner_cfg=planner_cfg))
 

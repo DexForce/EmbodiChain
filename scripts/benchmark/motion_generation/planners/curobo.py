@@ -59,6 +59,8 @@ class CuroboAdapter(PlannerAdapter):
     )
     model_revision = "curobo-v2"
     separate_prepare = True
+    native_timing = True
+    """cuRobo optimizes the trajectory's timing under its own dynamic limits."""
 
     def __init__(self, spec: PlannerSpecCfg, context: PlannerContext) -> None:
         super().__init__(spec, context)

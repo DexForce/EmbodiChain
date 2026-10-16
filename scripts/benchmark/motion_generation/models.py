@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import cast
@@ -39,6 +40,8 @@ __all__ = [
 
 def _json_value(value: object) -> object:
     """Convert nested benchmark values into deterministic JSON values."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, frozenset):
@@ -82,6 +85,14 @@ class PlannerMetadata:
     capabilities: frozenset[str]
     model_revision: str = "N/A"
     inference_dtype: str = "fp32"
+    native_timing: bool = False
+    """Whether reported ``dt`` is solved rather than a nominal constant.
+
+    ``PlanResult`` requires ``dt`` whenever it carries positions, so a planner
+    with no time parameterization still reports intervals. Recording the
+    distinction here keeps native-timing comparisons from treating a nominal
+    constant as a solved duration; report such rows as N/A.
+    """
     supported_robots: tuple[str, ...] = ("franka_panda",)
     parameters: dict[str, object] = field(default_factory=dict)
 
@@ -164,6 +175,23 @@ class CaseOutcome:
     waypoint_min_translation_err_mm_at_orientation: tuple[float | None, ...] = ()
     executed_final_translation_err_mm: float | None = None
     executed_final_rotation_err_deg: float | None = None
+    max_joint_velocity_rad_s: float | None = None
+    velocity_utilization: float | None = None
+    velocity_limit_violation: bool | None = None
+    max_joint_acceleration_rad_s2: float | None = None
+    acceleration_utilization: float | None = None
+    acceleration_limit_violation: bool | None = None
+    max_joint_jerk_rad_s3: float | None = None
+    jerk_utilization: float | None = None
+    jerk_limit_violation: bool | None = None
+    dynamic_measurement_status: str | None = None
+    """Whether trajectory dynamics were ``finite``, ``unbounded``, or unavailable."""
+    dynamic_limits_satisfied: bool | None = None
+    """Whether every applicable dynamic limit holds, or ``None`` when none apply.
+
+    Acceleration and jerk limits have no asset source, so a suite that leaves
+    them unset yields ``None`` rather than a satisfied result.
+    """
     stages: tuple[StageOutcome, ...] = ()
     failure_stage: str | None = None
     physical_skill_success: bool | None = None

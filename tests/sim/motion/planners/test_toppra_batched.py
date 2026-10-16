@@ -27,12 +27,8 @@ from embodichain.lab.sim.motion.planners.toppra_planner import _toppra_solve_one
 from embodichain.lab.sim.motion.planners.utils import TrajectorySampleMethod
 
 
-# Note: TOPPRA's ParametrizeConstAccel robustly avoids returning None for smooth
-# splines (verified empirically across tiny limits, huge displacements, zigzags,
-# and plateaus), so the ``jnt_traj is None`` branch in ``_toppra_solve_one_env``
-# is defensive and not directly unit-tested here; infeasible inputs instead
-# raise during path/constraint construction and are caught by the
-# ``except Exception`` -> ``_empty_failure`` path.
+# Numerical contracts are also exercised without the simulation adapter in
+# tests/compute/test_toppra.py.
 class TestToppraWorker:
     def test_solve_one_env_quantity(self):
         # 2-waypoint, 6-DOF
@@ -50,7 +46,7 @@ class TestToppraWorker:
         assert out["dt"].shape == (20,)
 
     def test_solve_one_env_infeasible_exception(self):
-        # Single waypoint -> SplineInterpolator raises -> caught, returns failure
+        # A path needs at least two waypoints; the worker isolates this failure.
         wp = np.array([[0.0] * 6])
         out = _toppra_solve_one_env(
             waypoints=wp,
@@ -429,3 +425,389 @@ class TestToppraNumericalRegression:
             import embodichain.lab.sim as om
 
             om.SimulationManager.flush_cleanup_queue()
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["numpy", "warp", "auto"])
+def test_in_tree_planner_preserves_batch_timing_and_failures(backend: str) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend, max_workers=1)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    states = [
+        PlanState.from_qpos(torch.tensor([[0.0], [0.0], [2.0]])),
+        PlanState.from_qpos(torch.tensor([[1.0], [float("nan")], [2.0]])),
+    ]
+    result = planner.plan(
+        states,
+        ToppraPlanOptions(
+            constraints={"velocity": [[-0.5, 1.0]], "acceleration": [[-2.0, 1.0]]},
+            sample_method=TrajectorySampleMethod.TIME,
+            sample_interval=0.03,
+        ),
+    )
+    assert result.success.tolist() == [True, False, True]
+    assert planner._pool is None
+    assert result.duration[0] > 0
+    assert result.duration[1:].count_nonzero() == 0
+    assert result.positions[2].eq(2.0).all()
+    assert result.velocities[2].count_nonzero() == 0
+    assert result.dt.max() <= 0.03
+    reference = _toppra_solve_one_env(
+        np.array([[0.0], [1.0]]),
+        [[-0.5, 1.0]],
+        [[-2.0, 1.0]],
+        TrajectorySampleMethod.TIME,
+        0.03,
+    )
+    np.testing.assert_allclose(result.positions[0], reference["positions"], atol=1e-6)
+    np.testing.assert_allclose(result.dt[0], reference["dt"], atol=1e-6)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["numpy", "warp"])
+def test_in_tree_planner_invalid_limits_return_failure(backend: str) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend, max_workers=1)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    result = planner.plan(
+        [PlanState.from_qpos(torch.zeros(1, 1)), PlanState.from_qpos(torch.ones(1, 1))],
+        ToppraPlanOptions(
+            constraints={"velocity": -1.0, "acceleration": 2.0}, sample_interval=10
+        ),
+    )
+    assert not result.success.any()
+    assert result.dt.count_nonzero() == 0
+
+
+@pytest.mark.no_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float64])
+def test_cuda_auto_backend_keeps_plan_on_device(
+    monkeypatch: pytest.MonkeyPatch,
+    dtype: torch.dtype,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    planner.device = torch.device("cuda")
+    planner._pool = None
+    points = torch.tensor(
+        [
+            [[0.0], [0.4]],
+            [[1.0], [1.0]],
+            [[0.0], [float("nan")]],
+        ],
+        device="cuda",
+        dtype=dtype,
+    )
+    states = [PlanState.from_qpos(points[:, i]) for i in range(2)]
+    with monkeypatch.context() as patch:
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("auto CUDA planning must not copy waypoints to CPU")
+
+        patch.setattr(torch.Tensor, "cpu", forbidden)
+        result = planner.plan(states, ToppraPlanOptions(sample_interval=128.9))
+    assert result.success.tolist() == [True, True, False]
+    assert result.positions.is_cuda and result.dt.is_cuda
+    assert result.positions.shape == (3, 128, 1)
+    assert result.positions.dtype == result.dt.dtype == torch.float32
+    assert planner._pool is None
+    assert result.duration[0] > 0
+    assert result.duration[1:].count_nonzero() == 0
+    torch.testing.assert_close(result.positions[0, -1], points[0, -1].float())
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["numpy", "warp"])
+@pytest.mark.parametrize(
+    "dtype", [torch.float16, torch.float32, torch.float64, torch.int64]
+)
+@pytest.mark.parametrize("quantity", [20, 20.0, 20.9])
+def test_legacy_planner_output_dtype_and_quantity_coercion(
+    backend: str, dtype: torch.dtype, quantity: float | int
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend, max_workers=1)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    result = planner.plan(
+        [
+            PlanState.from_qpos(torch.zeros(1, 1, dtype=dtype)),
+            PlanState.from_qpos(torch.ones(1, 1, dtype=dtype)),
+        ],
+        ToppraPlanOptions(sample_interval=quantity),
+    )
+    assert result.success.tolist() == [True]
+    assert result.positions.shape == (1, 20, 1)
+    for values in (
+        result.positions,
+        result.velocities,
+        result.accelerations,
+        result.dt,
+    ):
+        assert values.dtype == torch.float32
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["auto", "warp"])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+def test_planner_preserves_waypoint_gradients_and_duration_contract(
+    backend: str,
+    dtype: torch.dtype,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    # Use a non-leaf input to verify gradients reach the caller's computation.
+    parameter = torch.tensor([[0.365]], dtype=dtype, requires_grad=True)
+    distance = 2 * parameter
+    result = planner.plan(
+        [
+            PlanState.from_qpos(torch.zeros_like(distance)),
+            PlanState.from_qpos(distance),
+        ],
+        ToppraPlanOptions(
+            constraints={"velocity": 100.0, "acceleration": 2.0},
+            sample_interval=17,
+        ),
+    )
+    assert result.success.all()
+    assert planner._pool is None
+    assert result.positions.dtype == torch.float32
+    assert result.positions.requires_grad and result.duration.requires_grad
+    result.duration.sum().backward()
+    expected = result.duration.detach().to(dtype) / (2 * parameter.detach().flatten())
+    torch.testing.assert_close(parameter.grad.flatten(), expected)
+
+
+@pytest.mark.no_sim
+def test_numpy_planner_rejects_autograd_instead_of_detaching() -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend="numpy")
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    states = [
+        PlanState.from_qpos(torch.zeros(1, 1)),
+        PlanState.from_qpos(torch.ones(1, 1, requires_grad=True)),
+    ]
+    options = ToppraPlanOptions(
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.1,
+    )
+    with pytest.raises(NotImplementedError, match="Warp backend"):
+        planner.plan(states, options)
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["auto", "warp"])
+@pytest.mark.parametrize(
+    "sampling", [TrajectorySampleMethod.TIME, TrajectorySampleMethod.QUANTITY]
+)
+def test_planner_autograd_routes_trainable_limits_without_trainable_waypoints(
+    backend: str,
+    sampling: TrajectorySampleMethod,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    parameter = torch.tensor(0.6, dtype=torch.float64, requires_grad=True)
+    acceleration = parameter.exp()  # Verify the caller's graph is preserved.
+    result = planner.plan(
+        [
+            PlanState.from_qpos(torch.zeros(1, 1)),
+            PlanState.from_qpos(torch.full((1, 1), 0.73)),
+        ],
+        ToppraPlanOptions(
+            constraints={"velocity": 100.0, "acceleration": acceleration},
+            sample_method=sampling,
+            sample_interval=0.13 if sampling == TrajectorySampleMethod.TIME else 17,
+        ),
+    )
+    assert result.success.all() and result.duration.requires_grad
+    assert result.positions.dtype == torch.float32 and planner._pool is None
+    result.duration.sum().backward()
+    torch.testing.assert_close(
+        parameter.grad, -result.duration.sum().detach().double() / 2
+    )
+
+
+@pytest.mark.no_sim
+@pytest.mark.parametrize("backend", ["numpy", "warp", "auto"])
+def test_no_grad_planning_accepts_trainable_inputs_as_constants(backend: str) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused", backend=backend)
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    end = torch.ones(1, 1, requires_grad=True)
+    limit = torch.tensor(1.0, requires_grad=True)
+    with torch.no_grad():
+        result = planner.plan(
+            [PlanState.from_qpos(torch.zeros_like(end)), PlanState.from_qpos(end)],
+            ToppraPlanOptions(
+                constraints={"velocity": limit, "acceleration": 2 * limit},
+                sample_interval=17,
+            ),
+        )
+    assert result.success.all() and not result.duration.requires_grad
+
+
+@pytest.mark.no_sim
+def test_toppra_option_copies_preserve_tensor_graphs_and_isolate_containers() -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import ToppraPlanOptions
+
+    parameter = torch.tensor(0.6, requires_grad=True)
+    limit = parameter.exp()
+    options = ToppraPlanOptions(constraints={"velocity": [1.0], "acceleration": limit})
+    copied = options.copy()
+    assert copied.constraints is not options.constraints
+    assert copied.constraints["acceleration"] is limit
+    copied.constraints["velocity"][0] = 2.0
+    assert options.constraints["velocity"] == [1.0]
+    assert ToppraPlanOptions().constraints == {"velocity": 0.2, "acceleration": 0.5}
+
+
+@pytest.mark.no_sim
+def test_motion_generator_keeps_toppra_gradients_through_option_copy_and_resampling() -> (
+    None
+):
+    from embodichain.lab.sim.motion.motion_generator import (
+        MotionGenerator,
+        MotionGenOptions,
+    )
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    planner.device = torch.device("cpu")
+    planner._pool = None
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+    generator.device = planner.device
+    distance = torch.tensor([[0.73]], dtype=torch.float64, requires_grad=True)
+    parameter = torch.tensor(0.6, dtype=torch.float64, requires_grad=True)
+    result = generator.generate(
+        [
+            PlanState.from_qpos(torch.zeros_like(distance)),
+            PlanState.from_qpos(distance),
+        ],
+        MotionGenOptions(
+            sample_count=29,
+            plan_opts=ToppraPlanOptions(
+                constraints={"velocity": 100.0, "acceleration": parameter.exp()},
+                sample_interval=17,
+            ),
+        ),
+    )
+    assert result.success.all() and result.positions.shape == (1, 29, 1)
+    duration = result.duration.sum()
+    dq, da = torch.autograd.grad(duration, (distance, parameter))
+    torch.testing.assert_close(dq, duration.detach().double() / (2 * distance.detach()))
+    torch.testing.assert_close(da, -duration.detach().double() / 2)
+
+
+@pytest.mark.no_sim
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+def test_cuda_time_planner_backward_preserves_input_gradients(
+    dtype: torch.dtype,
+) -> None:
+    from embodichain.lab.sim.motion.planners.toppra_planner import (
+        ToppraPlanner,
+        ToppraPlannerCfg,
+        ToppraPlanOptions,
+    )
+    from embodichain.lab.sim.motion.planners.utils import PlanState
+
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
+    planner = object.__new__(ToppraPlanner)
+    planner.cfg = ToppraPlannerCfg(robot_uid="unused")
+    planner.device = torch.device("cuda")
+    planner._pool = None
+    distance = torch.tensor([[0.73]], device="cuda", dtype=dtype, requires_grad=True)
+    acceleration = torch.tensor(1.7, device="cuda", requires_grad=True)
+    options = ToppraPlanOptions(
+        constraints={"velocity": 100.0, "acceleration": acceleration},
+        sample_method=TrajectorySampleMethod.TIME,
+        sample_interval=0.13,
+    )
+    result = planner.plan(
+        [
+            PlanState.from_qpos(torch.zeros_like(distance)),
+            PlanState.from_qpos(distance),
+        ],
+        options,
+    )
+    duration = result.duration.sum()
+    dq, da = torch.autograd.grad(duration, (distance, acceleration))
+    assert result.success.all() and dq.is_cuda and da.is_cuda
+    expected_dq = duration.detach().double() / (2 * distance.detach().double())
+    torch.testing.assert_close(dq, expected_dq.to(dtype))
+    torch.testing.assert_close(da, -duration.detach() / (2 * acceleration.detach()))
