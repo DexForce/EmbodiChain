@@ -29,10 +29,10 @@ algorithms and backend behavior. Their configurations live under
      - RL
 
 For configuration-backed tasks, pass the selected environment file to
-``run-env``. Point Mass is selected by its trainer configuration instead of a
+``run-task``. Point Mass is selected by its trainer configuration instead of a
 Gym configuration file.
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/classic_control/cart_pole/env.yaml

@@ -132,7 +132,7 @@ def _record(recipe: CandidateRecipe) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     if args.expansion_profile is None:
-        from embodichain.lab.scripts.run_env import (
+        from embodichain.lab.scripts.run_task import (
             _resolve_expansion_request,
         )
 

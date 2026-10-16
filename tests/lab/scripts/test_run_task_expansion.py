@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from embodichain.lab.scripts.run_env import (
+from embodichain.lab.scripts.run_task import (
     CollectionPlan,
     CollectionSelection,
     _create_parser,

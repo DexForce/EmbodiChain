@@ -55,5 +55,5 @@ For example, launch Pour Water through its Task Program deployment:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml

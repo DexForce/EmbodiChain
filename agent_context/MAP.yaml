@@ -41,7 +41,7 @@ topics:
   title: Environment Framework
   aliases: [env framework, environment framework, task registration, list task, expert trajectory, 环境框架, 任务环境,
     专家轨迹]
-  keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-env, target_control_frequency,
+  keywords: [BaseEnv, EmbodiedEnv, EnvCfg, register_env, list-task, run-task, target_control_frequency,
     sim_steps_per_control, step_dt, environment.component, embodiment.component, file-owned physics backend,
     physics_config, ControllerAction, EnvProfiler, startup_summary, dexsim_startup_info,
     ExpertTrajectoryCfg, joint_command_mode, position_velocity, qpos qvel, expert action schema,
@@ -55,7 +55,7 @@ topics:
   - embodichain/cli/show_task.py
   - embodichain/lab/gym/envs/objectives/
   - embodichain/lab/scripts/evaluate_task_objective.py
-  - embodichain/lab/scripts/run_env.py
+  - embodichain/lab/scripts/run_task.py
   - embodichain/lab/gym/utils/gym_utils.py
   - embodichain/lab/gym/utils/_component_composition.py
   - embodichain/lab/gym/utils/registration.py
@@ -67,7 +67,7 @@ topics:
   - embodichain/lab/gym/utils/profiler.py
   watch_paths: [embodichain/lab/gym/envs/base_env.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/gym/envs/expert_trajectory.py,
     embodichain/lab/gym/envs/demo.py,
-    embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_env.py,
+    embodichain/lab/gym/utils/, embodichain/lab/gym/envs/task_program/, embodichain/cli/, embodichain/lab/scripts/run_task.py,
     extensions/embodichain_tasks/, tests/gym/envs/, embodichain/lab/gym/envs/objectives/,
     embodichain/lab/scripts/evaluate_task_objective.py, tests/lab/scripts/test_evaluate_task_objective.py]
   related_topics: [simulation-system, manager-functor, sim-visualization, task-programs, data-pipeline]
@@ -408,9 +408,9 @@ topics:
   - embodichain/data_pipeline/recording/
   - embodichain/cli/dataset.py
   - tools/lerobot_export/
-  - embodichain/lab/scripts/run_env.py
+  - embodichain/lab/scripts/run_task.py
   watch_paths: [embodichain/data_pipeline/, embodichain/lab/gym/envs/managers/dataset_manager.py, embodichain/lab/gym/envs/managers/datasets.py,
-    embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_env.py,
+    embodichain/lab/gym/envs/managers/async_datasets.py, embodichain/lab/gym/envs/embodied_env.py, embodichain/lab/scripts/run_task.py,
     tests/data_pipeline/, embodichain/cli/dataset.py, tools/lerobot_export/]
   related_topics: [manager-functor, env-framework, task-programs, sensor-system]
   status: active

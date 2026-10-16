@@ -60,7 +60,7 @@ independent task version is required. Third-party packages declaring an
 task with the unified CLI:
 
 ```bash
-embodichain run-env --gym_config path/to/gym_config.json
+embodichain run-task --gym_config path/to/gym_config.json
 ```
 
 To build your own task environments, start from the
@@ -70,7 +70,7 @@ subclass with `@register_env`; supported configuration-defined Task Programs
 may instead compose the common environment from reusable `env.yaml`,
 embodiment, integration, and policy components. In either case, add a runnable
 gym config with `id`, install with `pip install -e .`, and launch it with
-`embodichain run-env`. See the
+`embodichain run-task`. See the
 [embodichain_tasks README](https://github.com/DexForce/EmbodiChain/blob/main/extensions/embodichain_tasks/README.md)
 for details.
 EmbodiChain environments can also be used with the optional

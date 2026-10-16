@@ -35,8 +35,8 @@ from embodichain.lab.task_program.language.loader import (
     load_task_program as _load_task_program,
 )
 from embodichain.lab.gym.utils.gym_utils import merge_args_with_gym_config
-from embodichain.lab.scripts import run_env
-from embodichain.lab.scripts.run_env import (
+from embodichain.lab.scripts import run_task
+from embodichain.lab.scripts.run_task import (
     _create_parser,
     _run_replay_control_loop,
     generate_function,
@@ -115,9 +115,9 @@ def test_legacy_action_list_displays_episode_and_segment_indices(
     """Progress output distinguishes episodes from their local segments."""
     env = _LegacyProgressEnv()
     progress = MagicMock(side_effect=lambda actions, **kwargs: actions)
-    monkeypatch.setattr(run_env.tqdm, "tqdm", progress)
+    monkeypatch.setattr(run_task.tqdm, "tqdm", progress)
 
-    generated = run_env.generate_and_execute_action_list(
+    generated = run_task.generate_and_execute_action_list(
         env,
         ACTION_LIST_INDEX,
         debug_mode=False,
@@ -137,7 +137,7 @@ def test_task_program_progress_displays_repeated_segment_position(capsys) -> Non
     """Each lazy segment renders its position, percentage, and exact step count."""
     env = _TaskProgramProgressEnv()
 
-    generated = run_env.generate_and_execute_action_list(
+    generated = run_task.generate_and_execute_action_list(
         env,
         ACTION_LIST_INDEX,
         debug_mode=False,
@@ -159,7 +159,7 @@ def test_progress_wrapper_formats_known_step_total(capsys) -> None:
     """Sized action sequences render a complete step progress bar."""
     actions = (object(), object())
 
-    for _ in run_env._progress_wrapper(actions, "Ep 1 · Seg 1/1 · move_cube"):
+    for _ in run_task._progress_wrapper(actions, "Ep 1 · Seg 1/1 · move_cube"):
         pass
 
     output = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
@@ -173,7 +173,7 @@ def test_progress_wrapper_formats_unknown_step_total_as_activity(capsys) -> None
     """Lazy action streams finish an indeterminate bar without a percentage."""
     actions = (object() for _ in range(2))
 
-    for _ in run_env._progress_wrapper(
+    for _ in run_task._progress_wrapper(
         actions, "Ep 1 · Seg 1/1 · pour_and_return_bottle"
     ):
         pass
@@ -187,8 +187,8 @@ def test_progress_wrapper_formats_unknown_step_total_as_activity(capsys) -> None
     assert "0%" not in output
 
 
-def test_run_env_syncs_viser_images_each_step_by_default() -> None:
-    """Run-env uses step-synchronized camera images when no FPS is supplied."""
+def test_run_task_syncs_viser_images_each_step_by_default() -> None:
+    """Run-task uses step-synchronized camera images when no FPS is supplied."""
     args = _create_parser().parse_args(["--gym_config", GYM_CONFIG_PATH, "--viser"])
 
     merged = merge_args_with_gym_config(args, {"id": GYM_ID, "physics": "default"})
@@ -196,7 +196,7 @@ def test_run_env_syncs_viser_images_each_step_by_default() -> None:
     assert merged["visualization"]["sensor_image_fps"] is None
 
 
-def test_run_env_accepts_explicit_viser_image_fps() -> None:
+def test_run_task_accepts_explicit_viser_image_fps() -> None:
     """An explicit image FPS restores wall-clock rate limiting."""
     expected_fps = 6.0
     args = _create_parser().parse_args(
@@ -214,8 +214,8 @@ def test_run_env_accepts_explicit_viser_image_fps() -> None:
     assert merged["visualization"]["sensor_image_fps"] == expected_fps
 
 
-def test_run_env_preserves_configured_viser_image_fps() -> None:
-    """A file-based rate overrides the run-env step-synchronized default."""
+def test_run_task_preserves_configured_viser_image_fps() -> None:
+    """A file-based rate overrides the run-task step-synchronized default."""
     configured_fps = 4.0
     args = _create_parser().parse_args(["--gym_config", GYM_CONFIG_PATH, "--viser"])
 
@@ -231,7 +231,7 @@ def test_run_env_preserves_configured_viser_image_fps() -> None:
     assert merged["visualization"]["sensor_image_fps"] == configured_fps
 
 
-def test_run_env_parser_accepts_task_program_path() -> None:
+def test_run_task_parser_accepts_task_program_path() -> None:
     """The declarative program is an explicit, opt-in CLI input."""
     program_path = "program.yaml"
 
@@ -242,7 +242,7 @@ def test_run_env_parser_accepts_task_program_path() -> None:
     assert args.task_program == program_path
 
 
-def test_run_env_parser_accepts_debug_trace_mode() -> None:
+def test_run_task_parser_accepts_debug_trace_mode() -> None:
     """Failed Task Program attempts can expose their structured trace."""
     args = _create_parser().parse_args(
         ["--gym_config", GYM_CONFIG_PATH, "--debug-mode"]
@@ -317,14 +317,14 @@ def test_replay_restores_wrapper_state_without_closing_caller_env(monkeypatch) -
     env.unwrapped = env
     replay_env = MagicMock()
     monkeypatch.setattr(
-        run_env,
+        run_task,
         "load_trajectory",
         lambda path: {"meta": {"num_envs": 1, "num_steps": 1, "lengths": [1]}},
     )
-    monkeypatch.setattr(run_env, "ReplayWrapper", lambda *args, **kwargs: replay_env)
-    monkeypatch.setattr(run_env, "replay_auto", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_task, "ReplayWrapper", lambda *args, **kwargs: replay_env)
+    monkeypatch.setattr(run_task, "replay_auto", lambda *args, **kwargs: None)
 
-    run_env.replay(env, "trajectory.pt")
+    run_task.replay(env, "trajectory.pt")
 
     replay_env.close.assert_not_called()
     replay_env.env.sim.enable_physics.assert_called_once_with(True)
@@ -337,7 +337,7 @@ def test_preview_quit_returns_without_zero_exit(monkeypatch) -> None:
     env.reset.return_value = (None, {})
     monkeypatch.setattr("builtins.input", lambda: "q")
 
-    run_env.preview(env)
+    run_task.preview(env)
 
     env.reset.assert_called_once_with()
 
@@ -403,7 +403,7 @@ def test_generate_function_discards_retry_then_commits_once(monkeypatch) -> None
         ]
     )
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: next(results),
     )
 
@@ -434,7 +434,7 @@ def test_generate_function_updates_collection_attempt_and_reset_stats(
         ]
     )
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: next(results),
     )
 
@@ -452,11 +452,11 @@ def test_generate_function_logs_failed_trace_in_debug_mode(monkeypatch) -> None:
     result = _episode_result(success=False, reason="segment_validation_failed")
     warnings: list[str] = []
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: result,
     )
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.log_warning",
+        "embodichain.lab.scripts.run_task.log_warning",
         warnings.append,
     )
 
@@ -478,7 +478,7 @@ def test_generate_function_commits_failed_episode_when_configured(monkeypatch) -
     """A recorded task failure is a persisted result when explicitly enabled."""
     env = _ResetTrackingEnv(save_failed_episodes=True)
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: _episode_result(
             success=False,
             reason="task_incomplete",
@@ -539,7 +539,7 @@ def test_generate_function_commits_accepted_prefix_as_segment_fragment(
         lengths=(4,),
     )
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: result,
     )
 
@@ -566,7 +566,7 @@ def test_generate_function_retries_empty_failure_even_when_saving_failures(
         ]
     )
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: next(results),
     )
 
@@ -585,7 +585,7 @@ def test_generate_function_commits_only_selected_vector_rows(monkeypatch) -> Non
     num_envs = 3
     env = _ResetTrackingEnv(num_envs=num_envs)
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: _episode_result(
             success=True,
             reason="success",
@@ -624,9 +624,9 @@ def test_main_counts_max_episodes_as_persisted_env_rows(monkeypatch) -> None:
         calls.append((kwargs["time_id"], tuple(kwargs["save_env_ids"])))
         return True
 
-    monkeypatch.setattr(run_env, "generate_function", record_batch)
+    monkeypatch.setattr(run_task, "generate_function", record_batch)
 
-    run_env.main(
+    run_task.main(
         args,
         env,
         {"max_episodes": 5, "demo_max_attempts": 2},
@@ -648,8 +648,8 @@ def _run_successful_collection(monkeypatch) -> None:
         regenerate=False,
         record_trajectory=False,
     )
-    monkeypatch.setattr(run_env, "generate_function", lambda *args, **kwargs: True)
-    run_env.main(
+    monkeypatch.setattr(run_task, "generate_function", lambda *args, **kwargs: True)
+    run_task.main(
         args,
         env,
         {"id": GYM_ID, "max_episodes": 5, "demo_max_attempts": 2},
@@ -689,7 +689,7 @@ def test_main_prints_clean_collection_completion(monkeypatch, capsys) -> None:
 
 
 def test_generate_function_rejects_runner_owned_segment_count() -> None:
-    """The task, not run-env, defines how many segments an episode contains."""
+    """The task, not run-task, defines how many segments an episode contains."""
     with pytest.raises(ValueError, match="create_demo_segments"):
         generate_function(_ResetTrackingEnv(), num_traj=2)
 
@@ -698,7 +698,7 @@ def test_generate_function_discards_partial_episode_on_exception(monkeypatch) ->
     """Planner or step exceptions cannot be committed later by finalize()."""
     env = _ResetTrackingEnv()
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planner failed")),
     )
 
@@ -723,7 +723,7 @@ def test_generate_function_discards_partial_episode_on_early_exit(
         raise exit_type()
 
     monkeypatch.setattr(
-        "embodichain.lab.scripts.run_env.execute_demo_episode",
+        "embodichain.lab.scripts.run_task.execute_demo_episode",
         exit_during_episode,
     )
 
@@ -754,22 +754,22 @@ def test_cli_aborts_before_closing_environment_once(monkeypatch) -> None:
         "demo_max_attempts": 1,
     }
 
-    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
-    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
-    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(run_task, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_task, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_task, "execute_init_hooks", lambda: None)
     monkeypatch.setattr(
-        run_env,
+        run_task,
         "build_env_cfg_from_args",
         lambda parsed_args: (object(), gym_config, {}),
     )
-    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
-    monkeypatch.setattr(run_env, "generate_function", lambda *args, **kwargs: True)
+    monkeypatch.setattr(run_task.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(run_task, "generate_function", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
         lambda: None,
     )
 
-    run_env.cli([])
+    run_task.cli([])
 
     abort_event = ("reset", {"save_data": False})
     assert env.events == [abort_event, ("reset", None), abort_event, ("close", None)]
@@ -803,24 +803,24 @@ def test_cli_uses_loaded_program_with_scoped_renderer_default(
 
     make = MagicMock(side_effect=make_task)
 
-    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
-    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
-    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(run_task, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_task, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_task, "execute_init_hooks", lambda: None)
 
     def build(parsed_args):
         assert parsed_args is args
         env_cfg.task_program = decoded_program
         return env_cfg, {"id": GYM_ID}, {}
 
-    monkeypatch.setattr(run_env, "build_env_cfg_from_args", build)
-    monkeypatch.setattr(run_env.gymnasium, "make", make)
-    monkeypatch.setattr(run_env, "main", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_task, "build_env_cfg_from_args", build)
+    monkeypatch.setattr(run_task.gymnasium, "make", make)
+    monkeypatch.setattr(run_task, "main", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
         lambda: None,
     )
 
-    run_env.cli([])
+    run_task.cli([])
 
     assert env_cfg.task_program is decoded_program
     make.assert_called_once_with(id=GYM_ID, cfg=env_cfg)
@@ -838,7 +838,7 @@ def test_close_durability_failure_is_not_swallowed() -> None:
     env.close = fail_close
 
     with pytest.raises(OSError, match="dataset flush failed"):
-        run_env._abort_and_close_env(env)
+        run_task._abort_and_close_env(env)
 
     assert env.events == [
         ("reset", {"save_data": False}),
@@ -863,17 +863,17 @@ def test_cli_preserves_main_error_and_disables_fast_exit(monkeypatch) -> None:
     parser.parse_args.return_value = args
     gym_config = {"id": GYM_ID}
 
-    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
-    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
-    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(run_task, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_task, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_task, "execute_init_hooks", lambda: None)
     monkeypatch.setattr(
-        run_env,
+        run_task,
         "build_env_cfg_from_args",
         lambda parsed_args: (object(), gym_config, {}),
     )
-    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(run_task.gymnasium, "make", lambda **kwargs: env)
     monkeypatch.setattr(
-        run_env,
+        run_task,
         "main",
         MagicMock(side_effect=RuntimeError("generation failed")),
     )
@@ -883,7 +883,7 @@ def test_cli_preserves_main_error_and_disables_fast_exit(monkeypatch) -> None:
     )
 
     with pytest.raises(RuntimeError, match="generation failed"):
-        run_env.cli([])
+        run_task.cli([])
 
     assert env.events == [
         ("reset", {"save_data": False}),
@@ -902,16 +902,16 @@ def test_zero_system_exit_cannot_hide_cleanup_failure(monkeypatch) -> None:
     )
     parser = MagicMock()
     parser.parse_args.return_value = args
-    monkeypatch.setattr(run_env, "_create_parser", lambda: parser)
-    monkeypatch.setattr(run_env, "discover_task_packages", lambda: None)
-    monkeypatch.setattr(run_env, "execute_init_hooks", lambda: None)
+    monkeypatch.setattr(run_task, "_create_parser", lambda: parser)
+    monkeypatch.setattr(run_task, "discover_task_packages", lambda: None)
+    monkeypatch.setattr(run_task, "execute_init_hooks", lambda: None)
     monkeypatch.setattr(
-        run_env,
+        run_task,
         "build_env_cfg_from_args",
         lambda parsed_args: (object(), {"id": GYM_ID}, {}),
     )
-    monkeypatch.setattr(run_env.gymnasium, "make", lambda **kwargs: env)
-    monkeypatch.setattr(run_env, "main", MagicMock(side_effect=SystemExit(0)))
+    monkeypatch.setattr(run_task.gymnasium, "make", lambda **kwargs: env)
+    monkeypatch.setattr(run_task, "main", MagicMock(side_effect=SystemExit(0)))
     monkeypatch.setattr(
         "embodichain.lab.sim.sim_manager.SimulationManager.flush_cleanup_queue",
         lambda: None,
@@ -923,7 +923,7 @@ def test_zero_system_exit_cannot_hide_cleanup_failure(monkeypatch) -> None:
     env.close = fail_close
 
     with pytest.raises(OSError, match="dataset flush failed"):
-        run_env.cli([])
+        run_task.cli([])
 
 
 def test_control_loop_consumes_viser_seek_while_paused() -> None:

@@ -223,7 +223,7 @@ Run the complete configuration with the normal environment CLI:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
      --gym_config \
      embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
      --headless
@@ -232,7 +232,7 @@ To select another compatible program while keeping the trusted integration:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
      --gym_config path/to/task.ur5.yaml \
      --task-program path/to/program.yaml \
      --headless

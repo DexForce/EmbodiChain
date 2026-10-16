@@ -66,7 +66,7 @@ also auto-discovered. Launch any registered task with the unified CLI:
 
 .. code:: bash
 
-   embodichain run-env --gym_config path/to/gym_config.json
+   embodichain run-task --gym_config path/to/gym_config.json
 
 To build your own task environments, start from the
 `embodichain_task_template <https://github.com/DexForce/embodichain_task_template>`__
@@ -76,7 +76,7 @@ configuration-defined Task Programs may instead compose the common
 environment from reusable ``env.yaml``, embodiment, integration, and
 policy components. In either case, add a runnable gym config with
 ``id``, install with ``pip install -e .``, and launch it with
-``embodichain run-env``. See the `embodichain_tasks
+``embodichain run-task``. See the `embodichain_tasks
 README <https://github.com/DexForce/EmbodiChain/blob/main/embodichain_tasks/README.md>`__
 for details.
 

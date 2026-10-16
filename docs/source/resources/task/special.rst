@@ -32,5 +32,5 @@ families:
 
 .. code-block:: bash
 
-   embodichain run-env \
+   embodichain run-task \
        --gym_config embodichain_tasks/configs/tasks/special/simple_task/env_ur10.json

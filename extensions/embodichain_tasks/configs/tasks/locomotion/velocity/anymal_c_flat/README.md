@@ -13,7 +13,7 @@ catalog defaults to `default`; backend selection belongs to the environment file
 
 ```bash
 embodichain show-task embodichain_tasks:anymal_c_flat
-embodichain run-env --gym_config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/anymal_c_flat/env.yaml
+embodichain run-task --gym_config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/anymal_c_flat/env.yaml
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/anymal_c_flat/agents/ppo.yaml
 embodichain train-rl --config extensions/embodichain_tasks/configs/tasks/locomotion/velocity/anymal_c_flat/agents/ppo.newton.yaml
 ```

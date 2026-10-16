@@ -88,7 +88,7 @@ supplies the trusted integration, robot embodiment, and execution policy. See
 Run the shipped example from the repository root:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
     --headless \
     --max_episodes 1
@@ -191,7 +191,7 @@ env.reset(options={"save_data": result.success})
 ```
 
 If planning or execution raises an exception, discard the attempt with
-`env.reset(options={"save_data": False})` before retrying. The `run-env`
+`env.reset(options={"save_data": False})` before retrying. The `run-task`
 collector manages commit/discard and retries for CLI collection. Finalizing or
 closing a recorder drains committed writes; it does not commit an unfinished
 rollout.

@@ -1508,10 +1508,10 @@ def preview(env: gymnasium.Env) -> None:
 
 
 def _create_parser() -> argparse.ArgumentParser:
-    """Create the ``run-env`` argument parser."""
+    """Create the ``run-task`` argument parser."""
     parser = argparse.ArgumentParser(
-        prog="embodichain run-env",
-        description="Run an environment for data expansion or interactive preview.",
+        prog="embodichain run-task",
+        description="Run a task for data expansion or interactive preview.",
     )
 
     add_env_launcher_args_to_parser(parser, require_gym_config=True)

@@ -946,7 +946,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 994,
           "end_line": 994,
@@ -955,11 +955,11 @@
       ],
       "documentation": [
         {
-          "docname": "guides/run_env",
+          "docname": "guides/run_task",
           "label": "Environment launch guide"
         }
       ],
-      "details": "The run-env launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
+      "details": "The run-task launcher discovers task packages, decodes the selected deployment, and creates the registered Gym environment. Use its launch guide to inspect a task, configure a run, and understand where configuration becomes a live environment."
     },
     {
       "id": "config-loader",
@@ -3790,8 +3790,8 @@
       "source": "cli",
       "target": "env-launcher",
       "relation": "calls",
-      "description": "Dispatch the run-env command to the environment launcher.",
-      "scope": "Lazy command dispatch for run-env (and its run-task alias), not an unconditional startup call.",
+      "description": "Dispatch the run-task command to the environment launcher.",
+      "scope": "Lazy command dispatch for run-task, not an unconditional startup call.",
       "provenance": "source-reviewed",
       "evidence": [
         {
@@ -3799,7 +3799,7 @@
           "symbol": "<module>",
           "start_line": 68,
           "end_line": 68,
-          "excerpt": "        target=\"embodichain.lab.scripts.run_env:cli\","
+          "excerpt": "        target=\"embodichain.lab.scripts.run_task:cli\","
         },
         {
           "path": "embodichain/cli/main.py",
@@ -3859,7 +3859,7 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1018,
           "end_line": 1018,
@@ -3916,7 +3916,7 @@
       "provenance": "source-reviewed",
       "evidence": [
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1628,
           "end_line": 1628,
@@ -3966,7 +3966,7 @@
           "excerpt": "        cfg: EmbodiedEnvCfg = config_to_cfg(\n            gym_config,\n            manager_modules=get_manager_modules(),\n            source_path=gym_config_source_path,\n            task_program_path_override=getattr(args, \"task_program\", None),\n        )"
         },
         {
-          "path": "embodichain/lab/scripts/run_env.py",
+          "path": "embodichain/lab/scripts/run_task.py",
           "symbol": "cli",
           "start_line": 1680,
           "end_line": 1680,
