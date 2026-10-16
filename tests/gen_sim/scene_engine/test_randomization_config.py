@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from embodichain.gen_sim.scene_engine.randomization import generation
+from embodichain.gen_sim.scene_engine.randomization import generation, persistence
 from embodichain.gen_sim.scene_engine.randomization.cfg import (
     SceneRandomizationCfg,
     load_randomization_config,
@@ -300,12 +300,14 @@ def test_unified_cli_passes_workspace_config_and_rebuild_and_reports_result(
     )
     output_root = tmp_path / "source"
     calls = []
+    saved = []
+    run_dir = output_root / "scene_layouts/run_001"
 
     def randomize_scene(
         cfg: SceneRandomizationCfg, *, rebuild: bool = False
     ) -> SimpleNamespace:
         calls.append((cfg, rebuild))
-        return SimpleNamespace(
+        result = SimpleNamespace(
             baseline=SimpleNamespace(
                 path=cfg.base_data_path, cache_hit=True, data={"groups": [{}, {}]}
             ),
@@ -314,8 +316,14 @@ def test_unified_cli_passes_workspace_config_and_rebuild_and_reports_result(
             attempts=4,
             solver_status_counts={"solved": 3, "no_solution": 1},
         )
+        return result
+
+    def save_layouts(result: SimpleNamespace, *, output_root: str) -> Path:
+        saved.append((result, output_root))
+        return run_dir
 
     monkeypatch.setattr(generation, "randomize_scene", randomize_scene)
+    monkeypatch.setattr(persistence, "save_layouts", save_layouts)
 
     main(
         [
@@ -343,7 +351,12 @@ def test_unified_cli_passes_workspace_config_and_rebuild_and_reports_result(
     assert "Cache: reused" in output
     assert "Sampling: completed" in output
     assert "Attempts: 4" in output
-    assert "Layouts: 3 (in memory; not saved)" in output
+    assert len(saved) == 1
+    assert saved[0][0].status == "completed"
+    assert saved[0][1] == str(output_root)
+    assert "Layouts: 3" in output
+    assert f"Run directory: {run_dir}" in output
+    assert f"Manifest: {run_dir / 'run_result.json'}" in output
     assert "no_solution=1" in output
 
 
@@ -378,6 +391,13 @@ def test_cli_reports_sampling_outcome_and_returns_normally_on_budget_exhaustion(
         solver_status_counts={status: 1},
     )
     monkeypatch.setattr(generation, "randomize_scene", lambda *a, **kw: result)
+    saved = []
+
+    def save_layouts(actual: SimpleNamespace, *, output_root: str) -> Path:
+        saved.append(actual)
+        return Path(output_root) / "scene_layouts/run_001"
+
+    monkeypatch.setattr(persistence, "save_layouts", save_layouts)
 
     arguments = ["--output_root", str(tmp_path), "--config", str(config_path)]
     if exit_code is None:
@@ -388,7 +408,8 @@ def test_cli_reports_sampling_outcome_and_returns_normally_on_budget_exhaustion(
         assert exc.value.code == exit_code
     output = capsys.readouterr().out
     assert f"Sampling: {status}" in output
-    assert f"Layouts: {candidate_count} (in memory; not saved)" in output
+    assert saved == [result]
+    assert f"Layouts: {candidate_count}" in output
 
 
 @pytest.mark.parametrize("missing", ["--config", "--output_root"])
@@ -408,6 +429,26 @@ def test_cli_requires_config_and_workspace(
 
     assert exc.value.code == 2
     assert f"required: {missing}" in capsys.readouterr().err
+
+
+def test_cli_reports_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from embodichain.gen_sim.scene_engine.cli.randomization import main
+
+    config_path = _write_config(tmp_path)
+    monkeypatch.setattr(generation, "randomize_scene", lambda *a, **kw: object())
+
+    def save_layouts(*args: object, **kwargs: object) -> Path:
+        raise OSError("Layout output cannot be written")
+
+    monkeypatch.setattr(persistence, "save_layouts", save_layouts)
+    with pytest.raises(SystemExit) as exc:
+        main(["--output_root", str(tmp_path), "--config", str(config_path)])
+    assert exc.value.code == 2
+    output = capsys.readouterr()
+    assert "Layout output cannot be written" in output.err
+    assert "Manifest:" not in output.out
 
 
 @pytest.mark.parametrize(

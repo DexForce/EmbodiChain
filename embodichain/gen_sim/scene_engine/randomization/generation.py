@@ -57,6 +57,8 @@ class SceneRandomizationResult:
         status: Whether the requested count was reached, the attempt budget
             was exhausted, or the shared generator reported unsupported input.
         solver_status_counts: Number of attempts for each observed solver status.
+        resolved_parameters: Owned snapshot of actual parameters after overrides.
+        algorithm_version: Version of the adapter that generated these candidates.
 
     Candidates establish fixed-orientation group AABB bounds and XY clearances
     only. They do not establish physical stability or task acceptance.
@@ -67,6 +69,8 @@ class SceneRandomizationResult:
     attempts: int
     status: Literal["completed", "budget_exhausted", "unsupported"]
     solver_status_counts: dict[str, int]
+    resolved_parameters: dict[str, int | float]
+    algorithm_version: str
 
 
 def randomize_scene(
@@ -154,7 +158,18 @@ def randomize_scene(
             status = "completed"
             break
     return SceneRandomizationResult(
-        baseline, tuple(candidates), attempts, status, counts
+        baseline,
+        tuple(candidates),
+        attempts,
+        status,
+        counts,
+        resolved_parameters={
+            "seed": seed,
+            "candidate_count": candidate_count,
+            "max_attempts": max_attempts,
+            "collision_margin_m": float(collision_margin_m),
+        },
+        algorithm_version=_GENERATOR,
     )
 
 

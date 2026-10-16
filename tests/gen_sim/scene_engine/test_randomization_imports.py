@@ -60,6 +60,7 @@ assert ({_PACKAGE + '.cfg'!r} in sys.modules) is {loads_configuration!r}
 assert {_PACKAGE + '.baseline'!r} not in sys.modules
 assert {_PACKAGE + '._geometry'!r} not in sys.modules
 assert {_PACKAGE + '.generation'!r} not in sys.modules
+assert {_PACKAGE + '.persistence'!r} not in sys.modules
 assert 'trimesh' not in sys.modules
 """)
 
@@ -78,10 +79,12 @@ from {_PACKAGE}.generation import (
     SceneRandomizationResult,
     randomize_scene,
 )
+from {_PACKAGE}.persistence import save_layouts
 for symbols, owner in (
     ((SceneRandomizationCfg, load_randomization_config), {_PACKAGE + '.cfg'!r}),
     ((PreparedSceneBaseline, prepare_scene_baseline), {_PACKAGE + '.baseline'!r}),
     ((SceneRandomizationResult, randomize_scene), {_PACKAGE + '.generation'!r}),
+    ((save_layouts,), {_PACKAGE + '.persistence'!r}),
 ):
     for symbol in symbols:
         assert symbol.__module__ == owner
@@ -102,6 +105,7 @@ assert {_PACKAGE + '.cfg'!r} not in sys.modules
 assert {_PACKAGE + '.baseline'!r} not in sys.modules
 assert {_PACKAGE + '._geometry'!r} not in sys.modules
 assert {_PACKAGE + '.generation'!r} not in sys.modules
+assert {_PACKAGE + '.persistence'!r} not in sys.modules
 """)
     assert "--config" in result.stdout
     assert "--output_root" in result.stdout

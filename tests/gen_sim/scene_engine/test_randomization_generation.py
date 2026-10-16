@@ -263,15 +263,33 @@ def test_configured_attempt_budget_and_python_overrides(
     monkeypatch.setattr(generation, "generate", no_solution)
     result = generation.randomize_scene(cfg)
     assert result.status == "budget_exhausted" and result.attempts == 3
+    assert result.resolved_parameters == {
+        "seed": 19,
+        "candidate_count": 2,
+        "max_attempts": 3,
+        "collision_margin_m": 0.03,
+    }
     assert [call["ordinal"] for call in calls] == [0, 1, 2]
     assert all(call["seed"] == 19 for call in calls)
     assert all(call["cfg"].collision_margin_m == 0.03 for call in calls)
 
     calls.clear()
-    generation.randomize_scene(cfg, seed=0, max_attempts=2, collision_margin_m=0.0)
+    overridden = generation.randomize_scene(
+        cfg, seed=0, max_attempts=2, collision_margin_m=0.0
+    )
     assert len(calls) == 2
     assert all(call["seed"] == 0 for call in calls)
     assert all(call["cfg"].collision_margin_m == 0.0 for call in calls)
+    assert overridden.resolved_parameters == {
+        "seed": 0,
+        "candidate_count": 2,
+        "max_attempts": 2,
+        "collision_margin_m": 0.0,
+    }
+    cfg.seed = 100
+    assert result.resolved_parameters["seed"] == 19
+    assert overridden.resolved_parameters["seed"] == 0
+    cfg.seed = 19
     assert (cfg.seed, cfg.max_attempts, cfg.collision_margin_m) == (19, 3, 0.03)
 
 

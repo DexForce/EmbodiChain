@@ -318,9 +318,16 @@ def test_cli_prepares_workspace_baseline_then_reuses_it(
     data = yaml.safe_load(output_path.read_text())
     assert {group["root_id"] for group in data["groups"]} == {"bottle", "tray"}
     assert "Groups: 2" in capsys.readouterr().out
+    first_run = tmp_path / "scene_layouts/run_001"
+    first_manifest = json.loads((first_run / "run_result.json").read_text())
+    assert first_manifest["generated_count"] == 10
+    assert len(list((first_run / "layouts").glob("candidate_*.json"))) == 10
+    first_saved = (first_run / "run_result.json").read_bytes()
     original = (output_path.read_bytes(), output_path.stat().st_mtime_ns)
 
     main(arguments)
 
     assert "Cache: reused" in capsys.readouterr().out
     assert (output_path.read_bytes(), output_path.stat().st_mtime_ns) == original
+    assert (first_run / "run_result.json").read_bytes() == first_saved
+    assert (tmp_path / "scene_layouts/run_002/run_result.json").is_file()

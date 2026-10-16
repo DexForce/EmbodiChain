@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Sample grouped scene layouts in memory using the shared scene generator."""
+"""Generate and persist grouped scene layouts using the shared scene generator."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ __all__ = ["main"]
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Prepare a baseline and sample layouts with validated YAML parameters.
+    """Prepare a baseline, generate layouts and save a new run directory.
 
     Exhausting the attempt budget is a normal result, including when no
     layouts were found. The sampling status reports whether the target was met.
@@ -36,8 +36,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="embodichain scene-randomization",
         description=(
-            "Prepare a reusable baseline and sample grouped XY layouts in memory "
-            "using validated YAML parameters. Candidate layouts are not saved."
+            "Prepare a reusable baseline, generate grouped XY layouts using "
+            "validated YAML parameters, and save each successful layout."
         ),
     )
     parser.add_argument(
@@ -57,10 +57,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     from embodichain.gen_sim.scene_engine.randomization.generation import (
         randomize_scene,
     )
+    from embodichain.gen_sim.scene_engine.randomization.persistence import save_layouts
 
     try:
         cfg = load_randomization_config(args.config, output_root=args.output_root)
         result = randomize_scene(cfg, rebuild=args.rebuild)
+        run_dir = save_layouts(result, output_root=args.output_root)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
@@ -69,7 +71,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"Cache: {'reused' if result.baseline.cache_hit else 'rebuilt'}")
     print(f"Sampling: {result.status}")
     print(f"Attempts: {result.attempts}")
-    print(f"Layouts: {len(result.candidates)} (in memory; not saved)")
+    print(f"Layouts: {len(result.candidates)}")
+    print(f"Run directory: {run_dir}")
+    print(f"Manifest: {run_dir / 'run_result.json'}")
     print(
         "Solver statuses: "
         + ", ".join(
