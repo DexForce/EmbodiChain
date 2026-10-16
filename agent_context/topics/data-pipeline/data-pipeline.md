@@ -11,6 +11,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
+| Standalone online BC showcase | `examples/data_pipeline/ods_pick_place_showcase.py`; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |

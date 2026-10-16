@@ -12,6 +12,26 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 
 ## OnlineDataEngine
 
+For an end-to-end online BC example, run
+`python examples/data_pipeline/ods_pick_place_showcase.py` from an installed
+checkout. The single-cycle Franka task qualifies a physical expert, trains a
+small recurrent student from live ODS data, and evaluates the student in a
+separate process. Viser and TensorBoard expose execution and learning metrics.
+Use `--smoke --no-viewer --no-video` for an engineering check or `--mode frozen`
+for a fixed-initial-data control. Detailed commands and acceptance criteria are
+in `extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md`.
+
+The example uses `refill_policy="manual"`: `request_refill()` returns a target
+generation and coalesces an outstanding request; `wait_for_generation()` waits
+for complete publication with a timeout. `get_stats()` reports production and
+consumption counters. With `include_provenance=True`, each copied sample carries
+numeric `ods_run_id`, `ods_episode_id`, and `ods_generation` fields. An optional
+`action_dim` separates expert-command width from the robot-state `state_dim`.
+Omitting these settings preserves the original threshold-refill behavior.
+
+Learner checkpoints in this example resume optimization against a freshly
+created data source. They do not restore the previous shared-memory buffer.
+
 **Module:** `embodichain/data_pipeline/engine/data.py`
 
 `OnlineDataEngine` manages an in-memory, shared buffer for streaming trajectory data. A typical usage pattern is:

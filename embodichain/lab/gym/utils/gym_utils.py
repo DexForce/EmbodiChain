@@ -1734,6 +1734,7 @@ def init_rollout_buffer_from_config(
     batch_size: int,
     state_dim: int,
     device: Union[str, torch.device] = "cpu",
+    action_dim: int | None = None,
 ) -> TensorDict:
     """Initialize a rollout buffer based on the environment configuration.
 
@@ -1749,6 +1750,7 @@ def init_rollout_buffer_from_config(
         max_episode_steps (int): The number of steps in an episode.
         batch_size (int): The batch size for the rollout buffer.
         state_dim (int): The dimension of the flattened state vector.
+        action_dim: Stored action width, defaulting to state_dim.
 
     Returns:
         TensorDict: A TensorDict containing the initialized rollout buffer with keys 'obs', 'actions' and 'rewards'.
@@ -1756,6 +1758,9 @@ def init_rollout_buffer_from_config(
 
     from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
     from embodichain.lab.sim.sensors import SensorCfg
+
+    if action_dim is not None and (type(action_dim) is not int or action_dim < 1):
+        raise ValueError("action_dim must be a positive integer or None")
 
     config = _resolve_gym_components(config, base_dir=Path.cwd()).config
 
@@ -1898,7 +1903,11 @@ def init_rollout_buffer_from_config(
             # TODO: For action, we may support TensorDict structure in the future, which may include
             # qpos, qvel and qf.
             "actions": torch.zeros(
-                (batch_size, max_episode_steps, state_dim),
+                (
+                    batch_size,
+                    max_episode_steps,
+                    state_dim if action_dim is None else action_dim,
+                ),
                 dtype=torch.float32,
                 device=device,
             ),

@@ -221,6 +221,67 @@ def _make_fake_engine(
     return engine
 
 
+def test_manual_refill_coalesces_pending_and_active_generation() -> None:
+    engine = _make_fake_engine(refill_threshold=1)
+    engine.cfg.refill_policy = "manual"
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[1] = 1
+    assert engine.request_refill() == 2
+    assert engine.request_refill() == 2
+    engine._fill_signal.clear()  # The producer accepted the same request.
+    assert engine.request_refill() == 2
+    engine.sample_batch(2, 1)
+    assert not engine._fill_signal.is_set()
+    assert engine._progress.values[6] == 2
+    engine._progress.values[1] = 2
+    assert engine.request_refill() == 3
+
+
+def test_generation_wait_rejects_unrequested_generation_and_times_out() -> None:
+    engine = _make_fake_engine()
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine._progress.values[1] = 1
+    engine.wait_for_generation(1, timeout=0.1)
+    with pytest.raises(ValueError, match="not been requested"):
+        engine.wait_for_generation(2, timeout=0.1)
+    engine._progress.values[0] = 2
+    with pytest.raises(TimeoutError):
+        engine.wait_for_generation(2, timeout=0.01)
+
+
+def test_manual_refill_requires_owner_and_ready() -> None:
+    engine = _make_fake_engine()
+    engine._owner_pid = -1
+    with pytest.raises(RuntimeError):
+        engine.request_refill()
+    engine._owner_pid = os.getpid()
+    engine._set_state(OnlineDataEngineState.STOPPED)
+    with pytest.raises(RuntimeError):
+        engine.request_refill()
+
+
+def test_stats_exclude_write_window_and_are_detached() -> None:
+    engine = _make_fake_engine(lock_start=0, lock_end=1)
+    engine._progress = engine_module._ProducerProgress(engine._mp_ctx)
+    engine.run_id = 12
+    stats = engine.get_stats()
+    assert stats["valid_frames"] == (BUFFER_SIZE - 1) * MAX_EPISODE_STEPS
+    engine._progress.add(2, 1)
+    assert stats["successful_episodes"] == 0
+    assert engine.get_stats()["successful_episodes"] == 1
+
+
+def test_config_buffer_allocates_independent_action_width() -> None:
+    from embodichain.lab.gym.utils.gym_utils import init_rollout_buffer_from_config
+
+    config = {"enable_sensor": False}
+    buffer = init_rollout_buffer_from_config(config, 5, 2, 9, action_dim=8)
+    assert buffer["obs", "robot", "qpos"].shape == (2, 5, 9)
+    assert buffer["actions"].shape == (2, 5, 8)
+    legacy = init_rollout_buffer_from_config(config, 5, 2, 9)
+    assert legacy["actions"].shape == (2, 5, 9)
+
+
 def _install_fake_starting_worker(
     engine: OnlineDataEngine, *, initialize: bool = True
 ) -> MagicMock:

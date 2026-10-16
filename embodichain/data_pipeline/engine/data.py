@@ -23,6 +23,7 @@ import sys
 import threading
 import time
 import multiprocessing as mp
+import uuid
 
 from dataclasses import dataclass
 from enum import Enum
@@ -219,6 +220,15 @@ class OnlineDataEngineCfg:
     state_dim: int = 14
     """Dimensionality of the state space."""
 
+    action_dim: int | None = None
+    """Stored expert action width; None preserves the historical state_dim width."""
+
+    refill_policy: Literal["sample_threshold", "manual"] = "sample_threshold"
+    """Automatic sample-count refill or owner-requested refill."""
+
+    include_provenance: bool = False
+    """Include numeric ods_run_id, ods_episode_id and ods_generation fields."""
+
     buffer_device: str = "cpu"
     """Device on which the shared buffer is allocated."""
 
@@ -247,6 +257,18 @@ class OnlineDataEngineCfg:
     """Append-only task/subtask dictionary capacity in UTF-8 bytes. Descriptions
     remain available for copied samples after trajectory slots are reused.
     Exhaustion fails the worker explicitly; increase this for many unique tasks."""
+
+
+class _ProducerProgress:
+    """Small shared progress record, independent of the trajectory write lock."""
+
+    def __init__(self, context: object) -> None:
+        # requested, completed, successes, failures, frames, seconds, samples
+        self.values = context.Array("d", [1, 0, 0, 0, 0, 0, 0])
+
+    def add(self, index: int, value: float) -> None:
+        with self.values.get_lock():
+            self.values[index] += value
 
 
 def _populate_language_indices(
@@ -322,6 +344,7 @@ def _apply_worker_simulation_overrides(
     (notably Newton's ``cuda:0`` device) and physics settings intact while
     still applying the worker's headless/render/GPU options.
     """
+
     sim_cfg.headless = bool(gym_config.get("headless", True))
     sim_cfg.render_cfg.renderer = str(gym_config.get("renderer", "hybrid"))
     sim_cfg.gpu_id = int(gym_config.get("gpu_id", 0))
@@ -352,6 +375,8 @@ def _run_sim_worker(
     state_value: Synchronized,
     error_reported: list[bool],
     language_registry: SharedLanguageRegistry | None = None,
+    progress: _ProducerProgress | None = None,
+    run_id: int = 0,
 ) -> None:
     """Simulation subprocess entry point.
 
@@ -424,6 +449,16 @@ def _run_sim_worker(
 
     # --- Main loop: wait for fill signal, then fill the entire buffer -------
     try:
+        if cfg.action_dim is not None:
+            spec = env.get_wrapper_attr("expert_action_spec")
+            robot = env.get_wrapper_attr("robot")
+            if (
+                spec.width != cfg.action_dim
+                or robot.get_qpos().shape[-1] != cfg.state_dim
+            ):
+                raise ValueError(
+                    "ODS state/action widths disagree with the live environment"
+                )
         while True:
             fill_signal.wait()
             fill_signal.clear()
@@ -434,6 +469,12 @@ def _run_sim_worker(
                     color="cyan",
                 )
                 break
+
+            started_at = time.monotonic()
+            generation = 1
+            if progress is not None:
+                with progress.values.get_lock():
+                    generation = int(progress.values[1]) + 1
 
             log_info(
                 "[Simulation Process] Fill signal received. Starting full buffer fill.",
@@ -475,6 +516,8 @@ def _run_sim_worker(
                     )
                     if result.completed and result.all_success:
                         break
+                    if progress is not None:
+                        progress.add(3, num_envs)
                     if close_signal.is_set() or result.terminal_reason == "interrupted":
                         return
                     log_warning(
@@ -491,6 +534,22 @@ def _run_sim_worker(
 
                 if language_registry is not None:
                     _populate_language_indices(tmp_buffer, result, language_registry)
+
+                if progress is not None:
+                    with progress.values.get_lock():
+                        episode_start = int(progress.values[2])
+                        progress.values[2] += len(tmp_buffer)
+                        progress.values[4] += int(tmp_buffer["valid"].sum().item())
+                    if cfg.include_provenance:
+                        for offset in range(len(tmp_buffer)):
+                            mask = tmp_buffer["valid"][offset]
+                            for key, value in (
+                                ("ods_run_id", run_id),
+                                ("ods_generation", generation),
+                                ("ods_episode_id", episode_start + offset),
+                            ):
+                                tmp_buffer[key][offset].fill_(-1)
+                                tmp_buffer[key][offset][mask] = value
 
                 rollout_idx += 1
 
@@ -523,6 +582,11 @@ def _run_sim_worker(
                 lock_index[0] = -1
                 lock_index[1] = -1
 
+            if progress is not None:
+                with progress.values.get_lock():
+                    progress.values[1] = generation
+                    progress.values[5] += time.monotonic() - started_at
+
             # Signal that the buffer contains valid data for the first time.
             # is_set() is checked so subsequent refills do not redundantly set it.
             if not init_signal.is_set():
@@ -542,6 +606,10 @@ def _run_sim_worker(
                 error,
             )
         env.close()
+        if os.environ.get("EMBODICHAIN_SIM_EXIT_PROCESS") == "0":
+            from embodichain.lab.sim import SimulationManager
+
+            SimulationManager.flush_cleanup_queue()
 
 
 def _sim_worker_fn(
@@ -556,6 +624,8 @@ def _sim_worker_fn(
     failed_signal: MpEvent,
     state_value: Synchronized,
     language_registry: SharedLanguageRegistry | None = None,
+    progress: _ProducerProgress | None = None,
+    run_id: int = 0,
 ) -> None:
     """Run the simulation worker and publish a stable exception envelope.
 
@@ -579,7 +649,9 @@ def _sim_worker_fn(
             state_value,
             error_reported,
         )
-        if language_registry is None:
+        if progress is not None:
+            _run_sim_worker(*worker_args, language_registry, progress, run_id)
+        elif language_registry is None:
             _run_sim_worker(*worker_args)
         else:
             _run_sim_worker(*worker_args, language_registry)
@@ -657,6 +729,13 @@ class OnlineDataEngine:
         self._cleanup_complete = False
         self._forced_shutdown_attempted = False
         self.cfg = cfg
+        if cfg.refill_policy not in {"sample_threshold", "manual"}:
+            raise ValueError("refill_policy must be 'sample_threshold' or 'manual'")
+        if cfg.action_dim is not None and (
+            type(cfg.action_dim) is not int or cfg.action_dim < 1
+        ):
+            raise ValueError("action_dim must be a positive integer or None")
+        self.run_id = uuid.uuid4().int & ((1 << 63) - 1)
 
         if cfg.max_generation_attempts < 1:
             raise ValueError(
@@ -694,6 +773,7 @@ class OnlineDataEngine:
 
         # Use a spawn context to avoid forking unsafe runtime state.
         self._mp_ctx = mp.get_context("forkserver")
+        self._progress = _ProducerProgress(self._mp_ctx)
         self._language_registry = SharedLanguageRegistry(
             cfg.language_buffer_bytes, context=self._mp_ctx
         )
@@ -762,6 +842,8 @@ class OnlineDataEngine:
                         self._worker_failed_signal,
                         self._state_value,
                         getattr(self, "_language_registry", None),
+                        getattr(self, "_progress", None),
+                        getattr(self, "run_id", 0),
                     ),
                     # Some planners create their own process pool. A daemonic
                     # producer would make those nested workers illegal.
@@ -1005,12 +1087,23 @@ class OnlineDataEngine:
             batch_size=self.cfg.buffer_size,
             max_episode_steps=max_episode_steps,
             state_dim=self.cfg.state_dim,
+            **(
+                {"action_dim": self.cfg.action_dim}
+                if self.cfg.action_dim is not None
+                else {}
+            ),
         )
 
         for key in ("task_index", "subtask_index"):
             shared_td[key] = torch.full(
                 shared_td.batch_size, -1, dtype=torch.int64, device=shared_td.device
             )
+
+        if self.cfg.include_provenance:
+            for key in ("ods_run_id", "ods_episode_id", "ods_generation"):
+                shared_td[key] = torch.full(
+                    shared_td.batch_size, -1, dtype=torch.int64, device=shared_td.device
+                )
 
         if shared_td.device.type == "cpu":
             shared_td.share_memory_()
@@ -1224,6 +1317,96 @@ class OnlineDataEngine:
     # Refill criterion
     # -----------------------------------------------------------------------
 
+    def request_refill(self) -> int:
+        """Request a fill, coalescing an outstanding manual request.
+
+        Returns:
+            Generation that will contain the requested fresh data.
+
+        Raises:
+            RuntimeError: If called outside READY or from a reader process.
+        """
+        self._require_owner_process("request_refill")
+        error = self._receive_worker_error()
+        if error is not None:
+            raise error
+        self._require_state(OnlineDataEngineState.READY, "request_refill")
+        self._ensure_worker_alive()
+        with self._progress.values.get_lock():
+            values = self._progress.values
+            if values[0] <= values[1]:
+                values[0] = values[1] + 1
+                self._fill_signal.set()
+            return int(values[0])
+
+    def wait_for_generation(self, generation: int, timeout: float = 300.0) -> None:
+        """Wait for a requested generation while propagating worker failures.
+
+        Args:
+            generation: Positive generation returned by request_refill.
+            timeout: Finite positive timeout in seconds.
+
+        Raises:
+            ValueError: If the generation was not requested or timeout is invalid.
+            TimeoutError: If publication does not finish before the deadline.
+        """
+        if type(generation) is not int or generation < 1:
+            raise ValueError("generation must be a positive integer")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be finite and positive")
+        with self._progress.values.get_lock():
+            if generation > self._progress.values[0]:
+                raise ValueError("generation has not been requested")
+        deadline = time.monotonic() + timeout
+        while True:
+            error = self._receive_worker_error()
+            if error is not None:
+                raise error
+            self._require_state(OnlineDataEngineState.READY, "wait_for_generation")
+            self._ensure_worker_alive()
+            error = self._receive_worker_error()
+            if error is not None:
+                raise error
+            with self._progress.values.get_lock():
+                if self._progress.values[1] >= generation:
+                    return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"ODS generation {generation} was not published in {timeout}s"
+                )
+            self._close_signal.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    def get_stats(self) -> dict[str, int | float]:
+        """Return a detached snapshot of production, consumption and valid rows.
+
+        Returns:
+            Engine identity, requested/completed generations, episode/frame
+            counts, cumulative production seconds and trajectory sample count.
+        """
+        names = (
+            "requested_generation",
+            "completed_generation",
+            "successful_episodes",
+            "failed_episodes",
+            "generated_frames",
+            "production_seconds",
+            "sampled_chunks",
+        )
+        with self._progress.values.get_lock():
+            values = list(self._progress.values[:])
+        stats = {
+            name: (value if name == "production_seconds" else int(value))
+            for name, value in zip(names, values)
+        }
+        stats["run_id"] = self.run_id
+        with self._lock_index.get_lock():
+            valid = self.shared_buffer["valid"].clone()
+            start, end = self._lock_index[:]
+            if start >= 0:
+                valid[start:end] = False
+            stats["valid_frames"] = int(valid.sum().item())
+        return stats
+
     def _trigger_refill_if_needed(self, count: int = 1) -> None:
         """Accumulate sample count and trigger a buffer refill when the threshold is reached.
 
@@ -1235,6 +1418,11 @@ class OnlineDataEngine:
             count: Number of individual trajectory samples drawn in the latest
                 call to :meth:`sample_batch` (typically equal to *batch_size*).
         """
+        progress = getattr(self, "_progress", None)
+        if progress is not None:
+            progress.add(6, count)
+        if self.cfg.refill_policy == "manual":
+            return
         with self._sample_count.get_lock():
             self._sample_count.value += count
             should_refill = (
@@ -1243,9 +1431,11 @@ class OnlineDataEngine:
             )
             if should_refill:
                 self._sample_count.value = 0
+                if progress is not None:
+                    progress.add(0, 1)
+                self._fill_signal.set()
 
         if should_refill:
-            self._fill_signal.set()
             log_info(
                 f"[OnlineDataEngine] Sample count reached refill threshold (refill_threshold * buffer_size) "
                 f"({self.cfg.refill_threshold * self.buffer_size}). Signalling subprocess to refill the buffer.",

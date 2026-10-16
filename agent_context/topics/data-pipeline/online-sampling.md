@@ -24,10 +24,14 @@
    checks every row in a sampled window, enforces `continuity_id`, applies
    segment/boundary/episode mode rules, and clones the final batch before releasing the lock
    (`engine/data.py`).
-6. Refill is requested after sample count reaches `refill_threshold * buffer_size`. Duplicate
+6. The default sample-threshold refill is requested after sample count reaches `refill_threshold * buffer_size`. Duplicate
    requests are suppressed only while `fill_signal` remains set; the worker clears it when it
    starts a fill, so sampling that reaches another threshold during an active fill may queue
    one subsequent full refill.
+   With `refill_policy="manual"`, only the owner requests subsequent fills through
+   `request_refill()`. Outstanding manual requests coalesce, including while the
+   worker is writing. `wait_for_generation()` observes complete publication and
+   propagates failure/timeout; readiness is still established by the initial fill.
 7. Worker exceptions are serialized into a fixed 64 KiB envelope and reconstructed when safely
    picklable; otherwise consumers receive stable `OnlineDataWorkerError`. The error is shared
    so all consumers observe terminal failure.
@@ -39,6 +43,18 @@
    readers sample shared memory independently.
 
 ## Sampling failure boundary
+
+`action_dim` optionally separates stored expert command width from robot-state
+width; omitted values preserve `state_dim` for both. Explicit widths are checked
+against the live expert action spec and full robot qpos before generation.
+`include_provenance` adds numeric run/episode/generation IDs while rows remain
+excluded from readers. `get_stats()` returns detached production/consumption
+counters and excludes the active write window from valid-frame counts. These
+IDs identify live data; they do not provide shared-buffer checkpoint recovery.
+
+`examples/data_pipeline/ods_pick_place_showcase.py` composes manual ODS refill
+with a small recurrent BC learner and a separate student-only evaluator. Its
+checkpoint resume starts a new data source rather than restoring replay.
 
 `sample_batch()` checks the shared worker error, READY state and worker liveness
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked
