@@ -260,6 +260,19 @@ embodichain.gen_sim.gradio_ui.gradio_app
 
    main
 
+embodichain.gen_sim.scene_engine.cli.randomization
+--------------------------------------------------
+
+Command-line entry point for grouped layout generation from an existing
+Scene Engine workspace. Validates the YAML policy, prepares a reusable
+baseline and saves successful candidates with a completion manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.cli.randomization
+
+.. autosummary::
+
+   main
+
 embodichain.gen_sim.scene_engine.core.scene_edit_plan
 -----------------------------------------------------
 
@@ -293,6 +306,104 @@ Entity metadata and deterministic UID indexing for schema-v2 USD scene stages.
    UsdEntityDesc
    UsdSceneBinding
    UsdSceneIndex
+
+embodichain.gen_sim.scene_engine.randomization.baseline
+-------------------------------------------------------
+
+Extracts one table work area, group AABBs and root-relative member poses from
+rigid GLB exports. A group contains a direct table child and all descendants.
+The baseline cache is reused only when source identity, extraction version,
+structure and checksum match; preparation leaves the source export untouched.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.baseline
+
+.. autosummary::
+
+   PreparedSceneBaseline
+   prepare_scene_baseline
+
+embodichain.gen_sim.scene_engine.randomization.cfg
+--------------------------------------------------
+
+Loads a closed, versioned YAML policy and resolves the workspace's
+``scene_export/`` input and ``scene_randomization_base.yaml`` baseline path.
+The workspace is supplied separately through ``output_root``. For example:
+
+.. code-block:: yaml
+
+   schema_version: 1
+   seed: 42
+   candidate_count: 10
+   max_attempts: 1000
+   collision_margin_m: 0.02
+
+Generate and save layouts, then cycle the original scene and saved candidates:
+
+.. code-block:: bash
+
+   embodichain scene-randomization --output_root ./workspace --config policy.yaml
+   python -m embodichain.gen_sim.scene_engine.randomization.loading \
+       --layout-dir ./workspace/scene_layouts/run_001/layouts --interval 3
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.cfg
+
+.. autosummary::
+
+   SceneRandomizationCfg
+   load_randomization_config
+
+embodichain.gen_sim.scene_engine.randomization.generation
+---------------------------------------------------------
+
+Uses the shared seeded procedural generator and XY layout solver, then expands
+every group from the same baseline. Successful candidates contain a full
+``SceneFragment`` and a ``SceneVariant`` that preserve each object's orientation,
+height, scale and exported collision hull budget. Acceptance checks group AABB
+bounds and clearances; it does not establish physical stability or task success.
+
+``budget_exhausted`` is a normal result that retains any successful candidates.
+The result records actual parameters, proposal attempts and solver outcomes;
+generation does not save candidates until ``save_layouts`` is called.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.generation
+
+.. autosummary::
+
+   SceneRandomizationResult
+   randomize_scene
+
+embodichain.gen_sim.scene_engine.randomization.loading
+------------------------------------------------------
+
+Validates a completed run's candidate files against its manifest, policy,
+baseline and unchanged source export, then reconstructs every group member's
+absolute pose without generating layouts or rewriting caches. Playback loads
+assets once and cycles original and candidate poses without advancing physics.
+Runs with no successful candidates cannot be previewed.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.loading
+
+.. autosummary::
+
+   LoadedLayouts
+   load_layouts
+   preview_layouts
+   main
+
+embodichain.gen_sim.scene_engine.randomization.persistence
+----------------------------------------------------------
+
+Saves each result in a distinct ``scene_layouts/run_NNN/`` directory containing
+the resolved policy and candidate group centers. Relative references identify
+the existing source export and baseline, so those files must remain available
+and unchanged. The completion manifest is published last, including for a run
+with zero candidates; interrupted writes may leave a run without that manifest.
+
+.. currentmodule:: embodichain.gen_sim.scene_engine.randomization.persistence
+
+.. autosummary::
+
+   save_layouts
 
 embodichain.gen_sim.simready_pipeline.cli.start
 -----------------------------------------------

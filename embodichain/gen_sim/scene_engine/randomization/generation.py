@@ -24,6 +24,9 @@ from typing import Literal
 
 import numpy as np
 
+from embodichain.gen_sim.scene_engine.pipeline.utils.scene_usd import (
+    _mesh_collision_cfg,
+)
 from embodichain.lab.sim.cfg import RigidObjectCfg
 from embodichain.lab.sim.scene.composition import SceneFragment
 from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
@@ -214,6 +217,9 @@ def _build_recipe(baseline: PreparedSceneBaseline) -> SceneRecipe:
         runtime["shape"]["fpath"] = str(
             (export_root / entry["shape"]["fpath"]).resolve()
         )
+        runtime["shape"]["collision"] = _mesh_collision_cfg(
+            entry.get("max_convex_hull_num", 32)
+        ).to_dict()
         entity = RigidObjectCfg.from_dict(runtime)
         # from_dict infers extrinsic xyz. Portable exports and SceneFragment
         # use intrinsic XYZ, so supply the authoritative rigid matrix explicitly.

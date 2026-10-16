@@ -81,6 +81,35 @@ def _mesh_aabb(root: Path, entry: dict, pose: np.ndarray) -> np.ndarray:
     return np.asarray((points[:, :2].min(axis=0), points[:, :2].max(axis=0)))
 
 
+@pytest.mark.parametrize("hull_budget", [None, 1, 16])
+def test_generated_fragments_preserve_exported_collision_configuration(
+    grouped_export: tuple[Path, SceneRandomizationCfg, dict],
+    hull_budget: int | None,
+) -> None:
+    root, cfg, _ = grouped_export
+    config_path = root / "scene_config.json"
+    config = json.loads(config_path.read_text())
+    if hull_budget is not None:
+        for entry in config["background"] + config["rigid_object"]:
+            entry["max_convex_hull_num"] = hull_budget
+        config_path.write_text(json.dumps(config))
+
+    result = generation.randomize_scene(cfg, candidate_count=1)
+
+    assert result.status == "completed"
+    fragment = result.candidates[0].fragment
+    assert fragment is not None
+    for entity in fragment.entities:
+        collision = entity.shape.collision
+        assert collision is not None
+        if hull_budget == 1:
+            assert collision.approximation == "convex_hull"
+        else:
+            assert collision.approximation == "convex_decomposition"
+            assert collision.max_hulls == (32 if hull_budget is None else hull_budget)
+            assert collision.acd_method == "vhacd"
+
+
 def test_generated_groups_move_all_members_and_satisfy_measured_aabbs(
     grouped_export: tuple[Path, SceneRandomizationCfg, dict],
 ) -> None:
