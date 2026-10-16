@@ -152,15 +152,10 @@ class RobotSpecCfg:
 
 @configclass
 class EmbodimentSpecCfg:
-    """Official embodiment component selected by a suite.
-
-    The benchmark runner still accepts the legacy ``robot`` provider while
-    component loading is migrated in the embodiment integration layer.  These
-    fields are resolved and recorded now so case manifests remain stable when
-    that loader is enabled.
-    """
+    """Official component supplying the runtime robot and endpoint bindings."""
 
     component: str = ""
+    resource_id: str | None = None
     overrides: dict[str, Any] = {}
     initial_qpos: list[float] = []
     endpoint_bindings: dict[str, Any] = {}
@@ -257,6 +252,10 @@ class SuiteCfg:
         protocol = ProtocolCfg(**data.get("protocol", {}))
         raw_embodiment = data.get("embodiment")
         if raw_embodiment is not None:
+            if "robot" in data:
+                raise ValueError(
+                    "embodiment.component owns robot; remove inline robot."
+                )
             if not isinstance(raw_embodiment, Mapping):
                 raise TypeError("embodiment must be a mapping.")
             embodiment = EmbodimentSpecCfg(**dict(raw_embodiment))
@@ -783,7 +782,16 @@ def load_suite(name_or_path: str = "smoke") -> SuiteCfg:
         raise TypeError(
             f"Expected a mapping in suite {path}, got {type(data).__name__}."
         )
-    return SuiteCfg.from_dict(data)
+    suite = SuiteCfg.from_dict(data)
+    if suite.embodiment is not None:
+        from .embodiments import _resolve_component_path
+
+        suite.embodiment.component = str(
+            _resolve_component_path(
+                suite.embodiment.component, base_dir=path.resolve().parent
+            )
+        )
+    return suite
 
 
 def suite_to_dict(suite: SuiteCfg) -> dict[str, Any]:
@@ -793,6 +801,9 @@ def suite_to_dict(suite: SuiteCfg) -> dict[str, Any]:
     data.pop("free_space", None)
     if data.get("embodiment") is None:
         data.pop("embodiment", None)
+    else:
+        # The component is the sole owner; robot is derived runtime metadata.
+        data.pop("robot", None)
     for track in data.get("tracks", []):
         domain = track.get("domain")
         if isinstance(domain, dict):

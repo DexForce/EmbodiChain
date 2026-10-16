@@ -107,24 +107,40 @@ scenes. Use `--no-headless` instead to open the live simulator viewer.
 
 This migration layer provides shared contracts, versioned domain populations,
 capability-aware denominators, and recomputable generalization statistics while
-preserving existing skill scoring. Official embodiment loading and new physical
-success criteria remain follow-up work. The three existing report tables remain
+preserving existing skill scoring. Provider-specific physical evaluation remains
+a separate migration. The three existing report tables remain
 unchanged; domain summaries are rendered as report metadata so the table count
 stays stable.
 
-Suites may also declare the official embodiment identity while the legacy robot
-provider remains active during migration:
+Suites can select an official embodiment instead of the legacy `robot` provider:
 
 ```yaml
 embodiment:
-  component: ../../embodichain_tasks/configs/components/embodiments/franka_panda.yaml
+  component: embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml
   overrides: {}
 ```
 
-The resolved component and overrides are recorded in `case_manifest.json`; the
-static resolver also records endpoint bindings, declared capabilities, runtime
-services, and a stable component hash. Runtime `RobotCfg` construction and
-simulator binding remain the next embodiment integration layer.
+The runner builds the component's `simulation` robot using the shared robot
+decoder, preserves its TCP, and supplies its selected motion endpoint and
+gripper command preset to the existing scenario/planner pipeline. Do not repeat
+inline `robot` configuration or conflicting track-level gripper commands.
+Multiple motion resources require an explicit `embodiment.resource_id`; this
+selects one resource, not a coordinated dual-arm benchmark. Relative component
+paths resolve from the suite file; packaged component references work from any
+working directory. Independent camera acquisition and Task Program runtime
+services are outside this direct-simulation host.
+
+`atomic_ur5_embodiment` demonstrates PickUp with nominal and object-XY domains:
+
+```bash
+python -m scripts.benchmark.motion_generation.run_benchmark \
+  --suite atomic_ur5_embodiment --device cuda
+```
+
+The component identity, bindings, declared capabilities, services, and stable
+hash are recorded in `case_manifest.json`. The suite retains the existing
+evaluation and three-table report. This example requires live GPU physics and
+cuRobo; configuration tests do not establish physical task success.
 
 ### Domain provenance
 

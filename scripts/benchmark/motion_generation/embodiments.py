@@ -14,19 +14,21 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Static embodiment resolution for configuration-driven benchmark suites."""
+"""Resolve official embodiment components for benchmark metadata and runtime."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 import yaml
 
-from .config import EmbodimentSpecCfg, RobotSpecCfg, stable_hash
+from .config import EmbodimentSpecCfg, RobotSpecCfg, _merge_mappings, stable_hash
 from .contracts import CapabilityDecision
 
 __all__ = [
@@ -56,6 +58,8 @@ class EmbodimentResolution:
     endpoint_bindings: Mapping[str, Mapping[str, str]]
     runtime_services: Mapping[str, object]
     source: str
+    simulation: Mapping[str, object] | None = None
+    skill_profile: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not self.embodiment_id or self.embodiment_id != self.embodiment_id.strip():
@@ -86,6 +90,10 @@ class EmbodimentResolution:
             "runtime_services",
             MappingProxyType(dict(self.runtime_services)),
         )
+        for name in ("simulation", "skill_profile"):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, MappingProxyType(deepcopy(dict(value))))
 
     def to_metadata(self) -> dict[str, object]:
         """Return JSON-safe resolved embodiment metadata."""
@@ -135,6 +143,26 @@ class YamlEmbodimentProvider:
         with path.open(encoding="utf-8") as stream:
             raw = yaml.safe_load(stream) or {}
         component = _mapping(raw, name="embodiment component")
+        from embodichain.lab.gym.utils._component_composition import (
+            _resolve_embodiment_component,
+        )
+
+        simulation, _, profile = _resolve_embodiment_component(
+            {"component": str(path), "overrides": spec.overrides}, base_dir=path.parent
+        )
+        if spec.initial_qpos:
+            if "init_qpos" in spec.overrides:
+                raise ValueError(
+                    "Specify initial_qpos or overrides.init_qpos, not both."
+                )
+            if any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in spec.initial_qpos
+            ):
+                raise ValueError("embodiment.initial_qpos must contain finite numbers.")
+            simulation["init_qpos"] = list(spec.initial_qpos)
         embodiment_id = component.get("embodiment_id")
         if not isinstance(embodiment_id, str) or not embodiment_id.strip():
             raise ValueError("embodiment component.embodiment_id must be non-empty.")
@@ -156,6 +184,8 @@ class YamlEmbodimentProvider:
             resource_id = resource_mapping.get("resource_id")
             if not isinstance(resource_id, str) or not resource_id.strip():
                 raise ValueError("embodiment resources need resource_id.")
+            if resource_id in endpoints:
+                raise ValueError(f"Duplicate embodiment resource {resource_id!r}.")
             endpoint_map: dict[str, str] = {}
             raw_endpoints = resource_mapping.get("endpoints", [])
             if not isinstance(raw_endpoints, list):
@@ -168,18 +198,32 @@ class YamlEmbodimentProvider:
                     raise ValueError("embodiment endpoints need endpoint_id.")
                 if not isinstance(control_part, str) or not control_part.strip():
                     raise ValueError("embodiment endpoints need control_part.")
+                if endpoint_id in endpoint_map:
+                    raise ValueError(f"Duplicate embodiment endpoint {endpoint_id!r}.")
                 endpoint_map[endpoint_id] = control_part
                 raw_capabilities = endpoint_mapping.get("capabilities", [])
                 if not isinstance(raw_capabilities, list):
                     raise TypeError("endpoint capabilities must be a list.")
                 capabilities.update(str(value) for value in raw_capabilities)
             endpoints[resource_id] = endpoint_map
+        for resource_id, bindings in spec.endpoint_bindings.items():
+            if resource_id not in endpoints:
+                raise ValueError(f"Unknown embodiment resource {resource_id!r}.")
+            for endpoint_id, control_part in _mapping(
+                bindings, name="endpoint_bindings resource"
+            ).items():
+                if endpoint_id not in endpoints[resource_id]:
+                    raise ValueError(f"Unknown embodiment endpoint {endpoint_id!r}.")
+                if not isinstance(control_part, str) or not control_part.strip():
+                    raise ValueError("endpoint bindings need non-empty control parts.")
+                endpoints[resource_id][endpoint_id] = control_part
         resolved = {
             "component": component,
             "overrides": spec.overrides,
             "initial_qpos": spec.initial_qpos,
             "endpoint_bindings": spec.endpoint_bindings,
             "runtime_services": spec.runtime_services,
+            "resource_id": spec.resource_id,
         }
         runtime_services = skill_profile.get("runtime_services", {})
         runtime_services = _mapping(
@@ -191,32 +235,25 @@ class YamlEmbodimentProvider:
             config_hash=stable_hash(resolved),
             capabilities=frozenset(capabilities),
             endpoint_bindings=endpoints,
-            runtime_services=runtime_services,
+            runtime_services=_merge_mappings(runtime_services, spec.runtime_services),
             source="yaml_component",
+            simulation=simulation,
+            skill_profile=profile,
         )
 
 
 def _resolve_component_path(component: str, *, base_dir: Path | None) -> Path:
-    """Resolve a component path against the suite, cwd, and repository roots."""
+    """Resolve a packaged or owner-relative component without CWD fallback."""
     if not isinstance(component, str) or not component.strip():
         raise ValueError("embodiment.component must be a non-empty path.")
-    requested = Path(component).expanduser()
-    candidates = []
-    if requested.is_absolute():
-        candidates.append(requested)
-    else:
-        if base_dir is not None:
-            candidates.append(base_dir / requested)
-        candidates.append(Path.cwd() / requested)
-        candidates.append(Path(__file__).resolve().parents[3] / requested)
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved.is_file():
-            return resolved
-    rendered = ", ".join(str(candidate.resolve()) for candidate in candidates)
-    raise FileNotFoundError(
-        f"Embodiment component {component!r} was not found; checked: {rendered}"
-    )
+    from embodichain.utils import resolve_config_path
+
+    resolved = resolve_config_path(component, base_dir=base_dir or Path.cwd()).resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"Embodiment component {component!r} was not found: {resolved}"
+        )
+    return resolved
 
 
 def resolve_embodiment(

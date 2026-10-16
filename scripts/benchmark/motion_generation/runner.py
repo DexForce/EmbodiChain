@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
@@ -117,7 +118,8 @@ class BenchmarkRunner:
         output_root: str | Path = "outputs/benchmarks",
         video: VideoRecordCfg | None = None,
     ) -> None:
-        self.suite = suite
+        self.suite = deepcopy(suite)
+        suite = self.suite
         self.planner_specs = planner_specs
         self.device = resolve_device(device)
         self.headless = headless
@@ -128,7 +130,17 @@ class BenchmarkRunner:
             suite.robot,
             base_dir=Path.cwd(),
         )
-        self.robot_provider = create_robot_provider(suite.robot)
+        if suite.embodiment is None:
+            self.robot_provider = create_robot_provider(suite.robot)
+        else:
+            from .robots.base import EmbodimentRobotProvider
+
+            self.robot_provider = EmbodimentRobotProvider(
+                self.embodiment_resolution, suite.embodiment.resource_id
+            )
+            suite.robot = deepcopy(self.robot_provider.spec)
+            for track in suite.tracks:
+                self.robot_provider.configure_track(track)
         self.control_part = self.robot_provider.control_part
         self.records: list[TrialRecord] = []
         self.cases: list[BenchmarkCase] = []
@@ -563,6 +575,9 @@ class BenchmarkRunner:
         print("Motion Generation Benchmark")
         print("=" * 60)
         enabled_tracks = self.suite.evaluation_tracks()
+        if self.suite.embodiment is not None:
+            for track in enabled_tracks:
+                self.robot_provider.configure_track(track)
         print(
             f"suite={self.suite.suite_version} device={self.device} "
             f"tracks={','.join(track.id for track in enabled_tracks)} "
@@ -601,6 +616,14 @@ class BenchmarkRunner:
                     track_group = track.group_id or track.id
                     resolved_cases = []
                     for case in cases:
+                        if self.suite.embodiment is not None and (
+                            case.robot_id != self.suite.robot.id
+                            or case.embodiment_id
+                            not in (None, self.embodiment_resolution.embodiment_id)
+                        ):
+                            raise ValueError(
+                                "Provider case conflicts with suite embodiment."
+                            )
                         case_domain = case.domain or domain
                         required = set(case.required_capabilities)
                         if case_domain is not None:
