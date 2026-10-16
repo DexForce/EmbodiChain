@@ -577,6 +577,35 @@ def test_retime_joint_paths_slices_a_single_cpu_path_to_its_valid_prefix():
     torch.testing.assert_close(result.dt, trimmed.dt)
 
 
+@pytest.mark.no_sim
+@pytest.mark.parametrize(
+    "bfloat16_input", ["positions", "velocity", "acceleration", "all"]
+)
+def test_retime_joint_paths_accepts_single_cpu_bfloat16_inputs(
+    bfloat16_input: str,
+) -> None:
+    path = torch.zeros(1, 3, NUM_ARM_JOINTS)
+    # Binary-exact values isolate dtype conversion from input quantization.
+    path[0, :, 0] = torch.tensor([0.0, 0.125, 0.25])
+    limits = {
+        "velocity": torch.ones(NUM_ARM_JOINTS),
+        "acceleration": torch.full((NUM_ARM_JOINTS,), 2.0),
+    }
+    reference = retime_joint_paths(path, constraints=limits, sample_interval=17)
+    if bfloat16_input in {"positions", "all"}:
+        path = path.to(torch.bfloat16)
+    limits = {
+        name: value.to(torch.bfloat16) if bfloat16_input in {name, "all"} else value
+        for name, value in limits.items()
+    }
+
+    result = retime_joint_paths(path, constraints=limits, sample_interval=17)
+
+    assert result.success.tolist() == reference.success.tolist() == [True]
+    for field in ("positions", "velocities", "accelerations", "dt"):
+        torch.testing.assert_close(getattr(result, field), getattr(reference, field))
+
+
 def test_retime_joint_paths_solves_a_cpu_batch_in_one_call(monkeypatch):
     import embodichain.compute.trajectory._toppra_warp as warp_module
 

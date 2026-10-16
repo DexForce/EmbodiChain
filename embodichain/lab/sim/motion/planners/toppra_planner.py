@@ -345,9 +345,12 @@ def retime_joint_paths(
             **{key: value.to(resolved_device) for key, value in result.items()}
         )
 
-    samples = positions.detach().cpu().numpy().astype(np.float64)
+    # Promote before NumPy conversion: NumPy cannot represent Torch bfloat16.
+    samples = positions.detach().to(device="cpu", dtype=torch.float64).numpy()
     to_numpy = lambda limit: (
-        limit.detach().cpu().numpy() if isinstance(limit, torch.Tensor) else limit
+        limit.detach().to(device="cpu", dtype=torch.float64).numpy()
+        if isinstance(limit, torch.Tensor)
+        else limit
     )
     results = [
         _toppra_solve_one_env(
