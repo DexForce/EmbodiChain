@@ -401,10 +401,20 @@ x-gripper-contact: &gripper_contact
   open_qpos: [0.0]
   grasp_qpos: [0.040]
 
+# Parameter anchors are the single edit surface for the first-stage primitive
+# geometry sweep. Runtime object overrides and domain provenance reuse the same
+# values so a replacement cannot drift from its recorded parameters.
+x-cube-size-nominal: &cube_size_nominal [0.05, 0.05, 0.05]
+x-cube-size-uniform-40mm: &cube_size_uniform_40mm [0.04, 0.04, 0.04]
+x-cube-size-uniform-60mm: &cube_size_uniform_60mm [0.06, 0.06, 0.06]
+x-cube-size-aspect-x: &cube_size_aspect_x [0.07, 0.042258, 0.042258]
+x-cube-size-aspect-y: &cube_size_aspect_y [0.042258, 0.07, 0.042258]
+x-cube-size-aspect-z: &cube_size_aspect_z [0.042258, 0.042258, 0.07]
+
 x-cube: &cube
   id: cube_50mm
   kind: cube
-  size: [0.05, 0.05, 0.05]
+  size: *cube_size_nominal
   position: [-0.42, -0.08, 0.05]
   mass: 0.05
   dynamic_friction: 0.97
@@ -416,39 +426,42 @@ x-cube: &cube
 
 x-cube-uniform-40mm: &cube_uniform_40mm
   <<: *cube
-  size: [0.04, 0.04, 0.04]
+  size: *cube_size_uniform_40mm
 
 x-cube-uniform-60mm: &cube_uniform_60mm
   <<: *cube
-  size: [0.06, 0.06, 0.06]
+  size: *cube_size_uniform_60mm
 
 # The elongated variants keep approximately the nominal cube volume while
 # moving the long axis between X, Y, and Z.
 x-cube-aspect-x: &cube_aspect_x
   <<: *cube
-  size: [0.07, 0.042258, 0.042258]
+  size: *cube_size_aspect_x
 
 x-cube-aspect-y: &cube_aspect_y
   <<: *cube
-  size: [0.042258, 0.07, 0.042258]
+  size: *cube_size_aspect_y
 
 x-cube-aspect-z: &cube_aspect_z
   <<: *cube
-  size: [0.042258, 0.042258, 0.07]
+  size: *cube_size_aspect_z
 
 x-domain-cube-nominal: &domain_cube_nominal
   id: nominal
   version: v1
   kind: nominal
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.05, 0.05, 0.05]
+    primitive_parameters:
+      size: *cube_size_nominal
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: nominal_50mm
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: nominal_50mm
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube]
@@ -457,15 +470,18 @@ x-domain-cube-uniform-40mm: &domain_cube_uniform_40mm
   id: cube_uniform_40mm
   version: v1
   kind: robustness
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.04, 0.04, 0.04]
+    primitive_parameters:
+      size: *cube_size_uniform_40mm
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: uniform_40mm
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: uniform_40mm
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube_uniform_40mm]
@@ -474,15 +490,18 @@ x-domain-cube-uniform-60mm: &domain_cube_uniform_60mm
   id: cube_uniform_60mm
   version: v1
   kind: robustness
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.06, 0.06, 0.06]
+    primitive_parameters:
+      size: *cube_size_uniform_60mm
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: uniform_60mm
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: uniform_60mm
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube_uniform_60mm]
@@ -491,15 +510,18 @@ x-domain-cube-aspect-x: &domain_cube_aspect_x
   id: cube_aspect_x
   version: v1
   kind: robustness
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.07, 0.042258, 0.042258]
+    primitive_parameters:
+      size: *cube_size_aspect_x
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: elongated_x
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: elongated_x
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube_aspect_x]
@@ -508,15 +530,18 @@ x-domain-cube-aspect-y: &domain_cube_aspect_y
   id: cube_aspect_y
   version: v1
   kind: robustness
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.042258, 0.07, 0.042258]
+    primitive_parameters:
+      size: *cube_size_aspect_y
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: elongated_y
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: elongated_y
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube_aspect_y]
@@ -525,15 +550,18 @@ x-domain-cube-aspect-z: &domain_cube_aspect_z
   id: cube_aspect_z
   version: v1
   kind: robustness
-  case_generator: configured_asset_geometry
+  case_generator: configured_primitive_parameters
   objects: [cube_50mm]
   perturbations:
-    asset_size_m: [0.042258, 0.042258, 0.07]
+    primitive_parameters:
+      size: *cube_size_aspect_z
   metadata:
-    generalization_axis: asset_geometry
-    asset_family: cube
-    asset_variant: elongated_z
-    nominal_size_m: [0.05, 0.05, 0.05]
+    generalization_axis: primitive_geometry
+    primitive_kind: cube
+    primitive_variant: elongated_z
+    parameter_names: [size]
+    nominal_parameters:
+      size: *cube_size_nominal
   overrides:
     batch_sizes: [1]
     objects: [*cube_aspect_z]
@@ -985,9 +1013,9 @@ tracks:
       objects: [*cube]
       skills: [*skill_push_object]
 
-  # Asset tracks keep their own nominal population so asset-geometry summaries
-  # are not mixed with the position and orientation domains above.
-  - id: asset-cube-rigid-object
+  # Primitive tracks keep their own nominal population so parameterized geometry
+  # summaries are not mixed with the position and orientation domains above.
+  - id: primitive-cube-rigid-object
     scenario: atomic_task
     enabled: true
     domains:
@@ -1017,7 +1045,7 @@ tracks:
       objects: [*cube]
       skills: [*skill_pick_up, *skill_pour, *skill_axis_align]
 
-  - id: asset-cube-held-pose-target
+  - id: primitive-cube-held-pose-target
     scenario: atomic_task
     enabled: true
     domains:
@@ -1047,7 +1075,7 @@ tracks:
       objects: [*cube]
       skills: [*skill_move_held_object]
 
-  - id: asset-cube-place-target
+  - id: primitive-cube-place-target
     scenario: atomic_task
     enabled: true
     domains:
@@ -1077,7 +1105,7 @@ tracks:
       objects: [*cube]
       skills: [*skill_place]
 
-  - id: asset-cube-position-target
+  - id: primitive-cube-position-target
     scenario: atomic_task
     enabled: true
     domains:
