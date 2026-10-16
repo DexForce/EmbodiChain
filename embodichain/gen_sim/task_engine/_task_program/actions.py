@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""GenSim-only action wrappers; the shared Atomic Action implementations stay unchanged."""
+"""GenSim-only policies on shared Atomic Action planning and execution."""
 
 from __future__ import annotations
 
@@ -110,6 +110,7 @@ class _PickSelection:
     raw_candidate_routes: list[tuple[int, AffordancePoseCandidates, torch.Tensor]] = (
         field(default_factory=list)
     )
+    pour_preview: Any = None
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -147,6 +148,9 @@ class GenSimPickUp(PickUp):
     path_simulation: object | None = None
     path_excluded_invocations: frozenset[str] = frozenset()
     closing_geometry_factory: Any = None
+    pour_continuations: dict | None = None
+    pour_scene_vertices: dict | None = None
+    pour_gravity_world: tuple[float, float, float] | None = None
 
     def _approach_alignment_mask(self, grasp_poses, options, approach_direction):
         aligned = super()._approach_alignment_mask(
@@ -159,7 +163,22 @@ class GenSimPickUp(PickUp):
             aligned = aligned & selection.closing_geometry.mask(
                 grasp_poses, selection.object_pose
             )
+        if selection is not None and selection.pour_preview is not None:
+            if selection.object_pose is None:
+                raise ValueError("Pour look-ahead requires the exact Pick object pose.")
+            transforms = pose_inv(selection.object_pose)[:, None, None] @ grasp_poses
+            aligned &= selection.pour_preview.valid_mask(transforms)
         return aligned
+
+    def _iter_downstream_eef_targets(self, object_to_eef_variants, options):
+        selection = _PICK_SELECTION.get()
+        if selection is None or selection.pour_preview is None:
+            yield from super()._iter_downstream_eef_targets(
+                object_to_eef_variants, options
+            )
+            return
+        targets, _ = selection.pour_preview.targets(object_to_eef_variants)
+        yield from targets
 
     def inspect_closing_plan(
         self, request: Any, context: Any, plan: Any, *, screen: Any = None
@@ -389,6 +408,11 @@ class GenSimPickUp(PickUp):
                 semantics.affordance.set_custom_config(ADAPTIVE_GRASP, purpose)
                 request = replace(request, goal=replace(goal, semantics=semantics))
         selection = _PickSelection(request=request)
+        pour_route = (self.pour_continuations or {}).get(request.invocation_id)
+        if pour_route is not None:
+            from .pour_continuation import prepare_preview
+
+            selection.pour_preview = prepare_preview(self, request, context, pour_route)
         if self.closing_geometry_factory is not None:
             selection.closing_geometry = self.closing_geometry_factory(request, context)
 
@@ -2086,6 +2110,9 @@ class GenSimPour(Pour):
     GoalType = Pour.GoalType
     OptionsType = Pour.OptionsType
     binding_contract = Pour.binding_contract
+    continuations: dict | None = None
+    scene_vertices: dict | None = None
+    gravity_world: tuple[float, float, float] | None = None
 
     def __init__(self, pour_receivers: dict[str, str] | None = None) -> None:
         super().__init__()
@@ -2108,7 +2135,6 @@ class GenSimPour(Pour):
         handoff = GenSimStateHandoff.from_request(
             request, context, participant="GenSim Pour"
         )
-        task_key = handoff.resource
         held = handoff.require_held()
         arm_qpos = arm_qpos_from_state(context, list(motion_target.joint_ids))
         eef = self.robot.compute_fk(
@@ -2116,6 +2142,28 @@ class GenSimPour(Pour):
         )
         object_to_eef = held.object_to_eef.to(self.device, torch.float32)
         object_pose = eef @ pose_inv(object_to_eef)
+        continuation = (self.continuations or {}).get(request.invocation_id)
+        if continuation is not None:
+            if handoff.resource != continuation.resource:
+                raise ValueError(
+                    "Canonical Pour resource differs from its bound recipe."
+                )
+            object_poses, metadata = self._canonical_arc(
+                request, context, continuation, held, object_pose, motion_target
+            )
+            return self._build_tilt_plan(
+                request,
+                context,
+                handoff,
+                held,
+                arm_qpos,
+                motion_target,
+                grasp,
+                object_to_eef,
+                object_poses,
+                metadata,
+                retain=True,
+            )
         prefix = motion_target.control_part.split("_arm")[0]
         names = set(self.robot.link_names)
         pad_names = (
@@ -2231,6 +2279,106 @@ class GenSimPour(Pour):
                 f"pivot={tuple(pivot.shape) if 'pivot' in locals() else None}, "
                 f"vertices={tuple(vertices.shape) if 'vertices' in locals() and isinstance(vertices, torch.Tensor) else None}"
             ) from exc
+        metadata = {
+            "pad_line_local": jaw_local.detach().cpu().tolist(),
+            "receiver_entity_id": receiver_id,
+            "tilt_axis_local": axis.detach().cpu().tolist(),
+            "tilt_direction_local": direction.detach().cpu().tolist(),
+        }
+        return self._build_tilt_plan(
+            request,
+            context,
+            handoff,
+            held,
+            arm_qpos,
+            motion_target,
+            grasp,
+            object_to_eef,
+            object_poses,
+            metadata,
+        )
+
+    def _canonical_arc(self, request, context, route, held, object_pose, motion_target):
+        from .pour_continuation import observed_pose, pad_line_world
+        from .pour_geometry import pour_frames
+
+        if (
+            context.batch_size != 1
+            or held.semantics.entity_id != route.object_id
+            or self._receiver_id(request.invocation_id) != route.receiver_id
+            or request.motion_policy.sample_count != route.sample_count
+            or float(request.skill_options.rotate_angle) != route.angle_rad
+        ):
+            raise ValueError("Canonical Pour differs from its bound recipe.")
+        source = self.scene_vertices[route.object_id][0].detach().cpu().numpy()
+        receiver = self.scene_vertices[route.receiver_id][0].detach().cpu().numpy()
+        receiver_pose = observed_pose(context, route.receiver_id)
+        jaw_world = pad_line_world(self.robot, motion_target)
+        jaw_local = (object_pose[:, :3, :3].transpose(1, 2) @ jaw_world[..., None])[
+            0, :, 0
+        ]
+        frames = pour_frames(
+            source,
+            receiver,
+            object_pose[0].detach().cpu().numpy(),
+            receiver_pose[0].detach().cpu().numpy(),
+            jaw_local.detach().cpu().numpy(),
+            route.angle_rad,
+            route.return_pose.detach().cpu().numpy(),
+            sample_count=route.sample_count,
+            gravity_world=self.gravity_world,
+        )
+        poses = torch.as_tensor(
+            frames["object_arc"], device=self.device, dtype=object_pose.dtype
+        )[None]
+        metadata = {
+            "pad_line_local": jaw_local[None].detach().cpu().tolist(),
+            "receiver_entity_id": route.receiver_id,
+            "tilt_axis_local": [frames["tilt_axis_object"].tolist()],
+            "gen_sim_pour_geometry": {
+                "revision": 1,
+                "source_entity_id": route.object_id,
+                "receiver_entity_id": route.receiver_id,
+                "physical_evidence": False,
+                "fluid_transfer": "unmodeled",
+                "planning_pose_source": "held_fk_and_existing_object_to_eef",
+                "observed_source_entry_pose": observed_pose(context, route.object_id)[0]
+                .detach()
+                .cpu()
+                .tolist(),
+                "entry_pose": frames["object_arc"][0].tolist(),
+                "peak_pose": frames["object_arc"][frames["peak_index"]].tolist(),
+                "restore_pose": frames["object_arc"][-1].tolist(),
+                "pivot_object": frames["pivot_object"].tolist(),
+                "pivot_world": frames["pivot_world"].tolist(),
+                "receiver_pose": receiver_pose[0].detach().cpu().tolist(),
+                "gravity_world": list(self.gravity_world),
+                "target_roles": list(frames["target_roles"]),
+                "receiver_bearing_m": frames["receiver_bearing_m"],
+                "receiver_bearing_tie": frames["receiver_bearing_tie"],
+                "tilt_direction_policy": frames["tilt_direction_policy"],
+                "effective_angle_rad": frames["effective_angle_rad"],
+                "peak_index": frames["peak_index"],
+                "sample_count": route.sample_count,
+            },
+        }
+        return poses, metadata
+
+    def _build_tilt_plan(
+        self,
+        request,
+        context,
+        handoff,
+        held,
+        arm_qpos,
+        motion_target,
+        grasp,
+        object_to_eef,
+        object_poses,
+        metadata,
+        *,
+        retain=False,
+    ):
         # ik_interp prepends the observed start qpos; pass the remaining
         # count-1 Cartesian keyframes so every output sample is grounded.
         eef_targets = (object_poses @ object_to_eef[:, None])[:, 1:]
@@ -2241,14 +2389,36 @@ class GenSimPour(Pour):
         )
         if options.strategy == "ik_interp":
             options.preserve_cartesian_samples = True
+        before_ik_rng = torch.get_rng_state().tolist() if retain else None
         result = self.motion_generator.generate(
             build_pose_plan_states(eef_targets), options=options
         )
         if result.positions is None or result.dt is None or not result.success.all():
-            return self.failed_plan(
+            failed = self.failed_plan(
                 request,
                 context,
                 message="GenSim Pour tilt arc has no feasible IK path.",
+            )
+            if not retain:
+                return failed
+            return replace(
+                failed,
+                diagnostics=replace(
+                    failed.diagnostics,
+                    metadata={
+                        **failed.diagnostics.metadata,
+                        **metadata,
+                        "gen_sim_pour_failed_kinematics": {
+                            "scope": "planning_inputs_not_execution_or_ik_certificate",
+                            "entry_arm_qpos": arm_qpos.detach().cpu().tolist(),
+                            "torch_cpu_rng_state_before_generate": before_ik_rng,
+                            "torch_intraop_threads": torch.get_num_threads(),
+                            "object_to_eef": object_to_eef.detach().cpu().tolist(),
+                            "required_eef_targets": eef_targets.detach().cpu().tolist(),
+                            "per_waypoint_status": "not_exposed_by_shared_result",
+                        },
+                    },
+                ),
             )
         grasp_target = grasp.require_target(JointPositionTarget)
         hand_ids = list(grasp_target.joint_ids)
@@ -2267,20 +2437,20 @@ class GenSimPour(Pour):
             env_ids=context.env_ids,
             control_dt=context.require_control_dt(),
         )
-        previous = None
-        metadata = {
-            "pad_line_local": jaw_local.detach().cpu().tolist(),
-            "receiver_entity_id": receiver_id,
-            "tilt_axis_local": axis.detach().cpu().tolist(),
-            "tilt_direction_local": direction.detach().cpu().tolist(),
-        }
-        return self.build_plan(
+        plan = self.build_plan(
             request,
             context,
-            success=result.success & context.task.exclusive_held_object_mask(task_key),
+            success=result.success
+            & context.task.exclusive_held_object_mask(handoff.resource),
             trajectory=timed,
             diagnostics=PlannerDiagnostics(
                 backend=self.planning_services.planner_name, metadata=metadata
             ),
-            segment_lengths={"pour": timed.waypoint_count},
+            # Reuse the seed command as the hold for native pre-pour verification.
+            segment_lengths=(
+                {"entry_hold": 1, "pour": timed.waypoint_count - 1}
+                if retain
+                else {"pour": timed.waypoint_count}
+            ),
         )
+        return handoff.retain(plan, held) if retain else plan

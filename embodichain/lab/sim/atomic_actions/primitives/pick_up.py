@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
@@ -739,23 +740,9 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         # MoveHeldObject begins after the lift, so screen its target from the
         # same joint state that the execution stream will use.
         downstream_seed = lift_qpos
-        for object_target_pose in options.downstream_object_target_poses:
-            object_target_pose = object_target_pose.to(
-                device=self.device, dtype=torch.float32
-            )
-            if object_target_pose.shape == (4, 4):
-                object_target_pose = object_target_pose.unsqueeze(0).repeat(
-                    num_envs, 1, 1
-                )
-            if object_target_pose.shape != (num_envs, 4, 4):
-                raise ValueError(
-                    "downstream_object_target_poses entries must have shape "
-                    f"(4, 4) or ({num_envs}, 4, 4), but got "
-                    f"{object_target_pose.shape}."
-                )
-            downstream_eef_variants = torch.matmul(
-                object_target_pose[:, None, None], object_to_eef_variants
-            )
+        for downstream_eef_variants in self._iter_downstream_eef_targets(
+            object_to_eef_variants, options
+        ):
             downstream_success, downstream_seed = self._compute_batch_candidate_ik(
                 downstream_eef_variants, downstream_seed, manipulator
             )
@@ -801,6 +788,31 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         selected_grasp_xpos = grasp_variants[env_idx, pose_idx, best_variant_idx]
         ik_success = pickup_success[env_idx, pose_idx, best_variant_idx]
         return selected_grasp_xpos, ik_success
+
+    def _iter_downstream_eef_targets(
+        self,
+        object_to_eef_variants: torch.Tensor,
+        options: PickUpOptions,
+    ) -> Iterator[torch.Tensor]:
+        """Project downstream object targets before selecting a TCP-roll variant."""
+        num_envs = object_to_eef_variants.shape[0]
+        for object_target_pose in options.downstream_object_target_poses:
+            object_target_pose = object_target_pose.to(
+                device=self.device, dtype=torch.float32
+            )
+            if object_target_pose.shape == (4, 4):
+                object_target_pose = object_target_pose.unsqueeze(0).repeat(
+                    num_envs, 1, 1
+                )
+            if object_target_pose.shape != (num_envs, 4, 4):
+                raise ValueError(
+                    "downstream_object_target_poses entries must have shape "
+                    f"(4, 4) or ({num_envs}, 4, 4), but got "
+                    f"{object_target_pose.shape}."
+                )
+            yield torch.matmul(
+                object_target_pose[:, None, None], object_to_eef_variants
+            )
 
     def _approach_alignment_mask(
         self,

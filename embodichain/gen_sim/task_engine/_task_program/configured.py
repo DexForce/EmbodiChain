@@ -65,6 +65,7 @@ from .services import (
     _RelativePlaceLowererFactory,
     _UprightPlaceLowererFactory,
 )
+from .pour_services import PourStageRoute, PourTransportFactory, RetainedPourFactory
 
 __all__: list[str] = []
 
@@ -231,8 +232,15 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
         return make_pick_factory(
             tuple(routes), call_id, verify_phases=config.get("verify_phases", False)
         )
-    if kind in {"move_held_object", "drawer_transport"}:
-        config = _mapping(value, path=path, required=frozenset({"kind", "routes"}))
+    if kind in {"move_held_object", "drawer_transport", "pour_transport"}:
+        config = _mapping(
+            value,
+            path=path,
+            required=frozenset(
+                {"kind", "routes"}
+                | ({"staging_routes"} if kind == "pour_transport" else set())
+            ),
+        )
         routes: list[_MoveHeldObjectRoute] = []
         for index, raw in enumerate(_sequence(config["routes"], path=f"{path}.routes")):
             route_path = f"{path}.routes[{index}]"
@@ -252,6 +260,33 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
+        if kind == "pour_transport":
+            stages = []
+            for index, raw in enumerate(
+                _sequence(config["staging_routes"], path=f"{path}.staging_routes")
+            ):
+                stage_path = f"{path}.staging_routes[{index}]"
+                stage = _mapping(
+                    raw,
+                    path=stage_path,
+                    required=frozenset(
+                        {"object_id", "target_id", "receiver_id", "clearance_m"}
+                    ),
+                )
+                stages.append(
+                    PourStageRoute(
+                        **{
+                            key: _identifier(stage[key], path=f"{stage_path}.{key}")
+                            for key in ("object_id", "target_id", "receiver_id")
+                        },
+                        clearance_m=_real(
+                            stage["clearance_m"],
+                            path=f"{stage_path}.clearance_m",
+                            minimum=0.0,
+                        ),
+                    )
+                )
+            return PourTransportFactory(tuple(routes), tuple(stages))
         factory = (
             _DrawerTransportLowererFactory
             if kind == "drawer_transport"
@@ -445,6 +480,11 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
             else ArticulationWithdrawFactory
         )
         return factory(bindings)
+    if kind == "retained_pour":
+        config = _mapping(value, path=path, required=frozenset({"kind", "object_id"}))
+        return RetainedPourFactory(
+            _identifier(config["object_id"], path=f"{path}.object_id")
+        )
     if kind in {"park", "pour", "axis_align"}:
         return _decode_shared_lowerer(value, path=path)
     raise ValueError(

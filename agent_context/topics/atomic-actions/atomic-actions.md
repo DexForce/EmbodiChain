@@ -65,6 +65,12 @@ top/bottom restrictions on `mesh_extent`; the policy does not recover IK,
 trajectory, closing or acquisition failure.
 The shared default does not forward a new keyword to existing custom services.
 
+Pick projects downstream targets through the protected lazy
+`_iter_downstream_eef_targets` hook before choosing between TCP-roll variants.
+The default preserves object-target ordering, normalization, lift-seeded IK and
+RNG behavior. Specializations may supply candidate-dependent target geometry;
+they do not own IK, roll selection, execution or physical verification.
+
 `SlideGoal.joint_target` optionally supplies a public `SlideJointTarget` with an
 absolute prismatic coordinate and a calibrated axis sign. Slide resolves the
 remaining distance from same-timestamp joint/robot observations per planning row;

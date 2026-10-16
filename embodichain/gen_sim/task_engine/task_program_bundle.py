@@ -198,6 +198,7 @@ def generate_task_program_bundle(
     support_contract_revision: int | None = None,
     pick_contact_revision: int | None = None,
     verify_pick_phases: bool = False,
+    pour_geometry_revision: int | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -234,6 +235,10 @@ def generate_task_program_bundle(
             verification; all revisions retain native acquisition requirements.
         verify_pick_phases: Explicit registered Pick acquisition/lift contract.
             False preserves legacy lowerer declarations and fingerprints.
+        pour_geometry_revision: Explicit candidate-dependent tilt/restore geometry.
+            Revision 1 preserves observed entry orientation for ordinary E3 with
+            no requested orientation or tilt direction. None preserves legacy
+            consumers. This is not a liquid-transfer observation contract.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -243,6 +248,19 @@ def generate_task_program_bundle(
             integration cannot be composed and preflighted.
     """
     selected_graph = validate_semantic_task_graph(graph)
+    if pour_geometry_revision is not None:
+        if type(pour_geometry_revision) is not int or pour_geometry_revision != 1:
+            raise ValueError("Unsupported GenSim Pour geometry revision.")
+        from ._task_program.pour_continuation import supports_ordinary_pour
+
+        if task_candidate is None or not supports_ordinary_pour(
+            selected_graph, task_candidate
+        ):
+            raise ValueError(
+                "Pour geometry revision 1 needs an explicit ordinary E3 witness "
+                "without requested orientation, axis or direction and the "
+                "complete independent Pick/stage/Pour/return/Place recipe."
+            )
     if type(verify_pick_phases) is not bool:
         raise TypeError("verify_pick_phases must be a boolean.")
     if type(fit_grasp_assets) is not bool:
@@ -691,6 +709,7 @@ def generate_task_program_bundle(
             embodiment=embodiment_payload,
             twist_contact_feedback=twist_contact_feedback,
             verify_pick_phases=verify_pick_phases,
+            pour_geometry_revision=pour_geometry_revision,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -1690,6 +1709,7 @@ def _integration_payload(
     embodiment: dict[str, Any] | None = None,
     twist_contact_feedback: bool = False,
     verify_pick_phases: bool = False,
+    pour_geometry_revision: int | None = None,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
@@ -1752,7 +1772,7 @@ def _integration_payload(
     coordinated_hold_routes: list[tuple[str, str, tuple[float, float, float]]] = []
     move_held_routes: list[dict[str, Any]] = []
     drawer_transport_routes: list[dict[str, Any]] = []
-    pour_geometry: dict[str, dict[str, Any]] = {}
+    pour_staging_routes: list[dict[str, Any]] = []
     upright_move_objects: set[str] = set()
     horizontal_handover_objects: set[str] = set()
     pick_routes: dict[str, list[dict[str, Any]]] = {}
@@ -2001,13 +2021,29 @@ def _integration_payload(
             else:
                 reference = str(arguments["reference"])
                 referenced_objects.add(reference)
-                pose, geometry = _pour_target_geometry(
-                    scene_objects[object_id],
-                    scene_objects[reference],
-                    embodiment,
-                    call.get("resources", {}).get("primary", "left"),
-                )
-                pour_geometry[object_id] = geometry
+                if pour_geometry_revision == 1:
+                    if node["task_type"] != "E3":
+                        raise ValueError("Canonical Pour staging must belong to E3.")
+                    pose = {}
+                    pour_staging_routes.append(
+                        {
+                            "object_id": object_id,
+                            "target_id": target_id,
+                            "receiver_id": reference,
+                            "clearance_m": _pour_gripper_radius(
+                                embodiment,
+                                call.get("resources", {}).get("primary", "left"),
+                            )
+                            + 0.015,
+                        }
+                    )
+                else:
+                    pose, _ = _pour_target_geometry(
+                        scene_objects[object_id],
+                        scene_objects[reference],
+                        embodiment,
+                        call.get("resources", {}).get("primary", "left"),
+                    )
                 move_held_routes.append(
                     {
                         "object_id": object_id,
@@ -2512,6 +2548,7 @@ def _integration_payload(
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
                     _MOVE_HELD_OBJECT_CALL_ID,
+                    *((_POUR_CALL_ID,) if pour_geometry_revision == 1 else ()),
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                     _UPRIGHT_PLACE_CALL_ID,
@@ -2618,8 +2655,17 @@ def _integration_payload(
                 *(
                     [
                         {
-                            "kind": "move_held_object",
+                            "kind": (
+                                "pour_transport"
+                                if pour_staging_routes
+                                else "move_held_object"
+                            ),
                             "routes": move_held_routes,
+                            **(
+                                {"staging_routes": pour_staging_routes}
+                                if pour_staging_routes
+                                else {}
+                            ),
                         }
                     ]
                     if move_held_routes
@@ -2633,7 +2679,11 @@ def _integration_payload(
                 *(
                     [
                         {
-                            "kind": "pour",
+                            "kind": (
+                                "retained_pour"
+                                if pour_geometry_revision == 1
+                                else "pour"
+                            ),
                             "object_id": next(iter(pour_objects)),
                         }
                     ]
@@ -3751,22 +3801,8 @@ def _pour_target_geometry(
     elif cosine < 0:
         transverse = rotation[:, int(np.argmin(np.abs(upright)))]
         rotation = Rotation.from_rotvec(transverse * math.pi).as_matrix() @ rotation
-    if embodiment is None:
-        raise ValueError("Pour clearance requires the selected gripper geometry.")
-    model = embodiment["skill_profile"]["runtime_services"]["grasp_pose_generators"][
-        f"{resource}_eef"
-    ]["model"]
-    finger_radius = float(
-        np.linalg.norm(
-            [
-                (float(model["max_opening_width"]) + float(model["finger_thickness"]))
-                * 0.5,
-                float(model["finger_width"]) * 0.5,
-                float(model["finger_length"]) * 0.5,
-            ]
-        )
-    )
     _, top = _vertical_mesh_bounds(reference, axis_aligned=False)
+    finger_radius = _pour_gripper_radius(embodiment, resource)
     offset = np.array([0.0, 0.0, top + radius + finger_radius + 0.015])
     relative = np.eye(4)
     relative[:3, 3] = rotation.T @ offset - pivot
@@ -3776,6 +3812,25 @@ def _pour_target_geometry(
             "world_orientation": rotation.reshape(-1).tolist(),
         },
         {"upright_axis": upright.tolist(), "pivot_local": pivot.tolist()},
+    )
+
+
+def _pour_gripper_radius(embodiment: dict[str, Any] | None, resource: str) -> float:
+    """Retain the existing nominal hand reserve, not a collision certificate."""
+    if embodiment is None:
+        raise ValueError("Pour clearance requires the selected gripper geometry.")
+    model = embodiment["skill_profile"]["runtime_services"]["grasp_pose_generators"][
+        f"{resource}_eef"
+    ]["model"]
+    return float(
+        np.linalg.norm(
+            [
+                (float(model["max_opening_width"]) + float(model["finger_thickness"]))
+                * 0.5,
+                float(model["finger_width"]) * 0.5,
+                float(model["finger_length"]) * 0.5,
+            ]
+        )
     )
 
 

@@ -117,6 +117,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         pick_continuations: tuple = (),
+        pour_continuations: tuple = (),
         twist_routes: tuple = (),
         pick_contact_revision: int | None = None,
         **kwargs: Any,
@@ -138,6 +139,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
+        self._pour_continuations = pour_continuations
         self._twist_routes = twist_routes
         self._pick_contact_revision = pick_contact_revision
         self._task_post_port = TaskStabilityPort(
@@ -303,6 +305,17 @@ class _TaskFactory(SimulationTaskProgramFactory):
             getattr(self, "_simulation", None),
             getattr(self.task_program_registration, "scene_binding", None),
         )
+        pour = GenSimPour(self._pour_receivers)
+        if self._pour_continuations:
+            from .pour_services import gravity_from_simulation
+
+            gravity = gravity_from_simulation(self._simulation)
+            pick.pour_continuations = {r.pick_id: r for r in self._pour_continuations}
+            pick.pour_scene_vertices = transport.held_path_scene_vertices
+            pick.pour_gravity_world = gravity
+            pour.continuations = {r.pour_id: r for r in self._pour_continuations}
+            pour.scene_vertices = transport.held_path_scene_vertices
+            pour.gravity_world = gravity
         engine.register(transport, replace=True)
         place = GenSimPlace()
         place.recovery_scene_vertices = transport.held_path_scene_vertices
@@ -314,7 +327,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
             self.task_program_registration.scene_binding,
         )
         engine.register(place, replace=True)
-        engine.register(GenSimPour(self._pour_receivers), replace=True)
+        engine.register(pour, replace=True)
         if self._coordinated_motion:
             engine.register(GenSimCoordinatedPickment(), replace=True)
         if self._press_routes:
@@ -612,6 +625,60 @@ class TaskAdapterFactory:
                 pick_continuations = bind_calls(
                     self.registration.catalog.preflight(program), preset
                 )
+        from .pour_services import PourTransportFactory, RetainedPourFactory
+
+        pour_factory = next(
+            (
+                f
+                for f in getattr(
+                    self.registration, "registered_semantic_lowerer_factories", ()
+                )
+                if type(f) is PourTransportFactory
+            ),
+            None,
+        )
+        retained_factory = next(
+            (
+                f
+                for f in getattr(
+                    self.registration, "registered_semantic_lowerer_factories", ()
+                )
+                if type(f) is RetainedPourFactory
+            ),
+            None,
+        )
+        pour_continuations = ()
+        if (pour_factory is None) != (retained_factory is None):
+            raise ValueError(
+                "Canonical Pour requires both transport and retention contracts."
+            )
+        if pour_factory is not None:
+            from embodichain.lab.task_program.language import TaskProgramCfg
+            from .pour_continuation import bind_calls as bind_pour_calls
+
+            program = getattr(getattr(environment, "cfg", None), "task_program", None)
+            if type(program) is not TaskProgramCfg:
+                raise ValueError(
+                    "Canonical Pour requires its compiled configured program."
+                )
+            preset = next(
+                p
+                for p in self.registration.robot_profile_binding.presets
+                if p.preset_id == self.runtime_preset
+            )
+            if any(
+                r.object_id != retained_factory.object_id
+                for r in pour_factory.staging_routes
+            ):
+                raise ValueError(
+                    "Canonical Pour transport and retained object identities disagree."
+                )
+            pour_continuations = bind_pour_calls(
+                self.registration.catalog.preflight(program),
+                preset,
+                pour_factory,
+                self.motion_samples,
+            )
         factory = _TaskFactory(
             environment.sim,
             environment.robot,
@@ -638,6 +705,7 @@ class TaskAdapterFactory:
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
+            pour_continuations=pour_continuations,
             twist_routes=self.twist_routes,
             pick_contact_revision=self.pick_contact_revision,
         )

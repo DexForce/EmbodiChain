@@ -312,6 +312,20 @@ def test_constrained_pick_keeps_raw_pool_when_vertical_lift_screen_rejects(monke
     generator.for_pick.assert_called_once()
 
 
+@pytest.mark.parametrize("purpose", ["ordinary", "pour"])
+def test_typed_pour_does_not_enter_static_suffix_only_recovery(monkeypatch, purpose):
+    action, request, context, _grasp, direction, _calls = _fixture(monkeypatch)
+    action.pick_purposes = {request.invocation_id: purpose}
+    selection = _PickSelection(
+        request=request, raw_candidate_routes=[(0, _pool(), direction)]
+    )
+    assert candidate.eligible(action, request, context, selection)
+    selection.pour_preview = object()
+    assert not candidate.eligible(action, request, context, selection)
+    selection.pour_preview = None
+    assert candidate.eligible(action, request, context, selection)
+
+
 def test_upright_calibration_and_call_local_filter_are_not_skipped(monkeypatch):
     from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
         TaskGraspPoseGenerator,

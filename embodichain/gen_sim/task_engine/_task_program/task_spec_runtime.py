@@ -228,6 +228,11 @@ def capture_final_goals(
                     )
                     observations.append(record)
                     continue
+                elif predicate.name == "poured":
+                    raise ValueError(
+                        "Fluid transfer is unmodeled; tilt/restore pose evidence "
+                        "does not certify the poured predicate."
+                    )
                 else:
                     cfg = next(
                         constraints[f"gen_sim.{node_id}.stable"]

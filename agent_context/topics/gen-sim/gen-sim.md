@@ -220,6 +220,23 @@ without changing its behavior or fingerprint. This authority does not grant E2
 staging recovery; Pour, release and handover do not qualify as predecessors.
 Support-contact endpoints, missing geometry and direct-transport routes remain
 unmigrated. Bound-rigid envelopes are not full-world or continuous-contact proof.
+Explicit `pour_geometry_revision=1` uses `pour_services.py` and
+`pour_continuation.py` to bind ordinary orientation/axis/direction-free E3 to its
+exact Pick, staging, Pour and absolute return calls. Staging preserves current
+observed orientation; `pour_geometry.py` supplies the candidate-dependent
+five-role look-ahead and actual tilt/restore geometry. Existing held G remains
+the command-planning reference, not a native pose witness. Direction-free tilt
+uses the ordered pad axis; receiver-bearing drift is diagnostic, not permission
+to reverse the qualified arc. The new Pour lowerer
+declares existing acquisition/retention verification, with no new executor or
+path fallback. Old consumer declarations remain unchanged. The independent
+recipe does not own already-held E3 continuations; normal preparation
+keeps those compositions on their legacy declaration rather than opting them
+into a five-call contract they do not have. The Default/B1
+source-only sweep proposal is not hand/cavity/collision qualification, and
+`pour_evidence.py` evaluates a separately named native pose proxy, never liquid
+transfer. An unmodeled `poured` TaskSpec remains unavailable; geometric motion
+must not silently become its certificate.
 Bare `table/on` targets retain legal source XY; only occupied landings select a
 measured free tabletop region. Fixed-base prismatic travel envelopes qualify
 endpoints only. Named regions, explicit poses and E2 in-place goals do not move.

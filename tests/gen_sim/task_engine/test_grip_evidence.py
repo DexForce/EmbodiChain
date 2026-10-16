@@ -113,10 +113,17 @@ def test_native_trace_snapshot_owns_rows_and_does_not_read_sensor() -> None:
     assert snapshot["cumulative_query_count"] == 1
     assert snapshot["retained_query_count"] == 1
     assert snapshot["finite_audit"]["valid"] is True
+    assert snapshot["actor_bindings"]["object_actor_ids"] == {"item": [[9]]}
+    assert snapshot["actor_bindings"]["pad_actor_ids"] == {"left_eef": [[1, 2]]}
+    assert snapshot["actor_bindings"]["env_axis"] == "native_env_id"
     assert sensor.update.call_count == sensor.get_data.call_count == 1
+    observer.object_actors["item"][0, 0] = 999
+    observer.pad_actors["left_eef"][0, 0] = 888
     observer.trace[0]["rows"][0]["pairs"][0][0] = 99
     observer.trace.clear()
     assert snapshot["trace"][0]["rows"][0]["pairs"][0][0] == 1
+    assert snapshot["actor_bindings"]["object_actor_ids"] == {"item": [[9]]}
+    assert snapshot["actor_bindings"]["pad_actor_ids"] == {"left_eef": [[1, 2]]}
     json.dumps(snapshot, allow_nan=False)
 
 

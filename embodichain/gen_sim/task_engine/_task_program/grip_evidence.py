@@ -133,6 +133,18 @@ class NativeGripObserver:
             "observed": self.recorded_query_count > 0,
             "sensor_uid": SENSOR_UID,
             "scope": "observer_lifetime_raw_queries_not_task_success",
+            "actor_bindings": {
+                "scope": "observer_lifetime_native_ids_not_contact_evidence",
+                "env_axis": "native_env_id",
+                "object_actor_ids": {
+                    uid: actors.detach().cpu().tolist()
+                    for uid, actors in self.object_actors.items()
+                },
+                "pad_actor_ids": {
+                    part: actors.detach().cpu().tolist()
+                    for part, actors in self.pad_actors.items()
+                },
+            },
             "cumulative_query_count": self.cumulative_query_count,
             "recorded_query_count": self.recorded_query_count,
             "retained_query_count": len(self.trace),

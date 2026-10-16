@@ -209,6 +209,47 @@ def test_final_native_pose_uses_normalized_preset_axis(
     assert next(iter(goals.values()))["members"][0]["accepted"] == [accepted]
 
 
+def test_unmodeled_poured_goal_reports_explicit_boundary_without_stability_fallback(
+    tmp_path,
+) -> None:
+    from embodichain.gen_sim.task_spec import Predicate
+    from embodichain.gen_sim.task_engine._task_program.task_spec_runtime import (
+        capture_final_goals,
+    )
+
+    plan, contract = _evidence()[:2]
+    original = plan.task_spec.goal[0]
+    predicate = Predicate(
+        "poured",
+        {**original.arguments, "task_type": "E3"},
+        predicate_id=original.id,
+    )
+    spec = replace(plan.task_spec, goal=(predicate,))
+    save_config(tmp_path / "task_spec.json", spec.to_dict())
+    path = tmp_path / "task_program/constraints.json"
+    path.parent.mkdir()
+    save_config(path, {"presets": {}})
+    registration = SimpleNamespace(
+        scene_binding=SimpleNamespace(
+            rigid_objects=(SimpleNamespace(entity_id="a", simulation_uid="native-a"),)
+        )
+    )
+    goals = capture_final_goals(
+        SimpleNamespace(sim=SimpleNamespace()),
+        SimpleNamespace(integration=SimpleNamespace(registration=registration)),
+        tmp_path,
+        plan.graph,
+        contract,
+        1,
+    )
+    assert goals[predicate.id] == {
+        "unavailable": [
+            "Fluid transfer is unmodeled; tilt/restore pose evidence "
+            "does not certify the poured predicate."
+        ]
+    }
+
+
 def test_workflow_consumes_full_verdict_not_only_flat_program_success(tmp_path) -> None:
     from .test_semantic_graph_validation import _contract
     from embodichain.gen_sim.task_engine.workflow import _environment_successes

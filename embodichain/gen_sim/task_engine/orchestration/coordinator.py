@@ -224,6 +224,13 @@ class TaskEngineCoordinator:
                         extra = {"twist_support_lift_m": height} if is_twist else {}
                         if twist_mass_source:
                             extra["twist_mass_source"] = True
+                        if any(n["task_type"] == "E3" for n in graph["nodes"]):
+                            from .._task_program.pour_continuation import (
+                                supports_ordinary_pour,
+                            )
+
+                            if supports_ordinary_pour(graph, plan.candidate):
+                                extra["pour_geometry_revision"] = 1
                         graph, generated = generate_task_program_bundle(
                             graph,
                             adaptation.prepared_scene,

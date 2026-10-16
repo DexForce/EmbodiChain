@@ -84,6 +84,7 @@ def eligible(action: Any, request: Any, context: Any, selection: Any) -> bool:
         and context.batch_size == 1
         and context.env_ids.tolist() == [0]
         and selection.raw_candidate_routes
+        and getattr(selection, "pour_preview", None) is None
         and goal.object_pose is None
         and goal.grasp_xpos is None
         and options.fixed_object_to_eef is None
