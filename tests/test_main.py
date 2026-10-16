@@ -485,3 +485,27 @@ def test_nested_benchmark_help_uses_suite_parser(
     assert "--tasks" in output
     assert "--algorithms" in output
     assert "--rebuild-report-only" in output
+
+
+def test_benchmark_console_resolves_checkout_without_cwd_on_import_path(
+    tmp_path: Path,
+) -> None:
+    """Editable console launchers find source benchmarks from outside the checkout."""
+    import subprocess
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from embodichain.cli.main import main; main(['benchmark', 'atomic-action', '--help'])",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "--robot" in completed.stdout
+    assert "--skill" in completed.stdout
+    assert "--planner" in completed.stdout
