@@ -178,7 +178,9 @@ def _effective_articulation(config: Mapping[str, Any]) -> dict[str, Any]:
     # Use the same declaration translation as spawn, without creating a World.
     cfg = ArticulationCfg.from_dict(deepcopy(dict(config)))
     descriptor, _ = articulation_desc_from_usd(cfg, per_env=True)
-    result["body_scale"] = [float(value) for value in descriptor.body_scale]
+    # The translator selects source scale for preserve mode. Overlay keeps its
+    # declared precision; round-tripping the float32 descriptor breaks lineage.
+    result["body_scale"] = [float(value) for value in cfg.body_scale]
     result["init_local_pose"] = np.asarray(descriptor.pose).tolist()
     result["init_pos"] = np.asarray(descriptor.pose)[:3, 3].tolist()
     result.setdefault("root_props", {})["fixed_base"] = bool(descriptor.fixed_base)

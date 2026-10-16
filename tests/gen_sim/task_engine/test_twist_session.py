@@ -812,7 +812,10 @@ def test_reassembling_engine_allocates_fresh_feedback_state(monkeypatch: Any) ->
     factory._motion_samples = ()
     factory._cartesian_calls = ()
     factory._articulation_calls = ()
+    factory._pour_return_calls = ()
     factory._adaptive_pick = False
+    factory._handover_scene_clearance = False
+    factory._pick_contact_revision = None
     factory._pick_purposes = ()
     factory._pour_receivers = {}
     from embodichain.gen_sim.task_engine._task_program.state_handoff import (

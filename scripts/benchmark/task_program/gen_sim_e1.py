@@ -82,6 +82,16 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _device_arguments(plan: dict[str, Any]) -> list[str]:
+    """Forward an explicit compute device without changing legacy defaults."""
+    if "device" not in plan:
+        return []
+    device = plan["device"]
+    if type(device) is not str or device not in {"cpu", "cuda"}:
+        raise ValueError("The declared compute device must be cpu or cuda.")
+    return ["--device", device]
+
+
 def _select_member(
     candidate: dict, bindings: dict, uid: str, task_id: str
 ) -> tuple[dict, dict, dict]:
@@ -247,6 +257,7 @@ def main() -> None:
     args = parser.parse_args()
     root = args.plan.resolve().parent
     plan = _read(args.plan)
+    device_arguments = _device_arguments(plan)
     if (
         plan["schema_version"]
         not in {"gensim.bounded-e-plan/v1", "gensim.prepared-e-plan/v1"}
@@ -447,6 +458,7 @@ def main() -> None:
             "1",
             "--seed",
             "0",
+            *device_arguments,
             "--headless",
             "--renderer",
             _headless_renderer_for_bundle(bundle),

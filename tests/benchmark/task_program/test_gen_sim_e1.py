@@ -24,7 +24,26 @@ from pathlib import Path
 
 import pytest
 
-from scripts.benchmark.task_program.gen_sim_e1 import _native_summary, _select_member
+from scripts.benchmark.task_program.gen_sim_e1 import (
+    _device_arguments,
+    _native_summary,
+    _select_member,
+)
+
+
+def test_legacy_plan_does_not_override_runner_device_default():
+    assert _device_arguments({}) == []
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_plan_explicitly_forwards_its_compute_device(device):
+    assert _device_arguments({"device": device}) == ["--device", device]
+
+
+@pytest.mark.parametrize("device", [None, True, 0, "cuda:0", " cuda", "mps"])
+def test_invalid_device_is_rejected_before_admission(device):
+    with pytest.raises(ValueError, match="compute device"):
+        _device_arguments({"device": device})
 
 
 @pytest.mark.parametrize(

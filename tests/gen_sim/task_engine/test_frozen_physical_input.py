@@ -37,6 +37,7 @@ from .test_twist import knob_scene
 from embodichain.gen_sim.task_engine import task_program_bundle as bundle
 from embodichain.gen_sim.task_engine._task_program.physical_inputs import (
     FrozenPhysicalInput,
+    _effective_articulation,
     load_frozen_physical_input,
     verify_physical_input_manifest,
 )
@@ -49,6 +50,23 @@ from embodichain.gen_sim.task_engine.semantic_planner import SemanticTaskPlanner
 from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 from embodichain.lab.task_program.language import load_task_program
 from embodichain.utils.utility import load_config, save_config
+
+
+@pytest.mark.parametrize("mode", ["overlay", "preserve"])
+def test_effective_articulation_preserves_selected_scale_precision(
+    knob_scene: PreparedScene, mode: str
+) -> None:
+    config = deepcopy(knob_scene.articulations[0])
+    config["root_props"] = {"fixed_base": config.pop("fix_base")}
+    declared_scale = 0.470352381468
+    config.update(body_scale=[declared_scale] * 3, asset_physics_mode=mode)
+    original = deepcopy(config)
+
+    effective = _effective_articulation(config)
+
+    expected = declared_scale if mode == "overlay" else 1.0
+    assert effective["body_scale"] == [expected] * 3
+    assert config == original
 
 
 def _combined_graph(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
