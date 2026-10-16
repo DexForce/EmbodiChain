@@ -38,7 +38,12 @@ from .articulation import (
     _raise_removed_articulation_cfg_fields,
     link_attrs_from_dict,
 )
-from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .asset import (
+    AssetPhysicsMode,
+    ObjectBaseCfg,
+    UsdSourceCfg,
+    _resolve_asset_physics_mode,
+)
 from .deformable import (
     SurfaceElementPropertiesCfg,
     VolumeDeformableMeshingCfg,
@@ -88,6 +93,7 @@ from .robot import RobotCfg, RobotPresetCfg  # noqa: E402
 __all__ = [
     "DEFAULT_RENDERER",
     "AssetPhysicsMode",
+    "UsdSourceCfg",
     "DenoisingCfg",
     "DenoisingMode",
     "DLSSCfg",

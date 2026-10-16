@@ -53,6 +53,17 @@ drives. Preserve-mode articulation configs warn about ignored overlay fields.
 Root import intent is handled separately in
 [articulation adapters](articulation-adapters.md).
 
+`cfg/asset.py:UsdSourceCfg` owns USD subtree/variant/namespace selection and
+root placement, shared by singleton configuration and `add_usd(usd=...)`.
+DexSim resolves source composition and meter/kg/Z-up conversion; EmbodiChain
+does not maintain another USD parser. Auto placement preserves the source root
+unless an initial pose is configured; explicit config/preserve/offset modes
+remove ambiguity at identity. Source selection retains original prim paths.
+Whole-scene `asset_cfgs` uses those paths, resolves partial dictionaries through
+the ordinary typed config loaders, and compiles overlays before materialization.
+An omitted USD actor type/overlay scale retains source intent. Root defaults
+preserve USD fixation/self-collision while URDF import defaults stay unchanged.
+
 `RigidBodyPhysicsCfg` is the single grouped schema. `mass_props`,
 `rigid_props`, `collision_props` and `material_props` each own one physical
 concept; concrete subclasses/local backend discriminators carry native fields.
@@ -112,3 +123,15 @@ Focused coverage: `tests/sim/test_rigid_physics_cfg.py`,
 `tests/sim/spawn/test_descriptors.py`, `tests/sim/spawn/test_source.py`, and
 `tests/sim/objects/test_backend_physics_helpers.py`. Select tests for the affected
 property, particularly sparse overlays, inertia fallback and backend rejection.
+
+Standalone USD relationships remain owned by DexSim's `SceneDesc.constraints`
+and finalized `Scene`. Whole-scene `add_usd()` keeps them, remaps endpoint names
+when asset UIDs change, and transforms world anchors with the scene-root pose.
+Query them through `spawn_result.get_constraint(path)` after preparation;
+EmbodiChain does not keep a second constraint registry. Singleton loaders reject
+such sources and direct callers to whole-scene import. Default supports fixed,
+revolute, prismatic, spherical and representable D6 relationships; Newton
+standalone constraints, closed loops and incompatible drive/limit combinations
+fail before materialization. Finite Direct GPU break thresholds are unsupported.
+USD APIs check the required DexSim source contract explicitly, since an older
+0.5-series wheel can remain usable for non-USD tasks.

@@ -872,7 +872,9 @@ class Articulation(BatchEntity):
         self.default_joint_max_effort = self._data.qf_limits.clone()
         self.default_joint_max_velocity = self._data.qvel_limits.clone()
 
-        is_usd_source = str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc"))
+        is_usd_source = (
+            str(self.cfg.fpath).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
+        )
         self.pk_chain = None
         if self.cfg.build_pk_chain:
             if is_usd_source:
