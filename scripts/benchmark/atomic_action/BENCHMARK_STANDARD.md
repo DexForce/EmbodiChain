@@ -53,6 +53,11 @@ absolute, never scaled by commanded magnitude.
 A skill that breaks and re-establishes contact gets a derived budget rather
 than its own constant: `n * TASK_POSITION_TOLERANCE_M` for `n` contact phases.
 
+The independent reference-scene Place benchmark permits **1.5 cm final XY
+error after landing**, accounting for post-release contact and tipping.
+This is a Place-only landing acceptance override; settling drift retains
+the base **1 cm / 5°** limits. Each row records `placement_xy_tolerance_m`.
+
 ---
 
 ## 1. success_rate
@@ -76,7 +81,7 @@ pick it up.
 | `PickUp` | `TASK_*` | `grasped` → `lifted` → `held` | held / lift ≥ 4 cm / still held after settle |
 | `AxisAlign` | `TASK_*` | `grasped` → `aligned` → `held` | held / axis angle ≤ 5° / still held |
 | `MoveHeldObject` | `TASK_*` | `transported` | position ≤ 1 cm and orientation ≤ 5° |
-| `Place` | `TASK_*` | `released` → `placed` → `stable` | hand empty / XY ≤ 1 cm / drift ≤ 1 cm·5° |
+| `Place` | `TASK_*` with landing override | `released` → `placed` → `stable` | hand empty / XY ≤ 1.5 cm / drift ≤ 1 cm·5° |
 | `Pour` | `TASK_*` | `poured` | **peak signed** rotation about the object's own axis within 5° |
 | `PushObject` | `TASK_*` | `contacted` → `pushed` → `on_support_plane` | object displaced > 0 / in-plane pose ≤ 1 cm / tilt ≤ 5° |
 | `Press` | `TASK_*` | `contacted` → `pressed` | button displaced > 0 / peak signed ≥ 80 % of stroke |

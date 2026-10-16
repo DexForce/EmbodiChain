@@ -401,6 +401,8 @@ def _report(results: list[dict[str, Any]], directory: Path) -> Path:
         "",
         "`success_rate` is physical skill success. Place and Pour include an explicitly scored prerequisite PickUp; MoveJoint visits three ordered targets; Slide performs one pull. Each batch starts in a fresh scene. No failed row is retried.",
         "",
+        "Place allows 1.5 cm final XY error after landing; settling drift remains limited to 1 cm and 5 degrees. Per-row placement_xy_tolerance_m records the acceptance threshold.",
+        "",
         "Timing covers planning, augmentation and physical execution/observation; scene construction and persistence are excluded. CPU memory is process RSS; GPU memory is PyTorch allocation, excluding native simulator allocations. Cartesian contact paths use ik_interp and bypass the selected planner. Replay cadence and settling settings are recorded in results.json.",
         "",
     ]

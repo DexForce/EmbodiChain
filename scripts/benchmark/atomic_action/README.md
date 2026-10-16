@@ -70,7 +70,7 @@ last command does not establish task success.
 | Skill | Measured stages |
 | --- | --- |
 | Pickup | grasped, lifted at least 4 cm, held after settling |
-| Place | prerequisite Pickup, released, object XY within 1 cm of the release goal, stable landing |
+| Place | prerequisite Pickup, released, object XY within 1.5 cm of the release goal, stable landing |
 | Pour | prerequisite Pickup, peak signed object rotation about its internal axis within 5° |
 | Press | actual button movement, peak stroke at least 80% of the asset's 6 mm travel |
 | Slide | grasped, drawer within 1 cm of the pull goal, released |
@@ -81,11 +81,15 @@ last command does not establish task success.
 | OpenDoor | grasped, hinge within 5° of the opening goal while controlled, released |
 
 Place and Pour each include one explicit prerequisite Pickup, rather than a
-repeated task. Slide performs one pull. Grasp inference uses actual jaw
-closure, proximity and subsequent lift/holding state; it is not a force-closure
-certificate. Holding checks permit object motion relative to the gripper and
-evaluate actual height and proximity. Articulation goals are scored at the controlled phase;
-release is checked after the final hold. A failed prerequisite is named
+repeated task. Benchmark Place lowers its final TCP release height to 0.03 m
+above the ground, retaining the 0.20 m hover waypoint, to reduce free-fall
+landing drift. Final Place XY error allows 1.5 cm after landing; settling drift
+still allows 1 cm translation and 5° rotation. Slide performs one pull. Grasp
+inference uses actual jaw closure, proximity and subsequent lift/holding state;
+it is not a force-closure certificate. Holding checks permit object motion
+relative to the gripper and evaluate actual height and proximity. Articulation
+goals are scored at the controlled phase; release is checked after the final
+hold. A failed prerequisite is named
 separately. Per-row measurements and the first failed stage explain failures.
 Release requires at least 90% reopening relative to each joint's configured
 open/close command span, respecting PGI's metres and Robotiq's radians.

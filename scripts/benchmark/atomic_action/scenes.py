@@ -331,6 +331,8 @@ def build_scene(args: argparse.Namespace) -> AtomicBenchmarkScene:
         calls = [invocation("pick_up", GraspGoal(semantics), 120, pick_options)]
         if skill == "place":
             poses = place.make_place_eef_poses(sim.device)
+            # Open the gripper close to the ground to limit landing drift.
+            poses[-1, 2, 3] = 0.03
             metadata["release_pose"] = poses[-1].cpu().tolist()
             calls.append(
                 invocation(

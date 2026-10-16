@@ -211,6 +211,26 @@ def test_place_must_stabilize_after_release() -> None:
     assert result["failure_stage"] == "stable"
 
 
+@pytest.mark.parametrize("offset,success", [(0.014, True), (0.016, False)])
+def test_place_accepts_small_landing_offsets_within_fifteen_mm(
+    offset: float, success: bool
+) -> None:
+    trace, phases, metadata = _example("place")
+    trace["object"][-2:, :, 0, 3] += offset
+    result = evaluate_skill("place", trace, phases, metadata, [True])[0]
+    assert result["success"] == success
+    assert result["metrics"]["placement_xy_error_m"] == pytest.approx(offset)
+    assert result["metrics"]["placement_xy_tolerance_m"] == pytest.approx(0.015)
+    assert result["failure_stage"] == (None if success else "placed")
+
+
+def test_place_landing_allowance_does_not_relax_settling_drift() -> None:
+    trace, phases, metadata = _example("place")
+    trace["object"][-2, :, 0, 3] -= 0.012
+    result = evaluate_skill("place", trace, phases, metadata, [True])[0]
+    assert result["failure_stage"] == "stable"
+
+
 def test_handover_fails_if_object_falls_after_source_releases() -> None:
     trace, phases, metadata = _example("handover")
     trace["object"][8, :, 2, 3] = 0.05

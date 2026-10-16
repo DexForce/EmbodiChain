@@ -29,6 +29,7 @@ import torch
 __all__ = ["evaluate_skill"]
 
 _POSITION_TOLERANCE = 0.01
+_PLACE_XY_TOLERANCE = 0.015
 _ROTATION_TOLERANCE = math.radians(5)
 _MIN_LIFT = 0.04
 _DROP_MARGIN = 0.15
@@ -229,6 +230,9 @@ def evaluate_skill(
                 metrics["placement_xy_error_m"] = torch.linalg.vector_norm(
                     trace["object"][final, :, :2, 3] - target[:, :2, 3], dim=-1
                 )
+                metrics["placement_xy_tolerance_m"] = torch.full(
+                    (batch,), _PLACE_XY_TOLERANCE
+                )
                 # Compare the settled landing with a prior settled sample,
                 # excluding the expected gravity-driven fall after release.
                 settled = len(trace["qpos"]) - 2
@@ -249,7 +253,7 @@ def evaluate_skill(
                         ("released", released, "release_failure"),
                         (
                             "placed",
-                            metrics["placement_xy_error_m"] <= _POSITION_TOLERANCE,
+                            metrics["placement_xy_error_m"] <= _PLACE_XY_TOLERANCE,
                             "task_goal_miss",
                         ),
                         ("stable", stable & no_drop, "object_dropped"),
