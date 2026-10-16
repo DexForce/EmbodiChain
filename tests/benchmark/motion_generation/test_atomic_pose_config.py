@@ -283,10 +283,10 @@ def test_cube_asset_domains_override_only_geometry_for_every_cube_skill() -> Non
         assert len(object_config) == 1
         object_config = object_config[0]
         expected_size = expected_sizes[track.domain.id]
-        assert object_config["id"] == "cube_subject"
+        assert object_config["id"] == "cube_50mm"
         assert object_config["kind"] == "cube"
         assert object_config["size"] == expected_size
-        assert track.domain.objects == ["cube_subject"]
+        assert track.domain.objects == ["cube_50mm"]
         assert track.domain.perturbations == {"asset_size_m": expected_size}
         assert track.domain.metadata["asset_family"] == "cube"
         assert track.domain.metadata["nominal_size_m"] == [0.05, 0.05, 0.05]
@@ -307,7 +307,7 @@ def test_cube_asset_domains_override_only_geometry_for_every_cube_skill() -> Non
             case["object"]
             for skill in track.config["skills"]
             for case in skill["cases"]
-        } == {"cube_subject"}
+        } == {"cube_50mm"}
 
 
 @pytest.mark.parametrize(
