@@ -258,14 +258,66 @@ def test_generalization_excludes_cases_that_bypass_selected_planner() -> None:
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["cases"] == 1
+    assert row["cases"] == 2
+    assert row["attributed_cases"] == 1
     assert row["applicable_cases"] == 1
     assert row["bypassed_cases"] == 1
     assert row["coverage_rate"] == pytest.approx(1.0)
     assert row["success_rate"] == pytest.approx(0.0)
-    assert (
-        aggregate_generalization(
-            [bypassed_record], metadata, [bypassed_case], measured_trials=1
-        )
-        == []
+    bypassed_rows = aggregate_generalization(
+        [bypassed_record], metadata, [bypassed_case], measured_trials=1
     )
+    assert len(bypassed_rows) == 1
+    bypassed_row = bypassed_rows[0]
+    assert bypassed_row["cases"] == 1
+    assert bypassed_row["attributed_cases"] == 0
+    assert bypassed_row["applicable_cases"] == 0
+    assert bypassed_row["bypassed_cases"] == 1
+    assert bypassed_row["coverage_rate"] == pytest.approx(0.0)
+    assert bypassed_row["success_rate"] is None
+    assert bypassed_row["generalization_eligible"] is False
+
+
+def test_spatial_bucket_rates_count_missing_repeats_as_failures() -> None:
+    """Missing expected rows remain in every bucket's success denominator."""
+    domain = EvaluationDomain(id="workspace_shell", version="v1", kind="robustness")
+    case = replace(
+        _case("shell-case", domain),
+        track="pick@workspace_shell",
+        batch_size=3,
+        start_qpos=torch.zeros(3, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(3, 1, 1, 1),
+        reference_qpos=torch.zeros(3, 1, 7),
+        case_parameters={"randomization": {"spatial_buckets": ["near", "mid", "far"]}},
+    )
+    record = replace(
+        _record(case, _outcome(True)),
+        batch_size=3,
+        outcomes=(
+            replace(_outcome(True), env_index=0),
+            replace(_outcome(True), env_index=2),
+        ),
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    row = aggregate_generalization([record], metadata, [case], measured_trials=2)[0]
+
+    assert row["spatial_bucket_success_rates"] == {
+        "far": 0.5,
+        "mid": 0.0,
+        "near": 0.5,
+    }
+    assert row["spatial_bucket_counts"] == {"far": 2, "mid": 2, "near": 2}
+    assert row["spatial_bucket_failure_stages"] == {
+        "far": {"missing_outcome": 1},
+        "mid": {"missing_outcome": 2},
+        "near": {"missing_outcome": 1},
+    }

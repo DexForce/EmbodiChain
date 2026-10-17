@@ -172,6 +172,7 @@ def write_markdown_report(
         "",
         f"- suite: `{suite.name}`",
         f"- suite_version: `{suite.suite_version}`",
+        f"- report_schema_version: `{suite.protocol.report_schema_version}`",
         f"- profile: `{suite.profile}`",
         (
             f"- external position threshold: `{suite.protocol.position_threshold_m} m` "
@@ -224,6 +225,8 @@ def write_markdown_report(
                         "domain_id",
                         "domain_version",
                         "domain_kind",
+                        "cases",
+                        "attributed_cases",
                         "bypassed_cases",
                         "coverage_rate",
                         "success_rate",

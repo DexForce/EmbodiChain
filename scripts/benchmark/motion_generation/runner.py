@@ -222,12 +222,16 @@ class BenchmarkRunner:
         case: BenchmarkCase,
         phase: TrialPhase,
         callable_fn: "Callable[[], object]",
+        *,
+        record_metadata: dict[str, object] | None = None,
     ) -> tuple[object | None, Exception | None]:
         """Measure a construct/prepare operation and persist its outcome."""
         measured = timed_call(lambda: _capture(callable_fn))
         result, error = measured.result
         status = "error" if error is not None else "ok"
-        phase_metadata = result if isinstance(result, dict) else {}
+        phase_metadata = dict(result) if isinstance(result, dict) else {}
+        if error is not None and record_metadata is not None:
+            phase_metadata.update(record_metadata)
         self._append(
             writer,
             TrialRecord(
@@ -248,6 +252,30 @@ class BenchmarkRunner:
                 f"B={case.batch_size}: {error}"
             )
         return result, error
+
+    def _record_lifecycle_failures(
+        self,
+        writer: TrialJsonlWriter,
+        metadata: PlannerMetadata,
+        cases: list[BenchmarkCase],
+        phase: TrialPhase,
+        *,
+        failure_code: str,
+        failure_message: str,
+        record_metadata: dict[str, dict[str, object]],
+    ) -> None:
+        """Replicate a shared lifecycle failure across every affected case."""
+        for case in cases:
+            self._append(
+                writer,
+                TrialRecord(
+                    **self._base_record(metadata, case, phase),
+                    status="error",
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                    metadata=dict(record_metadata[case.case_id]),
+                ),
+            )
 
     def _run_plan_call(
         self,
@@ -465,16 +493,21 @@ class BenchmarkRunner:
         if not supported_cases:
             return
         first_case = supported_cases[0]
+        lifecycle_metadata = {
+            case.case_id: dict(provider.trial_metadata(case))
+            for case in supported_cases
+        }
         available, reason = adapter.availability()
         if not available:
-            self._record_unavailable(
-                writer,
-                metadata,
-                first_case,
-                reason or "runtime unavailable",
-                failure_code="runtime_unavailable",
-                record_metadata=provider.trial_metadata(first_case),
-            )
+            for case in supported_cases:
+                self._record_unavailable(
+                    writer,
+                    metadata,
+                    case,
+                    reason or "runtime unavailable",
+                    failure_code="runtime_unavailable",
+                    record_metadata=lifecycle_metadata[case.case_id],
+                )
             return
 
         _, build_error = self._record_timed_lifecycle(
@@ -483,8 +516,18 @@ class BenchmarkRunner:
             first_case,
             TrialPhase.CONSTRUCT,
             adapter.build,
+            record_metadata=lifecycle_metadata[first_case.case_id],
         )
         if build_error is not None:
+            self._record_lifecycle_failures(
+                writer,
+                metadata,
+                supported_cases[1:],
+                TrialPhase.CONSTRUCT,
+                failure_code="planner_exception",
+                failure_message=str(build_error),
+                record_metadata=lifecycle_metadata,
+            )
             adapter.close()
             return
         scenario_prepared = False
@@ -496,22 +539,32 @@ class BenchmarkRunner:
                     first_case,
                     TrialPhase.PREPARE,
                     lambda: adapter.prepare_cases(supported_cases),
+                    record_metadata=lifecycle_metadata[first_case.case_id],
                 )
                 if prepare_error is not None:
+                    self._record_lifecycle_failures(
+                        writer,
+                        metadata,
+                        supported_cases[1:],
+                        TrialPhase.PREPARE,
+                        failure_code="planner_exception",
+                        failure_message=str(prepare_error),
+                        record_metadata=lifecycle_metadata,
+                    )
                     return
 
             try:
                 provider.prepare_planner(adapter, first_case)
                 scenario_prepared = True
             except Exception as exc:  # noqa: BLE001 - recorded benchmark failure
-                self._append(
+                self._record_lifecycle_failures(
                     writer,
-                    TrialRecord(
-                        **self._base_record(metadata, first_case, TrialPhase.PREPARE),
-                        status="error",
-                        failure_code="scenario_prepare_error",
-                        failure_message=str(exc),
-                    ),
+                    metadata,
+                    supported_cases,
+                    TrialPhase.PREPARE,
+                    failure_code="scenario_prepare_error",
+                    failure_message=str(exc),
+                    record_metadata=lifecycle_metadata,
                 )
                 self.notes.append(
                     f"{metadata.algorithm_id} scenario prepare failed for "
@@ -675,7 +728,13 @@ class BenchmarkRunner:
             self.cases,
             self.suite.protocol.measured_trials,
         )
-        write_json(run_dir / "aggregates.json", aggregates)
+        write_json(
+            run_dir / "aggregates.json",
+            {
+                "report_schema_version": self.suite.protocol.report_schema_version,
+                **aggregates,
+            },
+        )
         enabled_scenarios = {track.scenario for track in enabled_tracks}
         track_notes: list[str] = []
         if "free_space" in enabled_scenarios:

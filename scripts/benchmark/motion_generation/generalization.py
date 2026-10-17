@@ -70,10 +70,12 @@ def _case_success(
 def _spatial_bucket_statistics(
     cases: Iterable[BenchmarkCase],
     records_by_case: dict[str, list[TrialRecord]],
+    measured_trials: int,
 ) -> tuple[dict[str, float], dict[str, int], dict[str, dict[str, int]]]:
     """Aggregate row-level success and failure stages for spatial buckets."""
     successes: dict[str, int] = defaultdict(int)
-    counts: dict[str, int] = defaultdict(int)
+    observed_counts: dict[str, int] = defaultdict(int)
+    expected_counts: dict[str, int] = defaultdict(int)
     failures: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for case in cases:
         randomization = case.case_parameters.get("randomization", {})
@@ -86,6 +88,8 @@ def _spatial_bucket_statistics(
             raise ValueError(
                 f"Case {case.case_id!r} spatial_buckets must match batch_size."
             )
+        for bucket in buckets:
+            expected_counts[str(bucket)] += measured_trials
         for record in records_by_case.get(case.case_id, []):
             if record.phase is not TrialPhase.MEASURED:
                 continue
@@ -96,15 +100,21 @@ def _spatial_bucket_statistics(
                         "spatial_buckets."
                     )
                 bucket = str(buckets[outcome.env_index])
-                counts[bucket] += 1
+                observed_counts[bucket] += 1
                 succeeded = bool(getattr(outcome, case.primary_success, False))
                 successes[bucket] += int(succeeded)
                 if not succeeded:
                     stage = outcome.failure_stage or outcome.failure_code or "unknown"
                     failures[bucket][stage] += 1
-    rates = {
-        bucket: successes[bucket] / count for bucket, count in sorted(counts.items())
+    counts = {
+        bucket: max(expected_counts[bucket], observed_counts[bucket])
+        for bucket in sorted(expected_counts.keys() | observed_counts.keys())
     }
+    for bucket, count in counts.items():
+        missing = count - observed_counts[bucket]
+        if missing:
+            failures[bucket]["missing_outcome"] += missing
+    rates = {bucket: successes[bucket] / count for bucket, count in counts.items()}
     return (
         rates,
         dict(sorted(counts.items())),
@@ -206,8 +216,6 @@ def aggregate_generalization(
             attributed_cases = [
                 case for case in population_cases if case.case_id not in bypassed
             ]
-            if not attributed_cases:
-                continue
             population_records = [
                 record
                 for case in attributed_cases
@@ -241,6 +249,7 @@ def aggregate_generalization(
                     ]
                     for case in applicable_cases
                 },
+                measured_trials,
             )
             rows.append(
                 {
@@ -250,7 +259,8 @@ def aggregate_generalization(
                     "domain_id": domain_id,
                     "domain_version": domain_version,
                     "domain_kind": domain_kind,
-                    "cases": len(attributed_cases),
+                    "cases": len(population_cases),
+                    "attributed_cases": len(attributed_cases),
                     "applicable_cases": len(applicable_cases),
                     "bypassed_cases": len(bypassed),
                     "unsupported_cases": len(unsupported),

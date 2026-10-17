@@ -113,8 +113,16 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
 
 
 def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
-    """Every Franka task skill gets only its meaningful spatial domains."""
+    """Every Franka task skill gets its meaningful spatial or primitive domains."""
     suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    primitive_domain_ids = {
+        "nominal",
+        "cube_uniform_40mm",
+        "cube_uniform_60mm",
+        "cube_aspect_x",
+        "cube_aspect_y",
+        "cube_aspect_z",
+    }
     expected = {
         "spatial-rigid-object": (
             {"pick_up", "pour", "axis_align"},
@@ -167,6 +175,16 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_relative_shell",
             },
         ),
+        "primitive-cube-rigid-object": (
+            {"pick_up", "pour", "axis_align"},
+            primitive_domain_ids,
+        ),
+        "primitive-cube-held-pose-target": (
+            {"move_held_object"},
+            primitive_domain_ids,
+        ),
+        "primitive-cube-place-target": ({"place"}, primitive_domain_ids),
+        "primitive-cube-position-target": ({"push_object"}, primitive_domain_ids),
         "spatial-microwave-controls": (
             {"press", "twist"},
             {
@@ -208,14 +226,86 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v7"
-    assert len(suite.evaluation_tracks()) == 55
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v8"
+    assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
         skills, domain_ids = expected[track.id]
         assert {entry["id"] for entry in track.config["skills"]} == skills
         assert {domain.id for domain in track.domains} == domain_ids
         assert all(set(domain.applicability) == skills for domain in track.domains)
+
+
+def test_cube_primitive_domains_parameterize_only_geometry_for_every_skill() -> None:
+    """Every cube skill receives one nominal and five primitive parameters."""
+    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    expected_sizes = {
+        "nominal": [0.05, 0.05, 0.05],
+        "cube_uniform_40mm": [0.04, 0.04, 0.04],
+        "cube_uniform_60mm": [0.06, 0.06, 0.06],
+        "cube_aspect_x": [0.07, 0.042258, 0.042258],
+        "cube_aspect_y": [0.042258, 0.07, 0.042258],
+        "cube_aspect_z": [0.042258, 0.042258, 0.07],
+    }
+    primitive_groups = {
+        "primitive-cube-rigid-object",
+        "primitive-cube-held-pose-target",
+        "primitive-cube-place-target",
+        "primitive-cube-position-target",
+    }
+    cube_skills = {
+        "pick_up",
+        "move_held_object",
+        "place",
+        "pour",
+        "axis_align",
+        "push_object",
+    }
+    nominal_object = suite.tracks[0].config["objects"][0]
+    primitive_tracks = [
+        track
+        for track in suite.evaluation_tracks()
+        if track.domain.metadata.get("generalization_axis") == "primitive_geometry"
+    ]
+
+    assert len(primitive_tracks) == len(primitive_groups) * len(expected_sizes)
+    assert {track.group_id for track in primitive_tracks} == primitive_groups
+    assert {
+        skill["id"] for track in primitive_tracks for skill in track.config["skills"]
+    } == cube_skills
+    for group_id in primitive_groups:
+        assert {
+            track.domain.id for track in primitive_tracks if track.group_id == group_id
+        } == set(expected_sizes)
+
+    for track in primitive_tracks:
+        object_config = track.config["objects"]
+        assert len(object_config) == 1
+        object_config = object_config[0]
+        expected_size = expected_sizes[track.domain.id]
+        assert object_config["id"] == "cube_50mm"
+        assert object_config["kind"] == "cube"
+        assert object_config["size"] == expected_size
+        assert track.domain.objects == ["cube_50mm"]
+        assert track.domain.perturbations == {
+            "primitive_parameters": {"size": expected_size}
+        }
+        assert track.domain.metadata["primitive_kind"] == "cube"
+        assert track.domain.metadata["parameter_names"] == ["size"]
+        assert track.domain.metadata["nominal_parameters"] == {
+            "size": [0.05, 0.05, 0.05]
+        }
+        assert track.domain.case_generator == "configured_primitive_parameters"
+        assert resolve_atomic_batch_sizes(track) == [1]
+        assert resolve_atomic_pose_randomization(track).enabled is False
+        assert {
+            key: value for key, value in object_config.items() if key != "size"
+        } == {key: value for key, value in nominal_object.items() if key != "size"}
+        assert {
+            case["object"]
+            for skill in track.config["skills"]
+            for case in skill["cases"]
+        } == {"cube_50mm"}
 
 
 @pytest.mark.parametrize(
@@ -348,6 +438,16 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
                 assert settings.enabled is False
                 assert resolve_atomic_batch_sizes(track) == [1]
                 assert "control_parts" in track.config
+                continue
+            if track.domain.case_generator == "configured_primitive_parameters":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                assert (
+                    track.domain.metadata["generalization_axis"] == "primitive_geometry"
+                )
+                assert track.config["objects"][0]["size"] == (
+                    track.domain.perturbations["primitive_parameters"]["size"]
+                )
                 continue
             assert settings.enabled is True
             assert resolve_atomic_batch_sizes(track) == [8]
@@ -616,6 +716,76 @@ def test_workspace_shell_sampling_covers_radius_buckets_and_height() -> None:
         torch.linspace(-amplitude[2], amplitude[2], 8),
     )
     assert set(labels) == {"near", "mid", "far"}
+
+
+@pytest.mark.parametrize("amplitude", [(0.04, 0.0, 0.01), (0.0, 0.04, 0.01)])
+def test_workspace_shell_sampling_rejects_single_xy_axis(
+    amplitude: tuple[float, float, float],
+) -> None:
+    """A radial shell cannot preserve its labels on only one active XY axis."""
+    with pytest.raises(ValueError, match="both X and Y"):
+        _seeded_jitter(
+            amplitude,
+            seed=47,
+            stream=203,
+            dtype=torch.float32,
+            device=torch.device("cpu"),
+            batch_size=8,
+            sampling_pattern="workspace_shell",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("object_translation_jitter_m", [0.04, 0.0, 0.0]),
+        ("target_translation_jitter_m", [0.0, 0.04, 0.0]),
+        ("task_frame_translation_jitter_m", [0.0, 0.0, 0.02]),
+    ],
+)
+def test_workspace_shell_config_rejects_degenerate_xy_ranges(
+    field: str, value: list[float]
+) -> None:
+    """Shell configs require paired XY ranges and at least one radial source."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                field: value,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="workspace_shell"):
+        resolve_atomic_pose_randomization(track)
+
+
+def test_workspace_shell_config_allows_zero_irrelevant_ranges() -> None:
+    """An inactive vector is valid when another translation defines the shell."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                "object_translation_jitter_m": [0.04, 0.02, 0.0],
+                "target_translation_jitter_m": [0.0, 0.0, 0.01],
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+
+    assert settings.object_translation_jitter_m == (0.04, 0.02, 0.0)
+    assert settings.target_translation_jitter_m == (0.0, 0.0, 0.01)
 
 
 def test_pose_sampling_pattern_is_validated_and_injected() -> None:

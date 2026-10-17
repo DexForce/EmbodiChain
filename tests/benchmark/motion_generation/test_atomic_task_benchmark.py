@@ -2285,6 +2285,13 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     assert manifests[0] == manifests[1]
     assert all(record.domain.version == "v1" for record in result.records)
     assert provider.generate_cases.return_value[0].domain is None
+    aggregate_payload = json.loads(
+        (result.run_dir / "aggregates.json").read_text(encoding="utf-8")
+    )
+    assert aggregate_payload["report_schema_version"] == "2"
+    assert "- report_schema_version: `2`" in result.report_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:

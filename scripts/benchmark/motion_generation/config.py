@@ -130,7 +130,7 @@ class ProtocolCfg:
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
     confidence_level: float = 0.95
-    report_schema_version: str = "1"
+    report_schema_version: str = "2"
     seeds: list[int] = []
 
 
@@ -786,6 +786,32 @@ def resolve_atomic_pose_randomization(
         ),
         name="atomic-task randomization.task_frame_roll_pitch_jitter_rad",
     )
+
+    if sampling_pattern == "workspace_shell":
+        translation_jitters = {
+            "object_translation_jitter_m": object_jitter,
+            "target_translation_jitter_m": target_jitter,
+            "support_object_translation_jitter_m": support_jitter,
+            "task_frame_translation_jitter_m": task_frame_jitter,
+        }
+        single_axis = [
+            name
+            for name, values in translation_jitters.items()
+            if (values[0] > 0.0) != (values[1] > 0.0)
+        ]
+        if single_axis:
+            raise ValueError(
+                "atomic-task workspace_shell requires both X and Y for "
+                f"{', '.join(single_axis)}."
+            )
+        if not any(
+            values[0] > 0.0 and values[1] > 0.0
+            for values in translation_jitters.values()
+        ):
+            raise ValueError(
+                "atomic-task workspace_shell requires at least one translation "
+                "jitter with positive X and Y ranges."
+            )
 
     stride = _positive_int(
         randomization.get("seed_stride", config.get("randomization_seed_stride")),
