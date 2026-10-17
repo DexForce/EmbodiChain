@@ -9,22 +9,16 @@ The cube first initializes at a red point: the table supports it, but the fixed
 downward grasp has no accepted IK solution. It then initializes at three green
 points, where the same Task Program picks it up and places it at a fixed goal.
 
-.. raw:: html
+.. figure:: /_static/tutorials/robot_workspace/round_table.gif
+   :alt: Animated UR5 showcase: a cube on the red workspace region fails initial IK with zero expert actions, followed by successful pick-and-place trials from three green starts on the round table.
+   :width: 100%
 
-   <figure style="margin: 1.5rem auto; max-width: 1280px;">
-     <video controls playsinline preload="metadata" style="width: 100%;"
-            poster="../_static/tutorials/robot_workspace/red_start.png"
-            aria-label="UR5 rejects a red start and completes pick and place from green starts on a round table">
-       <source src="../_static/tutorials/robot_workspace/round_table.mp4" type="video/mp4">
-       Your browser does not support embedded MP4 video.
-     </video>
-     <figcaption style="text-align: center; margin-top: 0.5rem;">
-       Red start: initial IK fails and no expert action is executed.
-       Green starts: IK/FK checks pass and measured pick-and-place trials succeed.
-     </figcaption>
-   </figure>
+   Red start: initial IK fails and no expert action is executed.
+   Green starts: IK/FK checks pass and measured pick-and-place trials succeed.
 
-:download:`Download the showcase video <../_static/tutorials/robot_workspace/round_table.mp4>`.
+The looping GIF shows the complete recorded sequence at 960 x 540 and 8 fps.
+:download:`Download the original 1280 x 720, 25 fps MP4 <../_static/tutorials/robot_workspace/round_table.mp4>`
+for full-resolution playback.
 
 Before starting, it helps to be familiar with :doc:`robot`,
 :doc:`point_cloud_visualization`, and :doc:`task_program_python`.

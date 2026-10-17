@@ -586,8 +586,8 @@ simulation scene services; ``task`` mode consumes the same generated candidates
 through the existing Pick/Place Task Program bridge. The report records actual
 IK/FK checks, settling, restoration, task evidence and first-frame consistency.
 
-See the :doc:`round-table showcase </tutorial/robot_workspace>` for an embedded
-video, red/green initialization snapshots, commands, and measured results.
+See the :doc:`round-table showcase </tutorial/robot_workspace>` for a looping GIF,
+the original MP4, red/green initialization snapshots, commands, and measured results.
 
 .. code-block:: bash
 
