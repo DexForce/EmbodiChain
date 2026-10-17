@@ -1,7 +1,8 @@
 # Franka online PickPlace showcase
 
-See [validation results](VALIDATION.md) for the measured engineering checks and
-the reference learner's unmet task-learning target.
+See [revised experiments](EXPERIMENTS.md) for the causal-history fixes, controlled
+comparisons and current unmet task-learning target. The [earlier validation](VALIDATION.md)
+retains the original engineering checks and learning shortfall.
 
 This task physically grasps a 5 cm cube, lifts it, places it at the marked goal,
 opens the gripper and withdraws. The expert and student use the same measured

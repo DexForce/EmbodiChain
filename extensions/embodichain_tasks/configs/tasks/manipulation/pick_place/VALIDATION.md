@@ -2,6 +2,10 @@
 
 Validation date: 2026-10-17 (Asia/Shanghai).
 
+This report preserves the original fixed-window learner's results. See
+[revised experiments](EXPERIMENTS.md) for the subsequent causal-history,
+observation-processing and refill changes and their measured outcomes.
+
 The engineering data/training/evaluation loop passes its checks. The reference
 student does **not** meet the 80% task-learning target. These are separate results.
 
