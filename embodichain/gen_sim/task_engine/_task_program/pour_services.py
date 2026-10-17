@@ -29,6 +29,7 @@ from embodichain.lab.sim.atomic_actions import (
     ActionOptions,
     AtomicActionEngine,
     HeldObjectPoseGoal,
+    JointPositionTarget,
     PlanningContext,
     SceneEntityPose,
 )
@@ -58,13 +59,17 @@ from .services import (
     _MoveHeldObjectRoute,
     _SceneEntityTarget,
 )
+from .pour_region import PourRegionGeometry, _position_budget
 
 __all__ = [
     "PourStageRoute",
     "PourTransportFactory",
+    "PourRegionTransportFactory",
+    "PourRegionGeometry",
     "RetainedPourFactory",
     "native_vertices",
     "gravity_from_simulation",
+    "active_arm_origin",
 ]
 
 
@@ -114,6 +119,24 @@ def gravity_from_simulation(simulation: object) -> tuple[float, float, float]:
     ):
         raise ValueError("Pour services require a finite nonzero configured gravity.")
     return tuple(float(value) for value in gravity)
+
+
+def active_arm_origin(
+    robot: object, motion: JointPositionTarget, context: PlanningContext
+) -> np.ndarray:
+    """Read the compiled arm solver's current root, never guess the robot base."""
+    if context.batch_size != 1 or context.env_ids.shape != (1,):
+        raise ValueError("Pour region arm observation requires an exact B1 row.")
+    solver = robot.get_solver(motion.control_part)
+    name = getattr(solver, "root_link_name", None)
+    if not isinstance(name, str) or not name:
+        raise ValueError("Pour region requires the bound arm solver's root link.")
+    pose = robot.get_link_pose(link_name=name, env_ids=context.env_ids, to_matrix=True)
+    if not isinstance(pose, torch.Tensor) or pose.shape != (1, 4, 4):
+        raise ValueError("Pour region requires an observed B1 native arm-root pose.")
+    from .pour_geometry import _pose
+
+    return _pose(pose[0].detach().cpu().numpy())[:3, 3].copy()
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,15 +216,7 @@ class _PourTransportLowerer(_MoveHeldObjectLowerer):
                 raise ValueError("Pour staging requires observed source and receiver.")
             pose = state.pose[0] if state.pose.ndim == 3 else state.pose
             poses.append(pose.detach().cpu().numpy())
-        from .pour_geometry import staging_pose
-
-        target = staging_pose(
-            self._vertices[stage.object_id],
-            self._vertices[stage.receiver_id],
-            *poses,
-            clearance_m=stage.clearance_m,
-            gravity_world=self._gravity,
-        )
+        target = self._staging_target(stage, poses, bound, context)
         matrix = torch.as_tensor(
             target, dtype=context.robot.qpos.dtype, device=context.robot.qpos.device
         )
@@ -215,6 +230,24 @@ class _PourTransportLowerer(_MoveHeldObjectLowerer):
                     world_displacement=matrix[:3, 3] - receiver[:3, 3],
                 )
             ),
+        )
+
+    def _staging_target(
+        self,
+        stage: PourStageRoute,
+        poses: list[np.ndarray],
+        bound: BoundSemanticCall,
+        context: PlanningContext,
+    ) -> np.ndarray:
+        del bound, context
+        from .pour_geometry import staging_pose
+
+        return staging_pose(
+            self._vertices[stage.object_id],
+            self._vertices[stage.receiver_id],
+            *poses,
+            clearance_m=stage.clearance_m,
+            gravity_world=self._gravity,
         )
 
     def pick_lookahead_targets(
@@ -301,6 +334,104 @@ class PourTransportFactory(_MoveHeldObjectLowererFactory):
         return _PourTransportLowerer(
             self.routes, self.staging_routes, vertices, identifiers, gravity
         )
+
+
+class _PourRegionTransportLowerer(_PourTransportLowerer):
+    def __init__(
+        self,
+        source: _PourTransportLowerer,
+        region_geometry: PourRegionGeometry,
+        robot: object,
+    ) -> None:
+        super().__init__(
+            tuple(source._routes.values()),
+            source.staging_routes,
+            source._vertices,
+            source._identifiers,
+            source.gravity_world,
+        )
+        self.region_geometry, self._robot = region_geometry, robot
+
+    def _staging_target(
+        self,
+        stage: PourStageRoute,
+        poses: list[np.ndarray],
+        bound: BoundSemanticCall,
+        context: PlanningContext,
+    ) -> np.ndarray:
+        if bound is None or bound.binding.action_binding is None:
+            raise ValueError("Pour region requires its compiled motion binding.")
+        motion = bound.binding.action_binding.endpoint(
+            "primary", "motion"
+        ).require_target(JointPositionTarget)
+        return self.region_geometry.staging_pose(
+            stage.object_id,
+            stage.receiver_id,
+            *poses,
+            active_arm_origin(self._robot, motion, context),
+            clearance_m=stage.clearance_m,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PourRegionTransportFactory(PourTransportFactory):
+    """Fresh explicit inset-region policy; legacy transport identity is unchanged."""
+
+    revision: ClassVar[str] = "pour-region-transport-1"
+    proxy_position_tolerance_m: float
+
+    def __post_init__(self) -> None:
+        PourTransportFactory.__post_init__(self)
+        _position_budget(self.proxy_position_tolerance_m)
+
+    def create(
+        self,
+        *,
+        simulation: object,
+        robot: object,
+        scene_registry: SceneRegistry,
+        engine: AtomicActionEngine,
+    ) -> RegisteredSemanticLowerer:
+        """Capture paired native vertices/faces once, without plans or IK."""
+        source = PourTransportFactory.create(
+            self,
+            simulation=simulation,
+            robot=robot,
+            scene_registry=scene_registry,
+            engine=engine,
+        )
+        faces = {}
+        for identifier in dict.fromkeys(
+            route.receiver_id for route in self.staging_routes
+        ):
+            registration = scene_registry.lookup(
+                identifier, expected_type=SceneObjectRef
+            )
+            entity = getattr(registration.state_provider, "entity", None)
+            getter = getattr(entity, "get_triangles", None)
+            if not callable(getter):
+                raise TypeError("Pour region requires native receiver triangles.")
+            value = getter(env_ids=[0])
+            if (
+                not isinstance(value, torch.Tensor)
+                or value.ndim != 3
+                or value.shape[0] != 1
+                or value.shape[2] != 3
+                or value.dtype == torch.bool
+                or value.is_floating_point()
+                or value.is_complex()
+            ):
+                raise ValueError(
+                    "Pour native receiver faces must be integer (1, F, 3)."
+                )
+            faces[identifier] = value[0].detach().cpu().numpy()
+        geometry = PourRegionGeometry(
+            source._vertices,
+            faces,
+            source.gravity_world,
+            self.proxy_position_tolerance_m,
+        )
+        return _PourRegionTransportLowerer(source, geometry, robot)
 
 
 class _RetainedPourLowerer(_PourLowerer):

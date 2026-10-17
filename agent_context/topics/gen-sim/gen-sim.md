@@ -237,6 +237,18 @@ source-only sweep proposal is not hand/cavity/collision qualification, and
 `pour_evidence.py` evaluates a separately named native pose proxy, never liquid
 transfer. An unmodeled `poured` TaskSpec remains unavailable; geometric motion
 must not silently become its certificate.
+Explicit revision 2 requires `pour_proxy_position_tolerance_m` and a distinct
+`pour_region_transport` factory. Its runtime-only native vertices/triangles
+snapshot is shared by Pick preview and the actual stage lowerer. The same pure
+`pour_region.py` rule insets the receiver's actual triangle projection by that
+declared position budget and chooses its arm-nearest point. It changes staging
+XY only, retains observed R/height, and rejects an empty or invalid region without
+falling back to the center. The active arm origin comes from its compiled motion
+endpoint's solver-root frame. Explicit staging points and constrained E3 remain
+unowned; legacy and revision 1 declarations/fingerprints remain unchanged. This
+is a render-mesh target proposal, not an opening, collision or fluid certificate.
+Region invocation metadata must bind the same position budget used by the
+pose-proxy observer; that observer does not certify the original `poured` goal.
 Bare `table/on` targets retain legal source XY; only occupied landings select a
 measured free tabletop region. Fixed-base prismatic travel envelopes qualify
 endpoints only. Named regions, explicit poses and E2 in-place goals do not move.

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, Literal
@@ -111,6 +111,19 @@ class _PickSelection:
         field(default_factory=list)
     )
     pour_preview: Any = None
+    ik_audit: dict[str, Any] = field(default_factory=dict)
+    active_ik_audit: dict[str, Any] | None = None
+
+
+def _pick_ik_tensor(value: Any) -> dict[str, Any]:
+    tensor = torch.as_tensor(value)
+    if not hasattr(value, "dtype") and tensor.is_floating_point():
+        tensor = torch.as_tensor(value, dtype=torch.float64)
+    tensor = tensor.detach().cpu()
+    record = {"shape": list(tensor.shape), "dtype": str(tensor.dtype)}
+    if tensor.is_complex() or not bool(torch.isfinite(tensor).all()):
+        return {**record, "available": False, "reason": "nonfinite_or_complex"}
+    return {**record, "available": True, "values": tensor.tolist()}
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -150,6 +163,7 @@ class GenSimPickUp(PickUp):
     closing_geometry_factory: Any = None
     pour_continuations: dict | None = None
     pour_scene_vertices: dict | None = None
+    pour_region_geometries: dict | None = None
     pour_gravity_world: tuple[float, float, float] | None = None
 
     def _approach_alignment_mask(self, grasp_poses, options, approach_direction):
@@ -168,6 +182,12 @@ class GenSimPickUp(PickUp):
                 raise ValueError("Pour look-ahead requires the exact Pick object pose.")
             transforms = pose_inv(selection.object_pose)[:, None, None] @ grasp_poses
             aligned &= selection.pour_preview.valid_mask(transforms)
+        if (
+            selection is not None
+            and selection.active_ik_audit is not None
+            and not selection.active_ik_audit.get("omitted")
+        ):
+            selection.active_ik_audit["alignment_mask"] = _pick_ik_tensor(aligned)
         return aligned
 
     def _iter_downstream_eef_targets(self, object_to_eef_variants, options):
@@ -177,8 +197,42 @@ class GenSimPickUp(PickUp):
                 object_to_eef_variants, options
             )
             return
-        targets, _ = selection.pour_preview.targets(object_to_eef_variants)
-        yield from targets
+        preview, group = selection.pour_preview, selection.active_ik_audit
+        targets, valid = preview.targets(object_to_eef_variants)
+        if group is None:
+            yield from targets
+            return
+        if not group.get("omitted"):
+            group["object_to_eef_variants"] = _pick_ik_tensor(object_to_eef_variants)
+            group["geometry_valid_mask"] = _pick_ik_tensor(valid)
+            if "operands" not in selection.ik_audit:
+                selection.ik_audit["operands"] = {
+                    name: _pick_ik_tensor(getattr(preview, name))
+                    for name in (
+                        "source_vertices",
+                        "receiver_vertices",
+                        "staging",
+                        "receiver_pose",
+                        "pad_line_tcp",
+                        "gravity_world",
+                    )
+                }
+                selection.ik_audit["recipe"] = {
+                    name: (
+                        value
+                        if value is None or isinstance(value, str)
+                        else _pick_ik_tensor(value)
+                    )
+                    for name, value in asdict(preview.route).items()
+                }
+        for role, target in zip(
+            ("staging", "peak", "restore", "return_transport", "return_place"),
+            targets,
+            strict=True,
+        ):
+            if group is not None:
+                group["next_role"] = role
+            yield target
 
     def inspect_closing_plan(
         self, request: Any, context: Any, plan: Any, *, screen: Any = None
@@ -301,6 +355,56 @@ class GenSimPickUp(PickUp):
         from .motion import _CPU_BATCH_THREADS
         from embodichain.lab.sim.motion.solvers.pytorch_solver import PytorchSolver
 
+        parent = super()._compute_batch_candidate_ik
+
+        def solve():
+            selection = _PICK_SELECTION.get()
+            group = None if selection is None else selection.active_ik_audit
+            record = None
+            if (
+                group is not None
+                and not group.get("omitted")
+                and len(group["calls"]) < 8
+            ):
+                seed = (
+                    joint_seed[:, None, None, :].expand(*poses.shape[:3], -1)
+                    if joint_seed.ndim == 2
+                    else joint_seed
+                )
+                record = {
+                    "role": (
+                        group["next_role"]
+                        if "next_role" in group
+                        else ("pre_grasp", "grasp", "lift")[len(group["calls"])]
+                    ),
+                    "candidate_shape": list(poses.shape[:3]),
+                    "control_part": manipulator.control_part,
+                    "joint_ids": list(manipulator.joint_ids),
+                    "targets": _pick_ik_tensor(poses.reshape(poses.shape[0], -1, 4, 4)),
+                    "joint_seed": _pick_ik_tensor(
+                        seed.reshape(poses.shape[0], -1, len(manipulator.joint_ids))
+                    ),
+                    "torch_cpu_rng_state": torch.get_rng_state().tolist(),
+                    "torch_cuda_rng_states": {
+                        str(i): torch.cuda.get_rng_state(i).tolist()
+                        for i in _cuda_devices(poses.device)
+                    },
+                    "torch_intraop_threads": torch.get_num_threads(),
+                }
+                group["calls"].append(record)
+            elif group is not None:
+                group["dropped_calls"] = group.get("dropped_calls", 0) + 1
+                group["trace_complete"] = False
+                selection.ik_audit.update(trace_complete=False, truncated=True)
+                selection.ik_audit["omitted_calls"] += 1
+            result = parent(poses, joint_seed, manipulator)
+            if record is not None:
+                record.update(
+                    raw_success=_pick_ik_tensor(result[0]),
+                    output_qpos=_pick_ik_tensor(result[1]),
+                )
+            return result
+
         threads = _CPU_BATCH_THREADS.get()
         if (
             threads is None
@@ -311,15 +415,58 @@ class GenSimPickUp(PickUp):
                 self.robot.get_solver(manipulator.control_part), PytorchSolver
             )
         ):
-            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+            return solve()
         previous = torch.get_num_threads()
         if previous >= threads:
-            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+            return solve()
         try:
             torch.set_num_threads(threads)
-            return super()._compute_batch_candidate_ik(poses, joint_seed, manipulator)
+            return solve()
         finally:
             torch.set_num_threads(previous)
+
+    def _shared_grasp_variants(self, *args):
+        from .pour_continuation import CandidatePreview, PourContinuation
+
+        selection = _PICK_SELECTION.get()
+        preview = None if selection is None else selection.pour_preview
+        if (
+            type(preview) is not CandidatePreview
+            or type(preview.route) is not PourContinuation
+        ):
+            return super()._select_feasible_grasp_variants(*args)
+        if not selection.ik_audit:
+            selection.ik_audit = {
+                "scope": "planning_inputs_not_physical",
+                "group_limit": 8,
+                "trace_complete": True,
+                "truncated": False,
+                "omitted_groups": 0,
+                "omitted_calls": 0,
+                "groups": [],
+            }
+        groups = selection.ik_audit["groups"]
+        previous, group = selection.active_ik_audit, None
+        if len(groups) < 8:
+            group = {
+                "calls": [],
+                "trace_complete": True,
+                "object_pose": _pick_ik_tensor(args[2]),
+            }
+            groups.append(group)
+        else:
+            group = {"calls": [], "omitted": True}
+            selection.ik_audit["omitted_groups"] += 1
+            selection.ik_audit.update(trace_complete=False, truncated=True)
+        selection.active_ik_audit = group
+        try:
+            return super()._select_feasible_grasp_variants(*args)
+        except Exception:
+            group["trace_complete"] = False
+            selection.ik_audit["trace_complete"] = False
+            raise
+        finally:
+            selection.active_ik_audit = previous
 
     def _select_feasible_grasp_variants(
         self,
@@ -338,7 +485,7 @@ class GenSimPickUp(PickUp):
             options.rotate_upright is not None
             or options.approach_alignment_max_angle is None
         ):
-            return super()._select_feasible_grasp_variants(
+            return self._shared_grasp_variants(
                 grasp_xpos,
                 start_qpos,
                 object_poses,
@@ -365,7 +512,7 @@ class GenSimPickUp(PickUp):
             grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
         )
         if keep.any():
-            poses, valid = super()._select_feasible_grasp_variants(
+            poses, valid = self._shared_grasp_variants(
                 grasp_xpos[:, keep],
                 start_qpos,
                 object_poses,
@@ -417,7 +564,19 @@ class GenSimPickUp(PickUp):
             selection.closing_geometry = self.closing_geometry_factory(request, context)
 
         def finish(plan):
-            return self._qualify_closing_plan(request, context, plan)
+            plan = self._qualify_closing_plan(request, context, plan)
+            if selection.ik_audit and not plan.plan_success.any():
+                plan = replace(
+                    plan,
+                    diagnostics=replace(
+                        plan.diagnostics,
+                        metadata={
+                            **plan.diagnostics.metadata,
+                            "gen_sim_pour_pick_ik_audit": deepcopy(selection.ik_audit),
+                        },
+                    ),
+                )
+            return plan
 
         token = _PICK_SELECTION.set(selection)
         try:
@@ -2336,7 +2495,12 @@ class GenSimPour(Pour):
             "receiver_entity_id": route.receiver_id,
             "tilt_axis_local": [frames["tilt_axis_object"].tolist()],
             "gen_sim_pour_geometry": {
-                "revision": 1,
+                "revision": 2 if route.proxy_position_tolerance_m is not None else 1,
+                **(
+                    {"proxy_position_tolerance_m": route.proxy_position_tolerance_m}
+                    if route.proxy_position_tolerance_m is not None
+                    else {}
+                ),
                 "source_entity_id": route.object_id,
                 "receiver_entity_id": route.receiver_id,
                 "physical_evidence": False,

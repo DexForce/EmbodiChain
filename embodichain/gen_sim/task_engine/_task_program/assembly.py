@@ -398,6 +398,22 @@ class _TaskFactory(SimulationTaskProgramFactory):
         lowerers = super().create_registered_semantic_lowerers(
             scene_registry=scene_registry, engine=engine
         )
+        from .pour_services import _PourRegionTransportLowerer
+
+        region_lowerers = [
+            lowerer
+            for lowerer in lowerers
+            if type(lowerer) is _PourRegionTransportLowerer
+        ]
+        if region_lowerers:
+            if len(region_lowerers) != 1:
+                raise ValueError("Pour region requires one exact geometry owner.")
+            geometry = region_lowerers[0].region_geometry
+            engine.actions["pick_up"].pour_region_geometries = {
+                route.pick_id: geometry
+                for route in self._pour_continuations
+                if route.proxy_position_tolerance_m is not None
+            }
         if (
             self._clearance_routes
             or self._alignment_continuation_routes
@@ -625,7 +641,11 @@ class TaskAdapterFactory:
                 pick_continuations = bind_calls(
                     self.registration.catalog.preflight(program), preset
                 )
-        from .pour_services import PourTransportFactory, RetainedPourFactory
+        from .pour_services import (
+            PourTransportFactory,
+            PourRegionTransportFactory,
+            RetainedPourFactory,
+        )
 
         pour_factory = next(
             (
@@ -633,7 +653,7 @@ class TaskAdapterFactory:
                 for f in getattr(
                     self.registration, "registered_semantic_lowerer_factories", ()
                 )
-                if type(f) is PourTransportFactory
+                if type(f) in (PourTransportFactory, PourRegionTransportFactory)
             ),
             None,
         )

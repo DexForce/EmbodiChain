@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import FrozenInstanceError, asdict, replace
+from dataclasses import FrozenInstanceError, asdict, fields, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -46,6 +46,7 @@ from embodichain.gen_sim.task_engine._task_program.services import (
 from embodichain.lab.sim.atomic_actions import (
     AxisAlignAffordance,
     HeldObjectPoseGoal,
+    JointPositionTarget,
     MoveHeldObjectOptions,
     PourGoal,
     PourOptions,
@@ -575,4 +576,256 @@ def test_factory_rejects_another_robot_and_unknown_retained_fields():
     with pytest.raises(ValueError):
         decode_task_lowerer(
             {"kind": "retained_pour", "object_id": "source", "G": []}, path="test"
+        )
+
+
+def _region_factory(budget=0.02):
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        PourRegionTransportFactory,
+    )
+
+    legacy = _factory()
+    return PourRegionTransportFactory(legacy.routes, legacy.staging_routes, budget)
+
+
+def _region_create():
+    registry, source, receiver, scaled = _registry()
+    receiver.get_triangles = Mock(
+        return_value=torch.tensor([[[0, 1, 2]]], dtype=torch.int32)
+    )
+    root = torch.eye(4, dtype=torch.float64)[None]
+    root[0, :3, 3] = torch.tensor([2.0, -0.2, 0.4])
+    robot = SimpleNamespace(
+        get_solver=Mock(
+            return_value=SimpleNamespace(root_link_name="compiled_right_root")
+        ),
+        get_link_pose=Mock(return_value=root),
+    )
+    lowerer = _region_factory().create(
+        simulation=_simulation(),
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    motion = JointPositionTarget("right_arm", tuple(range(7)))
+    endpoint = SimpleNamespace(require_target=Mock(return_value=motion))
+    bound = SimpleNamespace(
+        binding=SimpleNamespace(
+            action_binding=SimpleNamespace(endpoint=Mock(return_value=endpoint))
+        )
+    )
+    return lowerer, robot, bound, source, receiver, scaled
+
+
+def test_region_factory_has_fresh_identity_without_changing_legacy_fields():
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        PourRegionGeometry,
+        PourRegionTransportFactory,
+    )
+    from embodichain.gen_sim.task_engine._task_program.pour_region import (
+        PourRegionGeometry as PureGeometry,
+    )
+
+    assert PourRegionGeometry is PureGeometry
+    assert [field.name for field in fields(PourStageRoute)] == [
+        "object_id",
+        "target_id",
+        "receiver_id",
+        "clearance_m",
+    ]
+    assert [field.name for field in fields(PourTransportFactory)] == [
+        "routes",
+        "staging_routes",
+    ]
+    assert PourTransportFactory.revision == "pour-transport-1"
+    assert [field.name for field in fields(PourRegionTransportFactory)] == [
+        "routes",
+        "staging_routes",
+        "proxy_position_tolerance_m",
+    ]
+    assert PourRegionTransportFactory.revision != PourTransportFactory.revision
+    assert asdict(_factory()) == {
+        "routes": asdict(_region_factory())["routes"],
+        "staging_routes": asdict(_region_factory())["staging_routes"],
+    }
+    with pytest.raises(TypeError):
+        PourRegionTransportFactory(_factory().routes, _factory().staging_routes)
+    with pytest.raises(FrozenInstanceError):
+        _region_factory().proxy_position_tolerance_m = 0.03
+
+
+@pytest.mark.parametrize("budget", [None, True, 0, -0.01, np.nan, np.inf])
+def test_region_factory_rejects_missing_or_invalid_position_budget(budget):
+    with pytest.raises((TypeError, ValueError)):
+        _region_factory(budget)
+
+
+def test_region_factory_captures_scaled_native_vertices_and_matched_faces_once():
+    lowerer, robot, _, source, receiver, scaled = _region_create()
+    geometry = lowerer.region_geometry
+    np.testing.assert_array_equal(geometry.vertices["source"], scaled)
+    np.testing.assert_array_equal(
+        geometry.vertices["receiver"], receiver.get_vertices.return_value[0].numpy()
+    )
+    np.testing.assert_array_equal(geometry.faces["receiver"], [[0, 1, 2]])
+    source.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
+    receiver.get_vertices.assert_called_once_with(env_ids=[0], scale=True)
+    receiver.get_triangles.assert_called_once_with(env_ids=[0])
+    robot.get_link_pose.assert_not_called()
+    with pytest.raises(ValueError):
+        geometry.faces["receiver"].setflags(write=True)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        torch.zeros(3, 3, dtype=torch.int64),
+        torch.zeros(1, 0, 3, dtype=torch.int64),
+        torch.zeros(1, 1, 3),
+        torch.zeros(1, 1, 3, dtype=torch.bool),
+        torch.tensor([[[0, 1, 3]]]),
+        torch.tensor([[[-1, 1, 2]]]),
+    ],
+)
+def test_region_factory_rejects_native_faces_without_matching_topology(value):
+    registry, _, receiver, _ = _registry()
+    receiver.get_triangles = Mock(return_value=value)
+    robot = object()
+    with pytest.raises((ValueError, TypeError)):
+        _region_factory().create(
+            simulation=_simulation(),
+            robot=robot,
+            scene_registry=registry,
+            engine=SimpleNamespace(robot=robot),
+        )
+    receiver.get_triangles.assert_called_once_with(env_ids=[0])
+
+
+def test_region_factory_captures_each_shared_receiver_once_and_requires_its_native_faces():
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        PourRegionTransportFactory,
+    )
+
+    registry, source, receiver, _ = _registry()
+    receiver.get_triangles = Mock(return_value=torch.tensor([[[0, 1, 2]]]))
+    old = _factory()
+    routes = (
+        *old.routes,
+        _MoveHeldObjectRoute("source", "second_stage", _SceneEntityTarget("receiver")),
+    )
+    stages = (
+        *old.staging_routes,
+        PourStageRoute("source", "second_stage", "receiver", 0.03),
+    )
+    factory = PourRegionTransportFactory(routes, stages, 0.02)
+    robot = object()
+    factory.create(
+        simulation=_simulation(),
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    source.get_vertices.assert_called_once()
+    receiver.get_vertices.assert_called_once()
+    receiver.get_triangles.assert_called_once()
+    receiver.get_triangles = None
+    with pytest.raises(TypeError, match="native receiver triangles"):
+        factory.create(
+            simulation=_simulation(),
+            robot=robot,
+            scene_registry=registry,
+            engine=SimpleNamespace(robot=robot),
+        )
+
+
+def test_region_lowerer_reads_compiled_active_arm_root_in_the_same_call():
+    lowerer, robot, bound, _, receiver, scaled = _region_create()
+    context = _context()
+    context.robot.timestamp = 7.0
+    context.scene.timestamp = 7.0
+    result = lowerer.lower(
+        _call(reference="receiver"),
+        context=context,
+        bound=bound,
+        option_template=MoveHeldObjectOptions(),
+    )
+    bound.binding.action_binding.endpoint.assert_called_once_with("primary", "motion")
+    robot.get_solver.assert_called_once_with("right_arm")
+    robot.get_link_pose.assert_called_once_with(
+        link_name="compiled_right_root", env_ids=context.env_ids, to_matrix=True
+    )
+    expected = lowerer.region_geometry.staging_pose(
+        "source",
+        "receiver",
+        context.scene.entities["source"].pose[0].numpy(),
+        context.scene.entities["receiver"].pose.numpy(),
+        robot.get_link_pose.return_value[0, :3, 3].numpy(),
+        clearance_m=0.025,
+    )
+    resolved = resolve_pose_goal(
+        result.goal.object_target_pose, context, name="region_stage"
+    )
+    np.testing.assert_array_equal(resolved[0].numpy(), expected.astype(np.float32))
+    assert collect_scene_dependencies(result.goal) == ("receiver",)
+    assert result.registered_effect.held_objects[0].object_id == "source"
+    changed = robot.get_link_pose.return_value.clone()
+    changed[0, 0, 3] = -2
+    robot.get_link_pose.return_value = changed
+    moved = lowerer.lower(
+        _call(), context=context, bound=bound, option_template=MoveHeldObjectOptions()
+    )
+    assert not torch.equal(
+        resolve_pose_goal(moved.goal.object_target_pose, context, name="region_stage"),
+        resolved,
+    )
+    assert robot.get_link_pose.call_count == 2
+
+
+def test_region_return_route_is_legacy_and_never_reads_bound_arm_or_scene():
+    lowerer, robot, _, *_ = _region_create()
+    context, bound = Mock(), Mock()
+    result = lowerer.lower(
+        _call("return"),
+        context=context,
+        bound=bound,
+        option_template=MoveHeldObjectOptions(),
+    )
+    expected = _MoveHeldObjectLowerer(_factory().routes).lower(
+        _call("return"),
+        context=context,
+        bound=None,
+        option_template=MoveHeldObjectOptions(),
+    )
+    torch.testing.assert_close(
+        result.goal.object_target_pose, expected.goal.object_target_pose
+    )
+    assert result.registered_effect == expected.registered_effect
+    assert context.mock_calls == [] and bound.mock_calls == []
+    robot.get_link_pose.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "damage", ["solver", "root_name", "shape", "nonfinite", "reflection"]
+)
+def test_active_arm_origin_refuses_missing_or_invalid_native_root_without_guessing(
+    damage,
+):
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        active_arm_origin,
+    )
+
+    _, robot, _, *_ = _region_create()
+    if damage == "solver":
+        robot.get_solver.return_value = None
+    elif damage == "root_name":
+        robot.get_solver.return_value.root_link_name = None
+    elif damage == "shape":
+        robot.get_link_pose.return_value = torch.eye(4)
+    elif damage == "nonfinite":
+        robot.get_link_pose.return_value[0, 0, 3] = torch.nan
+    else:
+        robot.get_link_pose.return_value[0, 0, 0] = -1
+    with pytest.raises((ValueError, TypeError)):
+        active_arm_origin(
+            robot, JointPositionTarget("right_arm", tuple(range(7))), _context()
         )

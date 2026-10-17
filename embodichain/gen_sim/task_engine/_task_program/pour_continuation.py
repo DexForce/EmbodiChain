@@ -45,6 +45,7 @@ class PourContinuation:
     clearance_m: float
     angle_rad: float
     sample_count: int
+    proxy_position_tolerance_m: float | None = None
 
 
 def supports_ordinary_pour(
@@ -107,6 +108,7 @@ def bind_calls(
     program: Any, preset: Any, factory: Any, motion_samples: tuple[tuple[str, int], ...]
 ) -> tuple[PourContinuation, ...]:
     """Require the complete five-role recipe before replacing legacy targets."""
+    from .pour_services import PourRegionTransportFactory
     from .services import _AbsolutePoseTarget
 
     segments = tuple(program.iter_segments())
@@ -205,6 +207,11 @@ def bind_calls(
                 declaration.clearance_m,
                 float(options.rotate_angle),
                 budgets[pour_id],
+                proxy_position_tolerance_m=(
+                    factory.proxy_position_tolerance_m
+                    if type(factory) is PourRegionTransportFactory
+                    else None
+                ),
             )
         )
     if {r.stage_id for r in result} != {
@@ -305,22 +312,55 @@ def prepare_preview(
     # never just remove the candidate-dependent peak from qualification.
     if len(request.skill_options.downstream_object_target_poses) != 2:
         raise ValueError("Canonical Pour look-ahead has an unrecognized suffix.")
-    vertices = action.pour_scene_vertices
-    source = vertices[route.object_id][0].detach().cpu().numpy()
-    receiver = vertices[route.receiver_id][0].detach().cpu().numpy()
-    source_pose = observed_pose(context, route.object_id)[0].detach().cpu().numpy()
-    receiver_pose = observed_pose(context, route.receiver_id)[0].detach().cpu().numpy()
-    staging = staging_pose(
-        source,
-        receiver,
-        source_pose,
-        receiver_pose,
-        clearance_m=route.clearance_m,
-        gravity_world=action.pour_gravity_world,
-    )
-    motion = request.binding.endpoint("primary", "motion").require_target(
-        JointPositionTarget
-    )
+    if route.proxy_position_tolerance_m is None:
+        vertices = action.pour_scene_vertices
+        source = vertices[route.object_id][0].detach().cpu().numpy()
+        receiver = vertices[route.receiver_id][0].detach().cpu().numpy()
+        source_pose = observed_pose(context, route.object_id)[0].detach().cpu().numpy()
+        receiver_pose = (
+            observed_pose(context, route.receiver_id)[0].detach().cpu().numpy()
+        )
+        staging = staging_pose(
+            source,
+            receiver,
+            source_pose,
+            receiver_pose,
+            clearance_m=route.clearance_m,
+            gravity_world=action.pour_gravity_world,
+        )
+        motion = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+    else:
+        from .pour_services import PourRegionGeometry, active_arm_origin
+
+        geometry = (getattr(action, "pour_region_geometries", None) or {}).get(
+            request.invocation_id
+        )
+        if (
+            type(geometry) is not PourRegionGeometry
+            or geometry.proxy_position_tolerance_m != route.proxy_position_tolerance_m
+        ):
+            raise ValueError(
+                "Canonical Pour region preview lacks its exact geometry/budget owner."
+            )
+        source_pose = observed_pose(context, route.object_id)[0].detach().cpu().numpy()
+        receiver_pose = (
+            observed_pose(context, route.receiver_id)[0].detach().cpu().numpy()
+        )
+        motion = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        staging = geometry.staging_pose(
+            route.object_id,
+            route.receiver_id,
+            source_pose,
+            receiver_pose,
+            active_arm_origin(action.robot, motion, context),
+            clearance_m=route.clearance_m,
+        )
+        source = geometry.vertices[route.object_id]
+        receiver = geometry.vertices[route.receiver_id]
     tcp = action.robot.compute_fk(
         qpos=context.robot.qpos[:, list(motion.joint_ids)],
         name=motion.control_part,

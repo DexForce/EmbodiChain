@@ -226,6 +226,38 @@ def test_exact_compiled_five_role_recipe_binds_original_ids_and_budget():
     preset.action_option_template.assert_called_once_with("simulation.pour")
 
 
+def test_legacy_pour_recipe_has_no_region_proxy_budget():
+    calls, factory, preset, samples = _binding_inputs()
+    (route,) = _bind(calls, factory, preset, samples)
+    assert route.proxy_position_tolerance_m is None
+
+
+def test_only_exact_region_factory_binds_its_required_proxy_budget():
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        PourRegionTransportFactory,
+    )
+
+    calls, original, preset, samples = _binding_inputs()
+    factory = PourRegionTransportFactory(
+        routes=original.routes,
+        staging_routes=original.staging_routes,
+        proxy_position_tolerance_m=0.02,
+    )
+    (route,) = _bind(calls, factory, preset, samples)
+    assert route.proxy_position_tolerance_m == factory.proxy_position_tolerance_m
+
+    class ForeignRegionFactory(PourRegionTransportFactory):
+        pass
+
+    foreign = ForeignRegionFactory(
+        routes=original.routes,
+        staging_routes=original.staging_routes,
+        proxy_position_tolerance_m=0.02,
+    )
+    (unowned,) = _bind(calls, foreign, preset, samples)
+    assert unowned.proxy_position_tolerance_m is None
+
+
 def test_owned_stage_without_complete_recipe_is_not_silently_legacy():
     calls, factory, preset, samples = _binding_inputs()
     complete = tuple(_program(calls).iter_segments())
@@ -436,6 +468,285 @@ def test_unowned_pick_delegates_legacy_count_and_exact_targets(with_selection):
     assert all(torch.equal(a, b) for a, b in zip(actual, expected, strict=True))
 
 
+def _pick_audit_case(problem, alignment_angle=None):
+    source, receiver, receiver_pose, stage, route = _geometry()
+    preview = CandidatePreview(
+        route,
+        source,
+        receiver,
+        stage,
+        receiver_pose,
+        torch.tensor([1.0, 0.0, 0.0], dtype=torch.float64),
+        _GRAVITY,
+    )
+    all_valid = torch.ones(1, 2, 2, dtype=torch.bool)
+    masks = [all_valid.clone() for _ in range(8)]
+    aligned = all_valid.clone()
+    if problem == "preintersection_empty":
+        aligned = torch.tensor([[[True, False], [True, False]]])
+        masks[2] = ~aligned
+    elif problem == "stage_raw_failure":
+        masks[3].zero_()
+    calls = []
+
+    def ik(*, pose, name, joint_seed):
+        index = len(calls) % 8
+        before = torch.get_rng_state().clone()
+        qpos = joint_seed.clone() + torch.rand((), dtype=joint_seed.dtype) * 0.001
+        success = masks[index].reshape(1, -1).clone()
+        calls.append(
+            (pose.clone(), joint_seed.clone(), before, success.clone(), qpos.clone())
+        )
+        return success, qpos
+
+    robot = SimpleNamespace(
+        compute_batch_ik=ik,
+        compute_fk=lambda **kwargs: torch.eye(4, dtype=torch.float64)[None],
+    )
+    action = actions.GenSimPickUp()
+    action._planning_services = SimpleNamespace(device=torch.device("cpu"), robot=robot)
+    selection = actions._PickSelection(
+        pour_preview=preview,
+        closing_geometry=SimpleNamespace(mask=lambda *args: aligned),
+    )
+    args = (
+        torch.eye(4, dtype=torch.float64).repeat(1, 2, 1, 1),
+        torch.zeros(1, 7, dtype=torch.float64),
+        torch.eye(4, dtype=torch.float64)[None],
+        JointPositionTarget("left_arm", tuple(range(7))),
+        PickUpOptions(approach_alignment_max_angle=alignment_angle),
+        torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64),
+    )
+    return action, selection, args, calls
+
+
+@pytest.mark.parametrize("problem", ["preintersection_empty", "stage_raw_failure"])
+@pytest.mark.parametrize("alignment_angle", [None, 0.5])
+def test_pick_audit_distinguishes_raw_stage_ik_from_pre_stage_intersection_without_new_queries(
+    problem, alignment_angle
+):
+    action, selection, args, calls = _pick_audit_case(problem, alignment_angle)
+    rng = torch.get_rng_state().clone()
+    token = actions._PICK_SELECTION.set(selection)
+    try:
+        actual = action._select_feasible_grasp_variants(*args)
+    finally:
+        actions._PICK_SELECTION.reset(token)
+    after = torch.get_rng_state().clone()
+    assert len(calls) == 8
+    audit = selection.ik_audit
+    assert audit["trace_complete"] is True and audit["truncated"] is False
+    assert audit["omitted_groups"] == audit["omitted_calls"] == 0
+    group = audit["groups"][0]
+    assert [c["role"] for c in group["calls"]] == [
+        "pre_grasp",
+        "grasp",
+        "lift",
+        *_ROLES,
+    ]
+    pre = torch.tensor(group["alignment_mask"]["values"])
+    for recorded, (target, seed, before, success, qpos) in zip(
+        group["calls"], calls, strict=True
+    ):
+        assert recorded["targets"]["values"] == target.tolist()
+        assert recorded["joint_seed"]["values"] == seed.tolist()
+        assert recorded["torch_cpu_rng_state"] == before.tolist()
+        assert recorded["raw_success"]["values"] == success.reshape(1, 2, 2).tolist()
+        assert recorded["output_qpos"]["values"] == qpos.reshape(1, 2, 2, 7).tolist()
+    for recorded in group["calls"][:3]:
+        pre &= torch.tensor(recorded["raw_success"]["values"])
+    stage = torch.tensor(group["calls"][3]["raw_success"]["values"])
+    assert int(pre.sum()) == (0 if problem == "preintersection_empty" else 4)
+    assert int(stage.sum()) == (4 if problem == "preintersection_empty" else 0)
+    assert not actual[1].any()
+    assert selection.active_ik_audit is None
+    assert set(audit["operands"]) == {
+        "source_vertices",
+        "receiver_vertices",
+        "staging",
+        "receiver_pose",
+        "pad_line_tcp",
+        "gravity_world",
+    }
+
+    baseline, legacy_selection, legacy_args, legacy_calls = _pick_audit_case(
+        problem, alignment_angle
+    )
+    baseline._shared_grasp_variants = (
+        lambda *values: PickUp._select_feasible_grasp_variants(baseline, *values)
+    )
+    torch.set_rng_state(rng)
+    token = actions._PICK_SELECTION.set(legacy_selection)
+    try:
+        expected = baseline._select_feasible_grasp_variants(*legacy_args)
+    finally:
+        actions._PICK_SELECTION.reset(token)
+    assert len(legacy_calls) == len(calls)
+    assert all(torch.equal(a, b) for a, b in zip(actual, expected, strict=True))
+    assert torch.equal(torch.get_rng_state(), after)
+    assert all(
+        torch.equal(a, b)
+        for old, new in zip(calls, legacy_calls, strict=True)
+        for a, b in zip(old, new, strict=True)
+    )
+    assert legacy_selection.ik_audit == {}
+
+
+def test_pick_ik_audit_is_bounded_and_restores_group_on_exception(monkeypatch):
+    action, selection, args, calls = _pick_audit_case("stage_raw_failure")
+    token = actions._PICK_SELECTION.set(selection)
+    try:
+        for _ in range(10):
+            action._select_feasible_grasp_variants(*args)
+        assert len(calls) == 80
+        assert len(selection.ik_audit["groups"]) == 8
+        assert selection.ik_audit["omitted_groups"] == 2
+        assert selection.ik_audit["omitted_calls"] == 16
+        assert selection.ik_audit["trace_complete"] is False
+        assert selection.ik_audit["truncated"] is True
+        previous = {"previous": True}
+        selection.active_ik_audit = previous
+        monkeypatch.setattr(
+            PickUp,
+            "_select_feasible_grasp_variants",
+            Mock(side_effect=ValueError("unchanged")),
+        )
+        with pytest.raises(ValueError, match="unchanged"):
+            action._shared_grasp_variants(*args)
+        assert selection.active_ik_audit is previous
+    finally:
+        actions._PICK_SELECTION.reset(token)
+
+
+def test_untyped_preview_does_not_enable_pick_ik_audit():
+    action, selection, args, calls = _pick_audit_case("stage_raw_failure")
+    preview = selection.pour_preview
+    selection.pour_preview = SimpleNamespace(
+        targets=preview.targets, valid_mask=preview.valid_mask, route=preview.route
+    )
+    token = actions._PICK_SELECTION.set(selection)
+    try:
+        action._select_feasible_grasp_variants(*args)
+    finally:
+        actions._PICK_SELECTION.reset(token)
+    assert len(calls) == 8
+    assert selection.ik_audit == {} and selection.active_ik_audit is None
+
+
+@pytest.mark.parametrize("succeeded", [False, True])
+def test_only_failed_canonical_pick_publishes_audit_metadata(monkeypatch, succeeded):
+    from embodichain.gen_sim.task_engine._task_program import (
+        pick_candidate_path,
+        pick_path,
+        pour_continuation,
+    )
+
+    @dataclass(frozen=True)
+    class Plan:
+        plan_success: torch.Tensor
+        diagnostics: PlannerDiagnostics
+
+    action, selection, args, calls = _pick_audit_case("stage_raw_failure")
+    original = Plan(
+        torch.tensor([succeeded]),
+        PlannerDiagnostics(backend="mock", metadata={"existing": "untouched"}),
+    )
+    action.pour_continuations = {"pick": selection.pour_preview.route}
+    monkeypatch.setattr(
+        pour_continuation, "prepare_preview", lambda *args: selection.pour_preview
+    )
+    monkeypatch.setattr(pick_candidate_path, "owns_fixed", lambda *args: False)
+    monkeypatch.setattr(pick_path, "eligible", lambda *args: False)
+
+    def parent(self, request, context):
+        self._select_feasible_grasp_variants(*args)
+        return original
+
+    monkeypatch.setattr(PickUp, "_plan", parent)
+    result = action._plan(SimpleNamespace(invocation_id="pick"), SimpleNamespace())
+    assert len(calls) == 8 and actions._PICK_SELECTION.get() is None
+    assert result.plan_success is original.plan_success
+    if succeeded:
+        assert result is original and result.diagnostics.metadata == {
+            "existing": "untouched"
+        }
+    else:
+        assert result.diagnostics.metadata["existing"] == "untouched"
+        audit = result.diagnostics.metadata["gen_sim_pour_pick_ik_audit"]
+        assert audit["scope"] == "planning_inputs_not_physical"
+        assert len(audit["groups"][0]["calls"]) == 8
+        assert original.diagnostics.metadata == {"existing": "untouched"}
+
+
+@pytest.mark.parametrize(
+    "budget,previous,expected", [(None, 1, 1), (4, 4, 4), (4, 1, 4)]
+)
+def test_pick_ik_audit_observes_actual_thread_branch_without_changing_policy(
+    monkeypatch, budget, previous, expected
+):
+    from embodichain.gen_sim.task_engine._task_program.motion import _CPU_BATCH_THREADS
+    from embodichain.lab.sim.motion.solvers import pytorch_solver
+
+    class Solver:
+        pass
+
+    threads, changes = [previous], []
+    monkeypatch.setattr(pytorch_solver, "PytorchSolver", Solver)
+    monkeypatch.setattr(torch, "get_num_threads", lambda: threads[0])
+
+    def set_threads(value):
+        changes.append(value)
+        threads[0] = value
+
+    monkeypatch.setattr(torch, "set_num_threads", set_threads)
+    action = actions.GenSimPickUp()
+    robot = SimpleNamespace(
+        get_solver=lambda part: Solver(),
+        compute_batch_ik=lambda **kw: (
+            torch.ones(1, 100, dtype=torch.bool),
+            kw["joint_seed"].clone(),
+        ),
+    )
+    action._planning_services = SimpleNamespace(device=torch.device("cpu"), robot=robot)
+    group = {"calls": []}
+    selection = actions._PickSelection(active_ik_audit=group)
+    selection_token = actions._PICK_SELECTION.set(selection)
+    budget_token = _CPU_BATCH_THREADS.set(budget)
+    try:
+        action._compute_batch_candidate_ik(
+            torch.eye(4).repeat(1, 50, 2, 1, 1),
+            torch.zeros(1, 7),
+            JointPositionTarget("left_arm", tuple(range(7))),
+        )
+    finally:
+        _CPU_BATCH_THREADS.reset(budget_token)
+        actions._PICK_SELECTION.reset(selection_token)
+    assert group["calls"][0]["torch_intraop_threads"] == expected
+    assert threads[0] == previous
+    assert changes == ([expected, previous] if previous < expected else [])
+
+
+def test_nonfinite_pick_ik_audit_marks_unavailable_without_changing_return():
+    action, selection, args, calls = _pick_audit_case("stage_raw_failure")
+    group = {"calls": []}
+    selection.active_ik_audit = group
+    poses = torch.eye(4).repeat(1, 2, 2, 1, 1)
+    poses[0, 0, 0, 0, 3] = torch.nan
+    seed = torch.zeros(1, 7)
+    seed[0, 0] = torch.inf
+    token = actions._PICK_SELECTION.set(selection)
+    try:
+        success, qpos = action._compute_batch_candidate_ik(poses, seed, args[3])
+    finally:
+        actions._PICK_SELECTION.reset(token)
+    assert len(calls) == 1 and success.all() and torch.isinf(qpos[..., 0]).all()
+    record = group["calls"][0]
+    assert record["targets"]["available"] is False
+    assert record["joint_seed"]["available"] is False
+    assert record["output_qpos"]["available"] is False
+    assert "values" not in record["targets"]
+
+
 @pytest.mark.parametrize("retain", [False, True])
 def test_failed_pour_keeps_canonical_inputs_without_more_ik_or_changing_legacy(retain):
     @dataclass(frozen=True)
@@ -601,6 +912,210 @@ def test_existing_seed_frame_owns_pre_pour_gate_without_adding_commands(retain):
         with pytest.raises(ValueError, match="first trajectory segment"):
             ExecutionSession._validate_phase_effect_gates(session, plan)
         handoff.retain.assert_not_called()
+
+
+def _region_preview_fixture():
+    from embodichain.gen_sim.task_engine._task_program.pour_services import (
+        PourRegionTransportFactory,
+    )
+    from .test_pour_services import _registry, _simulation
+
+    source, receiver, receiver_pose, _, _ = _geometry()
+    calls, original, preset, samples = _binding_inputs()
+    factory = PourRegionTransportFactory(
+        routes=original.routes,
+        staging_routes=original.staging_routes,
+        proxy_position_tolerance_m=0.02,
+    )
+    (route,) = _bind(calls, factory, preset, samples)
+    registry, native_source, native_receiver, _ = _registry()
+    # Triangulate the eight product-ordered box corners used by _geometry.
+    faces = torch.tensor(
+        [
+            [0, 1, 3],
+            [0, 3, 2],
+            [4, 6, 7],
+            [4, 7, 5],
+            [0, 4, 5],
+            [0, 5, 1],
+            [2, 3, 7],
+            [2, 7, 6],
+            [0, 2, 6],
+            [0, 6, 4],
+            [1, 5, 7],
+            [1, 7, 3],
+        ],
+        dtype=torch.int32,
+    )[None]
+    for native, vertices in ((native_source, source), (native_receiver, receiver)):
+        native.get_vertices.return_value = torch.as_tensor(vertices)[None]
+        native.get_triangles = Mock(return_value=faces)
+    tcp = torch.as_tensor(_native_source_pose()).double()[None] @ _transform()[None]
+    jaw = tcp[:, :3, :3] @ torch.tensor([0.09, 0.0, 0.0], dtype=torch.float64)
+    poses = {name: tcp.clone() for name in _PAD_NAMES["left"]}
+    poses[_PAD_NAMES["left"][0]][:, :3, 3] -= jaw / 2
+    poses[_PAD_NAMES["left"][1]][:, :3, 3] += jaw / 2
+    poses["compiled_arm_mount"] = torch.eye(4, dtype=torch.float64)[None]
+    poses["compiled_arm_mount"][0, :3, 3] = torch.tensor([0.9, -0.1, 0.2])
+
+    def link_pose(name=None, **kwargs):
+        return poses[name if name is not None else kwargs["link_name"]]
+
+    robot = SimpleNamespace(
+        link_names=tuple(poses),
+        get_link_pose=Mock(side_effect=link_pose),
+        get_solver=Mock(
+            return_value=SimpleNamespace(root_link_name="compiled_arm_mount")
+        ),
+        compute_fk=Mock(return_value=tcp),
+        compute_batch_ik=Mock(side_effect=AssertionError("Preview never solves IK")),
+    )
+    lowerer = factory.create(
+        simulation=_simulation(),
+        robot=robot,
+        scene_registry=registry,
+        engine=SimpleNamespace(robot=robot),
+    )
+    context = _context(_native_source_pose(), receiver_pose)
+    context.env_ids = torch.tensor([0])
+    for entity in context.scene.entities.values():
+        entity.confidence = 1.0
+    motion = JointPositionTarget("left_arm", tuple(range(7)))
+    binding = SimpleNamespace(
+        endpoint=Mock(return_value=SimpleNamespace(require_target=lambda cls: motion))
+    )
+    request = SimpleNamespace(
+        invocation_id=route.pick_id,
+        goal=SimpleNamespace(semantics=SimpleNamespace(entity_id=route.object_id)),
+        skill_options=PickUpOptions(
+            downstream_object_target_poses=(torch.eye(4), torch.eye(4))
+        ),
+        binding=binding,
+    )
+    action = SimpleNamespace(
+        robot=robot,
+        pour_gravity_world=_GRAVITY,
+        pour_region_geometries={route.pick_id: lowerer.region_geometry},
+    )
+    return SimpleNamespace(
+        action=action,
+        request=request,
+        context=context,
+        route=route,
+        lowerer=lowerer,
+        calls=calls,
+        poses=poses,
+        native=(native_source, native_receiver),
+        bound=SimpleNamespace(binding=SimpleNamespace(action_binding=binding)),
+    )
+
+
+@pytest.mark.parametrize("change", ["none", "receiver", "arm", "world"])
+def test_region_preview_and_actual_stage_share_geometry_and_bound_live_frames(
+    monkeypatch, change
+):
+    from embodichain.lab.sim.atomic_actions import MoveHeldObjectOptions
+    from embodichain.lab.sim.atomic_actions.goals import resolve_pose_goal
+
+    f = _region_preview_fixture()
+    before = prepare_preview(f.action, f.request, f.context, f.route)
+    reads = [
+        (native.get_vertices.call_count, native.get_triangles.call_count)
+        for native in f.native
+    ]
+    if change == "receiver":
+        pose = f.context.scene.entities["receiver"].pose
+        pose[:3, 3] += pose.new_tensor([0.03, -0.02, 0.02])
+        pose[:3, :3] = torch.as_tensor(Rotation.from_euler("z", 0.4).as_matrix())
+    elif change == "arm":
+        f.poses["compiled_arm_mount"][0, :3, 3] = torch.tensor([-0.3, 0.2, 0.2])
+    elif change == "world":
+        world = torch.eye(4, dtype=torch.float64)
+        world[:3, :3] = torch.tensor(
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        world[:3, 3] = torch.tensor([0.2, -0.1, 0.15])
+        for entity in f.context.scene.entities.values():
+            entity.pose = world @ entity.pose.double()
+        for name, pose in f.poses.items():
+            f.poses[name] = world @ pose
+        f.action.robot.compute_fk.return_value = (
+            world @ f.action.robot.compute_fk.return_value
+        )
+    geometry = f.lowerer.region_geometry
+    original = type(geometry).staging_pose
+    outputs = []
+
+    def observed(self, *args, **kwargs):
+        output = original(self, *args, **kwargs)
+        outputs.append(output.copy())
+        return output
+
+    monkeypatch.setattr(type(geometry), "staging_pose", observed)
+    preview = prepare_preview(f.action, f.request, f.context, f.route)
+    lowered = f.lowerer.lower(
+        f.calls[1],
+        context=f.context,
+        bound=f.bound,
+        option_template=MoveHeldObjectOptions(),
+    )
+    assert len(outputs) == 2
+    np.testing.assert_array_equal(outputs[0], outputs[1])
+    np.testing.assert_array_equal(preview.staging, outputs[0])
+    resolved = resolve_pose_goal(
+        lowered.goal.object_target_pose, f.context, name="region_stage"
+    )
+    np.testing.assert_allclose(
+        resolved[0].numpy(), preview.staging.astype(np.float32), rtol=0, atol=1e-7
+    )
+    assert [
+        (native.get_vertices.call_count, native.get_triangles.call_count)
+        for native in f.native
+    ] == reads
+    assert all(
+        call.args[0] == "left_arm" for call in f.action.robot.get_solver.call_args_list
+    )
+    if change == "world":
+        np.testing.assert_allclose(
+            preview.staging, world.numpy() @ before.staging, rtol=0, atol=1e-9
+        )
+    elif change != "none":
+        assert not np.allclose(preview.staging[:3, 3], before.staging[:3, 3])
+    else:
+        np.testing.assert_array_equal(preview.staging, before.staging)
+    transform = _transform()[None, None, None]
+    unchanged = transform.clone()
+    calls_before = f.action.robot.compute_fk.call_count
+    targets, valid = preview.targets(transform)
+    assert valid.all()
+    torch.testing.assert_close(
+        targets[0], torch.as_tensor(preview.staging) @ transform, rtol=0, atol=0
+    )
+    torch.testing.assert_close(transform, unchanged, rtol=0, atol=0)
+    assert f.action.robot.compute_fk.call_count == calls_before
+    f.action.robot.compute_batch_ik.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "problem",
+    ["missing_mapping", "foreign_invocation", "foreign_owner", "foreign_budget"],
+)
+def test_region_preview_rejects_missing_or_foreign_geometry_budget_before_fk(problem):
+    f = _region_preview_fixture()
+    if problem == "missing_mapping":
+        del f.action.pour_region_geometries
+    elif problem == "foreign_invocation":
+        f.action.pour_region_geometries = {"foreign": f.lowerer.region_geometry}
+    elif problem == "foreign_owner":
+        f.action.pour_region_geometries[f.route.pick_id] = SimpleNamespace(
+            proxy_position_tolerance_m=f.route.proxy_position_tolerance_m
+        )
+    else:
+        f.route = replace(f.route, proxy_position_tolerance_m=0.03)
+    with pytest.raises(ValueError, match="geometry/budget owner"):
+        prepare_preview(f.action, f.request, f.context, f.route)
+    f.action.robot.compute_fk.assert_not_called()
+    f.action.robot.get_solver.assert_not_called()
 
 
 @pytest.mark.parametrize("prefix", ["left", "right"])

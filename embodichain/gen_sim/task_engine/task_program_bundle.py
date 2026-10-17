@@ -199,6 +199,7 @@ def generate_task_program_bundle(
     pick_contact_revision: int | None = None,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
+    pour_proxy_position_tolerance_m: float | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -237,8 +238,13 @@ def generate_task_program_bundle(
             False preserves legacy lowerer declarations and fingerprints.
         pour_geometry_revision: Explicit candidate-dependent tilt/restore geometry.
             Revision 1 preserves observed entry orientation for ordinary E3 with
-            no requested orientation or tilt direction. None preserves legacy
-            consumers. This is not a liquid-transfer observation contract.
+            no requested orientation or tilt direction. Revision 2 selects an
+            arm-side point inside the receiver projection with an explicit proxy
+            position reserve. None preserves legacy consumers. Neither revision
+            is a liquid-transfer observation contract.
+        pour_proxy_position_tolerance_m: Required positive receiver-relative pivot
+            position budget for revision 2, shared with its pose-proxy observer.
+            Forbidden for other revisions; no tolerance is invented implicitly.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -249,18 +255,41 @@ def generate_task_program_bundle(
     """
     selected_graph = validate_semantic_task_graph(graph)
     if pour_geometry_revision is not None:
-        if type(pour_geometry_revision) is not int or pour_geometry_revision != 1:
+        if type(pour_geometry_revision) is not int or pour_geometry_revision not in (
+            1,
+            2,
+        ):
             raise ValueError("Unsupported GenSim Pour geometry revision.")
+        if pour_geometry_revision == 2 and (
+            type(pour_proxy_position_tolerance_m) not in (int, float)
+            or not math.isfinite(pour_proxy_position_tolerance_m)
+            or pour_proxy_position_tolerance_m <= 0
+        ):
+            raise ValueError(
+                "Pour region proxy position tolerance must be explicit, finite and positive."
+            )
         from ._task_program.pour_continuation import supports_ordinary_pour
 
         if task_candidate is None or not supports_ordinary_pour(
             selected_graph, task_candidate
         ):
             raise ValueError(
-                "Pour geometry revision 1 needs an explicit ordinary E3 witness "
+                "Pour geometry revision needs an explicit ordinary E3 witness "
                 "without requested orientation, axis or direction and the "
                 "complete independent Pick/stage/Pour/return/Place recipe."
             )
+        if pour_geometry_revision == 2 and any(
+            node["task_type"] == "E3"
+            and node["call"].get("call_id") == _MOVE_HELD_OBJECT_CALL_ID
+            and "reference" in node["call"].get("arguments", {})
+            and node["call"]["arguments"]["target"] in selected_graph["targets"]
+            for node in selected_graph["nodes"]
+        ):
+            raise ValueError("Pour region cannot replace an explicit staging target.")
+    if pour_geometry_revision != 2 and pour_proxy_position_tolerance_m is not None:
+        raise ValueError(
+            "Pour proxy position tolerance is owned only by geometry revision 2."
+        )
     if type(verify_pick_phases) is not bool:
         raise TypeError("verify_pick_phases must be a boolean.")
     if type(fit_grasp_assets) is not bool:
@@ -710,6 +739,7 @@ def generate_task_program_bundle(
             twist_contact_feedback=twist_contact_feedback,
             verify_pick_phases=verify_pick_phases,
             pour_geometry_revision=pour_geometry_revision,
+            pour_proxy_position_tolerance_m=pour_proxy_position_tolerance_m,
         ),
     )
     scene_payload = _scene_payload(scene, program_id=program_id)
@@ -1710,6 +1740,7 @@ def _integration_payload(
     twist_contact_feedback: bool = False,
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
+    pour_proxy_position_tolerance_m: float | None = None,
 ) -> dict[str, Any]:
     scene_objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     articulation_bindings = graph_bindings(graph, scene)
@@ -2021,7 +2052,7 @@ def _integration_payload(
             else:
                 reference = str(arguments["reference"])
                 referenced_objects.add(reference)
-                if pour_geometry_revision == 1:
+                if pour_geometry_revision in (1, 2):
                     if node["task_type"] != "E3":
                         raise ValueError("Canonical Pour staging must belong to E3.")
                     pose = {}
@@ -2548,7 +2579,7 @@ def _integration_payload(
                     _COORDINATED_HOLD_CALL_ID,
                     _AXIS_ALIGN_CALL_ID,
                     _MOVE_HELD_OBJECT_CALL_ID,
-                    *((_POUR_CALL_ID,) if pour_geometry_revision == 1 else ()),
+                    *((_POUR_CALL_ID,) if pour_geometry_revision in (1, 2) else ()),
                     *pick_routes,
                     _PLACE_RELATIVE_CALL_ID,
                     _UPRIGHT_PLACE_CALL_ID,
@@ -2656,11 +2687,22 @@ def _integration_payload(
                     [
                         {
                             "kind": (
-                                "pour_transport"
+                                (
+                                    "pour_region_transport"
+                                    if pour_geometry_revision == 2
+                                    else "pour_transport"
+                                )
                                 if pour_staging_routes
                                 else "move_held_object"
                             ),
                             "routes": move_held_routes,
+                            **(
+                                {
+                                    "proxy_position_tolerance_m": pour_proxy_position_tolerance_m
+                                }
+                                if pour_geometry_revision == 2
+                                else {}
+                            ),
                             **(
                                 {"staging_routes": pour_staging_routes}
                                 if pour_staging_routes
@@ -2681,7 +2723,7 @@ def _integration_payload(
                         {
                             "kind": (
                                 "retained_pour"
-                                if pour_geometry_revision == 1
+                                if pour_geometry_revision in (1, 2)
                                 else "pour"
                             ),
                             "object_id": next(iter(pour_objects)),

@@ -65,7 +65,12 @@ from .services import (
     _RelativePlaceLowererFactory,
     _UprightPlaceLowererFactory,
 )
-from .pour_services import PourStageRoute, PourTransportFactory, RetainedPourFactory
+from .pour_services import (
+    PourStageRoute,
+    PourTransportFactory,
+    PourRegionTransportFactory,
+    RetainedPourFactory,
+)
 
 __all__: list[str] = []
 
@@ -232,13 +237,27 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
         return make_pick_factory(
             tuple(routes), call_id, verify_phases=config.get("verify_phases", False)
         )
-    if kind in {"move_held_object", "drawer_transport", "pour_transport"}:
+    if kind in {
+        "move_held_object",
+        "drawer_transport",
+        "pour_transport",
+        "pour_region_transport",
+    }:
         config = _mapping(
             value,
             path=path,
             required=frozenset(
                 {"kind", "routes"}
-                | ({"staging_routes"} if kind == "pour_transport" else set())
+                | (
+                    {"staging_routes"}
+                    if kind in {"pour_transport", "pour_region_transport"}
+                    else set()
+                )
+                | (
+                    {"proxy_position_tolerance_m"}
+                    if kind == "pour_region_transport"
+                    else set()
+                )
             ),
         )
         routes: list[_MoveHeldObjectRoute] = []
@@ -260,7 +279,7 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                     pose=_decode_goal_pose(route["pose"], path=f"{route_path}.pose"),
                 )
             )
-        if kind == "pour_transport":
+        if kind in {"pour_transport", "pour_region_transport"}:
             stages = []
             for index, raw in enumerate(
                 _sequence(config["staging_routes"], path=f"{path}.staging_routes")
@@ -286,6 +305,13 @@ def decode_task_lowerer(value: object, *, path: str) -> Any:
                         ),
                     )
                 )
+            if kind == "pour_region_transport":
+                budget = _real(
+                    config["proxy_position_tolerance_m"],
+                    path=f"{path}.proxy_position_tolerance_m",
+                    minimum=0.0,
+                )
+                return PourRegionTransportFactory(tuple(routes), tuple(stages), budget)
             return PourTransportFactory(tuple(routes), tuple(stages))
         factory = (
             _DrawerTransportLowererFactory
