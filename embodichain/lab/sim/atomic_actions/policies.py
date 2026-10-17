@@ -65,12 +65,6 @@ class MotionPolicy:
     sample_count: int = 50
     """Minimum trajectory sample count when the backend does not preserve samples."""
 
-    velocity_limit: float = 0.2
-    """Scalar per-joint velocity limit in radians or metres per second."""
-
-    acceleration_limit: float = 0.5
-    """Scalar per-joint acceleration limit in radians or metres per second squared."""
-
     velocity_targets: Literal["auto", "zero"] = "auto"
     """Use trajectory velocities or explicit zero velocity targets."""
 
@@ -79,6 +73,12 @@ class MotionPolicy:
 
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
+
+    velocity_limit: float | None = None
+    """Optional scalar speed request, capped by effective Robot joint limits."""
+
+    acceleration_limit: float = 0.5
+    """Scalar planner-owned acceleration budget in joint units per second squared."""
 
     def __post_init__(self) -> None:
         valid_strategies = {"motion_gen", "ik_interp"}
@@ -97,6 +97,8 @@ class MotionPolicy:
             raise ValueError("sample_count must be at least 2.")
         for name in ("velocity_limit", "acceleration_limit"):
             value = getattr(self, name)
+            if value is None and name == "velocity_limit":
+                continue
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and greater than zero.")
         mode = self.dynamic_collision_mode

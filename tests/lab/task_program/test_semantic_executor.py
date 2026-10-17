@@ -2003,6 +2003,16 @@ def test_motion_policy_metadata_includes_timing_limits() -> None:
     assert metadata["acceleration_limit"] == pytest.approx(0.5)
 
 
+def test_motion_policy_metadata_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.runtime.results import (
+        _motion_policy_to_metadata,
+    )
+
+    metadata = _motion_policy_to_metadata(MotionPolicy(sample_count=7))
+
+    assert metadata["velocity_limit"] is None
+
+
 def test_result_metadata_is_json_safe_and_contains_typed_runtime_trace() -> None:
     system = _system((EffectMonitorDecision(_mask(True, True), _mask(False, False)),))
 

@@ -378,10 +378,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
         *,
         with_effect: bool = False,
         with_phase_gate: bool = False,
+        timing_fault: str | None = None,
     ) -> None:
         super().__init__()
         self.with_effect = with_effect
         self.with_phase_gate = with_phase_gate
+        self.timing_fault = timing_fault
         self.plan_count = 0
 
     def _plan(
@@ -401,8 +403,12 @@ class TimedAction(AtomicAction[EndEffectorPoseGoal, ActionOptions]):
             [[0.0, FIRST_INTERVAL, SECOND_INTERVAL]],
             dtype=torch.float32,
         ).repeat(context.batch_size, 1)
-        if context.batch_size > 1:
-            dt[1, 1:] *= 2.0
+        if self.timing_fault == "first_mismatch":
+            dt[1, 1] *= 2.0
+        elif self.timing_fault == "later_mismatch":
+            dt[1, 2] *= 2.0
+        elif self.timing_fault == "later_short":
+            dt[:, 2] = MINIMUM_CYCLE_TIME / 2.0
         trajectory = TimedTrajectory.from_positions(
             positions,
             env_ids=context.env_ids,
@@ -456,6 +462,7 @@ def _make_runner(
     physical_evidence_provider: PhysicalEvidenceProvider | None = None,
     clock: FakeClock | None = None,
     minimum_cycle_time: float = MINIMUM_CYCLE_TIME,
+    timing_fault: str | None = None,
 ) -> tuple[
     ExecutionRunner,
     FakeClock,
@@ -481,6 +488,7 @@ def _make_runner(
     action = TimedAction(
         with_effect=with_effect,
         with_phase_gate=with_phase_gate,
+        timing_fault=timing_fault,
     )
     engine = AtomicActionEngine(generator, tracking_runtime=tracking_runtime)
     engine.register(action)
@@ -784,12 +792,49 @@ def test_session_active_commands_return_an_owned_endpoint_snapshot() -> None:
 
 
 def test_runner_rejects_mismatched_active_batch_intervals_before_dispatch() -> None:
-    runner, _, _, sink, _ = _make_runner(batch_size=2)
+    runner, _, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault="first_mismatch",
+    )
 
-    with pytest.raises(ValueError, match="share one positive hold duration"):
-        runner.step()
+    failed = runner.step()
 
+    assert failed.status is RunnerStatus.FAILED
     assert sink.sent == []
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+
+
+@pytest.mark.parametrize("timing_fault", ["later_mismatch", "later_short"])
+def test_runner_safely_stops_after_later_interval_validation_failure(
+    timing_fault: str,
+) -> None:
+    runner, clock, _, sink, _ = _make_runner(
+        batch_size=2,
+        timing_fault=timing_fault,
+    )
+
+    first = runner.step()
+    clock.advance(FIRST_INTERVAL)
+    failed = runner.step()
+    repeated = runner.step()
+
+    assert first.status is RunnerStatus.RUNNING
+    assert failed.status is RunnerStatus.FAILED
+    assert failed.command_count == 1
+    assert len(sink.sent) == 1
+    assert [item.operation for item in failed.dispatches] == [
+        CommandOperation.CANCEL,
+        CommandOperation.HOLD,
+    ]
+    assert sink.cancel_count == 1
+    assert [target.target_id for target in sink.cancelled[0]] == ["arm"]
+    assert [target.target_id for target in sink.held[0][0]] == ["arm"]
+    assert repeated.status is RunnerStatus.FAILED
+    assert repeated.dispatches == ()
+    assert len(sink.sent) == 1
 
 
 def test_runner_completes_and_holds_after_last_command_settles() -> None:

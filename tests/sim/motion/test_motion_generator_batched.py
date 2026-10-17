@@ -115,6 +115,9 @@ def _trapezoidal_generator() -> MotionGenerator:
     generator = object.__new__(MotionGenerator)
     generator.planner = planner
     generator.device = torch.device("cpu")
+    generator.robot = SimpleNamespace(
+        get_qvel_limits=lambda *, name=None: torch.full((2, 1), 10.0)
+    )
     return generator
 
 
@@ -173,7 +176,8 @@ def test_trapezoidal_generator_covers_dense_ik_waypoints() -> None:
     generator.robot = SimpleNamespace(
         compute_fk=lambda *, qpos, name, to_matrix: torch.eye(
             4, dtype=qpos.dtype, device=qpos.device
-        ).expand(qpos.shape[0], -1, -1)
+        ).expand(qpos.shape[0], -1, -1),
+        get_qvel_limits=lambda *, name=None: torch.full((1, 2), 10.0),
     )
     dense_qpos = torch.linspace(0.0, 0.5, 6, dtype=torch.float64).reshape(1, 6, 1)
     dense_qpos = dense_qpos.expand(-1, -1, 2).clone()
@@ -631,6 +635,117 @@ def test_resolve_trapezoidal_limits_without_sample_count() -> None:
     assert options.constraints["acceleration"] == 0.02
 
 
+def test_resolve_trapezoidal_preserves_omitted_velocity_limit() -> None:
+    planner = Mock()
+    planner.cfg.planner_type = "trapezoidal"
+    generator = object.__new__(MotionGenerator)
+    generator.planner = planner
+
+    options = generator.resolve_plan_options(
+        plan_opts=None,
+        sample_count=20,
+        velocity_limit=None,
+        acceleration_limit=None,
+    )
+
+    assert isinstance(options, TrapezoidalPlanOptions)
+    assert options.constraints["velocity"] is None
+    assert options.constraints["acceleration"] == pytest.approx(0.5)
+
+
+def test_ik_velocity_limits_preserve_caps_and_intersect_scalar_request() -> None:
+    limits = torch.tensor([[0.08, 1.2], [0.05, 1.4]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["slow", "fast"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [0, 1],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    reference = torch.zeros(2, 2, dtype=torch.float64)
+
+    omitted = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=2,
+        dof=2,
+        requested=None,
+        reference=reference,
+    )
+    explicit = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=2,
+        dof=2,
+        requested=0.2,
+        reference=reference,
+    )
+
+    torch.testing.assert_close(omitted, torch.tensor([0.05, 1.2], dtype=torch.float64))
+    torch.testing.assert_close(explicit, torch.tensor([0.05, 0.2], dtype=torch.float64))
+
+
+def test_ik_velocity_limits_apply_mimic_caps_in_control_part_order() -> None:
+    limits = torch.tensor([[1.2, 2.0, 0.1]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["parent", "other", "follower"],
+        mimic_ids=[2],
+        mimic_parents=[0],
+        mimic_multipliers=[2.0],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [1, 0],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+
+    resolved = generator._resolve_velocity_limits(
+        control_part="arm",
+        batch_size=1,
+        dof=2,
+        requested=None,
+        reference=torch.zeros(1, 2, dtype=torch.float64),
+    )
+
+    torch.testing.assert_close(resolved, torch.tensor([2.0, 0.05], dtype=torch.float64))
+
+
+def test_ik_interpolation_respects_robot_per_joint_velocity_caps() -> None:
+    limits = torch.tensor([[0.05, 1.2], [0.08, 1.4]], dtype=torch.float64)
+    robot = SimpleNamespace(
+        joint_names=["slow", "fast"],
+        mimic_ids=[],
+        mimic_parents=[],
+        mimic_multipliers=[],
+        control_parts={"arm": object()},
+        get_joint_ids=lambda name: [0, 1],
+        get_qvel_limits=lambda *, joint_ids: limits[:, joint_ids],
+    )
+    generator = object.__new__(MotionGenerator)
+    generator.robot = robot
+    keyframes = torch.tensor(
+        [[[0.0, 0.0], [0.2, 0.2]], [[0.0, 0.0], [0.2, 0.2]]],
+        dtype=torch.float64,
+    )
+
+    positions = generator._interpolate_ik_keyframes(
+        keyframes,
+        MotionGenOptions(
+            strategy="ik_interp",
+            sample_count=3,
+            interpolation_dt=0.1,
+            control_part="arm",
+            acceleration_limit=100.0,
+        ),
+    )
+
+    peak_velocity = (positions.diff(dim=1) / 0.1).abs().amax(dim=(0, 1))
+    assert peak_velocity[0] <= 0.05 + 1.0e-6
+    assert peak_velocity[1] <= 1.2 + 1.0e-6
+
+
 def _mock_generator(
     *,
     batch_size: int = 2,
@@ -648,6 +763,10 @@ def _mock_generator(
     robot.compute_batch_ik.side_effect = lambda *, pose, **kwargs: (
         torch.ones(pose.shape[:2], dtype=torch.bool),
         torch.zeros(*pose.shape[:2], controlled_dof),
+    )
+    robot.get_qvel_limits.return_value = torch.full(
+        (batch_size, controlled_dof),
+        10.0,
     )
     planner = Mock()
     planner.cfg.planner_type = "toppra"
@@ -1175,6 +1294,10 @@ class _CartesianRobot:
 
     device = torch.device("cpu")
     num_instances = 2
+
+    def get_qvel_limits(self, *, name: str | None = None) -> torch.Tensor:
+        del name
+        return torch.full((self.num_instances, 1), 10.0)
 
     def get_solver(self, name: str) -> SimpleNamespace:
         return SimpleNamespace(supports_continuous_batch_ik=False)

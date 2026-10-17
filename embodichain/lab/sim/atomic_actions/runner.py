@@ -822,13 +822,21 @@ class ExecutionRunner:
 
         dispatches: list[CommandDispatch] = []
         if tick.command is not None:
-            self._remember_targets(tick.command.targets)
             operation = (
                 CommandOperation.SEND
                 if bool(tick.command.active_mask.any().item())
                 else CommandOperation.HOLD
             )
-            interval = self._command_interval(tick.command)
+            try:
+                interval = self._command_interval(tick.command)
+            except Exception as exc:
+                return self._fail(
+                    "Command interval validation failed: "
+                    f"{type(exc).__name__}: {exc}",
+                    context=context,
+                    tick=tick,
+                )
+            self._remember_targets(tick.command.targets)
             dispatch = self._dispatch(
                 operation,
                 command=(tick.command if operation is CommandOperation.SEND else None),

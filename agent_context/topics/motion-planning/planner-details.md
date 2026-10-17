@@ -123,8 +123,10 @@ Source `PlanResult.dt` remains planner timing.
 `compute/trajectory/interpolation.py::interpolate_minimum_jerk()` expands joint
 keyframes onto a fixed control interval while preserving every keyframe. The
 requested sample count is a minimum; per-segment counts grow to satisfy scalar
-joint velocity and acceleration limits, and spare samples are distributed by
-joint displacement rather than equally across unequal moves.
+or ordered per-joint velocity and acceleration limits, and spare samples are
+distributed by joint displacement rather than equally across unequal moves.
+The emitted dtype is checked on the destination grid so float32 cancellation
+cannot silently violate those derivative limits.
 
 `motion/execution.py::play_joint_trajectory()` requires `control_dt` to be an
 integer multiple of `physics_dt` and advances that many unchanged substeps.

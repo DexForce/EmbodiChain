@@ -55,6 +55,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    pad_trajectory_to_length,
     resample_planned_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -488,6 +489,16 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
             hand_open_qpos,
             n_waypoints=options.hand_interp_steps,
         )
+        release_length = max(
+            hand_open.shape[1],
+            0 if release_arm is None else release_arm.shape[1],
+        )
+        hand_open = pad_trajectory_to_length(hand_open, release_length)
+        release_arm_phase = (
+            translate_arm[:, -1:].expand(-1, release_length, -1)
+            if release_arm is None
+            else pad_trajectory_to_length(release_arm, release_length)
+        )
         named_parts: list[tuple[str, torch.Tensor]] = [
             ("approach", approach_arm),
             ("reach", reach_arm),
@@ -530,9 +541,7 @@ class Slide(AtomicAction[SlideGoal, SlideOptions]):
         offset = stop
 
         stop = offset + hand_open.shape[1]
-        full[:, offset:stop, arm_joint_ids] = (
-            translate_arm[:, -1].unsqueeze(1) if release_arm is None else release_arm
-        )
+        full[:, offset:stop, arm_joint_ids] = release_arm_phase
         full[:, offset:stop, hand_joint_ids] = hand_open
         offset = stop
 

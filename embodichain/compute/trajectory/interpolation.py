@@ -33,8 +33,8 @@ def interpolate_minimum_jerk(
     trajectory: torch.Tensor,
     minimum_sample_count: int,
     step_dt: float,
-    velocity_limit: float,
-    acceleration_limit: float,
+    velocity_limit: float | torch.Tensor,
+    acceleration_limit: float | torch.Tensor,
 ) -> torch.Tensor:
     """Interpolate joint keyframes with rest-to-rest minimum-jerk segments.
 
@@ -47,8 +47,9 @@ def interpolate_minimum_jerk(
         trajectory: Joint keyframes with shape ``(B, N, D)``.
         minimum_sample_count: Minimum total number of output samples.
         step_dt: Fixed output interval in seconds.
-        velocity_limit: Positive scalar per-joint velocity limit.
-        acceleration_limit: Positive scalar per-joint acceleration limit.
+        velocity_limit: Positive scalar or ordered per-joint velocity limits.
+        acceleration_limit: Positive scalar or ordered per-joint acceleration
+            limits.
 
     Returns:
         Interpolated joint positions with a shared sample count for the batch.
@@ -71,30 +72,71 @@ def interpolate_minimum_jerk(
             "minimum_sample_count must be an integer at least as large as the "
             "keyframe count."
         )
-    for name, value in (
-        ("step_dt", step_dt),
-        ("velocity_limit", velocity_limit),
-        ("acceleration_limit", acceleration_limit),
+    if (
+        isinstance(step_dt, bool)
+        or not isinstance(step_dt, (int, float))
+        or not math.isfinite(step_dt)
+        or step_dt <= 0.0
     ):
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or value <= 0.0
-        ):
-            raise ValueError(f"{name} must be a positive finite number.")
+        raise ValueError("step_dt must be a positive finite number.")
+
+    def limit_tensor(
+        value: float | torch.Tensor,
+        name: str,
+        *,
+        allow_tensor_zero: bool = False,
+    ) -> torch.Tensor:
+        if isinstance(value, bool):
+            raise ValueError(f"{name} must contain positive finite values.")
+        limit = torch.as_tensor(
+            value,
+            dtype=trajectory.dtype,
+            device=trajectory.device,
+        )
+        scalar = limit.ndim == 0
+        if scalar:
+            limit = limit.expand(trajectory.shape[2])
+        if limit.shape != (trajectory.shape[2],):
+            raise ValueError(
+                f"{name} must be scalar or have shape ({trajectory.shape[2]},)."
+            )
+        invalid = (
+            (limit < 0.0).any()
+            if allow_tensor_zero and not scalar
+            else (limit <= 0.0).any()
+        )
+        if not torch.isfinite(limit).all() or invalid:
+            raise ValueError(f"{name} must contain positive finite values.")
+        return limit
+
+    velocity_limits = limit_tensor(
+        velocity_limit,
+        "velocity_limit",
+        allow_tensor_zero=True,
+    )
+    acceleration_limits = limit_tensor(acceleration_limit, "acceleration_limit")
     if trajectory.shape[0] == 0:
         return trajectory.new_empty((0, minimum_sample_count, trajectory.shape[2]))
     if trajectory.shape[1] == 1:
         return trajectory.expand(-1, minimum_sample_count, -1).clone()
 
-    delta = torch.abs(trajectory[:, 1:] - trajectory[:, :-1]).amax(dim=-1)
+    delta = torch.abs(trajectory[:, 1:] - trajectory[:, :-1])
+    zero_velocity_joints = velocity_limits == 0.0
+    if zero_velocity_joints.any() and (delta[..., zero_velocity_joints] > 0.0).any():
+        raise ValueError("A zero-velocity joint cannot move between keyframes.")
+    safe_velocity_limits = torch.where(
+        zero_velocity_joints,
+        torch.ones_like(velocity_limits),
+        velocity_limits,
+    )
     # For p(u)=10u^3-15u^4+6u^5, max(p')=1.875 and
     # max(abs(p''))=10/sqrt(3) ~= 5.7735.
-    duration_from_velocity = 1.875 * delta / float(velocity_limit)
-    duration_from_acceleration = torch.sqrt(
-        (10.0 / math.sqrt(3.0)) * delta / float(acceleration_limit)
+    duration_from_velocity = (1.875 * delta / safe_velocity_limits.view(1, 1, -1)).amax(
+        dim=-1
     )
+    duration_from_acceleration = torch.sqrt(
+        (10.0 / math.sqrt(3.0)) * delta / acceleration_limits.view(1, 1, -1)
+    ).amax(dim=-1)
     required = torch.ceil(
         torch.maximum(duration_from_velocity, duration_from_acceleration)
         / float(step_dt)
@@ -108,7 +150,7 @@ def interpolate_minimum_jerk(
         # than splitting them equally across unequal moves.  This keeps peak
         # speeds comparable when the caller's minimum count, not a limit, is
         # what determines the final duration.
-        weights = delta.amax(dim=0)
+        weights = delta.amax(dim=(0, 2))
         if float(weights.sum().item()) == 0.0:
             weights = torch.ones_like(weights)
         quotas = weights / weights.sum() * missing
@@ -119,20 +161,72 @@ def interpolate_minimum_jerk(
             additions[ranked[:remainder]] += 1
         interval_counts += additions
 
-    segments = [trajectory[:, :1]]
-    for index, count in enumerate(interval_counts.tolist()):
-        tau = torch.linspace(
-            0.0,
-            1.0,
-            count + 1,
-            dtype=trajectory.dtype,
-            device=trajectory.device,
-        )[1:]
-        blend = 10.0 * tau**3 - 15.0 * tau**4 + 6.0 * tau**5
-        start = trajectory[:, index : index + 1]
-        end = trajectory[:, index + 1 : index + 2]
-        segments.append(torch.lerp(start, end, blend.view(1, -1, 1)))
-    return torch.cat(segments, dim=1)
+    def build_positions() -> torch.Tensor:
+        segments = [trajectory[:, :1]]
+        for index, count in enumerate(interval_counts.tolist()):
+            # Evaluate the polynomial symmetrically in float64.  The direct
+            # expanded form loses monotonicity through cancellation near u=1
+            # when the requested control grid is dense and the output is
+            # float32.
+            tau = (
+                torch.arange(
+                    1,
+                    count + 1,
+                    dtype=torch.float64,
+                    device=trajectory.device,
+                )
+                / count
+            )
+            reverse_tau = 1.0 - tau
+            lower = tau**3 * (10.0 + tau * (-15.0 + 6.0 * tau))
+            upper = 1.0 - reverse_tau**3 * (
+                10.0 + reverse_tau * (-15.0 + 6.0 * reverse_tau)
+            )
+            blend = torch.where(tau <= 0.5, lower, upper)
+            start = trajectory[:, index : index + 1].to(torch.float64)
+            end = trajectory[:, index + 1 : index + 2].to(torch.float64)
+            segment = torch.lerp(start, end, blend.view(1, -1, 1)).to(trajectory.dtype)
+            segment[:, -1] = trajectory[:, index + 1]
+            segments.append(segment)
+        return torch.cat(segments, dim=1)
+
+    # Analytic duration is only an initial estimate.  Quantization in the
+    # emitted dtype and finite differencing on the destination clock are the
+    # actual consumer contract, so validate those derivatives before returning.
+    for _ in range(8):
+        positions = build_positions()
+        interval_velocity = positions.diff(dim=1) / float(step_dt)
+        boundary_acceleration = torch.cat(
+            [
+                interval_velocity[:, :1],
+                interval_velocity.diff(dim=1),
+                -interval_velocity[:, -1:],
+            ],
+            dim=1,
+        ) / float(step_dt)
+        velocity_ratio = float(
+            (interval_velocity.abs() / safe_velocity_limits.view(1, 1, -1))
+            .amax()
+            .item()
+        )
+        acceleration_ratio = float(
+            (boundary_acceleration.abs() / acceleration_limits.view(1, 1, -1))
+            .amax()
+            .item()
+        )
+        scale = max(velocity_ratio, math.sqrt(acceleration_ratio))
+        if scale <= 1.0 + 1.0e-5:
+            return positions
+        growth = max(1.01, scale * 1.02)
+        expanded = torch.ceil(interval_counts.to(torch.float64) * growth).to(
+            torch.int64
+        )
+        interval_counts = torch.maximum(expanded, interval_counts + 1)
+
+    raise ValueError(
+        "Unable to satisfy discrete velocity and acceleration limits in the "
+        "trajectory output dtype."
+    )
 
 
 def _allocate_segment_intervals(

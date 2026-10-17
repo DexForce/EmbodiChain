@@ -97,10 +97,10 @@ class MotionGenOptions:
     """Requested output sample count; ``None`` preserves backend defaults."""
 
     velocity_limit: float | None = None
-    """Optional scalar joint velocity limit used by compatible strategies."""
+    """Optional scalar speed request, capped by effective Robot joint limits."""
 
     acceleration_limit: float | None = None
-    """Optional scalar joint acceleration limit used by compatible strategies."""
+    """Optional scalar planner-owned joint acceleration budget."""
 
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
@@ -495,8 +495,8 @@ class MotionGenerator:
                 if planner_type == "toppra"
                 else TrapezoidalPlanOptions
             )
-            constraints: dict[str, float] = {
-                "velocity": 0.2 if velocity_limit is None else velocity_limit,
+            constraints: dict[str, float | None] = {
+                "velocity": velocity_limit,
                 "acceleration": (
                     0.5 if acceleration_limit is None else acceleration_limit
                 ),
@@ -511,6 +511,128 @@ class MotionGenerator:
                 )
             return options_type(**options_kwargs)
         return self.planner.default_plan_options()
+
+    def _resolve_velocity_limits(
+        self,
+        *,
+        control_part: str | None,
+        batch_size: int,
+        dof: int,
+        requested: float | None,
+        reference: torch.Tensor,
+    ) -> torch.Tensor:
+        """Intersect one scalar request with effective ordered Robot speed caps.
+
+        Runtime joint-speed metadata is reduced across the participating batch,
+        and mimic follower caps are projected back to their active parents.
+        Missing or unbounded metadata uses the historical finite fallback only
+        for the affected joint.
+        """
+        joint_names = getattr(self.robot, "joint_names", None)
+        use_full_limits = isinstance(joint_names, (list, tuple)) and bool(joint_names)
+        if use_full_limits:
+            joint_count = len(joint_names)
+            limits = (
+                self.robot.get_qvel_limits(joint_ids=list(range(joint_count)))
+                .detach()
+                .clone()
+            )
+            if limits.ndim != 2 or limits.shape[1] != joint_count:
+                raise ValueError(
+                    "Robot velocity limits must have shape (B, robot DOF)."
+                )
+            limits = torch.where(
+                torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
+                limits,
+                torch.inf,
+            )
+            mimic_ids = tuple(getattr(self.robot, "mimic_ids", ()))
+            mimic_parents = tuple(getattr(self.robot, "mimic_parents", ()))
+            mimic_multipliers = tuple(getattr(self.robot, "mimic_multipliers", ()))
+            if not (len(mimic_ids) == len(mimic_parents) == len(mimic_multipliers)):
+                raise ValueError("Robot mimic metadata lengths must match.")
+            mimics = dict(
+                zip(
+                    mimic_ids,
+                    zip(mimic_parents, mimic_multipliers, strict=True),
+                    strict=True,
+                )
+            )
+            for original_child in mimics:
+                if not isinstance(original_child, int):
+                    raise ValueError("Mimic child indices must be integers.")
+                child = original_child
+                bound = limits[:, child].clone()
+                visited = {child}
+                while child in mimics:
+                    parent, multiplier = mimics[child]
+                    if (
+                        not isinstance(parent, int)
+                        or isinstance(multiplier, bool)
+                        or not isinstance(multiplier, (int, float))
+                        or not math.isfinite(multiplier)
+                        or parent in visited
+                    ):
+                        raise ValueError(
+                            "Mimic relations require finite multipliers and an "
+                            "acyclic integer parent mapping."
+                        )
+                    if multiplier == 0.0:
+                        break
+                    bound = bound / abs(multiplier)
+                    limits[:, parent] = torch.minimum(limits[:, parent], bound)
+                    visited.add(parent)
+                    child = parent
+            if control_part is None and dof != joint_count:
+                matches = [
+                    name
+                    for name in (self.robot.control_parts or {})
+                    if len(self.robot.get_joint_ids(name)) == dof
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        "Set control_part to map interpolated joints to Robot "
+                        "velocity limits."
+                    )
+                control_part = matches[0]
+            joint_ids = (
+                list(range(dof))
+                if control_part is None
+                else self.robot.get_joint_ids(control_part)
+            )
+            if len(joint_ids) != dof:
+                raise ValueError(
+                    "control_part joint count does not match interpolation DOF."
+                )
+            limits = limits[:, joint_ids]
+        else:
+            limits = self.robot.get_qvel_limits(name=control_part).detach().clone()
+            if limits.ndim != 2 or limits.shape[1] != dof:
+                raise ValueError(
+                    "Robot velocity limits must have shape (B, interpolation DOF)."
+                )
+        if limits.shape[0] < batch_size:
+            raise ValueError(
+                "Robot velocity limits do not cover the interpolation batch."
+            )
+        limits = limits[:batch_size].to(
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+        limits = torch.where(
+            torch.isfinite(limits) & (limits >= 0.0) & (limits < 1.0e9),
+            limits,
+            torch.inf,
+        )
+        caps = limits.amin(dim=0)
+        if requested is None:
+            return torch.where(torch.isfinite(caps), caps, 0.2)
+        requested_limits = torch.full_like(caps, float(requested))
+        return torch.where(
+            torch.isfinite(caps),
+            torch.minimum(caps, requested_limits),
+            requested_limits,
+        )
 
     @classmethod
     def register_planner_type(cls, name: str, planner_class, planner_cfg_class) -> None:
@@ -724,6 +846,29 @@ class MotionGenerator:
             # lower bound instead of rejecting an otherwise valid path. An
             # explicit TrapezoidalPlanOptions remains caller-authoritative.
             plan_opts.sample_interval = len(target_plan_states)
+        planner_context_method = getattr(
+            type(self.planner), "with_motion_context", None
+        )
+        legacy_backend_limits = planner_context_method in {
+            None,
+            BasePlanner.with_motion_context,
+        }
+        if (
+            not explicit_plan_options
+            and legacy_backend_limits
+            and isinstance(plan_opts, (ToppraPlanOptions, TrapezoidalPlanOptions))
+        ):
+            reference_qpos = target_plan_states[0].qpos
+            if reference_qpos is not None:
+                if reference_qpos.dim() == 1:
+                    reference_qpos = reference_qpos.unsqueeze(0)
+                plan_opts.constraints["velocity"] = self._resolve_velocity_limits(
+                    control_part=options.control_part,
+                    batch_size=reference_qpos.shape[0],
+                    dof=reference_qpos.shape[1],
+                    requested=options.velocity_limit,
+                    reference=reference_qpos,
+                )
         plan_opts = self.planner.with_motion_context(
             plan_opts,
             start_qpos=options.start_qpos,
@@ -956,7 +1101,24 @@ class MotionGenerator:
                     f"{len(target_states)} targets for sample_count "
                     f"{options.sample_count}."
                 )
+            preserve_fixed_grid = False
             if options.velocity_limit is None and options.acceleration_limit is None:
+                velocity_limits = self._resolve_velocity_limits(
+                    control_part=options.control_part,
+                    batch_size=batch_size,
+                    dof=controlled_dof,
+                    requested=None,
+                    reference=keyframes,
+                )
+                preserve_fixed_grid = bool(
+                    (
+                        keyframes.diff(dim=1).abs() / options.interpolation_dt
+                        <= velocity_limits.view(1, 1, -1) + 1.0e-6
+                    )
+                    .all()
+                    .item()
+                )
+            if preserve_fixed_grid:
                 positions = keyframes
             else:
                 limited_success, positions = self._interpolate_cartesian_with_limits(
@@ -989,16 +1151,31 @@ class MotionGenerator:
         assert options.control_part is not None
         assert options.sample_count is not None
         assert options.interpolation_dt is not None
-        velocity_limit = (
-            0.2 if options.velocity_limit is None else options.velocity_limit
+        velocity_limits = self._resolve_velocity_limits(
+            control_part=options.control_part,
+            batch_size=solved_keyframes.shape[0],
+            dof=solved_keyframes.shape[2],
+            requested=options.velocity_limit,
+            reference=solved_keyframes,
         )
         acceleration_limit = (
             0.5 if options.acceleration_limit is None else options.acceleration_limit
         )
-        variation = solved_keyframes.diff(dim=1).abs().sum(dim=1).amax(dim=1)
+        acceleration_limits = torch.full_like(velocity_limits, acceleration_limit)
+        variation = solved_keyframes.diff(dim=1).abs().sum(dim=1)
+        zero_velocity_motion = (velocity_limits == 0.0) & (variation > 0.0).any(dim=0)
+        if zero_velocity_motion.any():
+            raise ValueError("A zero-velocity Robot joint cannot follow this path.")
+        safe_velocity_limits = torch.where(
+            velocity_limits == 0.0,
+            torch.ones_like(velocity_limits),
+            velocity_limits,
+        )
         duration = torch.maximum(
-            1.875 * variation / velocity_limit,
-            torch.sqrt((10.0 / math.sqrt(3.0)) * variation / acceleration_limit),
+            (1.875 * variation / safe_velocity_limits).amax(dim=1),
+            torch.sqrt((10.0 / math.sqrt(3.0)) * variation / acceleration_limits).amax(
+                dim=1
+            ),
         )
         interval_count = max(
             options.sample_count - 1,
@@ -1043,10 +1220,14 @@ class MotionGenerator:
                 / options.interpolation_dt
             )
             velocity_ratio = float(
-                (interval_velocity.abs().amax() / velocity_limit).item()
+                (interval_velocity.abs() / safe_velocity_limits.view(1, 1, -1))
+                .amax()
+                .item()
             )
             acceleration_ratio = float(
-                (boundary_acceleration.abs().amax() / acceleration_limit).item()
+                (boundary_acceleration.abs() / acceleration_limits.view(1, 1, -1))
+                .amax()
+                .item()
             )
             scale = max(velocity_ratio, math.sqrt(acceleration_ratio))
             if scale <= 1.0 + 1.0e-5:
@@ -1065,10 +1246,12 @@ class MotionGenerator:
             )
             / options.interpolation_dt
         )
-        success &= (interval_velocity.abs() <= velocity_limit + 1.0e-6).all(dim=(1, 2))
-        success &= (boundary_acceleration.abs() <= acceleration_limit + 1.0e-5).all(
-            dim=(1, 2)
-        )
+        success &= (
+            interval_velocity.abs() <= velocity_limits.view(1, 1, -1) + 1.0e-6
+        ).all(dim=(1, 2))
+        success &= (
+            boundary_acceleration.abs() <= acceleration_limits.view(1, 1, -1) + 1.0e-5
+        ).all(dim=(1, 2))
         return success, positions
 
     def _sample_cartesian_path(
@@ -1206,27 +1389,41 @@ class MotionGenerator:
             "pos_eps", "position_tolerance"
         ), configured_tolerance("rot_eps", "rotation_tolerance")
 
-    @staticmethod
     def _interpolate_ik_keyframes(
+        self,
         keyframes: torch.Tensor,
         options: MotionGenOptions,
     ) -> torch.Tensor:
-        """Interpolate IK keyframes while honoring optional scalar limits."""
+        """Interpolate IK keyframes under Robot-capped per-joint speeds."""
         assert options.sample_count is not None
         assert options.interpolation_dt is not None
+        velocity_limits = self._resolve_velocity_limits(
+            control_part=options.control_part,
+            batch_size=keyframes.shape[0],
+            dof=keyframes.shape[2],
+            requested=options.velocity_limit,
+            reference=keyframes,
+        )
         if options.velocity_limit is None and options.acceleration_limit is None:
-            return interpolate_with_distance(
+            fixed_grid = interpolate_with_distance(
                 trajectory=keyframes,
                 interp_num=options.sample_count,
                 device=keyframes.device,
             )
+            if bool(
+                (
+                    fixed_grid.diff(dim=1).abs() / options.interpolation_dt
+                    <= velocity_limits.view(1, 1, -1) + 1.0e-6
+                )
+                .all()
+                .item()
+            ):
+                return fixed_grid
         return interpolate_minimum_jerk(
             keyframes,
             minimum_sample_count=options.sample_count,
             step_dt=options.interpolation_dt,
-            velocity_limit=(
-                0.2 if options.velocity_limit is None else options.velocity_limit
-            ),
+            velocity_limit=velocity_limits,
             acceleration_limit=(
                 0.5
                 if options.acceleration_limit is None

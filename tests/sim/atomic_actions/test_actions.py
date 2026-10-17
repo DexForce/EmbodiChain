@@ -328,6 +328,13 @@ def _robot() -> Mock:
             return list(range(ARM_DOF, ROBOT_DOF))
         return list(range(ROBOT_DOF))
 
+    def get_qvel_limits(
+        name: str | None = None,
+        joint_ids: list[int] | None = None,
+    ) -> torch.Tensor:
+        ids = get_joint_ids(name) if joint_ids is None else joint_ids
+        return torch.ones(NUM_ENVS, len(ids))
+
     def compute_ik(
         pose: torch.Tensor | None = None,
         name: str | None = None,
@@ -356,6 +363,7 @@ def _robot() -> Mock:
 
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
+    robot.get_qvel_limits.side_effect = get_qvel_limits
     robot.compute_ik.side_effect = compute_ik
 
     def compute_batch_ik(
@@ -703,6 +711,10 @@ def _dual_motion_generator() -> MotionGenerator:
 
     robot.get_qpos.side_effect = get_qpos
     robot.get_joint_ids.side_effect = get_joint_ids
+    robot.get_qvel_limits.side_effect = lambda name=None, joint_ids=None: torch.ones(
+        NUM_ENVS,
+        len(get_joint_ids(name) if joint_ids is None else joint_ids),
+    )
     robot.get_solver.return_value = SimpleNamespace(supports_continuous_batch_ik=False)
     robot.compute_ik.side_effect = compute_ik
     robot.compute_batch_ik.side_effect = compute_batch_ik
@@ -3414,6 +3426,60 @@ def test_slide_plans_expected_segments(
         )
 
 
+def test_slide_expands_hand_opening_to_match_longer_release_trajectory() -> None:
+    generator = _motion_generator()
+    action = _bind_action(generator, Slide())
+    _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+        return_value=[
+            (torch.eye(4).unsqueeze(0), torch.zeros(1)) for _ in range(NUM_ENVS)
+        ]
+    )
+    original_plan = action._plan_pose_segment
+
+    def expand_release(*args, **kwargs):
+        success, positions = original_plan(*args, **kwargs)
+        if args[4] == 3:
+            positions = torch.cat(
+                [positions, positions[:, -1:].expand(-1, 2, -1)],
+                dim=1,
+            )
+        return success, positions
+
+    action._plan_pose_segment = expand_release
+    semantics = ObjectSemantics(
+        affordance=SlideAffordance(
+            mesh_vertices=torch.zeros(3, 3),
+            mesh_triangles=torch.tensor([[0, 1, 2]]),
+            translation_axis=torch.tensor([0.0, -1.0, 0.0]),
+        ),
+        geometry={},
+        entity_id="handle",
+    )
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id="slide",
+            goal=SlideGoal(semantics, torch.eye(4)),
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=SlideOptions(
+                hand_interp_steps=3,
+                release_retreat_distance=0.04,
+            ),
+        ),
+        _context(),
+    )
+
+    trajectory = _joint_trajectory(plan)
+    open_segment = plan.segment("open")
+    assert open_segment.stop - open_segment.start == 5
+    assert trajectory.positions.shape[1] == 26
+    assert torch.all(
+        trajectory.positions[:, plan.segment("open").stop - 1, ARM_DOF:] == 0.0
+    )
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -4176,6 +4242,115 @@ def test_open_door_holds_failed_grasp_environment() -> None:
     assert torch.allclose(
         trajectory.positions[1],
         context.robot.qpos[1].unsqueeze(0).expand(18, -1),
+    )
+
+
+@pytest.mark.parametrize("action_kind", ["open_door", "twist"])
+def test_exact_contact_path_holds_row_after_partial_ik_failure(
+    action_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generator = _motion_generator()
+
+    def position_ik(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **_: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del name
+        qpos = joint_seed.clone()
+        qpos[:, :3] = pose[:, :3, 3]
+        return torch.tensor([True, False]), qpos
+
+    def position_fk(
+        qpos: torch.Tensor,
+        name: str,
+        to_matrix: bool,
+    ) -> torch.Tensor:
+        del name, to_matrix
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, :3, 3] = qpos[:, :3]
+        return pose
+
+    def validate_exact_start(
+        self: MotionGenerator,
+        target_poses: torch.Tensor,
+        solved_keyframes: torch.Tensor,
+        options,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del target_poses
+        if options.cartesian_path_sampler is not None:
+            sampled = options.cartesian_path_sampler(torch.tensor([0.0, 1.0]))
+            start_pose = self.robot.compute_fk(
+                qpos=solved_keyframes[:, 0],
+                name=options.control_part,
+                to_matrix=True,
+            )
+            if not torch.allclose(sampled[:, 0], start_pose, atol=1.0e-6):
+                raise ValueError("cartesian_path_sampler start differs from FK")
+        return (
+            torch.ones(solved_keyframes.shape[0], dtype=torch.bool),
+            solved_keyframes,
+        )
+
+    generator.robot.compute_ik.side_effect = position_ik
+    generator.robot.compute_fk.side_effect = position_fk
+    monkeypatch.setattr(
+        MotionGenerator,
+        "_interpolate_cartesian_with_limits",
+        validate_exact_start,
+    )
+    if action_kind == "open_door":
+        action = _bind_action(generator, OpenDoor())
+        grasp_pose = torch.eye(4).repeat(NUM_ENVS, 1, 1)
+        grasp_pose[:, 0, 3] = 1.0
+        _GRASP_GENERATORS[id(action)].get_valid_grasp_poses = Mock(
+            return_value=[
+                (grasp_pose[index : index + 1], torch.zeros(1))
+                for index in range(NUM_ENVS)
+            ]
+        )
+        semantics = ObjectSemantics(
+            affordance=_door_affordance(),
+            geometry={},
+            entity_id=DOOR_ENTITY_ID,
+        )
+        goal = OpenDoorGoal(semantics, torch.eye(4), open_fraction=0.5)
+        options = OpenDoorOptions(hand_interp_steps=3, door_waypoint_count=4)
+        context = _context(scene=_door_scene())
+    else:
+        action = _bind_action(generator, Twist())
+        semantics = ObjectSemantics(
+            affordance=TwistAffordance(
+                grasp_position=(0.0, 0.0, 0.0),
+                axis_origin=(0.0, 0.0, 0.0),
+                twist_axis=torch.tensor([0.0, 0.0, 1.0]),
+            ),
+            geometry={},
+            entity_id="knob",
+        )
+        goal = TwistGoal(semantics, torch.eye(4))
+        options = TwistOptions(hand_interp_steps=3, twist_waypoint_count=4)
+        context = _context()
+
+    plan = _plan_action(
+        action,
+        ActionInvocation(
+            skill_id=action.skill_id,
+            goal=goal,
+            binding=_binding(action),
+            motion_policy=MotionPolicy(sample_count=24),
+            skill_options=options,
+        ),
+        context,
+    )
+
+    assert plan.plan_success.tolist() == [True, False]
+    trajectory = _joint_trajectory(plan)
+    assert torch.allclose(
+        trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).expand_as(trajectory.positions[1]),
     )
 
 

@@ -534,6 +534,22 @@ def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
         MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
 
 
+def test_motion_policy_preserves_existing_positional_constructor_order() -> None:
+    policy = MotionPolicy(
+        "ik_interp",
+        50,
+        "zero",
+        DynamicCollisionMode.OFF,
+        None,
+    )
+
+    assert policy.velocity_targets == "zero"
+    assert policy.dynamic_collision_mode is DynamicCollisionMode.OFF
+    assert policy.plan_opts is None
+    assert policy.velocity_limit is None
+    assert policy.acceleration_limit == pytest.approx(0.5)
+
+
 def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     planner_options = ToppraPlanOptions(
         constraints={"velocity": 0.2, "acceleration": 0.5}
@@ -559,7 +575,7 @@ def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     assert torch.equal(options.start_qpos, start_qpos)
     assert options.control_part == "arm"
     assert options.interpolation_dt == pytest.approx(0.02)
-    assert options.velocity_limit == pytest.approx(0.2)
+    assert options.velocity_limit is None
     assert options.acceleration_limit == pytest.approx(0.5)
     assert isinstance(options.plan_opts, ToppraPlanOptions)
     assert options.plan_opts.constraints == {"velocity": 0.2, "acceleration": 0.5}

@@ -60,6 +60,7 @@ from embodichain.lab.sim.atomic_actions.primitives._binding_contracts import (
 )
 from embodichain.lab.sim.atomic_actions.primitives._helpers import (
     arm_qpos_from_state,
+    hold_inactive_cartesian_rows,
     resample_planned_trajectory,
 )
 from embodichain.lab.sim.atomic_actions.requirements import (
@@ -239,16 +240,6 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             n_twist - 1,
         )
 
-        def sample_twist_path(progress: torch.Tensor) -> torch.Tensor:
-            return self._twisted_grasp_poses_at_fractions(
-                link_pose,
-                grasp_xpos,
-                affordance.twist_axis,
-                affordance.require_axis_origin(),
-                options.twist_angle,
-                progress,
-            )
-
         approach_success, approach_arm = self._plan_pose_segment(
             pre_grasp_xpos,
             start_arm_qpos,
@@ -263,6 +254,17 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             grasp_xpos[:, :3, 2],
             n_waypoints=n_reach - 1,
         )
+        reach_active = grasp_sample.success & approach_success
+        reach_hold_pose = self.robot.compute_fk(
+            qpos=approach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(reach_keyframes)
+        reach_keyframes = hold_inactive_cartesian_rows(
+            reach_keyframes,
+            active_mask=reach_active,
+            hold_pose=reach_hold_pose,
+        )
         reach_success, reach_arm = self._plan_pose_segment(
             reach_keyframes,
             approach_arm[:, -1],
@@ -272,8 +274,35 @@ class Twist(AtomicAction[TwistGoal, TwistOptions]):
             interpolation_dt=interpolation_dt,
             cartesian_samples=True,
         )
-        twist_success, twist_arm = self._plan_pose_segment(
+        twist_active = reach_active & reach_success
+        twist_hold_pose = self.robot.compute_fk(
+            qpos=reach_arm[:, -1],
+            name=control_part,
+            to_matrix=True,
+        ).to(twist_xpos)
+        twist_keyframes = hold_inactive_cartesian_rows(
             twist_xpos,
+            active_mask=twist_active,
+            hold_pose=twist_hold_pose,
+        )
+
+        def sample_twist_path(progress: torch.Tensor) -> torch.Tensor:
+            sampled = self._twisted_grasp_poses_at_fractions(
+                link_pose,
+                grasp_xpos,
+                affordance.twist_axis,
+                affordance.require_axis_origin(),
+                options.twist_angle,
+                progress,
+            )
+            return hold_inactive_cartesian_rows(
+                sampled,
+                active_mask=twist_active,
+                hold_pose=twist_hold_pose,
+            )
+
+        twist_success, twist_arm = self._plan_pose_segment(
+            twist_keyframes,
             reach_arm[:, -1],
             control_part,
             request,

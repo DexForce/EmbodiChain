@@ -98,6 +98,40 @@ def repeat_qpos(qpos: torch.Tensor, n_waypoints: int) -> torch.Tensor:
     return qpos.unsqueeze(1).repeat(1, n_waypoints, 1)
 
 
+def hold_inactive_cartesian_rows(
+    path: torch.Tensor,
+    *,
+    active_mask: torch.Tensor,
+    hold_pose: torch.Tensor,
+) -> torch.Tensor:
+    """Replace inactive Cartesian path rows with a consistent pose hold.
+
+    Exact-path interpolation validates its Cartesian start against FK of the
+    supplied joint seed.  A row that failed an earlier segment therefore must
+    not retain the successful row's requested contact geometry.
+    """
+    if path.ndim != 4 or path.shape[2:] != (4, 4):
+        raise ValueError("path must have shape (B, T, 4, 4).")
+    if active_mask.dtype != torch.bool or active_mask.shape != (path.shape[0],):
+        raise ValueError("active_mask must have bool shape (B,).")
+    if hold_pose.shape != (path.shape[0], 4, 4):
+        raise ValueError("hold_pose must have shape (B, 4, 4).")
+    if (
+        active_mask.device != path.device
+        or hold_pose.device != path.device
+        or hold_pose.dtype != path.dtype
+    ):
+        raise ValueError(
+            "path, active_mask, and hold_pose must share a device, and path and "
+            "hold_pose must share a dtype."
+        )
+    return torch.where(
+        active_mask[:, None, None, None],
+        path,
+        hold_pose[:, None].expand_as(path),
+    )
+
+
 def resample_planned_trajectory(
     trajectory: torch.Tensor,
     sample_count: int,

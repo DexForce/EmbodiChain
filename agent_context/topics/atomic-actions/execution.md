@@ -132,8 +132,10 @@ Primitive planner results are explicitly retimed before their controlled-joint
 paths are embedded into a full-robot `TimedTrajectory`. Off-grid duration rounds
 up to a whole control interval, qvel is recomputed from the executed samples,
 and now-invalid native acceleration samples are discarded. Default `ik_interp`
-policies use rest-to-rest minimum-jerk joint segments with scalar velocity and
-acceleration limits; `sample_count` remains a lower bound. Exact Cartesian
+policies use rest-to-rest minimum-jerk joint segments. Omitted velocity follows
+the Robot's ordered per-joint caps, while an explicit scalar request is
+intersected with those caps; acceleration remains a planner-owned scalar budget.
+`sample_count` remains a lower bound. Exact Cartesian
 paths use one global minimum-jerk progress law and batch IK for every expanded
 sample, so enforcing limits does not replace contact geometry with joint-space
 interpolation. Articulated paths whose geometry cannot be reconstructed from

@@ -1535,6 +1535,19 @@ def test_motion_limit_policy_decodes() -> None:
     assert policy.acceleration_limit == pytest.approx(0.5)
 
 
+def test_motion_limit_policy_preserves_omitted_velocity_limit() -> None:
+    from embodichain.lab.task_program.integrations.configured import (
+        _decode_motion_policy,
+    )
+
+    policy = _decode_motion_policy(
+        {"sample_count": 40, "acceleration_limit": 0.5},
+        path="motion",
+    )
+
+    assert policy.velocity_limit is None
+
+
 @pytest.mark.parametrize("field", ["velocity_limit", "acceleration_limit"])
 @pytest.mark.parametrize("value", [0.0, -0.1, float("inf")])
 def test_motion_limit_policy_rejects_nonpositive_or_nonfinite_values(
