@@ -317,6 +317,19 @@ def _track_ids(records: list[TrialRecord], cases: list[BenchmarkCase]) -> list[s
     return sorted(tracks)
 
 
+def _bypassed_case_ids(
+    records: Iterable[TrialRecord], algorithm_id: str, track: str
+) -> frozenset[str]:
+    """Return cases whose scenario did not call the selected planner backend."""
+    return frozenset(
+        record.case_id
+        for record in records
+        if record.algorithm_id == algorithm_id
+        and record.track == track
+        and not record.uses_selected_planner_backend
+    )
+
+
 def _lifecycle_value(
     records: list[TrialRecord],
     track: str,
@@ -337,6 +350,7 @@ def _lifecycle_value(
             and record.algorithm_id == algorithm_id
             and record.batch_size == batch_size
             and record.phase is phase
+            and record.uses_selected_planner_backend
             and (waypoint_count is None or record.waypoint_count == waypoint_count)
         ):
             return record.cost_time_ms
@@ -348,13 +362,13 @@ def _performance_rows(
     metadata: list[PlannerMetadata],
     cases: list[BenchmarkCase],
 ) -> list[dict[str, object]]:
-    """Aggregate steady-state time and memory by track, algorithm, and input shape."""
+    """Aggregate planner-attributed time and memory by track and input shape."""
     measured_groups: dict[
         tuple[str, str, str, str, str | None, str | None, int, int],
         list[TrialRecord],
     ] = defaultdict(list)
     for record in records:
-        if record.phase is TrialPhase.MEASURED:
+        if record.phase is TrialPhase.MEASURED and record.uses_selected_planner_backend:
             measured_groups[
                 (
                     record.track,
@@ -518,7 +532,8 @@ def _metric_rows(
 
     Boolean success columns use the same case-level macro average as the
     leaderboard (missing cases contribute ``0.0``). Continuous quality metrics
-    remain conditioned on externally motion-valid outcomes.
+    remain conditioned on externally motion-valid outcomes. Cases whose
+    scenario bypasses the selected planner are excluded from planner metrics.
     """
     measured_by_key: dict[
         tuple[
@@ -538,7 +553,12 @@ def _metric_rows(
         list[TrialRecord],
     ] = defaultdict(list)
     unsupported_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
+    bypassed_by_algorithm_track: dict[tuple[str, str], set[str]] = defaultdict(set)
     for record in records:
+        if not record.uses_selected_planner_backend:
+            bypassed_by_algorithm_track[(record.algorithm_id, record.track)].add(
+                record.case_id
+            )
         if (
             record.phase is TrialPhase.AVAILABILITY
             and record.status == "unsupported"
@@ -548,7 +568,10 @@ def _metric_rows(
             unsupported_by_algorithm_track[(record.algorithm_id, record.track)].add(
                 record.case_id
             )
-        if record.phase is not TrialPhase.MEASURED:
+        if (
+            record.phase is not TrialPhase.MEASURED
+            or not record.uses_selected_planner_backend
+        ):
             continue
         key = (
             record.track,
@@ -645,7 +668,14 @@ def _metric_rows(
                 path_shape,
                 start_state_bin,
             ) = group_key
-            group_cases = cases_by_group[group_key]
+            bypassed_case_ids = bypassed_by_algorithm_track[(info.algorithm_id, track)]
+            group_cases = [
+                case
+                for case in cases_by_group[group_key]
+                if case.case_id not in bypassed_case_ids
+            ]
+            if not group_cases:
+                continue
             measured = measured_by_key.get(
                 (
                     track,
@@ -668,7 +698,7 @@ def _metric_rows(
             )
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             valid_outcomes = [outcome for outcome in outcomes if outcome.motion_valid]
-            expected = expected_by_group[group_key]
+            expected = sum(case.batch_size for case in group_cases) * measured_trials
             rows.append(
                 {
                     "track": track,
@@ -844,22 +874,31 @@ def _leaderboard_rows(
     Success rates are macro-averaged over mandatory cases (equal case weight).
     ``latency_p95_ms`` uses the same case-equal weighting: per-case mean warm
     latency, then nearest-rank p95 across cases. ``coverage_rate`` remains an
-    outcome-count completeness check used for eligibility.
+    outcome-count completeness check used for eligibility. Cases explicitly
+    attributed to another motion algorithm are excluded from both ranking
+    numerators and denominators.
     """
     entries: list[dict[str, object]] = []
     for track in _track_ids(records, cases):
-        track_cases = [case for case in cases if case.track == track]
-        expected_outcomes = (
-            sum(case.batch_size for case in track_cases) * measured_trials
-        )
+        all_track_cases = [case for case in cases if case.track == track]
         track_entries: list[dict[str, object]] = []
         for info in metadata:
+            bypassed_case_ids = _bypassed_case_ids(records, info.algorithm_id, track)
+            track_cases = [
+                case
+                for case in all_track_cases
+                if case.case_id not in bypassed_case_ids
+            ]
+            expected_outcomes = (
+                sum(case.batch_size for case in track_cases) * measured_trials
+            )
             measured = [
                 record
                 for record in records
                 if record.algorithm_id == info.algorithm_id
                 and record.track == track
                 and record.phase is TrialPhase.MEASURED
+                and record.uses_selected_planner_backend
             ]
             outcomes = [outcome for record in measured for outcome in record.outcomes]
             excluded_case_ids = frozenset(
@@ -916,7 +955,9 @@ def _leaderboard_rows(
                     "algorithm_role": info.algorithm_role.value,
                     "model_revision": info.model_revision,
                     "planner_config_hash": info.config_hash[:12],
-                    "eligible": coverage >= 1.0 - 1.0e-12,
+                    "eligible": bool(track_cases) and coverage >= 1.0 - 1.0e-12,
+                    "attributed_cases": len(track_cases),
+                    "bypassed_cases": len(all_track_cases) - len(track_cases),
                     "coverage_rate": coverage,
                     "overall_success_rate": primary_rate,
                     "planning_success_rate": planning_rate,

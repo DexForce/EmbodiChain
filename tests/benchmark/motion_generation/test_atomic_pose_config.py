@@ -34,6 +34,8 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     _apply_target_rotation_randomization,
     _randomization_parameters,
     _randomized_vector_batch,
+    _seeded_jitter,
+    _workspace_shell_profile,
     atomic_skill_provider_names,
     create_atomic_skill_provider,
 )
@@ -111,12 +113,27 @@ def test_pose_batch_suite_declares_translation_only_batched_trials() -> None:
 
 
 def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> None:
-    """Every Franka task skill gets only its meaningful spatial domains."""
+    """Every Franka task skill gets its meaningful spatial or primitive domains."""
     suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    primitive_domain_ids = {
+        "nominal",
+        "cube_uniform_40mm",
+        "cube_uniform_60mm",
+        "cube_aspect_x",
+        "cube_aspect_y",
+        "cube_aspect_z",
+    }
     expected = {
         "spatial-rigid-object": (
             {"pick_up", "pour", "axis_align"},
-            {"nominal", "object_xy", "object_yaw"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "task_frame_planar",
+                "object_planar_pose",
+                "object_workspace_shell",
+            },
         ),
         "spatial-rigid-object-held-pose-target": (
             {"move_held_object"},
@@ -128,6 +145,9 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_yaw",
                 "target_z",
                 "target_roll_pitch",
+                "task_frame_planar",
+                "object_target_spatial_pose",
+                "target_relative_shell",
             },
         ),
         "spatial-rigid-object-place-target": (
@@ -138,12 +158,33 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_yaw",
                 "target_relative_pose",
                 "target_yaw",
+                "task_frame_planar",
+                "object_target_planar_pose",
+                "target_relative_shell",
             },
         ),
         "spatial-rigid-object-position-target": (
             {"push_object"},
-            {"nominal", "object_xy", "object_yaw", "target_relative_pose"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "task_frame_planar",
+                "object_target_position",
+                "target_relative_shell",
+            },
         ),
+        "primitive-cube-rigid-object": (
+            {"pick_up", "pour", "axis_align"},
+            primitive_domain_ids,
+        ),
+        "primitive-cube-held-pose-target": (
+            {"move_held_object"},
+            primitive_domain_ids,
+        ),
+        "primitive-cube-place-target": ({"place"}, primitive_domain_ids),
+        "primitive-cube-position-target": ({"push_object"}, primitive_domain_ids),
         "spatial-microwave-controls": (
             {"press", "twist"},
             {
@@ -152,6 +193,9 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_yaw",
                 "object_z",
                 "object_roll_pitch",
+                "task_frame_planar",
+                "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
         "spatial-drawer": (
@@ -162,6 +206,9 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_yaw",
                 "object_z",
                 "object_roll_pitch",
+                "task_frame_planar",
+                "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
         "spatial-door": (
@@ -172,12 +219,15 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "object_yaw",
                 "object_z",
                 "object_roll_pitch",
+                "task_frame_planar",
+                "articulation_spatial_pose",
+                "articulation_workspace_shell",
             },
         ),
     }
 
-    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v5"
-    assert len(suite.evaluation_tracks()) == 34
+    assert suite.suite_version == "atomic_franka_pgi_spatial_generalization_v8"
+    assert len(suite.evaluation_tracks()) == 79
     assert set(expected) == {track.id for track in suite.tracks}
     for track in suite.tracks:
         skills, domain_ids = expected[track.id]
@@ -186,13 +236,94 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
         assert all(set(domain.applicability) == skills for domain in track.domains)
 
 
+def test_cube_primitive_domains_parameterize_only_geometry_for_every_skill() -> None:
+    """Every cube skill receives one nominal and five primitive parameters."""
+    suite = load_suite("atomic_franka_pgi_spatial_generalization")
+    expected_sizes = {
+        "nominal": [0.05, 0.05, 0.05],
+        "cube_uniform_40mm": [0.04, 0.04, 0.04],
+        "cube_uniform_60mm": [0.06, 0.06, 0.06],
+        "cube_aspect_x": [0.07, 0.042258, 0.042258],
+        "cube_aspect_y": [0.042258, 0.07, 0.042258],
+        "cube_aspect_z": [0.042258, 0.042258, 0.07],
+    }
+    primitive_groups = {
+        "primitive-cube-rigid-object",
+        "primitive-cube-held-pose-target",
+        "primitive-cube-place-target",
+        "primitive-cube-position-target",
+    }
+    cube_skills = {
+        "pick_up",
+        "move_held_object",
+        "place",
+        "pour",
+        "axis_align",
+        "push_object",
+    }
+    nominal_object = suite.tracks[0].config["objects"][0]
+    primitive_tracks = [
+        track
+        for track in suite.evaluation_tracks()
+        if track.domain.metadata.get("generalization_axis") == "primitive_geometry"
+    ]
+
+    assert len(primitive_tracks) == len(primitive_groups) * len(expected_sizes)
+    assert {track.group_id for track in primitive_tracks} == primitive_groups
+    assert {
+        skill["id"] for track in primitive_tracks for skill in track.config["skills"]
+    } == cube_skills
+    for group_id in primitive_groups:
+        assert {
+            track.domain.id for track in primitive_tracks if track.group_id == group_id
+        } == set(expected_sizes)
+
+    for track in primitive_tracks:
+        object_config = track.config["objects"]
+        assert len(object_config) == 1
+        object_config = object_config[0]
+        expected_size = expected_sizes[track.domain.id]
+        assert object_config["id"] == "cube_50mm"
+        assert object_config["kind"] == "cube"
+        assert object_config["size"] == expected_size
+        assert track.domain.objects == ["cube_50mm"]
+        assert track.domain.perturbations == {
+            "primitive_parameters": {"size": expected_size}
+        }
+        assert track.domain.metadata["primitive_kind"] == "cube"
+        assert track.domain.metadata["parameter_names"] == ["size"]
+        assert track.domain.metadata["nominal_parameters"] == {
+            "size": [0.05, 0.05, 0.05]
+        }
+        assert track.domain.case_generator == "configured_primitive_parameters"
+        assert resolve_atomic_batch_sizes(track) == [1]
+        assert resolve_atomic_pose_randomization(track).enabled is False
+        assert {
+            key: value for key, value in object_config.items() if key != "size"
+        } == {key: value for key, value in nominal_object.items() if key != "size"}
+        assert {
+            case["object"]
+            for skill in track.config["skills"]
+            for case in skill["cases"]
+        } == {"cube_50mm"}
+
+
 @pytest.mark.parametrize(
     ("suite_name", "skill_id", "domain_ids"),
     [
         (
             "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
             "hand_over",
-            {"nominal", "object_xy", "object_yaw", "target_relative_pose"},
+            {
+                "nominal",
+                "object_xy",
+                "object_yaw",
+                "target_relative_pose",
+                "task_frame_planar",
+                "object_target_position",
+                "target_relative_shell",
+                "bilateral_role_mirror",
+            },
         ),
         (
             "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
@@ -205,6 +336,10 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "target_yaw",
                 "target_z",
                 "target_roll_pitch",
+                "task_frame_planar",
+                "object_target_spatial_pose",
+                "target_relative_shell",
+                "bilateral_role_mirror",
             },
         ),
         (
@@ -221,6 +356,10 @@ def test_spatial_generalization_suite_covers_task_level_single_arm_skills() -> N
                 "support_object_yaw",
                 "task_frame_xy",
                 "task_frame_yaw",
+                "task_frame_planar",
+                "object_support_target_task_frame_pose",
+                "support_relative_shell",
+                "bilateral_role_mirror",
             },
         ),
     ],
@@ -295,6 +434,21 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
                 assert settings.enabled is False
                 assert resolve_atomic_batch_sizes(track) == [1]
                 continue
+            if track.domain.case_generator == "mirrored_control_assignment":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                assert "control_parts" in track.config
+                continue
+            if track.domain.case_generator == "configured_primitive_parameters":
+                assert settings.enabled is False
+                assert resolve_atomic_batch_sizes(track) == [1]
+                assert (
+                    track.domain.metadata["generalization_axis"] == "primitive_geometry"
+                )
+                assert track.config["objects"][0]["size"] == (
+                    track.domain.perturbations["primitive_parameters"]["size"]
+                )
+                continue
             assert settings.enabled is True
             assert resolve_atomic_batch_sizes(track) == [8]
             for field, attribute in perturbation_fields.items():
@@ -306,6 +460,105 @@ def test_every_spatial_domain_matches_its_runtime_randomization() -> None:
                     assert actual == tuple(expected)
                 else:
                     assert actual == pytest.approx(expected)
+
+
+def test_composed_spatial_domains_use_stratified_boundary_sampling() -> None:
+    """Every new multi-factor domain exercises all configured pose bounds."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    )
+    composed_domain_ids = {
+        "task_frame_planar",
+        "object_planar_pose",
+        "object_target_position",
+        "object_target_planar_pose",
+        "object_target_spatial_pose",
+        "articulation_spatial_pose",
+        "object_support_target_task_frame_pose",
+    }
+    seen: set[str] = set()
+    for suite_name in suite_names:
+        for track in load_suite(suite_name).evaluation_tracks():
+            if track.domain.id not in composed_domain_ids:
+                continue
+            seen.add(track.domain.id)
+            settings = resolve_atomic_pose_randomization(track)
+            pose_fields = [
+                value
+                for key, value in track.domain.perturbations.items()
+                if key.endswith(("_jitter_m", "_jitter_rad"))
+                and (any(value) if isinstance(value, list) else value > 0.0)
+            ]
+            assert len(pose_fields) >= 2
+            assert track.domain.case_generator == "deterministic_stratified_pose_batch"
+            assert track.domain.perturbations["distribution"] == "stratified"
+            assert settings.sampling_pattern == "stratified"
+    assert seen == composed_domain_ids
+
+
+def test_workspace_shell_domains_declare_radial_buckets() -> None:
+    """Every shell domain uses the executable radial sampler and three buckets."""
+    suite_names = (
+        "atomic_franka_pgi_spatial_generalization",
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization",
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization",
+    )
+    shell_ids = {
+        "object_workspace_shell",
+        "target_relative_shell",
+        "articulation_workspace_shell",
+        "support_relative_shell",
+    }
+    seen: set[str] = set()
+    for suite_name in suite_names:
+        for track in load_suite(suite_name).evaluation_tracks():
+            if track.domain.id not in shell_ids:
+                continue
+            seen.add(track.domain.id)
+            settings = resolve_atomic_pose_randomization(track)
+            assert track.domain.case_generator == "deterministic_workspace_shell_batch"
+            assert track.domain.perturbations["distribution"] == "workspace_shell"
+            assert track.domain.perturbations["workspace_buckets"] == [
+                "near",
+                "mid",
+                "far",
+            ]
+            assert settings.sampling_pattern == "workspace_shell"
+            assert resolve_atomic_batch_sizes(track) == [8]
+    assert seen == shell_ids
+
+
+def test_dual_arm_mirror_domains_swap_spatial_roles() -> None:
+    """Mirrored domains route each semantic slot to the opposite physical arm."""
+    expected = {
+        "atomic_dual_ur5_pgi_hand_over_spatial_generalization": {
+            "source": {"motion": "right_arm", "grasp": "right_eef"},
+            "destination": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+        "atomic_dual_ur5_pgi_coordinated_pickment_spatial_generalization": {
+            "left": {"motion": "right_arm", "grasp": "right_eef"},
+            "right": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+        "atomic_dual_ur5_pgi_coordinated_placement_spatial_generalization": {
+            "placing": {"motion": "right_arm", "grasp": "right_eef"},
+            "support": {"motion": "left_arm", "grasp": "left_eef"},
+        },
+    }
+    for suite_name, control_parts in expected.items():
+        mirror = next(
+            track
+            for track in load_suite(suite_name).evaluation_tracks()
+            if track.domain.id == "bilateral_role_mirror"
+        )
+        prepared = AtomicTaskScenario._prepare_pose_batch_config(
+            {}, mirror, batch_size=1
+        )
+        assert prepared["control_parts"] == control_parts
+        assert mirror.domain.perturbations["mirror_axis"] == "y"
 
 
 def test_pose_batch_aliases_are_normalized() -> None:
@@ -409,6 +662,156 @@ def test_spatial_pose_mode_injects_all_roll_pitch_controls() -> None:
         0.4,
     ]
     assert prepared["_pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]
+
+
+def test_stratified_pose_sampling_is_deterministic_and_covers_bounds() -> None:
+    """Each dimension independently visits both configured interval limits."""
+    kwargs = {
+        "amplitude": (0.03, 0.02, 0.5),
+        "seed": 23,
+        "stream": 101,
+        "dtype": torch.float32,
+        "device": torch.device("cpu"),
+        "batch_size": 8,
+        "seed_stride": 1,
+        "sampling_pattern": "stratified",
+    }
+    first = _seeded_jitter(**kwargs)
+    second = _seeded_jitter(**kwargs)
+
+    torch.testing.assert_close(first, second)
+    for dimension, amplitude in enumerate(kwargs["amplitude"]):
+        expected = torch.linspace(-amplitude, amplitude, 8)
+        torch.testing.assert_close(torch.sort(first[:, dimension]).values, expected)
+    assert not torch.allclose(
+        first[:, 0] / kwargs["amplitude"][0],
+        first[:, 1] / kwargs["amplitude"][1],
+    )
+
+
+def test_workspace_shell_sampling_covers_radius_buckets_and_height() -> None:
+    """Workspace shells cover near/mid/far XY radii and the configured Z range."""
+    amplitude = (0.04, 0.02, 0.03)
+    kwargs = {
+        "amplitude": amplitude,
+        "seed": 47,
+        "stream": 203,
+        "dtype": torch.float32,
+        "device": torch.device("cpu"),
+        "batch_size": 8,
+        "seed_stride": 1,
+        "sampling_pattern": "workspace_shell",
+    }
+    first = _seeded_jitter(**kwargs)
+    second = _seeded_jitter(**kwargs)
+    radii, labels = _workspace_shell_profile(8)
+    realized_radii = torch.sqrt(
+        (first[:, 0] / amplitude[0]).square() + (first[:, 1] / amplitude[1]).square()
+    )
+
+    torch.testing.assert_close(first, second)
+    torch.testing.assert_close(realized_radii, radii)
+    torch.testing.assert_close(
+        torch.sort(first[:, 2]).values,
+        torch.linspace(-amplitude[2], amplitude[2], 8),
+    )
+    assert set(labels) == {"near", "mid", "far"}
+
+
+@pytest.mark.parametrize("amplitude", [(0.04, 0.0, 0.01), (0.0, 0.04, 0.01)])
+def test_workspace_shell_sampling_rejects_single_xy_axis(
+    amplitude: tuple[float, float, float],
+) -> None:
+    """A radial shell cannot preserve its labels on only one active XY axis."""
+    with pytest.raises(ValueError, match="both X and Y"):
+        _seeded_jitter(
+            amplitude,
+            seed=47,
+            stream=203,
+            dtype=torch.float32,
+            device=torch.device("cpu"),
+            batch_size=8,
+            sampling_pattern="workspace_shell",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("object_translation_jitter_m", [0.04, 0.0, 0.0]),
+        ("target_translation_jitter_m", [0.0, 0.04, 0.0]),
+        ("task_frame_translation_jitter_m", [0.0, 0.0, 0.02]),
+    ],
+)
+def test_workspace_shell_config_rejects_degenerate_xy_ranges(
+    field: str, value: list[float]
+) -> None:
+    """Shell configs require paired XY ranges and at least one radial source."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                field: value,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="workspace_shell"):
+        resolve_atomic_pose_randomization(track)
+
+
+def test_workspace_shell_config_allows_zero_irrelevant_ranges() -> None:
+    """An inactive vector is valid when another translation defines the shell."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                "object_translation_jitter_m": [0.04, 0.02, 0.0],
+                "target_translation_jitter_m": [0.0, 0.0, 0.01],
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+
+    assert settings.object_translation_jitter_m == (0.04, 0.02, 0.0)
+    assert settings.target_translation_jitter_m == (0.0, 0.0, 0.01)
+
+
+def test_pose_sampling_pattern_is_validated_and_injected() -> None:
+    """The YAML sampling selector reaches runtime pose generation unchanged."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "stratified",
+                "pose_batch_size": 4,
+                "object_translation_jitter_m": [0.02, 0.02, 0.0],
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+    prepared = AtomicTaskScenario._prepare_pose_batch_config({}, track, batch_size=4)
+    assert settings.sampling_pattern == "stratified"
+    assert prepared["_pose_batch_sampling_pattern"] == "stratified"
+
+    track.config["randomization"]["sampling_pattern"] = "grid"
+    with pytest.raises(ValueError, match="sampling_pattern"):
+        resolve_atomic_pose_randomization(track)
 
 
 @pytest.mark.parametrize(
@@ -1046,6 +1449,7 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
         {
             "_pose_batch_enabled": True,
             "_pose_batch_seed_stride": 1,
+            "_pose_batch_sampling_pattern": "stratified",
             "_pose_batch_translation_jitter_m": [0.1, 0.1, 0.0],
             "_pose_batch_object_translation_jitter_m": [0.2, 0.2, 0.0],
             "_pose_batch_object_yaw_jitter_rad": 0.5,
@@ -1064,6 +1468,8 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
     )
     assert all(not key.startswith("_pose_batch_") for key in parameters["ranges"])
     assert parameters["pose_batch"] is True
+    assert parameters["distribution"] == "deterministic_stratified"
+    assert parameters["pose_batch_sampling_pattern"] == "stratified"
     assert parameters["pose_batch_object_yaw_jitter_rad"] == pytest.approx(0.5)
     assert parameters["pose_batch_object_roll_pitch_jitter_rad"] == [0.1, 0.2]
     assert parameters["pose_batch_target_yaw_jitter_rad"] == pytest.approx(0.4)
@@ -1085,3 +1491,32 @@ def test_pose_batch_internal_ranges_are_not_exposed_as_legacy_jitter() -> None:
     ]
     assert parameters["pose_batch_task_frame_yaw_jitter_rad"] == pytest.approx(0.2)
     assert parameters["pose_batch_task_frame_roll_pitch_jitter_rad"] == [0.4, 0.5]
+
+
+def test_workspace_shell_manifest_records_row_buckets() -> None:
+    """Case metadata maps every shell row to its normalized radial bucket."""
+    parameters = _randomization_parameters(
+        {
+            "_pose_batch_enabled": True,
+            "_pose_batch_size": 8,
+            "_pose_batch_seed_stride": 1,
+            "_pose_batch_sampling_pattern": "workspace_shell",
+        },
+        seed=23,
+    )
+
+    assert parameters["distribution"] == "deterministic_workspace_shell"
+    assert parameters["spatial_bucket_axis"] == "normalized_xy_offset_radius"
+    assert parameters["spatial_buckets"] == [
+        "near",
+        "near",
+        "mid",
+        "mid",
+        "mid",
+        "far",
+        "far",
+        "far",
+    ]
+    assert parameters["spatial_bucket_radii"] == pytest.approx(
+        [0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0]
+    )

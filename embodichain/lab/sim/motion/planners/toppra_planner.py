@@ -57,6 +57,13 @@ def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndar
     return vlims, alims
 
 
+def _constraint_for_numpy_worker(value: object) -> object:
+    """Materialize tensor-backed limits on CPU before NumPy worker dispatch."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return value
+
+
 def _toppra_solve_one_env(
     waypoints: np.ndarray,
     vel_constraint,
@@ -438,8 +445,8 @@ class ToppraPlanner(BasePlanner):
             [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
         )  # (B, N, DOF)
 
-        vc = options.constraints["velocity"]
-        ac = options.constraints["acceleration"]
+        vc = _constraint_for_numpy_worker(options.constraints["velocity"])
+        ac = _constraint_for_numpy_worker(options.constraints["acceleration"])
         args_per_env = [
             (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
             for i in range(b)
