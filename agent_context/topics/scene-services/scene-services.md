@@ -122,8 +122,9 @@ returning `SceneCheckReport`. It does not choose task roles, apply poses, reset,
 step or accept task success. Task Program retains a compatibility adapter that
 converts checks to its execution validation contract.
 
-The UR5 demonstration is `scripts/tutorials/scene/robot_workspace.py`, backed by
-`embodichain/lab/scripts/robot_workspace.py`. Scene mode exercises these services
+The UR5 demonstration and its private helpers live in `scripts/tutorials/scene/`;
+run `robot_workspace.py`. They call the scene services directly and are not SDK
+APIs. Scene mode exercises these services
 without importing Gym or Task Program; task mode adds preparation, real Pick/Place,
 first-frame and measured outcome checks. Views are Viser, native window,
 offscreen camera/video and no-render. Native renderer/device availability is

@@ -578,43 +578,6 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.robot_workspace
-----------------------------------------
-
-UR5 workspace validation on a static work surface. ``scene`` mode uses only
-simulation scene services; ``task`` mode consumes the same generated candidates
-through the existing Pick/Place Task Program bridge. The report records actual
-IK/FK checks, settling, restoration, task evidence and first-frame consistency.
-
-See the :doc:`round-table showcase </tutorial/robot_workspace>` for a looping GIF,
-the original MP4, red/green initialization snapshots, commands, and measured results.
-
-.. code-block:: bash
-
-   python scripts/tutorials/scene/robot_workspace.py --mode scene --view viser
-   python scripts/tutorials/scene/robot_workspace.py --mode task --view window
-   python scripts/tutorials/scene/robot_workspace.py --mode task --view offscreen --output /tmp/workspace-demo
-   python scripts/tutorials/scene/robot_workspace.py --mode task --view none --seed 7
-
-Offscreen mode captures a fixed 640 by 480 camera and writes ``preview.mp4`` and
-keyframes without extra physics steps. ``workspace_explained.mp4`` adds labelled
-inspection pauses after recording. Rendering does not change the sampling
-seed or acceptance thresholds. Default CPU physics uses one environment and
-8192 joint-space samples, caching the valid samples with real FK positions;
-the bounded sampler must find three distinct valid upright object poses.
-A supported but unreachable far-table pose must fail IK.
-The demo does not write LeRobot data; accepted task trials save trajectory
-proofs. It requires installed UR5 and DH PGI assets plus a native simulator.
-Window mode also requires a working display server; Xvfb can supply one for
-headless smoke checks.
-
-.. currentmodule:: embodichain.lab.scripts.robot_workspace
-
-.. autosummary::
-
-   main
-   run_demo
-
 embodichain.lab.scripts.run_task
 -------------------------------
 

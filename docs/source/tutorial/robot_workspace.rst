@@ -23,6 +23,11 @@ for full-resolution playback.
 Before starting, it helps to be familiar with :doc:`robot`,
 :doc:`point_cloud_visualization`, and :doc:`task_program_python`.
 
+The demo entry point and its private helpers live in
+``scripts/tutorials/scene/``. They compose the public scene services and Task
+Program integrations; the UR5 scene, acceptance rules, and video presentation
+belong to this tutorial.
+
 What the colors mean
 --------------------
 
