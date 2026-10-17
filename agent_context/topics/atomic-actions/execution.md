@@ -144,7 +144,15 @@ Tracking recovery is separate from task-level semantic recovery:
 - Atomic Actions owns planning failure, target/collision revision, transport
   acknowledgement, tracking error, timeout, retry, and safe stop.
 - Task Program may perform bounded workflow recovery after the action reaches
-  a semantic effect boundary.
+a semantic effect boundary.
+
+`MotionPolicy.velocity_limit` and `acceleration_limit` optionally forward scalar
+planning budgets to `MotionGenOptions`. Values must be finite and positive and
+require `motion_gen`; they cannot be combined with typed `plan_opts`. Compatible
+planners still cap the requested speed by the robot's joint limits. Configured
+execution policies expose the same optional fields under `motion`, and explicit
+budgets are retained in execution metadata. Use these fields when a physically
+qualified task needs a lower speed than the selected robot's nominal limits.
 
 ## Velocity target contract
 

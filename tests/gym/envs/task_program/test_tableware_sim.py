@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Physical outcome regressions for the migrated production tableware experts."""
+"""Physical outcome regressions for configured production manipulation experts."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _physical_state(env: Any, task_name: str) -> dict[str, object]:
     """Read object poses and speeds independently of semantic acceptance."""
     import torch
 
-    uids = ("block_1", "block_2")
+    uids = ("handover_object",) if task_name == "hand_over" else ("block_1", "block_2")
     if task_name == "blocks_ranking_rgb":
         uids += ("block_3",)
     result = {}
@@ -118,8 +118,8 @@ def _run_real_sim_episode(
     discover_task_packages()
     source = (
         _REPOSITORY_ROOT
-        / "extensions/embodichain_tasks/configs/tasks/manipulation/tableware"
-        / task_name
+        / "extensions/embodichain_tasks/configs/tasks/manipulation"
+        / (task_name if task_name == "hand_over" else f"tableware/{task_name}")
         / f"task.{variant}.yaml"
     )
     payload = load_config(source)
@@ -205,14 +205,19 @@ def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
         assert all(math.isfinite(item) for row in poses[uid] for item in row)
         if task_name == "stack_blocks_two":
             assert poses[uid][2][2] > math.cos(math.pi / 4), (uid, state)
-        else:
+        elif task_name == "blocks_ranking_rgb":
             # A colored cube may rest on any face; RGB ranking has no up axis.
             assert max(abs(value) for value in poses[uid][2][:3]) > math.cos(
                 math.pi / 4
             ), (uid, state)
         assert value["linear_speed"] < 0.03, (uid, state)
         assert value["angular_speed"] < 0.20, (uid, state)
-    if task_name == "stack_blocks_two":
+    if task_name == "hand_over":
+        # Authored delivery_rest_pose in the shared tabletop hand-over program.
+        destination = (0.45, -0.18, 0.782)
+        error = math.dist(positions["handover_object"], destination)
+        assert error < 0.05, state
+    elif task_name == "stack_blocks_two":
         separation = [a - b for a, b in zip(positions["block_2"], positions["block_1"])]
         assert abs(separation[0]) < 0.025, state
         assert abs(separation[1]) < 0.025, state
@@ -228,15 +233,22 @@ def _assert_physical_goal(task_name: str, state: dict[str, Any]) -> None:
 @pytest.mark.requires_sim
 @pytest.mark.subprocess_sim
 @pytest.mark.slow
-@pytest.mark.parametrize("task_name", ("stack_blocks_two", "blocks_ranking_rgb"))
 @pytest.mark.parametrize(
-    "variant",
-    (
-        "cobotmagic",
-        "dual_ur5_dh_pgi_140_80",
-        "dual_ur10_dh_pgi_140_80",
-        "tianji_marvin",
-    ),
+    ("task_name", "variant"),
+    [
+        (task, variant)
+        for task in ("stack_blocks_two", "blocks_ranking_rgb")
+        for variant in (
+            "cobotmagic",
+            "dual_ur5_dh_pgi_140_80",
+            "dual_ur10_dh_pgi_140_80",
+            "tianji_marvin",
+        )
+    ]
+    + [
+        ("hand_over", "dual_ur10_dh_pgi_140_80"),
+        ("hand_over", "tianji_marvin"),
+    ],
 )
 def test_production_expert_and_dynamic_replay_satisfy_physical_goal(
     task_name: str, variant: str, tmp_path: Path
@@ -264,7 +276,14 @@ def test_production_expert_and_dynamic_replay_satisfy_physical_goal(
     episode = report["episode"]
     assert episode["completed"] and episode["success"] == [True], episode
     segments = episode["segments"]
-    assert len(segments) == (2 if task_name == "stack_blocks_two" else 4)
+    assert (
+        len(segments)
+        == {
+            "stack_blocks_two": 2,
+            "blocks_ranking_rgb": 4,
+            "hand_over": 1,
+        }[task_name]
+    )
     for segment in segments:
         assert segment["success"], segment
         validation = segment["metadata"]["validation"]

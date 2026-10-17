@@ -166,6 +166,8 @@ _DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dual_ur5.yaml")] = (
     "dual_ur5_dh_pgi_140_80",
 )
 _DUAL_ARM_RESOURCES = {
+    Path("components/execution_policies/motion_gen_verified_slow.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/integration.dual_ur10.yaml"),
     Path("components/execution_policies/motion_gen_projected_manipulation.yaml"),
     Path("components/embodiments/dual_ur10_dh_pgi_140_80.yaml"),
     Path(

@@ -126,6 +126,12 @@ leaves; they do not introduce independent arms. Static preflight proves
 composition, not physical completion; use the task's measured validators when
 qualifying trajectories, seeds, or backend settings.
 
+Verified tabletop policies request explicit planning speed and acceleration
+budgets, still capped by robot joint limits. UR10 hand-over selects the slower
+0.1 speed budget, 360 motion samples and 40-step hand interpolations; the shared
+verified policy uses 0.2. This preserves physically
+qualified transfers when planner defaults follow a robot's higher nominal limits.
+
 Example:
 
 ```bash

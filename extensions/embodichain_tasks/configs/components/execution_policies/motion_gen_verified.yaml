@@ -11,6 +11,9 @@ planner:
 motion:
   strategy: motion_gen
   sample_count: 140
+  # Keep the physically qualified tabletop speed budget across robot limits.
+  velocity_limit: 0.2
+  acceleration_limit: 0.5
   dynamic_collision_mode: auto
 
 tracking:
