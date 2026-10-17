@@ -32,12 +32,18 @@ current options and dependencies. The main change sites are:
 | Analytical structure for SRS, OPW, UR or Franka (FEP) arms | `srs_solver.py`, `opw_solver.py`, `ur_solver.py`, `fep_solver.py` |
 | General iterative PK solve and multi-start seeds | `pytorch_solver.py` |
 | Reduced Pinocchio model or task-based QP | `pinocchio_solver.py`, `pink_solver.py` |
+| Graph-preserving fixed-step DLS | `differentiable_ik_solver.py` |
 | Jacobian differential commands | `differential_solver.py` |
 | Checkpoint-dependent learned inference | `neural_ik_solver.py` |
 
 Use [add-solver](../../../.agents/skills/add-solver/SKILL.md) for a new solver.
 Read [solver details](solver-details.md) for cross-call state, analytical buffer
 ownership, Pink frame/limit adaptation or seed-cache invalidation.
+
+The differentiable runtime adapter and standalone Torch layers share one compute
+implementation. See [learning layers](../learning-layers/learning-layers.md) for
+gradient, device and checkpoint ownership; existing solver names do not imply
+end-to-end differentiability.
 
 ## Frame and result contracts
 

@@ -1,0 +1,53 @@
+# Differentiable learning layers
+
+## Owners and dependency direction
+
+`compute/kinematics/{dls,pose_error,serial_chain,types}.py` owns fixed-step
+DLS, SE(3) residuals, copied PK geometry, and shared configuration/results.
+These modules do not import learning or simulation. `SerialChainKinematics`
+returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
+
+`learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
+module interfaces. `learning/models/` owns the shared MLP; historical
+`learning.rl.models` imports preserve class identity. Policy interfaces and
+registries remain in `learning/rl/models`. Learning roots load exports on demand
+so standalone layers and lightweight APG do not load simulation.
+
+The runtime `lab/sim/motion/solvers/differentiable_ik_solver.py` adapter calls
+the same compute function; it does not wrap or import the training layer.
+Robot TCP/limit synchronization belongs to this adapter. See
+[IK solvers](../ik-solvers/ik-solvers.md) for runtime binding and arena frames.
+
+## Gradient and state boundaries
+
+Targets are root-frame TCP matrices; seed batch axes match the target or contain
+only a joint axis. Training inputs must match model device and dtype. Both float32
+and float64 are supported. FK and Jacobian derivatives remain connected through
+all iterations. Final tolerances produce boolean metadata; no convergence-based
+Python exit occurs. Failure returns the final iterate and continuous residuals.
+Hard limits have piecewise gradients; disabling projection does not disable the
+physical-limit success check. The shortest rotation residual has a pi branch cut.
+Only first-order input gradients are part of the public contract.
+
+Layers own fixed TCP/limit buffers, copy geometry, and explicitly migrate PK
+internals during `.to()`. Checkpoints verify fixed-model identity and restore
+numerical settings and buffers; construct the same geometry before loading.
+They contain no optimizer or recurrent seed. `.eval()` preserves gradients.
+Training code owns state, reset and detach boundaries. No call may overwrite
+another outstanding graph's intermediates.
+
+## Training and validation
+
+`examples/learning/differentiable_ik/train.py` is an unregistered Franka research
+example. It fits synthetic tracking transitions, freezes model parameters and
+uses the existing complete-rollout APG trainer. The model is not physical dynamics.
+Frozen parameters must not imply a no-grad forward: gradients still propagate
+through model inputs. Formal task deployments belong to the task extension.
+See [RL learning](../rl-learning/rl-learning.md) for trainer/collector lifecycle.
+
+Tests live under `tests/compute/kinematics/`, `tests/learning/layers/`, and the
+matching simulation solver test. Validate FK, dJ/dq, full IK and recurrent-state
+gradients separately; include nonzero TCP offsets, repeated solves, checkpoint
+migration and import boundaries. GPU validation runs serially with `--run-gpu`.
+The unified kinematic benchmark's `differentiable` mode measures training and
+forward-only baselines, including FK/Jacobian and DLS component costs.

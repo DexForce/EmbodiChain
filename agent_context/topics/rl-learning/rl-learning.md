@@ -168,7 +168,7 @@ the complete-rollout safety and normalization contracts.
 | PPO, GRPO, APG implementations | `algo/ppo.py`, `algo/grpo.py`, `algo/apg.py` |
 | Standard rollout storage and views | `buffer/` |
 | Standard and differentiable collection | `collector/` |
-| Policy interface, actor-critic, actor-only, MLP builder | `models/` |
+| Policy interface, actor-critic, actor-only, MLP builder | `models/`; shared MLP implementation in `learning/models/` |
 | Running observation statistics | `normalization.py` |
 | Batched action-adjoint stabilization | `gradients.py` |
 | Actor and critic observation statistics | `models/normalizer.py` |
@@ -221,6 +221,11 @@ pose immediately after an update can still return the preceding rendered pose.
 Validate changes with `tests/learning/rl/policy_evaluation/test_viewer.py` and
 an actual native Viewer run. User controls and recording are described in the
 [policy evaluation guide](../../../docs/source/guides/policy_evaluation.md).
+
+Cross-algorithm Torch layers and trainable components live beside `rl` under
+`learning/layers` and `learning/models`. See [learning layers](../learning-layers/learning-layers.md)
+for differentiable IK ownership. Root exports load on demand; importing a
+lightweight APG component must not eagerly load the simulator-backed Trainer.
 
 ## Invariants
 

@@ -97,7 +97,7 @@ topics:
   title: IK Solver System
   aliases: [ik solver, inverse kinematics, IK 求解器, 逆运动学]
   keywords: [BaseSolver, SolverCfg, SRSSolver, OPWSolver, URSolver, PinkSolver, PytorchSolver, PinocchioSolver,
-    DifferentialSolver, NeuralIKSolver, FEPSolver, FEPSolverCfg, FEP, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
+    DifferentialSolver, DifferentiableIKSolver, NeuralIKSolver, FEPSolver, FEPSolverCfg, FEP, QposSeedSampler, QposSeedSelSampler, NullSpacePostureTask, compute kinematics, Warp
       kinematics]
   paths: [topics/ik-solvers/ik-solvers.md]
   source_of_truth:
@@ -245,6 +245,26 @@ topics:
     embodichain/lab/task_program/integrations/scene_expansion.py,
     tests/sim/scene/expansion/, tests/gym/envs/task_program/test_scene_expansion.py]
   related_topics: [scene-services, simulation-system, task-programs, robot-workspace, motion-planning, gen-sim, data-pipeline]
+  status: active
+- id: learning-layers
+  title: Differentiable Learning Layers
+  aliases: [learning layers, differentiable IK layer, 可微 IK, 训练层, 学习模块分层]
+  keywords: [DifferentiableIKLayer, KinematicsLayer, SerialChainKinematics, DifferentiableIKCfg,
+    solve_dls_ik, damped_least_squares_step, Jacobian gradient, dJ/dq]
+  paths: [topics/learning-layers/learning-layers.md]
+  source_of_truth:
+  - embodichain/compute/kinematics/dls.py
+  - embodichain/compute/kinematics/serial_chain.py
+  - embodichain/compute/kinematics/pose_error.py
+  - embodichain/compute/kinematics/types.py
+  - embodichain/learning/__init__.py
+  - embodichain/learning/layers/
+  - embodichain/learning/models/
+  - examples/learning/differentiable_ik/train.py
+  watch_paths: [embodichain/compute/kinematics/, embodichain/learning/layers/,
+    embodichain/learning/models/, embodichain/learning/__init__.py,
+    tests/compute/kinematics/, tests/learning/layers/, examples/learning/differentiable_ik/]
+  related_topics: [ik-solvers, rl-learning]
   status: active
 - id: rl-learning
   title: RL Learning Pipeline
