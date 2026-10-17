@@ -143,8 +143,8 @@ separately.
 
 Three render arenas display the same official Franka arm and Robotiq 2F85 assets,
 assembled inside the output directory. There are no reconstructed scene objects.
-The gripper is fixed open because its recorded scalar encoding is unresolved;
-the mount is an uncalibrated identity transform. Robot states are written for
+The gripper defaults to fixed open; the optional explicit lookup below animates
+the declared scalar convention. The mount remains an uncalibrated identity transform. Robot states are written for
 kinematic inspection and rendered without physics stepping. Joint-position and
 velocity limits, protected qpos/qvel and runtime qpos readback are checked;
 collisions, tracking under dynamics and task success are not qualified.
@@ -244,3 +244,57 @@ jaw calibration, camera reprojection/frame offset and live target-joint order.
 Its audit therefore reports `rejected_until_reviewed`. The near-zero source-pose
 versus flange-FK residual is a conversion consistency check, not an independent
 measurement-accuracy result. Do not promote these input states automatically.
+
+## Physical interaction and expansion preview
+
+`physics_preview.py` drives the same recorded arm path and two seeded residual
+variants through the shared `play_joint_trajectory` host, with 1 ms Default
+physics and 10 ms PD command periods. Each candidate runs sequentially at B=1
+from the same reset state. The block is dynamic; table and container proxies are
+static. Object poses are written only at reset. Gravity, contact and friction
+produce grasping, transport, release and settling; no object attachment or
+object-trajectory playback is used.
+
+```bash
+PYTHONPATH="$PWD:$PWD/extensions" python examples/real2sim/physics_preview.py \
+  --input /path/to/gt_action_full.npz \
+  --gripper-calibration /path/to/gripper_calibration.json \
+  --source-video /path/to/camera_rgb.mp4 \
+  --output outputs/real2sim-physics/run01 --repeats 3
+```
+
+Generate the explicit gripper lookup with `prepare_pick_sample.py` first. This
+example uses the selected recording's source indices 105 and 160 to anchor the
+estimated grasp and release geometry. The block width follows the declared jaw
+width at closure; length/height, mass, friction, container and table are shared
+model estimates. The robot base is translated to 0.75 m in the preview world.
+The actual measured gripper position is converted into a controller target with
+an explicit 0.015 rad squeeze preload while closing. This preload is shared by
+all candidates, stored separately from raw driver values, and configurable with
+`--grip-preload`. It is a control assumption, not recovered real command evidence.
+
+Use `--no-render --cases 0 1 2 --repeats 3` for a bounded physics-only run, or select
+one case while investigating failure. Parameters such as `--mass`, `--friction`,
+`--grip-effort` and `--grip-stiffness` are explicit and recorded. They must remain
+fixed across a comparison; changing them produces another diagnostic condition.
+
+The contact sensor resolves exact left/right inner-finger actor identities. The
+measured proxy-scene criteria require the block to rise at least 4 cm with
+continuous bilateral contact for at least 1 s, finish wholly inside the container
+(using oriented box corners), and remain stable in position and orientation for
+the final 1 s. Stability also limits linear and angular speed. A motion-limit pass
+or a robot reaching its endpoint does not establish this physical result.
+
+Outputs include per-candidate native videos, the four-panel
+`physical_comparison.mp4` when `--source-video` is supplied, controller targets,
+measured object/joint/flange traces, contact/impulse evidence, actor identities,
+settings and per-trial results. The first repeat of each candidate is rendered;
+every repeat is physically executed and evaluated. Interpolation-only and contact
+motion remains protected exactly as in the kinematic diagnostic.
+
+These results qualify the **estimated proxy-scene diagnostic only**. The real
+mount/TCP, hardware jaw calibration, camera/frame alignment and reconstructed
+asset geometry remain unverified. Physical-preview success does not change the
+source bundle's admission state, allocate accepted generation candidates or
+produce an EpisodeSink commit receipt. The registered real2sim source still
+rejects the unreviewed original recording.
