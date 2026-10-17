@@ -3,7 +3,26 @@ embodichain.lab.task_program.integrations
 
 .. automodule:: embodichain.lab.task_program.integrations
    :members:
-   :no-index:
+   :undoc-members:
+   :exclude-members: TaskProgramEnvironmentAdapter, TaskProgramAdapterFactory,
+      TaskProgramEnvironmentFactory, TaskProgramRuntimeAssembly,
+      PlanningObservationPort, TaskProgramIntegrationCatalog,
+      SimulationTaskProgramRegistration, IntegrationFingerprintMismatch,
+      ControlPartEvidenceProviderDeclaration, ControlPartEvidenceProviderFactory,
+      RegisteredSemanticLowererDeclaration, RegisteredSemanticLowererFactory,
+      EndpointAdapterDeclaration, RuntimeTransportDeclaration,
+      ParallelSafetyDeclaration, ParallelCommandSafetyValidatorFactory,
+      StandardExtensionDeclarations, VersionedKey, default_simulation_settle_presets,
+      SimulationSceneBinding, SimulationRigidObjectBinding,
+      SimulationRigidizedArticulationObjectBinding, SimulationArticulationBinding,
+      SimulationArticulationLinkBinding, AntipodalGraspAffordanceBinding,
+      RigidizedArticulationAntipodalGraspBinding, ContainerAffordanceBinding,
+      SupportSurfaceAffordanceBinding, ControlPartCommandPreset,
+      ControlPartEndpointBinding, ControlPartResourceBinding,
+      SimulationRobotSkillProfileBinding, SimulationTaskProgramFactory,
+      SimulationTaskProgramAdapterFactory, ConfiguredHandOverPoseProvider,
+      CuroboParallelCommandSafetyValidator, CuroboParallelSafetyValidatorFactory,
+      SimulationSegmentPolicyPort, create_simulation_task_program_adapter
 
    .. autosummary::
 
@@ -117,41 +136,110 @@ Registration and extensions
 Simulation bindings
 -------------------
 
+.. Register shared implementation names once beside their public definitions.
+   Re-export packages can then index their own names without duplicate
+   canonical registrations for the same implementation.
+
+.. py:class:: SimulationSceneBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: SimulationSceneBinding
    :members:
+
+.. py:class:: SimulationRigidObjectBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: SimulationRigidObjectBinding
    :members:
 
+.. py:class:: SimulationRigidizedArticulationObjectBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: SimulationRigidizedArticulationObjectBinding
    :members:
+
+.. py:class:: SimulationArticulationBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: SimulationArticulationBinding
    :members:
 
+.. py:class:: SimulationArticulationLinkBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: SimulationArticulationLinkBinding
    :members:
+
+.. py:class:: AntipodalGraspAffordanceBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: AntipodalGraspAffordanceBinding
    :members:
 
+.. py:class:: RigidizedArticulationAntipodalGraspBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: RigidizedArticulationAntipodalGraspBinding
    :members:
+
+.. py:class:: ContainerAffordanceBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: ContainerAffordanceBinding
    :members:
 
+.. py:class:: SupportSurfaceAffordanceBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: SupportSurfaceAffordanceBinding
    :members:
+
+.. py:class:: ControlPartCommandPreset
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: ControlPartCommandPreset
    :members:
 
+.. py:class:: ControlPartEndpointBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: ControlPartEndpointBinding
    :members:
 
+.. py:class:: ControlPartResourceBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
+
 .. autoclass:: ControlPartResourceBinding
    :members:
+
+.. py:class:: SimulationRobotSkillProfileBinding
+   :module: embodichain.lab.task_program.integrations.simulation.bindings
+   :no-typesetting:
+   :no-index-entry:
 
 .. autoclass:: SimulationRobotSkillProfileBinding
    :members:
@@ -229,3 +317,5 @@ Implementation module exports
 .. autofunction:: declare_runtime_transport
 
 .. autofunction:: validate_immutable_extension_declaration
+
+.. autodata:: VersionedKey
