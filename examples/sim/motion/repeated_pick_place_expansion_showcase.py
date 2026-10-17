@@ -331,7 +331,7 @@ def main(argv: list[str] | None = None) -> None:
     """Run selected candidates through the configured Task Program environment."""
     args = _create_parser().parse_args(argv)
     if args.expansion_profile is None:
-        from embodichain.lab.scripts.run_env import _resolve_expansion_request
+        from embodichain.lab.scripts.run_task import _resolve_expansion_request
         from embodichain.utils.config_paths import resolve_config_path
         from embodichain.utils.utility import load_config
 

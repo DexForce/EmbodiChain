@@ -1,6 +1,6 @@
-# Running Environments with `run-env`
+# Running Tasks with `run-task`
 
-`embodichain run-env` is the common entry point for loading a configured
+`embodichain run-task` is the common entry point for loading a configured
 Gymnasium environment. It supports three primary workflows: inspecting an
 environment interactively, running an expert rollout while recording data, and
 replaying a previously recorded trajectory.
@@ -39,7 +39,7 @@ be used while running or replaying an environment.
 Every invocation requires a gym config:
 
 ```bash
-embodichain run-env --gym_config path/to/gym_config.yaml
+embodichain run-task --gym_config path/to/gym_config.yaml
 ```
 
 JSON, YAML, and YML files are supported. The input must be a runnable config
@@ -53,11 +53,11 @@ A configuration-defined Task Program deployment conventionally uses
 `integration`, and `execution_policy`), and `embodiment.component`:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml
 ```
 
-At startup, `run-env`:
+At startup, `run-task`:
 
 1. discovers installed task packages through the `embodichain.tasks` entry
    point and executes their initialization hooks;
@@ -149,8 +149,8 @@ an authored `device` or the selected backend's default; supplying `--device`
 overrides both environment tensors and backend execution, including an explicit
 CPU selection for Newton.
 
-Use `embodichain run-env --help` for the complete option list. The
-{ref}`CLI Reference <cli-run-environment>` also lists defaults and
+Use `embodichain run-task --help` for the complete option list. The
+{ref}`CLI Reference <cli-run-taskironment>` also lists defaults and
 visualization arguments.
 
 ## Preview an environment
@@ -159,7 +159,7 @@ Preview mode is intended for inspection before an expensive data-expansion
 run:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --preview
 ```
@@ -197,7 +197,7 @@ write debugging episodes. Visual randomization remains enabled unless
 selects the browser visualization backend and makes the simulation headless:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --viser \
     --viser-host 127.0.0.1 \
@@ -215,7 +215,7 @@ details.
 
 ## Run and record
 
-Without `--preview` or `--replay`, `run-env` enters offline rollout mode. For
+Without `--preview` or `--replay`, `run-task` enters offline rollout mode. For
 each vector batch, it asks the task for its demonstration segments, applies
 every action through `env.step()`, and commits selected environment rows with an explicit reset.
 `collection.target_episodes` is the exact number of persisted environment rows,
@@ -224,7 +224,7 @@ not the number of vector batches. For example, `target_episodes=10` with
 The legacy `--max_episodes` option maps to the same target:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --action_config path/to/action_config.yaml \
     --headless \
@@ -342,7 +342,7 @@ grasp segment and a placement segment, giving six lazy segments. Later calls
 are grounded against the scene state left by earlier calls.
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
     --headless \
     --device cuda \
@@ -383,7 +383,7 @@ EmbodiChain uses "recording" for three related but distinct outputs:
   - `--record_trajectory`.
   - Per-step robot and object kinematic state, raw task action, and replay
     metadata in a PyTorch `.pt` file.
-  - `run-env --replay` and `ReplayWrapper`.
+  - `run-task --replay` and `ReplayWrapper`.
 ```
 
 Dataset video is still structured training data; it is not interchangeable
@@ -404,7 +404,7 @@ features, follow {doc}`lerobot_export` in its independent Python environment.
 Add `--record_trajectory` to a normal rollout:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --action_config path/to/action_config.yaml \
     --record_trajectory \
@@ -444,7 +444,7 @@ The final directory is also printed when the run finishes.
 Replay requires the trajectory file and the gym config used to record it:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --replay \
     --replay_trajectory outputs/trajectories/traj_env0_000000.pt
@@ -471,7 +471,7 @@ automatically.
 Kinematic replay is the default and the best first check:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --replay \
     --replay_trajectory path/to/trajectory.pt \
@@ -481,7 +481,7 @@ embodichain run-env \
 Physics is disabled and recorded poses and joint positions are written into the
 scene at every step. This gives an exact visual/state reproduction and renders
 new observations, but it does not recompute meaningful task rewards or
-successes from the recorded actions. At completion, `run-env` reports the
+successes from the recorded actions. At completion, `run-task` reports the
 maximum robot joint-state error against the recording.
 
 ### Dynamic replay
@@ -489,7 +489,7 @@ maximum robot joint-state error against the recording.
 Dynamic replay sends each recorded raw action back through `env.step()`:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --replay \
     --replay_trajectory path/to/trajectory.pt \
@@ -502,14 +502,14 @@ re-simulated rather than merely restored. Results may diverge if the replay
 configuration changes physics, control, randomization, assets, or timestep
 settings that are not stored in the trajectory file.
 
-(run-env-interactive-replay)=
+(run-task-interactive-replay)=
 ### Interactive control replay
 
 Control mode uses kinematic state restoration and lets you scrub the trajectory
 from the terminal or Viser:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
     --gym_config path/to/gym_config.yaml \
     --replay \
     --replay_trajectory path/to/trajectory.pt \
@@ -546,4 +546,4 @@ Use the modes in this order when bringing up a task:
    the full data-expansion job.
 
 For rollout profiling, renderer selection, and every available CLI option, see
-the {ref}`CLI Reference <cli-run-environment>`.
+the {ref}`CLI Reference <cli-run-taskironment>`.

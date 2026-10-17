@@ -11,7 +11,7 @@ Lightweight RL environments have a separate owner in
 |---|---|
 | Command dispatch | `embodichain/cli/main.py`; `embodichain/__main__.py` is the module entry wrapper |
 | Task discovery / gallery / `show-task` | `embodichain/cli/_task_catalog.py` → shared logical-task/deployment records; `list_task.py` and `show_task.py` render them |
-| Launch / CLI overrides | `embodichain/lab/scripts/run_env.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
+| Launch / CLI overrides | `embodichain/lab/scripts/run_task.py` → `build_env_cfg_from_args()` → `config_to_cfg()` |
 | Generic component expansion | `embodichain/lab/gym/utils/_component_composition.py` |
 | Config decoding | `embodichain/lab/gym/utils/gym_utils.py` |
 | Robot selector decoding | `robot.class_type` → `embodichain/robot_registry.py`; catalog ownership is in [robot-system](../robot-system/robot-system.md) |
@@ -31,6 +31,10 @@ Read [execution](execution.md) for hooks, bridge acceptance, reset ordering,
 wrappers, and replay. Read [profiling](profiling.md) only for instrumentation.
 
 ## Launcher argument ownership
+
+`embodichain run-task` is the sole task execution command, dispatched to
+`embodichain.lab.scripts.run_task:cli`. The former `run-env` command and
+`embodichain.lab.scripts.run_env` module are removed.
 
 `add_env_launcher_args_to_parser()` composes the lightweight simulation options
 from `embodichain.cli.sim` with Gym config, seed and recording options. When

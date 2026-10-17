@@ -29,7 +29,7 @@ Internal semantic effects are projected; segment acceptance is measured.
 Run from the repository root with the project's simulation Python environment:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/task.cobotmagic.yaml
 ```
 

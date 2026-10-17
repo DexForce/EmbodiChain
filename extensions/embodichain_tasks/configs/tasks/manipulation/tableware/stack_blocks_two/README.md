@@ -26,7 +26,7 @@ effects are projected; the segment validators measure physical acceptance.
 Run from the repository root with the project's simulation Python environment:
 
 ```bash
-python -m embodichain run-env \
+python -m embodichain run-task \
   --gym_config extensions/embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/task.cobotmagic.yaml
 ```
 

@@ -25,6 +25,14 @@ installation audit. Required robot assets were already cached on the host. The e
 import. Installing the pinned wheel and matching Warp/Newton dependencies in an
 isolated environment resolved that failure without modifying the shared install.
 
+## Launcher migration
+
+The current walkthrough uses `embodichain run-task`, the sole execution entry
+point after main commit `db821682` (#793). The historical physical runs above
+used `run-env` at baseline `a8226e14`; their measurements and screenshots are
+retained unchanged. Synchronizing the documentation changes the command spelling
+and launcher-guide links, not the tested program, deployment or physics policy.
+
 ## Observed results
 
 | Case | Result |

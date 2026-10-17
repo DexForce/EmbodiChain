@@ -399,7 +399,7 @@ class RenderCfg:
         they have no enabled cameras, recording cameras, window, Viser or explicit
         rendering demand. Custom camera/visual code must explicitly select a native
         renderer or reserve rendering through its environment's demand hook.
-        The run-task/run-env launcher uses 'fast-rt' for native auto rendering
+        The run-task launcher uses 'fast-rt' for native auto rendering
         on every platform; other entry points retain GPU-based selection.
         Explicit renderer selections and global defaults retain precedence.
     - GPU-based auto selection: RTX-series cards use

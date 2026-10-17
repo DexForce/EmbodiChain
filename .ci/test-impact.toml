@@ -50,7 +50,7 @@ contracts = [
 tests = [
   "tests/gym/envs/**",
   "tests/gym/utils/**",
-  "tests/lab/scripts/test_run_env.py",
+  "tests/lab/scripts/test_run_task.py",
 ]
 contracts = [
   "tests/gym/envs/test_embodied_env.py",
@@ -304,13 +304,13 @@ paths = [
   "embodichain/lab/gym/envs/demo.py",
   "embodichain/lab/gym/envs/settling.py",
   "embodichain/lab/gym/utils/**",
-  "embodichain/lab/scripts/run_env.py",
+  "embodichain/lab/scripts/run_task.py",
   "embodichain/cli/**",
 ]
 tests = [
   "tests/gym/envs/**",
   "tests/gym/utils/**",
-  "tests/lab/scripts/test_run_env.py",
+  "tests/lab/scripts/test_run_task.py",
   "tests/test_main.py",
 ]
 resource_hints = ["sim"]

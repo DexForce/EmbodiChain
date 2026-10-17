@@ -75,7 +75,7 @@ call or different motion policy needs integration/deployment work. Follow
 {doc}`/tutorial/task_program` for those changes.
 
 For later workflows, see {doc}`/guides/offline_expert_datasets` for recording and
-consumption, {doc}`/guides/run_env` for expansion and launcher options, and
+consumption, {doc}`/guides/run_task` for expansion and launcher options, and
 {doc}`/features/generative_sim/index` for scene generation. These are optional follow-ups.
 
 ## Previous architecture sections

@@ -9,7 +9,8 @@ and have access to the robot assets described in {doc}`/resources/assets`.
 **Validated setup:** SDK source baseline `a8226e14`, installed as a wheel;
 DexSim `0.5.1rc1`, Warp `1.17.0`, Python 3.11, Linux, NVIDIA RTX PRO 5000.
 All runs use Default physics, seed **7**, one environment and one episode.
-See {doc}`validation` for the exact scope and limitations.
+Commands below use the current `run-task` entry point. See {doc}`validation`
+for the physical-run baseline, command migration and validation limits.
 
 ## 1. Find the task and inspect its deployment
 
@@ -43,12 +44,12 @@ without checking {doc}`/guides/task_catalog`.
 | Remove that flag and supply `--dataset-dir` | Use the deployment's configured recorder. |
 | `--headless` | Run without a native window. Visualization is separate from execution mode. |
 
-See {doc}`/guides/run_env` for display and replay options.
+See {doc}`/guides/run_task` for display and replay options.
 
 ## 2. Run the original program
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --filter_dataset_saving
@@ -121,7 +122,7 @@ The complete edited file is shown below. You can instead download
 Run your local file with the same deployment:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --filter_dataset_saving --task-program program.yaml
@@ -183,7 +184,7 @@ Keep the checked program as `program.yaml`. Remove `--filter_dataset_saving` and
 choose an explicit output directory:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml \
   --physics default --num_envs 1 --max_episodes 1 --seed 7 \
   --headless --task-program program.yaml --dataset-dir "$PWD/datasets"
@@ -267,7 +268,7 @@ inspection checks file/annotation consistency; read the validation results to
 understand physical acceptance. Continue with {doc}`/guides/expert_task_language`
 for language consumption and {doc}`/guides/offline_expert_datasets` for dataset
 validation and training splits. Batch expansion is a separate follow-up in
-{doc}`/guides/run_env`.
+{doc}`/guides/run_task`.
 
 ## 6. Recognize two errors before simulation starts
 

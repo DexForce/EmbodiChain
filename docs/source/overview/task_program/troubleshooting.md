@@ -156,7 +156,7 @@ other layouts. Reproduce the smallest failing configuration before scaling up.
 
 **Repair:** fix the scene/configuration or narrow its supported variation based
 on measured results. Requalify the intended seeds and batch settings. See
-{doc}`/guides/run_env` and {doc}`/tutorial/data_expansion`; expansion is outside
+{doc}`/guides/run_task` and {doc}`/tutorial/data_expansion`; expansion is outside
 the Quickstart's qualification scope.
 
 ## DexSim fails during import

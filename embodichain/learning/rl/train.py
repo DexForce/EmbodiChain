@@ -703,7 +703,7 @@ def cli(argv: Sequence[str] | None = None) -> None:
     Task packages are discovered (and init hooks executed) before training so
     that task environments registered in separate packages (e.g.
     ``embodichain_tasks``) are available to ``build_env``. This mirrors the
-    ``run_env`` CLI.
+    ``run_task`` CLI.
     """
     args = parse_args(argv)
 

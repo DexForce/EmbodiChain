@@ -250,7 +250,7 @@ environment variant mapping because those files contain no Task Program fields.
 Run a selected program with:
 
 ```bash
-embodichain run-env \
+embodichain run-task \
   --gym_config path/to/task.ur5.yaml \
   --task-program path/to/program.yaml
 ```

@@ -578,10 +578,10 @@ preview with managed control-part Gizmos and optional joint controls.
 .. autofunction:: main
 
 
-embodichain.lab.scripts.run_env
+embodichain.lab.scripts.run_task
 -------------------------------
 
-.. currentmodule:: embodichain.lab.scripts.run_env
+.. currentmodule:: embodichain.lab.scripts.run_task
 
 .. autosummary::
 

@@ -159,7 +159,7 @@ def test_show_and_filtered_gallery_use_static_records(
     main(["show-task", "demo:pick", "--config-root", f"demo={task_root}"])
     detail = capsys.readouterr().out
     assert "Pick <cube>" in detail
-    assert "embodichain run-env --gym_config" in detail
+    assert "embodichain run-task --gym_config" in detail
     assert "Qualification: unavailable" in detail
     main(
         [

@@ -24,7 +24,7 @@ paths. Preview a task with its runnable JSON or YAML configuration:
        --gym_config embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml \
        --preview
 
-See :doc:`/guides/run_env` for rollout, recording, and replay options, or
+See :doc:`/guides/run_task` for rollout, recording, and replay options, or
 :doc:`/tutorial/rl` to train an RL policy.
 
 Create a Task

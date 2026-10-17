@@ -33,7 +33,7 @@ Interaction Controls
 
 - :doc:`Interactive Gizmos <gizmo>` provide cross-frontend transform controls
   for robots, rigid objects, and cameras.
-- :ref:`Interactive replay <run-env-interactive-replay>` lets users scrub a
+- :ref:`Interactive replay <run-task-interactive-replay>` lets users scrub a
   recorded trajectory from the terminal or the Viser frame slider.
 
 Related Workflows
