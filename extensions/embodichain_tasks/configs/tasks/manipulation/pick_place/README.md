@@ -25,8 +25,21 @@ cannot control the evaluation robot. Training observations are robot qpos/qvel,
 cube pose and goal position; cameras are used only for visualization and videos.
 
 The default is five rounds of 1,000 updates, with 32 episode slots and a manual
-refill per subsequent round. Each round waits for fresh publication before its
-last training update. The learner never reads expert segment labels or calls a
+refill per subsequent round. The first 250 updates may overlap production;
+the next 750 wait for complete fresh publication and train on the new generation.
+`summary.json` records each round's supervised generation exposure separately
+from the repeated input frames used to reconstruct recurrent history.
+
+Each sequence contains its complete causal prefix and 24 supervised steps.
+Prefixes and windows are copied under one ODS lock, with right padding masked.
+A 25% episode-start sampling probability includes initial actions in the loss;
+the GRU state during training is reconstructed from the same origin as student
+inference. Gradients propagate through the prefix. Equivalent quaternion signs
+are canonicalized, quaternion components retain unit scale, and other input
+statistics use physical lower bounds and bounded normalized values. Normalization
+is calculated on initial training data and then frozen.
+
+The learner never reads expert segment labels or calls a
 planner during evaluation. Eight active joint targets control the seven arm
 joints and one active finger; the robot handles the mimic finger.
 
@@ -66,6 +79,13 @@ for the measured result and consumed ODS generations. A smoke run is never
 reported as meeting the learning target. Online data need not outperform the
 frozen control on every run.
 
+Selection first maximizes complete development success, then measured lift
+rate, then minimizes final goal error. The report also records the first arm
+target's deviation from the reset joint positions. These diagnostic metrics do
+not relax the task success predicate.
+
 This is online expert-data BC. It does not implement DAgger, feedback-directed
 collection or exact replay resume. Resume restores the learner and starts a new
 ODS run; its new source identity is recorded explicitly.
+Legacy checkpoints can still be loaded for comparison with their original
+observation contract; the corrected learner requires a new training run.

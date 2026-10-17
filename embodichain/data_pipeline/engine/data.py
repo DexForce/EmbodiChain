@@ -1168,6 +1168,58 @@ class OnlineDataEngine:
             ValueError: If an argument is invalid.
             RuntimeError: If no unlocked valid window satisfies the policy.
         """
+        return self._sample_batch(batch_size, chunk_size, sampling_mode)
+
+    def sample_batch_with_history(
+        self,
+        batch_size: int,
+        chunk_size: int,
+        *,
+        start_probability: float = 0.0,
+    ) -> TensorDict:
+        """Sample supervised windows together with their complete causal prefix.
+
+        Prefixes and windows are copied under the same producer lock. Each row
+        starts at its uninterrupted validity/continuity region and is padded on
+        the right. ``valid`` excludes padding and ``loss_mask`` selects exactly
+        ``chunk_size`` supervised frames. Episode starts have an empty prefix,
+        so their first actions can be supervised with a reset recurrent state.
+
+        Args:
+            batch_size: Number of sampled windows, with replacement.
+            chunk_size: Number of supervised steps per window.
+            start_probability: Probability of choosing the window at episode
+                step zero when that window is eligible; otherwise use the
+                usual episode-uniform, then offset-uniform sampling.
+
+        Returns:
+            An independent TensorDict with batch size ``[batch_size, time]``.
+            ``time`` is the longest sampled prefix plus supervised window.
+            Copying full prefixes also copies configured sensor payloads.
+
+        Raises:
+            ValueError: If counts or start_probability are invalid.
+            RuntimeError: If the engine fails or no eligible window exists.
+        """
+        if not 0.0 <= start_probability <= 1.0:
+            raise ValueError("start_probability must be between zero and one")
+        return self._sample_batch(
+            batch_size,
+            chunk_size,
+            "episode",
+            with_history=True,
+            start_probability=start_probability,
+        )
+
+    def _sample_batch(
+        self,
+        batch_size: int,
+        chunk_size: int,
+        sampling_mode: Literal["episode", "segment", "boundary"],
+        *,
+        with_history: bool = False,
+        start_probability: float = 0.0,
+    ) -> TensorDict:
         with self._lifecycle_condition:
             worker_error = self._receive_worker_error()
             if worker_error is not None:
@@ -1277,10 +1329,45 @@ class OnlineDataEngine:
                 num_samples=1,
                 replacement=True,
             ).squeeze(-1)
-
-            time_offsets = torch.arange(chunk_size, device=start_indices.device)
-            time_indices = start_indices[:, None] + time_offsets[None, :]
-            result = self.shared_buffer[row_indices[:, None], time_indices].clone()
+            if with_history:
+                use_start = (
+                    torch.rand(batch_size, device=start_indices.device)
+                    < start_probability
+                ) & valid_windows[row_indices, 0]
+                start_indices = torch.where(use_start, 0, start_indices)
+                steps = torch.arange(max_steps, device=start_indices.device)
+                compatible = valid[row_indices] & (
+                    continuity_ids[row_indices]
+                    == continuity_ids[row_indices, start_indices, None]
+                )
+                interrupted_prefix = (~compatible) & (
+                    steps[None, :] < start_indices[:, None]
+                )
+                prefix_starts = torch.where(
+                    interrupted_prefix, steps[None, :] + 1, 0
+                ).amax(dim=-1)
+                prefix_lengths = start_indices - prefix_starts
+                lengths = prefix_lengths + chunk_size
+                offsets = torch.arange(int(lengths.max()), device=steps.device)
+                time_indices = (prefix_starts[:, None] + offsets[None, :]).clamp_max(
+                    max_steps - 1
+                )
+                result = self.shared_buffer[row_indices[:, None], time_indices].clone()
+                valid_history = offsets[None, :] < lengths[:, None]
+                # Remove every padded payload, including stale tail observations.
+                for value in result.values(include_nested=True, leaves_only=True):
+                    mask = valid_history.reshape(
+                        *valid_history.shape, *((1,) * (value.ndim - 2))
+                    )
+                    value.masked_fill_(~mask, 0)
+                result["valid"] = valid_history
+                result["loss_mask"] = valid_history & (
+                    offsets[None, :] >= prefix_lengths[:, None]
+                )
+            else:
+                time_offsets = torch.arange(chunk_size, device=start_indices.device)
+                time_indices = start_indices[:, None] + time_offsets[None, :]
+                result = self.shared_buffer[row_indices[:, None], time_indices].clone()
 
         # Update sample count and conditionally trigger a refill.
         self._trigger_refill_if_needed(batch_size)

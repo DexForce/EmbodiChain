@@ -24,6 +24,12 @@
    checks every row in a sampled window, enforces `continuity_id`, applies
    segment/boundary/episode mode rules, and clones the final batch before releasing the lock
    (`engine/data.py`).
+   `sample_batch_with_history()` uses the same selection/copy boundary and
+   returns the complete contiguous causal prefix plus a supervised window.
+   Its `valid` mask excludes right padding; `loss_mask` selects the supervised
+   frames. Recurrent consumers can reconstruct inference history and supervise
+   episode starts. Prefixes never cross invalid frames or continuity changes;
+   optional start-window bias leaves ordinary sampling unchanged.
 6. The default sample-threshold refill is requested after sample count reaches `refill_threshold * buffer_size`. Duplicate
    requests are suppressed only while `fill_signal` remains set; the worker clears it when it
    starts a fill, so sampling that reaches another threshold during an active fill may queue
@@ -54,7 +60,11 @@ IDs identify live data; they do not provide shared-buffer checkpoint recovery.
 
 `examples/data_pipeline/ods_pick_place_showcase.py` composes manual ODS refill
 with a small recurrent BC learner and a separate student-only evaluator. Its
-checkpoint resume starts a new data source rather than restoring replay.
+learner uses complete causal prefixes, canonical quaternion inputs and frozen
+physical observation scales. Each online round reserves updates after complete
+refill publication, and logs supervised exposure separately from recurrent
+history. Checkpoint resume starts a new data source rather than restoring replay;
+legacy observation contracts remain loadable for inference/comparison only.
 
 `sample_batch()` checks the shared worker error, READY state and worker liveness
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked

@@ -29,8 +29,26 @@ numeric `ods_run_id`, `ods_episode_id`, and `ods_generation` fields. An optional
 `action_dim` separates expert-command width from the robot-state `state_dim`.
 Omitting these settings preserves the original threshold-refill behavior.
 
+For recurrent learners, `sample_batch_with_history(batch_size, chunk_size)`
+copies each supervised window and its entire uninterrupted causal prefix under
+the same producer lock. The result is padded on the right: `valid` marks real
+history/window frames, and `loss_mask` marks exactly `chunk_size` supervised
+frames per row. `start_probability` optionally increases the frequency of
+eligible episode-start windows. Prefix copying includes sensor payloads, so
+account for their memory cost when enabling it for image observations.
+
+The showcase supervises 24 steps per sequence, reconstructs GRU history from
+the causal region's origin, and includes startup actions in its loss. It uses
+canonical unit quaternions and frozen observation scales with physical lower
+bounds. From the second online round, 25% of updates may overlap refill; the
+remaining 75% follow complete publication of that round's new generation.
+Supervised-generation counts are logged separately from history input counts.
+
 Learner checkpoints in this example resume optimization against a freshly
 created data source. They do not restore the previous shared-memory buffer.
+Checkpoints record their observation contract. Older checkpoints remain usable
+for inference, but corrected training starts a fresh policy rather than silently
+changing the inputs of an older policy.
 
 **Module:** `embodichain/data_pipeline/engine/data.py`
 

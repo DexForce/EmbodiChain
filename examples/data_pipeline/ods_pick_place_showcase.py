@@ -67,6 +67,32 @@ def policy_observations(obs: Any) -> torch.Tensor:
     ).float()
 
 
+def _canonical_observations(obs: torch.Tensor) -> torch.Tensor:
+    """Give equivalent xyzw quaternions the same bounded representation."""
+    quaternion = F.normalize(obs[..., 21:25], dim=-1)
+    pivot = quaternion.gather(-1, quaternion.abs().argmax(-1, keepdim=True))
+    quaternion = torch.where(pivot < 0, -quaternion, quaternion)
+    return torch.cat((obs[..., :21], quaternion, obs[..., 25:]), dim=-1)
+
+
+def _observation_statistics(values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Freeze training-only statistics with feature-specific physical scales."""
+    values = _canonical_observations(values)
+    floors = values.new_tensor(
+        [0.1] * 7
+        + [0.02] * 2
+        + [0.5] * 7
+        + [0.02] * 2
+        + [0.05] * 3
+        + [1.0] * 4
+        + [0.1] * 3
+    )
+    mean, std = values.mean(0), values.std(0).clamp_min(floors)
+    # Unit quaternions already have a physical scale and need no centering.
+    mean[21:25], std[21:25] = 0, 1
+    return mean, std
+
+
 class RecurrentBC(nn.Module):
     """Small recurrent policy with frozen observation and action normalization."""
 
@@ -76,6 +102,8 @@ class RecurrentBC(nn.Module):
         std: torch.Tensor,
         low: torch.Tensor,
         high: torch.Tensor,
+        *,
+        observation_mode: str = "physical",
     ) -> None:
         super().__init__()
         if (
@@ -93,6 +121,9 @@ class RecurrentBC(nn.Module):
             or (high <= low).any()
         ):
             raise ValueError("Invalid normalization or action bounds")
+        if observation_mode not in {"legacy", "physical"}:
+            raise ValueError("Unknown policy observation mode")
+        self.observation_mode = observation_mode
         self.register_buffer("mean", mean.clone())
         self.register_buffer("std", std.clone())
         self.register_buffer("low", low.clone())
@@ -105,7 +136,12 @@ class RecurrentBC(nn.Module):
     def forward(
         self, obs: torch.Tensor, hidden: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        features, hidden = self.gru((obs - self.mean) / self.std, hidden)
+        if self.observation_mode == "physical":
+            obs = _canonical_observations(obs)
+        normalized = (obs - self.mean) / self.std
+        if self.observation_mode == "physical":
+            normalized = normalized.clamp(-10, 10)
+        features, hidden = self.gru(normalized, hidden)
         return self.head(features), hidden
 
     def action(
@@ -115,8 +151,22 @@ class RecurrentBC(nn.Module):
         return self.low + (normalized[:, 0] + 1) * 0.5 * (self.high - self.low), hidden
 
     def loss(
-        self, obs: torch.Tensor, actions: torch.Tensor, burn_in: int = 8
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        burn_in: int = 8,
+        *,
+        loss_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if loss_mask is not None:
+            if loss_mask.shape != obs.shape[:2] or not loss_mask.any():
+                raise ValueError("loss_mask must select supervised sequence steps")
+            # Full causal prefixes reconstruct the same state as online inference.
+            # Gradients through history also teach long contact/dwell transitions.
+            prediction, _ = self(obs)
+            target = 2 * (actions - self.low) / (self.high - self.low) - 1
+            error = F.smooth_l1_loss(prediction, target, reduction="none")[loss_mask]
+            return error[..., :7].mean(), error[..., 7:].mean()
         if not 0 <= burn_in < obs.shape[1]:
             raise ValueError("burn_in must leave at least one supervised step")
         hidden = None
@@ -159,6 +209,7 @@ def save_checkpoint(
         raise FileExistsError(f"Refusing to overwrite checkpoint {path}")
     state = {
         "model": model.state_dict(),
+        "policy_config": {"observation_mode": model.observation_mode},
         "optimizer": optimizer.state_dict(),
         "step": step,
         "config": vars(args),
@@ -179,7 +230,13 @@ def load_policy(path: str, device: str) -> tuple[RecurrentBC, dict[str, Any]]:
     state = torch.load(path, map_location="cpu", weights_only=False)
     weights = state["model"]
     model = RecurrentBC(
-        weights["mean"], weights["std"], weights["low"], weights["high"]
+        weights["mean"],
+        weights["std"],
+        weights["low"],
+        weights["high"],
+        observation_mode=state.get("policy_config", {}).get(
+            "observation_mode", "legacy"
+        ),
     ).to(device)
     model.load_state_dict(weights)
     model.eval()
@@ -259,6 +316,7 @@ def _evaluate_worker(
                     length = result.length
                 else:
                     hidden = None
+                    initial_delta = None
                     writer = None
                     if video and ordinal < 3 and request.get("record", False):
                         import imageio.v2 as imageio
@@ -272,6 +330,12 @@ def _evaluate_worker(
                             with torch.inference_mode():
                                 action, hidden = model.action(
                                     policy_observations(obs), hidden
+                                )
+                            if initial_delta is None:
+                                initial_delta = float(
+                                    (action[:, :7] - obs["robot"]["qpos"][:, :7])
+                                    .abs()
+                                    .max()
                                 )
                             obs, _, terminated, truncated, info = env.step(action)
                             if writer is not None:
@@ -298,6 +362,11 @@ def _evaluate_worker(
                         "lifted": bool(metrics["lifted"][0]),
                         "goal_error": float(metrics["goal_error"][0]),
                         "length": length,
+                        **(
+                            {"initial_arm_target_delta": initial_delta}
+                            if kind != "qualify"
+                            else {}
+                        ),
                     }
                 )
                 print(
@@ -314,6 +383,10 @@ def _evaluate_worker(
                 "goal_error": sum(r["goal_error"] for r in records) / len(records),
                 "episode_length": sum(r["length"] for r in records) / len(records),
             }
+            if kind != "qualify":
+                report["initial_arm_target_delta"] = sum(
+                    r["initial_arm_target_delta"] for r in records
+                ) / len(records)
             (Path(output) / f'{request["name"]}.json').write_text(
                 json.dumps(report, indent=2)
             )
@@ -345,11 +418,18 @@ def _receive(
     raise TimeoutError("Evaluation worker timed out")
 
 
-def _sample(engine: OnlineDataEngine, batch: int, length: int) -> tuple[Any, float]:
+def _sample(
+    engine: OnlineDataEngine, batch: int, length: int, *, with_history: bool = False
+) -> tuple[Any, float]:
     started = time.monotonic()
     while True:
         try:
-            return engine.sample_batch(batch, length), time.monotonic() - started
+            sample = (
+                engine.sample_batch_with_history(batch, length, start_probability=0.25)
+                if with_history
+                else engine.sample_batch(batch, length)
+            )
+            return sample, time.monotonic() - started
         except RuntimeError as error:
             if (
                 engine.state is not OnlineDataEngineState.READY
@@ -498,7 +578,7 @@ def main() -> None:
         engine.start()
         initial = engine.shared_buffer.clone()
         values = policy_observations(initial["obs"])[initial["valid"]]
-        mean, std = values.mean(0), values.std(0).clamp_min(1e-3)
+        mean, std = _observation_statistics(values)
         model = RecurrentBC(
             mean, std, torch.tensor(ready["low"]), torch.tensor(ready["high"])
         ).to(args.train_device)
@@ -506,6 +586,11 @@ def main() -> None:
         step = 0
         if args.resume:
             model, state = load_policy(str(args.resume), args.train_device)
+            if model.observation_mode != "physical":
+                raise ValueError(
+                    "Legacy checkpoints retain the old observation contract; "
+                    "start a fresh run to train the corrected policy."
+                )
             optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
             optimizer.load_state_dict(state["optimizer"])
             step = state["step"]
@@ -537,36 +622,71 @@ def main() -> None:
             }
         )
         initial_report = _receive(evaluator, results)
-        for name in ("success_rate", "lift_rate", "goal_error", "episode_length"):
+        for name in (
+            "success_rate",
+            "lift_rate",
+            "goal_error",
+            "episode_length",
+            "initial_arm_target_delta",
+        ):
             writer.add_scalar(f"eval/{name}", initial_report[name], step)
         initial_parameters = {
             name: value.detach().cpu().clone()
             for name, value in model.named_parameters()
         }
-        best_rate, best_path = -1.0, baseline
+        best_key, best_path = (-1.0, -1.0, -float("inf")), baseline
         consumed: dict[int, int] = {}
+        supervised: dict[int, int] = {}
+        round_sources = []
         for round_index in range(args.rounds):
             generation = 1
             if round_index and args.mode == "online":
                 generation = engine.request_refill()
+            round_supervised: dict[int, int] = {}
+            overlap_updates = (
+                args.updates_per_round // 4
+                if round_index and args.mode == "online"
+                else 0
+            )
             model.train()
             for update_index in range(args.updates_per_round):
                 update_started = time.monotonic()
                 generation_wait = 0.0
-                if update_index == args.updates_per_round - 1:
+                if update_index == overlap_updates:
                     engine.wait_for_generation(generation, timeout=1800)
                     generation_wait = time.monotonic() - update_started
-                batch, waited = _sample(engine, args.batch_size, 32)
+                batch, waited = _sample(engine, args.batch_size, 24, with_history=True)
                 waited += generation_wait
-                generations, counts = batch["ods_generation"].unique(return_counts=True)
+                generations, counts = batch["ods_generation"][batch["valid"]].unique(
+                    return_counts=True
+                )
                 for version, count in zip(generations.tolist(), counts.tolist()):
                     consumed[version] = consumed.get(version, 0) + count
                     writer.add_scalar(
                         f"data/consumed_generation_{version}", consumed[version], step
                     )
+                versions, counts = batch["ods_generation"][batch["loss_mask"]].unique(
+                    return_counts=True
+                )
+                for version, count in zip(versions.tolist(), counts.tolist()):
+                    supervised[version] = supervised.get(version, 0) + count
+                    round_supervised[version] = round_supervised.get(version, 0) + count
+                    writer.add_scalar(
+                        f"data/supervised_generation_{version}",
+                        supervised[version],
+                        step,
+                    )
+                if update_index >= overlap_updates and versions.tolist() != [
+                    generation
+                ]:
+                    raise RuntimeError(
+                        "A completed refill returned an unexpected generation"
+                    )
                 obs = policy_observations(batch["obs"]).to(args.train_device)
                 actions = batch["actions"].to(args.train_device)
-                arm, hand = model.loss(obs, actions)
+                arm, hand = model.loss(
+                    obs, actions, loss_mask=batch["loss_mask"].to(args.train_device)
+                )
                 optimizer.zero_grad(set_to_none=True)
                 (arm + 5 * hand).backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -575,6 +695,11 @@ def main() -> None:
                 writer.add_scalar("train/arm_loss", arm.item(), step)
                 writer.add_scalar("train/gripper_loss", hand.item(), step)
                 writer.add_scalar("data/wait_seconds", waited, step)
+                writer.add_scalar(
+                    "data/history_frames",
+                    int((batch["valid"] & ~batch["loss_mask"]).sum()),
+                    step,
+                )
                 writer.add_scalar(
                     "data/trained_frames_per_second",
                     args.batch_size * 24 / max(time.monotonic() - update_started, 1e-9),
@@ -591,7 +716,13 @@ def main() -> None:
                 }
             )
             report = _receive(evaluator, results)
-            for name in ("success_rate", "lift_rate", "goal_error", "episode_length"):
+            for name in (
+                "success_rate",
+                "lift_rate",
+                "goal_error",
+                "episode_length",
+                "initial_arm_target_delta",
+            ):
                 writer.add_scalar(f"eval/{name}", report[name], step)
             stats = engine.get_stats()
             writer.add_scalar(
@@ -603,8 +734,21 @@ def main() -> None:
                 if name != "run_id":
                     writer.add_scalar(f"ods/{name}", value, step)
             writer.flush()
-            if report["success_rate"] > best_rate:
-                best_rate, best_path = report["success_rate"], checkpoint
+            selection_key = (
+                report["success_rate"],
+                report["lift_rate"],
+                -report["goal_error"],
+            )
+            if selection_key > best_key:
+                best_key, best_path = selection_key, checkpoint
+            round_sources.append(
+                {
+                    "round": round_index + 1,
+                    "generation": generation,
+                    "overlap_updates": overlap_updates,
+                    "supervised_frames": round_supervised,
+                }
+            )
             print(
                 f"round={round_index + 1} step={step} success={report['success_rate']:.1%}",
                 flush=True,
@@ -628,6 +772,9 @@ def main() -> None:
             "smoke": args.smoke,
             "mode": args.mode,
             "consumed_generations": consumed,
+            "supervised_generations": supervised,
+            "round_sources": round_sources,
+            "sequence_contract": "complete causal history; 24 supervised steps; 25% episode-start windows",
             "best_checkpoint": str(best_path),
             "final_success_rate": final["success_rate"],
             "initial_success_rate": initial_test_rate,

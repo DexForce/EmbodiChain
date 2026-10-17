@@ -25,6 +25,8 @@ from examples.data_pipeline.ods_pick_place_showcase import (
     RecurrentBC,
     load_policy,
     save_checkpoint,
+    _canonical_observations,
+    _observation_statistics,
 )
 
 
@@ -75,6 +77,75 @@ def test_policy_rejects_wrong_width_and_invalid_normalization() -> None:
         RecurrentBC(torch.zeros(27), torch.ones(27), -torch.ones(8), torch.ones(8))
     with pytest.raises(ValueError):
         RecurrentBC(torch.zeros(28), torch.zeros(28), -torch.ones(8), torch.ones(8))
+
+
+def test_equivalent_quaternions_produce_identical_recurrent_actions() -> None:
+    model = _model()
+    obs = torch.randn(4, 28)
+    equivalent = obs.clone()
+    equivalent[:, 21:25] *= -1
+    action, hidden = model.action(obs, None)
+    other_action, other_hidden = model.action(equivalent, None)
+    torch.testing.assert_close(action, other_action)
+    torch.testing.assert_close(hidden, other_hidden)
+
+
+def test_nearly_constant_features_keep_physical_normalization_scales() -> None:
+    values = torch.zeros(12, 28)
+    values[:, 24] = 1
+    mean, std = _observation_statistics(values)
+    assert std[9:16].min() >= 0.5
+    torch.testing.assert_close(mean[21:25], torch.zeros(4))
+    torch.testing.assert_close(std[21:25], torch.ones(4))
+    equivalent = values.clone()
+    equivalent[:, 24] = -1
+    torch.testing.assert_close(
+        _canonical_observations(values), _canonical_observations(equivalent)
+    )
+
+
+def test_initial_actions_receive_supervision_with_causal_history() -> None:
+    model = _model()
+    obs = torch.randn(2, 24, 28, requires_grad=True)
+    mask = torch.ones(2, 24, dtype=torch.bool)
+    arm, hand = model.loss(obs, torch.zeros(2, 24, 8), loss_mask=mask)
+    (arm + 5 * hand).backward()
+    assert obs.grad[:, 0].abs().sum() > 0
+
+
+def test_full_history_prediction_matches_stepwise_inference_and_ignores_padding() -> (
+    None
+):
+    model = _model()
+    obs = torch.randn(2, 30, 28)
+    full, _ = model(obs)
+    hidden = None
+    for index in range(obs.shape[1]):
+        predicted, hidden = model(obs[:, index : index + 1], hidden)
+        torch.testing.assert_close(predicted[:, 0], full[:, index])
+    mask = torch.zeros(2, 30, dtype=torch.bool)
+    mask[0, 4:12], mask[1, 22:] = True, True
+    actions = torch.zeros(2, 30, 8)
+    original = model.loss(obs, actions, loss_mask=mask)
+    obs[0, 12:], actions[0, 12:] = 1000, -1000
+    changed = model.loss(obs, actions, loss_mask=mask)
+    torch.testing.assert_close(original, changed)
+
+
+def test_legacy_checkpoint_preserves_original_observation_contract(tmp_path) -> None:
+    model = RecurrentBC(
+        torch.zeros(28),
+        torch.ones(28),
+        -torch.ones(8),
+        torch.ones(8),
+        observation_mode="legacy",
+    )
+    path = tmp_path / "legacy.pt"
+    torch.save({"model": model.state_dict()}, path)
+    restored, _ = load_policy(str(path), "cpu")
+    obs = torch.randn(2, 28)
+    torch.testing.assert_close(model.action(obs, None), restored.action(obs, None))
+    assert restored.observation_mode == "legacy"
 
 
 def test_failed_producer_is_not_retried_as_an_empty_sampling_window() -> None:
