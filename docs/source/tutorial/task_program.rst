@@ -1,17 +1,20 @@
-Configure and Run an Embodied Task Program
-===========================================
+Integrate and Deploy a Task Program
+==================================
 
 This tutorial deploys Task Program's built-in Semantic Calls through explicit
 environment, integration, embodiment, and execution-policy configuration. The
 calls are declarative language instructions, not an independent execution API.
 
-For a smaller introduction to the language itself, first complete
-:doc:`task_program_python`, which constructs and compiles the same typed schema
-in Python without starting a Gym environment.
+This page is for **integration authors** who bind scenes, robot profiles and
+execution policies. To customize an existing task by editing only its program,
+start with :doc:`/overview/task_program/quickstart`.
+
+The optional :doc:`task_program_python` introduces the typed language without
+starting simulation; it is not a prerequisite for the Quickstart.
 
 Use :doc:`atomic_actions` instead when Python code should construct and execute
 typed ``ActionInvocation`` values directly. The architecture and ownership
-rules are described in :doc:`/overview/task_program/index`.
+rules are described in :doc:`/overview/task_program/architecture`.
 
 What you will configure
 -----------------------
@@ -42,18 +45,18 @@ The shared ``EmbodiedEnv`` and Task Program adapter then lower Semantic Calls
 to Atomic Skills while retaining the normal stepping, recording, and reset
 lifecycle.
 
-The official repeated Pick/Place example is a complete reference. Its physical
-backends live under ``envs/``; the UR5 deployment additionally
+In a source checkout, the official repeated Pick/Place example is a complete
+reference. Its physical backends live under ``envs/``; the UR5 deployment additionally
 references ``expansion/repeated_pick_place.yaml`` through ``expansion.config``:
 
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml``
   and ``envs/newton.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
-* ``embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
-* ``embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
-* ``embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task_program/``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml``;
+* ``extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/expansion/repeated_pick_place.yaml``;
+* ``extensions/embodichain_tasks/configs/components/embodiments/ur5_dh_pgi_140_80.yaml``;
+* ``extensions/embodichain_tasks/configs/components/execution_policies/trajectory_open_loop.yaml``.
 
 These files have explicit ownership rather than generic deep-merge semantics.
 The deployment must select components that satisfy the task's scene and
@@ -104,42 +107,18 @@ defaults, and the selected embodiment supplies compatible concrete endpoints.
 Compose the deployment
 ----------------------
 
-The reusable environment contains only physical simulation entities and
-ordinary environment values. This abbreviated shape is intentionally free of
-Task Program and embodiment fields:
+The reusable environment owns physical simulation entities and ordinary
+environment values, including its explicit physics backend. Here is the complete
+Default environment used by the Quickstart:
 
-.. code-block:: yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/envs/default.yaml
+   :language: yaml
 
-   environment_id: repeated_pick_place
-   max_episode_steps: 1200
+The complete Franka deployment selects environment variants, Task Program
+components and an embodiment. It does not enable expansion:
 
-   simulation:
-     rigid_object:
-       - uid: cube
-         # Physical shape, dynamics, and initial pose.
-
-   env:
-     sim_steps_per_control: 4
-     events: {}
-     dataset: {}
-
-The thin runnable deployment chooses that environment, all three Task Program
-files, and one embodiment without copying any of them:
-
-.. code-block:: yaml
-
-   id: TaskProgramRepeatedPickPlace-v1
-
-   environment:
-     component: env.yaml
-
-   task_program:
-     program: task_program/program.yaml
-     integration: task_program/integration.yaml
-     execution_policy: ../../../components/execution_policies/trajectory_open_loop.yaml
-
-   embodiment:
-     component: ../../../components/embodiments/ur5_dh_pgi_140_80.yaml
+.. literalinclude:: ../../../extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml
+   :language: yaml
 
 During ``config_to_cfg()``, the component resolver expands these selections,
 checks that every semantic ``simulation_uid`` exists in the physical scene,
@@ -184,8 +163,9 @@ monitor. Command acknowledgement alone is not physical evidence.
 Load and validate without simulation
 ------------------------------------
 
-The provider-independent API performs strict file decoding before any live
-environment is constructed:
+From the source checkout root, the provider-independent API performs strict
+file decoding before any live environment is constructed. Unlike the CLI,
+``load_task_program()`` takes a filesystem path, not a package-resource reference:
 
 .. code-block:: python
 
@@ -195,7 +175,7 @@ environment is constructed:
    )
 
    program = load_task_program(
-       "embodichain_tasks/configs/tasks/manipulation/"
+       "extensions/embodichain_tasks/configs/tasks/manipulation/"
        "repeated_pick_place/task_program/program.yaml",
        integration=TaskProgramIntegrationCfg(
            robot_profile="ur5_dh_pgi_140_80",
