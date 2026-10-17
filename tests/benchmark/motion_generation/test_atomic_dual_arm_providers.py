@@ -31,7 +31,7 @@ from embodichain.toolkits.graspkit import (
     ParallelJawGraspPoseGenerator,
     ParallelJawGripperModelCfg,
 )
-from embodichain.utils.math import axis_angle_to_rotation_matrix
+from embodichain.utils.math import axis_angle_to_rotation_matrix, pose_inv
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.contracts import (
     ReplayObservationTrace,
@@ -773,8 +773,8 @@ def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
     geometry = (torch.zeros(1, 3),) * 4
     monkeypatch.setattr(dual, "_placement_geometry", lambda *args: geometry)
 
-    def row_poses(placing, support, *args):
-        del args
+    def row_poses(placing, support, *args, **kwargs):
+        del args, kwargs
         return {
             "placing_grasp_pose": placing.clone(),
             "support_grasp_pose": support.clone(),
@@ -804,6 +804,69 @@ def test_coordinated_placement_builds_each_pose_row_independently(monkeypatch):
     assert torch.all(placing_shift.abs() <= torch.tensor([0.03, 0.02, 0.01]))
     for name, pose in poses.items():
         torch.testing.assert_close(pose, repeated[name])
+
+
+def test_coordinated_placement_transforms_fixed_targets_with_task_frame(monkeypatch):
+    """The shared task frame moves both fixed tutorial targets with the objects."""
+    batch_size = 4
+    nominal_placing_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    nominal_support_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    nominal_placing_pose[:, :3, 3] = torch.tensor([0.2, -0.1, 0.2])
+    nominal_support_pose[:, :3, 3] = torch.tensor([-0.1, 0.2, 0.2])
+    config = {
+        "_pose_batch_task_frame_translation_jitter_m": [0.03, 0.02, 0.0],
+        "_pose_batch_task_frame_yaw_jitter_rad": 0.3,
+        "_pose_batch_seed_stride": 1,
+    }
+    placing_pose = nominal_placing_pose.clone()
+    support_pose = nominal_support_pose.clone()
+    atomic_task._apply_task_frame_randomization(placing_pose, config, seed=11)
+    atomic_task._apply_task_frame_randomization(support_pose, config, seed=11)
+    placing_vertices = torch.tensor(
+        [
+            [-0.04, -0.03, -0.01],
+            [0.04, -0.03, -0.01],
+            [-0.04, 0.03, 0.01],
+            [0.04, 0.03, 0.01],
+        ]
+    )
+    support_vertices = torch.tensor(
+        [
+            [-0.08, -0.08, 0.0],
+            [0.08, -0.08, 0.0],
+            [-0.08, 0.08, 0.0],
+            [0.08, 0.08, 0.0],
+            [0.15, 0.0, 0.06],
+        ]
+    )
+    geometry = (
+        placing_vertices,
+        support_vertices,
+        placing_vertices.min(dim=0).values,
+        placing_vertices.max(dim=0).values,
+    )
+    monkeypatch.setattr(dual, "_placement_geometry", lambda *args: geometry)
+
+    poses = dual._placement_poses(
+        Mock(), Mock(), placing_pose, support_pose, config, seed=11
+    )
+    nominal = dual._placement_poses(
+        Mock(), Mock(), nominal_placing_pose, nominal_support_pose, {}, seed=11
+    )
+    task_frame_pose = torch.eye(4).repeat(batch_size, 1, 1)
+    atomic_task._apply_task_frame_randomization(task_frame_pose, config, seed=11)
+    expected_placing = torch.bmm(task_frame_pose, nominal["placing_target_pose"])
+    expected_support = torch.bmm(task_frame_pose, nominal["support_target_pose"])
+
+    torch.testing.assert_close(poses["placing_target_pose"], expected_placing)
+    torch.testing.assert_close(poses["support_target_pose"], expected_support)
+    torch.testing.assert_close(
+        torch.bmm(pose_inv(poses["support_target_pose"]), poses["placing_target_pose"]),
+        torch.bmm(
+            pose_inv(nominal["support_target_pose"]),
+            nominal["placing_target_pose"],
+        ),
+    )
 
 
 def test_scenario_configures_every_gripper_and_freezes_each_hand_over_grasp():
