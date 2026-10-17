@@ -29,11 +29,17 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import ArticulationAffordanceGeometry
+from embodichain.lab.sim.atomic_actions import (
+    ArticulationAffordanceGeometry,
+    MotionPolicy,
+)
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
-from scripts.benchmark.motion_generation.artifacts import write_case_manifest
+from scripts.benchmark.motion_generation.artifacts import (
+    TrialJsonlWriter,
+    write_case_manifest,
+)
 from scripts.benchmark.motion_generation.config import load_suite
 from scripts.benchmark.motion_generation.contracts import ReplayObservationTrace
 from scripts.benchmark.motion_generation.models import (
@@ -56,6 +62,8 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     _ExecutionObservation,
     _atomic_case_id,
     _articulation_effect_success,
+    _benchmark_motion_attribution,
+    _benchmark_motion_policy_strategy,
     _canonical_case_qpos,
     _case_generation_seed,
     _randomization_parameters,
@@ -1130,6 +1138,68 @@ def test_atomic_invocation_uses_motion_generator_policy():
     assert kwargs["control_parts"] == {"primary": {"motion": "manipulator"}}
 
 
+@pytest.mark.parametrize(
+    "skill_id", ["open_door", "press", "push_object", "slide", "twist"]
+)
+def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> None:
+    assert _benchmark_motion_policy_strategy(skill_id) == "ik_interp"
+    expected = {
+        "motion_policy_strategy": "ik_interp",
+        "selected_planner_backend_used": False,
+        "effective_motion_algorithm": "sequential_ik_interpolation",
+    }
+    assert _benchmark_motion_attribution(skill_id) == expected
+    assert (
+        AtomicTaskScenario().trial_metadata(replace(_atomic_case(), skill_id=skill_id))
+        == expected
+    )
+
+
+def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
+    assert _benchmark_motion_policy_strategy("move_end_effector") == "motion_gen"
+    assert _benchmark_motion_attribution("move_end_effector") == {
+        "motion_policy_strategy": "motion_gen",
+        "selected_planner_backend_used": True,
+        "effective_motion_algorithm": "selected_planner_backend",
+    }
+
+
+@pytest.mark.parametrize(
+    "skill_id", ["open_door", "press", "push_object", "slide", "twist"]
+)
+def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> None:
+    case = replace(
+        _atomic_case(),
+        case_id=f"atomic-task:{skill_id}:simple:s11",
+        scenario_id=skill_id,
+        skill_id=skill_id,
+    )
+    motion_generator = Mock()
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+    adapter.atomic_plan_options.return_value = None
+    invocation = SimpleNamespace(
+        motion_policy=MotionPolicy(strategy="ik_interp", sample_count=80)
+    )
+    provider = Mock(samples_grasps=False)
+    provider.build_invocation.return_value = invocation
+    provider.initial_task_state.return_value = None
+    provider.prefix_invocations.return_value = ()
+    provider.initial_scene.return_value = None
+    provider.frozen_grasps.return_value = {}
+    compiled = object()
+    engine = Mock(motion_generator=motion_generator)
+    engine.compile.return_value = compiled
+    scenario = AtomicTaskScenario()
+    scenario.simulation = SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01))
+    scenario.robot = SimpleNamespace(device=torch.device("cpu"))
+    scenario._engine = engine
+    scenario._case_providers[case.case_id] = provider
+
+    assert scenario.plan_case(adapter, case) is compiled
+    engine.compile.assert_called_once()
+
+
 def test_atomic_skill_and_object_extensions_are_registry_driven():
     assert atomic_skill_provider_names() == (
         "axis_align",
@@ -1743,6 +1813,136 @@ def test_atomic_primary_success_and_execution_efficiency_aggregate():
     assert leaderboard["task_success_rate"] == pytest.approx(1.0)
 
 
+def test_planner_aggregates_exclude_atomic_cases_that_bypass_backend():
+    selected_case = _atomic_case()
+    bypassed_case = replace(
+        selected_case,
+        scenario_id="press",
+        case_id="atomic-task:press:simple:s11",
+        skill_id="press",
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="curobo",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="curobo",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+            supported_robots=("franka_pgi",),
+        )
+    ]
+    selected_record = TrialRecord(
+        suite_version=selected_case.suite_version,
+        track=selected_case.track,
+        scenario_id=selected_case.scenario_id,
+        case_id=selected_case.case_id,
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        model_revision="curobo-v2",
+        planner_config_hash="abc",
+        seed=selected_case.seed,
+        repeat=0,
+        batch_size=selected_case.batch_size,
+        waypoint_count=selected_case.num_waypoints,
+        path_shape=selected_case.path_shape,
+        start_state_bin=selected_case.start_state_bin,
+        phase=TrialPhase.MEASURED,
+        cost_time_ms=20.0,
+        robot_id=selected_case.robot_id,
+        skill_id=selected_case.skill_id,
+        task_difficulty=selected_case.task_difficulty,
+        primary_success=selected_case.primary_success,
+        metadata=_benchmark_motion_attribution(selected_case.skill_id),
+        outcomes=(replace(_atomic_outcome(), task_success=False),),
+    )
+    bypassed_record = replace(
+        selected_record,
+        scenario_id=bypassed_case.scenario_id,
+        case_id=bypassed_case.case_id,
+        skill_id=bypassed_case.skill_id,
+        cost_time_ms=1.0,
+        metadata=_benchmark_motion_attribution(bypassed_case.skill_id),
+        outcomes=(_atomic_outcome(),),
+    )
+
+    aggregates = aggregate_results(
+        [selected_record, bypassed_record],
+        metadata,
+        [selected_case, bypassed_case],
+        measured_trials=1,
+    )
+
+    performance = aggregates["time_and_memory"]
+    metrics = aggregates["success_and_metrics"]
+    leaderboard = aggregates["leaderboard"][0]
+    assert [row["skill"] for row in performance] == ["move_end_effector"]
+    assert [row["skill"] for row in metrics] == ["move_end_effector"]
+    assert leaderboard["attributed_cases"] == 1
+    assert leaderboard["bypassed_cases"] == 1
+    assert leaderboard["coverage_rate"] == pytest.approx(1.0)
+    assert leaderboard["overall_success_rate"] == pytest.approx(0.0)
+    assert leaderboard["latency_p95_ms"] == pytest.approx(20.0)
+
+    bypass_only = aggregate_results(
+        [bypassed_record], metadata, [bypassed_case], measured_trials=1
+    )
+    bypass_leaderboard = bypass_only["leaderboard"][0]
+    assert bypass_only["success_and_metrics"] == []
+    assert bypass_leaderboard["eligible"] is False
+    assert bypass_leaderboard["attributed_cases"] == 0
+    assert bypass_leaderboard["bypassed_cases"] == 1
+    assert bypass_leaderboard["coverage_rate"] == pytest.approx(0.0)
+    assert bypass_leaderboard["overall_success_rate"] == pytest.approx(0.0)
+    assert bypass_leaderboard["latency_p95_ms"] is None
+
+
+def test_runner_preserves_preplan_attribution_after_planner_error(tmp_path):
+    case = replace(
+        _atomic_case(),
+        scenario_id="press",
+        case_id="atomic-task:press:simple:s11",
+        skill_id="press",
+    )
+    provider = Mock(spec=ScenarioProvider)
+    provider.trial_metadata.return_value = _benchmark_motion_attribution(case.skill_id)
+    provider.plan_case.side_effect = RuntimeError("planner failed")
+    provider.failure_outcomes.return_value = ()
+    runner = object.__new__(BenchmarkRunner)
+    runner.control_part = "arm"
+    runner.suite = Mock()
+    runner.video = VideoRecordCfg()
+    runner.records = []
+    runner._run_dir = None
+    runner._video_paths = []
+    planner_metadata = PlannerMetadata(
+        algorithm_id="curobo",
+        algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+        adapter="curobo",
+        config_hash="abc",
+        capabilities=frozenset({"eef_waypoint", "atomic_action"}),
+    )
+
+    runner._run_plan_call(
+        TrialJsonlWriter(tmp_path / "trials.jsonl"),
+        Mock(),
+        Mock(),
+        Mock(),
+        planner_metadata,
+        case,
+        provider,
+        TrialPhase.MEASURED,
+        repeat=0,
+    )
+
+    record = runner.records[0]
+    assert record.status == "error"
+    assert record.failure_code == "planner_exception"
+    assert record.metadata["selected_planner_backend_used"] is False
+    assert (
+        record.metadata["effective_motion_algorithm"] == "sequential_ik_interpolation"
+    )
+
+
 def test_atomic_case_manifest_retains_robot_skill_object_and_parameters(tmp_path):
     case = _atomic_case()
     path = write_case_manifest(tmp_path / "case_manifest.json", [case])
@@ -2085,6 +2285,13 @@ def test_runner_freezes_domain_manifest_before_each_planner(
     assert manifests[0] == manifests[1]
     assert all(record.domain.version == "v1" for record in result.records)
     assert provider.generate_cases.return_value[0].domain is None
+    aggregate_payload = json.loads(
+        (result.run_dir / "aggregates.json").read_text(encoding="utf-8")
+    )
+    assert aggregate_payload["report_schema_version"] == "2"
+    assert "- report_schema_version: `2`" in result.report_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_case_snapshot_uses_one_read_and_runtime_joint_order() -> None:

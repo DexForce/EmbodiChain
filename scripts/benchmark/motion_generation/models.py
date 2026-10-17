@@ -262,6 +262,15 @@ class TrialRecord:
     track_group: str | None = None
     embodiment_id: str | None = None
 
+    @property
+    def uses_selected_planner_backend(self) -> bool:
+        """Return whether this trial exercised its attributed planner backend.
+
+        Older artifacts predate explicit motion attribution, so a missing flag
+        retains their original planner-attributed behavior.
+        """
+        return self.metadata.get("selected_planner_backend_used") is not False
+
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serializable mapping while retaining numeric values."""
         payload = cast(dict[str, object], _json_value(asdict(self)))

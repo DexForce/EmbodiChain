@@ -45,7 +45,8 @@ python -m scripts.benchmark.motion_generation.run_benchmark \
 Artifacts land under `outputs/benchmarks/<suite-name>/<timestamp>/`
 (`resolved_suite.yaml`, `case_manifest.json`, `trials.jsonl`, `aggregates.json`,
 `report.md` with exactly three tables). Atomic Task videos, when enabled, land
-in that run's `videos/` directory.
+in that run's `videos/` directory. `aggregates.json` and `report.md` record the
+independent `report_schema_version` used to interpret their fields.
 
 ## Implemented
 

@@ -130,7 +130,7 @@ class ProtocolCfg:
     rotation_threshold_rad: float = 0.1
     joint_limit_tolerance_rad: float = 1.0e-5
     confidence_level: float = 0.95
-    report_schema_version: str = "1"
+    report_schema_version: str = "2"
     seeds: list[int] = []
 
 

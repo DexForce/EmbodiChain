@@ -227,6 +227,57 @@ def test_generalization_reports_row_level_spatial_bucket_rates() -> None:
     assert row["spatial_bucket_failure_stages"] == {"mid": {"physical_release": 1}}
 
 
+def test_generalization_excludes_cases_that_bypass_selected_planner() -> None:
+    domain = EvaluationDomain(id="objects", version="v1", kind="held_out")
+    attributed_case = replace(_case("planner-case", domain), track="pick@objects")
+    bypassed_case = replace(attributed_case, case_id="ik-interpolation-case", seed=23)
+    attributed_record = _record(attributed_case, _outcome(False))
+    bypassed_record = replace(
+        _record(bypassed_case, _outcome(True)),
+        metadata={
+            "selected_planner_backend_used": False,
+            "effective_motion_algorithm": "sequential_ik_interpolation",
+        },
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    rows = aggregate_generalization(
+        [attributed_record, bypassed_record],
+        metadata,
+        [attributed_case, bypassed_case],
+        measured_trials=1,
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["cases"] == 2
+    assert row["attributed_cases"] == 1
+    assert row["applicable_cases"] == 1
+    assert row["bypassed_cases"] == 1
+    assert row["coverage_rate"] == pytest.approx(1.0)
+    assert row["success_rate"] == pytest.approx(0.0)
+    bypassed_rows = aggregate_generalization(
+        [bypassed_record], metadata, [bypassed_case], measured_trials=1
+    )
+    assert len(bypassed_rows) == 1
+    bypassed_row = bypassed_rows[0]
+    assert bypassed_row["cases"] == 1
+    assert bypassed_row["attributed_cases"] == 0
+    assert bypassed_row["applicable_cases"] == 0
+    assert bypassed_row["bypassed_cases"] == 1
+    assert bypassed_row["coverage_rate"] == pytest.approx(0.0)
+    assert bypassed_row["success_rate"] is None
+    assert bypassed_row["generalization_eligible"] is False
+
+
 def test_spatial_bucket_rates_count_missing_repeats_as_failures() -> None:
     """Missing expected rows remain in every bucket's success denominator."""
     domain = EvaluationDomain(id="workspace_shell", version="v1", kind="robustness")

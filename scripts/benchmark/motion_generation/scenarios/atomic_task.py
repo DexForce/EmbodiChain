@@ -132,6 +132,41 @@ _GRIPPER_SKILLS = {
     "coordinated_placement",
 }
 _CASE_QPOS_RESOLUTION_RAD = 1.0e-4
+_EXACT_CARTESIAN_SKILLS = frozenset(
+    {"open_door", "press", "push_object", "slide", "twist"}
+)
+
+
+def _benchmark_motion_policy_strategy(
+    skill_id: str,
+) -> Literal["motion_gen", "ik_interp"]:
+    """Return the auditable motion strategy required by one benchmark skill."""
+    if skill_id in _EXACT_CARTESIAN_SKILLS:
+        return "ik_interp"
+    return "motion_gen"
+
+
+def _benchmark_motion_policy(skill_id: str, sample_count: int) -> MotionPolicy:
+    """Build the benchmark policy without hiding exact-path planner bypasses."""
+    return MotionPolicy(
+        strategy=_benchmark_motion_policy_strategy(skill_id),
+        sample_count=sample_count,
+    )
+
+
+def _benchmark_motion_attribution(skill_id: str) -> dict[str, object]:
+    """Describe whether the selected planner backend produced the motion."""
+    strategy = _benchmark_motion_policy_strategy(skill_id)
+    selected_backend_used = strategy == "motion_gen"
+    return {
+        "motion_policy_strategy": strategy,
+        "selected_planner_backend_used": selected_backend_used,
+        "effective_motion_algorithm": (
+            "selected_planner_backend"
+            if selected_backend_used
+            else "sequential_ik_interpolation"
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -3624,9 +3659,8 @@ class _PressCases(AtomicSkillCaseProvider):
                     "grasp": scenario.end_effector_part,
                 }
             },
-            motion_policy=MotionPolicy(
-                strategy="motion_gen",
-                sample_count=int(case.case_parameters["sample_count"]),
+            motion_policy=_benchmark_motion_policy(
+                self.skill_id, int(case.case_parameters["sample_count"])
             ),
             skill_options=PressOptions(
                 hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
@@ -3901,9 +3935,8 @@ class _SlideCases(AtomicSkillCaseProvider):
                     "grasp": scenario.end_effector_part,
                 }
             },
-            motion_policy=MotionPolicy(
-                strategy="motion_gen",
-                sample_count=int(case.case_parameters["sample_count"]),
+            motion_policy=_benchmark_motion_policy(
+                self.skill_id, int(case.case_parameters["sample_count"])
             ),
             skill_options=SlideOptions(
                 direction=_slide_direction(case.case_parameters["direction"]),
@@ -4168,9 +4201,8 @@ class _TwistCases(AtomicSkillCaseProvider):
                     "grasp": scenario.end_effector_part,
                 }
             },
-            motion_policy=MotionPolicy(
-                strategy="motion_gen",
-                sample_count=int(case.case_parameters["sample_count"]),
+            motion_policy=_benchmark_motion_policy(
+                self.skill_id, int(case.case_parameters["sample_count"])
             ),
             skill_options=TwistOptions(
                 hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
@@ -4262,6 +4294,10 @@ class AtomicTaskScenario(ScenarioProvider):
         """Return the explicitly configured physical-execution batch sizes."""
         del suite
         return resolve_atomic_batch_sizes(track)
+
+    def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
+        """Expose planner attribution before planning or evaluation can fail."""
+        return _benchmark_motion_attribution(case.skill_id)
 
     def create_runtime_entities(
         self,
@@ -4808,9 +4844,11 @@ class AtomicTaskScenario(ScenarioProvider):
         provider = self._case_providers[case.case_id]
         invocation = provider.build_invocation(self, case, adapter)
         policy = invocation.motion_policy
-        if policy.strategy != "motion_gen":
+        expected_strategy = _benchmark_motion_policy_strategy(case.skill_id)
+        if policy.strategy != expected_strategy:
             raise RuntimeError(
-                "Atomic Task invocations must use the motion_gen strategy."
+                f"Atomic Task skill {case.skill_id!r} requires strategy "
+                f"{expected_strategy!r}, got {policy.strategy!r}."
             )
         if engine.motion_generator is not adapter.require_motion_generator():
             raise RuntimeError(
@@ -5121,11 +5159,14 @@ class AtomicTaskScenario(ScenarioProvider):
             trajectory_waypoints=result.trajectory.waypoint_count,
             metadata={
                 "timing_scope": "atomic_action_compile",
-                "motion_policy_strategy": "motion_gen",
+                **_benchmark_motion_attribution(case.skill_id),
                 "physics_validation": "common_joint_target_replay",
                 "constraint_information": (
-                    "empty external world; manipulated target excluded from "
-                    "cuRobo collision obstacles"
+                    "exact Cartesian samples through sequential IK; selected "
+                    "planner backend bypassed"
+                    if _benchmark_motion_policy_strategy(case.skill_id) == "ik_interp"
+                    else "empty external world; manipulated target excluded from "
+                    "planner collision obstacles"
                 ),
             },
         )
