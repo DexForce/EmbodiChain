@@ -135,3 +135,34 @@ Geometry tensor kernels
    :maxdepth: 1
 
    embodichain.compute.scene_geometry
+
+Differentiable inverse kinematics
+--------------------------------
+
+The fixed-step DLS implementation preserves target and seed gradients through
+both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
+PK chain without loading simulation. ``DifferentiableIKCfg`` is shared by the
+training layer and robot solver adapter; failed solves retain their last iterate.
+
+.. currentmodule:: embodichain.compute.kinematics
+
+.. autosummary::
+
+   damped_least_squares_step
+   solve_dls_ik
+   pose_error
+   SerialChainKinematics
+   DifferentiableIKCfg
+   DifferentiableIKResult
+
+.. automodule:: embodichain.compute.kinematics.dls
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.pose_error
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.serial_chain
+   :members:
+
+.. automodule:: embodichain.compute.kinematics.types
+   :members:

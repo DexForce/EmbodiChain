@@ -17,6 +17,8 @@ Choose a solver
      - Use it for
    * - :doc:`pytorch_solver`
      - Numerical IK with batched PyTorch computation and multiple seeds.
+   * - :doc:`differentiable_ik_solver`
+     - Fixed-step DLS with target and seed gradients for learning.
    * - :doc:`differential_solver`
      - Jacobian-based joint updates for differential pose control.
    * - :doc:`pink_solver`
@@ -70,6 +72,7 @@ For full signatures and configuration fields, see the
 
    pytorch_solver
    differential_solver
+   differentiable_ik_solver
    pink_solver
    pinocchio_solver
    opw_solver

@@ -12,7 +12,8 @@ limits) and is constructed from a :class:`SolverCfg` subclass whose
 ``init_solver()`` factory produces the runtime instance inside
 :class:`~embodichain.lab.sim.objects.RobotCfg`. A robot may carry one solver per
 control part. All solvers share a ``pytorch_kinematics`` serial chain for FK and
-Jacobian computation, with ``torch.compile`` applied to the FK path.
+Jacobian computation, with ``torch.compile`` used by the base FK path. The differentiable solver
+uses eager Tensor FK with standard autograd for its full unrolled graph.
 
 Available implementations: analytic/closed-form (``SRS``, ``OPW``, ``UR``, ``FEP``),
 numerical (``Pinocchio``, ``Pink`` with null-space posture tasks,
@@ -254,3 +255,20 @@ Seed Selection
 .. autoclass:: QposSeedSelSampler
     :members:
     :show-inheritance:
+
+Differentiable IK Solver
+-----------------------
+
+This runtime adapter shares ``compute.kinematics.solve_dls_ik`` with the training
+layer. It owns Robot binding, live TCP and limits; it does not depend on learning.
+Use ``learning.layers.DifferentiableIKLayer`` when no simulation is needed.
+
+.. currentmodule:: embodichain.lab.sim.motion.solvers
+
+.. autosummary::
+
+   DifferentiableIKSolverCfg
+   DifferentiableIKSolver
+
+.. automodule:: embodichain.lab.sim.motion.solvers.differentiable_ik_solver
+   :members:
