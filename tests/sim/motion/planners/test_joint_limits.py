@@ -404,7 +404,9 @@ def test_toppra_spawn_workers_receive_resolved_joint_limits() -> None:
     planner = ToppraPlanner.__new__(ToppraPlanner)
     planner.robot = robot
     planner.device = robot.device
-    planner.cfg = ToppraPlannerCfg(robot_uid="robot", max_workers=2, mp_context="spawn")
+    planner.cfg = ToppraPlannerCfg(
+        robot_uid="robot", backend="numpy", max_workers=2, mp_context="spawn"
+    )
     planner._pool = None
     planner._mp_context = "spawn"
     options = planner.default_plan_options()

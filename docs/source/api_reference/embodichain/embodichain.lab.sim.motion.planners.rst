@@ -144,3 +144,17 @@ Utilities
     :members:
     :undoc-members:
     :show-inheritance:
+
+Joint path retiming
+------------------
+
+Re-parameterize existing joint paths with the differentiable Warp TOPPRA
+backend. The helper preserves float32/float64 input precision, supports valid
+per-row waypoint prefixes, and returns explicit timing with isolated failures.
+
+.. autosummary::
+   :nosignatures:
+
+   embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths
+
+.. autofunction:: embodichain.lab.sim.motion.planners.toppra_planner.retime_joint_paths
