@@ -271,3 +271,9 @@ Fault injection with a 1 N right-gripper budget stops with
 `segment_validation_failed` before `simulation.pour`; the cup is untouched.
 The force budget is calibrated for these simulated checks and is not a measured
 real-device payload rating.
+
+The physical environments select the Hybrid renderer explicitly. The GLB files
+use the glTF Y-up root frame, which the native loader converts to simulation
+Z-up. In the current DexSim runtime, the NoRender mesh path does not apply that
+conversion. Disabling sensor acquisition therefore retains Hybrid; explicitly
+forcing NoRender is not qualified for this asset bundle.

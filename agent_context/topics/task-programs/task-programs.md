@@ -112,10 +112,11 @@ not by Task Program or Gym.
 | `BlocksRankingRGB-v1` | projected with measured segment validators | `extensions/embodichain_tasks/configs/tasks/manipulation/tableware/blocks_ranking_rgb/` |
 
 Marvin deployments use `task.tianji_marvin.yaml` in `repeated_pick_place`,
-`hand_over` and `tableware/pour_water`. The first two select verified tabletop
+`hand_over`, `tableware/pour_water`, `tableware/stack_blocks_two` and
+`tableware/blocks_ranking_rgb`. The first two select verified tabletop
 programs; pouring selects a 750 mm table variant that lowers the scene and
 absolute targets by 125 mm while retaining the four-segment program behavior,
-dual-arm slow policy and independent measured checkpoints. All three inherit
+dual-arm slow policy and independent measured checkpoints. All select
 the shared compact ready pose. The shared embodiment owns calibrated
 grasp-frame TCPs and gripper evidence, not task-local object IDs.
 

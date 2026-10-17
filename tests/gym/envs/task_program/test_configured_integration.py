@@ -977,7 +977,7 @@ def test_marvin_embodiment_grasp_defaults_compose_with_bimanual_task(
     assert robot.with_gripper is True
     assert len(robot.control_parts[f"{side}_arm"]) == 7
     assert len(robot.control_parts[f"{side}_eef"]) == 2
-    assert physical.config["sensor"] == []
+    assert [sensor["uid"] for sensor in physical.config["sensor"]] == ["cam_high"]
 
     profile = physical.embodiment_skill_profile
     assert profile is not None
