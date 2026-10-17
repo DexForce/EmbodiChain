@@ -40,8 +40,10 @@ Assembly and rebuilding
 -----------------------
 
 .. automethod:: embodichain.lab.sim.atomic_actions.AtomicAction.assemble_trajectory_plan
+   :no-index:
 
 .. automethod:: embodichain.lab.sim.atomic_actions.AtomicActionEngine.build_plan_from_trajectory
+   :no-index:
 
 ``build_plan_from_trajectory`` checks the restored start state, full-joint limits,
 sampled and interval speeds, and endpoint authorization before Skill assembly.
@@ -74,6 +76,7 @@ original planning path.
 
 .. autoclass:: embodichain.lab.sim.atomic_actions.primitives.pick_up.PickTrajectoryGeometry
    :members:
+   :no-index:
 
 The generic assembler supports batches sharing one stage layout and preserves
 ordered ``env_ids``. The registered real2sim source remains B=1 fixed-qpos Pick;
