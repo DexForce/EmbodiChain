@@ -4,6 +4,9 @@ The entry point trains a small state policy from scratch, with a live expert
 producer, an independent student evaluator, optional Viser/TensorBoard, and
 explicit offline-data controls. See [implementation evidence](IMPLEMENTATION.md),
 [design](REDESIGN.md), [review](REVIEW.md), and [efficiency protocol](BENCHMARK.md).
+The [v2 comparison design](BENCHMARK.md) specifies four cold-start arms, five
+paired seeds and fresh final tests; its [protocol manifest](BENCHMARK_PROTOCOL.json)
+is a design artifact, not yet an executable experiment configuration.
 Engineering smoke and training-reset qualification are separate from the final
 80% success target; inspect each run's `summary.json`.
 The [LeRobot offline experiment](LEROBOT_OFFLINE.md) records actual dataset

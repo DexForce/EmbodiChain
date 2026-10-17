@@ -1,0 +1,427 @@
+{
+  "protocol_version": 2,
+  "status": "design_only_execution_prerequisites_pending",
+  "runnable_cli_configuration": false,
+  "date_utc": "2026-10-17",
+  "reference_implementation_commit": "10a7718e",
+  "formal_execution_commit": null,
+  "authoritative_description": "BENCHMARK.md",
+  "scope": "state_based_single_cycle_franka_pick_place",
+  "task": {
+    "id": "PickPlace-Franka-v1",
+    "physics": "default",
+    "physics_hz": 240,
+    "control_hz": 30,
+    "max_episode_steps": 600,
+    "cube_edge_m": 0.05,
+    "initial_xy_randomization_halfwidth_m": 0.04,
+    "success": {
+      "minimum_lift_m": 0.05,
+      "maximum_goal_distance_m": 0.03,
+      "stable_seconds": 0.3,
+      "requires_open_gripper": true,
+      "requires_withdrawn_tcp": true,
+      "requires_table_height": true,
+      "predicate_owner": "existing_task_measured_success"
+    },
+    "controller": "reference_dls",
+    "expert": "reference_cube_symmetric_orientation",
+    "qualification": {
+      "episodes": 40,
+      "minimum_successes": 38,
+      "reuse_requires_source_and_config_hash_match": true,
+      "cost_accounting": "separate_common_campaign_cost"
+    }
+  },
+  "learner": {
+    "type": "ChunkBC",
+    "measured_feature_width": 51,
+    "history_length": 2,
+    "hidden_widths": [
+      512,
+      512
+    ],
+    "prediction_horizon": 64,
+    "execution_horizon": 16,
+    "target_width": 10,
+    "target_representation": "absolute_tcp_xyz_rotation6d_gripper",
+    "environment_action_width": 7,
+    "batch_size": 256,
+    "update_cap": 10000,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0003,
+    "weight_decay": 1e-06,
+    "gradient_norm_cap": 1.0,
+    "normalized_observation_noise": 0.01,
+    "normalization_source": "first_32_accepted_training_episodes_only",
+    "normalizer_buffers": [
+      "input_mean",
+      "input_std",
+      "target_mean",
+      "target_std"
+    ],
+    "sampling": "uniform_episode_then_uniform_valid_anchor",
+    "loss_padding": "exclude_with_reference_future_loss_mask",
+    "all_other_settings": "freeze_reference_configuration_before_formal_execution"
+  },
+  "arms": [
+    {
+      "id": "ods_online",
+      "accepted_episodes": 64,
+      "resident_episode_capacity": 32,
+      "generations": [
+        32,
+        32
+      ],
+      "delivery": "live_shared_memory",
+      "refill": true
+    },
+    {
+      "id": "ods_frozen32",
+      "accepted_episodes": 32,
+      "resident_episode_capacity": 32,
+      "generations": [
+        32
+      ],
+      "delivery": "live_shared_memory",
+      "refill": false
+    },
+    {
+      "id": "lerobot32",
+      "accepted_episodes": 32,
+      "resident_episode_capacity": 32,
+      "generations": [
+        32
+      ],
+      "delivery": "official_sdk_then_resident_cpu",
+      "refill": false
+    },
+    {
+      "id": "lerobot64",
+      "accepted_episodes": 64,
+      "resident_episode_capacity": 64,
+      "generations": [
+        32,
+        32
+      ],
+      "delivery": "official_sdk_then_resident_cpu",
+      "refill": false
+    }
+  ],
+  "refill": {
+    "request_after_update": 5000,
+    "request_after_selection_and_confirmation": true,
+    "publication_barrier_before_update": 6251,
+    "publication": "existing_per_row_replacement",
+    "record_actual_consumed_generation_mixture": true
+  },
+  "offline_acquisition": {
+    "format": "LeRobot",
+    "reader": "official_sdk_to_resident_cpu",
+    "writer": "bounded_async_accepted_episode_queue",
+    "writer_queue_episode_capacity": 2,
+    "intermediate_pt_required": false,
+    "exact_numeric_readback_required": true,
+    "images_or_video": false
+  },
+  "seeds": {
+    "learner": [
+      11001,
+      11002,
+      11003,
+      11004,
+      11005
+    ],
+    "trial_indices": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "expert_attempt": {
+      "base": 1000000,
+      "trial_stride": 1000,
+      "attempt_index_start": 0,
+      "maximum_attempts_per_trial": 320
+    },
+    "selection": {
+      "start": 210000,
+      "count": 20
+    },
+    "confirmation": {
+      "start": 310000,
+      "count": 50
+    },
+    "final_test": {
+      "start": 610000,
+      "count": 200
+    },
+    "pilot_learner": [
+      91001,
+      91002
+    ],
+    "pilot_attempt_bases": [
+      9000000,
+      9001000
+    ],
+    "sampling": [
+      41001,
+      41002,
+      41003,
+      41004,
+      41005
+    ],
+    "augmentation": [
+      51001,
+      51002,
+      51003,
+      51004,
+      51005
+    ],
+    "rng_streams_are_independent": true,
+    "historical_test_seeds": {
+      "start": 50000,
+      "count": 100,
+      "untouched": false
+    }
+  },
+  "trial_order": [
+    {
+      "trial_index": 0,
+      "arms": [
+        "ods_online",
+        "ods_frozen32",
+        "lerobot32",
+        "lerobot64"
+      ]
+    },
+    {
+      "trial_index": 1,
+      "arms": [
+        "ods_frozen32",
+        "lerobot32",
+        "lerobot64",
+        "ods_online"
+      ]
+    },
+    {
+      "trial_index": 2,
+      "arms": [
+        "lerobot32",
+        "lerobot64",
+        "ods_online",
+        "ods_frozen32"
+      ]
+    },
+    {
+      "trial_index": 3,
+      "arms": [
+        "lerobot64",
+        "ods_online",
+        "ods_frozen32",
+        "lerobot32"
+      ]
+    },
+    {
+      "trial_index": 4,
+      "arms": [
+        "ods_online",
+        "ods_frozen32",
+        "lerobot32",
+        "lerobot64"
+      ]
+    }
+  ],
+  "budget": {
+    "primary_runs": 20,
+    "timing_pilot_blocks": 2,
+    "arms_per_pilot_block": 4,
+    "initial_wall_seconds": 3600,
+    "frozen_wall_seconds": null,
+    "pilot_wall_adjustment": "300 * ceil(max(3600, 1.25 * max_pilot_complete_seconds) / 300)",
+    "stop_optimization_on": [
+      "update_cap",
+      "wall_cap",
+      "terminal_failure"
+    ],
+    "data_cap_stops_production_only": true,
+    "physical_gpus_per_run": 1,
+    "logical_cpu_affinity_count": 16,
+    "host_ram_ceiling_gib": 64,
+    "gpu_uuid": null,
+    "cpu_ids": null,
+    "torch_omp_mkl_threads": null,
+    "storage_path": null,
+    "set_cuda_visible_devices_before_process_creation": true,
+    "verify_all_owned_process_device_allocations": true,
+    "viewer_cameras_video_enabled": false,
+    "primary_runs_sequential_by_default": true
+  },
+  "evaluation": {
+    "selection_updates": [
+      0,
+      2500,
+      5000,
+      6500,
+      7500,
+      10000
+    ],
+    "fresh_evaluator_world_per_panel": true,
+    "parallel_environments_per_evaluator": 1,
+    "same_scene_order_per_panel": true,
+    "reset_policy_state_each_episode": true,
+    "confirmation": {
+      "selection_minimum_successes": 18,
+      "selection_count": 20,
+      "confirmation_minimum_successes": 45,
+      "confirmation_count": 50,
+      "maximum_distinct_candidate_attempts": 2,
+      "same_checkpoint_required": true,
+      "freeze_first_confirmed_candidate": true
+    },
+    "selection_tiebreak_order": [
+      "success_desc",
+      "lift_desc",
+      "goal_error_asc",
+      "publication_time_asc"
+    ],
+    "policies_frozen_before_final_test": [
+      "first_confirmed_candidate_if_any",
+      "best_selection_checkpoint",
+      "latest_saved_checkpoint"
+    ],
+    "deduplicate_identity_fields": [
+      "model_parameters",
+      "normalizers",
+      "execution_settings",
+      "controller_schema"
+    ],
+    "final_count": 200,
+    "final_minimum_successes": 160,
+    "final_test_can_replace_candidate": false,
+    "partial_or_late_selection_can_select_in_budget_model": false,
+    "final_test_time_accounting": "separate_verification_cost_and_actual_publication_time"
+  },
+  "comparison_categories": {
+    "system": {
+      "same_recipe_required": true,
+      "exact_payload_identity_required": false,
+      "report_payload_and_normalizer_hashes": true
+    },
+    "delivery_mechanism": {
+      "exact_payload_identity_required": true,
+      "identical_layout_masks_preprocessing_order_and_normalizers_required": true,
+      "chunk_trace_replay_implemented": false
+    },
+    "overlap_mechanism": {
+      "predetermined_consumption_publication_schedule_required": true,
+      "retirement_guard_required": true,
+      "current_serial_mode_is_matched": false
+    },
+    "refresh_effect": "whole_intervention_including_new_data_contention_and_replacement"
+  },
+  "metrics": {
+    "primary": [
+      "first_update_latency_seconds",
+      "candidate_ready_seconds",
+      "candidate_verified_on_final_test",
+      "verified_candidate_ready_seconds_or_null",
+      "best_policy_final_success",
+      "latest_policy_final_success",
+      "best_minus_latest_percentage_points",
+      "best_published_selection_auc_over_wall_budget",
+      "allocated_gpu_hours",
+      "owned_cpu_core_seconds",
+      "sampled_process_tree_pss_peak_bytes",
+      "sampled_native_vram_peak_bytes",
+      "dataset_bytes",
+      "checkpoint_log_bytes",
+      "valid_supervised_targets",
+      "unique_supervised_source_frames"
+    ],
+    "diagnostic": [
+      "batch_service_p50_p95",
+      "blocked_data_seconds",
+      "accepted_rejected_generation_throughput",
+      "generation_exposure",
+      "publication_to_consumption_age",
+      "unused_frames_at_eviction",
+      "g1_g2_teacher_state_error",
+      "copy_geometry_h2d_train_telemetry_costs"
+    ],
+    "unmeasured_diagnostic_value": null,
+    "nonattainment_reasons": [
+      "no_development_candidate",
+      "confirmation_failed",
+      "candidate_failed_final_test",
+      "budget_limit",
+      "pipeline_failure"
+    ],
+    "quality_auc": "left_constant_best_published_selection_success_over_common_H_no_lookahead",
+    "failure_penalized_time": "verified_ready_seconds_else_H_label_as_composite"
+  },
+  "statistics": {
+    "unit": "paired_trial_block",
+    "blocks": 5,
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 81721,
+    "percentile_interval": 0.95,
+    "intervals_exploratory_with_five_blocks": true,
+    "report_all_seed_results": true,
+    "final_episode_binomial_intervals_separate": true
+  },
+  "aspirational_claim_gates": {
+    "median_verified_time_reduction_fraction": 0.2,
+    "maximum_selected_quality_loss_percentage_points": 5,
+    "unqualified_ratio_requires_all_five_pairs_verified": true,
+    "sustained_latest_minimum_success_fraction": 0.8,
+    "sustained_maximum_regression_percentage_points": 5,
+    "uncertainty_must_support_claim": true,
+    "both_offline32_and_offline64_must_be_reported": true
+  },
+  "reuse_diagnostic": {
+    "jobs": [
+      1,
+      5,
+      10
+    ],
+    "label_unexecuted_values_as_projections": true,
+    "equal_durability_comparison_requires_ods_archiving": true
+  },
+  "retry": {
+    "external_infrastructure_failure_maximum_retries": 1,
+    "requires_independent_host_or_unrelated_device_failure_evidence": true,
+    "retain_and_account_all_attempts": true,
+    "pipeline_and_policy_failures_retryable": false
+  },
+  "execution_prerequisites": [
+    "protocol_freeze_loader_independent_rngs_and_configurable_splits",
+    "same_checkpoint_confirmation_fresh_evaluator_panels_deadline_safe_selection",
+    "direct_bounded_async_lerobot_writer_and_exact_readback",
+    "system_mechanism_comparability_and_all_arm_failed_run_aggregation",
+    "profile_telemetry_preprocessing_and_process_tree_cpu_gpu_accounting",
+    "focused_numerical_process_validation_and_development_reference_check",
+    "chunk_exact_context_replay_before_mechanism_claims",
+    "pilot_freeze_wall_budget_hardware_thread_counts_source_and_asset_hashes"
+  ],
+  "planning_cost_not_measurement": {
+    "training_gpu_hours_at_initial_H": 20,
+    "maximum_unique_final_policies": 60,
+    "maximum_final_episodes": 12000,
+    "assumed_seconds_per_final_episode": [
+      6,
+      12
+    ],
+    "training_plus_final_gpu_hours_range": [
+      40,
+      60
+    ],
+    "excludes": [
+      "pilots",
+      "cleanup",
+      "mechanism_diagnostics",
+      "reuse_experiments"
+    ]
+  }
+}
