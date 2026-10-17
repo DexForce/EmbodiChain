@@ -124,7 +124,15 @@ from .simulation.policies import default_simulation_settle_presets
 
 _CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
-_VALIDATOR_KINDS = frozenset({"articulation_joint_position", "object_near_target"})
+_VALIDATOR_KINDS = frozenset(
+    {
+        "articulation_joint_position",
+        "object_near_target",
+        "object_lifted",
+        "object_relative_position",
+        "object_upright",
+    }
+)
 
 
 class IntegrationFingerprintMismatch(RuntimeError):

@@ -34,6 +34,9 @@ from .schema import (
     HandOverCfg,
     InvokeCfg,
     ObjectNearTargetValidatorCfg,
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     ParallelCfg,
     PickCfg,
     PlaceCfg,
@@ -649,8 +652,35 @@ def _decode_validator(
     kind = _expect_discriminator(
         mapping,
         path=path,
-        supported=("object_near_target", "articulation_joint_position"),
+        supported=(
+            "object_near_target",
+            "articulation_joint_position",
+            "object_lifted",
+            "object_relative_position",
+            "object_upright",
+        ),
     )
+    state_validator_types = {
+        "object_lifted": (ObjectLiftedValidatorCfg, {"minimum_lift"}),
+        "object_relative_position": (
+            ObjectRelativePositionValidatorCfg,
+            {"reference", "position_offset", "position_tolerance"},
+        ),
+        "object_upright": (ObjectUprightValidatorCfg, {"maximum_tilt_degrees"}),
+    }
+    if kind in state_validator_types:
+        config_type, fields = state_validator_types[kind]
+        _validate_fields(
+            mapping,
+            allowed=frozenset({"kind", "object"} | fields),
+            required=frozenset(
+                {"kind", "object"}
+                | ({"reference"} if kind == "object_relative_position" else set())
+            ),
+            path=path,
+        )
+        return _construct(config_type, path=path, **mapping)  # type: ignore[return-value]
+
     if kind == "articulation_joint_position":
         _validate_fields(
             mapping,
@@ -1050,13 +1080,25 @@ def validate_task_program(
                     validator,
                     path=validator_path,
                 )
-                if type(validator) is ObjectNearTargetValidatorCfg:
+                if type(validator) in (
+                    ObjectNearTargetValidatorCfg,
+                    ObjectLiftedValidatorCfg,
+                    ObjectRelativePositionValidatorCfg,
+                    ObjectUprightValidatorCfg,
+                ):
                     _call_context(
                         context.validate_scene_reference,
                         validator.object,
                         role="object",
                         path=(*validator_path, "object"),
                     )
+                    if type(validator) is ObjectRelativePositionValidatorCfg:
+                        _call_context(
+                            context.validate_scene_reference,
+                            validator.reference,
+                            role="object",
+                            path=(*validator_path, "reference"),
+                        )
                 elif type(validator) is ArticulationJointPositionValidatorCfg:
                     _call_context(
                         context.validate_scene_reference,

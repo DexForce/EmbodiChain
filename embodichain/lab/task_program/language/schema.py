@@ -440,6 +440,110 @@ class ObjectNearTargetValidatorCfg:
 
 
 @configclass
+class ObjectLiftedValidatorCfg:
+    """Require a world-Z increase since the owning segment started.
+
+    Args:
+        object: Logical scene object whose observed height is measured.
+        minimum_lift: Inclusive minimum increase in meters, relative to the
+            observed pose captured before the segment starts executing.
+        kind: Fixed ``object_lifted`` discriminator.
+    """
+
+    object: str = MISSING
+    minimum_lift: float = 0.05
+    kind: str = "object_lifted"
+
+    def __post_init__(self) -> None:
+        """Validate the object and a positive finite lift threshold."""
+        _validate_identifier(self.object, field_name="object")
+        self.minimum_lift = _validate_number(
+            self.minimum_lift, field_name="minimum_lift"
+        )
+        if self.minimum_lift <= 0.0:
+            raise ValueError("minimum_lift must be positive.")
+        _validate_kind(self.kind, expected="object_lifted", field_name="kind")
+
+
+@configclass
+class ObjectRelativePositionValidatorCfg:
+    """Require an object's position near a live reference plus world-axis offsets.
+
+    Each tolerance is exclusive; ``None`` disables checking that axis.
+    At least one axis must be checked. Reference rotation does not rotate
+    ``position_offset``.
+
+    Args:
+        object: Logical scene object to validate.
+        reference: Logical scene object whose live position defines the origin.
+        position_offset: Desired XYZ displacement in world axes, in meters.
+        position_tolerance: Exclusive XYZ error bounds in meters; ``None``
+            disables the corresponding axis.
+        kind: Fixed ``object_relative_position`` discriminator.
+    """
+
+    object: str = MISSING
+    reference: str = MISSING
+    position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    position_tolerance: tuple[float | None, float | None, float | None] = (
+        0.03,
+        0.03,
+        0.03,
+    )
+    kind: str = "object_relative_position"
+
+    def __post_init__(self) -> None:
+        """Validate two object references and three per-axis bounds."""
+        _validate_identifier(self.object, field_name="object")
+        _validate_identifier(self.reference, field_name="reference")
+        for field_name in ("position_offset", "position_tolerance"):
+            values = getattr(self, field_name)
+            if type(values) not in (tuple, list) or len(values) != 3:
+                raise ValueError(f"{field_name} must contain exactly three values.")
+            normalized = tuple(
+                (
+                    None
+                    if value is None and field_name == "position_tolerance"
+                    else _validate_number(value, field_name=field_name)
+                )
+                for value in values
+            )
+            setattr(self, field_name, normalized)
+        if not any(value is not None for value in self.position_tolerance):
+            raise ValueError("position_tolerance must check at least one axis.")
+        if any(value is not None and value <= 0.0 for value in self.position_tolerance):
+            raise ValueError("position_tolerance values must be positive or None.")
+        _validate_kind(
+            self.kind, expected="object_relative_position", field_name="kind"
+        )
+
+
+@configclass
+class ObjectUprightValidatorCfg:
+    """Require the object's local Z axis to tilt less than an angle from world Z.
+
+    Args:
+        object: Logical scene object whose local Z axis is measured.
+        maximum_tilt_degrees: Exclusive maximum angle from world Z in degrees.
+        kind: Fixed ``object_upright`` discriminator.
+    """
+
+    object: str = MISSING
+    maximum_tilt_degrees: float = 45.0
+    kind: str = "object_upright"
+
+    def __post_init__(self) -> None:
+        """Validate the object and the exclusive tilt bound in degrees."""
+        _validate_identifier(self.object, field_name="object")
+        self.maximum_tilt_degrees = _validate_number(
+            self.maximum_tilt_degrees, field_name="maximum_tilt_degrees"
+        )
+        if not 0.0 < self.maximum_tilt_degrees <= 180.0:
+            raise ValueError("maximum_tilt_degrees must be in (0, 180].")
+        _validate_kind(self.kind, expected="object_upright", field_name="kind")
+
+
+@configclass
 class ArticulationJointPositionValidatorCfg:
     """Validate one articulation joint against an inclusive position interval."""
 
@@ -483,7 +587,11 @@ class ArticulationJointPositionValidatorCfg:
 
 
 ValidatorCfg: TypeAlias = (
-    ObjectNearTargetValidatorCfg | ArticulationJointPositionValidatorCfg
+    ObjectNearTargetValidatorCfg
+    | ArticulationJointPositionValidatorCfg
+    | ObjectLiftedValidatorCfg
+    | ObjectRelativePositionValidatorCfg
+    | ObjectUprightValidatorCfg
 )
 
 
@@ -629,6 +737,9 @@ _SEMANTIC_CALL_TYPES = (
 )
 _POST_POLICY_TYPES = (WaitStablePostCfg,)
 _VALIDATOR_TYPES = (
+    ObjectLiftedValidatorCfg,
+    ObjectRelativePositionValidatorCfg,
+    ObjectUprightValidatorCfg,
     ObjectNearTargetValidatorCfg,
     ArticulationJointPositionValidatorCfg,
 )

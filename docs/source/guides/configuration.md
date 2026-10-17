@@ -140,7 +140,7 @@ Example paths in the repository:
 
 | Use case | JSON example | YAML example |
 |---|---|---|
-| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/tableware/stack_blocks_two/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
+| Runnable Gym deployment | `embodichain_tasks/configs/tasks/manipulation/push_cube/env.json` | `embodichain_tasks/configs/tasks/manipulation/tableware/pour_water/task.cobotmagic.yaml` |
 | RL training | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.json` | `embodichain_tasks/configs/tasks/classic_control/cart_pole/agents/ppo.yaml` |
 
 When a training config references a gym config (via `trainer.gym_config`), the nested path may also use any supported extension.

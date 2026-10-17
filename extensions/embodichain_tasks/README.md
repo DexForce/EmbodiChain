@@ -39,8 +39,8 @@ physical environment variant an `environment_id` and places the runnable `id`
 plus component selections in `task.<embodiment>.yaml`.
 A Gym deployment of any kind may select reusable `environment.component` and
 `embodiment.component` files instead of repeating environment, robot, sensor,
-and scene fields. A physical-only embodiment may omit `skill_profile`; this is
-used by the CobotMagic tableware handwritten demos. Standalone
+and scene fields. A physical-only embodiment may omit `skill_profile` when its
+deployments do not use Task Program. Standalone
 `scene.component` and inline Gym configs remain valid, but component-owned
 fields cannot also be declared inline in the same file.
 
