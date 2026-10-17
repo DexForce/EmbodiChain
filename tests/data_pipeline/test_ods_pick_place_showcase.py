@@ -179,17 +179,24 @@ def test_residual_arm_commands_preserve_measured_pose_and_bound_controller_lead(
     torch.testing.assert_close(model.action(obs, None), restored.action(obs, None))
 
 
-def test_failed_producer_is_not_retried_as_an_empty_sampling_window() -> None:
+@pytest.mark.parametrize("with_history", [False, True])
+def test_failed_producer_is_not_retried_as_an_empty_sampling_window(
+    with_history: bool,
+) -> None:
     from types import SimpleNamespace
     from examples.data_pipeline.ods_pick_place_showcase import _sample
     from embodichain.data_pipeline.engine.data import OnlineDataEngineState
 
     error = RuntimeError("No unlocked valid chunk: terminal producer failure")
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise error
 
-    source = SimpleNamespace(state=OnlineDataEngineState.FAILED, sample_batch=fail)
+    source = SimpleNamespace(
+        state=OnlineDataEngineState.FAILED,
+        sample_batch=fail,
+        sample_batch_with_history=fail,
+    )
     with pytest.raises(RuntimeError) as caught:
-        _sample(source, 2, 32)
+        _sample(source, 2, 32, with_history=with_history)
     assert caught.value is error
