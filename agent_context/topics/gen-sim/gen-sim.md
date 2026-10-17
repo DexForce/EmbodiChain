@@ -10,11 +10,13 @@ Paths below are relative to `embodichain/gen_sim/` unless qualified.
 
 | Request | Owner |
 |---|---|
-| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-preview`, `simready` |
+| Unified command dispatch | `embodichain/cli/main.py`: `scene-engine`, `scene-randomization`, `preview-scene`, `simready` |
 | Generate/edit CLI modes | `scene_engine/cli/start.py` |
 | Image → scene | `scene_engine/pipeline/generate.py`: `generate_scene_from_image()` |
 | Edit portable scene | `scene_engine/pipeline/edit.py`: `edit_scene()` |
 | Portable scene contract | `scene_engine/pipeline/utils/scene_exporter.py`, `scene_importer.py` |
+| Grouped layouts from an existing export | `scene_engine/cli/randomization.py`, `scene_engine/randomization/generation.py` |
+| Baseline cache, saved runs and pose playback | `scene_engine/randomization/baseline.py`, `persistence.py`, `loading.py` |
 | Whole-scene USD package | `scene_engine/pipeline/utils/scene_usd.py`: `build_scene_usd()`, direct preview loading; `usd_scene.py`: entity index |
 | General asset ingest | `simready_pipeline/pipeline/ingest.py`: `ingest_one_asset()` |
 | Web app configuration | `gradio_ui/gradio_app.py`, `app_env.py` |
@@ -66,6 +68,16 @@ GenSim owns scene understanding, asset generation, VLM orientation, its editable
 scene graph and file formats. General services consume explicit UID/geometry
 inputs rather than `SceneObject`, image masks or generation output directories.
 
+Grouped randomization consumes one rigid-GLB table export and its explicit
+support graph. The adapter caches group geometry and relative poses, expands
+shared XY proposals from that baseline, and preserves exported collision
+configuration in returned fragments. Saving owns policy/candidate provenance
+and publishes the completion manifest last; playback verifies the unchanged
+source and baseline, then applies absolute poses without physics steps. These
+checks establish group AABB bounds and clearances, not physical or task success.
+See the [public API supplement](../../../docs/source/api_reference/public_api.rst)
+for policy and playback examples.
+
 ## Runtime and extension boundaries
 
 Keep parser capabilities idempotent so recorded stages support resume.
@@ -84,6 +96,7 @@ environment files.
 | Change | Tests |
 |---|---|
 | Portable scene/pose/overwrite contract | `tests/gen_sim/scene_engine/test_scene_core_and_export.py` |
+| Grouped layout generation, provenance and playback | `tests/gen_sim/scene_engine/test_randomization_*.py` |
 | Edit plans and graph | `tests/gen_sim/scene_engine/test_scene_edit.py`, `test_scene_edit_plan.py`, `test_scene_graph.py` |
 | Ingest formats and metadata | `tests/gen_sim/simready_pipeline/` |
 | UI roots/auth/session workflow | `tests/gen_sim/gradio_ui/` |
