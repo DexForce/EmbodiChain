@@ -14,4 +14,20 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-from .cfg import DexforceW1Cfg
+"""Compatibility imports for :mod:`embodichain.lab.sim.scene.expansion`."""
+
+from __future__ import annotations
+
+from embodichain.lab.sim.scene.expansion import (
+    SceneExpansionCfg,
+    ScenePoseChange,
+    SceneVariant,
+    FixedSceneCandidateSource,
+)
+
+__all__ = [
+    "SceneExpansionCfg",
+    "ScenePoseChange",
+    "SceneVariant",
+    "FixedSceneCandidateSource",
+]

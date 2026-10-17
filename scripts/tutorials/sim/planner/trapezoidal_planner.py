@@ -50,7 +50,7 @@ from embodichain.lab.sim.motion.planners import (
 from embodichain.lab.sim.motion.planners.trapezoidal_planner import (
     _plan_linear_profiles,
 )
-from embodichain.lab.sim.robots import CobotMagicCfg
+from embodichain_robots import CobotMagicCfg
 from embodichain.lab.sim.cfg import MarkerCfg, physics_cfg_for_backend
 from embodichain.lab.visualization import visualization_cfg_from_args
 from embodichain.utils.math import euler_xyz_from_quat

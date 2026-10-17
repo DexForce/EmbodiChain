@@ -14,12 +14,10 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Pick up a cube from the side, then rotate it with the Pour action."""
+"""Standalone compatibility entry for the pour atomic example."""
 
 from __future__ import annotations
 
-import argparse
-import math
 import sys
 from pathlib import Path
 
@@ -27,198 +25,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import torch
-
-from embodichain.lab.sim.atomic_actions import (
-    ControlPartCommandProfile,
-    create_simulation_atomic_action_engine,
-    GraspGoal,
-    MotionPolicy,
-    PickUpOptions,
-    PourGoal,
-    PourOptions,
-)
-from embodichain.lab.sim.motion.planners import (
-    TrapezoidalPlanOptions,
-    ToppraPlanOptions,
-    TrajectorySampleMethod,
-)
-from embodichain.utils import logger
-from scripts.tutorials.atomic_action.axis_align import (
-    create_align_object,
-    create_axis_align_semantics,
-)
-from scripts.tutorials.atomic_action.tutorial_utils import (
-    add_ur5_gripper_robot,
-    create_parallel_jaw_grasp_pose_generator,
-    create_toppra_motion_generator,
-    create_tutorial_argument_parser,
-    create_tutorial_simulation,
-    draw_axis_marker,
-    get_hand_open_close_qpos,
-    initialize_pre_pick_robot_pose,
-    make_clear_dynamics_callback,
-    prepare_tutorial_scene,
-    replay_trajectory,
-    run_tutorial,
-    TutorialPlanner,
-)
-
-POUR_INTERNAL_AXIS = (1.0, 0.0, 0.0)
-APPROACH_DIRECTION = (-0.707, 0, -0.707)
-PICK_SAMPLE_INTERVAL = 120
-POUR_SAMPLE_INTERVAL = 80
-HAND_INTERP_STEPS = 12
-POST_TRAJECTORY_STEPS = 240
-PICK_MOTION_SAMPLE_COUNT = PICK_SAMPLE_INTERVAL - HAND_INTERP_STEPS
-OBJ_POSITION = (-0.5, 0.0, 0.0)
-RECORD_LOOK_AT = (
-    (-1.5, 0.2, 1.2),
-    (-0.4, 0.0, 0.4),
-    (0.0, 0.0, 1.0),
-)
-
-
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments for the Pour tutorial."""
-    parser = create_tutorial_argument_parser(
-        "Pick up a cube horizontally, then pour it about a local axis.",
-        features=("grasp_sampling", "visualize_axes"),
-    )
-    parser.add_argument(
-        "--rotate_angle",
-        type=float,
-        default=math.pi / 4.0,
-        help="Signed pouring rotation in radians.",
-    )
-    return parser.parse_args()
-
-
-def _create_pick_motion_policy(
-    planner: TutorialPlanner = "trapezoidal",
-) -> MotionPolicy:
-    """Create a planner-specific PickUp policy with a fixed motion sample count."""
-    if planner == "toppra":
-        plan_opts = ToppraPlanOptions(
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=PICK_MOTION_SAMPLE_COUNT,
-        )
-    elif planner == "trapezoidal":
-        plan_opts = TrapezoidalPlanOptions(
-            sample_method=TrajectorySampleMethod.QUANTITY,
-            sample_interval=PICK_MOTION_SAMPLE_COUNT,
-        )
-    elif planner == "curobo":
-        # cuRobo owns its native sampling and does not use the joint-space
-        # sample-count options above.
-        plan_opts = None
-    else:
-        raise ValueError(f"Unsupported tutorial planner {planner!r}.")
-    return MotionPolicy(
-        strategy="motion_gen",
-        sample_count=PICK_SAMPLE_INTERVAL,
-        plan_opts=plan_opts,
-    )
-
-
-def main() -> None:
-    """Plan and replay PickUp followed by Pour."""
-    args = parse_arguments()
-    sim = create_tutorial_simulation(args)
-    robot = add_ur5_gripper_robot(sim, tcp_z=0.15)
-    obj = create_align_object(
-        sim,
-        obj_position=OBJ_POSITION,
-    )
-    hand_open, hand_close = get_hand_open_close_qpos(robot)
-    initialize_pre_pick_robot_pose(robot, obj, hand_open)
-    planner = getattr(args, "planner", "trapezoidal")
-    motion_gen = create_toppra_motion_generator(robot, planner=planner)
-
-    engine = create_simulation_atomic_action_engine(
-        motion_generator=motion_gen,
-        scene_entities=(obj,),
-        control_profiles={
-            "eef": ControlPartCommandProfile.joint_positions(
-                open=hand_open,
-                grasp=hand_close,
-            )
-        },
-        grasp_pose_generators={
-            "eef": create_parallel_jaw_grasp_pose_generator(
-                n_sample=args.n_sample,
-                force_refresh=args.force_reannotate,
-            )
-        },
-    )
-    semantics = create_axis_align_semantics(obj, POUR_INTERNAL_AXIS)
-    if not args.no_vis_eef_axis:
-        draw_axis_marker(sim, "pour_object_axis", obj.get_local_pose(to_matrix=True))
-    wait_for_user = prepare_tutorial_scene(
-        sim,
-        args,
-        "Inspect the cube, then press Enter to plan PickUp followed by Pour...",
-    )
-
-    control_parts = {"primary": {"motion": "arm", "grasp": "eef"}}
-    compiled = engine.compile(
-        (
-            engine.make_invocation(
-                "pick_up",
-                GraspGoal(semantics),
-                control_parts=control_parts,
-                motion_policy=_create_pick_motion_policy(planner),
-                skill_options=PickUpOptions(
-                    approach_direction=torch.tensor(
-                        APPROACH_DIRECTION,
-                        dtype=torch.float32,
-                        device=sim.device,
-                    ),
-                    pre_grasp_distance=0.15,
-                    lift_height=0.16,
-                    hand_interp_steps=HAND_INTERP_STEPS,
-                ),
-            ),
-            engine.make_invocation(
-                "pour",
-                PourGoal(),
-                control_parts=control_parts,
-                motion_policy=MotionPolicy(
-                    strategy="motion_gen",
-                    sample_count=POUR_SAMPLE_INTERVAL,
-                ),
-                skill_options=PourOptions(rotate_angle=args.rotate_angle),
-            ),
-        ),
-        engine.initial_context(control_dt=sim.sim_config.physics_dt),
-    )
-    if not compiled.plan_success.all():
-        failed = [
-            f"{plan.skill_id}: {plan.diagnostics.messages or ('planning failed',)}"
-            for plan in compiled.action_plans
-            if not plan.plan_success.all()
-        ]
-        logger.log_warning(
-            "Failed to plan PickUp followed by Pour: " + "; ".join(failed)
-        )
-        return
-
-    if wait_for_user:
-        input("Press Enter to replay the PickUp + Pour trajectory...")
-    clear_after_step = compiled.segment(0, "lift").start
-    replay_trajectory(
-        sim,
-        robot,
-        compiled.trajectory,
-        args,
-        video_prefix="pour_cube_auto_play",
-        hold_steps=POST_TRAJECTORY_STEPS,
-        on_trajectory_step=make_clear_dynamics_callback(obj, clear_after_step),
-        look_at=RECORD_LOOK_AT,
-    )
-    if wait_for_user:
-        input("Press Enter to exit the simulation...")
-
+from embodichain.lab.scripts._atomic_action import pour as _implementation
 
 if __name__ == "__main__":
-    run_tutorial(main)
+    _implementation.run_tutorial(_implementation.main)
+else:
+    # Keep imports and monkeypatches on the shared implementation module.
+    sys.modules[__name__] = _implementation

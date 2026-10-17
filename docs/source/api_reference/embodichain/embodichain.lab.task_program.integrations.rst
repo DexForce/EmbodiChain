@@ -57,6 +57,11 @@ The provider-independent language and compiler live in
 registration, and simulation assembly. Gym stepping remains in
 :mod:`embodichain.lab.gym.envs.task_program`.
 
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.lab.task_program.integrations.scene_expansion
+
 .. autoclass:: TaskProgramEnvironmentAdapter
    :members:
 

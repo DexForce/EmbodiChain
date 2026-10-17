@@ -12,7 +12,8 @@ for backend in default newton; do
 done
 ```
 
-The default workload uses 4096 environments, 24 steps per rollout, 3 warmup updates,
+The default workload uses the selected task's PPO environment count (2048 for
+G1 Default, 4096 for G1 Newton), 24 steps per rollout, 3 warmup updates,
 and 10 measured updates. Use `--envs 32 --warmup 1 --updates 3` for a smoke run.
 `--task-dir` selects another G1 configuration directory; `--seed` and `--cpu-threads`
 control the training seed and PyTorch CPU thread count.

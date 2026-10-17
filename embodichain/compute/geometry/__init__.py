@@ -14,8 +14,34 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Geometric queries independent of simulation scene ownership."""
+"""Lazy tensor geometry kernels; private Warp consumers remain independent."""
 
 from __future__ import annotations
 
-__all__ = []
+from importlib import import_module
+from typing import Any
+
+__all__ = [
+    "aabb_overlap_depth",
+    "aabb_containment_violation",
+    "group_height_offset",
+    "transform_aabbs",
+    "triangle_geometry",
+]
+
+_EXPORT_MODULES = {
+    "aabb_overlap_depth": "aabb",
+    "aabb_containment_violation": "aabb",
+    "group_height_offset": "aabb",
+    "transform_aabbs": "transforms",
+    "triangle_geometry": "mesh",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORT_MODULES.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{module}"), name)
+    globals()[name] = value
+    return value

@@ -33,6 +33,19 @@ Dense allocations obey `max_voxel_count`, and representation changes require
 cache-version invalidation. Compatibility-only options must not silently regain
 old representation-selection behavior; inspect their config definitions.
 
+Generated robot YAML omits self-collision metadata. Both the motion planner
+and the exact trajectory collision checker load it through
+`CuroboPlanner._load_runtime_robot_config()`, which supplies cuRobo 0.8's
+required empty `self_collision_buffer` and `self_collision_ignore` mappings
+in memory. Loading the unpatched YAML path in either consumer can dereference
+`None` while building spheres. The cached YAML remains unchanged. Exact sample
+validation also disables self-collision, makes each batched joint sample
+contiguous, and passes `KinematicsState` to cuRobo's public world cost rather
+than its incompatible 0.8 `validate()` wrapper. Joint-limit and world-collision
+costs must both be zero for a sample to pass. Reuse an existing backend with
+the same control part and batch size for validation, including a backend
+created for EEF planning; only a cold validation call creates a joint backend.
+
 Shared pose conventions belong to [simulation](../simulation-system/simulation-system.md).
 cuRobo goal/scene adapters alone convert `xyzw` to native `wxyz`, exactly once;
 homogeneous dynamic-pose matrices need no quaternion conversion until then.

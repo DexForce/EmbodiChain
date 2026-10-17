@@ -62,7 +62,12 @@ Other resource exclusions and environment selections remain honored.
 
 `destroy(exit_process=False)` queues native cleanup. Flush with
 `SimulationManager.flush_cleanup_queue()` after caller scene/object locals
-unwind. `_deferred_destroy()` stops recording/window rendering, calls
+unwind. Constructor failure before World allocation removes only the failed
+manager's registry entry; after allocation it queues that manager's cleanup.
+Teardown state exists before native allocation, and the manager owns the Viser
+runtime before starting it so partial startup can be stopped. Registry removal
+checks object identity and leaves other live managers intact.
+`_deferred_destroy()` stops recording/window rendering, calls
 `PhysicsBackend.prepare_for_teardown()`, and runs GC while parents still live.
 Newton synchronizes its resolved Warp CUDA device and releases render-link
 views before Spawn closes skeletons. Cameras and result-scoped facade/batch
