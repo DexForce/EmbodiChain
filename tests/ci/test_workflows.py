@@ -65,6 +65,37 @@ def test_manual_docs_build_trusts_checkout_before_architecture_generation() -> N
     )
 
 
+@pytest.mark.parametrize("job_name", ["deploy-from-artifact", "deploy-manual-build"])
+def test_pages_paths_merge_under_deployment_lock_and_verify_versions(
+    job_name: str,
+) -> None:
+    workflow = _load_workflow("docs-pages.yml")
+    assert "'github-pages'" in workflow["concurrency"]["group"]
+    assert workflow["concurrency"]["cancel-in-progress"] == "false"
+    steps = workflow["jobs"][job_name]["steps"]
+    names = [step.get("name", "") for step in steps]
+    prepare = names.index("Preserve currently published versions")
+    upload = names.index("Upload Pages artifact")
+    publish = names.index("Deploy GitHub Pages")
+    verify = names.index("Verify deployed artifact")
+    assert prepare < upload < publish < verify
+    assert "prepare_docs_deployment.py prepare" in steps[prepare]["run"]
+    assert "prepare_docs_deployment.py verify" in steps[verify]["run"]
+    assert steps[upload]["with"]["retention-days"] == "90"
+    checkout = next(
+        step for step in steps if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}"
+
+
+def test_release_dispatch_reports_child_without_timing_out_while_queued() -> None:
+    steps = _load_workflow("docs-pages.yml")["jobs"]["redispatch-release"]["steps"]
+    command = steps[0]["run"]
+    assert "gh workflow run docs-pages.yml" in command
+    assert "gh run watch" not in command
+    assert "GITHUB_STEP_SUMMARY" in command
+
+
 def test_test_package_install_uses_explicit_public_index_and_private_sources() -> None:
     steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
     install = next(step for step in steps if step.get("name") == "Install test package")
