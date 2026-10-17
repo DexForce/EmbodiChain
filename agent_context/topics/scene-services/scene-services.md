@@ -22,8 +22,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
-`scene.expansion` namespace; the old `sim.scene_expansion` imports re-export the
-same contracts. `compute.geometry` takes Torch tensors, never entity UIDs,
+`scene.expansion` namespace. `compute.geometry` takes Torch tensors, never entity UIDs,
 polygon objects, simulation or GenSim models. Scene CPU strategies own support
 selection, polygon search, greedy packing and SciPy SLSQP optimization.
 

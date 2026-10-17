@@ -21,7 +21,7 @@ from dataclasses import MISSING
 
 import pytest
 
-from embodichain.lab.sim.scene_expansion import (
+from embodichain.lab.sim.scene.expansion import (
     FixedSceneCandidateSource,
     SceneExpansionCfg,
     ScenePoseChange,

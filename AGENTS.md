@@ -91,6 +91,12 @@ not switch it. Use a separate environment config for each backend.
 
 ## Code and validation
 
+- When task analysis identifies algorithmic complexity, data layout, batching,
+  memory use or synchronization costs as material to the implementation,
+  design and implement from a systems and HPC engineering perspective using
+  [implement-performance](.agents/skills/implement-performance/SKILL.md).
+  Preserve numerical correctness and public contracts; validate material
+  performance claims with representative measurements using `/benchmark`.
 - Run **`black==26.3.1`**, using `black .`, before every commit.
 - Use `/pre-commit-check` for proportional checks. New production fixes/features
   need focused tests that prove their behavior; use `/add-test` for project patterns.
@@ -141,6 +147,7 @@ Keep branches and PRs focused on one logical change and use the PR template.
 | `/add-functor` | Add observation, reward, event, action, dataset or randomization operation |
 | `/add-test` | Add focused tests with project conventions |
 | `/benchmark` | Write a benchmark using project patterns |
+| `/implement-performance` | Design and implement performance-sensitive computation |
 | `/update-api-docs` | Synchronize public API documentation |
 | `/pre-commit-check` | Validate readiness proportionally |
 | `/review-pr` | Review a change for evidence-backed regressions |

@@ -4,9 +4,8 @@ Scene expansion proposes changes before a new Task Program execution. The core
 is independent of Task Program, GenSim and Gym; injected host callbacks own the
 actual scene preparation and measured task evidence. General composition,
 layout and physical state services are owned by
-[scene services](../scene-services/scene-services.md); legacy
-`sim.scene_expansion` imports re-export the canonical `sim.scene.expansion`
-contracts.
+[scene services](../scene-services/scene-services.md). Proposal contracts are
+provided by `sim.scene.expansion`.
 
 ## Entry points
 
@@ -90,7 +89,7 @@ integrations and GenSim asset/model dependencies in GenSim. Extend the host
 boundary when adding physical preparation, preserving Gym lifecycle ownership.
 
 ```bash
-pytest -q tests/sim/scene_expansion
+pytest -q tests/sim/scene/expansion
 pytest -q tests/gym/envs/task_program/test_scene_expansion.py
 python docs/scripts/check_api_docs.py
 ```

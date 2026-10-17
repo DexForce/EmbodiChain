@@ -21,7 +21,7 @@ import math
 
 import pytest
 
-from embodichain.lab.sim.scene_expansion import ScenePoseChange, SceneVariant
+from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
 
 
 def _pose(x: float = 0.0) -> list[list[float]]:

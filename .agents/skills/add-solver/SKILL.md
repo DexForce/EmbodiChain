@@ -25,7 +25,7 @@ the conventions below.
 | # | Artifact | Path |
 |---|----------|------|
 | 1 | Solver module | `embodichain/lab/sim/motion/solvers/<name>_solver.py` |
-| 2 | (GPU/Warp only) Warp kernel | `embodichain/utils/warp/kinematics/<name>_solver.py` |
+| 2 | (GPU/Warp only) Warp kernel | `embodichain/compute/kinematics/_warp/<name>.py` |
 | 3 | Sphinx docs page | `docs/source/overview/sim/motion/solvers/<name>_solver.md` |
 | 4 | Unit test | `tests/sim/motion/solvers/test_<name>_solver.py` |
 | 5 | Benchmark entry | extend `scripts/benchmark/robotics/kinematic_solver/run_benchmark.py` |
@@ -50,6 +50,10 @@ Ask the user (only what is not already stated):
 4. **Backend** — pure PyTorch, NVIDIA Warp GPU kernel, or both.
 5. **URDF / DH / OPW parameter source** — link or file the parameters come
    from (cite it in the docs, as the UR solver cites `ur-analytic-ik`).
+
+When task analysis identifies material computation, memory or synchronization
+costs, use [implement-performance](../implement-performance/SKILL.md) to choose
+the algorithm, backend and batching strategy before writing the solver.
 
 ### 2. Write the Solver Module
 
@@ -151,11 +155,12 @@ __all__ = ["FooSolverCfg", "FooSolver"]
 
 For analytic solvers evaluated in batch on the GPU (UR, OPW, SRS), put the
 `@wp.kernel` / `@wp.func` / `@wp.struct` definitions in
-`embodichain/utils/warp/kinematics/<name>_solver.py` — **not** in the solver
+`embodichain/compute/kinematics/_warp/<name>.py` — **not** in the solver
 module. The solver module imports the kernel and any param struct from there
-and launches it with `wp.launch`.
+and launches it with `wp.launch`. Compute kernels cannot import simulation
+modules; `utils/warp/kinematics/` contains compatibility aliases only.
 
-Conventions (see `ur_solver.py` under `utils/warp/kinematics/`):
+Conventions (see `ur.py` under `compute/kinematics/_warp/`):
 
 - Apache header + `from __future__ import annotations`.
 - Define a `@wp.struct` for solver parameters (e.g. `URParam`) and pass it
@@ -163,6 +168,10 @@ Conventions (see `ur_solver.py` under `utils/warp/kinematics/`):
 - One kernel thread per target pose (`dim=(n_sample,)`).
 - Write candidate solutions and validity flags into preallocated Warp arrays,
   then convert back to torch with `wp.to_torch(...)`.
+- Keep reusable storage in the stateful solver; preserve output ownership and
+  Torch/Warp stream ordering. Read the
+  [IK buffer lifecycle](../../../agent_context/topics/ik-solvers/solver-details.md#analytical-buffers-and-selection)
+  before adapting the existing buffer helper.
 - Use `standardize_device_string(self.device)` from
   `embodichain.utils.device_utils` to get the Warp device string.
 
@@ -246,9 +255,9 @@ create a separate benchmark file — the kinematic-solver benchmark is unified):
    and update `_normalize_selected_solvers` / the `--solvers` argparse choices.
 3. Write `_init_<name>_solver(device) -> <Name>Solver` and
    `_timed_<name>_ik_call(solver, fk_xpos, qpos_seed)` helpers, mirroring
-   `_init_ur_solver` / `_timed_ur_ik_call` (3-iteration timing skipping the
-   first run, `_sync_cuda()`, `_reset_peak_gpu_memory()`,
-   `_memory_snapshot()`).
+   `_init_ur_solver` / `_timed_ur_ik_call`. Follow the `benchmark` skill for
+   warmup, repeated synchronized timing and separate memory measurement;
+   copying an existing helper does not establish measurement validity.
 4. Write `benchmark_<name>_solver() -> (perf_rows, metric_rows)` mirroring
    `benchmark_ur_solver`: iterate `SAMPLE_SIZES`, run CPU (+ optional CUDA),
    verify accuracy via `get_pose_err`, and append rows for both the
@@ -266,10 +275,7 @@ to the `benchmark` skill (`.agents/skills/benchmark/SKILL.md`).
 
 ```bash
 conda activate embodichain
-black embodichain/lab/sim/motion/solvers/<name>_solver.py
-black embodichain/utils/warp/kinematics/<name>_solver.py   # if added
-black tests/sim/motion/solvers/test_<name>_solver.py
-black scripts/benchmark/robotics/kinematic_solver/run_benchmark.py
+black .
 ```
 
 Run the unit test (CPU class is enough for a quick check):
@@ -307,7 +313,7 @@ Finally, run the `/pre-commit-check` skill to catch all CI violations locally.
 | Mistake | Fix |
 |---------|-----|
 | Reimplementing FK / TCP / joint limits in the solver | Reuse `BaseSolver.get_fk`, `set_tcp`, `set_qpos_limits` |
-| Putting the Warp kernel inside the solver module | Put `@wp.kernel`/`@wp.struct` in `embodichain/utils/warp/kinematics/<name>_solver.py` and import it |
+| Putting the Warp kernel inside the solver module | Put `@wp.kernel`/`@wp.struct` in `embodichain/compute/kinematics/_warp/<name>.py` and import it |
 | Not exporting the Cfg/Solver from `__init__.py` | Add the import line so `from embodichain.lab.sim.motion.solvers import FooSolverCfg` works |
 | Forgetting the docs toctree entry | Add the `.md` to `docs/source/overview/sim/motion/solvers/index.rst` |
 | Test only checks happy-path IK | Must verify FK↔IK round-trip equality AND an unreachable-pose returns `False` |
@@ -320,12 +326,12 @@ Finally, run the `/pre-commit-check` skill to catch all CI violations locally.
 | Action | Command / Path |
 |--------|----------------|
 | Reference solver | `embodichain/lab/sim/motion/solvers/ur_solver.py` |
-| Reference Warp kernel | `embodichain/utils/warp/kinematics/ur_solver.py` |
+| Reference Warp kernel | `embodichain/compute/kinematics/_warp/ur.py` |
 | Reference docs | `docs/source/overview/sim/motion/solvers/ur_solver.md` |
 | Reference test | `tests/sim/motion/solvers/test_ur_solver.py` |
 | Benchmark file | `scripts/benchmark/robotics/kinematic_solver/run_benchmark.py` |
 | Python env | `conda activate embodichain` |
 | Run test (CPU) | `pytest tests/sim/motion/solvers/test_<name>_solver.py::TestFooSolver -v` |
 | Run benchmark | `python -m scripts.benchmark.robotics.kinematic_solver.run_benchmark -s <name>` |
-| Format | `black <changed files>` |
+| Format | `black .` |
 | Pre-commit | `/pre-commit-check` |
