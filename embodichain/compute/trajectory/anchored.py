@@ -185,6 +185,38 @@ def resample_with_anchors(
         raise ValueError(
             "Expected finite (N>=2,D) positions and a strictly increasing zero-based clock"
         )
+    mapping = _prepare_time_map(
+        t,
+        control_dt,
+        anchor_indices,
+        max_anchor_delay=max_anchor_delay,
+        max_samples=max_samples,
+    )
+    result = q[mapping.left_indices] + mapping.weights[:, None] * (
+        q[mapping.right_indices] - q[mapping.left_indices]
+    )
+    result = result.astype(q.dtype)
+    result[mapping.anchor_execution_indices] = q[mapping.anchor_source_indices]
+    return result, mapping
+
+
+def _prepare_time_map(
+    t: np.ndarray,
+    control_dt: float,
+    anchor_indices: Sequence[int],
+    *,
+    max_anchor_delay: float | None,
+    max_samples: int,
+) -> AnchoredTimeMap:
+    """Build the common float64 clock without evaluating joint positions."""
+    if (
+        t.ndim != 1
+        or len(t) < 2
+        or not np.isfinite(t).all()
+        or t[0] != 0
+        or np.any(np.diff(t) <= 0)
+    ):
+        raise ValueError("Expected a strictly increasing zero-based source clock")
     if (
         type(control_dt) not in (float, int)
         or not math.isfinite(control_dt)
@@ -197,9 +229,9 @@ def resample_with_anchors(
     if type(delay) not in (float, int) or not math.isfinite(delay) or delay < 0:
         raise ValueError("max_anchor_delay must be finite and nonnegative")
     raw_anchors = tuple(anchor_indices)
-    if any(type(i) is not int or not 0 <= i < len(q) for i in raw_anchors):
+    if any(type(i) is not int or not 0 <= i < len(t) for i in raw_anchors):
         raise ValueError("Anchors must be in-range integer sample indices")
-    anchors = np.array(sorted({0, len(q) - 1, *raw_anchors}), dtype=np.int64)
+    anchors = np.array(sorted({0, len(t) - 1, *raw_anchors}), dtype=np.int64)
     ticks = []
     for source_index in anchors:
         ratio = float(t[source_index] / control_dt)
@@ -227,14 +259,11 @@ def resample_with_anchors(
     upper = np.searchsorted(t, query, side="right").clip(1, len(t) - 1)
     lower = upper - 1
     weights = ((query - t[lower]) / (t[upper] - t[lower])).clip(0.0, 1.0)
-    result = q[lower] + weights[:, None] * (q[upper] - q[lower])
-    result = result.astype(q.dtype)
-    # Restore anchors by assignment, not floating interpolation.
-    result[target_anchors] = q[anchors]
+    # Exact source samples are represented as copies, independent of backend.
     query[target_anchors] = t[anchors]
     lower[target_anchors] = anchors
     upper[target_anchors] = anchors
     weights[target_anchors] = 0.0
-    return result, AnchoredTimeMap(
+    return AnchoredTimeMap(
         t, mapped, grid, query, lower, upper, weights, anchors, target_anchors
     )

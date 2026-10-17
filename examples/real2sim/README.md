@@ -63,6 +63,37 @@ The template source revision is the normalization content digest. The host's
 `SourceContext` must match source ID, unit ID, revision and control period;
 candidate IDs are still allocated only by the existing coordinator/session.
 
+## Batched anchored resampling
+
+The compute layer also accepts float32/float64 `(B,N_max,D)` tensors with
+independent source lengths, clocks and anchor counts. Prepare a mapping once
+when multiple candidate paths share the same timing:
+
+```python
+from embodichain.compute.trajectory import resample_with_anchors_batched
+
+sampled, plan = resample_with_anchors_batched(
+    qpos, source_times, 0.01, anchor_indices,
+    source_lengths=source_lengths, anchor_counts=anchor_counts,
+    backend="warp",
+)
+sampled_variant = plan.apply(qpos_variant, backend="warp")
+valid_samples = plan.valid_mask
+```
+
+The host prepares float64 time maps using the single-path algorithm; evaluation
+preserves input dtype/device and runs on the active Torch CUDA stream. Torch is
+the default backend; explicit Warp failures propagate. Source/anchor padding is
+ignored, output padding holds the final valid state, and valid counts/masks must
+be used for evaluation and persistence. Warp qpos autograd is unsupported; use
+Torch for gradient-bearing inputs. Neither API computes task acceptance.
+The registered Task Program source remains B=1.
+
+Run `python -m scripts.benchmark.trajectory.anchored_batch` to compare NumPy,
+Torch CPU/CUDA and Warp CPU/CUDA. The report separates prepared evaluation from
+mapping preparation and offline input/output transfer, alongside numerical
+agreement, exact anchors and memory measurements.
+
 ## One optional real recording
 
 Run from a checkout with the normal EmbodiChain dependencies installed:

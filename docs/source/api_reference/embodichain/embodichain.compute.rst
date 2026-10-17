@@ -46,6 +46,9 @@ means trajectory deformation.
 
    differentiate_positions
    resample_in_time
+   AnchoredBatchPlan
+   prepare_anchored_batch
+   resample_with_anchors_batched
    interpolate_with_distance
    interpolate_with_nums
    resample_with_distance
@@ -63,6 +66,14 @@ or motion limits. ``resample_in_time`` preserves endpoints and total duration
 while sampling the original time profile; callers must recompute derivatives
 after changing samples or timing.
 
+Anchored batch resampling accepts ragged ``(B,N_max,D)`` paths with explicit
+source lengths and anchor counts. ``prepare_anchored_batch`` computes auditable
+float64 clocks on the CPU and prepares reusable device maps. Applying a plan
+uses Torch by default or explicit Warp CPU/CUDA kernels, preserves float32 or
+float64 qpos, and copies event samples exactly. Shorter outputs contain terminal
+holds; use the plan's valid counts/mask to exclude padding. Mapping preparation
+and interpolation do not check collisions or change the simulator clock.
+
 Implementation modules
 ----------------------
 
@@ -76,6 +87,9 @@ Implementation modules
    :members:
 
 .. automodule:: embodichain.compute.trajectory.warping
+   :members:
+
+.. automodule:: embodichain.compute.trajectory.anchored_batch
    :members:
 
 Kinematics API
