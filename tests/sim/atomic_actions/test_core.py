@@ -534,6 +534,36 @@ def test_motion_policy_normalizes_dynamic_collision_mode() -> None:
         MotionPolicy(dynamic_collision_mode=object())  # type: ignore[arg-type]
 
 
+def test_motion_policy_forwards_explicit_planning_budgets() -> None:
+    policy = MotionPolicy(
+        strategy="motion_gen", velocity_limit=0.2, acceleration_limit=0.5
+    )
+    options = policy.to_motion_gen_options(
+        start_qpos=torch.zeros(1, 6), control_part="arm"
+    )
+    assert options.velocity_limit == 0.2
+    assert options.acceleration_limit == 0.5
+    assert options.plan_opts is None
+
+
+@pytest.mark.parametrize("name", ["velocity_limit", "acceleration_limit"])
+@pytest.mark.parametrize("value", [0, -1, True, float("nan"), float("inf"), "0.2"])
+def test_motion_policy_rejects_invalid_planning_budgets(
+    name: str, value: object
+) -> None:
+    with pytest.raises(ValueError, match=name):
+        MotionPolicy(strategy="motion_gen", **{name: value})
+
+
+def test_motion_policy_rejects_ambiguous_or_unused_planning_budgets() -> None:
+    with pytest.raises(ValueError, match="motion_gen"):
+        MotionPolicy(velocity_limit=0.2)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        MotionPolicy(
+            strategy="motion_gen", velocity_limit=0.2, plan_opts=ToppraPlanOptions()
+        )
+
+
 def test_motion_policy_maps_to_motion_generator_strategy() -> None:
     planner_options = ToppraPlanOptions(
         constraints={"velocity": 0.2, "acceleration": 0.5}

@@ -21,6 +21,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
+import math
+from numbers import Real
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -72,6 +74,12 @@ class MotionPolicy:
     plan_opts: PlanOptions | None = None
     """Optional typed planner-specific options."""
 
+    velocity_limit: float | None = None
+    """Optional joint-speed budget for compatible motion planners, capped by the robot."""
+
+    acceleration_limit: float | None = None
+    """Optional joint-acceleration budget for compatible motion planners."""
+
     def __post_init__(self) -> None:
         valid_strategies = {"motion_gen", "ik_interp"}
         if self.strategy not in valid_strategies:
@@ -83,6 +91,27 @@ class MotionPolicy:
             raise ValueError(
                 "plan_opts requires strategy='motion_gen'; ik_interp bypasses the backend."
             )
+        has_limits = any(
+            value is not None
+            for value in (self.velocity_limit, self.acceleration_limit)
+        )
+        if has_limits and self.strategy != "motion_gen":
+            raise ValueError("Joint planning limits require strategy='motion_gen'.")
+        if has_limits and self.plan_opts is not None:
+            raise ValueError(
+                "Joint planning limits and plan_opts are mutually exclusive."
+            )
+        for name in ("velocity_limit", "acceleration_limit"):
+            value = getattr(self, name)
+            if value is not None:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, Real)
+                    or not math.isfinite(value)
+                    or value <= 0
+                ):
+                    raise ValueError(f"{name} must be finite and positive.")
+                object.__setattr__(self, name, float(value))
         if self.velocity_targets not in {"auto", "zero"}:
             raise ValueError("velocity_targets must be auto or zero.")
         if self.sample_count < 2:
@@ -145,6 +174,8 @@ class MotionPolicy:
             start_qpos=start_qpos,
             control_part=control_part,
             plan_opts=self.plan_opts,
+            velocity_limit=self.velocity_limit,
+            acceleration_limit=self.acceleration_limit,
             is_interpolate=self.strategy == "motion_gen",
             interpolation_dt=interpolation_dt,
             is_linear=cartesian_linear,

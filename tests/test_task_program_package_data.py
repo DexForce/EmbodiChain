@@ -136,8 +136,72 @@ _DEPLOYMENTS = {
         "cobotmagic",
     ),
 }
+_DUAL_ARM_VARIANTS = (
+    "dual_ur5_dh_pgi_140_80",
+    "dual_ur10_dh_pgi_140_80",
+    "tianji_marvin",
+)
+_DUAL_ARM_PROGRAMS = {
+    "hand_over": ("tabletop_hand_over", "tabletop_handover"),
+    "repeated_pick_place": (
+        "repeated_tabletop_cube_pick_place",
+        "repeated_pick_place_tabletop",
+    ),
+    "tableware/pour_water": ("pour_water_with_right_arm", "pour_water_tianji_marvin"),
+    "tableware/stack_blocks_two": ("stack_two_blocks", "task_program_stack_blocks_two"),
+    "tableware/blocks_ranking_rgb": (
+        "rank_blocks_rgb",
+        "task_program_blocks_ranking_rgb",
+    ),
+}
+for _task, (_program, _scene) in _DUAL_ARM_PROGRAMS.items():
+    for _variant in _DUAL_ARM_VARIANTS:
+        _DEPLOYMENTS.setdefault(
+            Path(f"tasks/manipulation/{_task}/task.{_variant}.yaml"),
+            (_program, _scene, _variant),
+        )
+_DEPLOYMENTS[Path("tasks/manipulation/hand_over/task.dual_ur5.yaml")] = (
+    "tabletop_hand_over",
+    "tabletop_handover",
+    "dual_ur5_dh_pgi_140_80",
+)
+_DUAL_ARM_RESOURCES = {
+    Path("components/execution_policies/motion_gen_verified_slow.yaml"),
+    Path("tasks/manipulation/hand_over/task_program/integration.dual_ur10.yaml"),
+    Path("components/execution_policies/motion_gen_projected_manipulation.yaml"),
+    Path("components/embodiments/dual_ur10_dh_pgi_140_80.yaml"),
+    Path(
+        "components/execution_policies/trajectory_open_loop_dual_arm_manipulation.yaml"
+    ),
+    Path(
+        "tasks/manipulation/repeated_pick_place/task_program/integration.dual_ur.yaml"
+    ),
+    *(
+        Path(
+            f"tasks/manipulation/tableware/{task}/task_program/integration.{kind}.yaml"
+        )
+        for task in ("stack_blocks_two", "blocks_ranking_rgb")
+        for kind in ("dual_ur", "tianji_marvin")
+    ),
+    *(
+        Path(f"tasks/manipulation/tableware/{task}/{filename}")
+        for task in (
+            "blocks_ranking_size",
+            "match_object_container",
+            "place_object_drawer",
+            "stack_cups",
+        )
+        for filename in (
+            "env.json",
+            "env.yaml",
+            *(f"task.{variant}.yaml" for variant in _DUAL_ARM_VARIANTS),
+        )
+    ),
+}
+
 _RESOURCE_PATHS = frozenset(
     {
+        *_DUAL_ARM_RESOURCES,
         *_PROGRAMS,
         *_DEPLOYMENTS,
         Path("components/execution_policies/trajectory_open_loop_manipulation.yaml"),
@@ -373,7 +437,11 @@ print(json.dumps(decoded_deployments, sort_keys=True))
 """
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join(
-        (str(staged_config_package.build_lib), str(_REPOSITORY_ROOT))
+        (
+            str(staged_config_package.build_lib),
+            str(_REPOSITORY_ROOT),
+            environment.get("PYTHONPATH", ""),
+        )
     )
     completed = subprocess.run(
         [

@@ -1321,7 +1321,15 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
         value,
         path=path,
         required=frozenset({"sample_count"}),
-        optional=frozenset({"strategy", "dynamic_collision_mode", "velocity_targets"}),
+        optional=frozenset(
+            {
+                "strategy",
+                "dynamic_collision_mode",
+                "velocity_targets",
+                "velocity_limit",
+                "acceleration_limit",
+            }
+        ),
     )
     return MotionPolicy(
         strategy=_identifier(
@@ -1342,6 +1350,13 @@ def _decode_motion_policy(value: object, *, path: str) -> MotionPolicy:
             DynamicCollisionMode,
             path=f"{path}.dynamic_collision_mode",
         ),
+        **{
+            name: _real(
+                config[name], path=f"{path}.{name}", minimum=0.0, strict_minimum=True
+            )
+            for name in ("velocity_limit", "acceleration_limit")
+            if name in config
+        },
     )
 
 

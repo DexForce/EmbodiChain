@@ -1,0 +1,14 @@
+id: PourWater-DualUR10-v1
+environment:
+  component: env.tianji_marvin.yaml
+task_program:
+  program: task_program/program.tianji_marvin.yaml
+  integration: task_program/integration.tianji_marvin.yaml
+  execution_policy: ../../../../components/execution_policies/trajectory_open_loop_dual_arm_slow.yaml
+embodiment:
+  component: ../../../../components/embodiments/dual_ur10_dh_pgi_140_80.yaml
+  overrides:
+    init_pos:
+    - 0.233
+    - 0.0
+    - 0.8525
