@@ -48,6 +48,10 @@ from embodichain.data_pipeline.real2sim.normalization import (
     normalize_real2sim,
 )
 from embodichain.compute.trajectory import differentiate_positions
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 from embodichain.lab.sim.motion.expansion import TrajectoryPhase, TrajectoryTemplate
 from embodichain.lab.sim.motion.expansion.operators import joint_residual
 
@@ -348,6 +352,7 @@ def _render(args: argparse.Namespace) -> None:
             render_cfg=RenderCfg(renderer="hybrid", tone_mapping_enabled=True),
             startup_summary="off",
             robot_ik_gizmo=None,
+            visualization=visualization_cfg_from_args(args),
         )
     )
     writer = None
@@ -677,6 +682,7 @@ def _render(args: argparse.Namespace) -> None:
 def main() -> None:
     """Parse one optional recording and render a non-qualifying preview."""
     parser = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(parser)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--video", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

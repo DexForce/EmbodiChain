@@ -265,6 +265,14 @@ class Real2SimExpertSourceProvider:
         )[None]
         if (velocities.abs() > velocity_limits.to(q)[:, None] + 1e-6).any():
             raise ValueError("Source violates live robot joint velocity limits")
+        dt = torch.tensor(unit.dt.copy(), device=q.device, dtype=q.dtype)[None]
+        # Central differences can cancel at reversals. Position commands must
+        # also be reachable within every individual arrival interval.
+        interval_speeds = q.diff(dim=1).abs() / dt[:, 1:, None]
+        if (interval_speeds > velocity_limits.to(q)[:, None] + 1e-6).any():
+            raise ValueError(
+                "Source interval speeds violate live robot joint velocity limits"
+            )
         claimed = set()
         for endpoint in request.binding.endpoints:
             target = getattr(endpoint, "target", None)
@@ -285,7 +293,7 @@ class Real2SimExpertSourceProvider:
             positions=q,
             velocities=velocities,
             accelerations=None,
-            dt=torch.tensor(unit.dt.copy(), device=q.device, dtype=q.dtype)[None],
+            dt=dt,
             env_ids=context.env_ids,
         )
         return self.engine.build_plan_from_recorded_trajectory(

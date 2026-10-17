@@ -23,6 +23,7 @@ persistence. Declarations contain stable IDs and immutable parameters only.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from weakref import WeakValueDictionary
 from typing import ClassVar, Protocol, runtime_checkable, TYPE_CHECKING
 
 from embodichain.lab.sim.atomic_actions import (
@@ -61,7 +62,11 @@ def _id(value: str) -> None:
 
 @runtime_checkable
 class ExpertSourceProvider(Protocol):
-    """Call-local source of a complete, side-effect-free nominal plan."""
+    """Weak-referenceable call-local source of a side-effect-free nominal plan.
+
+    The runtime tracks provider identity without owning completed recordings.
+    Providers using slots must include weak-reference support.
+    """
 
     def plan(
         self, request: ResolvedActionRequest, context: PlanningContext
@@ -265,7 +270,9 @@ class _RegisteredNominalSources:
             robot_profile,
             control_dt,
         )
-        self._providers = []
+        self._providers: WeakValueDictionary[int, ExpertSourceProvider] = (
+            WeakValueDictionary()
+        )
 
     def create_nominal_plan_provider(
         self, request: TaskProgramPlanRequest, *, engine: AtomicActionEngine
@@ -294,7 +301,12 @@ class _RegisteredNominalSources:
         )
         if not isinstance(provider, ExpertSourceProvider):
             raise TypeError("Factory returned an invalid expert source provider")
-        if any(provider is previous for previous in self._providers):
+        if self._providers.get(id(provider)) is provider:
             raise ValueError("Factory reused live expert source state")
-        self._providers.append(provider)
+        try:
+            self._providers[id(provider)] = provider
+        except TypeError as error:
+            raise TypeError(
+                "Expert source providers must support weak references"
+            ) from error
         return provider.plan

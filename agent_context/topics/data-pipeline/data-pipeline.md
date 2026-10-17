@@ -149,3 +149,6 @@ requires reviewed calibration and annotations. `real2sim/gripper.py` decodes an
 explicit scalar/width convention through a versioned lookup; model-only estimates
 remain unverified. Task Program source selection and Skill plan assembly belong
 to `task_program/integrations`, not this data layer.
+`gripper_release_duration` measures trailing release evidence from host-supplied
+measured-open/contact masks; calibration and physical task acceptance stay with
+the host, independently of source-input eligibility.

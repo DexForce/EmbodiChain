@@ -32,7 +32,10 @@ from embodichain.data_pipeline.real2sim.bundle import (
     load_real2sim_bundle,
     write_real2sim_bundle,
 )
-from embodichain.data_pipeline.real2sim.gripper import GripperPositionCalibration
+from embodichain.data_pipeline.real2sim.gripper import (
+    GripperPositionCalibration,
+    gripper_release_duration,
+)
 
 
 def _bundle(tmp_path, verified=True):
@@ -128,3 +131,54 @@ def test_declared_gripper_encodings_have_consistent_physical_widths():
         replace(calibration, encoding="guess")
     with pytest.raises(ValueError, match="Rejected"):
         replace(calibration, status="rejected").decode(np.array([0.5]))
+
+
+@pytest.mark.parametrize(
+    "opened,contact,expected",
+    [
+        ([True] * 5, [False] * 5, 2.0),
+        ([False] * 5, [False] * 5, 0.0),
+        ([True] * 5, [True] * 5, 0.0),
+        ([True] * 5, [False, False, True, False, False], 0.5),
+        ([False, False, True, True, True], [False] * 5, 1.0),
+        ([True] * 5, [False, False, False, False, True], 0.0),
+    ],
+)
+def test_release_duration_requires_measured_opening_and_absence_of_grasp(
+    opened, contact, expected
+):
+    times = np.arange(5) * 0.5
+    assert (
+        gripper_release_duration(times, np.array(opened), np.array(contact)) == expected
+    )
+
+
+def test_release_duration_uses_elapsed_time_instead_of_frame_count():
+    times = np.array([0.0, 0.01, 0.05, 0.08])
+    assert (
+        gripper_release_duration(times, np.ones(4, dtype=bool), np.zeros(4, dtype=bool))
+        == 0.08
+    )
+    for n in (0, 1):
+        assert (
+            gripper_release_duration(
+                times[:n], np.ones(n, dtype=bool), np.zeros(n, dtype=bool)
+            )
+            == 0.0
+        )
+
+
+@pytest.mark.parametrize(
+    "times,opened,contact",
+    [
+        ([0.0, 0.0], [True, True], [False, False]),
+        ([0.0, float("nan")], [True, True], [False, False]),
+        ([0.0, 1.0], [True], [False, False]),
+        ([0.0, 1.0], [1.0, 1.0], [False, False]),
+    ],
+)
+def test_release_duration_rejects_invalid_clocks_or_nonboolean_evidence(
+    times, opened, contact
+):
+    with pytest.raises(ValueError):
+        gripper_release_duration(np.array(times), np.array(opened), np.array(contact))

@@ -26,10 +26,11 @@ from .contracts import (
     SourcePhase,
 )
 
-from .gripper import GripperPositionCalibration
+from .gripper import GripperPositionCalibration, gripper_release_duration
 
 __all__ = [
     "GripperPositionCalibration",
+    "gripper_release_duration",
     "EefPoseSamples",
     "MimicJoint",
     "Real2SimTrajectory",

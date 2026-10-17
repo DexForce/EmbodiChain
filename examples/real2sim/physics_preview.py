@@ -39,7 +39,10 @@ import torch
 from scipy.spatial.transform import Rotation
 
 from embodichain.data import get_data_path
-from embodichain.data_pipeline.real2sim.gripper import GripperPositionCalibration
+from embodichain.data_pipeline.real2sim.gripper import (
+    GripperPositionCalibration,
+    gripper_release_duration,
+)
 from embodichain.lab.sim import SimulationManager, SimulationManagerCfg
 from embodichain.lab.sim.cfg import (
     RobotCfg,
@@ -59,6 +62,10 @@ from embodichain.lab.sim.cfg import (
 from embodichain.lab.sim.material import VisualMaterialCfg
 from embodichain.lab.sim.shapes import CubeCfg
 from embodichain.lab.sim.sensors import CameraCfg, ContactSensorCfg
+from embodichain.lab.visualization import (
+    add_viser_args_to_parser,
+    visualization_cfg_from_args,
+)
 from embodichain.lab.sim.motion.execution import (
     play_joint_trajectory,
     JointTrajectoryPlaybackCfg,
@@ -165,6 +172,9 @@ class _ObservedPlayback:
         writer,
         fps,
         label,
+        *,
+        open_driver_rad=0.0,
+        release_tolerance_rad=0.03,
     ):
         self.sim = sim
         self.sim_config = sim.sim_config
@@ -179,6 +189,8 @@ class _ObservedPlayback:
         self.writer = writer
         self.fps = fps
         self.label = label
+        self.open_driver_rad = open_driver_rad
+        self.release_tolerance_rad = release_tolerance_rad
         self.samples = []
         self.time = 0.0
         self.frame_count = 0
@@ -317,11 +329,15 @@ def _summary(observer, block_size, bowl_radius):
     times = np.array([s["t"] for s in data])
     heights = positions[:, 2] - observer.initial_z
     bilateral = np.array([s["bilateral"] for s in data])
-    run = longest = 0
-    for valid in bilateral & (heights > 0.04):
-        run = run + 1 if valid else 0
-        longest = max(longest, run)
-    sustained = float(longest * CONTROL_DT)
+    start = None
+    sustained = 0.0
+    for timestamp, valid in zip(times, bilateral & (heights > 0.04)):
+        if valid:
+            if start is None:
+                start = timestamp
+            sustained = max(sustained, float(timestamp - start))
+        else:
+            start = None
     final = positions[-1]
     resting = _resting_checks(
         np.array([s["pose"] for s in data]),
@@ -335,13 +351,22 @@ def _summary(observer, block_size, bowl_radius):
     stable = resting["stable_last_second"]
     q = np.array([s["qpos"] for s in data])[:, observer.active_ids]
     targets = np.array([s["target"] for s in data])
+    measured_open = (
+        np.abs(q[:, -1] - observer.open_driver_rad) <= observer.release_tolerance_rad
+    )
+    released_for = gripper_release_duration(times, measured_open, bilateral)
+    release_pass = released_for >= 1.0 - 1e-9
     return {
         "max_block_lift_m": float(heights.max()),
         "continuous_bilateral_lift_s": sustained,
         "grasp_lift_pass": sustained >= 1.0,
         "final_inside_container": bool(inside),
         "stable_last_second": bool(stable),
-        "physical_task_pass": bool(sustained >= 1.0 and inside and stable),
+        "continuous_release_s": released_for,
+        "release_pass": release_pass,
+        "physical_task_pass": bool(
+            sustained >= 1.0 and inside and stable and release_pass
+        ),
         "max_joint_tracking_error_rad": float(max(s["tracking_error"] for s in data)),
         "arm_tracking_rmse_rad": float(
             np.sqrt(np.mean((q[:, :7] - targets[:, :7]) ** 2))
@@ -460,7 +485,7 @@ def _compose(args, output, unit, results):
             )
             _text(
                 card,
-                f"Lift {min(r['max_block_lift_m'] for r in rows)*1000:.0f} mm | bilateral hold {min(r['continuous_bilateral_lift_s'] for r in rows):.2f} s | final stability 1 s",
+                f"Lift {min(r['max_block_lift_m'] for r in rows)*1000:.0f} mm | hold {min(r['continuous_bilateral_lift_s'] for r in rows):.2f} s | released {min(r['continuous_release_s'] for r in rows):.2f} s | stable 1 s",
                 (80, 345 + 150 * i),
                 (160, 195, 215),
                 0.67,
@@ -496,6 +521,20 @@ def _run(args):
     calibration = GripperPositionCalibration(
         **json.loads(args.gripper_calibration.read_text())
     )
+    open_driver = float(
+        np.interp(
+            calibration.max_width_m,
+            calibration.widths_m,
+            calibration.driver_positions_rad,
+        )
+    )
+    driver_range = abs(
+        calibration.driver_positions_rad[-1] - calibration.driver_positions_rad[0]
+    )
+    if not 0 < args.release_open_tolerance < driver_range / 2:
+        raise ValueError(
+            "Release tolerance must be smaller than half the calibrated driver range"
+        )
     with np.load(source, allow_pickle=False) as raw:
         scalar = raw["source_gripper_position"].copy()
     if len(scalar) != len(unit.source.positions) or len(scalar) <= 160:
@@ -581,6 +620,7 @@ def _run(args):
             ),
             robot_ik_gizmo=None,
             startup_summary="off",
+            visualization=visualization_cfg_from_args(args),
         )
     )
     all_results = []
@@ -720,6 +760,10 @@ def _run(args):
                 "minimum_lift_m": 0.04,
                 "continuous_bilateral_hold_s": 1.0,
                 "final_stability_s": 1.0,
+                "minimum_trailing_release_s": 1.0,
+                "release_open_driver_rad": open_driver,
+                "release_open_tolerance_rad": args.release_open_tolerance,
+                "release_evidence": "measured open driver and no bilateral grasp contact",
                 "final_position_spread_m": 0.005,
                 "final_speed_limit_m_s": 0.03,
                 "final_angle_limit_rad": float(np.deg2rad(3)),
@@ -809,6 +853,8 @@ def _run(args):
                     writer,
                     args.fps,
                     label,
+                    open_driver_rad=open_driver,
+                    release_tolerance_rad=args.release_open_tolerance,
                 )
                 observer.active_ids = active_ids
                 try:
@@ -864,6 +910,7 @@ def _run(args):
 def main() -> None:
     """Run bounded B=1 physical comparisons using estimated foreground geometry."""
     p = argparse.ArgumentParser(description=__doc__)
+    add_viser_args_to_parser(p)
     p.add_argument("--input", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--source-video", type=Path)
@@ -876,6 +923,7 @@ def main() -> None:
     p.add_argument("--grip-preload", type=float, default=0.015)
     p.add_argument("--grip-effort", type=float, default=2.0)
     p.add_argument("--grip-stiffness", type=float, default=600.0)
+    p.add_argument("--release-open-tolerance", type=float, default=0.03)
     p.add_argument("--cases", type=int, nargs="+", choices=(0, 1, 2), default=[0, 1, 2])
     p.add_argument("--repeats", type=int, default=1)
     p.add_argument("--fps", type=int, default=30)
@@ -888,6 +936,7 @@ def main() -> None:
         args.grip_effort,
         args.grip_stiffness,
         args.base_height,
+        args.release_open_tolerance,
     )
     if (
         not all(math.isfinite(value) for value in physical_values)
@@ -898,6 +947,7 @@ def main() -> None:
         or args.grip_preload < 0
         or args.grip_effort <= 0
         or args.grip_stiffness <= 0
+        or args.release_open_tolerance <= 0
         or args.base_height < 0.1
     ):
         p.error("Invalid physical parameters")

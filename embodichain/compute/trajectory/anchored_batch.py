@@ -78,6 +78,11 @@ class AnchoredBatchPlan:
             left[b, :size] = row.left_indices
             right[b, :size] = row.right_indices
             weights[b, :size] = row.weights
+            # A valid external map may encode a knot as an interval with weight
+            # one. Canonicalize hard anchors to copies for every backend.
+            events = row.anchor_execution_indices
+            left[b, events] = right[b, events] = row.anchor_source_indices
+            weights[b, events] = 0.0
         object.__setattr__(self, "rows", rows)
         for name, value in (
             ("_left", left),

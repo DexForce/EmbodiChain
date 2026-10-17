@@ -91,6 +91,9 @@ catalog fingerprints those declarations; configured task integrations select
 `runtime_services.expert_source_providers` by stable IDs and content-pinned source
 bundles. Bundle paths resolve from the integration file. Runtime assembly creates
 fresh providers sharing the existing planning scene and embodiment profile.
+Identity checks use weak references, so completed calls do not retain their
+recordings; provider implementations must support weak references. Fixed-qpos
+admission checks interval speeds as well as differentiated velocity references.
 
 The first registered source is B=1 fixed-qpos Pick replay. PickUp owns full plan
 assembly, including commands, tracking, semantic segments and pending effects.

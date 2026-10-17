@@ -21,7 +21,58 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-__all__ = ["GripperPositionCalibration"]
+__all__ = ["GripperPositionCalibration", "gripper_release_duration"]
+
+
+def gripper_release_duration(
+    timestamps: np.ndarray,
+    gripper_open: np.ndarray,
+    bilateral_contact: np.ndarray,
+) -> float:
+    """Measure continuous trailing release evidence in a recorded trace.
+
+    The host computes gripper_open from measured positions and its explicit
+    calibration/tolerance. Release requires an open gripper without bilateral
+    grasp contact. This measures elapsed time, not a count of samples, and does
+    not itself establish object stability, task success or source eligibility.
+
+    Args:
+        timestamps: Finite, strictly increasing (N,) elapsed seconds.
+        gripper_open: Boolean (N,) measured-open evidence, not controller targets.
+        bilateral_contact: Boolean (N,) simultaneous left/right grasp contacts.
+
+    Returns:
+        Seconds since the start of the final uninterrupted release interval.
+        Empty, singleton or currently unreleased traces return zero.
+
+    Raises:
+        ValueError: Invalid shapes, masks, timestamps or nonfinite intervals.
+    """
+    times = np.asarray(timestamps, dtype=np.float64)
+    opened = np.asarray(gripper_open)
+    contact = np.asarray(bilateral_contact)
+    if (
+        times.ndim != 1
+        or opened.shape != times.shape
+        or contact.shape != times.shape
+        or opened.dtype != np.bool_
+        or contact.dtype != np.bool_
+        or not np.isfinite(times).all()
+    ):
+        raise ValueError(
+            "Release evidence requires finite (N,) times and boolean masks"
+        )
+    intervals = np.diff(times)
+    if not np.isfinite(intervals).all() or np.any(intervals <= 0):
+        raise ValueError(
+            "Release timestamps must strictly increase with finite intervals"
+        )
+    released = opened & ~contact
+    if len(times) < 2 or not released[-1]:
+        return 0.0
+    interruptions = np.flatnonzero(~released)
+    start = int(interruptions[-1] + 1) if len(interruptions) else 0
+    return float(times[-1] - times[start])
 
 
 @dataclass(frozen=True)

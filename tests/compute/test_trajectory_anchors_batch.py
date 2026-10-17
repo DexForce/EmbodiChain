@@ -23,6 +23,8 @@ import pytest
 import torch
 
 from embodichain.compute.trajectory import (
+    AnchoredBatchPlan,
+    AnchoredTimeMap,
     prepare_anchored_batch,
     resample_with_anchors,
     resample_with_anchors_batched,
@@ -354,3 +356,30 @@ def test_cuda_metadata_preparation_and_plan_device_mismatch():
     _assert_reference(plan.apply(q, backend="warp"), plan, q, times, anchors, args)
     with pytest.raises(ValueError, match="plan device"):
         plan.apply(q.cpu())
+
+
+@pytest.mark.parametrize("device,backend", _EXECUTIONS)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_direct_plan_construction_copies_noncanonical_anchor_brackets(
+    device, backend, dtype
+):
+    if device.startswith("cuda") and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    clock = np.array([0.0, 1.0, 2.0])
+    mapping = AnchoredTimeMap(
+        clock,
+        clock,
+        clock,
+        clock,
+        np.array([0, 0, 1]),
+        np.array([0, 1, 2]),
+        np.array([0.0, 1.0, 1.0]),
+        np.array([0, 1, 2]),
+        np.array([0, 1, 2]),
+    )
+    positions = torch.tensor([[[2.0], [0.1], [-0.0]]], device=device, dtype=dtype)
+    result = AnchoredBatchPlan((mapping,), device=device).apply(
+        positions, backend=backend
+    )
+    bit_dtype = torch.int32 if dtype == torch.float32 else torch.int64
+    assert torch.equal(result.view(bit_dtype), positions.view(bit_dtype))

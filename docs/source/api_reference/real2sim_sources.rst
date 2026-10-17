@@ -46,8 +46,8 @@ A trusted nominal source supplies a complete ActionPlan before ordinary motion
 planning. The engine still validates and snapshots its result. The session
 retains the source during recovery and invocation revision. Existing plan
 transforms run after nominal-plan validation. Registered source catalogs,
-configured source services and real2sim-specific Pick assembly are separate
-follow-up work; the hook itself does not certify their capabilities.
+configured source services and real2sim-specific Pick assembly are described in
+:doc:`real2sim_providers`; the hook itself does not certify their capabilities.
 
 .. autodata:: embodichain.lab.sim.atomic_actions.NominalPlanProvider
 

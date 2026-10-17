@@ -235,6 +235,11 @@ qvel/tracking, segments, dependency boundaries and uncommitted held-object effec
 Source failures propagate without ordinary planning fallback. A fresh reset is
 required to run another fixed source attempt.
 
+Speed admission checks both the differentiated references and every commanded
+position interval, so reversals cannot cancel a speed-limit violation. Provider
+instances support weak references: the selector tracks identity without keeping
+completed recordings alive, and cached provider reuse is still rejected.
+
 The B=1 bridge regression uses reviewed **synthetic** source values and projected
 semantic completion. It proves the interface and lifecycle, not physical grasp
 success. Existing verified-runtime tests continue to cover measured-effect failure.
@@ -313,7 +318,11 @@ The contact sensor resolves exact left/right inner-finger actor identities. The
 measured proxy-scene criteria require the block to rise at least 4 cm with
 continuous bilateral contact for at least 1 s, finish wholly inside the container
 (using oriented box corners), and remain stable in position and orientation for
-the final 1 s. Stability also limits linear and angular speed. A motion-limit pass
+the final 1 s. During that final second the measured gripper driver must also
+remain within `--release-open-tolerance` (default 0.03 rad) of its calibrated open
+position, with no bilateral grasp contact. An opening command alone is insufficient.
+Both hold and release durations use elapsed timestamps. Stability also limits
+linear and angular speed. A motion-limit pass
 or a robot reaching its endpoint does not establish this physical result.
 
 Outputs include per-candidate native videos, the four-panel
@@ -329,3 +338,5 @@ asset geometry remain unverified. Physical-preview success does not change the
 source bundle's admission state, allocate accepted generation candidates or
 produce an EpisodeSink commit receipt. The registered real2sim source still
 rejects the unreviewed original recording.
+
+Both preview CLIs accept the shared `--viser` visualization options.
