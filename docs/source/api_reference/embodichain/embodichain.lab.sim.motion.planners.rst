@@ -148,8 +148,13 @@ Utilities
 Joint path retiming
 ------------------
 
-Re-parameterize existing joint paths with the differentiable Warp TOPPRA
-backend. The helper preserves float32/float64 input precision, supports valid
+TOPPRA uses a single Warp calculation chain on CPU and CUDA. Its configuration
+accepts ``grid_size`` and the shared robot/manager fields; the removed
+``backend``, ``max_workers`` and ``mp_context`` fields are no longer accepted.
+CPU inference uses shared threads without creating planner-owned processes.
+
+Re-parameterize existing joint paths with the same differentiable timing
+solve. The helper preserves float32/float64 input precision, supports valid
 per-row waypoint prefixes, and returns explicit timing with isolated failures.
 
 .. autosummary::

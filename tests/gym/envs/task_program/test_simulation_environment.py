@@ -1600,7 +1600,7 @@ def test_adapter_factory_forwards_policy_planner_config(
         SimulationSceneBinding(registry_id="scene"),
         _profile_binding(),
     )
-    planner_config = {"type": "toppra", "config": {"max_workers": 2}}
+    planner_config = {"type": "toppra", "config": {"grid_size": 127}}
     factory = SimulationTaskProgramAdapterFactory(
         registration,
         planner_config=planner_config,
@@ -1626,13 +1626,13 @@ def test_adapter_factory_forwards_policy_planner_config(
 def test_planner_config_decodes_to_typed_runtime_cfg() -> None:
     """A serialized planner selection becomes the selected planner config type."""
     planner_cfg = simulation_environment_module._planner_cfg_from_config(
-        {"type": "toppra", "config": {"max_workers": 2}},
+        {"type": "toppra", "config": {"grid_size": 127}},
         robot_uid="robot",
     )
 
     assert isinstance(planner_cfg, simulation_environment_module.ToppraPlannerCfg)
     assert planner_cfg.robot_uid == "robot"
-    assert planner_cfg.max_workers == 2
+    assert planner_cfg.grid_size == 127
 
 
 def test_curobo_scene_binding_preserves_live_object_references() -> None:

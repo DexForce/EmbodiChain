@@ -33,7 +33,7 @@ import torch
 import warp as wp
 from torch.autograd.function import once_differentiable
 
-from ._toppra import _limits, _validate_grid_size, _validate_sampling
+from ._toppra_common import _limits, _validate_grid_size, _validate_sampling
 from ._warp import toppra as kernels
 
 __all__ = []

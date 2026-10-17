@@ -77,12 +77,13 @@ retain their existing timing contracts and do not consume these backend limits.
 
 ### TOPPRA
 
-`toppra_planner.py` selects Warp on CPU and CUDA in automatic mode. NumPy
-remains an explicit reference backend. Numerical ownership is in
-`compute/trajectory/_toppra.py`, `_toppra_warp.py`, and `_warp/toppra.py`.
+`toppra_planner.py` uses Warp on CPU and CUDA. Numerical ownership is in
+`compute/trajectory/_toppra_warp.py` and `_warp/toppra.py`; shared validation
+lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
+not be imported by the runtime planner or Warp adapter.
 Robot-backed planning retains shared speed-cap and control-part resolution,
 including gradients of uncapped requested limits.
-Both preserve uniform not-a-knot cubic geometry, the existing waypoint
+The runtime and reference preserve uniform not-a-knot cubic geometry, the existing waypoint
 deduplication tolerance and final knot, and signed velocity/acceleration bounds
 containing rest. Planner outputs retain float32 and quantity sampling retains
 the existing integer coercion, independently of backend or input precision.
@@ -97,18 +98,17 @@ their numerical buffers, inherit Torch grad/inference modes and merge using
 the global endpoint/zero-derivative/zero-dt padding contract. Ordinary inference
 launches must not record into Warp's process-global tape. CPU pool state is
 discarded after fork; it is not owned by an individual planner's `close()`.
-Explicit NumPy selection fans batched solves into independent CPU processes,
-which must remain picklable and avoid CUDA/Warp/simulation state.
-Single-worker/single-row NumPy execution can run inline. The automatic process
-context uses spawn with GPU simulation; do not force fork to reduce overhead.
+Planning has no process backend, per-planner worker state or process cleanup.
+The removed `backend`, `max_workers` and `mp_context` configuration fields must
+be removed from callers; do not restore them as ignored compatibility options.
 
 Warp records first-order adjoints when Torch gradient tracking is enabled and
 waypoints or tensor velocity/acceleration bounds require gradients. Both time
 and quantity sampling propagate position, velocity, acceleration and duration
 losses through the timing solve. Scalar, per-joint and signed tensor bounds keep
 their graphs on either device; TOPPRA option copies preserve these tensor
-references while copying mutable containers. Explicit NumPy selection rejects
-gradient requests; `torch.no_grad()` retains ordinary forward planning.
+references while copying mutable containers. `torch.no_grad()` retains
+ordinary forward planning.
 Filtering, grid topology, sample counts and active-constraint choices are
 discrete: derivatives apply locally away from their switches. Time sampling
 keeps `ceil(duration / sample_dt) + 1` points uniformly spread across the full
@@ -119,8 +119,8 @@ generator option copying/resampling and CUDA backward stream behavior in the
 TOPPRA tests.
 
 Variable-length outputs pad with the terminal position without adding duration.
-Per-row failures preserve other rows; a broken worker pool is discarded and
-rebuilt on a later call. Test these lifecycle boundaries in
+Per-row failures preserve other rows. Test planner contracts and the absence
+of process workers in
 `tests/sim/motion/planners/test_toppra_batched.py`; numerical limits, geometry,
 CPU/Warp agreement and CUDA stream behavior are covered in
 `tests/compute/test_toppra.py`; CPU projection, thread isolation, variable-length

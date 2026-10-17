@@ -298,9 +298,9 @@ def test_execution_policy_planner_config_reaches_configured_adapter() -> None:
 def test_planner_policy_decoder_validates_backend_and_options() -> None:
     """Planner backends remain closed while typed options stay configurable."""
     assert _decode_planner_config(
-        {"type": "toppra", "config": {"max_workers": 2}},
+        {"type": "toppra", "config": {"grid_size": 127}},
         path="execution policy.planner",
-    ) == {"type": "toppra", "config": {"max_workers": 2}}
+    ) == {"type": "toppra", "config": {"grid_size": 127}}
 
     with pytest.raises(ValueError, match="execution policy.planner.type"):
         _decode_planner_config(

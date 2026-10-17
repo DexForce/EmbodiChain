@@ -118,9 +118,6 @@ def _zero_speed_planner(planner_type: str) -> ToppraPlanner | TrapezoidalPlanner
     planner.robot.velocities[:, 2] = 0.0
     planner.device = torch.device("cpu")
     planner.cfg = cfg_class(robot_uid="robot")
-    if planner_type == "toppra":
-        planner.cfg.max_workers = 1
-        planner._pool = None
     return planner
 
 
@@ -348,9 +345,6 @@ def test_facade_and_direct_plans_apply_robot_limits(planner_type: str) -> None:
     planner.robot = robot
     planner.device = robot.device
     planner.cfg = cfg_class(robot_uid="robot")
-    if planner_type == "toppra":
-        planner.cfg.max_workers = 1
-        planner._pool = None
     generator = MotionGenerator.__new__(MotionGenerator)
     generator.planner = planner
     states = [
@@ -397,41 +391,6 @@ def test_curobo_export_uses_robot_speeds_and_planner_acceleration(
     exported = _curobo_joint_limits(_Robot(), max_acceleration=acceleration_request)
     assert exported["max_velocity"] == pytest.approx([0.6, 0.02, 1.2])
     assert exported["max_acceleration"] == [expected] * 3
-
-
-def test_toppra_spawn_workers_receive_resolved_joint_limits() -> None:
-    robot = _Robot()
-    planner = ToppraPlanner.__new__(ToppraPlanner)
-    planner.robot = robot
-    planner.device = robot.device
-    planner.cfg = ToppraPlannerCfg(
-        robot_uid="robot", backend="numpy", max_workers=2, mp_context="spawn"
-    )
-    planner._pool = None
-    planner._mp_context = "spawn"
-    options = planner.default_plan_options()
-    options.control_part = "arm"
-    options.sample_method = TrajectorySampleMethod.QUANTITY
-    options.sample_interval = 100
-    try:
-        result = planner.plan(
-            [
-                PlanState.from_qpos(torch.zeros(2, 2)),
-                PlanState.from_qpos(torch.ones(2, 2)),
-            ],
-            options,
-        )
-        assert result.is_all_success()
-        assert result.positions.shape == (2, 100, 2)
-        assert bool(
-            (
-                result.velocities.abs().amax(dim=(0, 1))
-                <= torch.tensor([1.2, 0.6]) * 1.03
-            ).all()
-        )
-        assert planner._pool is not None
-    finally:
-        planner.close()
 
 
 def test_mimic_follower_caps_constrain_curobo_active_joint() -> None:

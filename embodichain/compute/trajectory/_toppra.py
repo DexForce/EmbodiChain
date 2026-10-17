@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Internal NumPy reference for rest-to-rest TOPPRA planning.
+"""Offline NumPy reference for rest-to-rest TOPPRA planning.
 
 The path remains the planner's uniform, not-a-knot cubic spline. Squared
 path speeds at adjacent gridpoints obey half-planes a*x + b*y <= c.
@@ -25,48 +25,12 @@ this conservative discretization; they do not claim the continuous optimum.
 
 from __future__ import annotations
 
-from numbers import Integral
-
 import numpy as np
 from scipy.interpolate import CubicSpline
 
+from ._toppra_common import _limits, _validate_grid_size
+
 __all__ = []
-
-
-def _limits(value: object, dofs: int) -> np.ndarray:
-    """Canonicalize symmetric magnitudes or signed lower/upper bounds."""
-    array = np.asarray(value, dtype=np.float64)
-    if array.ndim == 0:
-        array = np.full(dofs, float(array))
-    if array.shape == (dofs,):
-        array = np.stack((-array, array), axis=-1)
-    if array.shape != (dofs, 2) or not np.isfinite(array).all():
-        raise ValueError("limits must be finite scalar, (DOF,), or (DOF, 2)")
-    if np.any(array[:, 0] > 0) or np.any(array[:, 1] < 0):
-        raise ValueError("rest-to-rest limits must contain zero")
-    return array
-
-
-def _validate_sampling(sample_count: int | None, sample_dt: float | None) -> None:
-    if (sample_count is None) == (sample_dt is None):
-        raise ValueError("specify exactly one of sample_count and sample_dt")
-    if sample_count is not None and (
-        isinstance(sample_count, bool)
-        or not isinstance(sample_count, Integral)
-        or sample_count < 2
-    ):
-        raise ValueError("sample_count must be an integer >= 2")
-    if sample_dt is not None and (not np.isfinite(sample_dt) or sample_dt <= 0):
-        raise ValueError("sample_dt must be finite and positive")
-
-
-def _validate_grid_size(grid_size: int) -> None:
-    if (
-        isinstance(grid_size, bool)
-        or not isinstance(grid_size, Integral)
-        or grid_size < 3
-    ):
-        raise ValueError("grid_size must be an integer >= 3")
 
 
 class _NumpyToppra:

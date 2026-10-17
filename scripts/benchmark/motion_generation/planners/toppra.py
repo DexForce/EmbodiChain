@@ -86,7 +86,7 @@ class ToppraAdapter(PlannerAdapter):
         )
 
     def close(self) -> None:
-        """Release TOPPRA worker pools and drop the motion generator."""
+        """Drop the motion generator through the common planner lifecycle."""
         self._close_motion_generator()
 
 
