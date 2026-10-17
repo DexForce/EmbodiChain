@@ -43,10 +43,8 @@ def _read_url(site_url: str, path: str) -> bytes:
         return response.read()
 
 
-def _published_snapshot(
-    site_url: str, repository: str, destination: Path
-) -> Path | None:
-    """Prefer the exact deployed artifact; use the live-site mirror if expired."""
+def _published_snapshot(site_url: str, repository: str, destination: Path) -> Path:
+    """Require the exact deployed artifact, including JavaScript-loaded resources."""
     marker = _read_url(site_url, "pages-deployment-id.txt").decode().strip()
     if not re.fullmatch(r"[0-9]+-[0-9]+", marker):
         raise ValueError(f"Invalid published deployment marker: {marker!r}")
@@ -70,8 +68,10 @@ def _published_snapshot(
         timeout=180,
     )
     if result.returncode:
-        print("Published Pages artifact unavailable; mirroring the live site.")
-        return None
+        raise RuntimeError(
+            f"Published Pages artifact {run_id}/{attempt} is unavailable. "
+            "Refusing to replace the site without a complete published snapshot."
+        )
     with tarfile.open(destination / "artifact.tar") as archive:
         archive.extractall(destination / "site", filter="data")
     snapshot = destination / "site"
@@ -84,8 +84,7 @@ def prepare_deployment(
     build_dir: Path,
     version: str,
     *,
-    site_url: str | None = None,
-    published_root: Path | None = None,
+    published_root: Path,
     max_versions: int = 5,
 ) -> None:
     """Merge the current site immediately before replacing it with an artifact.
@@ -93,7 +92,6 @@ def prepare_deployment(
     Args:
         build_dir: Downloaded candidate site.
         version: Only version rebuilt by this candidate (main or a release tag).
-        site_url: Live Pages URL, used when no exact published snapshot is supplied.
         published_root: Exact previously deployed site, or a local test fixture.
         max_versions: Number of newest stable versions to retain.
     """
@@ -105,9 +103,7 @@ def prepare_deployment(
         raise ValueError("max_versions must be positive")
     if not (build_dir / version / "index.html").is_file():
         raise FileNotFoundError(f"Candidate is missing {version}/index.html")
-    manifest = load_versions_manifest(
-        site_base_url=site_url, published_root=published_root, required=True
-    )
+    manifest = load_versions_manifest(published_root=published_root, required=True)
     if not isinstance(manifest, dict) or not isinstance(manifest.get("versions"), list):
         raise ValueError("Invalid published versions manifest")
     names = {entry["name"] for entry in manifest["versions"]}
@@ -117,7 +113,6 @@ def prepare_deployment(
     # never replace content that has been deployed since the build started.
     merge_published_site(
         build_dir,
-        site_base_url=site_url,
         published_root=published_root,
         skip_versions=frozenset({version}),
         refresh_versions=frozenset(names),
@@ -172,16 +167,17 @@ def main() -> None:
     parser.add_argument("--deployment-id")
     args = parser.parse_args()
     if args.command == "prepare":
+        if not args.repository:
+            parser.error(
+                "prepare requires --repository for the complete published artifact"
+            )
         with tempfile.TemporaryDirectory() as directory:
-            snapshot = None
-            if args.repository:
-                snapshot = _published_snapshot(
-                    args.site_url, args.repository, Path(directory)
-                )
+            snapshot = _published_snapshot(
+                args.site_url, args.repository, Path(directory)
+            )
             prepare_deployment(
                 args.build_dir,
                 args.version,
-                site_url=args.site_url,
                 published_root=snapshot,
             )
     else:

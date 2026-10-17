@@ -19,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from urllib.error import HTTPError
@@ -43,6 +44,11 @@ def test_queued_artifact_preserves_versions_published_after_build(
     candidate, published = tmp_path / "candidate", tmp_path / "published"
     _write_published_site(candidate, ["v0.3.0", version], latest="v0.3.0")
     _write_published_site(published, ["v0.3.0", "v0.3.1", "main"], latest="v0.3.1")
+    runtime_data = "_static/architecture/architecture.json"
+    for name in ("v0.3.0", "v0.3.1", "main"):
+        data = published / name / runtime_data
+        data.parent.mkdir(parents=True)
+        data.write_text('{"nodes": ["runtime-loaded"]}')
     (candidate / version / "index.html").write_text("freshly built")
     (candidate / "v0.3.0" / "index.html").write_text("stale cached release")
     if version != "main":
@@ -62,6 +68,9 @@ def test_queued_artifact_preserves_versions_published_after_build(
     for name in {"v0.3.0", "v0.3.1", "main"} - {version}:
         assert (candidate / name / "index.html").read_bytes() == (
             published / name / "index.html"
+        ).read_bytes()
+        assert (candidate / name / runtime_data).read_bytes() == (
+            published / name / runtime_data
         ).read_bytes()
     assert "./v0.3.1/index.html" in (candidate / "index.html").read_text()
 
@@ -162,17 +171,34 @@ def test_deployed_snapshot_uses_exact_pages_artifact(
     ).read_bytes()
 
 
-def test_expired_artifact_falls_back_to_live_site(
+def test_expired_artifact_aborts_before_mutating_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(_deploy, "_read_url", lambda *args: b"123-2")
     monkeypatch.setattr(
         subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess([], 1)
     )
-    assert (
-        _deploy._published_snapshot("https://example.org", "owner/repo", tmp_path)
-        is None
+    _write_published_site(tmp_path, ["main"], latest="main")
+    runtime_data = tmp_path / "main/_static/architecture/architecture.json"
+    runtime_data.parent.mkdir(parents=True)
+    runtime_data.write_text("cached runtime data")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(_SCRIPT),
+            "prepare",
+            "--build-dir",
+            str(tmp_path),
+            "--site-url",
+            "https://example.org",
+            "--repository",
+            "owner/repo",
+        ],
     )
+    with pytest.raises(RuntimeError, match="complete published snapshot"):
+        _deploy.main()
+    assert runtime_data.read_text() == "cached runtime data"
 
 
 @pytest.mark.parametrize("version", ["v0.3.1.post1", "v0.4.0rc1"])
@@ -202,4 +228,6 @@ def test_required_manifest_read_failure_is_not_silently_skipped(
 
     monkeypatch.setattr(merge_published_site, "urlopen", unavailable)
     with pytest.raises(RuntimeError, match="Cannot read published manifest"):
-        _deploy.prepare_deployment(tmp_path, "main", site_url="https://example.org")
+        merge_published_site.load_versions_manifest(
+            site_base_url="https://example.org", required=True
+        )
