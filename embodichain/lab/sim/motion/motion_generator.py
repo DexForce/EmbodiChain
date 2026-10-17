@@ -48,7 +48,10 @@ from embodichain.compute.trajectory import (
     resample_in_time,
     differentiate_positions,
 )
-from embodichain.compute.trajectory.interpolation import interpolate_minimum_jerk
+from embodichain.compute.trajectory.interpolation import (
+    _minimum_jerk_progress,
+    interpolate_minimum_jerk,
+)
 from embodichain.utils import logger, configclass
 from embodichain.utils.math import (
     axis_angle_from_quat,
@@ -1275,14 +1278,11 @@ class MotionGenerator:
         segment_lengths = solved_keyframes.diff(dim=1).abs().amax(dim=-1)
         cumulative = torch.cumsum(segment_lengths, dim=1)
         total = cumulative[:, -1:]
-        tau = torch.linspace(
-            0.0,
-            1.0,
+        progress = _minimum_jerk_progress(
             sample_count,
             device=target_poses.device,
             dtype=target_poses.dtype,
         )
-        progress = 10.0 * tau**3 - 15.0 * tau**4 + 6.0 * tau**5
         if path_sampler is not None:
             result = path_sampler(progress)
             expected_shape = (target_poses.shape[0], sample_count, 4, 4)

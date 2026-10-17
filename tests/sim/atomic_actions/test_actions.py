@@ -4647,6 +4647,7 @@ def test_press_motion_gen_rejects_uncertified_contact_path() -> None:
         ),
         geometry={},
         label="button",
+        entity_id="button",
     )
 
     with pytest.raises(ValueError, match="requires strategy='ik_interp'"):

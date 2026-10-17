@@ -164,28 +164,16 @@ def interpolate_minimum_jerk(
     def build_positions() -> torch.Tensor:
         segments = [trajectory[:, :1]]
         for index, count in enumerate(interval_counts.tolist()):
-            # Evaluate the polynomial symmetrically in float64.  The direct
-            # expanded form loses monotonicity through cancellation near u=1
-            # when the requested control grid is dense and the output is
-            # float32.
-            tau = (
-                torch.arange(
-                    1,
-                    count + 1,
-                    dtype=torch.float64,
-                    device=trajectory.device,
-                )
-                / count
+            blend = _minimum_jerk_progress(
+                count + 1,
+                device=trajectory.device,
+                dtype=torch.float64,
             )
-            reverse_tau = 1.0 - tau
-            lower = tau**3 * (10.0 + tau * (-15.0 + 6.0 * tau))
-            upper = 1.0 - reverse_tau**3 * (
-                10.0 + reverse_tau * (-15.0 + 6.0 * reverse_tau)
-            )
-            blend = torch.where(tau <= 0.5, lower, upper)
             start = trajectory[:, index : index + 1].to(torch.float64)
             end = trajectory[:, index + 1 : index + 2].to(torch.float64)
-            segment = torch.lerp(start, end, blend.view(1, -1, 1)).to(trajectory.dtype)
+            segment = torch.lerp(start, end, blend[1:].view(1, -1, 1)).to(
+                trajectory.dtype
+            )
             segment[:, -1] = trajectory[:, index + 1]
             segments.append(segment)
         return torch.cat(segments, dim=1)
@@ -227,6 +215,52 @@ def interpolate_minimum_jerk(
         "Unable to satisfy discrete velocity and acceleration limits in the "
         "trajectory output dtype."
     )
+
+
+def _minimum_jerk_progress(
+    sample_count: int,
+    *,
+    device: torch.device | str,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Return stable rest-to-rest quintic progress on a fixed sample grid.
+
+    The polynomial is evaluated symmetrically in float64 before one final cast.
+    This avoids cancellation near one making dense float32 progress decrease.
+
+    Args:
+        sample_count: Number of progress samples, including both endpoints.
+        device: Device for the returned tensor.
+        dtype: Floating-point output dtype.
+
+    Returns:
+        Monotonic progress from exactly zero through exactly one.
+
+    Raises:
+        ValueError: If fewer than two samples or a non-floating dtype is used.
+    """
+    if (
+        isinstance(sample_count, bool)
+        or not isinstance(sample_count, int)
+        or sample_count < 2
+    ):
+        raise ValueError("sample_count must be an integer at least 2.")
+    if not dtype.is_floating_point:
+        raise ValueError("dtype must be floating point.")
+    tau = torch.linspace(
+        0.0,
+        1.0,
+        sample_count,
+        device=device,
+        dtype=torch.float64,
+    )
+    reverse_tau = 1.0 - tau
+    lower = tau**3 * (10.0 + tau * (-15.0 + 6.0 * tau))
+    upper = 1.0 - reverse_tau**3 * (10.0 + reverse_tau * (-15.0 + 6.0 * reverse_tau))
+    progress = torch.where(tau <= 0.5, lower, upper).to(dtype=dtype)
+    progress[0] = 0.0
+    progress[-1] = 1.0
+    return progress
 
 
 def _allocate_segment_intervals(

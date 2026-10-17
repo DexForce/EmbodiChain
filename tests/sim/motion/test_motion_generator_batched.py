@@ -1085,6 +1085,45 @@ class TestMotionStrategy:
         )
         generator.planner.plan.assert_not_called()
 
+    def test_dense_float32_cartesian_progress_is_monotonic_and_dtype_stable(self):
+        generator = _mock_generator()
+        sample_count = 10_001
+        generator.robot.compute_fk.return_value = torch.eye(
+            4, dtype=torch.float32
+        ).repeat(BATCH_SIZE, 1, 1)
+        target_poses = torch.eye(4, dtype=torch.float32).repeat(BATCH_SIZE, 1, 1, 1)
+        target_poses[:, 0, 0, 3] = 1.0
+        solved_keyframes = torch.zeros(BATCH_SIZE, 2, CONTROLLED_DOF)
+        solved_keyframes[:, 1, 0] = 1.0
+        observed_progress = None
+
+        def sample_path(progress: torch.Tensor) -> torch.Tensor:
+            nonlocal observed_progress
+            observed_progress = progress
+            poses = torch.eye(4, dtype=progress.dtype, device=progress.device).repeat(
+                BATCH_SIZE, progress.numel(), 1, 1
+            )
+            poses[..., 0, 3] = progress
+            return poses
+
+        result = generator._sample_cartesian_path(
+            target_poses,
+            solved_keyframes,
+            sample_count,
+            "arm",
+            path_sampler=sample_path,
+        )
+
+        assert observed_progress is not None
+        assert observed_progress.dtype == target_poses.dtype
+        assert observed_progress.device == target_poses.device
+        assert torch.all(observed_progress.diff() >= 0.0)
+        assert observed_progress[0] == 0.0
+        assert observed_progress[-1] == 1.0
+        assert result.dtype == target_poses.dtype
+        assert result.device == target_poses.device
+        assert torch.equal(result[..., 0, 3], observed_progress.expand(BATCH_SIZE, -1))
+
     def test_motion_gen_delegates_and_resamples_backend_result(self):
         raw_sample_count = 5
         generator = _mock_generator(

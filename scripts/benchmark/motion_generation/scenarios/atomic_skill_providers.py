@@ -63,6 +63,7 @@ from .atomic_task import (
     _TOP_DOWN_ROTATION,
     _ExecutionObservation,
     _atomic_case_id,
+    _benchmark_motion_policy,
     _canonical_case_qpos,
     _case_name,
     _case_pose,
@@ -855,9 +856,8 @@ class _OpenDoorCases(AtomicSkillCaseProvider):
                 open_fraction=float(case.case_parameters["open_fraction"]),
             ),
             control_parts=_primary_control_parts(scenario, "OpenDoor"),
-            motion_policy=MotionPolicy(
-                strategy="motion_gen",
-                sample_count=int(case.case_parameters["sample_count"]),
+            motion_policy=_benchmark_motion_policy(
+                self.skill_id, int(case.case_parameters["sample_count"])
             ),
             skill_options=OpenDoorOptions(
                 hand_interp_steps=int(case.case_parameters["hand_interp_steps"]),
@@ -1928,9 +1928,8 @@ class _PushObjectCases(AtomicSkillCaseProvider):
                 target_pose=_case_pose(case, "target_object_pose", device=device),
             ),
             control_parts=_primary_control_parts(scenario, "PushObject"),
-            motion_policy=MotionPolicy(
-                strategy="motion_gen",
-                sample_count=int(parameters["sample_count"]),
+            motion_policy=_benchmark_motion_policy(
+                self.skill_id, int(parameters["sample_count"])
             ),
             skill_options=PushObjectOptions(
                 hand_interp_steps=int(parameters["hand_interp_steps"]),

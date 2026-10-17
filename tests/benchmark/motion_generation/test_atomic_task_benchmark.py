@@ -29,7 +29,10 @@ from unittest.mock import Mock
 import pytest
 import torch
 
-from embodichain.lab.sim.atomic_actions import ArticulationAffordanceGeometry
+from embodichain.lab.sim.atomic_actions import (
+    ArticulationAffordanceGeometry,
+    MotionPolicy,
+)
 from embodichain.lab.sim.atomic_actions.plans import CompiledTrajectory, TimedTrajectory
 from embodichain.utils.math import axis_angle_to_rotation_matrix
 from scripts.benchmark.motion_generation.aggregation import aggregate_results
@@ -56,6 +59,8 @@ from scripts.benchmark.motion_generation.scenarios.atomic_task import (
     _ExecutionObservation,
     _atomic_case_id,
     _articulation_effect_success,
+    _benchmark_motion_attribution,
+    _benchmark_motion_policy_strategy,
     _canonical_case_qpos,
     _case_generation_seed,
     _randomization_parameters,
@@ -1128,6 +1133,63 @@ def test_atomic_invocation_uses_motion_generator_policy():
     assert args[0] == "move_end_effector"
     assert kwargs["motion_policy"].strategy == "motion_gen"
     assert kwargs["control_parts"] == {"primary": {"motion": "manipulator"}}
+
+
+@pytest.mark.parametrize(
+    "skill_id", ["open_door", "press", "push_object", "slide", "twist"]
+)
+def test_contact_benchmarks_use_attributed_ik_interpolation(skill_id: str) -> None:
+    assert _benchmark_motion_policy_strategy(skill_id) == "ik_interp"
+    assert _benchmark_motion_attribution(skill_id) == {
+        "motion_policy_strategy": "ik_interp",
+        "selected_planner_backend_used": False,
+        "effective_motion_algorithm": "sequential_ik_interpolation",
+    }
+
+
+def test_noncontact_benchmarks_retain_selected_planner_attribution() -> None:
+    assert _benchmark_motion_policy_strategy("move_end_effector") == "motion_gen"
+    assert _benchmark_motion_attribution("move_end_effector") == {
+        "motion_policy_strategy": "motion_gen",
+        "selected_planner_backend_used": True,
+        "effective_motion_algorithm": "selected_planner_backend",
+    }
+
+
+@pytest.mark.parametrize(
+    "skill_id", ["open_door", "press", "push_object", "slide", "twist"]
+)
+def test_atomic_scenario_accepts_required_contact_strategy(skill_id: str) -> None:
+    case = replace(
+        _atomic_case(),
+        case_id=f"atomic-task:{skill_id}:simple:s11",
+        scenario_id=skill_id,
+        skill_id=skill_id,
+    )
+    motion_generator = Mock()
+    adapter = Mock()
+    adapter.require_motion_generator.return_value = motion_generator
+    adapter.atomic_plan_options.return_value = None
+    invocation = SimpleNamespace(
+        motion_policy=MotionPolicy(strategy="ik_interp", sample_count=80)
+    )
+    provider = Mock(samples_grasps=False)
+    provider.build_invocation.return_value = invocation
+    provider.initial_task_state.return_value = None
+    provider.prefix_invocations.return_value = ()
+    provider.initial_scene.return_value = None
+    provider.frozen_grasps.return_value = {}
+    compiled = object()
+    engine = Mock(motion_generator=motion_generator)
+    engine.compile.return_value = compiled
+    scenario = AtomicTaskScenario()
+    scenario.simulation = SimpleNamespace(sim_config=SimpleNamespace(physics_dt=0.01))
+    scenario.robot = SimpleNamespace(device=torch.device("cpu"))
+    scenario._engine = engine
+    scenario._case_providers[case.case_id] = provider
+
+    assert scenario.plan_case(adapter, case) is compiled
+    engine.compile.assert_called_once()
 
 
 def test_atomic_skill_and_object_extensions_are_registry_driven():
