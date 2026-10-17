@@ -6,6 +6,8 @@ explicit offline-data controls. See [implementation evidence](IMPLEMENTATION.md)
 [design](REDESIGN.md), [review](REVIEW.md), and [efficiency protocol](BENCHMARK.md).
 Engineering smoke and training-reset qualification are separate from the final
 80% success target; inspect each run's `summary.json`.
+The [LeRobot offline experiment](LEROBOT_OFFLINE.md) records actual dataset
+round-trip checks, offline learning results and the frozen-data comparison.
 
 ## Physical task and policy
 
@@ -98,6 +100,30 @@ closes the producer, loads G1 and trains. `--offline-data PATH` explicitly measu
 a data-ready scenario. It must not be presented as an acquisition-inclusive run.
 Offline format uses numeric CPU tensors, restricted loading, schema/content hashes
 and episode/frame identity. The loader may retain the small state corpus in RAM.
+
+An exported numeric corpus can also be persisted and loaded through the official
+LeRobot SDK (validated with the installed LeRobot 0.4.4):
+
+```bash
+python examples/data_pipeline/_ods_pick_place_lerobot.py \
+  --source /tmp/pick-place-four/corpus.pt --output /tmp/pick-place-lerobot
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --stage overfit-four --offline-data /tmp/pick-place-lerobot \
+  --updates-per-round 3000 --eval-every 500 \
+  --qualification-report /tmp/pick-place-qualified/expert_qualification.json \
+  --no-viewer --no-video --output /tmp/pick-place-offline-four
+```
+
+To create the source corpus, add `--export-data /tmp/pick-place-four/corpus.pt`
+to the four-reset command above. The LeRobot path stores `observation.state`,
+`action` and numeric provenance in Parquet; the showcase sidecar preserves ordered
+controller semantics, original episode boundaries and content hashes. Loading
+reads actual SDK rows once, checks exact numeric equality, then samples resident
+CPU tensors. This tests offline learning and initial loading cost, not native
+LeRobot per-batch I/O. It uses the same locally generated expert demonstrations;
+it does not introduce external demonstration data or a pretrained policy.
+Small-data offline stages recover reset positions from valid frame-zero measured
+observations and apply the same physical verification as live data stages.
 
 For exact **MLP** batch replay, run online with `--export-data PATH
 --record-batches`, then use `--mode offline-matched --offline-data PATH

@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -461,3 +462,29 @@ def test_geometry_recurrent_loss_uses_unclamped_normalized_requests() -> None:
     assert model.head[-1].bias.grad.abs().min() > 0
     action, _ = model.action(obs[:, 0])
     torch.testing.assert_close(action, torch.ones(2, 7))
+
+
+def test_offline_reset_diagnostic_uses_original_causal_frame_zero() -> None:
+    from examples.data_pipeline._ods_pick_place_training import _offline_reset_positions
+
+    observations = torch.randn(4, 3, 51)
+    names = [f"feature_{i}" for i in range(51)]
+    names[27:30] = ["cube_0", "cube_1", "cube_2"]
+    corpus = SimpleNamespace(
+        observations=observations,
+        valid=torch.ones(4, 3, dtype=torch.bool),
+        frame_ids=torch.zeros(4, 3, 3, dtype=torch.int64),
+        manifest={
+            "schema": {
+                "observation": {"version": "pick_place.geometry@2", "names": names}
+            }
+        },
+    )
+    assert _offline_reset_positions(corpus, 4) == observations[:, 0, 27:30].tolist()
+    corpus.valid[2, 0] = False
+    with pytest.raises(ValueError, match="frame zero"):
+        _offline_reset_positions(corpus, 4)
+    corpus.valid[2, 0] = True
+    corpus.frame_ids[1, 0, 2] = 1
+    with pytest.raises(ValueError, match="frame zero"):
+        _offline_reset_positions(corpus, 4)

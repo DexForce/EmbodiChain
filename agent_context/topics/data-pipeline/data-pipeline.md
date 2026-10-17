@@ -28,6 +28,12 @@ for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
 
+The PickPlace example additionally accepts its own schema-validated LeRobot
+export directories through `_ods_pick_place_lerobot.py`. The SDK reads numeric
+rows once; subsequent causal sampling uses resident CPU tensors. This private
+learning comparison does not replace the general recording/export tools or
+measure LeRobot per-minibatch loading throughput.
+
 ## Online worker contract
 
 Shared image buffers are allocated by `init_rollout_buffer_from_config()` in

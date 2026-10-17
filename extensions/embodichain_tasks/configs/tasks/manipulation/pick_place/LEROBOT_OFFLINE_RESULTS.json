@@ -1,0 +1,3006 @@
+{
+  "date": "2026-10-17",
+  "experiment": "Four-demo LeRobot offline learning diagnostic",
+  "training_complete": true,
+  "learning_gate_passed": false,
+  "source_frozen_run": "/tmp/ods-v2-dls-gru-four-diagnostic",
+  "offline_run": "/tmp/ods-v3-lerobot-four/gru",
+  "dataset": "/tmp/ods-v3-lerobot-four/dataset",
+  "training_log": "/tmp/ods-v3-lerobot-four/train.log",
+  "development_log": "/tmp/ods-v3-lerobot-four/development.log",
+  "development_frozen_selection": {
+    "checkpoint": "/tmp/ods-v3-lerobot-four/gru/step_1000.pt",
+    "selected_using": "fixed four training resets; lexicographic success, lift, negative goal error",
+    "source_reports": [
+      "initial_dev",
+      "step_500_dev",
+      "step_1000_dev",
+      "step_1500_dev",
+      "step_2000_dev",
+      "step_2500_dev",
+      "step_3000_dev"
+    ],
+    "score": [
+      0.25,
+      1.0,
+      -0.17056034691631794
+    ],
+    "heldout_results_observed": false,
+    "evaluation_sim_device": "cuda:3",
+    "evaluation_gpu_id": 3
+  },
+  "pre_development_selection_matches_training_summary": true,
+  "focused_validation": {
+    "focused_tests_passed": 131,
+    "public_api_docs_covered": 2604,
+    "public_api_docs_total": 2604,
+    "context_check": "passed",
+    "full_repository_suite_run": false,
+    "full_sphinx_build_run": false,
+    "owned_gpu_post_run_mib": {
+      "1": 0,
+      "3": 0
+    },
+    "verified_by": "root agent in the shared implementation session"
+  },
+  "learning_curve": "/tmp/ods-v3-lerobot-four/learning_curve.png",
+  "data_audit": {
+    "source": "/tmp/ods-v2-dls-gru-four-diagnostic/corpus.pt",
+    "dataset": "/tmp/ods-v3-lerobot-four/dataset",
+    "schema_equal": true,
+    "source_schema_sha256": "2bd9a129ff929fc0f47ac56e5a571d5191cfbc2f0f5042534fe643cfc2f74b59",
+    "lerobot_schema_sha256": "2bd9a129ff929fc0f47ac56e5a571d5191cfbc2f0f5042534fe643cfc2f74b59",
+    "source_content_id": "712dc54494ac1db686874bc5b8219224c9b120eefb61ad07751f38161e816c15",
+    "lerobot_content_id": "712dc54494ac1db686874bc5b8219224c9b120eefb61ad07751f38161e816c15",
+    "content_id_equal": true,
+    "tensor_bitwise_equal": {
+      "observations": true,
+      "actions": true,
+      "valid": true,
+      "frame_ids": true,
+      "generations": true
+    },
+    "tensor_shapes": {
+      "observations": [
+        4,
+        600,
+        51
+      ],
+      "actions": [
+        4,
+        600,
+        7
+      ],
+      "valid": [
+        4,
+        600
+      ],
+      "frame_ids": [
+        4,
+        600,
+        3
+      ],
+      "generations": [
+        4,
+        600
+      ]
+    },
+    "source_tensor_sha256": {
+      "actions": "527f6e82e481c632f8e4a3dbc3150f8a0f75a2217d615005bc5d004989399bf1",
+      "frame_ids": "ab6eef52f8706818f88e9f357ca425f25539174cd898c43d38c4fe42cc0c7a59",
+      "generations": "417974fd4e1546282e54a18f4b3393da8d724c595380aa169c58f5dc6fb5f75a",
+      "observations": "df0ef8c181f2c51dbfb997afd7fc4d0f49e25888095668b7d44583f1ca6d425e",
+      "valid": "8b333cf570edabc3a5ae154786c73dabecc18b936578ea657f02a9ec0b40d0d8"
+    },
+    "lerobot_tensor_sha256": {
+      "actions": "527f6e82e481c632f8e4a3dbc3150f8a0f75a2217d615005bc5d004989399bf1",
+      "frame_ids": "ab6eef52f8706818f88e9f357ca425f25539174cd898c43d38c4fe42cc0c7a59",
+      "generations": "417974fd4e1546282e54a18f4b3393da8d724c595380aa169c58f5dc6fb5f75a",
+      "observations": "df0ef8c181f2c51dbfb997afd7fc4d0f49e25888095668b7d44583f1ca6d425e",
+      "valid": "8b333cf570edabc3a5ae154786c73dabecc18b936578ea657f02a9ec0b40d0d8"
+    },
+    "episodes": 4,
+    "valid_frames": 1328,
+    "episode_valid_frames": [
+      332,
+      332,
+      332,
+      332
+    ],
+    "initial_reset_positions_bitwise_equal": true,
+    "lerobot_version": "0.4.4",
+    "lerobot_metadata": {
+      "codebase_version": "v3.0",
+      "robot_type": "franka_panda",
+      "total_episodes": 4,
+      "total_frames": 1328,
+      "fps": 30,
+      "features": {
+        "observation.state": {
+          "dtype": "float32",
+          "shape": [
+            51
+          ],
+          "names": [
+            "qpos_0",
+            "qpos_1",
+            "qpos_2",
+            "qpos_3",
+            "qpos_4",
+            "qpos_5",
+            "qpos_6",
+            "qpos_7",
+            "qpos_8",
+            "qvel_0",
+            "qvel_1",
+            "qvel_2",
+            "qvel_3",
+            "qvel_4",
+            "qvel_5",
+            "qvel_6",
+            "qvel_7",
+            "qvel_8",
+            "tcp_0",
+            "tcp_1",
+            "tcp_2",
+            "tcp_3",
+            "tcp_4",
+            "tcp_5",
+            "tcp_6",
+            "tcp_7",
+            "tcp_8",
+            "cube_0",
+            "cube_1",
+            "cube_2",
+            "cube_3",
+            "cube_4",
+            "cube_5",
+            "cube_6",
+            "cube_7",
+            "cube_8",
+            "goal_0",
+            "goal_1",
+            "goal_2",
+            "relative_0",
+            "relative_1",
+            "relative_2",
+            "relative_3",
+            "relative_4",
+            "relative_5",
+            "cube_velocity_0",
+            "cube_velocity_1",
+            "cube_velocity_2",
+            "cube_velocity_3",
+            "cube_velocity_4",
+            "cube_velocity_5"
+          ]
+        },
+        "action": {
+          "dtype": "float32",
+          "shape": [
+            7
+          ],
+          "names": [
+            "dx",
+            "dy",
+            "dz",
+            "drx",
+            "dry",
+            "drz",
+            "gripper"
+          ]
+        },
+        "ods.provenance": {
+          "dtype": "int64",
+          "shape": [
+            4
+          ],
+          "names": [
+            "run_id",
+            "episode_id",
+            "source_frame_index",
+            "generation"
+          ]
+        },
+        "timestamp": {
+          "dtype": "float32",
+          "shape": [
+            1
+          ],
+          "names": null
+        },
+        "frame_index": {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "names": null
+        },
+        "episode_index": {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "names": null
+        },
+        "index": {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "names": null
+        },
+        "task_index": {
+          "dtype": "int64",
+          "shape": [
+            1
+          ],
+          "names": null
+        }
+      }
+    },
+    "sampling": "resident_cpu_after_official_lerobot_row_load",
+    "per_minibatch_lerobot_io": false,
+    "batches_match": false,
+    "batches_match_reason": "Recurrent runs use independent sampling; exact ordered minibatch replay is not implemented.",
+    "initial_model_sha256_source": "00a81b4dbe004e9b00041ea86d51457dbffd3fa4d19da34c721fe3b8aafbfc8f",
+    "normalization_sha256_source": "4d734a8f387cb45e0d41bf6e5df49d8ec4e74dc7d34901e9b6373c4472a159b6",
+    "initial_model_sha256_offline": "00a81b4dbe004e9b00041ea86d51457dbffd3fa4d19da34c721fe3b8aafbfc8f",
+    "normalization_sha256_offline": "4d734a8f387cb45e0d41bf6e5df49d8ec4e74dc7d34901e9b6373c4472a159b6",
+    "initial_model_equal": true,
+    "normalization_equal": true
+  },
+  "config": {
+    "sim_device": "cuda:1",
+    "train_device": "cuda:1",
+    "output": "/tmp/ods-v3-lerobot-four/gru",
+    "mode": "frozen",
+    "policy": "gru-pose",
+    "pose_ik": "dls",
+    "stage": "overfit-four",
+    "offline_data": "/tmp/ods-v3-lerobot-four/dataset",
+    "export_data": null,
+    "record_batches": false,
+    "batch_manifest": null,
+    "eval_every": 500,
+    "qualification_scenes": 40,
+    "qualification_report": "/tmp/ods-v2-dls-qualified40/expert_qualification.json",
+    "dev_scenes": 20,
+    "final_test_scenes": 0,
+    "wall_time_budget": null,
+    "learning_rate": 0.0003,
+    "arm_command_mode": "absolute",
+    "rounds": 1,
+    "updates_per_round": 3000,
+    "buffer_size": 4,
+    "batch_size": 64,
+    "seed": 42,
+    "resume": null,
+    "viser_port": 8080,
+    "tensorboard_port": 6006,
+    "no_viewer": true,
+    "no_video": true,
+    "smoke": false,
+    "qualification_only": false
+  },
+  "protocol": {
+    "model": "GeometryRecurrentBC, one-layer GRU hidden128",
+    "observation_dim": 51,
+    "action_dim": 7,
+    "action_representation": "Six normalized measured-relative arena-frame EEF pose requests and one parallel-gripper request",
+    "controller": "Local DLS damping0.05, max_joint_delta0.1rad, translation_scale0.02m, rotation_scale0.1rad",
+    "training_producer_present": false,
+    "sequence_supervised_steps": 24,
+    "history": "Full causal prefix; start_probability0.25; padded targets excluded",
+    "optimizer": "Adam",
+    "learning_rate": 0.0003,
+    "gradient_norm_max": 1.0,
+    "valid_supervised_targets": 4608000,
+    "checkpoint_selection": "Lexicographic training-reset success, lift, negative mean final goal error; baseline included",
+    "training_reset_periodic_seeds": [
+      21000,
+      21001,
+      21002,
+      21003
+    ],
+    "training_reset_verification_seeds": [
+      22000,
+      22001,
+      22002,
+      22003,
+      22004,
+      22005,
+      22006,
+      22007,
+      22008,
+      22009,
+      22010,
+      22011,
+      22012,
+      22013,
+      22014,
+      22015,
+      22016,
+      22017,
+      22018,
+      22019
+    ],
+    "training_reset_verification_repeats_per_position": 5,
+    "reserved_final100_evaluated": false,
+    "exact_batches_match": false,
+    "exact_batches_match_reason": "No recurrent minibatch manifest was recorded/replayed; equal checkpoints are an empirical observation only."
+  },
+  "offline_summary": {
+    "export_complete": null,
+    "batch_manifest_complete": null,
+    "policy": "gru-pose",
+    "mode": "frozen",
+    "stage": "overfit-four",
+    "smoke": false,
+    "training_seed": 42,
+    "parameters_updated": true,
+    "training_step": 3000,
+    "best_checkpoint": "/tmp/ods-v3-lerobot-four/gru/step_1000.pt",
+    "best_dev_success": 0.25,
+    "initial_dev_success": 0.0,
+    "final_success_rate": null,
+    "threshold_test_success": null,
+    "initial_success_rate": null,
+    "learning_target_met": false,
+    "small_data_gate_met": false,
+    "supervised_generations": {
+      "1": 4608000
+    },
+    "stats": null,
+    "efficiency": {
+      "end_reason": "update_budget",
+      "observed_seconds": 535.4726825216785,
+      "horizon_seconds": 535.4726825216785,
+      "efficiency/reached_80": false,
+      "efficiency/t80_dev_seconds": null,
+      "efficiency/t80_dev_right_censored": true,
+      "efficiency/censor_seconds": 535.4726825216785,
+      "efficiency/t80_dev_checkpoint": null,
+      "efficiency/auc_success_time": 0.0,
+      "pipeline/first_update_seconds": 63.41588936466724,
+      "pipeline/targets_per_second": 235461.71836054215,
+      "pipeline/acquisition_inclusive_targets_per_second": 8605.48100847973,
+      "pipeline/training_loop_seconds": 19.570060186786577,
+      "pipeline/exposed_data_wait_seconds": 0,
+      "pipeline/data_wait_fraction": 0.0,
+      "pipeline/batch_latency_ms_p50_p95": [
+        2.95484799426049,
+        3.8426135317422445
+      ],
+      "learning/valid_targets": 4608000,
+      "learning/unique_frames": 1328,
+      "learning/targets_to_80": null,
+      "learning/unique_frames_to_80": null,
+      "data/targets_per_unique_frame": 3469.879518072289,
+      "cost/gpu_hours_to_80": null,
+      "cost/allocated_gpu_hours": 0.14874241181157735,
+      "cost/allocated_physical_gpu_ids": [
+        "1"
+      ],
+      "cost/host_pss_sampled_peak_bytes": 5587459072,
+      "cost/cpu_core_seconds_observed": 1372.59,
+      "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
+        "cuda:1": 534773760
+      },
+      "cost/gpu_peak_bytes": null,
+      "pipeline/producer_learner_overlap_fraction": null,
+      "horizon_prespecified": false,
+      "data_ready": true,
+      "cost/data_disk_peak_bytes": 544241,
+      "data/accepted_frames": 1328,
+      "data/consumed_unique_fraction": 1.0,
+      "data/evicted_unused_fraction": null,
+      "data/generation_targets": {
+        "1": 4608000
+      },
+      "data/age_seconds_p50_p95": null,
+      "cost/data_write_read_bytes": null,
+      "cost/data_memory_peak_bytes": null
+    },
+    "final_verification_seconds": 0.0017759478650987148,
+    "matching": null
+  },
+  "source_summary": {
+    "policy": "gru-pose",
+    "mode": "frozen",
+    "stage": "overfit-four",
+    "smoke": false,
+    "training_seed": 42,
+    "parameters_updated": true,
+    "training_step": 3000,
+    "best_checkpoint": "/tmp/ods-v2-dls-gru-four-diagnostic/step_1000.pt",
+    "best_dev_success": 0.25,
+    "initial_dev_success": 0.0,
+    "final_success_rate": null,
+    "threshold_test_success": null,
+    "initial_success_rate": null,
+    "learning_target_met": false,
+    "small_data_gate_met": false,
+    "supervised_generations": {
+      "1": 4608000
+    },
+    "stats": {
+      "requested_generation": 1,
+      "completed_generation": 1,
+      "successful_episodes": 4,
+      "failed_episodes": 0,
+      "generated_frames": 1328,
+      "production_seconds": 33.622681197943166,
+      "sampled_chunks": 192000,
+      "run_id": 1042701492368597815,
+      "valid_frames": 1328
+    },
+    "efficiency": {
+      "end_reason": "update_budget",
+      "observed_seconds": 596.7905043307692,
+      "horizon_seconds": 596.7905043307692,
+      "efficiency/reached_80": false,
+      "efficiency/t80_dev_seconds": null,
+      "efficiency/t80_dev_right_censored": true,
+      "efficiency/censor_seconds": 596.7905043307692,
+      "efficiency/t80_dev_checkpoint": null,
+      "efficiency/auc_success_time": 0.0,
+      "pipeline/first_update_seconds": 110.43610578589141,
+      "pipeline/targets_per_second": 132296.37307866747,
+      "pipeline/acquisition_inclusive_targets_per_second": 7721.302478107177,
+      "pipeline/training_loop_seconds": 34.83088683965616,
+      "pipeline/exposed_data_wait_seconds": 0,
+      "pipeline/data_wait_fraction": 0.0,
+      "pipeline/batch_latency_ms_p50_p95": [
+        8.088240982033312,
+        8.281841012649238
+      ],
+      "learning/valid_targets": 4608000,
+      "learning/unique_frames": 1328,
+      "learning/targets_to_80": null,
+      "learning/unique_frames_to_80": null,
+      "data/targets_per_unique_frame": 3469.879518072289,
+      "cost/gpu_hours_to_80": null,
+      "cost/allocated_gpu_hours": 0.16577514009188032,
+      "cost/allocated_physical_gpu_ids": [
+        "1"
+      ],
+      "cost/host_pss_sampled_peak_bytes": 8492403712,
+      "cost/cpu_core_seconds_observed": 2405.9900000000002,
+      "cost/torch_cuda_this_process_max_reserved_bytes_by_device": {
+        "cuda:1": 534773760
+      },
+      "cost/gpu_peak_bytes": null,
+      "pipeline/producer_learner_overlap_fraction": null,
+      "horizon_prespecified": false,
+      "data_ready": false,
+      "cost/data_disk_peak_bytes": 661667,
+      "data/accepted_frames": 1328,
+      "data/consumed_unique_fraction": 1.0,
+      "data/evicted_unused_fraction": null,
+      "data/generation_targets": {
+        "1": 4608000
+      },
+      "data/age_seconds_p50_p95": null,
+      "cost/data_write_read_bytes": null,
+      "cost/data_memory_peak_bytes": null
+    },
+    "final_verification_seconds": 0.0016795010305941105,
+    "matching": null
+  },
+  "periodic_training_reset_panels": [
+    {
+      "name": "initial_dev",
+      "checkpoint_step": 0,
+      "successes": 0,
+      "lifts": 0,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.0,
+      "mean_goal_error_m": 0.3890248239040375,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.397221177816391,
+          "length": 600,
+          "initial_arm_target_delta": 0.10748767852783203
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3882727324962616,
+          "length": 600,
+          "initial_arm_target_delta": 0.11437361687421799
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38171201944351196,
+          "length": 600,
+          "initial_arm_target_delta": 0.11122479289770126
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38889336585998535,
+          "length": 600,
+          "initial_arm_target_delta": 0.1095992773771286
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/initial_dev.json"
+    },
+    {
+      "name": "step_500_dev",
+      "checkpoint_step": 500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.27165236324071884,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.1079367846250534,
+          "length": 600,
+          "initial_arm_target_delta": 0.05148597061634064
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38283899426460266,
+          "length": 600,
+          "initial_arm_target_delta": 0.045155540108680725
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.24879010021686554,
+          "length": 600,
+          "initial_arm_target_delta": 0.04933379590511322
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.34704357385635376,
+          "length": 600,
+          "initial_arm_target_delta": 0.05012322962284088
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_500_dev.json"
+    },
+    {
+      "name": "step_1000_dev",
+      "checkpoint_step": 1000,
+      "successes": 1,
+      "lifts": 4,
+      "episodes": 4,
+      "success_rate": 0.25,
+      "lift_rate": 1.0,
+      "mean_goal_error_m": 0.17056034691631794,
+      "mean_episode_length": 532.75,
+      "records": [
+        {
+          "seed": 21000,
+          "success": true,
+          "lifted": true,
+          "goal_error": 0.011669624596834183,
+          "length": 331,
+          "initial_arm_target_delta": 0.011748410761356354
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.05605565384030342,
+          "length": 600,
+          "initial_arm_target_delta": 0.011557616293430328
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.17510950565338135,
+          "length": 600,
+          "initial_arm_target_delta": 0.00524534285068512
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.4394066035747528,
+          "length": 600,
+          "initial_arm_target_delta": 0.003049911931157112
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_1000_dev.json"
+    },
+    {
+      "name": "step_1500_dev",
+      "checkpoint_step": 1500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.3906099144369364,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.4276483654975891,
+          "length": 600,
+          "initial_arm_target_delta": 0.011950507760047913
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.12434626370668411,
+          "length": 600,
+          "initial_arm_target_delta": 0.00978463888168335
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3818102777004242,
+          "length": 600,
+          "initial_arm_target_delta": 0.0049812644720077515
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.6286347508430481,
+          "length": 600,
+          "initial_arm_target_delta": 0.002999754622578621
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_1500_dev.json"
+    },
+    {
+      "name": "step_2000_dev",
+      "checkpoint_step": 2000,
+      "successes": 0,
+      "lifts": 0,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.0,
+      "mean_goal_error_m": 0.368745855987072,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3685181736946106,
+          "length": 600,
+          "initial_arm_target_delta": 0.012721233069896698
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3816460072994232,
+          "length": 600,
+          "initial_arm_target_delta": 0.007806211709976196
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.36148425936698914,
+          "length": 600,
+          "initial_arm_target_delta": 0.005074081011116505
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.363334983587265,
+          "length": 600,
+          "initial_arm_target_delta": 0.003539636731147766
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_2000_dev.json"
+    },
+    {
+      "name": "step_2500_dev",
+      "checkpoint_step": 2500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.5228864029049873,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.5661324262619019,
+          "length": 600,
+          "initial_arm_target_delta": 0.010152265429496765
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3988621234893799,
+          "length": 600,
+          "initial_arm_target_delta": 0.007615700364112854
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.684155285358429,
+          "length": 600,
+          "initial_arm_target_delta": 0.0066415052860975266
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.44239577651023865,
+          "length": 600,
+          "initial_arm_target_delta": 0.0026152338832616806
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_2500_dev.json"
+    },
+    {
+      "name": "step_3000_dev",
+      "checkpoint_step": 3000,
+      "successes": 1,
+      "lifts": 4,
+      "episodes": 4,
+      "success_rate": 0.25,
+      "lift_rate": 1.0,
+      "mean_goal_error_m": 0.23298725066706538,
+      "mean_episode_length": 533.75,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.5383871793746948,
+          "length": 600,
+          "initial_arm_target_delta": 0.009355798363685608
+        },
+        {
+          "seed": 21001,
+          "success": true,
+          "lifted": true,
+          "goal_error": 0.028937069699168205,
+          "length": 335,
+          "initial_arm_target_delta": 0.005476021207869053
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.10359294712543488,
+          "length": 600,
+          "initial_arm_target_delta": 0.0075647542253136635
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.2610318064689636,
+          "length": 600,
+          "initial_arm_target_delta": 0.0023211538791656494
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/gru/step_3000_dev.json"
+    }
+  ],
+  "source_periodic_training_reset_panels": [
+    {
+      "name": "initial_dev",
+      "checkpoint_step": 0,
+      "successes": 0,
+      "lifts": 0,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.0,
+      "mean_goal_error_m": 0.3890248239040375,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.397221177816391,
+          "length": 600,
+          "initial_arm_target_delta": 0.10748767852783203
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3882727324962616,
+          "length": 600,
+          "initial_arm_target_delta": 0.11437361687421799
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38171201944351196,
+          "length": 600,
+          "initial_arm_target_delta": 0.11122479289770126
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38889336585998535,
+          "length": 600,
+          "initial_arm_target_delta": 0.1095992773771286
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/initial_dev.json"
+    },
+    {
+      "name": "step_500_dev",
+      "checkpoint_step": 500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.27165236324071884,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.1079367846250534,
+          "length": 600,
+          "initial_arm_target_delta": 0.05148597061634064
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.38283899426460266,
+          "length": 600,
+          "initial_arm_target_delta": 0.045155540108680725
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.24879010021686554,
+          "length": 600,
+          "initial_arm_target_delta": 0.04933379590511322
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.34704357385635376,
+          "length": 600,
+          "initial_arm_target_delta": 0.05012322962284088
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_500_dev.json"
+    },
+    {
+      "name": "step_1000_dev",
+      "checkpoint_step": 1000,
+      "successes": 1,
+      "lifts": 4,
+      "episodes": 4,
+      "success_rate": 0.25,
+      "lift_rate": 1.0,
+      "mean_goal_error_m": 0.17056034691631794,
+      "mean_episode_length": 532.75,
+      "records": [
+        {
+          "seed": 21000,
+          "success": true,
+          "lifted": true,
+          "goal_error": 0.011669624596834183,
+          "length": 331,
+          "initial_arm_target_delta": 0.011748410761356354
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.05605565384030342,
+          "length": 600,
+          "initial_arm_target_delta": 0.011557616293430328
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.17510950565338135,
+          "length": 600,
+          "initial_arm_target_delta": 0.00524534285068512
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.4394066035747528,
+          "length": 600,
+          "initial_arm_target_delta": 0.003049911931157112
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_1000_dev.json"
+    },
+    {
+      "name": "step_1500_dev",
+      "checkpoint_step": 1500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.3906099144369364,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.4276483654975891,
+          "length": 600,
+          "initial_arm_target_delta": 0.011950507760047913
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.12434626370668411,
+          "length": 600,
+          "initial_arm_target_delta": 0.00978463888168335
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3818102777004242,
+          "length": 600,
+          "initial_arm_target_delta": 0.0049812644720077515
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.6286347508430481,
+          "length": 600,
+          "initial_arm_target_delta": 0.002999754622578621
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_1500_dev.json"
+    },
+    {
+      "name": "step_2000_dev",
+      "checkpoint_step": 2000,
+      "successes": 0,
+      "lifts": 0,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.0,
+      "mean_goal_error_m": 0.368745855987072,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3685181736946106,
+          "length": 600,
+          "initial_arm_target_delta": 0.012721233069896698
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3816460072994232,
+          "length": 600,
+          "initial_arm_target_delta": 0.007806211709976196
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.36148425936698914,
+          "length": 600,
+          "initial_arm_target_delta": 0.005074081011116505
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.363334983587265,
+          "length": 600,
+          "initial_arm_target_delta": 0.003539636731147766
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_2000_dev.json"
+    },
+    {
+      "name": "step_2500_dev",
+      "checkpoint_step": 2500,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 4,
+      "success_rate": 0.0,
+      "lift_rate": 0.5,
+      "mean_goal_error_m": 0.5228864029049873,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.5661324262619019,
+          "length": 600,
+          "initial_arm_target_delta": 0.010152265429496765
+        },
+        {
+          "seed": 21001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3988621234893799,
+          "length": 600,
+          "initial_arm_target_delta": 0.007615700364112854
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.684155285358429,
+          "length": 600,
+          "initial_arm_target_delta": 0.0066415052860975266
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.44239577651023865,
+          "length": 600,
+          "initial_arm_target_delta": 0.0026152338832616806
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_2500_dev.json"
+    },
+    {
+      "name": "step_3000_dev",
+      "checkpoint_step": 3000,
+      "successes": 1,
+      "lifts": 4,
+      "episodes": 4,
+      "success_rate": 0.25,
+      "lift_rate": 1.0,
+      "mean_goal_error_m": 0.23298725066706538,
+      "mean_episode_length": 533.75,
+      "records": [
+        {
+          "seed": 21000,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.5383871793746948,
+          "length": 600,
+          "initial_arm_target_delta": 0.009355798363685608
+        },
+        {
+          "seed": 21001,
+          "success": true,
+          "lifted": true,
+          "goal_error": 0.028937069699168205,
+          "length": 335,
+          "initial_arm_target_delta": 0.005476021207869053
+        },
+        {
+          "seed": 21002,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.10359294712543488,
+          "length": 600,
+          "initial_arm_target_delta": 0.0075647542253136635
+        },
+        {
+          "seed": 21003,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.2610318064689636,
+          "length": 600,
+          "initial_arm_target_delta": 0.0023211538791656494
+        }
+      ],
+      "path": "/tmp/ods-v2-dls-gru-four-diagnostic/step_3000_dev.json"
+    }
+  ],
+  "periodic_panel_metrics_and_records_equal": true,
+  "selected_training_reset_verification": {
+    "name": "small_data_verification",
+    "checkpoint_step": 1000,
+    "successes": 3,
+    "lifts": 15,
+    "episodes": 20,
+    "success_rate": 0.15,
+    "lift_rate": 0.75,
+    "mean_goal_error_m": 0.3724169246852398,
+    "mean_episode_length": 558.95,
+    "records": [
+      {
+        "seed": 22000,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.011669624596834183,
+        "length": 331,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22001,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.41627180576324463,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22002,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.5782314538955688,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22003,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.011669624596834183,
+        "length": 331,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22004,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.41627180576324463,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22005,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.019489936530590057,
+        "length": 317,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22006,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.5534234642982483,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22007,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.39539751410484314,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22008,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.1929694265127182,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22009,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.7782202959060669,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22010,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22011,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.34345364570617676,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22012,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22013,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.3567824065685272,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22014,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22015,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.4394066035747528,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22016,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22017,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22018,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22019,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      }
+    ],
+    "path": "/tmp/ods-v3-lerobot-four/gru/small_data_verification.json"
+  },
+  "source_selected_training_reset_verification": {
+    "name": "small_data_verification",
+    "checkpoint_step": 1000,
+    "successes": 3,
+    "lifts": 15,
+    "episodes": 20,
+    "success_rate": 0.15,
+    "lift_rate": 0.75,
+    "mean_goal_error_m": 0.3724169246852398,
+    "mean_episode_length": 558.95,
+    "records": [
+      {
+        "seed": 22000,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.011669624596834183,
+        "length": 331,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22001,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.41627180576324463,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22002,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.5782314538955688,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22003,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.011669624596834183,
+        "length": 331,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22004,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.41627180576324463,
+        "length": 600,
+        "initial_arm_target_delta": 0.011748410761356354
+      },
+      {
+        "seed": 22005,
+        "success": true,
+        "lifted": true,
+        "goal_error": 0.019489936530590057,
+        "length": 317,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22006,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.5534234642982483,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22007,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.39539751410484314,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22008,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.1929694265127182,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22009,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.7782202959060669,
+        "length": 600,
+        "initial_arm_target_delta": 0.011557616293430328
+      },
+      {
+        "seed": 22010,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22011,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.34345364570617676,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22012,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22013,
+        "success": false,
+        "lifted": false,
+        "goal_error": 0.3567824065685272,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22014,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.17510950565338135,
+        "length": 600,
+        "initial_arm_target_delta": 0.00524534285068512
+      },
+      {
+        "seed": 22015,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.4394066035747528,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22016,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22017,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22018,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      },
+      {
+        "seed": 22019,
+        "success": false,
+        "lifted": true,
+        "goal_error": 0.6024380922317505,
+        "length": 600,
+        "initial_arm_target_delta": 0.003049911931157112
+      }
+    ],
+    "path": "/tmp/ods-v2-dls-gru-four-diagnostic/small_data_verification.json"
+  },
+  "selected_training_reset_metrics_and_records_equal": true,
+  "selected_training_reset_per_position": [
+    {
+      "reset_index": 0,
+      "successes": 2,
+      "lifts": 3,
+      "episodes": 5
+    },
+    {
+      "reset_index": 1,
+      "successes": 1,
+      "lifts": 4,
+      "episodes": 5
+    },
+    {
+      "reset_index": 2,
+      "successes": 0,
+      "lifts": 3,
+      "episodes": 5
+    },
+    {
+      "reset_index": 3,
+      "successes": 0,
+      "lifts": 5,
+      "episodes": 5
+    }
+  ],
+  "loss_series": {
+    "train/arm_loss": [
+      {
+        "step": 50,
+        "value": 0.024844247847795486
+      },
+      {
+        "step": 100,
+        "value": 0.009983673691749573
+      },
+      {
+        "step": 150,
+        "value": 0.006930839736014605
+      },
+      {
+        "step": 200,
+        "value": 0.0043768081814050674
+      },
+      {
+        "step": 250,
+        "value": 0.0033917943947017193
+      },
+      {
+        "step": 300,
+        "value": 0.002512852195650339
+      },
+      {
+        "step": 350,
+        "value": 0.0020597311668097973
+      },
+      {
+        "step": 400,
+        "value": 0.0016240219119936228
+      },
+      {
+        "step": 450,
+        "value": 0.0012281166855245829
+      },
+      {
+        "step": 500,
+        "value": 0.0015001563588157296
+      },
+      {
+        "step": 550,
+        "value": 0.00105601258110255
+      },
+      {
+        "step": 600,
+        "value": 0.0011050745379179716
+      },
+      {
+        "step": 650,
+        "value": 0.0007223247084766626
+      },
+      {
+        "step": 700,
+        "value": 0.000952222675550729
+      },
+      {
+        "step": 750,
+        "value": 0.0006491501699201763
+      },
+      {
+        "step": 800,
+        "value": 0.0005925592849962413
+      },
+      {
+        "step": 850,
+        "value": 0.0005464341957122087
+      },
+      {
+        "step": 900,
+        "value": 0.0005148214404471219
+      },
+      {
+        "step": 950,
+        "value": 0.0004593894991558045
+      },
+      {
+        "step": 1000,
+        "value": 0.0004979363875463605
+      },
+      {
+        "step": 1050,
+        "value": 0.0004731867811642587
+      },
+      {
+        "step": 1100,
+        "value": 0.0004595094360411167
+      },
+      {
+        "step": 1150,
+        "value": 0.0003924931224901229
+      },
+      {
+        "step": 1200,
+        "value": 0.00033963745227083564
+      },
+      {
+        "step": 1250,
+        "value": 0.0003842446021735668
+      },
+      {
+        "step": 1300,
+        "value": 0.00028928107349202037
+      },
+      {
+        "step": 1350,
+        "value": 0.0003271611058153212
+      },
+      {
+        "step": 1400,
+        "value": 0.00025923867360688746
+      },
+      {
+        "step": 1450,
+        "value": 0.0002543128503020853
+      },
+      {
+        "step": 1500,
+        "value": 0.00029204360907897353
+      },
+      {
+        "step": 1550,
+        "value": 0.0002828605647664517
+      },
+      {
+        "step": 1600,
+        "value": 0.00030855429940856993
+      },
+      {
+        "step": 1650,
+        "value": 0.0002577037375885993
+      },
+      {
+        "step": 1700,
+        "value": 0.00021419119730126113
+      },
+      {
+        "step": 1750,
+        "value": 0.00025312643265351653
+      },
+      {
+        "step": 1800,
+        "value": 0.00021548738004639745
+      },
+      {
+        "step": 1850,
+        "value": 0.0001849001127993688
+      },
+      {
+        "step": 1900,
+        "value": 0.00020735223370138556
+      },
+      {
+        "step": 1950,
+        "value": 0.00017713864508550614
+      },
+      {
+        "step": 2000,
+        "value": 0.0001432803546776995
+      },
+      {
+        "step": 2050,
+        "value": 0.00016820119344629347
+      },
+      {
+        "step": 2100,
+        "value": 0.00018845613521989435
+      },
+      {
+        "step": 2150,
+        "value": 0.00015035476826597005
+      },
+      {
+        "step": 2200,
+        "value": 0.0001657058746786788
+      },
+      {
+        "step": 2250,
+        "value": 0.0001900639181258157
+      },
+      {
+        "step": 2300,
+        "value": 0.00018922945309896022
+      },
+      {
+        "step": 2350,
+        "value": 0.00014603340241592377
+      },
+      {
+        "step": 2400,
+        "value": 0.00016823349869810045
+      },
+      {
+        "step": 2450,
+        "value": 0.00012937567953485996
+      },
+      {
+        "step": 2500,
+        "value": 0.00014765940431971103
+      },
+      {
+        "step": 2550,
+        "value": 0.00010919439228018746
+      },
+      {
+        "step": 2600,
+        "value": 0.00011851199087686837
+      },
+      {
+        "step": 2650,
+        "value": 0.0001346920180367306
+      },
+      {
+        "step": 2700,
+        "value": 0.0001241763384314254
+      },
+      {
+        "step": 2750,
+        "value": 0.00010249834303976968
+      },
+      {
+        "step": 2800,
+        "value": 0.00010177494550589472
+      },
+      {
+        "step": 2850,
+        "value": 0.00014029561134520918
+      },
+      {
+        "step": 2900,
+        "value": 0.00010576751083135605
+      },
+      {
+        "step": 2950,
+        "value": 0.00010624771675793454
+      },
+      {
+        "step": 3000,
+        "value": 0.0001347886136500165
+      }
+    ],
+    "train/gripper_loss": [
+      {
+        "step": 50,
+        "value": 0.0824856087565422
+      },
+      {
+        "step": 100,
+        "value": 0.01549111120402813
+      },
+      {
+        "step": 150,
+        "value": 0.007401655428111553
+      },
+      {
+        "step": 200,
+        "value": 0.004426767583936453
+      },
+      {
+        "step": 250,
+        "value": 0.002672760747373104
+      },
+      {
+        "step": 300,
+        "value": 0.0020716215949505568
+      },
+      {
+        "step": 350,
+        "value": 0.0013886954402551055
+      },
+      {
+        "step": 400,
+        "value": 0.0006710618617944419
+      },
+      {
+        "step": 450,
+        "value": 0.0005294204456731677
+      },
+      {
+        "step": 500,
+        "value": 0.0006483756005764008
+      },
+      {
+        "step": 550,
+        "value": 0.00042267245589755476
+      },
+      {
+        "step": 600,
+        "value": 0.0005037043592892587
+      },
+      {
+        "step": 650,
+        "value": 0.0003188786213286221
+      },
+      {
+        "step": 700,
+        "value": 0.0003996866289526224
+      },
+      {
+        "step": 750,
+        "value": 0.00024878926342353225
+      },
+      {
+        "step": 800,
+        "value": 0.0003407078329473734
+      },
+      {
+        "step": 850,
+        "value": 0.000150386244058609
+      },
+      {
+        "step": 900,
+        "value": 0.000292584125418216
+      },
+      {
+        "step": 950,
+        "value": 0.00023896664788480848
+      },
+      {
+        "step": 1000,
+        "value": 0.00023884238908067346
+      },
+      {
+        "step": 1050,
+        "value": 0.00025762684526853263
+      },
+      {
+        "step": 1100,
+        "value": 0.00014162863953970373
+      },
+      {
+        "step": 1150,
+        "value": 0.0002361548104090616
+      },
+      {
+        "step": 1200,
+        "value": 0.00012359218089841306
+      },
+      {
+        "step": 1250,
+        "value": 0.00013498302723746747
+      },
+      {
+        "step": 1300,
+        "value": 0.00010194338392466307
+      },
+      {
+        "step": 1350,
+        "value": 8.402165258303285e-05
+      },
+      {
+        "step": 1400,
+        "value": 0.00011457990331109613
+      },
+      {
+        "step": 1450,
+        "value": 6.376794772222638e-05
+      },
+      {
+        "step": 1500,
+        "value": 0.00010980197112075984
+      },
+      {
+        "step": 1550,
+        "value": 0.00012473620881792158
+      },
+      {
+        "step": 1600,
+        "value": 9.623570804251358e-05
+      },
+      {
+        "step": 1650,
+        "value": 9.05394772416912e-05
+      },
+      {
+        "step": 1700,
+        "value": 0.00010255647066514939
+      },
+      {
+        "step": 1750,
+        "value": 9.090665116673335e-05
+      },
+      {
+        "step": 1800,
+        "value": 6.956035940675065e-05
+      },
+      {
+        "step": 1850,
+        "value": 7.262985309353098e-05
+      },
+      {
+        "step": 1900,
+        "value": 6.958499579923227e-05
+      },
+      {
+        "step": 1950,
+        "value": 5.28693781234324e-05
+      },
+      {
+        "step": 2000,
+        "value": 4.415325747686438e-05
+      },
+      {
+        "step": 2050,
+        "value": 0.00010609155287966132
+      },
+      {
+        "step": 2100,
+        "value": 9.567396773491055e-05
+      },
+      {
+        "step": 2150,
+        "value": 6.871719961054623e-05
+      },
+      {
+        "step": 2200,
+        "value": 7.183232082752511e-05
+      },
+      {
+        "step": 2250,
+        "value": 7.376170833595097e-05
+      },
+      {
+        "step": 2300,
+        "value": 6.500233575934544e-05
+      },
+      {
+        "step": 2350,
+        "value": 4.945234104525298e-05
+      },
+      {
+        "step": 2400,
+        "value": 5.2394239901332185e-05
+      },
+      {
+        "step": 2450,
+        "value": 5.3729476348962635e-05
+      },
+      {
+        "step": 2500,
+        "value": 6.667478010058403e-05
+      },
+      {
+        "step": 2550,
+        "value": 5.9118330682395026e-05
+      },
+      {
+        "step": 2600,
+        "value": 4.422663914738223e-05
+      },
+      {
+        "step": 2650,
+        "value": 7.065122917992994e-05
+      },
+      {
+        "step": 2700,
+        "value": 6.475065310951322e-05
+      },
+      {
+        "step": 2750,
+        "value": 4.3437503336463124e-05
+      },
+      {
+        "step": 2800,
+        "value": 5.3806870710104704e-05
+      },
+      {
+        "step": 2850,
+        "value": 5.363368836697191e-05
+      },
+      {
+        "step": 2900,
+        "value": 3.715369166457094e-05
+      },
+      {
+        "step": 2950,
+        "value": 4.384899511933327e-05
+      },
+      {
+        "step": 3000,
+        "value": 3.641592775238678e-05
+      }
+    ]
+  },
+  "source_loss_series": {
+    "train/arm_loss": [
+      {
+        "step": 50,
+        "value": 0.024844247847795486
+      },
+      {
+        "step": 100,
+        "value": 0.009983673691749573
+      },
+      {
+        "step": 150,
+        "value": 0.006930839736014605
+      },
+      {
+        "step": 200,
+        "value": 0.0043768081814050674
+      },
+      {
+        "step": 250,
+        "value": 0.0033917943947017193
+      },
+      {
+        "step": 300,
+        "value": 0.002512852195650339
+      },
+      {
+        "step": 350,
+        "value": 0.0020597311668097973
+      },
+      {
+        "step": 400,
+        "value": 0.0016240219119936228
+      },
+      {
+        "step": 450,
+        "value": 0.0012281166855245829
+      },
+      {
+        "step": 500,
+        "value": 0.0015001563588157296
+      },
+      {
+        "step": 550,
+        "value": 0.00105601258110255
+      },
+      {
+        "step": 600,
+        "value": 0.0011050745379179716
+      },
+      {
+        "step": 650,
+        "value": 0.0007223247084766626
+      },
+      {
+        "step": 700,
+        "value": 0.000952222675550729
+      },
+      {
+        "step": 750,
+        "value": 0.0006491501699201763
+      },
+      {
+        "step": 800,
+        "value": 0.0005925592849962413
+      },
+      {
+        "step": 850,
+        "value": 0.0005464341957122087
+      },
+      {
+        "step": 900,
+        "value": 0.0005148214404471219
+      },
+      {
+        "step": 950,
+        "value": 0.0004593894991558045
+      },
+      {
+        "step": 1000,
+        "value": 0.0004979363875463605
+      },
+      {
+        "step": 1050,
+        "value": 0.0004731867811642587
+      },
+      {
+        "step": 1100,
+        "value": 0.0004595094360411167
+      },
+      {
+        "step": 1150,
+        "value": 0.0003924931224901229
+      },
+      {
+        "step": 1200,
+        "value": 0.00033963745227083564
+      },
+      {
+        "step": 1250,
+        "value": 0.0003842446021735668
+      },
+      {
+        "step": 1300,
+        "value": 0.00028928107349202037
+      },
+      {
+        "step": 1350,
+        "value": 0.0003271611058153212
+      },
+      {
+        "step": 1400,
+        "value": 0.00025923867360688746
+      },
+      {
+        "step": 1450,
+        "value": 0.0002543128503020853
+      },
+      {
+        "step": 1500,
+        "value": 0.00029204360907897353
+      },
+      {
+        "step": 1550,
+        "value": 0.0002828605647664517
+      },
+      {
+        "step": 1600,
+        "value": 0.00030855429940856993
+      },
+      {
+        "step": 1650,
+        "value": 0.0002577037375885993
+      },
+      {
+        "step": 1700,
+        "value": 0.00021419119730126113
+      },
+      {
+        "step": 1750,
+        "value": 0.00025312643265351653
+      },
+      {
+        "step": 1800,
+        "value": 0.00021548738004639745
+      },
+      {
+        "step": 1850,
+        "value": 0.0001849001127993688
+      },
+      {
+        "step": 1900,
+        "value": 0.00020735223370138556
+      },
+      {
+        "step": 1950,
+        "value": 0.00017713864508550614
+      },
+      {
+        "step": 2000,
+        "value": 0.0001432803546776995
+      },
+      {
+        "step": 2050,
+        "value": 0.00016820119344629347
+      },
+      {
+        "step": 2100,
+        "value": 0.00018845613521989435
+      },
+      {
+        "step": 2150,
+        "value": 0.00015035476826597005
+      },
+      {
+        "step": 2200,
+        "value": 0.0001657058746786788
+      },
+      {
+        "step": 2250,
+        "value": 0.0001900639181258157
+      },
+      {
+        "step": 2300,
+        "value": 0.00018922945309896022
+      },
+      {
+        "step": 2350,
+        "value": 0.00014603340241592377
+      },
+      {
+        "step": 2400,
+        "value": 0.00016823349869810045
+      },
+      {
+        "step": 2450,
+        "value": 0.00012937567953485996
+      },
+      {
+        "step": 2500,
+        "value": 0.00014765940431971103
+      },
+      {
+        "step": 2550,
+        "value": 0.00010919439228018746
+      },
+      {
+        "step": 2600,
+        "value": 0.00011851199087686837
+      },
+      {
+        "step": 2650,
+        "value": 0.0001346920180367306
+      },
+      {
+        "step": 2700,
+        "value": 0.0001241763384314254
+      },
+      {
+        "step": 2750,
+        "value": 0.00010249834303976968
+      },
+      {
+        "step": 2800,
+        "value": 0.00010177494550589472
+      },
+      {
+        "step": 2850,
+        "value": 0.00014029561134520918
+      },
+      {
+        "step": 2900,
+        "value": 0.00010576751083135605
+      },
+      {
+        "step": 2950,
+        "value": 0.00010624771675793454
+      },
+      {
+        "step": 3000,
+        "value": 0.0001347886136500165
+      }
+    ],
+    "train/gripper_loss": [
+      {
+        "step": 50,
+        "value": 0.0824856087565422
+      },
+      {
+        "step": 100,
+        "value": 0.01549111120402813
+      },
+      {
+        "step": 150,
+        "value": 0.007401655428111553
+      },
+      {
+        "step": 200,
+        "value": 0.004426767583936453
+      },
+      {
+        "step": 250,
+        "value": 0.002672760747373104
+      },
+      {
+        "step": 300,
+        "value": 0.0020716215949505568
+      },
+      {
+        "step": 350,
+        "value": 0.0013886954402551055
+      },
+      {
+        "step": 400,
+        "value": 0.0006710618617944419
+      },
+      {
+        "step": 450,
+        "value": 0.0005294204456731677
+      },
+      {
+        "step": 500,
+        "value": 0.0006483756005764008
+      },
+      {
+        "step": 550,
+        "value": 0.00042267245589755476
+      },
+      {
+        "step": 600,
+        "value": 0.0005037043592892587
+      },
+      {
+        "step": 650,
+        "value": 0.0003188786213286221
+      },
+      {
+        "step": 700,
+        "value": 0.0003996866289526224
+      },
+      {
+        "step": 750,
+        "value": 0.00024878926342353225
+      },
+      {
+        "step": 800,
+        "value": 0.0003407078329473734
+      },
+      {
+        "step": 850,
+        "value": 0.000150386244058609
+      },
+      {
+        "step": 900,
+        "value": 0.000292584125418216
+      },
+      {
+        "step": 950,
+        "value": 0.00023896664788480848
+      },
+      {
+        "step": 1000,
+        "value": 0.00023884238908067346
+      },
+      {
+        "step": 1050,
+        "value": 0.00025762684526853263
+      },
+      {
+        "step": 1100,
+        "value": 0.00014162863953970373
+      },
+      {
+        "step": 1150,
+        "value": 0.0002361548104090616
+      },
+      {
+        "step": 1200,
+        "value": 0.00012359218089841306
+      },
+      {
+        "step": 1250,
+        "value": 0.00013498302723746747
+      },
+      {
+        "step": 1300,
+        "value": 0.00010194338392466307
+      },
+      {
+        "step": 1350,
+        "value": 8.402165258303285e-05
+      },
+      {
+        "step": 1400,
+        "value": 0.00011457990331109613
+      },
+      {
+        "step": 1450,
+        "value": 6.376794772222638e-05
+      },
+      {
+        "step": 1500,
+        "value": 0.00010980197112075984
+      },
+      {
+        "step": 1550,
+        "value": 0.00012473620881792158
+      },
+      {
+        "step": 1600,
+        "value": 9.623570804251358e-05
+      },
+      {
+        "step": 1650,
+        "value": 9.05394772416912e-05
+      },
+      {
+        "step": 1700,
+        "value": 0.00010255647066514939
+      },
+      {
+        "step": 1750,
+        "value": 9.090665116673335e-05
+      },
+      {
+        "step": 1800,
+        "value": 6.956035940675065e-05
+      },
+      {
+        "step": 1850,
+        "value": 7.262985309353098e-05
+      },
+      {
+        "step": 1900,
+        "value": 6.958499579923227e-05
+      },
+      {
+        "step": 1950,
+        "value": 5.28693781234324e-05
+      },
+      {
+        "step": 2000,
+        "value": 4.415325747686438e-05
+      },
+      {
+        "step": 2050,
+        "value": 0.00010609155287966132
+      },
+      {
+        "step": 2100,
+        "value": 9.567396773491055e-05
+      },
+      {
+        "step": 2150,
+        "value": 6.871719961054623e-05
+      },
+      {
+        "step": 2200,
+        "value": 7.183232082752511e-05
+      },
+      {
+        "step": 2250,
+        "value": 7.376170833595097e-05
+      },
+      {
+        "step": 2300,
+        "value": 6.500233575934544e-05
+      },
+      {
+        "step": 2350,
+        "value": 4.945234104525298e-05
+      },
+      {
+        "step": 2400,
+        "value": 5.2394239901332185e-05
+      },
+      {
+        "step": 2450,
+        "value": 5.3729476348962635e-05
+      },
+      {
+        "step": 2500,
+        "value": 6.667478010058403e-05
+      },
+      {
+        "step": 2550,
+        "value": 5.9118330682395026e-05
+      },
+      {
+        "step": 2600,
+        "value": 4.422663914738223e-05
+      },
+      {
+        "step": 2650,
+        "value": 7.065122917992994e-05
+      },
+      {
+        "step": 2700,
+        "value": 6.475065310951322e-05
+      },
+      {
+        "step": 2750,
+        "value": 4.3437503336463124e-05
+      },
+      {
+        "step": 2800,
+        "value": 5.3806870710104704e-05
+      },
+      {
+        "step": 2850,
+        "value": 5.363368836697191e-05
+      },
+      {
+        "step": 2900,
+        "value": 3.715369166457094e-05
+      },
+      {
+        "step": 2950,
+        "value": 4.384899511933327e-05
+      },
+      {
+        "step": 3000,
+        "value": 3.641592775238678e-05
+      }
+    ]
+  },
+  "logged_loss_series_bitwise_values_equal": true,
+  "model_checkpoint_comparison": [
+    {
+      "checkpoint": "initial_step_0.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/initial_step_0.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/initial_step_0.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "46efbefac1fd9458a9a6bca4433c60a469be5885dd3fc1ed57010ef2df1a90e5",
+      "offline_model_tensor_digest": "46efbefac1fd9458a9a6bca4433c60a469be5885dd3fc1ed57010ef2df1a90e5"
+    },
+    {
+      "checkpoint": "step_500.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_500.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_500.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "2590a181511b2f269889432e14b0e4624b1bf07985501e2a06f5bebc0de4de77",
+      "offline_model_tensor_digest": "2590a181511b2f269889432e14b0e4624b1bf07985501e2a06f5bebc0de4de77"
+    },
+    {
+      "checkpoint": "step_1000.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_1000.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_1000.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "d0573ef5b50d1032c5cd942a68aa085a033079d47a9ff392d9f7a4419d52d647",
+      "offline_model_tensor_digest": "d0573ef5b50d1032c5cd942a68aa085a033079d47a9ff392d9f7a4419d52d647"
+    },
+    {
+      "checkpoint": "step_1500.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_1500.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_1500.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "61905e5d7a7309d44da84d18c3d1c9310a8cc105fd624ad71a76660b1e61b676",
+      "offline_model_tensor_digest": "61905e5d7a7309d44da84d18c3d1c9310a8cc105fd624ad71a76660b1e61b676"
+    },
+    {
+      "checkpoint": "step_2000.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_2000.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_2000.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "5a90a196c1d4b0262f27738928e961e2aefb5aa9622437d3708ce41a50d0c667",
+      "offline_model_tensor_digest": "5a90a196c1d4b0262f27738928e961e2aefb5aa9622437d3708ce41a50d0c667"
+    },
+    {
+      "checkpoint": "step_2500.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_2500.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_2500.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "e21d2cb65de4f94348b086a08a87ea8cab027e6d42f6ec98b47de493fc3ffd1c",
+      "offline_model_tensor_digest": "e21d2cb65de4f94348b086a08a87ea8cab027e6d42f6ec98b47de493fc3ffd1c"
+    },
+    {
+      "checkpoint": "step_3000.pt",
+      "source": "/tmp/ods-v2-dls-gru-four-diagnostic/step_3000.pt",
+      "offline": "/tmp/ods-v3-lerobot-four/gru/step_3000.pt",
+      "model_tensors_bitwise_equal": true,
+      "model_tensor_count": 12,
+      "max_absolute_difference": 0.0,
+      "different_tensor_names": [],
+      "source_model_tensor_digest": "24420c5f2bb8def52050816c421c4ce7e5382abd18e179dac786483a549a834d",
+      "offline_model_tensor_digest": "24420c5f2bb8def52050816c421c4ce7e5382abd18e179dac786483a549a834d"
+    }
+  ],
+  "all_saved_model_checkpoints_bitwise_equal": true,
+  "development20": {
+    "status": "complete",
+    "reserved_test_used": false,
+    "development_seeds": [
+      20000,
+      20001,
+      20002,
+      20003,
+      20004,
+      20005,
+      20006,
+      20007,
+      20008,
+      20009,
+      20010,
+      20011,
+      20012,
+      20013,
+      20014,
+      20015,
+      20016,
+      20017,
+      20018,
+      20019
+    ],
+    "initial": {
+      "name": "initial_dev20",
+      "checkpoint_step": 0,
+      "successes": 0,
+      "lifts": 0,
+      "episodes": 20,
+      "success_rate": 0.0,
+      "lift_rate": 0.0,
+      "mean_goal_error_m": 0.3534782901406288,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 20000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3352346420288086,
+          "length": 600,
+          "initial_arm_target_delta": 0.10781069844961166
+        },
+        {
+          "seed": 20001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33928921818733215,
+          "length": 600,
+          "initial_arm_target_delta": 0.1078806072473526
+        },
+        {
+          "seed": 20002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3346072733402252,
+          "length": 600,
+          "initial_arm_target_delta": 0.10867413878440857
+        },
+        {
+          "seed": 20003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33725956082344055,
+          "length": 600,
+          "initial_arm_target_delta": 0.11300015449523926
+        },
+        {
+          "seed": 20004,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3426368832588196,
+          "length": 600,
+          "initial_arm_target_delta": 0.109189972281456
+        },
+        {
+          "seed": 20005,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3586222529411316,
+          "length": 600,
+          "initial_arm_target_delta": 0.10448604822158813
+        },
+        {
+          "seed": 20006,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3653717339038849,
+          "length": 600,
+          "initial_arm_target_delta": 0.10646571218967438
+        },
+        {
+          "seed": 20007,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3248249590396881,
+          "length": 600,
+          "initial_arm_target_delta": 0.11076009273529053
+        },
+        {
+          "seed": 20008,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.394549161195755,
+          "length": 600,
+          "initial_arm_target_delta": 0.11037199944257736
+        },
+        {
+          "seed": 20009,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.350509911775589,
+          "length": 600,
+          "initial_arm_target_delta": 0.10582011938095093
+        },
+        {
+          "seed": 20010,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.36175256967544556,
+          "length": 600,
+          "initial_arm_target_delta": 0.10624775290489197
+        },
+        {
+          "seed": 20011,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33287733793258667,
+          "length": 600,
+          "initial_arm_target_delta": 0.10647008568048477
+        },
+        {
+          "seed": 20012,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3633597195148468,
+          "length": 600,
+          "initial_arm_target_delta": 0.1061151847243309
+        },
+        {
+          "seed": 20013,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.35223767161369324,
+          "length": 600,
+          "initial_arm_target_delta": 0.10326950997114182
+        },
+        {
+          "seed": 20014,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3939237594604492,
+          "length": 600,
+          "initial_arm_target_delta": 0.11164113134145737
+        },
+        {
+          "seed": 20015,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3378456234931946,
+          "length": 600,
+          "initial_arm_target_delta": 0.11106069386005402
+        },
+        {
+          "seed": 20016,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.39154717326164246,
+          "length": 600,
+          "initial_arm_target_delta": 0.10265841335058212
+        },
+        {
+          "seed": 20017,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3885970115661621,
+          "length": 600,
+          "initial_arm_target_delta": 0.10232675075531006
+        },
+        {
+          "seed": 20018,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33147698640823364,
+          "length": 600,
+          "initial_arm_target_delta": 0.1091315746307373
+        },
+        {
+          "seed": 20019,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33304235339164734,
+          "length": 600,
+          "initial_arm_target_delta": 0.10784528404474258
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/development/initial_dev20.json"
+    },
+    "selected": {
+      "name": "selected_dev20",
+      "checkpoint_step": 1000,
+      "successes": 0,
+      "lifts": 2,
+      "episodes": 20,
+      "success_rate": 0.0,
+      "lift_rate": 0.1,
+      "mean_goal_error_m": 0.34841926749795676,
+      "mean_episode_length": 600.0,
+      "records": [
+        {
+          "seed": 20000,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.333734929561615,
+          "length": 600,
+          "initial_arm_target_delta": 0.027782469987869263
+        },
+        {
+          "seed": 20001,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3324457108974457,
+          "length": 600,
+          "initial_arm_target_delta": 0.02617695927619934
+        },
+        {
+          "seed": 20002,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.4176318645477295,
+          "length": 600,
+          "initial_arm_target_delta": 0.027234315872192383
+        },
+        {
+          "seed": 20003,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33749473094940186,
+          "length": 600,
+          "initial_arm_target_delta": 0.019000835716724396
+        },
+        {
+          "seed": 20004,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33683571219444275,
+          "length": 600,
+          "initial_arm_target_delta": 0.01924358308315277
+        },
+        {
+          "seed": 20005,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3325423300266266,
+          "length": 600,
+          "initial_arm_target_delta": 0.03109881281852722
+        },
+        {
+          "seed": 20006,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.32139015197753906,
+          "length": 600,
+          "initial_arm_target_delta": 0.01389417052268982
+        },
+        {
+          "seed": 20007,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.6005657911300659,
+          "length": 600,
+          "initial_arm_target_delta": 0.027814283967018127
+        },
+        {
+          "seed": 20008,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.03755829855799675,
+          "length": 600,
+          "initial_arm_target_delta": 0.004557490348815918
+        },
+        {
+          "seed": 20009,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.33279356360435486,
+          "length": 600,
+          "initial_arm_target_delta": 0.029357463121414185
+        },
+        {
+          "seed": 20010,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3191238045692444,
+          "length": 600,
+          "initial_arm_target_delta": 0.015246689319610596
+        },
+        {
+          "seed": 20011,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3115161061286926,
+          "length": 600,
+          "initial_arm_target_delta": 0.035320430994033813
+        },
+        {
+          "seed": 20012,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.31788885593414307,
+          "length": 600,
+          "initial_arm_target_delta": 0.01570338010787964
+        },
+        {
+          "seed": 20013,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3347194194793701,
+          "length": 600,
+          "initial_arm_target_delta": 0.041426658630371094
+        },
+        {
+          "seed": 20014,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.42165321111679077,
+          "length": 600,
+          "initial_arm_target_delta": 0.005379199981689453
+        },
+        {
+          "seed": 20015,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.37441590428352356,
+          "length": 600,
+          "initial_arm_target_delta": 0.017765160650014877
+        },
+        {
+          "seed": 20016,
+          "success": false,
+          "lifted": true,
+          "goal_error": 0.524168848991394,
+          "length": 600,
+          "initial_arm_target_delta": 0.033538587391376495
+        },
+        {
+          "seed": 20017,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3317718803882599,
+          "length": 600,
+          "initial_arm_target_delta": 0.03506507724523544
+        },
+        {
+          "seed": 20018,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.32811248302459717,
+          "length": 600,
+          "initial_arm_target_delta": 0.029326677322387695
+        },
+        {
+          "seed": 20019,
+          "success": false,
+          "lifted": false,
+          "goal_error": 0.3220217525959015,
+          "length": 600,
+          "initial_arm_target_delta": 0.028948873281478882
+        }
+      ],
+      "path": "/tmp/ods-v3-lerobot-four/development/selected_dev20.json"
+    },
+    "selection": {
+      "checkpoint": "/tmp/ods-v3-lerobot-four/gru/step_1000.pt",
+      "selected_using": "training-reset panel before observing this report",
+      "development_seeds": [
+        20000,
+        20001,
+        20002,
+        20003,
+        20004,
+        20005,
+        20006,
+        20007,
+        20008,
+        20009,
+        20010,
+        20011,
+        20012,
+        20013,
+        20014,
+        20015,
+        20016,
+        20017,
+        20018,
+        20019
+      ],
+      "reserved_test_used": false
+    },
+    "cleanup": {
+      "evaluator_exitcode": 0,
+      "forced": false
+    }
+  },
+  "development_resource_scope": {
+    "training_and_training_reset_gpu": "cuda:1",
+    "separate_development_gpu": "cuda:3",
+    "concurrent_diagnostic": true,
+    "single_gpu_timing_comparison_valid": false,
+    "configuration_changes": [
+      "device",
+      "gpu_id"
+    ]
+  },
+  "offline_load_intervals": [
+    [
+      20.340440354542807,
+      20.53653629263863
+    ]
+  ],
+  "training_cleanup": {
+    "seconds": 5.957251810003072,
+    "owned_worker_pids": [
+      3619822
+    ],
+    "evaluator_exitcode": 0,
+    "engine_cleanup_error": null
+  },
+  "limitations": [
+    "Same simulator-generated expert demonstrations exported through the official LeRobot SDK; not an independent external or human demonstration dataset.",
+    "SDK rows are read once into resident CPU tensors; this is not native LeRobot per-minibatch loader throughput.",
+    "Offline input was already prepared. Collection/export cost is excluded from the data-ready run; timing is not acquisition-inclusive or a controlled ODS speed comparison.",
+    "One training seed and four demonstrations; no statistical training-efficiency claim.",
+    "Periodic and repeated training-reset panels are fitting/repeatability diagnostics, not unseen-state generalization.",
+    "No reserved final100 or formal32/160 efficiency sweep was performed.",
+    "Exact recurrent minibatch equality is unverified despite empirically identical saved model tensors."
+  ]
+}

@@ -230,6 +230,22 @@ def _schema(ready: dict[str, Any], pose: bool) -> dict[str, Any]:
     }
 
 
+def _offline_reset_positions(corpus: Any, count: int) -> list[list[float]]:
+    """Recover training-reset positions from causal frame-zero observations."""
+    observation = corpus.manifest["schema"]["observation"]
+    if (
+        observation.get("version") != "pick_place.geometry@2"
+        or observation["names"][27:30] != ["cube_0", "cube_1", "cube_2"]
+        or count > len(corpus.valid)
+        or not corpus.valid[:count, 0].all()
+        or not (corpus.frame_ids[:count, 0, 2] == 0).all()
+    ):
+        raise ValueError(
+            "Offline reset diagnostics require geometry frame zero for every episode"
+        )
+    return corpus.observations[:count, 0, 27:30].tolist()
+
+
 def _sample(
     engine: OnlineDataEngine,
     count: int,
@@ -389,6 +405,7 @@ def run(args: argparse.Namespace) -> None:
         "examples/data_pipeline/ods_pick_place_showcase.py",
         "examples/data_pipeline/_ods_pick_place_training.py",
         "examples/data_pipeline/_ods_pick_place_benchmark.py",
+        "examples/data_pipeline/_ods_pick_place_lerobot.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
@@ -496,14 +513,25 @@ def run(args: argparse.Namespace) -> None:
             }:
                 raise ValueError("--offline-data requires an offline or frozen mode")
             load_started = tracker.elapsed_seconds()
-            corpus = load_corpus(args.offline_data, expected_schema=schema)
+            if args.offline_data.is_dir():
+                from examples.data_pipeline._ods_pick_place_lerobot import (
+                    load_lerobot_corpus,
+                )
+
+                corpus = load_lerobot_corpus(args.offline_data, expected_schema=schema)
+            else:
+                corpus = load_corpus(args.offline_data, expected_schema=schema)
             tracker.record_interval(
                 "offline_load", load_started, tracker.elapsed_seconds()
             )
             initial_values = corpus.observations[: args.buffer_size][
                 corpus.valid[: args.buffer_size]
             ]
-            initial_positions = None
+            initial_positions = (
+                _offline_reset_positions(corpus, args.buffer_size)
+                if args.stage != "showcase"
+                else None
+            )
             source_run = 0
         else:
             engine = _engine(config, args)
@@ -651,9 +679,7 @@ def run(args: argparse.Namespace) -> None:
         dev_request = {"seeds": list(range(20000, 20000 + args.dev_scenes))}
         if args.stage != "showcase":
             if initial_positions is None:
-                raise ValueError(
-                    "Small-data gates require live generation and initial reset snapshots"
-                )
+                raise ValueError("Small-data gates require initial reset observations")
             # Periodic evaluation diagnoses fitting on each reset once. The
             # selected policy is then verified on the full repeatability panel.
             dev_request = {
@@ -978,7 +1004,12 @@ def run(args: argparse.Namespace) -> None:
             for path in (args.offline_data, args.export_data, args.output / "corpus.pt")
             if path is not None and path.exists()
         ]
-        data_files = {path.resolve() for path in data_paths}
+        data_files = {
+            child.resolve()
+            for path in data_paths
+            for child in (path.rglob("*") if path.is_dir() else [path])
+            if child.is_file()
+        }
         data_files |= {
             Path(str(path) + ".manifest.json")
             for path in list(data_files)

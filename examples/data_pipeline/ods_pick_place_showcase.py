@@ -806,7 +806,11 @@ def _parse_args() -> argparse.Namespace:
         choices=("showcase", "overfit-one", "overfit-four"),
         default="showcase",
     )
-    p.add_argument("--offline-data", type=Path)
+    p.add_argument(
+        "--offline-data",
+        type=Path,
+        help="Numeric .pt corpus or a showcase-exported LeRobot dataset directory",
+    )
     p.add_argument("--export-data", type=Path)
     p.add_argument("--record-batches", action="store_true")
     p.add_argument("--batch-manifest", type=Path)
