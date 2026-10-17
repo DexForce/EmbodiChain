@@ -1,5 +1,5 @@
-Integrate and Deploy a Task Program
-==================================
+Configure and Run an Embodied Task Program
+===========================================
 
 This tutorial deploys Task Program's built-in Semantic Calls through explicit
 environment, integration, embodiment, and execution-policy configuration. The

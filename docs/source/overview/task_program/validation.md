@@ -12,8 +12,8 @@ all Task Program tasks, robots, seeds or physics backends.
 | Date | 2026-10-17 |
 | SDK baseline | `a8226e143343ed13fae0cdc4e71bf754ce364178` (`0.3.1` metadata), installed from a built wheel |
 | CLI | `embodichain run-env`; `run-task` exists as an alias at this baseline |
-| Runtime | Python 3.11, Linux, DexSim `0.5.1rc1`, Warp `1.17.0`, Newton dependency `1.6.0` |
-| GPU | NVIDIA RTX PRO 5000 Blackwell, one GPU selected with `CUDA_VISIBLE_DEVICES=1` |
+| Runtime | Python 3.11.14, Linux, DexSim `0.5.1rc1`, Warp `1.17.0`, Newton dependency `1.6.0` |
+| GPU | NVIDIA RTX PRO 5000 72 GB Blackwell; driver `580.126.20`; PyTorch `2.7.0+cu128`; one GPU selected with `CUDA_VISIBLE_DEVICES=1` |
 | Deployment | `embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.franka.yaml` |
 | Physics / execution | Default; `trajectory_open_loop.yaml`; `effect_assurance: projected` |
 | Selection | Seed 7, one environment, one episode, no expansion |
@@ -21,7 +21,7 @@ all Task Program tasks, robots, seeds or physics backends.
 
 The isolated Python environment inherited other SDK dependencies from the host;
 this was an installed-wheel, outside-checkout usage check, not a clean-room
-installation audit. The existing development DexSim installation failed during
+installation audit. Required robot assets were already cached on the host. The existing development DexSim installation failed during
 import. Installing the pinned wheel and matching Warp/Newton dependencies in an
 isolated environment resolved that failure without modifying the shared install.
 
@@ -32,6 +32,7 @@ isolated environment resolved that failure without modifying the shared install.
 | Discover/inspect | `list-task` and `show-task` resolve the installed official task. |
 | Original | Six segments, 240 steps, A → B → A; command execution completed with saving disabled. |
 | Two moves | Four segments, 160 steps, B → A; command execution completed with saving disabled. |
+| Checked without saving | Four segments completed, including two successful settling/position checks. |
 | Checked/save | Four segments, 188 frames, 7.52 s; two settling checks and two 3 cm position checks passed; one episode saved. |
 | Repeat checked/save with the ordinary CLI | One episode, 188 frames; both position/stability checks passed again without the capture harness. |
 | Dataset reader | `preview_lerobot_data` reads the episode, task/subtask language and four segment ranges; consistency check passes. |
