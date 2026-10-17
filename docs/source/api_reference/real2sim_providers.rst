@@ -15,7 +15,7 @@ Source bundles and gripper conventions
    :members: write_real2sim_bundle, load_real2sim_bundle
 
 .. automodule:: embodichain.data_pipeline.real2sim.gripper
-   :members: GripperPositionCalibration, gripper_release_duration
+   :members:
 
 .. autoclass:: embodichain.data_pipeline.real2sim.GripperPositionCalibration
    :no-index:
