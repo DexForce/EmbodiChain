@@ -19,6 +19,7 @@ semantic scene graph, generation model client or task lifecycle.
 | Explicit evidence, state comparison and caller-driven settling | `embodichain/lab/sim/scene/validation.py` |
 | Batched tensor geometry kernels | `embodichain/compute/geometry/` |
 | CPU support, packing and constrained-layout strategies | `embodichain/lab/sim/scene/_support_cpu.py`, `_placement_cpu.py`, `_packing_cpu.py`, `_layout_cpu.py` |
+| Robot-aware object proposals and full-pose IK/FK checks | `embodichain/lab/sim/scene/workspace.py` |
 | Existing-entity expansion proposals and host integration | [Scene expansion](../scene-expansion/scene-expansion.md) |
 
 The package facade resolves services lazily. Expansion has its own
@@ -111,6 +112,37 @@ support does not enable B>1 physics capture, edits or host stepping.
   Group consumers supply the union of every member's measured AABB under the
   root UID and separately verify internal structure and fixed member poses.
   A root-only pose check cannot establish that the whole group moved correctly.
+
+## Robot workspace adapter
+
+`RobotSceneWorkspace` uses an explicit Robot control part and object-local grasp
+to derive scene poses from valid workspace samples. It independently verifies
+actual targets using IK, current joint limits and full-pose FK residuals,
+returning `SceneCheckReport`. It does not choose task roles, apply poses, reset,
+step or accept task success. Task Program retains a compatibility adapter that
+converts checks to its execution validation contract.
+
+The UR5 demonstration is `scripts/tutorials/scene/robot_workspace.py`, backed by
+`embodichain/lab/scripts/robot_workspace.py`. Scene mode exercises these services
+without importing Gym or Task Program; task mode adds preparation, real Pick/Place,
+first-frame and measured outcome checks. Views are Viser, native window,
+offscreen camera/video and no-render. Native renderer/device availability is
+separate from geometric and task correctness. A tabletop grid checks upright
+object origins with the same fixed grasp, current joint limits and full-pose FK.
+The shared physical input is a 2.4 m diameter round table with a central
+pedestal and robot. Support and grid inclusion check the entire cube footprint
+inside the faceted circular collision surface, rather than its bounding box.
+`workspace_reachability.npz` saves actual green/pass and red/fail results; they
+are not inferred from FK-cache density. Viser and the native Hybrid renderer
+show the same red/green point cloud. The cube initializes at a red point first
+and is rejected before execution, then initializes at green points for successful
+pose checks and Task Program trials. Offscreen runs retain the control-cadence
+`preview.mp4` and post-process saved camera evidence into
+`workspace_explained.mp4` with labelled inspection pauses. Presentation does not
+advance physics.
+
+The user-facing showcase, recorded video, commands and measured acceptance are
+documented in `docs/source/tutorial/robot_workspace.rst`.
 
 ## Consumers and change sites
 

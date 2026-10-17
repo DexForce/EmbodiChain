@@ -228,10 +228,16 @@ class SimulationSceneExpansionHost:
         """Own the live physical parameters that must stay fixed across resets."""
         properties = {}
         for kind, uid, entity in self._entities():
-            values = {
-                name: getattr(entity.body_data, name)
-                for name in ("mass", "inertia", "com_pose")
-            }
+            # Static bodies deliberately have no RigidBodyData. Their material
+            # parameters remain measurable, but dynamic mass properties do not.
+            values = (
+                {}
+                if kind == "rigid_object" and entity.body_type == "static"
+                else {
+                    name: getattr(entity.body_data, name)
+                    for name in ("mass", "inertia", "com_pose")
+                }
+            )
             if kind == "rigid_object":
                 values.update(
                     friction=entity.get_friction(env_ids=[0]),

@@ -40,6 +40,25 @@ _CANDIDATE_CUBE_X = 0.6
 _SETTLE_DELTA = 0.03
 
 
+def test_static_work_surface_can_prepare_and_restore_without_body_data() -> None:
+    env = _Environment()
+    table = _Rigid(0.0)
+    table.body_type = "static"
+    table.body_data = None
+    table.value[:, 7:] = 0.0
+    table.default = table.value.clone()
+    env.sim.rigid["support_surface"] = table
+    host = SimulationSceneExpansionHost(env, initial_validator=_passed)
+    prepared = host(_variant())
+    assert prepared.validation.accepted
+    snapshot = host.initial_state
+    assert any(
+        row["uid"] == "support_surface" and row["body_type"] == "static"
+        for row in snapshot.to_metadata()["entities"]
+    )
+    assert host.restore_initial_state(snapshot).validation.accepted
+
+
 class _Rigid:
     body_type = "dynamic"
 

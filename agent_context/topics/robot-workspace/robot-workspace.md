@@ -7,7 +7,7 @@ collision-free motion, grasp validity or task success.
 [Scene expansion](../scene-expansion/scene-expansion.md) owns scene proposals,
 physical preparation and the Task Program attempt boundary. Its
 `RobotSceneWorkspace` adapter in
-`embodichain/lab/task_program/integrations/simulation/workspace.py` converts
+`embodichain/lab/sim/scene/workspace.py` converts
 valid current-base TCP samples through object-local grasp geometry and checks
 actual targets with pose IK, current joint limits and full-pose FK residuals.
 Cache sampling alone does not certify support,
@@ -82,7 +82,7 @@ cache-key inputs, runtime selection and cache failure diagnosis.
 | Runtime alignment, base pose, bounds and invalid padding | `tests/sim/motion/workspace/test_runtime.py` |
 | Manipulability color mapping, normalization and score alignment | `tests/sim/motion/workspace/test_manipulability_visualization.py` |
 | Workspace-aware event sampling | `tests/gym/envs/managers/test_workspace_randomization.py` |
-| Object-affordance scene proposals and actual pose IK | `tests/gym/envs/task_program/test_scene_workspace.py` |
+| Object-affordance scene proposals and actual pose IK | `tests/sim/scene/test_workspace.py` |
 
 Use [robot-system](../robot-system/robot-system.md) for robot config/kinematic
 wiring and [motion-planning](../motion-planning/motion-planning.md) for collision

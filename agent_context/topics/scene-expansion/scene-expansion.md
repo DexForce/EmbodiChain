@@ -16,7 +16,7 @@ provided by `sim.scene.expansion`.
 | Arena poses and proposal identity | `contracts.py` in that package |
 | One Task Program attempt and result metadata | `embodichain/lab/task_program/integrations/scene_expansion.py` |
 | Physical preparation and owned state restore | `embodichain/lab/task_program/integrations/simulation/scene_expansion.py` |
-| Object affordance/workspace sampling and pose IK | `embodichain/lab/task_program/integrations/simulation/workspace.py` |
+| Reusable object/workspace proposals and pose IK | `embodichain/lab/sim/scene/workspace.py` |
 | Preparation hook before final observations | `embodichain/lab/gym/envs/base_env.py` |
 | Reset-time persistence eligibility | `embodichain/lab/gym/envs/embodied_env.py` |
 | Action consumption and recording lifecycle | `embodichain/lab/gym/envs/demo.py` |
@@ -68,9 +68,10 @@ differ within tolerance. Solver history/external forces are cleared; this is
 episode restoration, not a complete backend checkpoint. Rigid groups,
 deformables and explicit rigid constraints are rejected.
 
-`RobotSceneWorkspace` selects one control part explicitly, consumes valid-only
+The shared `sim.scene.workspace.RobotSceneWorkspace` service selects one control part explicitly, consumes valid-only
 current-arena TCP samples, and derives object poses by inverting the object-local
-grasp transform. Optional bounds apply to object origins. Sampling supplies
+grasp transform. Optional bounds apply to object origins. It returns scene check reports; the legacy Task Program path converts them to
+execution validation results. Sampling supplies
 joint seeds and scores; actual pose IK also checks targets absent from the
 cache and verifies joint limits and full-pose FK residuals. Recheck settled or modified poses. Support, collision planning between
 phases and measured success remain separate gates.

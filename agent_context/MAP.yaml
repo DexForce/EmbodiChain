@@ -221,7 +221,7 @@ topics:
     SettlingCfg, declare_fragment, detect_support_region, clamp_group,
     solve_layout, capture_state, restore_state, settle_scene, check_layout,
     aabb_overlap_depth, aabb_containment_violation, transform_aabbs, triangle_geometry,
-    geometry kernels, 场景几何核]
+    geometry kernels, RobotSceneWorkspace, SceneWorkspaceCandidate, robot_workspace demo, 场景几何核]
   paths: [topics/scene-services/scene-services.md]
   source_of_truth:
   - embodichain/lab/sim/scene/
@@ -235,8 +235,7 @@ topics:
   aliases: [scene expansion, scene augmentation, scene variant, 场景扩增, 场景变体]
   keywords: [SceneExpansionCfg, ScenePoseChange, SceneVariant, FixedSceneCandidateSource,
     ScenePreparationResult, SceneVariantEpisodeResult, execute_scene_variant,
-    SimulationSceneExpansionHost, SimulationSceneInitialState, RobotSceneWorkspace,
-    SceneWorkspaceCandidate, scene_expansion_prepare]
+    SimulationSceneExpansionHost, SimulationSceneInitialState, scene_expansion_prepare]
   paths: [topics/scene-expansion/scene-expansion.md]
   source_of_truth:
   - embodichain/lab/sim/scene/expansion/

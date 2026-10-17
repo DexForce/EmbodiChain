@@ -323,3 +323,26 @@ def test_bounds_filter_cannot_hide_invalid_valid_workspace_data(field: str) -> N
             seed=0,
             position_bounds=((-10.0, -10.0, -10.0), (-9.0, -9.0, -9.0)),
         )
+
+
+def test_legacy_workspace_adapter_preserves_types_and_shares_candidate_contract() -> (
+    None
+):
+    from embodichain.lab.sim.scene.workspace import (
+        RobotSceneWorkspace as SceneWorkspace,
+        SceneWorkspaceCandidate as SceneCandidate,
+    )
+    from embodichain.lab.sim.scene.validation import SceneCheckReport
+    from embodichain.lab.sim.motion.expansion import ValidationResult
+
+    assert SceneWorkspaceCandidate is SceneCandidate
+    pose = ScenePoseChange("cube", torch.eye(4).tolist())
+    scene = SceneWorkspace(_Robot(), control_part=_PART).check_object_pose(
+        pose, _grasp()
+    )
+    legacy = RobotSceneWorkspace(_Robot(), control_part=_PART).check_object_pose(
+        pose, _grasp()
+    )
+    assert isinstance(scene, SceneCheckReport) and scene.passed
+    assert isinstance(legacy, ValidationResult) and legacy.accepted
+    assert scene.checks[0].name == legacy.checks[0].check_id

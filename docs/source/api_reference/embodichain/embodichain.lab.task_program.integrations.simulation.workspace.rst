@@ -1,9 +1,11 @@
 embodichain.lab.task_program.integrations.simulation.workspace
 ================================================================
 
-This adapter turns valid robot workspace TCP samples into object-pose proposals
-using an explicit object-local grasp transform, and checks manipulation targets
-with actual pose IK. It requires one environment row and a selected control part.
+This compatibility adapter delegates workspace sampling and manipulation-pose
+checks to :mod:`embodichain.lab.sim.scene.workspace`, preserving the Task Program
+``ValidationResult`` return type. Independent scene consumers use the canonical
+scene module and its ``SceneCheckReport``. Both require one environment row and
+an explicit control part.
 
 .. currentmodule:: embodichain.lab.task_program.integrations.simulation.workspace
 
@@ -103,3 +105,4 @@ Public interfaces
 
 .. autoclass:: SceneWorkspaceCandidate
    :members:
+   :no-index:
