@@ -78,6 +78,24 @@ def test_cpu_mmap_corpus_preserves_schema_masks_and_frame_identity(
         _export(path)
 
 
+def test_offline_context_samples_short_episodes_and_excludes_padded_targets(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "corpus.pt"
+    _export(path)
+    corpus = load_corpus(path, expected_schema=_SCHEMA)
+    batch = corpus.sample_context(256, 2, 5)
+    assert batch["observations"].shape == (256, 6, 2)
+    assert batch["valid"][:, 1].all()
+    assert not batch["loss_mask"][:, 0].any()
+    assert (batch["frame_ids"][~batch["valid"]] == -1).all()
+    assert (batch["observations"][~batch["valid"]] == 0).all()
+    short = batch["frame_ids"][:, 1, 1] == 0
+    assert short.any()
+    assert (batch["loss_mask"][short].sum(1) == 1).all()
+    assert not batch["valid"][short, 0].any()
+
+
 def test_corpus_content_identity_ignores_engine_run_id(tmp_path: Path) -> None:
     first = _export(tmp_path / "first.pt", run_id=11)
     second = _export(tmp_path / "second.pt", run_id=99)

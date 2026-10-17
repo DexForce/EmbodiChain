@@ -481,6 +481,8 @@ def test_offline_reset_diagnostic_uses_original_causal_frame_zero() -> None:
         },
     )
     assert _offline_reset_positions(corpus, 4) == observations[:, 0, 27:30].tolist()
+    with pytest.raises(ValueError, match="exactly the requested episodes"):
+        _offline_reset_positions(corpus, 1)
     corpus.valid[2, 0] = False
     with pytest.raises(ValueError, match="frame zero"):
         _offline_reset_positions(corpus, 4)

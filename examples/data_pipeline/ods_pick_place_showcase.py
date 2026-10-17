@@ -62,6 +62,8 @@ from embodichain.data_pipeline.engine.data import (
     OnlineDataEngineState,
 )
 
+from examples.data_pipeline._ods_pick_place_policy import ChunkBC
+
 TASK_CONFIG = (
     Path(__file__).resolve().parents[2]
     / "extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/task.franka.yaml"
@@ -439,7 +441,7 @@ def load_task_config(
 
 def save_checkpoint(
     path: Path,
-    model: RecurrentBC | MLPBC | GeometryRecurrentBC,
+    model: RecurrentBC | MLPBC | GeometryRecurrentBC | ChunkBC,
     optimizer: torch.optim.Optimizer,
     step: int,
     args: argparse.Namespace,
@@ -451,13 +453,26 @@ def save_checkpoint(
         "model": model.state_dict(),
         "policy_config": {
             "type": (
-                "gru_pose"
-                if isinstance(model, GeometryRecurrentBC)
-                else "mlp" if isinstance(model, MLPBC) else "gru"
+                "chunk_pose"
+                if isinstance(model, ChunkBC)
+                else (
+                    "gru_pose"
+                    if isinstance(model, GeometryRecurrentBC)
+                    else "mlp" if isinstance(model, MLPBC) else "gru"
+                )
             ),
             "observation_mode": model.observation_mode,
             "arm_command_mode": model.arm_command_mode,
             "schema": getattr(model, "schema", None),
+            **(
+                {
+                    "prediction_horizon": model.prediction_horizon,
+                    "action_horizon": model.action_horizon,
+                    "observation_noise": model.observation_noise,
+                }
+                if isinstance(model, ChunkBC)
+                else {}
+            ),
         },
         "optimizer": optimizer.state_dict(),
         "step": step,
@@ -480,10 +495,31 @@ def save_checkpoint(
 
 def load_policy(
     path: str, device: str
-) -> tuple[RecurrentBC | MLPBC | GeometryRecurrentBC, dict[str, Any]]:
+) -> tuple[RecurrentBC | MLPBC | GeometryRecurrentBC | ChunkBC, dict[str, Any]]:
     state = torch.load(path, map_location="cpu", weights_only=False)
     weights = state["model"]
     policy_config = state.get("policy_config", {})
+    if policy_config.get("type") == "chunk_pose":
+        if (
+            policy_config.get("observation_mode") != "geometry"
+            or policy_config.get("arm_command_mode") != "pose"
+        ):
+            raise ValueError(
+                "Chunk BC requires geometry observations and pose requests"
+            )
+        model = ChunkBC(
+            weights["mean"],
+            weights["std"],
+            weights["target_mean"],
+            weights["target_std"],
+            policy_config["prediction_horizon"],
+            policy_config["action_horizon"],
+            policy_config["observation_noise"],
+        ).to(device)
+        model.load_state_dict(weights)
+        model.schema = policy_config.get("schema")
+        model.eval()
+        return model, state
     if policy_config.get("type") == "gru_pose":
         if (
             policy_config.get("observation_mode") != "geometry"
@@ -797,10 +833,13 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--policy",
-        choices=("mlp-pose", "mlp-joint", "gru-pose", "gru"),
-        default="mlp-pose",
+        choices=("chunk-pose", "mlp-pose", "mlp-joint", "gru-pose", "gru"),
+        default="chunk-pose",
     )
-    p.add_argument("--pose-ik", choices=("solver", "dls"), default="solver")
+    p.add_argument("--pose-ik", choices=("solver", "dls"), default="dls")
+    p.add_argument("--prediction-horizon", type=int, default=64)
+    p.add_argument("--action-horizon", type=int, default=16)
+    p.add_argument("--observation-noise", type=float, default=0.01)
     p.add_argument(
         "--stage",
         choices=("showcase", "overfit-one", "overfit-four"),
@@ -814,7 +853,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--export-data", type=Path)
     p.add_argument("--record-batches", action="store_true")
     p.add_argument("--batch-manifest", type=Path)
-    p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--eval-every", type=int, default=5000)
     p.add_argument("--qualification-scenes", type=int, default=40)
     p.add_argument(
         "--qualification-report",
@@ -831,8 +870,8 @@ def _parse_args() -> argparse.Namespace:
         default="absolute",
         help="Predict absolute arm targets or a bounded +/-0.25 rad lead from measured qpos.",
     )
-    p.add_argument("--rounds", type=int, default=5)
-    p.add_argument("--updates-per-round", type=int, default=1000)
+    p.add_argument("--rounds", type=int, default=2)
+    p.add_argument("--updates-per-round", type=int, default=5000)
     p.add_argument("--buffer-size", type=int, default=32)
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
@@ -878,6 +917,10 @@ def _parse_args() -> argparse.Namespace:
         p.error("Wall-time budget must be finite and positive")
     if not np.isfinite(args.learning_rate) or args.learning_rate <= 0:
         p.error("Learning rate must be finite and positive")
+    if not 1 <= args.action_horizon <= args.prediction_horizon:
+        p.error("Action horizon must be within the positive prediction horizon")
+    if not np.isfinite(args.observation_noise) or args.observation_noise < 0:
+        p.error("Observation noise must be finite and nonnegative")
     if min(args.rounds, args.updates_per_round, args.buffer_size, args.batch_size) < 1:
         p.error("Training counts must be positive")
     return args

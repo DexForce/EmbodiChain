@@ -1334,6 +1334,43 @@ class OnlineDataEngine:
             start_probability=start_probability,
         )
 
+    def sample_batch_with_context(
+        self,
+        batch_size: int,
+        history_length: int,
+        prediction_horizon: int,
+    ) -> TensorDict:
+        """Sample causal observations and future supervision around valid anchors.
+
+        The current frame is at ``history_length - 1``. Every valid frame,
+        including episode starts and ends, can be an anchor. Context never
+        crosses invalid frames or continuity boundaries. Out-of-range numeric
+        payloads are zero; language/provenance IDs are -1. ``valid`` marks real
+        frames and ``loss_mask`` selects only valid current/future targets.
+        Selection, provenance and payload copies share the producer lock.
+
+        Args:
+            batch_size: Number of contexts, with replacement.
+            history_length: Number of causal observation frames including now.
+            prediction_horizon: Number of target frames including now.
+
+        Returns:
+            TensorDict of shape ``[batch_size, history_length +
+            prediction_horizon - 1]``. Consumers must mask padded supervision
+            and explicitly handle missing initial observation history.
+
+        Raises:
+            ValueError: If context lengths are not positive integers.
+            RuntimeError: If the worker fails or no unlocked valid anchor exists.
+        """
+        if any(
+            type(n) is not int or n < 1 for n in (history_length, prediction_horizon)
+        ):
+            raise ValueError("Context lengths must be positive integers")
+        return self._sample_batch(
+            batch_size, 1, "episode", context=(history_length, prediction_horizon)
+        )
+
     def _sample_batch(
         self,
         batch_size: int,
@@ -1342,6 +1379,7 @@ class OnlineDataEngine:
         *,
         with_history: bool = False,
         start_probability: float = 0.0,
+        context: tuple[int, int] | None = None,
     ) -> TensorDict:
         with self._lifecycle_condition:
             worker_error = self._receive_worker_error()
@@ -1452,7 +1490,45 @@ class OnlineDataEngine:
                 num_samples=1,
                 replacement=True,
             ).squeeze(-1)
-            if with_history:
+            if context is not None:
+                history, future = context
+                steps = torch.arange(max_steps, device=start_indices.device)
+                compatible = valid[row_indices] & (
+                    continuity_ids[row_indices]
+                    == continuity_ids[row_indices, start_indices, None]
+                )
+                lower = torch.where(
+                    (~compatible) & (steps[None] < start_indices[:, None]),
+                    steps[None] + 1,
+                    0,
+                ).amax(-1)
+                upper = torch.where(
+                    (~compatible) & (steps[None] > start_indices[:, None]),
+                    steps[None] - 1,
+                    max_steps - 1,
+                ).amin(-1)
+                offsets = torch.arange(1 - history, future, device=steps.device)
+                indices = start_indices[:, None] + offsets[None]
+                context_valid = (indices >= lower[:, None]) & (
+                    indices <= upper[:, None]
+                )
+                result = self.shared_buffer[
+                    row_indices[:, None], indices.clamp(0, max_steps - 1)
+                ].clone()
+                for key, value in result.items(include_nested=True, leaves_only=True):
+                    mask = context_valid.reshape(
+                        *context_valid.shape, *((1,) * (value.ndim - 2))
+                    )
+                    invalid_value = (
+                        -1
+                        if key in {"task_index", "subtask_index"}
+                        or (isinstance(key, str) and key.startswith("ods_"))
+                        else 0
+                    )
+                    value.masked_fill_(~mask, invalid_value)
+                result["valid"] = context_valid
+                result["loss_mask"] = context_valid & (offsets[None] >= 0)
+            elif with_history:
                 use_start = (
                     torch.rand(batch_size, device=start_indices.device)
                     < start_probability

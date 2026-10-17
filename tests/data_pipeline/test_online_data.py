@@ -76,6 +76,47 @@ PROCESS_CLEANUP_TIMEOUT = 5.0
 LAB_PACKAGE_NAME = "embodichain.lab"
 
 
+def test_action_context_respects_locks_gaps_continuity_and_padded_provenance() -> None:
+    torch.manual_seed(13)
+    engine = _make_fake_engine(
+        buffer_size=2, max_episode_steps=6, lock_start=0, lock_end=1
+    )
+    source = engine.shared_buffer
+    source["valid"][1] = torch.tensor([True, True, False, True, True, True])
+    source["continuity_id"][1] = torch.tensor([0, 0, -1, 1, 1, 2])
+    source["obs"][0] = 1000
+    for index in range(6):
+        source["obs"][1, index] = index + 10
+    source["obs"][1, 2] = float("nan")
+    source["ods_frame_index"] = torch.arange(6).repeat(2, 1)
+    sample = engine.sample_batch_with_context(128, 2, 4)
+    assert sample.batch_size == (128, 5)
+    assert torch.isfinite(sample["obs"]).all()
+    assert not sample["loss_mask"][:, 0].any()
+    assert sample["valid"][:, 1].all()
+    assert (sample["ods_frame_index"][~sample["valid"]] == -1).all()
+    assert (sample["task_index"][~sample["valid"]] == -1).all()
+    assert (sample["subtask_index"][~sample["valid"]] == -1).all()
+    assert (sample["obs"][~sample["valid"]] == 0).all()
+    assert set(sample["ods_frame_index"][:, 1].tolist()) == {0, 1, 3, 4, 5}
+    spans = {0: {0, 1}, 1: {0, 1}, 3: {3, 4}, 4: {3, 4}, 5: {5}}
+    for row in range(128):
+        anchor = int(sample["ods_frame_index"][row, 1])
+        ids = sample["ods_frame_index"][row, sample["valid"][row]]
+        assert set(ids.tolist()) <= spans[anchor]
+        torch.testing.assert_close(
+            sample["obs"][row, sample["valid"][row], 0], ids.float() + 10
+        )
+    sample["obs"].zero_()
+    assert source["obs"][1, 0, 0] == 10
+
+
+@pytest.mark.parametrize("history,future", [(0, 2), (2, 0), (True, 2), (2, 1.5)])
+def test_action_context_rejects_invalid_lengths(history, future) -> None:
+    with pytest.raises(ValueError, match="positive integers"):
+        _make_fake_engine().sample_batch_with_context(2, history, future)
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------

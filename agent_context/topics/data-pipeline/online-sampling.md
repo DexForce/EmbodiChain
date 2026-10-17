@@ -30,6 +30,11 @@
    frames. Recurrent consumers can reconstruct inference history and supervise
    episode starts. Prefixes never cross invalid frames or continuity changes;
    optional start-window bias leaves ordinary sampling unchanged.
+   `sample_batch_with_context()` samples every valid anchor, including episode
+   ends, with a fixed causal-history/future extent. The current frame is at
+   `history_length - 1`; invalid/continuity boundaries pad both sides with
+   zero payloads and `-1` language/provenance IDs. Consumers use `valid` for
+   history padding and `loss_mask` for real current/future supervision.
 6. The default sample-threshold refill is requested after sample count reaches `refill_threshold * buffer_size`. Duplicate
    requests are suppressed only while `fill_signal` remains set; the worker clears it when it
    starts a fill, so sampling that reaches another threshold during an active fill may queue
@@ -85,7 +90,8 @@ recovery or portable offline content identity.
 
 `examples/data_pipeline/ods_pick_place_showcase.py` owns the entry point, policy
 models, measured-state features and separate student evaluator. The private
-`_ods_pick_place_training.py` orchestrates geometry MLP and geometry GRU runs;
+`_ods_pick_place_training.py` orchestrates geometry policies;
+`_ods_pick_place_policy.py` owns the short-history absolute-target chunk learner;
 `_ods_pick_place_benchmark.py` owns validated numeric corpora, batch-identity
 replay and efficiency accounting. The geometry feature contract uses measured
 proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
@@ -97,10 +103,16 @@ geometry GRU uses pose requests, complete causal prefixes and masked supervised
 windows; its recurrent state advances from episode reset during evaluation.
 The older joint-command GRU remains a separate compatibility route with its
 original observation/checkpoint contracts.
+Chunk BC derives absolute TCP targets from pre-action observations and recorded
+requests. Only causal history is a model input; future observations are used
+solely to decode supervised commands. The student executes queued network
+targets through the same bounded relative-pose controller, replans periodically,
+and clears history/queue at reset. Input and target statistics are frozen from
+initial training data and both are included in comparison fingerprints.
 
 The runner supports live overlap, frozen initial data, offline full-corpus and
 serial-refresh modes. Offline matched delivery replays an explicit MLP frame
-manifest against the same validated corpus; recurrent exact-manifest replay is
+manifest against the same validated corpus; recurrent/chunk exact-manifest replay is
 not supported. Serial refresh is labeled an unmatched schedule and cannot
 isolate overlap under identical supervision. Corpus manifests validate the
 observation/action schema and tensor content; content identity is independent

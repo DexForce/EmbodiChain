@@ -27,6 +27,7 @@ import random
 import subprocess
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,7 @@ from examples.data_pipeline.ods_pick_place_showcase import (
     policy_observations,
     save_checkpoint,
 )
+from examples.data_pipeline._ods_pick_place_policy import ChunkBC, pose_targets
 
 
 class _BudgetExpired(Exception):
@@ -110,6 +112,16 @@ def _state_digest(values: dict[str, torch.Tensor]) -> str:
         digest.update(f"{name}:{cpu.dtype}:{tuple(cpu.shape)}".encode())
         digest.update(cpu.numpy().tobytes())
     return digest.hexdigest()
+
+
+def _normalization_values(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    """Include every input and output scale that changes policy semantics."""
+    names = (
+        ("mean", "std", "target_mean", "target_std")
+        if isinstance(model, ChunkBC)
+        else ("mean", "std")
+    )
+    return {name: getattr(model, name) for name in names}
 
 
 def _reuse_qualification(
@@ -236,12 +248,12 @@ def _offline_reset_positions(corpus: Any, count: int) -> list[list[float]]:
     if (
         observation.get("version") != "pick_place.geometry@2"
         or observation["names"][27:30] != ["cube_0", "cube_1", "cube_2"]
-        or count > len(corpus.valid)
+        or count != len(corpus.valid)
         or not corpus.valid[:count, 0].all()
         or not (corpus.frame_ids[:count, 0, 2] == 0).all()
     ):
         raise ValueError(
-            "Offline reset diagnostics require geometry frame zero for every episode"
+            "Offline reset diagnostics require exactly the requested episodes and geometry frame zero"
         )
     return corpus.observations[:count, 0, 27:30].tolist()
 
@@ -251,15 +263,20 @@ def _sample(
     count: int,
     tracker: EfficiencyTracker,
     history: bool = False,
+    chunk_horizon: int | None = None,
 ) -> dict[str, torch.Tensor]:
     started = tracker.elapsed_seconds()
     blocked = None
     while True:
         try:
             batch = (
-                engine.sample_batch_with_history(count, 24, start_probability=0.25)
-                if history
-                else engine.sample_batch(count, 1)
+                engine.sample_batch_with_context(count, 2, chunk_horizon)
+                if chunk_horizon is not None
+                else (
+                    engine.sample_batch_with_history(count, 24, start_probability=0.25)
+                    if history
+                    else engine.sample_batch(count, 1)
+                )
             )
             break
         except RuntimeError as error:
@@ -275,7 +292,8 @@ def _sample(
             time.sleep(0.02)
     ended = tracker.elapsed_seconds()
     tracker.record_interval("data_wait", ended if blocked is None else blocked, ended)
-    selection = (slice(None), slice(None)) if history else (slice(None), 0)
+    sequence = history or chunk_horizon is not None
+    selection = (slice(None), slice(None)) if sequence else (slice(None), 0)
     return {
         "observations": policy_observations(batch["obs"], "geometry")[selection],
         "actions": batch["actions"][selection],
@@ -286,7 +304,7 @@ def _sample(
         "generations": batch["ods_generation"][selection],
         **(
             {"valid": batch["valid"], "loss_mask": batch["loss_mask"]}
-            if history
+            if sequence
             else {}
         ),
     }
@@ -305,7 +323,7 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("offline-matched requires --offline-data and --batch-manifest")
     if args.batch_manifest and args.mode != "offline-matched":
         raise ValueError("Batch manifests are consumed only by offline-matched")
-    if args.policy == "gru-pose" and (
+    if args.policy in {"gru-pose", "chunk-pose"} and (
         args.record_batches or args.mode == "offline-matched"
     ):
         raise ValueError(
@@ -328,6 +346,7 @@ def run(args: argparse.Namespace) -> None:
     )
     pose = args.policy.endswith("pose")
     recurrent = args.policy == "gru-pose"
+    chunked = args.policy == "chunk-pose"
     config = load_task_config(
         args.sim_device, "pose" if pose else "joint", args.pose_ik
     )
@@ -406,6 +425,7 @@ def run(args: argparse.Namespace) -> None:
         "examples/data_pipeline/_ods_pick_place_training.py",
         "examples/data_pipeline/_ods_pick_place_benchmark.py",
         "examples/data_pipeline/_ods_pick_place_lerobot.py",
+        "examples/data_pipeline/_ods_pick_place_policy.py",
         "embodichain/data_pipeline/engine/data.py",
         "embodichain/lab/gym/envs/embodied_env.py",
         "embodichain/lab/gym/envs/base_env.py",
@@ -527,6 +547,9 @@ def run(args: argparse.Namespace) -> None:
             initial_values = corpus.observations[: args.buffer_size][
                 corpus.valid[: args.buffer_size]
             ]
+            initial_actions = corpus.actions[: args.buffer_size][
+                corpus.valid[: args.buffer_size]
+            ]
             initial_positions = (
                 _offline_reset_positions(corpus, args.buffer_size)
                 if args.stage != "showcase"
@@ -547,6 +570,7 @@ def run(args: argparse.Namespace) -> None:
                 raise
             initial = _snapshot(engine)
             initial_values = initial["observations"][initial["valid"]]
+            initial_actions = initial["actions"][initial["valid"]]
             initial_positions = initial["initial_positions"].tolist()
             source_run = engine.run_id
             if (
@@ -586,13 +610,30 @@ def run(args: argparse.Namespace) -> None:
         if initial_values.numel() == 0:
             raise RuntimeError("Initial data has no valid training observations")
         mean, std = _geometry_statistics(initial_values)
+        if chunked:
+            targets = pose_targets(initial_values, initial_actions)
+            target_mean = targets.mean(0)
+            target_std = targets.std(0, correction=0).clamp_min(0.05)
+            target_mean[3:], target_std[3:] = 0, 1
+            del targets
         del initial_values
+        del initial_actions
         if "initial" in locals():
             del initial
         # Data generation is a child process; reset the learner RNG so offline
         # and ODS runs start from the same parameter state.
         torch.manual_seed(args.seed)
-        if recurrent:
+        if chunked:
+            model = ChunkBC(
+                mean,
+                std,
+                target_mean,
+                target_std,
+                args.prediction_horizon,
+                args.action_horizon,
+                args.observation_noise,
+            ).to(args.train_device)
+        elif recurrent:
             model = GeometryRecurrentBC(
                 mean, std, torch.tensor(ready["low"]), torch.tensor(ready["high"])
             ).to(args.train_device)
@@ -604,12 +645,17 @@ def run(args: argparse.Namespace) -> None:
                 torch.tensor(ready["high"]),
                 arm_command_mode="pose" if pose else "residual",
             ).to(args.train_device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+        optimizer_type = torch.optim.AdamW if chunked else torch.optim.Adam
+        optimizer_options = {"weight_decay": 1e-6} if chunked else {}
+        optimizer = optimizer_type(
+            model.parameters(), lr=args.learning_rate, **optimizer_options
+        )
         step = 0
         if args.resume:
             model, state = load_policy(str(args.resume), args.train_device)
             if (
-                not isinstance(model, MLPBC)
+                not isinstance(model, (MLPBC, ChunkBC))
+                or isinstance(model, ChunkBC) != chunked
                 or isinstance(model, GeometryRecurrentBC) != recurrent
                 or model.arm_command_mode != ("pose" if pose else "residual")
             ):
@@ -620,7 +666,15 @@ def run(args: argparse.Namespace) -> None:
                 raise ValueError(
                     "Resume checkpoint lacks a matching observation/controller schema"
                 )
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+            if chunked and (
+                model.prediction_horizon != args.prediction_horizon
+                or model.action_horizon != args.action_horizon
+                or model.observation_noise != args.observation_noise
+            ):
+                raise ValueError("Resume chunk policy configuration differs")
+            optimizer = optimizer_type(
+                model.parameters(), lr=args.learning_rate, **optimizer_options
+            )
             optimizer.load_state_dict(state["optimizer"])
             step = state["step"]
             torch.set_rng_state(state["torch_rng"])
@@ -648,9 +702,8 @@ def run(args: argparse.Namespace) -> None:
                 {
                     "schema": schema,
                     "initial_model_sha256": _state_digest(initial_parameters),
-                    "normalization_sha256": _state_digest(
-                        {"mean": model.mean, "std": model.std}
-                    ),
+                    "normalization_sha256": _state_digest(_normalization_values(model)),
+                    "normalization_fields": sorted(_normalization_values(model)),
                     "run_id": source_run,
                     "source": "data-ready" if args.offline_data else "cold",
                     "offline_manifest": corpus.manifest if corpus else None,
@@ -740,6 +793,7 @@ def run(args: argparse.Namespace) -> None:
             best_path = None
         train_steps = 0
         pending_ids: list[torch.Tensor] = []
+        recent_target_counts: deque[int] = deque(maxlen=50)
         loop_started = tracker.elapsed_seconds()
         for round_index in range(args.rounds):
             model.train()
@@ -775,7 +829,16 @@ def run(args: argparse.Namespace) -> None:
                 service_started = tracker.elapsed_seconds()
                 if corpus is not None:
                     before = tracker.elapsed_seconds()
-                    if recurrent:
+                    if chunked:
+                        batch = corpus.sample_context(
+                            args.batch_size,
+                            2,
+                            args.prediction_horizon,
+                            generations=(
+                                [1] if args.mode in {"frozen", "offline-32"} else None
+                            ),
+                        )
+                    elif recurrent:
                         batch = corpus.sample_histories(
                             args.batch_size,
                             generations=(
@@ -800,7 +863,13 @@ def run(args: argparse.Namespace) -> None:
                     now = tracker.elapsed_seconds()
                     tracker.record_interval("data_wait", now, now)
                 else:
-                    batch = _sample(engine, args.batch_size, tracker, history=recurrent)
+                    batch = _sample(
+                        engine,
+                        args.batch_size,
+                        tracker,
+                        history=recurrent,
+                        chunk_horizon=args.prediction_horizon if chunked else None,
+                    )
                 obs = batch["observations"].to(args.train_device)
                 actions = batch["actions"].to(args.train_device)
                 tracker.record_interval(
@@ -810,14 +879,21 @@ def run(args: argparse.Namespace) -> None:
                     obs,
                     actions,
                     **(
-                        {"loss_mask": batch["loss_mask"].to(args.train_device)}
-                        if recurrent
-                        else {}
+                        {
+                            "loss_mask": batch["loss_mask"].to(args.train_device),
+                            "valid_mask": batch["valid"].to(args.train_device),
+                        }
+                        if chunked
+                        else (
+                            {"loss_mask": batch["loss_mask"].to(args.train_device)}
+                            if recurrent
+                            else {}
+                        )
                     ),
                 )
                 optimizer.zero_grad(set_to_none=True)
-                arm_dims = actions.shape[-1] - 1
-                ((arm * arm_dims + hand) / actions.shape[-1]).backward()
+                arm_dims = 9 if chunked else actions.shape[-1] - 1
+                ((arm * arm_dims + hand) / (arm_dims + 1)).backward()
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), 1, error_if_nonfinite=True
                 )
@@ -831,6 +907,7 @@ def run(args: argparse.Namespace) -> None:
                     else batch["frame_ids"][target_mask]
                 )
                 pending_ids.append(supervised_ids)
+                recent_target_counts.append(len(supervised_ids))
                 if (
                     train_steps % 50 == 0
                     or train_steps % args.eval_every == 0
@@ -869,10 +946,9 @@ def run(args: argparse.Namespace) -> None:
                     )
                     window = tracker.intervals.get("training_loop", [])[-50:]
                     window_seconds = sum(end - begin for begin, end in window)
-                    targets_per_update = args.batch_size * (24 if recurrent else 1)
                     writer.add_scalar(
                         "data/targets_per_second",
-                        targets_per_update * len(window) / max(window_seconds, 1e-9),
+                        sum(recent_target_counts) / max(window_seconds, 1e-9),
                         step,
                     )
                     producer_stats = engine.get_stats() if engine is not None else stats

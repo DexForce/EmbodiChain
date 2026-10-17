@@ -371,6 +371,52 @@ class FrozenCorpus:
         result["loss_mask"] = valid & (offsets[None] >= prefix_lengths[:, None])
         return result
 
+    def sample_context(
+        self,
+        batch_size: int,
+        history_length: int,
+        prediction_horizon: int,
+        *,
+        generations: Iterable[int] | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Sample episode-uniform anchors with masked causal/future context.
+
+        Matches the live engine's context convention. Invalid gaps split spans;
+        this corpus has no additional continuity changes within valid spans.
+        """
+        if any(
+            type(n) is not int or n < 1
+            for n in (batch_size, history_length, prediction_horizon)
+        ):
+            raise ValueError("Context lengths and batch size must be positive integers")
+        valid = self._filtered_valid(None, generations)
+        eligible = valid.any(1).nonzero().flatten()
+        if not len(eligible):
+            raise RuntimeError("No valid offline context anchor")
+        rows = eligible[torch.randint(len(eligible), (batch_size,))]
+        anchors = torch.multinomial(valid[rows].float(), 1, replacement=True).flatten()
+        steps = torch.arange(valid.shape[1])
+        lower = torch.where(
+            (~valid[rows]) & (steps[None] < anchors[:, None]), steps[None] + 1, 0
+        ).amax(-1)
+        upper = torch.where(
+            (~valid[rows]) & (steps[None] > anchors[:, None]),
+            steps[None] - 1,
+            valid.shape[1] - 1,
+        ).amin(-1)
+        offsets = torch.arange(1 - history_length, prediction_horizon)
+        times = anchors[:, None] + offsets[None]
+        mask = (times >= lower[:, None]) & (times <= upper[:, None])
+        result = self._select(rows[:, None], times.clamp(0, valid.shape[1] - 1))
+        for key in ("observations", "actions"):
+            result[key][~mask] = 0
+        result["frame_ids"][~mask] = -1
+        if "generations" in result:
+            result["generations"][~mask] = -1
+        result["valid"] = mask
+        result["loss_mask"] = mask & (offsets[None] >= 0)
+        return result
+
     def _select(
         self, rows: torch.Tensor, times: torch.Tensor
     ) -> dict[str, torch.Tensor]:

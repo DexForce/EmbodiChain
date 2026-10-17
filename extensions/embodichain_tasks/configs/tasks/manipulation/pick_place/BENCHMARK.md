@@ -4,12 +4,14 @@ Status: proposed experiment protocol, 2026-10-17 (Asia/Shanghai). No benchmark
 results are claimed here. This extends [the learner redesign](REDESIGN.md).
 Core data-delivery and reporting modes are now implemented; see
 [implementation evidence](IMPLEMENTATION.md). Exact MLP manifest replay is
-verified, recurrent manifest replay is not implemented, and serial refresh is
+verified, recurrent/chunk manifest replay is not implemented, and serial refresh is
 currently an explicitly unmatched diagnostic. Age, eviction, device-wide peak,
 kernel-overlap and attributed-I/O counters remain unmeasured/null. Full learning
-comparisons are gated on repeatable student execution.
-Run learning comparisons only after its small-data and frozen-generalization
-gates pass. The objective is to measure whether ODS delivers a competent policy
+comparisons are gated on repeatable student execution at the declared data budget
+and reserved-test verification. Small-data failures remain reported limitations.
+The [working chunk-policy validation](WORKING_SHOWCASE.md) reaches the selected
+policy's learning target, but also records second-round regression; it is not an
+efficiency benchmark. The objective is to measure whether ODS delivers a competent policy
 sooner and with fewer resources, and identify which mechanism produces any gain.
 
 ## Questions and claims
@@ -32,10 +34,13 @@ to maximize. Report negative and neutral results as well as gains.
 
 Use the same qualified teacher, task, feature/action schema, model, optimizer,
 batch size, normalization, seed pairing, success predicate and evaluation schedule.
-Default data budget is 160 accepted episodes in five groups of 32; count all
-failed attempts and their costs. Default training budget is 5,000 updates of
-256 valid targets, or 1,280,000 supervised targets. Budget changes must be frozen
-before comparison runs and applied consistently.
+The historical frame-BC template below uses 160 episodes in five groups of 32
+and 5,000 updates of 256 individual targets. It is not the current CLI default.
+The working chunk recipe uses two groups of 32 and 10,000 updates of 256
+contexts, each with up to 64 valid future targets. Count supervision using the
+loss mask; update counts are not interchangeable between these learners.
+Choose one recipe before a comparison, count failed attempts and their costs,
+and apply all data/update/valid-target caps consistently across arms.
 
 | Arm | Production and training | Purpose |
 | --- | --- | --- |

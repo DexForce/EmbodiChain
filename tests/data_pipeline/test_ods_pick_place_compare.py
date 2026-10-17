@@ -467,3 +467,31 @@ def test_cli_accepts_positional_or_runs_paths(tmp_path: Path, use_option: bool) 
     saved = json.loads((output / "comparison.json").read_text())
     assert saved["figures"] == []
     assert saved["runs"][0]["data_disk_peak_bytes"] is None
+
+
+@pytest.mark.parametrize(
+    "setting,value",
+    [("action_horizon", 1), ("prediction_horizon", 128), ("observation_noise", 0.5)],
+)
+def test_chunk_policy_settings_are_part_of_comparison_evidence(
+    tmp_path, setting, value
+) -> None:
+    from examples.data_pipeline.ods_pick_place_compare import _fingerprint
+
+    path = _run(tmp_path, "online", 0)
+    run = load_run(path)
+    run["policy"] = "chunk-pose"
+    run["config"].update(
+        prediction_horizon=64, action_horizon=16, observation_noise=0.01
+    )
+    run["data_manifest"]["normalization_fields"] = [
+        "mean",
+        "std",
+        "target_mean",
+        "target_std",
+    ]
+    first = _fingerprint(run)
+    run["config"][setting] = value
+    assert _fingerprint(run) != first
+    del run["data_manifest"]["normalization_fields"]
+    assert _fingerprint(run)["normalization_fields"] is None

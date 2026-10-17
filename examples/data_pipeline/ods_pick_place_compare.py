@@ -250,6 +250,29 @@ def _fingerprint(run: dict[str, Any]) -> dict[str, Any]:
         ),
         "torch_num_threads": threads if type(threads) is int and threads > 0 else None,
     }
+    result["chunk_settings"] = {}
+    result["normalization_fields"] = ["mean", "std"]
+    if run.get("policy") == "chunk-pose":
+        prediction = config.get("prediction_horizon")
+        execution = config.get("action_horizon")
+        noise = _number(config.get("observation_noise"))
+        result["chunk_settings"] = (
+            {
+                "prediction_horizon": prediction,
+                "action_horizon": execution,
+                "observation_noise": noise,
+            }
+            if type(prediction) is int
+            and type(execution) is int
+            and 1 <= execution <= prediction
+            and noise is not None
+            and noise >= 0
+            else None
+        )
+        fields = run["data_manifest"].get("normalization_fields")
+        result["normalization_fields"] = (
+            fields if fields == ["mean", "std", "target_mean", "target_std"] else None
+        )
     for name in ("observation", "action"):
         component = schema.get(name)
         result[f"{name}_schema"] = (

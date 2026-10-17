@@ -256,8 +256,12 @@ class PickPlaceEnv(EmbodiedEnv):
         source = cube.get_local_pose(to_matrix=True).clone()
         # Fixed top-down grasp; no teleport, grasp attachment or dynamics clearing.
         grasp = torch.eye(4, device=self.device).repeat(self.num_envs, 1, 1)
+        # A half-turn about the cube's vertical axis is the same parallel-jaw
+        # grasp. Choose the branch near the Panda's initial wrist orientation:
+        # the opposite branch requires almost 180 degrees of rotation and makes
+        # differential control approach the wrist limit before contact.
         grasp[:, :3, :3] = torch.diag(
-            torch.tensor([1.0, -1.0, -1.0], device=self.device)
+            torch.tensor([-1.0, 1.0, -1.0], device=self.device)
         )
         grasp[:, :3, 3] = source[:, :3, 3]
         # Panda TCP sits near the finger tips; grasp the upper half of the cube
