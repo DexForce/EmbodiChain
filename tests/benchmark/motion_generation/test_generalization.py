@@ -225,3 +225,48 @@ def test_generalization_reports_row_level_spatial_bucket_rates() -> None:
     }
     assert row["spatial_bucket_counts"] == {"far": 1, "mid": 1, "near": 1}
     assert row["spatial_bucket_failure_stages"] == {"mid": {"physical_release": 1}}
+
+
+def test_spatial_bucket_rates_count_missing_repeats_as_failures() -> None:
+    """Missing expected rows remain in every bucket's success denominator."""
+    domain = EvaluationDomain(id="workspace_shell", version="v1", kind="robustness")
+    case = replace(
+        _case("shell-case", domain),
+        track="pick@workspace_shell",
+        batch_size=3,
+        start_qpos=torch.zeros(3, 7),
+        target_waypoints=torch.eye(4).reshape(1, 1, 4, 4).repeat(3, 1, 1, 1),
+        reference_qpos=torch.zeros(3, 1, 7),
+        case_parameters={"randomization": {"spatial_buckets": ["near", "mid", "far"]}},
+    )
+    record = replace(
+        _record(case, _outcome(True)),
+        batch_size=3,
+        outcomes=(
+            replace(_outcome(True), env_index=0),
+            replace(_outcome(True), env_index=2),
+        ),
+    )
+    metadata = [
+        PlannerMetadata(
+            algorithm_id="baseline",
+            algorithm_role=AlgorithmRole.PRIMARY_BASELINE,
+            adapter="ik_interpolate",
+            config_hash="abc",
+            capabilities=frozenset({"eef_waypoint"}),
+        )
+    ]
+
+    row = aggregate_generalization([record], metadata, [case], measured_trials=2)[0]
+
+    assert row["spatial_bucket_success_rates"] == {
+        "far": 0.5,
+        "mid": 0.0,
+        "near": 0.5,
+    }
+    assert row["spatial_bucket_counts"] == {"far": 2, "mid": 2, "near": 2}
+    assert row["spatial_bucket_failure_stages"] == {
+        "far": {"missing_outcome": 1},
+        "mid": {"missing_outcome": 2},
+        "near": {"missing_outcome": 1},
+    }

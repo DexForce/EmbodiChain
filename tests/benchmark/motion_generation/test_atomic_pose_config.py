@@ -718,6 +718,76 @@ def test_workspace_shell_sampling_covers_radius_buckets_and_height() -> None:
     assert set(labels) == {"near", "mid", "far"}
 
 
+@pytest.mark.parametrize("amplitude", [(0.04, 0.0, 0.01), (0.0, 0.04, 0.01)])
+def test_workspace_shell_sampling_rejects_single_xy_axis(
+    amplitude: tuple[float, float, float],
+) -> None:
+    """A radial shell cannot preserve its labels on only one active XY axis."""
+    with pytest.raises(ValueError, match="both X and Y"):
+        _seeded_jitter(
+            amplitude,
+            seed=47,
+            stream=203,
+            dtype=torch.float32,
+            device=torch.device("cpu"),
+            batch_size=8,
+            sampling_pattern="workspace_shell",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("object_translation_jitter_m", [0.04, 0.0, 0.0]),
+        ("target_translation_jitter_m", [0.0, 0.04, 0.0]),
+        ("task_frame_translation_jitter_m", [0.0, 0.0, 0.02]),
+    ],
+)
+def test_workspace_shell_config_rejects_degenerate_xy_ranges(
+    field: str, value: list[float]
+) -> None:
+    """Shell configs require paired XY ranges and at least one radial source."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                field: value,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="workspace_shell"):
+        resolve_atomic_pose_randomization(track)
+
+
+def test_workspace_shell_config_allows_zero_irrelevant_ranges() -> None:
+    """An inactive vector is valid when another translation defines the shell."""
+    track = TrackCfg(
+        id="atomic-task",
+        scenario="atomic_task",
+        config={
+            "randomization": {
+                "enabled": True,
+                "mode": "translation",
+                "sampling_pattern": "workspace_shell",
+                "pose_batch_size": 8,
+                "object_translation_jitter_m": [0.04, 0.02, 0.0],
+                "target_translation_jitter_m": [0.0, 0.0, 0.01],
+            }
+        },
+    )
+
+    settings = resolve_atomic_pose_randomization(track)
+
+    assert settings.object_translation_jitter_m == (0.04, 0.02, 0.0)
+    assert settings.target_translation_jitter_m == (0.0, 0.0, 0.01)
+
+
 def test_pose_sampling_pattern_is_validated_and_injected() -> None:
     """The YAML sampling selector reaches runtime pose generation unchanged."""
     track = TrackCfg(

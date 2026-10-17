@@ -303,6 +303,14 @@ def _seeded_jitter(
         raise ValueError(
             "sampling_pattern must be 'uniform', 'stratified', or " "'workspace_shell'."
         )
+    if (
+        sampling_pattern == "workspace_shell"
+        and len(amplitude) == 3
+        and ((float(amplitude[0]) > 0.0) != (float(amplitude[1]) > 0.0))
+    ):
+        raise ValueError(
+            "workspace_shell requires both X and Y amplitudes when either is active."
+        )
     base_seed = (int(seed) * 1_000_003 + int(stream) * 97_409) % (2**63 - 1)
     # Keep the historical uniform sequence byte-for-byte stable.  Structured
     # patterns use deterministic CPU streams so device and planner order do
