@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""CPU TOPPRA projection and inference scheduling contracts."""
+"""Fast TOPPRA projection and CPU inference scheduling contracts."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from embodichain.compute.trajectory import _toppra_warp as adapter
 from embodichain.compute.trajectory._warp import toppra as kernels
 
 
-def _project(planes: np.ndarray) -> np.ndarray:
+def _project(planes: np.ndarray, device: str = "cpu") -> np.ndarray:
     """Compute the largest feasible x for rest-feasible half-plane batches."""
     wp.init()
     batch = len(planes)
@@ -44,23 +44,26 @@ def _project(planes: np.ndarray) -> np.ndarray:
         wp.from_numpy(
             np.ascontiguousarray(planes[:, None, :, index]),
             dtype=wp.float64,
-            device="cpu",
+            device=device,
         )
         for index in range(3)
     ]
-    counts = wp.from_numpy(np.ones(batch, dtype=np.int32), device="cpu")
-    caps = wp.empty((batch, 1), dtype=wp.float64, device="cpu")
+    counts = wp.from_numpy(np.ones(batch, dtype=np.int32), device=device)
+    caps = wp.empty((batch, 1), dtype=wp.float64, device=device)
     wp.launch(
-        kernels._project_caps_cpu,
+        kernels._project_caps_fast,
         dim=(batch, 1),
         inputs=[*arrays, counts, caps],
-        device="cpu",
+        device=device,
     )
     return caps.numpy()[:, 0]
 
 
 @pytest.mark.parametrize("scale", [1e-100, 1.0, 1e100])
-def test_cpu_projection_matches_analytic_polygons(scale: float) -> None:
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_fast_projection_matches_analytic_polygons(scale: float, device: str) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
     # Every inequality has the form a*x + b*y <= c, with x,y >= 0.
     planes = (
         np.array(
@@ -100,11 +103,14 @@ def test_cpu_projection_matches_analytic_polygons(scale: float) -> None:
         * scale
     )
     np.testing.assert_allclose(
-        _project(planes), [0.5, 2.0, 1.0, 2.0, 0.0], rtol=1e-12, atol=1e-12
+        _project(planes, device), [0.5, 2.0, 1.0, 2.0, 0.0], rtol=1e-12, atol=1e-12
     )
 
 
-def test_cpu_projection_matches_independent_linear_programs() -> None:
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_fast_projection_matches_independent_linear_programs(device: str) -> None:
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable")
     rng = np.random.default_rng(712)
     # This includes 14-DoF-sized plane sets, zero one-sided bounds and parallel
     # planes. SciPy's HiGHS LP is independent of the TOPPRA projection algorithm.
@@ -124,13 +130,18 @@ def test_cpu_projection_matches_independent_linear_programs() -> None:
         )
         assert solution.success
         expected.append(solution.x[0])
-    np.testing.assert_allclose(_project(planes), expected, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(
+        _project(planes, device), expected, rtol=1e-10, atol=1e-12
+    )
 
 
-@pytest.mark.parametrize("sampling", [{"sample_count": 129}, {"sample_dt": 0.07}])
-def test_cpu_optimized_forward_matches_differentiable_solver(sampling: dict) -> None:
+@pytest.mark.parametrize("sampling", [{"sample_count": 513}, {"sample_dt": 0.07}])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_cpu_optimized_forward_matches_differentiable_solver(
+    sampling: dict, dtype: torch.dtype
+) -> None:
     rng = np.random.default_rng(731)
-    points = torch.tensor(rng.normal(size=(8, 16, 7)), dtype=torch.float64)
+    points = torch.tensor(rng.normal(size=(8, 16, 7)), dtype=dtype)
     velocity = np.column_stack((-rng.uniform(0.4, 1.2, 7), rng.uniform(0.5, 1.4, 7)))
     acceleration = np.column_stack(
         (-rng.uniform(0.8, 1.6, 7), rng.uniform(0.9, 1.8, 7))
@@ -140,8 +151,12 @@ def test_cpu_optimized_forward_matches_differentiable_solver(sampling: dict) -> 
         points.requires_grad_(), velocity, acceleration, **sampling
     )
     assert torch.equal(optimized["success"], tracked["success"])
+    tolerance = 1e-6 if dtype == torch.float32 else 1e-10
     for key in ("positions", "velocities", "accelerations", "dt"):
-        torch.testing.assert_close(optimized[key], tracked[key], rtol=1e-10, atol=1e-10)
+        assert optimized[key].dtype == dtype
+        torch.testing.assert_close(
+            optimized[key], tracked[key], rtol=tolerance, atol=tolerance
+        )
     tracked["dt"].sum().backward()
     assert torch.isfinite(points.grad).all()
 

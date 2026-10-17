@@ -78,7 +78,8 @@ retain their existing timing contracts and do not consume these backend limits.
 ### TOPPRA
 
 `toppra_planner.py` uses Warp on CPU and CUDA. Numerical ownership is in
-`compute/trajectory/_toppra_warp.py` and `_warp/toppra.py`; shared validation
+`compute/trajectory/_toppra_warp.py` and `_warp/toppra.py`, with cooperative
+CUDA inference in `_warp/toppra_cuda.py`; shared validation
 lives in `_toppra_common.py`. `_toppra.py` is an offline NumPy oracle and must
 not be imported by the runtime planner or Warp adapter.
 Robot-backed planning retains shared speed-cap and control-part resolution,
@@ -92,6 +93,12 @@ TOPPRA package. Tiny real moves must retain positive duration.
 
 Warp constructs splines, bounds, controllable sets and samples on the input
 device. It honors the current Torch stream and reads a scalar to size output.
+CUDA inference reduces constraint planes across one block per path; all
+early exits must remain uniform across the block. Inference may use fast
+polygon projection, while recorded calls retain the selected-expression
+projection and serial solver needed by the adjoint. Dense CPU inference sampling
+shares scalar timing and interval searches across the joints of each sample;
+recorded sampling retains its per-joint adjoint path.
 CPU inference amortizes sufficiently large batches over a shared bounded thread
 pool; small requests and adjoint-recording calls stay inline. Row blocks own
 their numerical buffers, inherit Torch grad/inference modes and merge using

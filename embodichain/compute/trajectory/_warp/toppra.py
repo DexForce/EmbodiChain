@@ -23,6 +23,8 @@ accumulators do not retain the intermediate values needed by the adjoint.
 
 from __future__ import annotations
 
+from typing import Any
+
 import warp as wp
 
 __all__ = []
@@ -402,7 +404,7 @@ def _project_caps(
 
 
 @wp.kernel(enable_backward=False)
-def _project_caps_cpu(
+def _project_caps_fast(
     a: wp.array3d(dtype=wp.float64),
     b: wp.array3d(dtype=wp.float64),
     c: wp.array3d(dtype=wp.float64),
@@ -696,3 +698,88 @@ def _sample(
         velocity_value = wp.float64(0.0)
     positions[row, sample, joint] = position
     velocities[row, sample, joint] = velocity_value
+
+
+@wp.kernel(enable_backward=False)
+def _sample_cpu(
+    points: wp.array3d(dtype=wp.float64),
+    coefficients: wp.array4d(dtype=wp.float64),
+    counts: wp.array(dtype=int),
+    intervals: wp.array(dtype=int),
+    success: wp.array(dtype=int),
+    x: wp.array2d(dtype=wp.float64),
+    times: wp.array2d(dtype=wp.float64),
+    durations: wp.array(dtype=wp.float64),
+    sample_counts: wp.array(dtype=int),
+    positions: wp.array3d(dtype=Any),
+    velocities: wp.array3d(dtype=Any),
+    accelerations: wp.array3d(dtype=Any),
+    dt: wp.array2d(dtype=Any),
+):
+    # CPU inference shares the time search and scalar state across joints.
+    # Keep the recorded per-joint sampler for its existing adjoint contract.
+    row, sample = wp.tid()
+    if success[row] == 0:
+        return
+    n, valid = counts[row], sample_counts[row]
+    if sample >= valid or n == 1:
+        for joint in range(points.shape[2]):
+            positions[row, sample, joint] = positions.dtype(points[row, n - 1, joint])
+        return
+    step = durations[row] / wp.float64(valid - 1)
+    query = step * wp.float64(sample)
+    if sample > 0:
+        dt[row, sample] = dt.dtype(step)
+    total = intervals[row]
+    i = _sample_interval(times, row, total, query)
+    elapsed = query - times[row, i]
+    accel = (x[row, i + 1] - x[row, i]) * wp.float64(total) / wp.float64(2.0)
+    initial = _speed(x[row, i])
+    speed = wp.max(wp.float64(0.0), initial + accel * elapsed)
+    s = wp.clamp(
+        wp.float64(i) / wp.float64(total)
+        + initial * elapsed
+        + wp.float64(0.5) * accel * elapsed * elapsed,
+        wp.float64(i) / wp.float64(total),
+        wp.float64(i + 1) / wp.float64(total),
+    )
+    segment = wp.min(int(s * wp.float64(n - 1)), n - 2)
+    delta = s - wp.float64(segment) / wp.float64(n - 1)
+    for joint in range(points.shape[2]):
+        ca, cb = (
+            coefficients[row, segment, joint, 0],
+            coefficients[row, segment, joint, 1],
+        )
+        cc, cd = (
+            coefficients[row, segment, joint, 2],
+            coefficients[row, segment, joint, 3],
+        )
+        first = cb + delta * (wp.float64(2.0) * cc + wp.float64(3.0) * delta * cd)
+        second = wp.float64(2.0) * cc + wp.float64(6.0) * delta * cd
+        position = ca + delta * (cb + delta * (cc + delta * cd))
+        velocity_value = first * speed
+        accelerations[row, sample, joint] = accelerations.dtype(
+            second * speed * speed + first * accel
+        )
+        if sample == 0:
+            position = points[row, 0, joint]
+            velocity_value = wp.float64(0.0)
+        elif sample == valid - 1:
+            position = points[row, n - 1, joint]
+            velocity_value = wp.float64(0.0)
+        positions[row, sample, joint] = positions.dtype(position)
+        velocities[row, sample, joint] = velocities.dtype(velocity_value)
+
+
+# Register both concrete variants before the submitting thread loads this
+# module. CPU worker threads must not race to instantiate a generic kernel.
+for _output_dtype in (wp.float32, wp.float64):
+    wp.overload(
+        _sample_cpu,
+        {
+            "positions": wp.array3d(dtype=_output_dtype),
+            "velocities": wp.array3d(dtype=_output_dtype),
+            "accelerations": wp.array3d(dtype=_output_dtype),
+            "dt": wp.array2d(dtype=_output_dtype),
+        },
+    )

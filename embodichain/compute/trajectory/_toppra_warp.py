@@ -507,8 +507,8 @@ def _launch_toppra(
             )
             wp.launch(
                 (
-                    kernels._project_caps_cpu
-                    if device.is_cpu and not differentiable
+                    kernels._project_caps_fast
+                    if not differentiable and (device.is_cpu or batch >= 128)
                     else kernels._project_caps
                 ),
                 dim=(batch, capacity),
@@ -526,9 +526,18 @@ def _launch_toppra(
             durations = wp.zeros(
                 batch, dtype=wp.float64, device=device, requires_grad=differentiable
             )
+            solver, solve_dim, solve_block = kernels._solve, batch, 256
+            if device.is_cuda and not differentiable:
+                from ._warp import toppra_cuda
+
+                solver = toppra_cuda._solve
+                solve_dim, solve_block = (
+                    batch,
+                    toppra_cuda._BLOCK_DIM,
+                ), toppra_cuda._BLOCK_DIM
             wp.launch(
-                kernels._solve,
-                dim=batch,
+                solver,
+                dim=solve_dim,
                 inputs=[
                     a,
                     b,
@@ -543,6 +552,7 @@ def _launch_toppra(
                 ],
                 device=device,
                 record_tape=differentiable,
+                block_dim=solve_block,
             )
             duration_tensor = wp.to_torch(durations)
             ok = wp.to_torch(success).bool()
@@ -560,9 +570,19 @@ def _launch_toppra(
                 sample_lengths = desired.to(torch.int32).clamp_min(2)
             sample_lengths = torch.where(moving, sample_lengths, 2).contiguous()
             samples = int(sample_lengths.max().item())
+            # Reuse scalar searches only when dense output amortizes the
+            # point-wise joint loop; small outputs retain the flat sampler.
+            cpu_sampling = device.is_cpu and not differentiable and samples >= 512
+            # Narrow only on final stores. Avoid nested Torch cast work in
+            # CPU worker threads and an extra double-precision output buffer.
+            sample_dtype = (
+                wp.float32
+                if cpu_sampling and waypoints.dtype == torch.float32
+                else wp.float64
+            )
             positions = wp.zeros(
                 (batch, samples, dofs),
-                dtype=wp.float64,
+                dtype=sample_dtype,
                 device=device,
                 requires_grad=differentiable,
             )
@@ -571,13 +591,13 @@ def _launch_toppra(
             )
             dt = wp.zeros(
                 (batch, samples),
-                dtype=wp.float64,
+                dtype=sample_dtype,
                 device=device,
                 requires_grad=differentiable,
             )
             wp.launch(
-                kernels._sample,
-                dim=(batch, samples, dofs),
+                kernels._sample_cpu if cpu_sampling else kernels._sample,
+                dim=(batch, samples) if cpu_sampling else (batch, samples, dofs),
                 inputs=[
                     clean,
                     coefficients,
