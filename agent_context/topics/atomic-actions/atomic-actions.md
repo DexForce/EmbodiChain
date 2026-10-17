@@ -76,6 +76,7 @@ contact or physical goal satisfaction.
 | Invocation, binding, and policies | `invocation.py`, `bindings.py`, `policies.py`, `control.py` |
 | Robot/task/scene state | `state.py`, `scene.py` |
 | Plans and runtime commands | `plans.py`, `runtime_commands.py` |
+| Source-neutral trajectory inputs, schema and Skill semantic assembly | `trajectory_assembly.py`, `core.py` |
 | Session state machine | `execution.py` |
 | Verification request/result values | `verification.py` |
 | Runner and transports | `runner.py`, `transports.py`, `tracking.py` |
@@ -211,9 +212,14 @@ For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
 
-For externally recorded nominal paths, `AtomicActionEngine.build_plan_from_recorded_trajectory`
-delegates to the registered Skill's `build_recorded_plan` instead of ordinary
-planning. PickUp assembles approach/close/lift commands, tracking and uncommitted
-held-object effects from a complete full-joint path. The resulting fixed replay is
-non-replannable; source admission and restored-initial-state checks belong to the
-registered Task Program source provider.
+`AtomicActionEngine.build_plan_from_trajectory` admits full-joint motion through
+an explicit versioned `SkillDescriptor.trajectory_contract`, then delegates to
+the framework-owned `AtomicAction.assemble_trajectory_plan`. PickUp and
+MoveJoints share their `_trajectory_semantics` hook between ordinary planning
+and external motion; other Skills opt in explicitly. Skill code owns effects
+and geometric facts, while the public builder owns commands and tracking.
+`ActionPlan.trajectory_input` retains an owned input for same-grid rebuilding;
+rebuilding reassembles semantics and rejects stale geometric-event facts.
+Semantic stages/events do not grant expansion permissions. Input source/model
+review remains provider-owned, and fixed replay remains non-replannable.
+See [trajectory assembly details](execution.md#trajectory-backed-plan-assembly).

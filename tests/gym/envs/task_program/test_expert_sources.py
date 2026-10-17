@@ -45,7 +45,7 @@ from embodichain.lab.task_program.integrations.real2sim import (
 from embodichain.lab.task_program.integrations.configured import (
     _decode_runtime_services,
 )
-from embodichain.lab.sim.atomic_actions import MotionPolicy, RecoveryPolicy
+from embodichain.lab.sim.atomic_actions import MotionPolicy, RecoveryPolicy, PickUp
 
 
 def _declaration(tmp_path, positions=None):
@@ -229,6 +229,7 @@ def _selector_and_engine(tmp_path, positions=None):
         [[[-2.0, 2.0], [-2.0, 2.0]]]
     )
     engine.robot.get_qvel_limits.return_value = torch.full((1, 2), 2.0)
+    engine.skills = {"pick_up": PickUp.descriptor()}
     request = SimpleNamespace(
         analysis_call_index=0, call=SimpleNamespace(semantic_id="pick")
     )
@@ -266,13 +267,12 @@ def test_recorded_source_checks_each_interval_at_reversals(
     if rejected:
         with pytest.raises(ValueError, match="interval speeds.*velocity limits"):
             callback(request, context)
-        engine.build_plan_from_recorded_trajectory.assert_not_called()
+        engine.build_plan_from_trajectory.assert_not_called()
     else:
         assert (
-            callback(request, context)
-            is engine.build_plan_from_recorded_trajectory.return_value
+            callback(request, context) is engine.build_plan_from_trajectory.return_value
         )
-        engine.build_plan_from_recorded_trajectory.assert_called_once()
+        engine.build_plan_from_trajectory.assert_called_once()
 
 
 def test_completed_source_is_collectable_after_callback_is_released(tmp_path):

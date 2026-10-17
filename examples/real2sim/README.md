@@ -20,7 +20,9 @@ The shared `ExpertSourceRegistry` now fingerprints exact provider versions and
 expanded call selections in the simulation catalog. The configured
 `expert_source_providers` service admits a content-pinned source bundle before
 simulation construction. `Real2SimExpertSourceProviderFactory` creates fresh B=1
-Pick providers, and PickUp owns complete nominal-plan assembly. Neither source
+Pick providers, and PickUp supplies semantics to the shared trajectory assembler.
+`SkillTrajectoryContract` and `SkillTrajectoryInput` are source-independent;
+ordinary PickUp and MoveJoints planning use the same assembly path. Neither source
 code nor callables belong in `program.yaml`.
 
 Physical qualification, receipt-backed array attachments, registered-source
@@ -230,8 +232,12 @@ Close and lift use protected `contact`/`hold` kinds. Interpolation-only gaps rem
 locked by the adapter; the plan assembler attributes those gaps to the preceding
 semantic segment. All source/execution phase intervals remain in diagnostics.
 The provider checks B=1, exact profile/model digest/joint order, initial state, control period,
-endpoint ownership and live joint-position limits. PickUp then builds commands,
-qvel/tracking, segments, dependency boundaries and uncommitted held-object effects.
+endpoint ownership and live joint-position limits. The provider calls
+`AtomicActionEngine.build_plan_from_trajectory`; the selected Skill supplies
+semantic effects to the existing command/tracking builder. Plans retain owned
+assembly inputs so same-grid candidates rebuild commands, tracking, effects,
+stages and dependency boundaries together. Geometry changes require new facts
+rather than carrying stale grasp baselines.
 Source failures propagate without ordinary planning fallback. A fresh reset is
 required to run another fixed source attempt.
 

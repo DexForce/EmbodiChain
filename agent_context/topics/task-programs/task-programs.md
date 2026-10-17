@@ -95,8 +95,10 @@ Identity checks use weak references, so completed calls do not retain their
 recordings; provider implementations must support weak references. Fixed-qpos
 admission checks interval speeds as well as differentiated velocity references.
 
-The first registered source is B=1 fixed-qpos Pick replay. PickUp owns full plan
-assembly, including commands, tracking, semantic segments and pending effects.
+The first registered source is B=1 fixed-qpos Pick replay. It uses the
+[source-independent Skill trajectory assembler](../atomic-actions/execution.md#trajectory-backed-plan-assembly),
+with the Skill owning semantic stages and pending effects. Skill trajectory
+schemas are included in registration fingerprints.
 Unverified input bundles, automatic replanning/retry policies, parallel segments
 and configured combined expansion fail closed. Physical qualification and
 receipt-backed source attachments remain separate host work. Do not insert

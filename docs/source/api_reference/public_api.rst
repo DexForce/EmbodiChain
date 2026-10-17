@@ -716,6 +716,8 @@ embodichain.lab.sim.atomic_actions.control
 embodichain.lab.sim.atomic_actions.core
 ---------------------------------------
 
+Trajectory-backed Skill assembly is described in :doc:`atomic_trajectory_assembly`.
+
 .. currentmodule:: embodichain.lab.sim.atomic_actions.core
 
 .. autosummary::

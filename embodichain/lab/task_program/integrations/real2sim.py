@@ -27,6 +27,7 @@ from pathlib import Path
 import torch
 
 from embodichain.data_pipeline.real2sim.bundle import load_real2sim_bundle
+from embodichain.lab.sim.atomic_actions.trajectory_assembly import SkillTrajectoryInput
 from embodichain.data_pipeline.real2sim.normalization import NormalizedReal2SimUnit
 from embodichain.lab.sim.atomic_actions import (
     AtomicActionEngine,
@@ -38,6 +39,7 @@ from embodichain.lab.sim.atomic_actions.plans import (
     ActionPlan,
     PlannerDiagnostics,
     TimedTrajectory,
+    TrajectorySegment,
 )
 from embodichain.lab.sim.motion.expansion import (
     Real2SimSourceAdapter,
@@ -296,23 +298,39 @@ class Real2SimExpertSourceProvider:
             dt=dt,
             env_ids=context.env_ids,
         )
-        return self.engine.build_plan_from_recorded_trajectory(
+        contract = self.engine.skills[request.skill_id].trajectory_contract
+        if contract is None:
+            raise ValueError(
+                "Selected Skill does not declare a trajectory assembly schema"
+            )
+        segments = []
+        offset = 0
+        for name, length in _segment_lengths(unit).items():
+            segments.append(TrajectorySegment(name, offset, offset + length))
+            offset += length
+        segments = tuple(segments)
+        return self.engine.build_plan_from_trajectory(
             request,
             context,
-            trajectory,
-            segment_lengths=_segment_lengths(unit),
-            diagnostics=PlannerDiagnostics(
-                backend="real2sim_qpos",
-                metadata={
-                    "source_id": unit.source.source_id,
-                    "source_revision": unit.source.source_revision,
-                    "normalized_revision": unit.revision,
-                    "unit_id": unit.source.unit_id,
-                    "authority": "qpos",
-                    "profile_id": self.profile_id,
-                    "target_asset_sha256": self.asset_sha256,
-                    "normalization": unit.report_dict(),
-                    "interphase_segment_policy": "preceding_segment_locked",
-                },
+            SkillTrajectoryInput(
+                schema_id=contract.schema_id,
+                schema_revision=contract.revision,
+                trajectory=trajectory,
+                segments=segments,
+                landmarks=contract.stage_landmarks(segments, trajectory.waypoint_count),
+                diagnostics=PlannerDiagnostics(
+                    backend="real2sim_qpos",
+                    metadata={
+                        "source_id": unit.source.source_id,
+                        "source_revision": unit.source.source_revision,
+                        "normalized_revision": unit.revision,
+                        "unit_id": unit.source.unit_id,
+                        "authority": "qpos",
+                        "profile_id": self.profile_id,
+                        "target_asset_sha256": self.asset_sha256,
+                        "normalization": unit.report_dict(),
+                        "interphase_segment_policy": "preceding_segment_locked",
+                    },
+                ),
             ),
         )

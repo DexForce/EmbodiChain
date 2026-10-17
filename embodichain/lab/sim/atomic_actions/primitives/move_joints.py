@@ -30,6 +30,11 @@ from embodichain.lab.sim.atomic_actions.invocation import (
     ResolvedActionRequest,
 )
 from embodichain.lab.sim.atomic_actions.plans import ActionPlan
+from embodichain.lab.sim.atomic_actions.trajectory_assembly import (
+    SkillPlanSemantics,
+    SkillTrajectoryContract,
+    SkillTrajectoryInput,
+)
 from embodichain.lab.sim.atomic_actions.requirements import (
     JOINT_POSITION_CAPABILITY,
     SkillBindingContract,
@@ -83,6 +88,12 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
     GoalType: ClassVar[type] = JointPositionGoal
     OptionsType: ClassVar[type] = MoveJointsOptions
     agent_visible: ClassVar[bool] = True
+    trajectory_contract: ClassVar[SkillTrajectoryContract] = SkillTrajectoryContract(
+        schema_id="move_joints.qpos",
+        revision="1",
+        landmark_names=("goal",),
+        landmark_stages={"goal": None},
+    )
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_motion_slot(
@@ -131,12 +142,92 @@ class MoveJoints(AtomicAction[JointPositionGoal, MoveJointsOptions]):
             env_ids=context.env_ids,
             control_dt=context.require_control_dt(),
         )
-        return self.build_plan(
+        return self.assemble_trajectory_plan(
             request,
             context,
-            success=success,
-            trajectory=trajectory,
+            SkillTrajectoryInput(
+                schema_id=self.trajectory_contract.schema_id,
+                schema_revision=self.trajectory_contract.revision,
+                trajectory=trajectory,
+                landmarks={"goal": trajectory.waypoint_count - 1},
+                planning_success=success,
+                replannable=True,
+            ),
         )
+
+    def _trajectory_semantics(
+        self,
+        request: ResolvedActionRequest[JointPositionGoal, MoveJointsOptions],
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> SkillPlanSemantics:
+        """Check ordered joint goals without introducing symbolic task effects."""
+        target = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        goals = resolve_joint_target(
+            self._resolve_target_qpos(request.goal, request=request, context=context),
+            num_envs=context.batch_size,
+            joint_dof=len(target.joint_ids),
+            control_part=target.control_part,
+            device=self.device,
+        )
+        if goals.ndim == 2:
+            goals = goals[:, None]
+        positions = motion.trajectory.positions[:, :, list(target.joint_ids)]
+        if motion.landmarks["goal"] != motion.trajectory.waypoint_count - 1:
+            raise ValueError("MoveJoints goal event must be the terminal sample")
+        # This checks the reference path, not measured controller acceptance.
+        tolerance = 1e-4
+        for row in motion.planning_success.nonzero().flatten().tolist():
+            if not torch.allclose(
+                positions[row, -1], goals[row, -1].to(positions), atol=tolerance, rtol=0
+            ):
+                raise ValueError(
+                    "MoveJoints trajectory does not reach its requested joint goal"
+                )
+            path = positions[row]
+            if len(path) == 1:
+                if not torch.allclose(
+                    goals[row].to(path),
+                    path.expand_as(goals[row]),
+                    atol=tolerance,
+                    rtol=0,
+                ):
+                    raise ValueError(
+                        "MoveJoints trajectory must visit requested waypoints in order"
+                    )
+                continue
+            edges = path[1:] - path[:-1]
+            squared_lengths = edges.square().sum(dim=-1)
+            cursor = 0.0
+            for waypoint in goals[row]:
+                # Control-grid retiming can put an interior waypoint between
+                # samples. Check the ordered reference polyline, not only exact
+                # sample equality; this still does not certify physical motion.
+                delta = waypoint.to(path) - path[:-1]
+                fractions = (
+                    (delta * edges).sum(dim=-1)
+                    / squared_lengths.clamp_min(torch.finfo(path.dtype).tiny)
+                ).clamp(0, 1)
+                closest = path[:-1] + fractions[:, None] * edges
+                progress = torch.arange(
+                    len(edges), device=path.device, dtype=torch.float64
+                ) + fractions.to(torch.float64)
+                matches = (
+                    (
+                        ((closest - waypoint.to(path)).abs() <= tolerance).all(dim=-1)
+                        & (progress >= cursor - 1e-8)
+                    )
+                    .nonzero()
+                    .flatten()
+                )
+                if not len(matches):
+                    raise ValueError(
+                        "MoveJoints trajectory must visit requested waypoints in order"
+                    )
+                cursor = float(progress[matches[0]])
+        return SkillPlanSemantics()
 
     def _resolve_target_qpos(
         self,

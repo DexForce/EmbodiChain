@@ -37,7 +37,8 @@ Registered nominal plans
    :members: Real2SimExpertSourceProviderFactory, Real2SimExpertSourceProvider
 
 The initial registered source supports B=1, sequential, fixed-qpos Pick replay.
-PickUp owns semantic segment and effect assembly. Replay-only sources reject
+The provider calls the source-independent :doc:`atomic_trajectory_assembly`
+interface; PickUp owns semantic segment and effect assembly. Replay-only sources reject
 replanning/retry policies and configured combined expansion. Unverified source
 bundles remain usable for offline diagnostics but cannot enter formal admission.
 Provider instances must support weak references. Runtime identity tracking does

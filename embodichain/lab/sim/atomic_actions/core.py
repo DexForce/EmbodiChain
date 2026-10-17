@@ -63,6 +63,11 @@ from .tracking import (
     TrackingFrame,
     TrackingSetpoint,
 )
+from .trajectory_assembly import (
+    SkillPlanSemantics,
+    SkillTrajectoryContract,
+    SkillTrajectoryInput,
+)
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -147,6 +152,8 @@ class SkillDescriptor:
     """Whether completion reports motion execution without physical-effect proof."""
     binding_contract: SkillBindingContract | None = None
     """Explicit generic resource contract used by Task Program lowering."""
+    trajectory_contract: SkillTrajectoryContract | None = None
+    """Explicit source-neutral trajectory assembly schema, when supported."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -170,6 +177,13 @@ class SkillDescriptor:
                     "SkillDescriptor.binding_contract must be a "
                     "SkillBindingContract or None."
                 )
+        if (
+            self.trajectory_contract is not None
+            and type(self.trajectory_contract) is not SkillTrajectoryContract
+        ):
+            raise TypeError(
+                "trajectory_contract must be SkillTrajectoryContract or None"
+            )
 
 
 class AtomicAction(Generic[GoalT, OptionsT], ABC):
@@ -203,6 +217,9 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     does not silently expose a new skill identifier.
     """
 
+    trajectory_contract: ClassVar[SkillTrajectoryContract | None] = None
+    """Optional explicit opt-in to source-independent joint-plan assembly."""
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Reject skill classes that bypass framework-owned scene binding."""
         super().__init_subclass__(**kwargs)
@@ -210,6 +227,11 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             raise TypeError(
                 "AtomicAction subclasses must implement _plan(); the public "
                 "plan() method is framework-owned."
+            )
+        if "assemble_trajectory_plan" in cls.__dict__:
+            raise TypeError(
+                "AtomicAction subclasses must implement _trajectory_semantics(); "
+                "assemble_trajectory_plan() is framework-owned."
             )
 
     def __init__(
@@ -300,6 +322,7 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
             agent_visible=cls.agent_visible,
             open_loop=cls.open_loop,
             binding_contract=cls.__dict__.get("binding_contract"),
+            trajectory_contract=cls.__dict__.get("trajectory_contract"),
         )
 
     def resolve_request(
@@ -484,6 +507,96 @@ class AtomicAction(Generic[GoalT, OptionsT], ABC):
     ) -> tuple[str, ...]:
         """Return scene entities whose poses materially affect this plan."""
         return collect_scene_dependencies(request.goal)
+
+    def assemble_trajectory_plan(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> ActionPlan:
+        """Build a complete plan using the Skill's source-independent semantics.
+
+        Args:
+            request: Grounded Skill invocation with authoritative endpoint bindings.
+            context: Current observed robot, task and scene snapshot.
+            motion: Owned timed motion, stages and event landmarks.
+
+        Returns:
+            Commands, tracking and uncommitted effects assembled together.
+
+        Raises:
+            ValueError: The Skill has not opted in or an input violates its schema.
+        """
+        self.require_goal(request)
+        contract = self.descriptor().trajectory_contract
+        if contract is None:
+            raise ValueError(
+                f"Skill {self.skill_id!r} does not support trajectory assembly"
+            )
+        if type(motion) is not SkillTrajectoryInput:
+            raise TypeError("motion must be exactly SkillTrajectoryInput")
+        owned = motion.snapshot()
+        contract.validate_input(owned)
+        timed = owned.trajectory
+        if (
+            timed.batch_size != context.batch_size
+            or timed.robot_dof != context.robot.robot_dof
+        ):
+            raise ValueError("Trajectory dimensions must match the planning context")
+        if timed.positions.device != context.robot.qpos.device:
+            raise ValueError("Trajectory and planning context must share a device")
+        if timed.positions.dtype != context.robot.qpos.dtype:
+            raise ValueError("Trajectory and planning context must share a joint dtype")
+        if not torch.equal(timed.env_ids, context.env_ids):
+            raise ValueError("Trajectory must preserve ordered planning env_ids")
+        ticks = timed.dt / context.require_control_dt()
+        if not torch.isclose(ticks, ticks.round(), atol=1e-5, rtol=0).all():
+            raise ValueError(
+                "Trajectory arrival intervals must align to the control grid"
+            )
+        names = {s.name for s in owned.segments} or {self.skill_id}
+        if any(gate.segment_name not in names for gate in request.phase_effect_gates):
+            raise ValueError("Trajectory is missing a required phase-effect gate stage")
+        semantics = self._trajectory_semantics(request, context, owned)
+        if type(semantics) is not SkillPlanSemantics:
+            raise TypeError("_trajectory_semantics must return SkillPlanSemantics")
+        plan = self.build_plan(
+            request,
+            context,
+            success=owned.planning_success,
+            trajectory=timed,
+            expected_effects=semantics.expected_effects,
+            effect_candidates=semantics.effect_candidates,
+            effect_verification=semantics.effect_verification,
+            replannable=owned.replannable,
+            diagnostics=owned.diagnostics,
+            segment_lengths=(
+                {s.name: s.waypoint_count for s in owned.segments}
+                if owned.segments
+                else None
+            ),
+            scene_dependency_monitor_until=semantics.scene_dependency_monitor_until,
+            scene_dependency_end_segment=semantics.scene_dependency_end_segment,
+        )
+        return replace(
+            plan,
+            trajectory_input=replace(
+                owned,
+                trajectory=plan.joint_trajectory,
+                planning_success=plan.plan_success,
+            ),
+        )
+
+    def _trajectory_semantics(
+        self,
+        request: ResolvedActionRequest[GoalT, OptionsT],
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> SkillPlanSemantics:
+        """Supply Skill-owned effects without planning, executing or committing state."""
+        raise NotImplementedError(
+            f"Skill {self.skill_id!r} has no trajectory semantics"
+        )
 
     def build_plan(
         self,

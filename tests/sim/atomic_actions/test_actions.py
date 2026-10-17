@@ -1849,7 +1849,7 @@ def test_planner_timing_is_preserved_in_simple_action() -> None:
     action = _bind_action(generator, MoveJoints())
     invocation = ActionInvocation(
         skill_id="move_joints",
-        goal=JointPositionGoal(torch.ones(ARM_DOF)),
+        goal=JointPositionGoal(torch.full((ARM_DOF,), 0.15)),
         binding=_binding(action),
         motion_policy=MotionPolicy(strategy="motion_gen", sample_count=3),
     )
@@ -7376,6 +7376,12 @@ def test_recorded_pick_builds_commands_tracking_effects_and_preserves_rebuild(
     from embodichain.lab.sim.atomic_actions.policies import RecoveryPolicy
 
     generator = _motion_generator()
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-2.0, 2.0]).expand(
+        NUM_ENVS, ROBOT_DOF, 2
+    )
+    generator.robot.get_qvel_limits.return_value = torch.full(
+        (NUM_ENVS, ROBOT_DOF), 100.0
+    )
     action = _bind_action(generator, PickUp())
     engine = _ACTION_ENGINES[id(action)]
     monkeypatch.setattr(
@@ -7437,6 +7443,94 @@ def test_recorded_pick_builds_commands_tracking_effects_and_preserves_rebuild(
     assert [s.name for s in rebuilt.segments] == ["approach", "close", "lift"]
     assert rebuilt.diagnostics.metadata["source_revision"] == "fixture1"
     assert not rebuilt.replannable
+    assert rebuilt.trajectory_input.geometry is None
+
+    def shifted_fk(qpos: torch.Tensor, **_: object) -> torch.Tensor:
+        pose = torch.eye(4).repeat(qpos.shape[0], 1, 1)
+        pose[:, 0, 3] = qpos[:, 0]
+        return pose
+
+    monkeypatch.setattr(generator.robot, "compute_fk", shifted_fk)
+    changed = trajectory.positions.clone()
+    grasp_index = plan.trajectory_input.landmarks["grasp"]
+    changed[:, grasp_index, 0] += 0.001
+    candidate = replace(trajectory, positions=changed, velocities=None)
+    rebuilt = engine.rebuild_plan_from_trajectory(request, context, plan, candidate)
+    torch.testing.assert_close(
+        rebuilt.expected_effects.held_object_updates["arm"].object_to_eef[:, 0, 3],
+        changed[:, grasp_index, 0],
+    )
+
+
+@pytest.mark.parametrize("skill", ["pick_up", "move_joints"])
+def test_normal_and_external_motion_share_semantic_assembly(
+    skill: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from embodichain.lab.sim.atomic_actions import RecoveryPolicy
+    from embodichain.lab.task_program.integrations.catalog import _canonical_value
+
+    generator = _motion_generator()
+    generator.robot.get_qpos_limits.return_value = torch.tensor([-100.0, 100.0]).expand(
+        NUM_ENVS, ROBOT_DOF, 2
+    )
+    generator.robot.get_qvel_limits.return_value = torch.full(
+        (NUM_ENVS, ROBOT_DOF), 10000.0
+    )
+    action = _bind_action(generator, PickUp() if skill == "pick_up" else MoveJoints())
+    engine = _ACTION_ENGINES[id(action)]
+    goal = (
+        GraspGoal(
+            _semantics(entity_id="target"),
+            grasp_xpos=torch.eye(4).repeat(NUM_ENVS, 1, 1),
+        )
+        if skill == "pick_up"
+        else JointPositionGoal(torch.full((ARM_DOF,), 0.1))
+    )
+    context = _context(
+        scene=_target_scene(
+            torch.eye(4).repeat(NUM_ENVS, 1, 1), timestamp=0.0, version=0
+        )
+    )
+    invocation = replace(
+        _invocation(action, goal),
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    request = engine.resolve(invocation)
+    normal = engine.plan_request(request, context)
+    assert normal.trajectory_input is not None
+    monkeypatch.setattr(
+        action,
+        "_plan",
+        Mock(side_effect=AssertionError("ordinary planning must be bypassed")),
+    )
+    imported = engine.build_plan_from_trajectory(
+        request, context, replace(normal.trajectory_input, replannable=False)
+    )
+    assert _canonical_value(imported.commands) == _canonical_value(normal.commands)
+    assert _canonical_value(imported.tracking) == _canonical_value(normal.tracking)
+    assert imported.segments == normal.segments
+    assert (
+        imported.scene_dependency_monitor_until == normal.scene_dependency_monitor_until
+    )
+    assert not imported.replannable and normal.replannable
+    assert context.get_held_object("arm") is None
+    if skill == "pick_up":
+        expected = normal.expected_effects.held_object_updates["arm"]
+        actual = imported.expected_effects.held_object_updates["arm"]
+        torch.testing.assert_close(actual.object_to_eef, expected.object_to_eef)
+        torch.testing.assert_close(actual.grasp_xpos, expected.grasp_xpos)
+        positions = normal.joint_trajectory.positions.clone()
+        positions[:, normal.trajectory_input.landmarks["grasp"], 0] += 0.001
+        with pytest.raises(ValueError, match="new trajectory assembly input"):
+            engine.rebuild_plan_from_trajectory(
+                request,
+                context,
+                normal,
+                replace(normal.joint_trajectory, positions=positions),
+            )
+    else:
+        assert imported.expected_effects.is_empty
 
 
 def test_real2sim_provider_constructs_one_pick_and_rejects_wrong_live_initial_state(

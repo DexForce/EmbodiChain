@@ -163,3 +163,25 @@ it never substitutes observed velocities or depends on peer active masks.
 It writes position and velocity targets through the existing `set_qpos` and
 `set_qvel` APIs. Inactive rows hold observed positions with zero target velocity.
 A nonzero damping gain is needed for the velocity error to contribute to tracking.
+
+## Trajectory-backed plan assembly
+
+`trajectory_assembly.py` owns immutable Skill schemas, timed inputs and semantic
+assembly results. A concrete Skill opts in through `trajectory_contract` and
+implements `_trajectory_semantics`; it does not override the public assembler.
+The schema participates in the existing semantic catalog fingerprint. Registration
+rejects a declared contract without an assembler, and unsupported Skills fail
+before ordinary planning rather than falling back.
+
+The engine checks imported motion against restored initial state, position and
+sampled/interval velocity limits, and bound endpoint claims. Sources retain
+calibration, model identity, joint mapping and collision/physical qualification.
+Stages are half-open; landmarks index actual samples. Shared stage layouts can
+batch with ordered `env_ids`, but source admission may still require B=1.
+
+Same-grid rebuilding uses the plan's owned assembly input and current provenance
+to regenerate commands, tracking, effects and monitor bounds. Supplied geometry
+cannot survive a changed event pose without an explicit new input. Existing
+non-joint plans and Skills without a contract retain their previous rebuild
+path. Changed-grid execution, extra source recovery capabilities and phase
+expansion permissions are separate contracts.

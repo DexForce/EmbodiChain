@@ -124,7 +124,7 @@ from .extensions import (
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
 from .simulation.policies import default_simulation_settle_presets
 
-_CATALOG_FINGERPRINT_SCHEMA_VERSION = 5
+_CATALOG_FINGERPRINT_SCHEMA_VERSION = 6
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset(
     {

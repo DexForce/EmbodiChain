@@ -130,6 +130,12 @@ from .runtime_commands import (
 )
 from .transports import EndpointCommandRouter, EndpointCommandTransport
 from .trajectory_adapter import ActionPlanTemplateAdapter
+from .trajectory_assembly import (
+    SkillPlanSemantics,
+    SkillTrajectoryContract,
+    SkillTrajectoryGeometry,
+    SkillTrajectoryInput,
+)
 from .tracking import (
     BASE_POSE_CHANNEL,
     JOINT_POSITION_CHANNEL,
@@ -427,6 +433,10 @@ __all__ = [
     "SceneSnapshotSupplier",
     "SceneEntityPose",
     "SkillDescriptor",
+    "SkillPlanSemantics",
+    "SkillTrajectoryContract",
+    "SkillTrajectoryGeometry",
+    "SkillTrajectoryInput",
     "SkillBindingContract",
     "SkillEndpointRequirement",
     "SkillResourceSlot",
