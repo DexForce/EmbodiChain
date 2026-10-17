@@ -58,7 +58,7 @@ from embodichain.lab.sim.atomic_actions.state import (
     TaskState,
 )
 from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
-from embodichain.lab.sim.scene_expansion import ScenePoseChange, SceneVariant
+from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
 from embodichain.lab.task_program import (
     CompiledTaskProgram,
     InvokeCfg,

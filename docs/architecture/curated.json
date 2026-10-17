@@ -1219,7 +1219,7 @@
         "scene-expansion"
       ],
       "summary": "Defines immutable arena-local scene proposals and bounded authored candidate sources.",
-      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The canonical package is sim.scene.expansion; legacy sim.scene_expansion imports re-export the same types and candidate identities.",
+      "details": "The scene expansion core represents existing-entity pose changes with stable proposal identity, movable-entity permissions, provenance, and a bounded fixed-candidate source. Task semantics, physical preparation, execution, and persistence remain host responsibilities. The package is sim.scene.expansion.",
       "boundaries": [
         "The core does not import Task Program, GenSim or Gym and does not reset, step or validate task success."
       ],
