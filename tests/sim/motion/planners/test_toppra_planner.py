@@ -80,6 +80,7 @@ class TestToppraPlanner:
         ]
 
         opts = ToppraPlanOptions(
+            control_part="left_arm",
             sample_method=TrajectorySampleMethod.TIME,
             sample_interval=0.1,
             constraints={"velocity": 1.0, "acceleration": 2.0},

@@ -90,10 +90,10 @@ class MotionGenOptions:
     """Requested output sample count; ``None`` preserves backend defaults."""
 
     velocity_limit: float | None = None
-    """Optional scalar joint velocity limit used by compatible backends."""
+    """Scalar speed request for TOPPRA/Trapezoidal, capped by robot limits."""
 
     acceleration_limit: float | None = None
-    """Optional scalar joint acceleration limit used by compatible backends."""
+    """Scalar planning acceleration budget for TOPPRA/Trapezoidal."""
 
     start_qpos: torch.Tensor | None = None
     """Observed controlled-joint start, shape ``(B, DOF)``.
@@ -468,11 +468,9 @@ class MotionGenerator:
                 if planner_type == "toppra"
                 else TrapezoidalPlanOptions
             )
-            constraints: dict[str, float] = {
-                "velocity": 0.2 if velocity_limit is None else velocity_limit,
-                "acceleration": (
-                    0.5 if acceleration_limit is None else acceleration_limit
-                ),
+            constraints: dict[str, float | None] = {
+                "velocity": velocity_limit,
+                "acceleration": acceleration_limit,
             }
             if planner_type == "trapezoidal":
                 constraints["jerk"] = 2.0

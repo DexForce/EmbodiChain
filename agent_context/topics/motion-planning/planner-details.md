@@ -45,6 +45,34 @@ Preserve these coupled result rules in `motion_generator.py`:
 and applies supported generic timing constraints. Atomic Skills call this facade
 rather than branching on concrete planner option classes.
 
+`planners/_joint_limits.py` resolves effective speeds through
+`Robot.get_qvel_limits()` and existing articulation mimic metadata. It selects
+trajectory joints, reduces participating environments to their strictest caps,
+and intersects speed requests with those caps. Acceleration is a planner-owned
+budget, supplied through plan options or backend defaults; it is not
+an inferred asset or physics limit. Partial-joint trajectories require an
+explicit control part when their column mapping is ambiguous. Explicit zero
+runtime speeds hold those joints; moving them must fail planning. Imported
+nonpositive speeds follow DexSim's unspecified-limit semantics, and unavailable
+runtime caps use planner fallbacks.
+
+A finite backend value does not prove that a speed was authored in the asset:
+DexSim's legacy URDF reader substitutes a positive default when the field is
+missing. Preserve backend import semantics instead of guessing provenance from
+the number; calibrated presets can supply explicit limits. Asset zero placeholders
+must not be interpreted as explicit runtime zero-speed commands.
+
+cuRobo writes absolute speed caps into a cache-owned URDF copy and acceleration
+caps into YAML in active cspace order, excluding mimic followers. Keep velocity
+scales at one so loading and cloning preserve these caps. Mesh paths retain the
+source asset root. cuRobo rejects controlled zero-speed joints before loading;
+it cannot represent zero-width velocity intervals. `CuroboPlannerCfg.max_acceleration`
+sets its acceleration budget, preserving the existing 15.0 default; CPU timing
+planners retain their 0.5 default. Its YAML and backend caches include effective
+speeds and the configured acceleration budget; changing robot limits closes and rebuilds the
+affected backend. Neural policy rollout and `ik_interp`
+retain their existing timing contracts and do not consume these backend limits.
+
 ## Backend-specific boundaries
 
 ### TOPPRA

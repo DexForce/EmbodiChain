@@ -41,6 +41,8 @@ class TestToppraWorker:
         planner = object.__new__(ToppraPlanner)
         planner._pool = None
         options = planner.default_plan_options()
+        assert options.sample_method is TrajectorySampleMethod.TIME
+        assert options.sample_interval == 0.01
         out = _toppra_solve_one_env(
             waypoints=np.array([[0.0] * 7, [0.2] * 7]),
             vel_constraint=options.constraints["velocity"],
@@ -187,6 +189,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=15,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -220,6 +223,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.TIME,
                 sample_interval=0.05,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -294,6 +298,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=12,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -364,6 +369,7 @@ class TestToppraPlanBatched:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=12,
                 constraints={"velocity": 1.0, "acceleration": 2.0},
@@ -424,6 +430,7 @@ class TestToppraNumericalRegression:
                 PlanState.from_qpos(wp),
             ]
             opts = ToppraPlanOptions(
+                control_part="left_arm",
                 sample_method=TrajectorySampleMethod.QUANTITY,
                 sample_interval=20,
                 constraints={"velocity": 1.0, "acceleration": 2.0},

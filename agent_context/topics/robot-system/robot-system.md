@@ -163,6 +163,11 @@ selects per-part caches; `get_workspace()` loads them on first access, while
 [robot workspace](../robot-workspace/robot-workspace.md) for cache ownership and
 [motion planning](../motion-planning/motion-planning.md) for planner integration.
 
+`RobotCfg` preserves asset velocity limits unless a drive override is configured.
+Planning reads effective speeds through `get_qvel_limits()` and existing mimic
+metadata. Acceleration budgets and missing-speed fallback belong to the
+[planner contracts](../motion-planning/planner-details.md).
+
 ## Focused validation
 
 | Changed boundary | Existing coverage |

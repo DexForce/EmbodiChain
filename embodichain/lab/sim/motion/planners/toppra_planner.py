@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from dataclasses import field
+
 import os
 
 import torch
@@ -32,6 +34,11 @@ from embodichain.lab.sim.motion.planners.base_planner import (
     _infer_batch_size,
 )
 from .utils import PlanState, PlanResult
+from ._joint_limits import (
+    _DEFAULT_ACCELERATION,
+    _DEFAULT_VELOCITY,
+    _resolve_joint_constraints,
+)
 
 try:
     import toppra as ta
@@ -45,7 +52,11 @@ ta.setup_logging(level="WARN")
 
 
 def _build_constraint_arrays(value, acc, dofs: int) -> tuple[np.ndarray, np.ndarray]:
-    """Expand scalar limits to (dofs, 2) arrays; pass through arrays as-is."""
+    """Expand limits, using compatibility defaults for standalone ``None`` inputs."""
+    if value is None:
+        value = _DEFAULT_VELOCITY
+    if acc is None:
+        acc = _DEFAULT_ACCELERATION
     if isinstance(value, (float, int)):
         vlims = np.array([[-value, value] for _ in range(dofs)])
     else:
@@ -68,7 +79,9 @@ def _toppra_solve_one_env(
 
     Args:
         waypoints: ``(N, DOF)`` numpy array of joint waypoints.
-        vel_constraint / acc_constraint: scalar or per-DoF array limits.
+        vel_constraint / acc_constraint: Resolved scalar or per-DOF limits.
+            Standalone ``None`` inputs use compatibility defaults. Robot-backed
+            planning resolves effective limits before dispatching this worker.
         sample_method: TIME or QUANTITY.
         sample_interval: seconds (TIME) or sample count (QUANTITY).
 
@@ -78,6 +91,14 @@ def _toppra_solve_one_env(
     """
     dofs = waypoints.shape[1]
     vlims, alims = _build_constraint_arrays(vel_constraint, acc_constraint, dofs)
+
+    if vlims.shape in ((dofs,), (dofs, 2)):
+        frozen = vlims == 0 if vlims.ndim == 1 else (vlims == 0).all(axis=1)
+        if np.any(waypoints[:, frozen] != waypoints[:1, frozen]):
+            return _empty_failure(dofs)
+        # TOPPRA requires nonzero intervals. Proven-constant joints impose no
+        # timing constraint, so use a finite interval only inside the solver.
+        vlims[frozen] = 1.0 if vlims.ndim == 1 else [-1.0, 1.0]
 
     if sample_method == TrajectorySampleMethod.TIME and sample_interval <= 0:
         return _empty_failure(dofs)
@@ -259,13 +280,19 @@ class ToppraPlannerCfg(BasePlannerCfg):
 @configclass
 class ToppraPlanOptions(PlanOptions):
 
+    control_part: str | None = field(default=None, kw_only=True)
+    """Control group whose joint order matches the trajectory columns."""
+
     constraints: dict = {
-        "velocity": 0.2,
-        "acceleration": 0.5,
+        "velocity": None,
+        "acceleration": None,
     }
     """Constraints for the planner, including velocity and acceleration limits.
 
-    Should be a dictionary with keys 'velocity' and 'acceleration', each containing a value or a list of limits for each joint.
+    Values may be scalars, per-joint magnitudes, or signed bounds. ``None``
+    velocity resolves robot speed caps at planning time. Acceleration is a
+    planning budget; ``None`` uses its compatibility default. Explicit speed
+    requests are capped by available robot limits.
     """
 
     sample_method: TrajectorySampleMethod = TrajectorySampleMethod.TIME
@@ -438,8 +465,15 @@ class ToppraPlanner(BasePlanner):
             [s.qpos.detach().cpu().numpy() for s in target_states], axis=1
         )  # (B, N, DOF)
 
-        vc = options.constraints["velocity"]
-        ac = options.constraints["acceleration"]
+        constraints = _resolve_joint_constraints(
+            self.robot,
+            options.constraints,
+            control_part=options.control_part,
+            dof=dofs,
+            batch_size=b,
+        )
+        vc = constraints["velocity"].numpy()
+        ac = constraints["acceleration"].numpy()
         args_per_env = [
             (waypoints[i], vc, ac, options.sample_method, options.sample_interval)
             for i in range(b)

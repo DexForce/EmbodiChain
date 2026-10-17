@@ -1634,6 +1634,40 @@ def test_articulation_array_qpos_limits_compile_before_backend_build() -> None:
     assert joint.upper_limit == pytest.approx(0.75)
 
 
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+@pytest.mark.parametrize("authored_velocity", [0.05, None])
+def test_robot_default_drive_preserves_authored_velocity_limit(
+    solver_type: str | None,
+    authored_velocity: float | None,
+) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = authored_velocity
+    joint.dexsim = DexsimJointDesc(max_velocity=authored_velocity)
+    cfg = RobotCfg(
+        uid="robot", fpath="robot.urdf", control_parts={"arm": ["arm_joint"]}
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == authored_velocity
+    assert joint.dexsim.max_velocity == authored_velocity
+
+
+@pytest.mark.parametrize("solver_type", [None, "auto"])
+def test_explicit_zero_speed_override_is_preserved(solver_type: str | None) -> None:
+    descriptor = _resolved_articulation_desc()
+    joint = descriptor.get_joint_desc("arm_joint")
+    joint.velocity_limit = None
+    cfg = RobotCfg(
+        uid="robot",
+        fpath="robot.urdf",
+        control_parts={"arm": ["arm_joint"]},
+        joint_drive_props=JointDrivePropertiesCfg(max_velocity=0.0),
+    )
+    configure_articulation_desc(descriptor, cfg, newton_solver_type=solver_type)
+    assert joint.velocity_limit == 0.0
+    assert joint.dexsim.max_velocity == 0.0
+
+
 def test_robot_control_part_drive_rule_expands_before_spawn() -> None:
     cfg = RobotCfg(
         uid="robot",
