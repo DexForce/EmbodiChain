@@ -17,7 +17,7 @@
 """
 This script demonstrates how to import USD files into the scene.
 Currently, it supports importing USD files as rigid objects or articulations.
-Multiple arenas are not supported when importing USD files.
+Imported rigid objects and articulations use Spawn's replicated arenas.
 """
 
 from __future__ import annotations

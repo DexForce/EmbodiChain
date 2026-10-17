@@ -1760,7 +1760,7 @@ def _articulation_uid(value: str | None, path: str | None) -> str:
 
 
 def _is_usd_path(path: object) -> bool:
-    return str(path).lower().endswith((".usd", ".usda", ".usdc"))
+    return str(path).lower().endswith((".usd", ".usda", ".usdc", ".usdz"))
 
 
 def _is_missing(value: object) -> bool:

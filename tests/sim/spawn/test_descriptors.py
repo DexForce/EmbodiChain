@@ -1270,7 +1270,7 @@ def test_explicit_root_properties_override_usd_in_preserve_mode() -> None:
     assert descriptor.enable_self_collision is False
 
 
-def test_default_root_properties_override_usd_values() -> None:
+def test_default_root_properties_preserve_usd_values() -> None:
     source = ArticulationDesc(
         name="source",
         fixed_base=False,
@@ -1288,8 +1288,8 @@ def test_default_root_properties_override_usd_values() -> None:
     ):
         descriptor, _ = articulation_desc_from_usd(cfg)
 
-    assert descriptor.fixed_base is True
-    assert descriptor.enable_self_collision is False
+    assert descriptor.fixed_base is False
+    assert descriptor.enable_self_collision is True
 
 
 def test_explicit_none_root_properties_preserve_usd_values() -> None:

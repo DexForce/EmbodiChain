@@ -29,7 +29,13 @@ from dexsim.types import ActorType
 from embodichain.utils import configclass, is_configclass, logger
 
 from ..shapes import ShapeCfg
-from .asset import AssetPhysicsMode, ObjectBaseCfg, _resolve_asset_physics_mode
+from .asset import (
+    AssetPhysicsMode,
+    ObjectBaseCfg,
+    UsdSourceCfg,
+    _is_usd_source,
+    _resolve_asset_physics_mode,
+)
 from .rigid import RigidBodyPhysicsCfg
 
 
@@ -52,9 +58,10 @@ class RigidObjectCfg(ObjectBaseCfg):
     :class:`RigidBodyPhysicsCfg` groups portable and backend-native intent.
     """
 
-    body_type: Literal["dynamic", "kinematic", "static"] = "dynamic"
+    body_type: Literal["dynamic", "kinematic", "static"] | None = None
+    """Actor type override; omission retains USD intent or selects dynamic for other shapes."""
 
-    body_scale: tuple | list = (1.0, 1.0, 1.0)
+    body_scale: tuple | list | None = None
     """Scale of the rigid body in the simulation world frame."""
 
     asset_physics_mode: AssetPhysicsMode = "preserve"
@@ -64,6 +71,18 @@ class RigidObjectCfg(ObjectBaseCfg):
     configured properties on top of the parsed asset. Procedural shapes always
     use config.
     """
+
+    usd: UsdSourceCfg = UsdSourceCfg()
+    """USD source selection and root-pose policy."""
+
+    def __post_init__(self) -> None:
+        if isinstance(self.usd, Mapping):
+            self.usd = UsdSourceCfg.from_dict(self.usd)
+        if not _is_usd_source(getattr(self.shape, "fpath", None)):
+            if self.body_type is None:
+                self.body_type = "dynamic"
+            if self.body_scale is None:
+                self.body_scale = (1.0, 1.0, 1.0)
 
     def resolve_asset_physics_mode(self) -> AssetPhysicsMode:
         """Return the effective file-backed physics policy."""
@@ -102,7 +121,15 @@ class RigidObjectCfg(ObjectBaseCfg):
                 DeprecationWarning,
                 stacklevel=2,
             )
-        return super().from_dict(data)
+        cfg = super().from_dict(data)
+        if _is_usd_source(getattr(cfg.shape, "fpath", None)):
+            if "body_type" not in data:
+                cfg.body_type = None
+            if "body_scale" not in data:
+                cfg.body_scale = None
+            if not {"init_pos", "init_rot", "init_local_pose"}.intersection(data):
+                cfg.init_local_pose = None
+        return cfg
 
     def to_dexsim_body_type(self) -> ActorType:
         """Convert the body type to dexsim ActorType."""
@@ -217,3 +244,6 @@ class RigidObjectGroupCfg:
                     f"Key '{key}' not found in {cfg.__class__.__name__}."
                 )
         return cfg
+
+
+__all__ = ["RigidObjectCfg", "RigidObjectGroupCfg"]

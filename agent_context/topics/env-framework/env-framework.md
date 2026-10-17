@@ -179,3 +179,11 @@ BaseEnv starts one simulation-manager update per control interval and samples
 participating sensors through its `after_substep` observer. See the sensor-owned [contact history contract](../sensor-system/contact-history.md)
 for interval accumulation, counterpart filtering and selective reset.
 EmbodiedEnv resets action and event managers before applying reset-mode events.
+
+## USD actor-role resolution
+
+`RigidObjectCfg.body_type=None` retains a USD asset's authored actor type.
+`EmbodiedEnv` validates background objects as non-dynamic and interactive
+objects as dynamic after source resolution when that field is omitted. An
+explicit actor type keeps the existing early role check. Do not replace an
+unresolved USD type with the procedural dynamic default in Gym setup.

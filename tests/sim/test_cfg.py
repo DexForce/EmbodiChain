@@ -107,8 +107,8 @@ def test_articulation_cfg_uses_grouped_physics_fields_only() -> None:
         "joint_props",
     }.isdisjoint(field_names)
     assert root_props == ArticulationRootPropertiesCfg()
-    assert root_props.fixed_base is True
-    assert root_props.self_collision_enabled is False
+    assert root_props.fixed_base is None
+    assert root_props.self_collision_enabled is None
 
 
 @pytest.mark.parametrize(
@@ -1000,7 +1000,7 @@ def test_backend_joint_and_articulation_configs_round_trip() -> None:
     assert isinstance(restored_drive, NewtonJointDrivePropertiesCfg)
     assert root.to_dict() == {
         "fixed_base": False,
-        "self_collision_enabled": False,
+        "self_collision_enabled": None,
         "sleep_threshold": None,
         "min_position_iters": None,
         "min_velocity_iters": None,

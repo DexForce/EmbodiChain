@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import os
+import numpy as np
 from dataclasses import fields, replace
 from typing import TypeVar
 
@@ -49,6 +50,38 @@ from embodichain.lab.sim.spawn.descriptors import (
 __all__ = ["articulation_desc_from_usd", "rigid_desc_from_usd"]
 
 _PropertyCfgT = TypeVar("_PropertyCfgT")
+
+
+def _require_usd_import_contract() -> None:
+    """Fail clearly when an installed wheel predates the required USD contract."""
+    import inspect
+    from dexsim.kit.usd import parse_stage
+    from dexsim.spawn import SceneDesc
+
+    if (
+        "prim_path" not in inspect.signature(parse_stage).parameters
+        or "constraints" not in SceneDesc.__dataclass_fields__
+    ):
+        raise RuntimeError(
+            "USD loading requires a compatible DexSim build with SI/source selection and standalone constraint support. Install the companion DexSim USD import update before using this API."
+        )
+
+
+def _source_pose(
+    cfg: RigidObjectCfg | ArticulationCfg, source_pose: np.ndarray
+) -> np.ndarray:
+    mode = cfg.usd.pose_mode
+    configured = _pose_from_cfg(cfg)
+    if mode == "preserve":
+        return source_pose.copy()
+    if mode == "offset":
+        return configured @ source_pose
+    if mode == "auto" and cfg.init_local_pose is None:
+        if not np.any(np.asarray(cfg.init_pos)) and not np.any(
+            np.asarray(cfg.init_rot)
+        ):
+            return source_pose.copy()
+    return configured
 
 
 def _overlay_optional_properties(
@@ -114,10 +147,21 @@ def rigid_desc_from_usd(
     """Select the sole rigid object in a USD stage."""
     uid = _required_uid(cfg.uid, "Rigid object")
     path = getattr(cfg.shape, "fpath", None)
-    scene, desc = _parse_singleton(path, "mesh_objects", "rigid object")
+    scene, desc = _parse_singleton(
+        path, "mesh_objects", "rigid object", **cfg.usd.parse_kwargs()
+    )
+    return _configure_rigid_usd(
+        cfg, scene, desc, per_env=per_env, newton_solver_type=newton_solver_type
+    )
+
+
+def _configure_rigid_usd(cfg, scene, desc, *, per_env=True, newton_solver_type=None):
+    """Configure an already parsed rigid using the singleton import policy."""
+    uid = _required_uid(cfg.uid, "Rigid object")
+    path = getattr(cfg.shape, "fpath", None)
 
     desc.name = uid
-    desc.pose = _pose_from_cfg(cfg)
+    desc.pose = _source_pose(cfg, desc.pose)
     desc.per_env = per_env
     materials = _namespace_materials(desc.renders, scene.materials, uid)
 
@@ -137,13 +181,25 @@ def rigid_desc_from_usd(
         cfg.attrs,
         newton_solver_type=newton_solver_type,
     )
+    if cfg.body_type is None:
+        cfg.body_type = (
+            {
+                ActorType.DYNAMIC: "dynamic",
+                ActorType.KINEMATIC: "kinematic",
+                ActorType.STATIC: "static",
+            }[desc.physics.actor_type]
+            if desc.physics is not None
+            else "dynamic"
+        )
     configured_body = _compile_rigid_physics(physics, cfg.body_type)
     desc.physics = _overlay_rigid_body_properties(
         desc.physics,
         configured_body,
         recompute_inertia=bool(physics.recompute_inertia),
     )
-    desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+    if cfg.body_scale is not None:
+        desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+    cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     for collision in desc.collisions:
         _overlay_collision_properties(
             collision,
@@ -185,22 +241,43 @@ def articulation_desc_from_usd(
             newton_solver_type=newton_solver_type,
         )
     path = source_path or cfg.fpath
-    scene, desc = _parse_singleton(path, "articulations", "articulation")
+    scene, desc = _parse_singleton(
+        path, "articulations", "articulation", **cfg.usd.parse_kwargs()
+    )
+    return _configure_articulation_usd(
+        cfg,
+        scene,
+        desc,
+        per_env=per_env,
+        source_path=path,
+        newton_solver_type=newton_solver_type,
+    )
+
+
+def _configure_articulation_usd(
+    cfg, scene, desc, *, per_env=True, source_path=None, newton_solver_type=None
+):
+    """Configure an already parsed articulation before materialization."""
+    preserve_asset_physics = cfg.resolve_asset_physics_mode() == "preserve"
+    if not preserve_asset_physics:
+        _validate_articulation_rigid_physics(cfg, newton_solver_type=newton_solver_type)
+    path = source_path or cfg.fpath
     uid = _required_uid(
         cfg.uid or os.path.splitext(os.path.basename(str(path)))[0],
         "Articulation",
     )
     cfg.uid = uid
     desc.name = uid
-    desc.pose = _pose_from_cfg(cfg)
+    desc.pose = _source_pose(cfg, desc.pose)
     desc.per_env = per_env
     renders = [visual for link in desc.links for visual in link.visuals]
     materials = _namespace_materials(renders, scene.materials, uid)
 
     if preserve_asset_physics:
         cfg.body_scale = tuple(float(value) for value in desc.body_scale)
-    else:
+    elif cfg.body_scale is not None:
         desc.body_scale = _vector3(cfg.body_scale, field_name="body_scale")
+    cfg.body_scale = tuple(float(value) for value in desc.body_scale)
     desc.fixed_base, desc.enable_self_collision = _articulation_root_values(
         cfg,
         fixed_base_default=bool(desc.fixed_base),
@@ -209,13 +286,18 @@ def articulation_desc_from_usd(
     return desc, materials
 
 
-def _parse_singleton(path: object, collection: str, label: str):
+def _parse_singleton(path: object, collection: str, label: str, **options):
     if path is None:
         raise ValueError(f"A USD path is required for the {label}.")
 
     from dexsim.kit.usd import parse_usd
 
-    scene = parse_usd(str(path))
+    _require_usd_import_contract()
+    scene = parse_usd(str(path), **options)
+    if scene.constraints:
+        raise ValueError(
+            "A USD source with standalone constraints requires SimulationManager.add_usd()."
+        )
     candidates = getattr(scene, collection)
     if len(candidates) != 1:
         found = [
