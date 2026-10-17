@@ -915,3 +915,131 @@ def test_factory_protocol_is_required() -> None:
     """Loose objects cannot enter the production assembly boundary."""
     with pytest.raises(TypeError, match="TaskProgramEnvironmentFactory"):
         TaskProgramEnvironmentAdapter(object(), step_dt=_STEP_DT)
+
+
+def test_one_pick_real2sim_source_runs_through_task_program_bridge(
+    tmp_path, monkeypatch
+):
+    """Admitted synthetic data exercises B=1 source -> Skill -> bridge lifecycle."""
+    from dataclasses import replace
+    import hashlib
+    import numpy as np
+    from embodichain.data_pipeline.real2sim import (
+        Real2SimTrajectory,
+        RobotJointLayout,
+        SourcePhase,
+    )
+    from embodichain.data_pipeline.real2sim.normalization import (
+        Real2SimNormalizationCfg,
+    )
+    from embodichain.data_pipeline.real2sim.bundle import write_real2sim_bundle
+    from embodichain.lab.task_program.integrations.expert_sources import (
+        ExpertSourceRegistry,
+        ExpertSourceSelection,
+    )
+    from embodichain.lab.task_program.integrations.real2sim import (
+        Real2SimExpertSourceProviderFactory,
+    )
+    from embodichain.lab.sim.atomic_actions import RecoveryPolicy
+
+    monkeypatch.setitem(globals(), "_BATCH_SIZE", 1)
+    preset = SkillPolicyPreset(
+        "safe",
+        action_option_templates={"pick": PickUpOptions()},
+        effect_assurance=EffectAssurance.PROJECTED,
+        recovery_policy=RecoveryPolicy(max_replans=0, max_action_retries=0),
+    )
+    profile = replace(_robot_profile(effect_monitors={}), presets={"safe": preset})
+    asset = tmp_path / "robot.urdf"
+    asset.write_text("<robot name='fixture'/>")
+    q = np.zeros((12, 2))
+    q[:, 0] = np.linspace(0, 0.1, 12)
+    q[6:, 1] = 0.2
+    raw = Real2SimTrajectory(
+        "synthetic",
+        "data1",
+        "pick0",
+        "fixture",
+        "r1",
+        ("arm_joint", "finger"),
+        ("rad", "rad"),
+        q,
+        np.arange(12) * _STEP_DT,
+        "s",
+        "cal1",
+        "phase1",
+        "verified",
+        "verified",
+        (
+            SourcePhase("approach", 0, 6, "free", ("joint_residual",)),
+            SourcePhase("close", 6, 9, "contact"),
+            SourcePhase("lift", 9, 12, "hold"),
+        ),
+    )
+    path = write_real2sim_bundle(
+        raw,
+        RobotJointLayout(
+            "fixture", "r1", raw.joint_names, raw.joint_units, q[0], ("arm_joint",)
+        ),
+        Real2SimNormalizationCfg(control_dt=_STEP_DT),
+        tmp_path / "source",
+    )
+    registry = ExpertSourceRegistry(
+        (
+            Real2SimExpertSourceProviderFactory(
+                str(path),
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+                "fake_robot",
+                hashlib.sha256(asset.read_bytes()).hexdigest(),
+            ),
+        ),
+        (ExpertSourceSelection("pick", "real2sim_qpos", "1"),),
+    )
+
+    class Factory(_FakeEnvironmentFactory):
+        def create_robot_skill_profile(self):
+            return profile
+
+        def create_atomic_action_engine(self, selected_profile):
+            engine = _engine(selected_profile)
+            engine.robot.joint_names = list(raw.joint_names)
+            engine.robot.cfg.fpath = str(asset)
+            engine.robot.compute_fk.side_effect = lambda qpos, **kwargs: torch.eye(
+                4
+            ).repeat(qpos.shape[0], 1, 1)
+            engine.robot.get_qpos_limits.return_value = torch.tensor(
+                [[[-2.0, 2.0], [-2.0, 2.0]]]
+            )
+            engine.robot.get_qvel_limits.return_value = torch.full((1, 2), 100.0)
+            for action in engine.actions.values():
+                monkeypatch.setattr(
+                    action,
+                    "_plan",
+                    Mock(
+                        side_effect=AssertionError("Ordinary planning must be bypassed")
+                    ),
+                )
+            self.engine = engine
+            return engine
+
+    factory = Factory(effect_monitors={})
+    adapter = TaskProgramEnvironmentAdapter(factory, step_dt=_STEP_DT)
+    compiled = adapter.compile(_program())
+    selector = registry.create_runtime(
+        scene_provider=_scene_registry().make_scene_provider(batch_size=1),
+        robot_profile=profile,
+        control_dt=_STEP_DT,
+    )
+    bridge = adapter.create_bridge(compiled, nominal_plan_factory=selector)
+    iterator = bridge.iter_segments()
+    segment = next(iterator)
+    dispatched = []
+    for command in segment.actions:
+        value = command.value
+        assert isinstance(value, torch.Tensor) and value.shape == (1, 2)
+        factory.engine.robot.get_qpos.return_value = value.clone()
+        dispatched.append(value.clone())
+    assert dispatched
+    assert max(float(x[0, 1]) for x in dispatched) >= 0.19
+    assert segment.validator().tolist() == [True]
+    assert list(iterator) == []

@@ -75,6 +75,7 @@ from embodichain.lab.task_program.semantics.profiles import (
 from embodichain.lab.task_program.runtime.executor import SemanticCallExecutor
 from embodichain.lab.task_program.runtime.expansion import (
     TaskProgramPlanTransformFactory,
+    TaskProgramNominalPlanFactory,
 )
 from embodichain.lab.task_program.semantics.scene import SceneRegistry
 
@@ -300,6 +301,7 @@ class TaskProgramRuntimeAssembly:
     parallel_safety_validator: ParallelCommandSafetyValidator | None
     runtime: SemanticCallExecutor
     plan_transform_factory: TaskProgramPlanTransformFactory | None = None
+    nominal_plan_factory: TaskProgramNominalPlanFactory | None = None
     expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None
 
 
@@ -572,17 +574,22 @@ class TaskProgramEnvironmentAdapter:
     def assemble_runtime(
         self,
         integration: TaskProgramIntegrationCfg,
+        *,
+        nominal_plan_factory: TaskProgramNominalPlanFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Create a fresh fully connected semantic runtime.
 
         Args:
             integration: Exact scene, profile, and runtime-preset selection.
+            nominal_plan_factory: Optional trusted, call-scoped nominal source factory.
 
         Returns:
             Owned assembly containing every validated runtime boundary.
         """
         semantic = self._assemble_semantic_components(integration)
-        return self._assemble_execution_runtime(semantic)
+        return self._assemble_execution_runtime(
+            semantic, nominal_plan_factory=nominal_plan_factory
+        )
 
     def _assemble_semantic_components(
         self,
@@ -670,6 +677,7 @@ class TaskProgramEnvironmentAdapter:
         semantic: SemanticExecutorComponents,
         *,
         plan_transform_factory: TaskProgramPlanTransformFactory | None = None,
+        nominal_plan_factory: TaskProgramNominalPlanFactory | None = None,
         expansion_trace_provider: CombinedTaskProgramExpansionFactory | None = None,
     ) -> TaskProgramRuntimeAssembly:
         """Attach live observation, evidence, command, and runtime boundaries."""
@@ -682,6 +690,12 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError(
                 "plan_transform_factory must implement "
                 "TaskProgramPlanTransformFactory or be None."
+            )
+        if nominal_plan_factory is not None and not isinstance(
+            nominal_plan_factory, TaskProgramNominalPlanFactory
+        ):
+            raise TypeError(
+                "nominal_plan_factory must implement TaskProgramNominalPlanFactory or be None."
             )
         if expansion_trace_provider is not None and not isinstance(
             expansion_trace_provider,
@@ -704,6 +718,26 @@ class TaskProgramEnvironmentAdapter:
             raise TypeError(
                 "create_planning_observation_provider() must return a port "
                 "implementing both ObservationProvider and CurrentQposProvider."
+            )
+        if (
+            self._registration is not None
+            and self._registration.expert_sources.selections
+        ):
+            if nominal_plan_factory is not None:
+                raise ValueError(
+                    "Registered expert sources cannot be overridden by a Python nominal factory"
+                )
+            from embodichain.lab.sim.atomic_actions import SceneProvider
+
+            scene_provider = getattr(observation_provider, "scene_provider", None)
+            if not isinstance(scene_provider, SceneProvider):
+                raise TypeError(
+                    "Registered expert sources require the existing planning scene provider"
+                )
+            nominal_plan_factory = self._registration.expert_sources.create_runtime(
+                scene_provider=scene_provider,
+                robot_profile=semantic.robot_profile,
+                control_dt=self._step_dt,
             )
         try:
             selected_preset = semantic.robot_profile.presets[
@@ -775,6 +809,7 @@ class TaskProgramEnvironmentAdapter:
             clock=clock,
             runner_cfg=deepcopy(selected_runner_cfg),
             plan_transform_factory=plan_transform_factory,
+            nominal_plan_factory=nominal_plan_factory,
         )
         parallel_safety_validator = self._parallel_safety_validator
         if (
@@ -822,6 +857,7 @@ class TaskProgramEnvironmentAdapter:
             parallel_safety_validator=parallel_safety_validator,
             runtime=runtime,
             plan_transform_factory=plan_transform_factory,
+            nominal_plan_factory=nominal_plan_factory,
             expansion_trace_provider=expansion_trace_provider,
         )
 
@@ -830,6 +866,7 @@ class TaskProgramEnvironmentAdapter:
         program: CompiledTaskProgram,
         *,
         expansion_profile: CombinedExpansionProfile | None = None,
+        nominal_plan_factory: TaskProgramNominalPlanFactory | None = None,
         candidate_index: int = 0,
         recipe_indices: tuple[int, ...] | None = None,
     ) -> TaskProgramDemoBridge:
@@ -837,12 +874,28 @@ class TaskProgramEnvironmentAdapter:
 
         Args:
             program: Program compiled for this adapter's exact integration IDs.
+            nominal_plan_factory: Optional trusted nominal source for sequential calls.
 
         Returns:
             Lazy bridge sharing one newly assembled runtime, clock, and sink.
         """
         if type(program) is not CompiledTaskProgram:
             raise TypeError("program must be exactly CompiledTaskProgram.")
+        if nominal_plan_factory is not None and any(
+            segment.parallel_block is not None for segment in program.iter_segments()
+        ):
+            raise ValueError(
+                "External nominal sources currently require sequential Task Program segments."
+            )
+        if (
+            self._registration is not None
+            and self._registration.expert_sources.selections
+        ):
+            self._registration.expert_sources.validate_program(program)
+            if expansion_profile is not None:
+                raise ValueError(
+                    "Registered source expansion must use admitted phase permissions; configured combined expansion is not yet supported"
+                )
         self._validate_selection(program.integration)
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)
@@ -875,6 +928,7 @@ class TaskProgramEnvironmentAdapter:
         assembly = self._assemble_execution_runtime(
             semantic,
             plan_transform_factory=expansion,
+            nominal_plan_factory=nominal_plan_factory,
             expansion_trace_provider=expansion,
         )
         return TaskProgramDemoBridge(

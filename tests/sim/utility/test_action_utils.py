@@ -21,7 +21,20 @@ import pytest
 from embodichain.compute import trajectory
 from embodichain.lab.sim.utility import action_utils
 
+# The compatibility surface preserves historical names. New compute APIs are
+# consumed through compute and do not automatically enlarge this legacy shim.
+LEGACY_TRAJECTORY_EXPORTS = (
+    "differentiate_positions",
+    "interpolate_with_distance",
+    "interpolate_with_nums",
+    "resample_in_time",
+    "resample_with_distance",
+    "retime_to_control_grid",
+    "sort_and_padding_key_frame",
+    "warp_trajectory_qpos",
+)
 
-@pytest.mark.parametrize("name", trajectory.__all__)
+
+@pytest.mark.parametrize("name", LEGACY_TRAJECTORY_EXPORTS)
 def test_legacy_trajectory_exports_are_compute_functions(name: str) -> None:
     assert getattr(action_utils, name) is getattr(trajectory, name)

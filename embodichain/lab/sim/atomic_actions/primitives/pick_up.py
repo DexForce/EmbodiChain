@@ -68,6 +68,11 @@ from embodichain.lab.sim.atomic_actions.plans import (
     TimedTrajectory,
     normalize_success_mask,
 )
+from embodichain.lab.sim.atomic_actions.trajectory_assembly import (
+    SkillPlanSemantics,
+    SkillTrajectoryContract,
+    SkillTrajectoryInput,
+)
 from embodichain.lab.sim.atomic_actions.policies import MotionPolicy
 from embodichain.lab.sim.atomic_actions.requirements import (
     BATCH_INVERSE_KINEMATICS_CAPABILITY,
@@ -288,12 +293,55 @@ class PickUpOptions(ActionOptions):
             )
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class PickTrajectoryGeometry:
+    """Expected grasp pose selected by ordinary Pick planning.
+
+    Args:
+        grasp_pose: Batched expected grasp transforms, shape ``(B, 4, 4)``.
+
+    This is planning geometry, not independently measured grasp evidence.
+    Imported joint paths may omit it so PickUp derives the pose by FK at the
+    explicit grasp event instead.
+    """
+
+    grasp_pose: torch.Tensor
+
+    def __post_init__(self) -> None:
+        pose = self.grasp_pose
+        if (
+            not isinstance(pose, torch.Tensor)
+            or pose.ndim != 3
+            or pose.shape[1:] != (4, 4)
+        ):
+            raise ValueError("grasp_pose must have shape (B, 4, 4)")
+        if not torch.isfinite(pose).all():
+            raise ValueError("grasp_pose must contain finite transforms")
+        object.__setattr__(self, "grasp_pose", pose.detach().clone())
+
+    def snapshot(self) -> PickTrajectoryGeometry:
+        """Return independently owned expected grasp geometry.
+
+        Returns:
+            A distinct value with copied grasp transforms.
+        """
+        return PickTrajectoryGeometry(self.grasp_pose)
+
+
 class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
     """Approach a grasp pose, close the gripper, lift."""
 
     skill_id: ClassVar[str] = "pick_up"
     GoalType: ClassVar[type] = GraspGoal
     OptionsType: ClassVar[type] = PickUpOptions
+    trajectory_contract: ClassVar[SkillTrajectoryContract] = SkillTrajectoryContract(
+        schema_id="pick_up.qpos",
+        revision="1",
+        segment_names=("approach", "close", "lift"),
+        landmark_names=("grasp",),
+        landmark_stages={"grasp": "close"},
+        geometry_type=PickTrajectoryGeometry,
+    )
     binding_contract: ClassVar[SkillBindingContract] = SkillBindingContract(
         slots=(
             make_manipulation_slot(
@@ -584,52 +632,116 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             name="Pick-up trajectory success",
         )
 
-        object_to_eef = torch.bmm(pose_inv(object_pose), grasp_xpos)
-        held = HeldObjectState(
-            semantics=sem, object_to_eef=object_to_eef, grasp_xpos=grasp_xpos
-        )
-        coordinated_updates = {
-            key: None for key in state.coordinated_held_objects if task_state_key in key
-        }
-        if target.object_pose is None:
-            monitored_object_id = sem.entity_id
-        elif isinstance(target.object_pose, SceneEntityPose):
-            monitored_object_id = target.object_pose.entity_id
-        else:
-            monitored_object_id = None
-        return self.build_plan(
+        segments = self._build_segments(segment_lengths, frame_count=full.shape[1])
+        return self.assemble_trajectory_plan(
             request,
             context,
-            success=success_mask,
-            trajectory=TimedTrajectory.from_uniform_step(
-                full,
-                env_ids=context.env_ids,
-                step_dt=context.require_control_dt(),
-            ),
-            expected_effects=StateDelta(
-                held_object_updates={task_state_key: held},
-                coordinated_held_object_updates=coordinated_updates,
-            ),
-            diagnostics=PlannerDiagnostics(
-                backend=self.planning_services.planner_name,
-                metadata=(
-                    {}
-                    if affordance_sample is None
-                    else {"affordance_sample": {"grasp": affordance_sample.metadata}}
+            SkillTrajectoryInput(
+                schema_id=self.trajectory_contract.schema_id,
+                schema_revision=self.trajectory_contract.revision,
+                trajectory=TimedTrajectory.from_uniform_step(
+                    full,
+                    env_ids=context.env_ids,
+                    step_dt=context.require_control_dt(),
                 ),
+                segments=segments,
+                landmarks={
+                    "grasp": segment_lengths["approach"] + segment_lengths["close"] - 1
+                },
+                planning_success=success_mask,
+                geometry=PickTrajectoryGeometry(grasp_xpos),
+                diagnostics=PlannerDiagnostics(
+                    backend=self.planning_services.planner_name,
+                    metadata=(
+                        {}
+                        if affordance_sample is None
+                        else {
+                            "affordance_sample": {"grasp": affordance_sample.metadata}
+                        }
+                    ),
+                ),
+                replannable=True,
             ),
-            segment_lengths=segment_lengths,
-            # Once the approach is dispatched, contact can move the acquired
-            # object. Keep downstream late-bound targets monitored so a changed
-            # destination is resolved again before the action continues.
+        )
+
+    def _trajectory_semantics(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> SkillPlanSemantics:
+        """Build the same expected grasp effects for planned and imported motion."""
+        target = self.require_goal(request)
+        approach, close, _ = motion.segments
+        if motion.landmarks["grasp"] != close.stop - 1:
+            raise ValueError("PickUp grasp event must be the final close sample")
+        arm = request.binding.endpoint("primary", "motion")
+        grasp = request.binding.endpoint("primary", "grasp")
+        manipulator = arm.require_target(JointPositionTarget)
+        key = require_shared_task_state_key(
+            arm, grasp, participant="PickUp primary participant"
+        )
+        geometry = motion.geometry
+        if geometry is None:
+            grasp_pose = self.robot.compute_fk(
+                motion.trajectory.positions[
+                    :, motion.landmarks["grasp"], list(manipulator.joint_ids)
+                ],
+                name=manipulator.control_part,
+                env_ids=context.env_ids,
+                to_matrix=True,
+            )
+        else:
+            assert isinstance(geometry, PickTrajectoryGeometry)
+            grasp_pose = geometry.grasp_pose
+            if (
+                grasp_pose.shape != (context.batch_size, 4, 4)
+                or grasp_pose.device != self.device
+            ):
+                raise ValueError(
+                    "Pick grasp geometry must match the planning batch and device"
+                )
+        object_pose = (
+            _resolve_object_pose(target.semantics, context, name="pickup_object_pose")
+            if target.object_pose is None
+            else resolve_pose_target(
+                resolve_pose_goal(target.object_pose, context, name="object_pose"),
+                num_envs=context.batch_size,
+                device=self.device,
+            )
+        )
+        held = HeldObjectState(
+            semantics=target.semantics,
+            object_to_eef=torch.bmm(pose_inv(object_pose), grasp_pose),
+            grasp_xpos=grasp_pose,
+        )
+        monitored = (
+            target.semantics.entity_id
+            if target.object_pose is None
+            else (
+                target.object_pose.entity_id
+                if isinstance(target.object_pose, SceneEntityPose)
+                else None
+            )
+        )
+        return SkillPlanSemantics(
+            expected_effects=StateDelta(
+                held_object_updates={key: held},
+                coordinated_held_object_updates={
+                    group: None
+                    for group in context.coordinated_held_objects
+                    if key in group
+                },
+            ),
             scene_dependency_monitor_until=(
                 {}
-                if monitored_object_id is None
+                if monitored is None
                 else {
-                    monitored_object_id: max(
+                    monitored: max(
                         1,
                         math.ceil(
-                            segment_lengths["approach"] * options.grasp_commit_fraction
+                            approach.waypoint_count
+                            * request.skill_options.grasp_commit_fraction
                         ),
                     )
                 }
@@ -901,4 +1013,4 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
         return adjusted_grasp_xpos
 
 
-__all__ = ["GraspGoal", "PickUp", "PickUpOptions"]
+__all__ = ["GraspGoal", "PickUp", "PickUpOptions", "PickTrajectoryGeometry"]

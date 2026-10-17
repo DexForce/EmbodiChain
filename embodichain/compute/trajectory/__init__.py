@@ -21,6 +21,12 @@ as optional path samples. Warping applies keyframe offsets to a trajectory."""
 
 from __future__ import annotations
 
+from .anchored import AnchoredTimeMap, resample_with_anchors
+from .anchored_batch import (
+    AnchoredBatchPlan,
+    prepare_anchored_batch,
+    resample_with_anchors_batched,
+)
 from .interpolation import interpolate_with_distance, interpolate_with_nums
 from .resampling import resample_with_distance
 from .timing import (
@@ -31,6 +37,11 @@ from .timing import (
 from .warping import sort_and_padding_key_frame, warp_trajectory_qpos
 
 __all__ = [
+    "AnchoredTimeMap",
+    "AnchoredBatchPlan",
+    "prepare_anchored_batch",
+    "resample_with_anchors_batched",
+    "resample_with_anchors",
     "differentiate_positions",
     "resample_in_time",
     "retime_to_control_grid",

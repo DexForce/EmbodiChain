@@ -95,6 +95,7 @@ from .operators import (
     validate_motion_limits,
     via_points,
 )
+from .real2sim import Real2SimSourceAdapter
 from .session import ExpansionSession
 from .profile import load_expansion_profile
 from .source import (
@@ -105,6 +106,7 @@ from .source import (
 )
 
 __all__ = [
+    "Real2SimSourceAdapter",
     "SPATIAL_METHODS",
     "CandidateIdentity",
     "CandidateRecipe",

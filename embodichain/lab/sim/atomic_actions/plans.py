@@ -22,7 +22,7 @@ import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 
@@ -37,6 +37,9 @@ from .tracking import (
     TimedTrackingSequence,
     TrackingPolicy,
 )
+
+if TYPE_CHECKING:
+    from .trajectory_assembly import SkillTrajectoryInput
 
 
 def _validate_optional_trajectory_field(
@@ -528,6 +531,8 @@ class ActionPlan:
     effect_verification: EffectVerificationRequirement | None = None
     invocation_id: str | None = None
     invocation_revision: int = 0
+    trajectory_input: SkillTrajectoryInput | None = None
+    """Owned semantic assembly input for rebuilding a supported joint plan."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.skill_id, str) or not self.skill_id:
@@ -814,6 +819,34 @@ class ActionPlan:
                 raise ValueError(
                     "scene_dependency_end_segment requires scene_dependencies."
                 )
+        if self.trajectory_input is not None:
+            from .trajectory_assembly import SkillTrajectoryInput
+
+            if type(self.trajectory_input) is not SkillTrajectoryInput:
+                raise TypeError("trajectory_input must be SkillTrajectoryInput or None")
+            source = self.trajectory_input.snapshot()
+            timed = self.joint_trajectory
+            if timed is None or any(
+                not torch.equal(getattr(source.trajectory, name), getattr(timed, name))
+                for name in ("positions", "dt", "env_ids")
+            ):
+                raise ValueError(
+                    "Assembly input must describe the plan's joint trajectory"
+                )
+            source_segments = source.segments or (
+                TrajectorySegment(self.skill_id, 0, source.trajectory.waypoint_count),
+            )
+            if source_segments != segments or not torch.equal(
+                source.planning_success, self.plan_success
+            ):
+                raise ValueError(
+                    "Assembly input stages and planning mask must match the plan"
+                )
+            if source.replannable != self.replannable:
+                raise ValueError(
+                    "Assembly input must preserve the plan's recovery capability"
+                )
+            object.__setattr__(self, "trajectory_input", source)
         object.__setattr__(self, "plan_success", self.plan_success.clone())
         object.__setattr__(self, "commands", self.commands.snapshot())
         object.__setattr__(
@@ -907,6 +940,7 @@ class ActionPlan:
             effect_verification=self.effect_verification,
             invocation_id=self.invocation_id,
             invocation_revision=self.invocation_revision,
+            trajectory_input=self.trajectory_input,
         )
 
     @property

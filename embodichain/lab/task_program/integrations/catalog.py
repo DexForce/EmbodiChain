@@ -106,6 +106,8 @@ from embodichain.lab.task_program.language.decoder import (
     SceneReferenceRole,
 )
 from embodichain.lab.gym.envs.task_program.bridge import RuntimeTransportActionEncoder
+from .expert_sources import ExpertSourceRegistry
+
 from .extensions import (
     ControlPartEvidenceProviderDeclaration,
     ControlPartEvidenceProviderFactory,
@@ -122,7 +124,7 @@ from .extensions import (
 from .simulation import SimulationRobotSkillProfileBinding, SimulationSceneBinding
 from .simulation.policies import default_simulation_settle_presets
 
-_CATALOG_FINGERPRINT_SCHEMA_VERSION = 4
+_CATALOG_FINGERPRINT_SCHEMA_VERSION = 6
 _POST_POLICY_KINDS = frozenset({"wait_stable"})
 _VALIDATOR_KINDS = frozenset(
     {
@@ -480,6 +482,8 @@ class TaskProgramIntegrationCatalog:
         compare=False,
     )
 
+    expert_sources: ExpertSourceRegistry = field(default_factory=ExpertSourceRegistry)
+
     def __post_init__(self) -> None:
         for field_name in ("scene_registry_id", "robot_profile_id"):
             value = getattr(self, field_name)
@@ -583,6 +587,10 @@ class TaskProgramIntegrationCatalog:
                 f"Unknown runtime preset {integration.runtime_preset!r}; available "
                 f"presets are {sorted(self.robot_profile.presets)}."
             )
+
+        self.expert_sources.validate_policy(
+            self.robot_profile.presets[integration.runtime_preset]
+        )
 
     def validate_semantic_call(
         self,
@@ -731,6 +739,7 @@ class TaskProgramIntegrationCatalog:
                         affordance=destination,
                         path=call.source_path,
                     )
+        self.expert_sources.validate_program(compiled)
         return compiled
 
     def validate_engine(self, engine: AtomicActionEngine) -> None:
@@ -952,10 +961,23 @@ def _registration_payload(
     parallel_safety_factory: ParallelCommandSafetyValidatorFactory | None,
     control_part_evidence_factory: ControlPartEvidenceProviderFactory | None,
     registered_semantic_lowerer_factories: tuple[RegisteredSemanticLowererFactory, ...],
+    expert_sources: ExpertSourceRegistry,
 ) -> dict[str, object]:
     """Build the versioned canonical fingerprint payload."""
     return {
         "schema_version": _CATALOG_FINGERPRINT_SCHEMA_VERSION,
+        "expert_sources": {
+            "selections": expert_sources.selections,
+            "providers": tuple(
+                {
+                    "provider_id": f.provider_id,
+                    "revision": f.revision,
+                    "capabilities": f.capabilities,
+                    "factory": _provider_fingerprint_declaration(f),
+                }
+                for f in expert_sources.factories
+            ),
+        },
         "scene_binding": scene_binding,
         "scene_manifest": scene.entries,
         "robot_profile_binding": robot_profile_binding,
@@ -1085,6 +1107,7 @@ class SimulationTaskProgramRegistration:
     registered_semantic_lowerer_factories: tuple[
         RegisteredSemanticLowererFactory, ...
     ] = ()
+    expert_sources: ExpertSourceRegistry = field(default_factory=ExpertSourceRegistry)
     catalog: TaskProgramIntegrationCatalog = field(init=False)
     _parallel_safety_validator_history: list[ParallelCommandSafetyValidator] = field(
         init=False,
@@ -1118,6 +1141,10 @@ class SimulationTaskProgramRegistration:
     )
 
     def __post_init__(self) -> None:
+        if type(self.expert_sources) is not ExpertSourceRegistry:
+            raise TypeError("expert_sources must be exactly ExpertSourceRegistry")
+        for selected in self.expert_sources.selections:
+            self.call_catalog.discover(selected.call_id)
         if type(self.scene_binding) is not SimulationSceneBinding:
             raise TypeError("scene_binding must be exactly SimulationSceneBinding.")
         if type(self.robot_profile_binding) is not SimulationRobotSkillProfileBinding:
@@ -1153,6 +1180,12 @@ class SimulationTaskProgramRegistration:
 
         scene = self.scene_binding.declare()
         profile = self.robot_profile_binding.declare()
+        for factory in self.expert_sources.factories:
+            expected_profile = getattr(factory, "target_profile_id", profile.profile_id)
+            if expected_profile != profile.profile_id:
+                raise ValueError(
+                    "Expert source target profile does not match the registered embodiment"
+                )
         _validate_standard_effect_monitors(profile)
         _validate_standard_tracking_metrics(profile)
         extensions = build_standard_extension_declarations(
@@ -1202,6 +1235,7 @@ class SimulationTaskProgramRegistration:
 
         fingerprint = _digest(
             _registration_payload(
+                expert_sources=self.expert_sources,
                 scene_binding=self.scene_binding,
                 scene=scene,
                 robot_profile_binding=self.robot_profile_binding,
@@ -1239,6 +1273,7 @@ class SimulationTaskProgramRegistration:
                 registered_semantic_lowerer_declarations=(
                     extensions.registered_semantic_lowerers
                 ),
+                expert_sources=self.expert_sources,
                 fingerprint=fingerprint,
                 _required_skills=required_skills,
             ),
@@ -1285,6 +1320,7 @@ class SimulationTaskProgramRegistration:
             )
             current = _digest(
                 _registration_payload(
+                    expert_sources=self.expert_sources,
                     scene_binding=self.scene_binding,
                     scene=scene,
                     robot_profile_binding=self.robot_profile_binding,

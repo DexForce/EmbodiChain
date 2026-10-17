@@ -19,21 +19,24 @@
 from __future__ import annotations
 
 from types import MappingProxyType
+from dataclasses import replace
 from typing import Callable, Iterable, Mapping, TYPE_CHECKING
 
 import torch
+from embodichain.compute.trajectory import differentiate_positions
 
 from .affordance_sampling import AffordanceSamplingContext
-from .bindings import ActionBinding
+from .bindings import ActionBinding, JointPositionTarget
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
-from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory, PlannerDiagnostics
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .scene import SceneProvider
 from .state import PlanningContext, RobotObservation, SceneSnapshot, TaskState
 from .tracking import TrackingPolicy, TrackingRuntime
+from .trajectory_assembly import SkillTrajectoryInput
 
 if TYPE_CHECKING:
     from embodichain.lab.sim.objects import Robot
@@ -47,6 +50,10 @@ PlanTransform = Callable[
     [ResolvedActionRequest, PlanningContext, ActionPlan],
     ActionPlan,
 ]
+
+
+NominalPlanProvider = Callable[[ResolvedActionRequest, PlanningContext], ActionPlan]
+"""Supply a complete nominal plan without invoking ordinary action planning."""
 
 
 class AtomicActionEngine:
@@ -287,6 +294,13 @@ class AtomicActionEngine:
         if not isinstance(action, AtomicAction):
             raise TypeError("action must be an AtomicAction instance.")
         descriptor = action.descriptor()
+        if (
+            descriptor.trajectory_contract is not None
+            and type(action)._trajectory_semantics is AtomicAction._trajectory_semantics
+        ):
+            raise ValueError(
+                "A trajectory contract requires a Skill semantic assembler"
+            )
         existing = self._actions.get(descriptor.skill_id)
         if existing is not None and existing is not action and not replace:
             raise ValueError(
@@ -324,12 +338,15 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
         Args:
             request: Immutable request previously returned by :meth:`resolve`.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
             plan_transform: Optional callback scoped to this planning call. The
                 callback receives and must return independently owned plan values.
 
@@ -340,6 +357,7 @@ class AtomicActionEngine:
             request,
             context,
             plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
         )
 
     def _resolve(
@@ -374,6 +392,7 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan an already-resolved request without rebuilding its snapshot.
 
@@ -384,6 +403,8 @@ class AtomicActionEngine:
         Args:
             request: Immutable request previously returned by :meth:`_resolve`.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
 
         Returns:
             Validated side-effect-free action plan.
@@ -397,7 +418,15 @@ class AtomicActionEngine:
             )
         current = self.initial_context() if context is None else context
         self._validate_context(current)
-        plan = action.plan(request, current)
+        if nominal_plan_provider is None:
+            plan = action.plan(request, current)
+        else:
+            if not callable(nominal_plan_provider):
+                raise TypeError("nominal_plan_provider must be callable or None.")
+            supplied = nominal_plan_provider(request, current)
+            if not isinstance(supplied, ActionPlan):
+                raise TypeError("nominal_plan_provider must return an ActionPlan.")
+            plan = supplied.snapshot()
         self._validate_plan(plan, current, request)
         if plan_transform is not None:
             if not callable(plan_transform):
@@ -416,12 +445,15 @@ class AtomicActionEngine:
         context: PlanningContext | None = None,
         *,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ActionPlan:
         """Plan one registered invocation through the engine-owned backend.
 
         Args:
             invocation: Grounded request for a registered skill.
             context: Optional latest planning state; captured when omitted.
+            nominal_plan_provider: Optional complete-plan source. When supplied,
+                ordinary action planning is bypassed; failures never fall back.
 
         Returns:
             Validated action plan.
@@ -431,7 +463,12 @@ class AtomicActionEngine:
         """
         current = self.initial_context() if context is None else context
         request = self._resolve(invocation)
-        return self._plan_request(request, current, plan_transform=plan_transform)
+        return self._plan_request(
+            request,
+            current,
+            plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
+        )
 
     def initial_context(
         self,
@@ -573,6 +610,7 @@ class AtomicActionEngine:
         *,
         eligible_mask: torch.Tensor | None = None,
         plan_transform: PlanTransform | None = None,
+        nominal_plan_provider: NominalPlanProvider | None = None,
     ) -> ExecutionSession:
         """Start incremental execution for a grounded invocation sequence.
 
@@ -583,6 +621,8 @@ class AtomicActionEngine:
             eligible_mask: Optional per-environment cohort allowed to execute.
                 Ineligible rows remain excluded for the whole session. All rows
                 are eligible when omitted.
+            nominal_plan_provider: Optional source retained for initial planning,
+                invocation revisions and recovery throughout the session.
             plan_transform: Optional transform scoped to every planning call in
                 the returned execution session.
 
@@ -598,6 +638,7 @@ class AtomicActionEngine:
             initial,
             eligible_mask=eligible_mask,
             plan_transform=plan_transform,
+            nominal_plan_provider=nominal_plan_provider,
         )
 
     def _validate_context(self, context: PlanningContext) -> None:
@@ -666,6 +707,184 @@ class AtomicActionEngine:
                 "Action plan must record the planning collision-world revision."
             )
 
+    def build_plan_from_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> ActionPlan:
+        """Admit external motion and delegate complete assembly to its Skill.
+
+        Args:
+            request: Grounded invocation owning the trajectory's endpoint claims.
+            context: Observed state restored to this motion's initial conditions.
+            motion: Source-independent motion with exact stages and event indices.
+
+        Returns:
+            Validated, owned plan without invoking ordinary planning.
+
+        This checks discrete motion limits and authorization, not collision
+        freedom or measured task success. Source/host validation retains those
+        responsibilities and registered source recovery admission is unchanged.
+        """
+        if not isinstance(request, ResolvedActionRequest):
+            raise TypeError("request must be a ResolvedActionRequest")
+        self._validate_context(context)
+        action = self._actions.get(request.skill_id)
+        if action is None:
+            raise KeyError(
+                f"No atomic action registered for skill {request.skill_id!r}."
+            )
+        contract = action.descriptor().trajectory_contract
+        if contract is None:
+            raise ValueError(
+                f"Skill {request.skill_id!r} does not support trajectory assembly"
+            )
+        if type(motion) is not SkillTrajectoryInput:
+            raise TypeError("motion must be exactly SkillTrajectoryInput")
+        owned = motion.snapshot()
+        contract.validate_input(owned)
+        self._validate_external_trajectory(request, context, owned)
+        plan = action.assemble_trajectory_plan(request, context, owned)
+        self._validate_plan(plan, context, request)
+        return plan.snapshot()
+
+    def _validate_external_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        motion: SkillTrajectoryInput,
+    ) -> None:
+        """Check restored initial state, authorized joints and discrete limits."""
+        timed = motion.trajectory
+        q = timed.positions
+        if q.shape[0] != context.batch_size or q.shape[2] != self.robot.dof:
+            raise ValueError("Trajectory dimensions must match the planning context")
+        if q.device != self.device or not torch.equal(timed.env_ids, context.env_ids):
+            raise ValueError("Trajectory must share context device and ordered env_ids")
+        if q.dtype != context.robot.qpos.dtype:
+            raise ValueError("Trajectory and planning context must share a joint dtype")
+        active = motion.planning_success
+        if not torch.allclose(
+            q[active, 0], context.robot.qpos[active], atol=1e-4, rtol=0
+        ):
+            raise ValueError("Restore the exact trajectory initial state before replay")
+        if not motion.replannable and (
+            request.revision
+            or request.recovery_policy.max_replans
+            or request.recovery_policy.max_action_retries
+        ):
+            raise ValueError(
+                "Fixed trajectory replay cannot replan or retry without a fresh reset"
+            )
+        limits = self.robot.get_qpos_limits(env_ids=context.env_ids)
+        if not isinstance(limits, torch.Tensor) or limits.shape != (
+            context.batch_size,
+            self.robot.dof,
+            2,
+        ):
+            raise ValueError("Live robot must expose full-joint position limits")
+        limits = limits.to(q)
+        if not torch.isfinite(limits).all() or (limits[..., 0] > limits[..., 1]).any():
+            raise ValueError("Live joint position limits must be finite and ordered")
+        if (
+            (q[active] < limits[active, None, :, 0] - 1e-6)
+            | (q[active] > limits[active, None, :, 1] + 1e-6)
+        ).any():
+            raise ValueError("Trajectory violates live robot joint position limits")
+        velocity_limits = self.robot.get_qvel_limits(env_ids=context.env_ids)
+        if (
+            not isinstance(velocity_limits, torch.Tensor)
+            or velocity_limits.shape != (context.batch_size, self.robot.dof)
+            or not torch.isfinite(velocity_limits).all()
+            or (velocity_limits <= 0).any()
+        ):
+            raise ValueError(
+                "Live robot must expose positive finite joint velocity limits"
+            )
+        velocities = timed.velocities
+        if velocities is None:
+            velocities = differentiate_positions(q, timed.dt)
+        if (
+            velocities[active].abs() > velocity_limits.to(q)[active, None] + 1e-6
+        ).any():
+            raise ValueError("Trajectory violates live robot joint velocity limits")
+        intervals = timed.dt[:, 1:]
+        if (intervals[active] <= 0).any():
+            raise ValueError(
+                "External trajectory arrival intervals must be positive after its first sample"
+            )
+        speeds = q[active].diff(dim=1).abs() / intervals[active, :, None]
+        if (speeds > velocity_limits.to(q)[active, None] + 1e-6).any():
+            raise ValueError(
+                "Trajectory interval speeds violate live robot joint velocity limits"
+            )
+        claimed = {
+            joint
+            for endpoint in request.binding.endpoints
+            if isinstance(endpoint.target, JointPositionTarget)
+            for joint in endpoint.target.joint_ids
+        }
+        mimics = getattr(self.robot, "mimic_ids", ())
+        if isinstance(mimics, (list, tuple, set, torch.Tensor)):
+            claimed.update(int(index) for index in mimics)
+        unclaimed = sorted(set(range(self.robot.dof)) - claimed)
+        if unclaimed and not torch.allclose(
+            q[active][:, :, unclaimed],
+            context.robot.qpos[active][:, None, unclaimed].expand(
+                -1, timed.waypoint_count, -1
+            ),
+            atol=1e-6,
+            rtol=0,
+        ):
+            raise ValueError(
+                "Trajectory moves joints outside the call's authorized endpoints"
+            )
+
+    def build_plan_from_recorded_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        trajectory: TimedTrajectory,
+        *,
+        segment_lengths: dict[str, int],
+        diagnostics: PlannerDiagnostics,
+    ) -> ActionPlan:
+        """Adapt the original recorded-path API to generic trajectory assembly.
+
+        Args:
+            request: Resolved invocation selected by the Semantic Call.
+            context: Live planning state after restoring the recording start.
+            trajectory: Source-normalized full-joint path on the host clock.
+            segment_lengths: Skill-owned semantic stage mapping.
+            diagnostics: Source evidence and normalization lineage.
+
+        Returns:
+            Validated complete nominal plan, without running ordinary planning.
+        """
+        action = self._actions.get(request.skill_id)
+        contract = None if action is None else action.descriptor().trajectory_contract
+        if contract is None:
+            raise ValueError(
+                f"Skill {request.skill_id!r} does not support recorded plan assembly"
+            )
+        segments = action._build_segments(
+            segment_lengths, frame_count=trajectory.waypoint_count
+        )
+        landmarks = contract.stage_landmarks(segments, trajectory.waypoint_count)
+        return self.build_plan_from_trajectory(
+            request,
+            context,
+            SkillTrajectoryInput(
+                schema_id=contract.schema_id,
+                schema_revision=contract.revision,
+                trajectory=trajectory,
+                segments=segments,
+                landmarks=landmarks,
+                diagnostics=diagnostics,
+            ),
+        )
+
     def rebuild_plan_from_trajectory(
         self,
         request: ResolvedActionRequest,
@@ -713,6 +932,23 @@ class AtomicActionEngine:
             original.dt,
         ):
             raise ValueError("same-grid plan rebuilding requires identical dt.")
+        if owned_plan.trajectory_input is not None:
+            source = owned_plan.trajectory_input
+            if source.geometry is not None:
+                events = list(source.landmarks.values())
+                if not torch.equal(
+                    trajectory.positions[:, events], original.positions[:, events]
+                ):
+                    raise ValueError(
+                        "Changed geometric event poses require a new trajectory assembly input"
+                    )
+            return self.build_plan_from_trajectory(
+                request,
+                context,
+                replace(
+                    source, trajectory=trajectory, diagnostics=owned_plan.diagnostics
+                ),
+            )
         action = self._actions.get(request.skill_id)
         if action is None:
             raise KeyError(

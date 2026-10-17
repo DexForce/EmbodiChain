@@ -1594,3 +1594,50 @@ def test_segmented_examples_preserve_overall_and_segment_instructions(
     for segment in segments:
         assert isinstance(segment.instruction, str) and segment.instruction.strip()
         assert segment.instruction != overall
+
+
+def test_expert_source_paths_resolve_from_integration_file(tmp_path, monkeypatch):
+    """Source selection is data owned by integration, independent of process cwd."""
+    import yaml
+
+    task_name = "rubiks_cube_pick_place"
+    original = _config_path(task_name)
+    physical = _physical_components(original, _gym_config(task_name))
+    selected = physical.config["task_program"]
+    program, task, _ = _resolve_task_program_components(
+        selected, base_dir=original.parent
+    )
+    task = deepcopy(dict(task))
+    task.setdefault("runtime_services", {})["expert_source_providers"] = [
+        {
+            "call_id": "pick",
+            "call_index": 0,
+            "provider_id": "real2sim_qpos",
+            "revision": "1",
+            "target_profile_id": "fixture",
+            "target_asset_sha256": "1" * 64,
+            "bundle_path": "sources/bundle.json",
+            "bundle_sha256": "0" * 64,
+        }
+    ]
+    (tmp_path / "sources").mkdir()
+    (tmp_path / "sources/bundle.json").write_text("{}")
+    integration_path = tmp_path / "integration.yaml"
+    integration_path.write_text(yaml.safe_dump(task))
+    policy = Path(selected["execution_policy"])
+    if not policy.is_absolute():
+        policy = (original.parent / policy).resolve()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    _, resolved, _ = _resolve_task_program_components(
+        {
+            "program": str(program),
+            "integration": str(integration_path),
+            "execution_policy": str(policy),
+        },
+        base_dir=tmp_path,
+    )
+    assert resolved["runtime_services"]["expert_source_providers"][0][
+        "bundle_path"
+    ] == str((tmp_path / "sources/bundle.json").resolve())

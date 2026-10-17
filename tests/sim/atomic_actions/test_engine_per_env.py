@@ -3525,3 +3525,38 @@ def test_failed_effect_plan_retries_without_requesting_effect_verification() -> 
     assert any(
         event.kind is ExecutionEventKind.RECOVERY_EXHAUSTED for event in failed.events
     )
+
+
+def test_nominal_source_is_retained_for_recovery_and_invocation_revision(monkeypatch):
+    engine, action = _engine()
+    calls = []
+
+    def provide(request, context):
+        calls.append((request.revision, context.scene.version))
+        target = context.robot.qpos + 0.1
+        trajectory = TimedTrajectory.from_uniform_step(
+            torch.stack(
+                [
+                    torch.lerp(context.robot.qpos, target, t)
+                    for t in torch.linspace(0, 1, 20)
+                ],
+                dim=1,
+            ),
+            env_ids=context.env_ids,
+            step_dt=CONTROL_DT,
+        )
+        return action.build_plan(request, context, success=True, trajectory=trajectory)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("ordinary planning must not run")
+
+    monkeypatch.setattr(action, "_plan", forbidden)
+    initial = _context(0.0, 0.0, 0.1, 0)
+    invocation = _invocation(engine)
+    session = engine.start((invocation,), initial, nominal_plan_provider=provide)
+    session.tick(initial)
+    changed = _context(0.1, 0.0, 0.3, 1)
+    session.tick(changed)
+    session.revise_current(replace(invocation, revision=1), context=changed)
+    assert calls == [(0, 0), (0, 1), (1, 1)]
+    assert action.plan_count == 0
