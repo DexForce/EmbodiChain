@@ -28,7 +28,7 @@ from .bindings import ActionBinding
 from .core import AtomicAction, SkillDescriptor
 from .control import ActionControlOverrides, ControlPartCommandProfile
 from .invocation import ActionInvocation, GoalT, OptionsT, ResolvedActionRequest
-from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory
+from .plans import ActionPlan, CompiledTrajectory, TimedTrajectory, PlannerDiagnostics
 from .policies import MotionPolicy, RecoveryPolicy
 from .runtime import ActionPlanningServices
 from .scene import SceneProvider
@@ -696,6 +696,44 @@ class AtomicActionEngine:
             raise ValueError(
                 "Action plan must record the planning collision-world revision."
             )
+
+    def build_plan_from_recorded_trajectory(
+        self,
+        request: ResolvedActionRequest,
+        context: PlanningContext,
+        trajectory: TimedTrajectory,
+        *,
+        segment_lengths: dict[str, int],
+        diagnostics: PlannerDiagnostics,
+    ) -> ActionPlan:
+        """Delegate nominal source assembly to the owning registered Skill.
+
+        Args:
+            request: Resolved invocation selected by the Semantic Call.
+            context: Live planning state after restoring the recording start.
+            trajectory: Source-normalized full-joint path on the host clock.
+            segment_lengths: Skill-owned semantic stage mapping.
+            diagnostics: Source evidence and normalization lineage.
+
+        Returns:
+            Validated complete nominal plan, without running ordinary planning.
+        """
+        self._validate_context(context)
+        action = self._actions.get(request.skill_id)
+        builder = getattr(action, "build_recorded_plan", None)
+        if not callable(builder):
+            raise ValueError(
+                f"Skill {request.skill_id!r} does not support recorded plan assembly"
+            )
+        plan = builder(
+            request,
+            context,
+            trajectory,
+            segment_lengths=segment_lengths,
+            diagnostics=diagnostics,
+        )
+        self._validate_plan(plan, context, request)
+        return plan.snapshot()
 
     def rebuild_plan_from_trajectory(
         self,

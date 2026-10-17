@@ -142,3 +142,10 @@ Measure writer throughput using a runnable task, recording hardware, image size,
 environment count and writer settings alongside the results.
 The CPU-only `benchmark_segment_annotations.py` isolates the validated frame-map
 lookup from simulation and storage costs.
+
+`real2sim/bundle.py` persists raw source declarations and NPZ sidecars with
+required content hashes, then reruns normalization at load. Formal admission
+requires reviewed calibration and annotations. `real2sim/gripper.py` decodes an
+explicit scalar/width convention through a versioned lookup; model-only estimates
+remain unverified. Task Program source selection and Skill plan assembly belong
+to `task_program/integrations`, not this data layer.

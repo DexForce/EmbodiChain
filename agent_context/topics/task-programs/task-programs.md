@@ -85,10 +85,19 @@ A trusted `TaskProgramNominalPlanFactory` can provide a complete call-scoped
 plan before ordinary Atomic planning. The engine snapshots and validates that
 plan, then applies any existing plan transform. Execution sessions retain the
 source during recovery and invocation revisions; source errors do not fall back
-to another planner. The optional Python assembly/bridge hook currently rejects
-parallel program segments. It is not a registered configured service: catalog
-registration, capability preflight and source-specific Skill assembly remain
-separate work. Do not insert executable provider syntax into program YAML.
+to another planner. `integrations/expert_sources.py` owns immutable versioned
+factories, exact expanded call selections and capability preflight. The simulation
+catalog fingerprints those declarations; configured task integrations select
+`runtime_services.expert_source_providers` by stable IDs and content-pinned source
+bundles. Bundle paths resolve from the integration file. Runtime assembly creates
+fresh providers sharing the existing planning scene and embodiment profile.
+
+The first registered source is B=1 fixed-qpos Pick replay. PickUp owns full plan
+assembly, including commands, tracking, semantic segments and pending effects.
+Unverified input bundles, automatic replanning/retry policies, parallel segments
+and configured combined expansion fail closed. Physical qualification and
+receipt-backed source attachments remain separate host work. Do not insert
+executable provider syntax into program YAML.
 
 The configured combined transform supports batches and Pick Affordance
 expansion; timing expansion is not connected to this transform. Batch expansion

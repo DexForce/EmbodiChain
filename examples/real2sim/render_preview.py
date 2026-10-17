@@ -292,6 +292,26 @@ def _render(args: argparse.Namespace) -> None:
     unit, qpos, qvel, fk, protected, diagnostics, consistency = _build_paths(
         args, arm_path
     )
+    gripper_calibration = None
+    gripper_driver = np.zeros(len(unit.positions))
+    if args.gripper_calibration is not None:
+        from embodichain.data_pipeline.real2sim.gripper import (
+            GripperPositionCalibration,
+        )
+
+        gripper_calibration = json.loads(args.gripper_calibration.read_text())
+        calibration = GripperPositionCalibration(**gripper_calibration)
+        with np.load(args.input, allow_pickle=False) as recording:
+            scalar = recording["source_gripper_position"]
+        driver = calibration.decode(scalar)
+        gripper_driver = np.interp(
+            unit.time_map.source_query_times, unit.source.seconds, driver
+        )
+    hand_joints = [
+        j
+        for j in ET.parse(hand_path).getroot().findall("joint")
+        if j.get("type") != "fixed"
+    ]
     frames = _decode_video(args.video)
     if len(frames) not in (len(unit.source.positions), len(unit.source.positions) - 1):
         raise ValueError(
@@ -399,6 +419,7 @@ def _render(args: argparse.Namespace) -> None:
             flange_fk=fk,
             protected_mask=protected,
             dt=unit.dt,
+            gripper_driver_rad=gripper_driver,
             render_times_s=render_times,
             execution_indices=execution_indices,
             source_indices=source_indices,
@@ -423,7 +444,12 @@ def _render(args: argparse.Namespace) -> None:
             "source_pose_is_independent_measurement": False,
             "free_source_samples": [0, args.free_stop],
             "joint_residual_scale": args.scale,
-            "gripper_policy": "fixed open; scalar encoding and real mount calibration unverified",
+            "gripper_policy": (
+                "fixed open"
+                if gripper_calibration is None
+                else "explicit width lookup; model estimate"
+            ),
+            "gripper_calibration": gripper_calibration,
             "mount_policy": "identity flange-to-gripper mount for preview only",
             "scene_policy": "neutral ground; no reconstructed objects or object animation",
             "preview_camera": {
@@ -501,6 +527,15 @@ def _render(args: argparse.Namespace) -> None:
 
         for frame_number, tick in enumerate(execution_indices):
             full[:, ids] = torch.from_numpy(qpos[:, tick]).to(full)
+            for joint in hand_joints:
+                mimic = joint.find("mimic")
+                multiplier = (
+                    1.0 if mimic is None else float(mimic.get("multiplier", "1"))
+                )
+                offset = 0.0 if mimic is None else float(mimic.get("offset", "0"))
+                full[:, robot.joint_names.index(joint.get("name"))] = (
+                    gripper_driver[tick] * multiplier + offset
+                )
             robot.set_qpos(full, target=False)
             with sim.render_frame():
                 # Camera.update() consumes native buffers; explicitly publish direct
@@ -554,7 +589,12 @@ def _render(args: argparse.Namespace) -> None:
                     plot_path(panel, i - 1, tick)
                     _text(
                         panel,
-                        "KINEMATIC | fixed-open gripper",
+                        "KINEMATIC | "
+                        + (
+                            "fixed-open gripper"
+                            if gripper_calibration is None
+                            else "model-mapped gripper"
+                        ),
                         (12, 385),
                         (30, 205, 250),
                         0.5,
@@ -649,6 +689,11 @@ def main() -> None:
     parser.add_argument("--scale", type=float, default=0.025)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--video-state-offset", type=int, choices=(-1, 0, 1), default=0)
+    parser.add_argument(
+        "--gripper-calibration",
+        type=Path,
+        help="Explicit scalar/width/driver lookup JSON; never qualifies physical calibration",
+    )
     parser.add_argument(
         "--max-frames",
         type=int,

@@ -1244,3 +1244,51 @@ def test_env_spec_derives_registration_and_injects_runtime_factory() -> None:
                 registration
             ),
         )
+
+
+@dataclass(frozen=True)
+class _ExpertSourceFactory:
+    provider_id: ClassVar[str] = "catalog_source"
+    revision: ClassVar[str] = "1"
+    capabilities: ClassVar[frozenset[str]] = frozenset(
+        {"replay", "phase_annotation", "replanning"}
+    )
+    data_revision: str = "data1"
+
+    def create(self, **kwargs):
+        raise AssertionError("Pure catalog preflight must not create a provider")
+
+
+def test_expert_sources_are_fingerprinted_and_exact_call_occurrences_preflight():
+    from embodichain.lab.task_program.integrations.expert_sources import (
+        ExpertSourceRegistry,
+        ExpertSourceSelection,
+    )
+
+    base = _registration()
+    registry = ExpertSourceRegistry(
+        (_ExpertSourceFactory(),),
+        (ExpertSourceSelection("pick", "catalog_source", "1", 0),),
+    )
+    registered = replace(base, expert_sources=registry)
+    changed = replace(
+        base,
+        expert_sources=ExpertSourceRegistry(
+            (_ExpertSourceFactory("data2"),), registry.selections
+        ),
+    )
+    assert registered.fingerprint != base.fingerprint != changed.fingerprint
+    assert registered.fingerprint != changed.fingerprint
+    registered.assert_unchanged()
+    # Existing configured program helper exercises the ordinary preflight path.
+    program = decode_task_program(_program_payload())
+    registered.catalog.preflight(program)
+    missing = replace(
+        base,
+        expert_sources=ExpertSourceRegistry(
+            registry.factories,
+            (ExpertSourceSelection("pick", "catalog_source", "1", 999),),
+        ),
+    )
+    with pytest.raises(ValueError, match="occurrence|expanded program call"):
+        missing.catalog.preflight(program)

@@ -45,7 +45,7 @@ _RUNTIME_SERVICE_FIELDS = frozenset(
     }
 )
 _TASK_RUNTIME_SERVICE_FIELDS = _RUNTIME_SERVICE_FIELDS | frozenset(
-    {"grasp_pose_generator_overrides"}
+    {"grasp_pose_generator_overrides", "expert_source_providers"}
 )
 _GRASP_GENERATOR_OVERRIDE_FIELDS = frozenset(
     {
@@ -236,6 +236,11 @@ def _merge_runtime_services(
     evidence = task_evidence if task_evidence is not None else skill_profile_evidence
     if evidence is not None:
         result["control_part_evidence"] = deepcopy(evidence)
+    if "expert_source_providers" in task:
+        result["expert_source_providers"] = _owned_sequence(
+            task["expert_source_providers"],
+            path="integration.runtime_services.expert_source_providers",
+        )
     return result
 
 
@@ -282,6 +287,22 @@ def _resolve_task_program_components(
         ),
         optional=frozenset({"runtime_services"}),
     )
+    # Data references belong to the integration file, independently of process cwd.
+    integration = deepcopy(dict(integration))
+    services = integration.get("runtime_services", {})
+    if isinstance(services, Mapping) and "expert_source_providers" in services:
+        services = deepcopy(dict(services))
+        integration["runtime_services"] = services
+        for source in services["expert_source_providers"]:
+            if isinstance(source, dict) and "bundle_path" in source:
+                source["bundle_path"] = str(
+                    _component_path(
+                        source["bundle_path"],
+                        base_dir=integration_path.parent,
+                        path="expert source bundle",
+                        suffixes=frozenset({".json"}),
+                    )
+                )
     policy = _mapping(
         _load_yaml_component(policy_path, field_name="execution policy"),
         path="execution policy",

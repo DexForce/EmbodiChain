@@ -719,6 +719,26 @@ class TaskProgramEnvironmentAdapter:
                 "create_planning_observation_provider() must return a port "
                 "implementing both ObservationProvider and CurrentQposProvider."
             )
+        if (
+            self._registration is not None
+            and self._registration.expert_sources.selections
+        ):
+            if nominal_plan_factory is not None:
+                raise ValueError(
+                    "Registered expert sources cannot be overridden by a Python nominal factory"
+                )
+            from embodichain.lab.sim.atomic_actions import SceneProvider
+
+            scene_provider = getattr(observation_provider, "scene_provider", None)
+            if not isinstance(scene_provider, SceneProvider):
+                raise TypeError(
+                    "Registered expert sources require the existing planning scene provider"
+                )
+            nominal_plan_factory = self._registration.expert_sources.create_runtime(
+                scene_provider=scene_provider,
+                robot_profile=semantic.robot_profile,
+                control_dt=self._step_dt,
+            )
         try:
             selected_preset = semantic.robot_profile.presets[
                 semantic.integration.runtime_preset
@@ -867,6 +887,15 @@ class TaskProgramEnvironmentAdapter:
             raise ValueError(
                 "External nominal sources currently require sequential Task Program segments."
             )
+        if (
+            self._registration is not None
+            and self._registration.expert_sources.selections
+        ):
+            self._registration.expert_sources.validate_program(program)
+            if expansion_profile is not None:
+                raise ValueError(
+                    "Registered source expansion must use admitted phase permissions; configured combined expansion is not yet supported"
+                )
         self._validate_selection(program.integration)
         self._preflight_program_surfaces(program)
         semantic = self._assemble_semantic_components(program.integration)

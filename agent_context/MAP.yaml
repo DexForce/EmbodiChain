@@ -339,7 +339,8 @@ topics:
   keywords: [TaskProgramCfg, program.yaml, integration.yaml, scene_binding, SceneManifest, SkillPolicyPreset,
     EffectAssurance, CompiledTaskProgram, TaskProgramDemoBridge, TaskProgramPlanTransformFactory,
     CombinedTaskProgramExpansionFactory, expansion_profile, execution_policy, SemanticPose, quaternion_xyzw,
-    joint_command_mode, TaskProgramNominalPlanFactory]
+    joint_command_mode, TaskProgramNominalPlanFactory, ExpertSourceProviderFactory, ExpertSourceRegistry,
+    Real2SimExpertSourceProviderFactory]
   paths: [topics/task-programs/task-programs.md]
   source_of_truth:
   - embodichain/lab/task_program/

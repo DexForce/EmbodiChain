@@ -636,6 +636,105 @@ class PickUp(AtomicAction[GraspGoal, PickUpOptions]):
             ),
         )
 
+    def build_recorded_plan(
+        self,
+        request: ResolvedActionRequest[GraspGoal, PickUpOptions],
+        context: PlanningContext,
+        trajectory: TimedTrajectory,
+        *,
+        segment_lengths: dict[str, int],
+        diagnostics: PlannerDiagnostics,
+    ) -> ActionPlan:
+        """Assemble recorded motion with the ordinary PickUp semantic contract.
+
+        Args:
+            request: Grounded and resolved PickUp invocation.
+            context: Restored source initial state and live scene snapshot.
+            trajectory: Complete full-joint path, including the recorded gripper.
+            segment_lengths: Ordered approach, close and lift sample counts.
+            diagnostics: Source provenance retained on the plan.
+
+        Returns:
+            Complete commands, tracking, phase gates and uncommitted held-object
+            effects. This fixed replay cannot replan from an interrupted state.
+        """
+        target = self.require_goal(request)
+        if (
+            tuple(segment_lengths) != ("approach", "close", "lift")
+            or any(type(n) is not int or n < 1 for n in segment_lengths.values())
+            or sum(segment_lengths.values()) != trajectory.waypoint_count
+        ):
+            raise ValueError(
+                "Recorded PickUp needs nonempty approach/close/lift segments covering its path"
+            )
+        motion = request.binding.endpoint("primary", "motion")
+        grasp = request.binding.endpoint("primary", "grasp")
+        manipulator = motion.require_target(JointPositionTarget)
+        key = require_shared_task_state_key(
+            motion, grasp, participant="Recorded PickUp"
+        )
+        close_index = segment_lengths["approach"] + segment_lengths["close"] - 1
+        grasp_pose = self.robot.compute_fk(
+            trajectory.positions[:, close_index, list(manipulator.joint_ids)],
+            name=manipulator.control_part,
+            env_ids=context.env_ids,
+            to_matrix=True,
+        )
+        object_pose = (
+            _resolve_object_pose(
+                target.semantics, context, name="recorded_pickup_object"
+            )
+            if target.object_pose is None
+            else resolve_pose_target(
+                resolve_pose_goal(target.object_pose, context, name="object_pose"),
+                num_envs=context.batch_size,
+                device=self.device,
+            )
+        )
+        held = HeldObjectState(
+            semantics=target.semantics,
+            object_to_eef=torch.bmm(pose_inv(object_pose), grasp_pose),
+            grasp_xpos=grasp_pose,
+        )
+        coordinated = {
+            group: None for group in context.coordinated_held_objects if key in group
+        }
+        monitored = (
+            target.semantics.entity_id
+            if target.object_pose is None
+            else (
+                target.object_pose.entity_id
+                if isinstance(target.object_pose, SceneEntityPose)
+                else None
+            )
+        )
+        return self.build_plan(
+            request,
+            context,
+            success=True,
+            trajectory=trajectory,
+            expected_effects=StateDelta(
+                held_object_updates={key: held},
+                coordinated_held_object_updates=coordinated,
+            ),
+            replannable=False,
+            diagnostics=diagnostics,
+            segment_lengths=segment_lengths,
+            scene_dependency_monitor_until=(
+                {}
+                if monitored is None
+                else {
+                    monitored: max(
+                        1,
+                        math.ceil(
+                            segment_lengths["approach"]
+                            * request.skill_options.grasp_commit_fraction
+                        ),
+                    )
+                }
+            ),
+        )
+
     def _resolve_grasp_pose(
         self,
         semantics: ObjectSemantics,

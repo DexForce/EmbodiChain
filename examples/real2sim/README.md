@@ -16,13 +16,18 @@ and read-only. Ordinary tests use synthetic arrays, not this optional file.
 - Regression tests for bypassing ordinary planning, preserving effect verification,
   deterministic variants, protected derivative boundaries and malformed data.
 
-The shared registered provider catalog/configuration entry, Real2Sim provider's
-Pick-specific semantic assembly, physical qualification and receipt-backed array
-attachments remain subsequent milestones. The runtime hook is a trusted Python
-integration boundary, not permission to put executable imports in `program.yaml`.
-No `ExpertSourceProviderFactory` registry or configured service is claimed to exist
-in this slice. `eef_pose` and `hybrid` explicitly require a later IK/replanning
-provider; the qpos normalizer rejects these authorities.
+The shared `ExpertSourceRegistry` now fingerprints exact provider versions and
+expanded call selections in the simulation catalog. The configured
+`expert_source_providers` service admits a content-pinned source bundle before
+simulation construction. `Real2SimExpertSourceProviderFactory` creates fresh B=1
+Pick providers, and PickUp owns complete nominal-plan assembly. Neither source
+code nor callables belong in `program.yaml`.
+
+Physical qualification, receipt-backed array attachments, registered-source
+combined expansion, time-grid changes and `eef_pose`/`hybrid` planning remain
+subsequent milestones. The existing same-grid source adapter and coordinator
+remain available; configured combined expansion with a registered source is
+rejected rather than changing its phase permissions.
 
 ## Contracts
 
@@ -154,3 +159,88 @@ paths, qvel, FK, protected mask and render/source/video mappings), `report.json`
 (provenance, asset hashes, amplitude/limit metrics and limitations), and the
 assembled robot asset. `--max-frames 1` runs a bounded render smoke check. Outputs
 must be in a new directory outside the original recording directory.
+
+
+## Registered B=1 Pick integration
+
+A task-local integration can select a verified source using only stable IDs and
+content-pinned data references:
+
+```yaml
+runtime_services:
+  expert_source_providers:
+    - call_id: pick
+      call_index: 0
+      provider_id: real2sim_qpos
+      revision: "1"
+      target_profile_id: my_franka_profile
+      target_asset_sha256: <SHA-256 of the resolved target robot URDF/USD>
+      bundle_path: ./sources/pick/bundle.json
+      bundle_sha256: <SHA-256 of bundle.json>
+```
+
+`call_index` selects one global expanded program occurrence. The catalog rejects
+missing/mismatched occurrences, unknown versions, duplicate selections and
+unsupported capabilities. Data paths resolve relative to the integration file.
+The normal execution-policy component must set both `max_replans: 0` and
+`max_action_retries: 0` for fixed replay. External nominal sources currently
+require sequential segments. Fresh providers share the existing planning scene
+provider and exact embodiment profile; Python callbacks cannot override a
+registered source binding.
+
+Create source bundles with `write_real2sim_bundle(source, layout, cfg, directory)`.
+`load_real2sim_bundle` verifies the declaration/NPZ digests and closed fields,
+reconstructs raw contracts, reruns normalization and rejects unreviewed inputs by
+default. Large arrays stay in the NPZ sidecar. There are no executable loaders or
+pickled arrays. Data digests are rechecked when creating each live source provider.
+
+The initial Pick source has full `approach`, `close`, `lift` semantic phases.
+Close and lift use protected `contact`/`hold` kinds. Interpolation-only gaps remain
+locked by the adapter; the plan assembler attributes those gaps to the preceding
+semantic segment. All source/execution phase intervals remain in diagnostics.
+The provider checks B=1, exact profile/model digest/joint order, initial state, control period,
+endpoint ownership and live joint-position limits. PickUp then builds commands,
+qvel/tracking, segments, dependency boundaries and uncommitted held-object effects.
+Source failures propagate without ordinary planning fallback. A fresh reset is
+required to run another fixed source attempt.
+
+The B=1 bridge regression uses reviewed **synthetic** source values and projected
+semantic completion. It proves the interface and lifecycle, not physical grasp
+success. Existing verified-runtime tests continue to cover measured-effect failure.
+
+## Original-recording calibration audit
+
+`prepare_pick_sample.py` consumes only one original HDF5, independently of any
+real2sim experiment code or generated scene:
+
+```bash
+PYTHONPATH="$PWD:$PWD/extensions" python examples/real2sim/prepare_pick_sample.py \
+  --hdf5 /path/to/original_sample.hdf5 \
+  --output outputs/real2sim-source-sample/pick_audit \
+  --upstream-revision c5737e40a6b18859b5b78dbcdbf1e3b3f5e461be \
+  --close-start 97 --lift-start 106 --stop 121
+```
+
+The selected source has an open approach, a closing transition at samples 97–105,
+and subsequent lift. These indices are example annotations, not an automatic
+contact detector. The script preserves raw gripper samples, camera matrices,
+source pose and pipeline calibration metadata in a separate evidence sidecar.
+It writes a diagnostic source bundle, explicit jaw-width/driver lookup and audit
+report. Original files remain read-only.
+
+The [pinned upstream DROID implementation](https://github.com/droid-dataset/droid/blob/c5737e40a6b18859b5b78dbcdbf1e3b3f5e461be/droid/franka/robot.py)
+defines gripper position as normalized closure (`1 - width/max_width`). The audit
+uses this explicit convention, preserves the exported canonical values separately
+in the original NPZ, and does not interpret the scalar as driver radians. The
+width-to-driver table comes from the bundled Robotiq contact-pad mesh and includes
+estimated endpoint extensions; it remains unverified hardware calibration.
+
+To animate that estimate in the diagnostic renderer, add
+`--gripper-calibration /path/to/gripper_calibration.json` to the four-panel command.
+This replaces the fixed-open visual policy without granting formal admission.
+
+The original sample still lacks independently reviewed real mount/TCP, hardware
+jaw calibration, camera reprojection/frame offset and live target-joint order.
+Its audit therefore reports `rejected_until_reviewed`. The near-zero source-pose
+versus flange-FK residual is a conversion consistency check, not an independent
+measurement-accuracy result. Do not promote these input states automatically.

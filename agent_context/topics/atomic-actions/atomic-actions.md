@@ -210,3 +210,10 @@ python docs/scripts/check_api_docs.py
 For public API changes also run the docs checker tests and Sphinx dummy build.
 For simulator adapters add an environment-level test that exercises normal
 `env.step()` consumption and safe cancellation.
+
+For externally recorded nominal paths, `AtomicActionEngine.build_plan_from_recorded_trajectory`
+delegates to the registered Skill's `build_recorded_plan` instead of ordinary
+planning. PickUp assembles approach/close/lift commands, tracking and uncommitted
+held-object effects from a complete full-joint path. The resulting fixed replay is
+non-replannable; source admission and restored-initial-state checks belong to the
+registered Task Program source provider.
