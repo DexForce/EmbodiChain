@@ -101,6 +101,11 @@ class ScenarioProvider(ABC):
     def close_planner(self, adapter: "PlannerAdapter") -> None:
         """Release scenario resources that retain a planner adapter."""
 
+    def trial_metadata(self, case: "BenchmarkCase") -> dict[str, object]:
+        """Return scenario attribution known before a planning call."""
+        del case
+        return {}
+
     def reset_case(
         self,
         simulation: "SimulationManager",

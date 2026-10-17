@@ -152,9 +152,11 @@ def aggregate_generalization(
     """Aggregate versioned nominal, robustness, and held-out populations.
 
     Unsupported capability cases lower coverage and are excluded from the
-    success denominator.  Runtime errors and ordinary planner failures remain
-    applicable cases and therefore count as failures.  The returned rows are
-    sufficient to recompute the domain summary from raw trial records.
+    success denominator. Cases that bypass the selected planner are excluded
+    from planner attribution entirely. Runtime errors and ordinary planner
+    failures remain applicable cases and therefore count as failures. The
+    returned rows are sufficient to recompute the domain summary from raw
+    trial records.
 
     Args:
         records: Raw lifecycle and measured trial records.
@@ -191,17 +193,33 @@ def aggregate_generalization(
     for planner in metadata_list:
         for population_key, population_cases in sorted(cases_by_population.items()):
             track, domain_id, domain_version, domain_kind = population_key
+            bypassed = {
+                case.case_id
+                for case in population_cases
+                if any(
+                    not record.uses_selected_planner_backend
+                    for record in by_algorithm_case[
+                        (planner.algorithm_id, case.case_id)
+                    ]
+                )
+            }
+            attributed_cases = [
+                case for case in population_cases if case.case_id not in bypassed
+            ]
+            if not attributed_cases:
+                continue
             population_records = [
                 record
-                for case in population_cases
+                for case in attributed_cases
                 for record in by_algorithm_case[(planner.algorithm_id, case.case_id)]
+                if record.uses_selected_planner_backend
             ]
             unsupported = _unsupported_case_ids(population_records)
             applicable_cases = [
-                case for case in population_cases if case.case_id not in unsupported
+                case for case in attributed_cases if case.case_id not in unsupported
             ]
             expected_rows = (
-                sum(case.batch_size for case in population_cases) * measured_trials
+                sum(case.batch_size for case in attributed_cases) * measured_trials
             )
             observed_rows = sum(
                 len(record.outcomes)
@@ -232,8 +250,9 @@ def aggregate_generalization(
                     "domain_id": domain_id,
                     "domain_version": domain_version,
                     "domain_kind": domain_kind,
-                    "cases": len(population_cases),
+                    "cases": len(attributed_cases),
                     "applicable_cases": len(applicable_cases),
+                    "bypassed_cases": len(bypassed),
                     "unsupported_cases": len(unsupported),
                     "coverage_rate": min(1.0, observed_rows / max(expected_rows, 1)),
                     "success_rate": success_rate,

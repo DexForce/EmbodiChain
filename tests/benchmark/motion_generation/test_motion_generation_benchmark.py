@@ -1056,7 +1056,7 @@ def test_atomic_task_press_invocation_uses_articulated_target_manifest():
 
     assert isinstance(invocation.goal, PressGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_microwave:button_cap"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is PressOptions
     assert invocation.skill_options.hand_interp_steps == 12
@@ -1133,7 +1133,7 @@ def test_atomic_task_slide_invocation_uses_tutorial_options():
 
     assert isinstance(invocation.goal, SlideGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_drawer:large_handle_bar"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is SlideOptions
     assert invocation.skill_options.direction == "pull"
@@ -1210,7 +1210,7 @@ def test_atomic_task_twist_invocation_uses_tutorial_options():
 
     assert isinstance(invocation.goal, TwistGoal)
     assert invocation.goal.semantics.entity_id == "benchmark_microwave:cap_1"
-    assert invocation.motion_policy.strategy == "motion_gen"
+    assert invocation.motion_policy.strategy == "ik_interp"
     assert invocation.motion_policy.sample_count == 140
     assert type(invocation.skill_options) is TwistOptions
     assert invocation.skill_options.hand_interp_steps == 12

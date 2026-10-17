@@ -198,6 +198,7 @@ class BenchmarkRunner:
         reason: str,
         *,
         failure_code: str,
+        record_metadata: dict[str, object] | None = None,
     ) -> None:
         """Record an unsupported/unavailable planner without counting a failure."""
         self._append(
@@ -207,6 +208,7 @@ class BenchmarkRunner:
                 status="unsupported",
                 failure_code=failure_code,
                 failure_message=reason,
+                metadata={} if record_metadata is None else dict(record_metadata),
             ),
         )
         note = f"{metadata.algorithm_id} skipped for B={case.batch_size}: {reason}"
@@ -260,6 +262,7 @@ class BenchmarkRunner:
         repeat: int,
     ) -> None:
         """Time one plan, validate outside timing, and persist the record."""
+        record_metadata = dict(provider.trial_metadata(case))
         provider.reset_case(sim, robot, case, self.control_part)
         measured = timed_call(
             lambda: _capture(lambda: provider.plan_case(adapter, case))
@@ -285,7 +288,7 @@ class BenchmarkRunner:
             outcomes = ()
         else:
             try:
-                evaluation = provider.evaluate_case(
+                candidate_evaluation = provider.evaluate_case(
                     result,
                     case,
                     robot,
@@ -293,6 +296,18 @@ class BenchmarkRunner:
                     self.suite,
                     planning_time_ms=measured.cost_time_ms,
                 )
+                conflicts = {
+                    key: (record_metadata[key], value)
+                    for key, value in candidate_evaluation.metadata.items()
+                    if key in record_metadata and record_metadata[key] != value
+                }
+                if conflicts:
+                    raise ValueError(
+                        "Scenario evaluation changed pre-plan trial metadata: "
+                        f"{conflicts}."
+                    )
+                record_metadata.update(candidate_evaluation.metadata)
+                evaluation = candidate_evaluation
                 outcomes = evaluation.outcomes
             except Exception as exc:  # noqa: BLE001 - metric failure is recorded
                 status = "error"
@@ -300,7 +315,6 @@ class BenchmarkRunner:
                 failure_message = str(exc)
                 outcomes = provider.failure_outcomes(case, failure_code)
 
-        record_metadata = {} if evaluation is None else dict(evaluation.metadata)
         video_path = self._maybe_record_replay(
             provider, result, case, evaluation, metadata.algorithm_id, phase
         )
@@ -418,6 +432,7 @@ class BenchmarkRunner:
                     "missing required capabilities: "
                     + ", ".join(missing_case_capabilities),
                     failure_code="unsupported_capability",
+                    record_metadata=provider.trial_metadata(case),
                 )
                 continue
             motion_capability, modality_reason = _case_motion_capability(case)
@@ -432,6 +447,7 @@ class BenchmarkRunner:
                     modality_reason
                     or f"case requires planner capability {motion_capability!r}",
                     failure_code="unsupported_capability",
+                    record_metadata=provider.trial_metadata(case),
                 )
                 continue
             supported, reason = adapter.supports_case(case)
@@ -444,6 +460,7 @@ class BenchmarkRunner:
                 case,
                 reason or "case is outside planner capacity",
                 failure_code="unsupported_capacity",
+                record_metadata=provider.trial_metadata(case),
             )
         if not supported_cases:
             return
@@ -456,6 +473,7 @@ class BenchmarkRunner:
                 first_case,
                 reason or "runtime unavailable",
                 failure_code="runtime_unavailable",
+                record_metadata=provider.trial_metadata(first_case),
             )
             return
 

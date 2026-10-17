@@ -111,6 +111,8 @@ LEADERBOARD_COLUMNS = (
     "model_revision",
     "planner_config_hash",
     "eligible",
+    "attributed_cases",
+    "bypassed_cases",
     "coverage_rate",
     "overall_success_rate",
     "planning_success_rate",
@@ -205,7 +207,9 @@ def write_markdown_report(
                 "",
                 "Domain statistics are computed from the raw trial records. "
                 "Unsupported capability cases lower coverage and are excluded "
-                "from success denominators.",
+                "from success denominators. Cases that bypassed the selected "
+                "planner backend are reported separately and excluded from "
+                "planner attribution.",
                 "",
             ]
         )
@@ -220,6 +224,7 @@ def write_markdown_report(
                         "domain_id",
                         "domain_version",
                         "domain_kind",
+                        "bypassed_cases",
                         "coverage_rate",
                         "success_rate",
                         "spatial_bucket_success_rates",

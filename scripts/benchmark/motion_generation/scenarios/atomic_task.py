@@ -4287,6 +4287,10 @@ class AtomicTaskScenario(ScenarioProvider):
         del suite
         return resolve_atomic_batch_sizes(track)
 
+    def trial_metadata(self, case: BenchmarkCase) -> dict[str, object]:
+        """Expose planner attribution before planning or evaluation can fail."""
+        return _benchmark_motion_attribution(case.skill_id)
+
     def create_runtime_entities(
         self,
         simulation: SimulationManager,
