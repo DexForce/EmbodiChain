@@ -79,7 +79,7 @@ in that run's `videos/` directory.
   read from the replayed scene: the hinge angle at the end of the opening
   segment, the held object's peak rotation about its own axis while pouring,
   the held object's axis after alignment, and the pushed object's final pose.
-- `atomic_franka_pgi_spatial_generalization_v7` is the strict spatial
+- `atomic_franka_pgi_spatial_generalization_v8` is the strict spatial
   generalization baseline for all ten task-level Franka skills: `PickUp`,
   `MoveHeldObject`, `Place`, `Press`, `Slide`, `Twist`, `OpenDoor`, `Pour`,
   `AxisAlign`, and `PushObject`. Tracks group only skills with the same spatial
@@ -87,20 +87,31 @@ in that run's `videos/` directory.
   Its isolated robustness domains cover object translation and orientation,
   plus target translation and orientation for skills with a Cartesian goal.
   Fixed-base articulations additionally vary root height and roll/pitch;
-  held-object goals additionally vary target height and roll/pitch. Each domain
-  keeps assets, physics, robot, and task semantics fixed and contains eight
-  deterministic samples per seed. Every track also contains a shared planar
-  task-frame domain and a skill-appropriate composed domain. These domains use
-  deterministic per-dimension stratification, including both configured
-  interval bounds, so object, target, support, and task-frame changes are
-  evaluated together without replacing the isolated-factor populations.
+  held-object goals additionally vary target height and roll/pitch. Each pose
+  domain keeps primitive parameters, physics, robot, and task semantics fixed
+  and contains eight deterministic samples per seed. Every track also contains
+  a shared planar task-frame domain and a skill-appropriate composed domain.
+  These domains use deterministic per-dimension stratification, including both
+  configured interval bounds, so object, target, support, and task-frame changes
+  are evaluated together without replacing the isolated-factor populations.
   Workspace-shell domains sample normalized XY offset radii from the nominal
   task pose toward the configured boundary and record each row as `near`,
   `mid`, or `far` in the case manifest. The generalization summary reports
-  bucket-level success rates, sample counts, and failure-stage counts. Domain
-  overrides select `B=1` for nominal cases and `B=8` for shifted cases;
+  bucket-level success rates, sample counts, and failure-stage counts. The six
+  cube-based skills additionally run a first-stage parameterized primitive
+  sweep. The built-in `cube` primitive varies only its `size` parameter: 40 mm
+  and 60 mm uniform scales plus approximately volume-preserving cuboids
+  elongated along X, Y, or Z. One YAML anchor owns each parameter value, and
+  both the runtime object override and domain provenance reference that anchor.
+  Four primitive-only tracks give these domains their own 50 mm nominal
+  population and generalization summary, separate from pose shifts. They retain
+  the same logical object id, physical parameters, skill configuration, seeds,
+  and nominal scene pose. The resolved parameters are recorded in
+  `resolved_suite.yaml` and each case's `object_config`. Domain overrides select
+  `B=1` for nominal and primitive cases and `B=8` for pose-shift cases;
   generated poses are frozen in the case manifest and restored before every
-  planner replay.
+  planner replay. Additional registered primitives and mesh-backed geometries
+  can extend the same replacement structure in later stages.
 - Dual-arm slice on the tutorial dual UR5 + PGI robot (`dual_arm` robot
   provider): `HandOver`, `CoordinatedPickment`, and `CoordinatedPlacement`,
   one suite each, reusing each tutorial's robot settings and scene. These
@@ -132,16 +143,24 @@ in that run's `videos/` directory.
   delivery height; Coordinated Placement combines subject, support, target,
   and task-frame pose changes in one domain.
 
-  | Atomic Skill | Workspace/relative shell | Shared workspace domain | Composed domain | Bilateral mirror | Simultaneously varied dimensions |
-  | --- | --- | --- | --- | :---: | --- |
-  | `PickUp`, `Pour`, `AxisAlign` | `object_workspace_shell` | `task_frame_planar` | `object_planar_pose` |  | subject XY + subject yaw |
-  | `MoveHeldObject` | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` |  | subject XY/yaw + target XYZ/yaw/roll/pitch |
-  | `Place` | `target_relative_shell` | `task_frame_planar` | `object_target_planar_pose` |  | subject XY/yaw + target XY/yaw |
-  | `PushObject` | `target_relative_shell` | `task_frame_planar` | `object_target_position` |  | subject XY/yaw + target XY |
-  | `Press`, `Twist`, `Slide`, `OpenDoor` | `articulation_workspace_shell` | `task_frame_planar` | `articulation_spatial_pose` |  | articulation XYZ/yaw/roll/pitch |
-  | `HandOver` | `target_relative_shell` | `task_frame_planar` | `object_target_position` | ✓ | subject XY/yaw + delivery XYZ |
-  | `CoordinatedPickment` | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` | ✓ | subject XY/yaw + target XYZ/yaw/roll/pitch |
-  | `CoordinatedPlacement` | `support_relative_shell` | `task_frame_planar` | `object_support_target_task_frame_pose` | ✓ | subject XY/yaw + support XY/yaw + target XYZ/yaw + task-frame XY/yaw |
+  | Atomic Skill | Cube primitive parameters | Workspace/relative shell | Shared workspace domain | Composed domain | Bilateral mirror | Simultaneously varied dimensions |
+  | --- | --- | --- | --- | --- | :---: | --- |
+  | `PickUp`, `Pour`, `AxisAlign` | 40/60 mm + X/Y/Z aspect | `object_workspace_shell` | `task_frame_planar` | `object_planar_pose` |  | subject XY + subject yaw |
+  | `MoveHeldObject` | 40/60 mm + X/Y/Z aspect | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` |  | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `Place` | 40/60 mm + X/Y/Z aspect | `target_relative_shell` | `task_frame_planar` | `object_target_planar_pose` |  | subject XY/yaw + target XY/yaw |
+  | `PushObject` | 40/60 mm + X/Y/Z aspect | `target_relative_shell` | `task_frame_planar` | `object_target_position` |  | subject XY/yaw + target XY |
+  | `Press`, `Twist`, `Slide`, `OpenDoor` |  | `articulation_workspace_shell` | `task_frame_planar` | `articulation_spatial_pose` |  | articulation XYZ/yaw/roll/pitch |
+  | `HandOver` |  | `target_relative_shell` | `task_frame_planar` | `object_target_position` | ✓ | subject XY/yaw + delivery XYZ |
+  | `CoordinatedPickment` |  | `target_relative_shell` | `task_frame_planar` | `object_target_spatial_pose` | ✓ | subject XY/yaw + target XYZ/yaw/roll/pitch |
+  | `CoordinatedPlacement` |  | `support_relative_shell` | `task_frame_planar` | `object_support_target_task_frame_pose` | ✓ | subject XY/yaw + support XY/yaw + target XYZ/yaw + task-frame XY/yaw |
+
+  | Primitive domain | Kind | Parameter override | Value in metres | Geometry change |
+  | --- | --- | --- | --- | --- |
+  | `cube_uniform_40mm` | `cube` | `size` | `[0.04, 0.04, 0.04]` | uniform scale down |
+  | `cube_uniform_60mm` | `cube` | `size` | `[0.06, 0.06, 0.06]` | uniform scale up |
+  | `cube_aspect_x` | `cube` | `size` | `[0.07, 0.042258, 0.042258]` | X elongated |
+  | `cube_aspect_y` | `cube` | `size` | `[0.042258, 0.07, 0.042258]` | Y elongated |
+  | `cube_aspect_z` | `cube` | `size` | `[0.042258, 0.042258, 0.07]` | Z elongated |
 
   | Atomic Skill | Subject XY | Subject Z | Subject yaw | Subject roll/pitch | Target XY | Target Z | Target yaw | Target roll/pitch | Support XY/yaw | Task-frame XY/yaw |
   | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
