@@ -148,6 +148,37 @@ def test_legacy_checkpoint_preserves_original_observation_contract(tmp_path) -> 
     assert restored.observation_mode == "legacy"
 
 
+def test_residual_arm_commands_preserve_measured_pose_and_bound_controller_lead(
+    tmp_path,
+) -> None:
+    model = RecurrentBC(
+        torch.zeros(28),
+        torch.ones(28),
+        -torch.ones(8),
+        torch.ones(8),
+        arm_command_mode="residual",
+    )
+    obs = torch.zeros(2, 28)
+    obs[:, :7] = 0.3
+    with torch.no_grad():
+        model.head[2].weight.zero_()
+        model.head[2].bias.zero_()
+        held, _ = model.action(obs, None)
+        torch.testing.assert_close(held[:, :7], obs[:, :7])
+        model.head[2].bias[:7] = 100
+        advanced, _ = model.action(obs, None)
+        torch.testing.assert_close(
+            advanced[:, :7] - obs[:, :7], torch.full((2, 7), 0.25)
+        )
+    path = tmp_path / "residual.pt"
+    save_checkpoint(
+        path, model, torch.optim.AdamW(model.parameters()), 1, argparse.Namespace(), 1
+    )
+    restored, _ = load_policy(str(path), "cpu")
+    assert restored.arm_command_mode == "residual"
+    torch.testing.assert_close(model.action(obs, None), restored.action(obs, None))
+
+
 def test_failed_producer_is_not_retried_as_an_empty_sampling_window() -> None:
     from types import SimpleNamespace
     from examples.data_pipeline.ods_pick_place_showcase import _sample

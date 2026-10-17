@@ -43,6 +43,12 @@ The learner never reads expert segment labels or calls a
 planner during evaluation. Eight active joint targets control the seven arm
 joints and one active finger; the robot handles the mimic finger.
 
+`--arm-command-mode residual` additionally learns a bounded controller lead of
+up to 0.25 rad from measured arm positions. It keeps the same GRU/head, action
+joint order and absolute target interface. The gripper remains an absolute
+position target. The default `absolute` mode predicts arm targets directly;
+checkpoints record the selected parameterization for correct inference/resume.
+
 Useful variants:
 
 ```bash

@@ -104,6 +104,7 @@ class RecurrentBC(nn.Module):
         high: torch.Tensor,
         *,
         observation_mode: str = "physical",
+        arm_command_mode: str = "absolute",
     ) -> None:
         super().__init__()
         if (
@@ -123,7 +124,10 @@ class RecurrentBC(nn.Module):
             raise ValueError("Invalid normalization or action bounds")
         if observation_mode not in {"legacy", "physical"}:
             raise ValueError("Unknown policy observation mode")
+        if arm_command_mode not in {"absolute", "residual"}:
+            raise ValueError("Unknown arm command mode")
         self.observation_mode = observation_mode
+        self.arm_command_mode = arm_command_mode
         self.register_buffer("mean", mean.clone())
         self.register_buffer("std", std.clone())
         self.register_buffer("low", low.clone())
@@ -142,7 +146,16 @@ class RecurrentBC(nn.Module):
         if self.observation_mode == "physical":
             normalized = normalized.clamp(-10, 10)
         features, hidden = self.gru(normalized, hidden)
-        return self.head(features), hidden
+        prediction = self.head(features)
+        if self.arm_command_mode == "residual":
+            # Learn the controller lead rather than reconstructing measured qpos.
+            # The environment still receives bounded absolute joint positions.
+            # A normalized residual of +/-1 adds at most +/-0.25 radians.
+            span = self.high[:7] - self.low[:7]
+            current = 2 * (obs[..., :7] - self.low[:7]) / span - 1
+            arm = (current + prediction[..., :7] * (0.5 / span)).clamp(-1, 1)
+            prediction = torch.cat((arm, prediction[..., 7:]), dim=-1)
+        return prediction, hidden
 
     def action(
         self, obs: torch.Tensor, hidden: torch.Tensor | None
@@ -209,7 +222,10 @@ def save_checkpoint(
         raise FileExistsError(f"Refusing to overwrite checkpoint {path}")
     state = {
         "model": model.state_dict(),
-        "policy_config": {"observation_mode": model.observation_mode},
+        "policy_config": {
+            "observation_mode": model.observation_mode,
+            "arm_command_mode": model.arm_command_mode,
+        },
         "optimizer": optimizer.state_dict(),
         "step": step,
         "config": vars(args),
@@ -236,6 +252,9 @@ def load_policy(path: str, device: str) -> tuple[RecurrentBC, dict[str, Any]]:
         weights["high"],
         observation_mode=state.get("policy_config", {}).get(
             "observation_mode", "legacy"
+        ),
+        arm_command_mode=state.get("policy_config", {}).get(
+            "arm_command_mode", "absolute"
         ),
     ).to(device)
     model.load_state_dict(weights)
@@ -447,6 +466,12 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--train-device", default="cuda:0")
     p.add_argument("--output", type=Path, default=Path("/tmp/ods-pick-place-showcase"))
     p.add_argument("--mode", choices=("online", "frozen"), default="online")
+    p.add_argument(
+        "--arm-command-mode",
+        choices=("absolute", "residual"),
+        default="absolute",
+        help="Predict absolute arm targets or a bounded +/-0.25 rad lead from measured qpos.",
+    )
     p.add_argument("--rounds", type=int, default=5)
     p.add_argument("--updates-per-round", type=int, default=1000)
     p.add_argument("--buffer-size", type=int, default=32)
@@ -580,7 +605,11 @@ def main() -> None:
         values = policy_observations(initial["obs"])[initial["valid"]]
         mean, std = _observation_statistics(values)
         model = RecurrentBC(
-            mean, std, torch.tensor(ready["low"]), torch.tensor(ready["high"])
+            mean,
+            std,
+            torch.tensor(ready["low"]),
+            torch.tensor(ready["high"]),
+            arm_command_mode=args.arm_command_mode,
         ).to(args.train_device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
         step = 0
@@ -599,6 +628,10 @@ def main() -> None:
             random.setstate(state["python_rng"])
             if state["cuda_rng"] is not None and torch.cuda.is_available():
                 torch.cuda.set_rng_state_all(state["cuda_rng"])
+            args.arm_command_mode = model.arm_command_mode
+            (args.output / "config.json").write_text(
+                json.dumps(vars(args), default=str, indent=2)
+            )
         (args.output / "data_manifest.json").write_text(
             json.dumps(
                 {
@@ -771,6 +804,10 @@ def main() -> None:
         summary = {
             "smoke": args.smoke,
             "mode": args.mode,
+            "policy_config": {
+                "observation_mode": model.observation_mode,
+                "arm_command_mode": model.arm_command_mode,
+            },
             "consumed_generations": consumed,
             "supervised_generations": supervised,
             "round_sources": round_sources,
