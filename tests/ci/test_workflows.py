@@ -110,6 +110,28 @@ def test_test_package_install_uses_explicit_public_index_and_private_sources() -
     assert "--extra-index-url https://download.blender.org/pypi/" in package_install
 
 
+def test_simulator_test_job_installs_node_before_workflow_contract_tests() -> None:
+    steps = _load_workflow("main.yml")["jobs"]["test"]["steps"]
+    setup_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("uses", "").startswith("actions/setup-node@")
+    )
+    tests_index = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Run selected tests"
+    )
+    assert steps[setup_index]["with"]["node-version"] == "22"
+    assert setup_index < tests_index
+    capture_index = next(
+        i
+        for i, step in enumerate(steps)
+        if step.get("name") == "Preserve Node path for login shells"
+    )
+    assert setup_index < capture_index < tests_index
+    assert "GITHUB_ENV" in steps[capture_index]["run"]
+    assert 'export PATH="${CI_NODE_BIN_DIR}:${PATH}"' in steps[tests_index]["run"]
+
+
 @pytest.mark.parametrize(
     "invalid_contents",
     [
