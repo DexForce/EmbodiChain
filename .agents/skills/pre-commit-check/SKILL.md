@@ -145,6 +145,17 @@ appropriate syntax or configuration validator. Run the full suite only when:
 - a release-critical behavior cannot be validated narrowly; or
 - the user explicitly requests it.
 
+For changes identified as performance-sensitive during task analysis, follow
+[implement-performance](../implement-performance/SKILL.md) and select focused
+correctness checks for the algorithm, batch, memory or concurrency contracts
+being changed. Validate material performance claims using
+[benchmark](../benchmark/SKILL.md), comparing equivalent workloads and quality
+settings, including relevant small-batch behavior and peak memory. Report
+measured gains, tradeoffs and regressions with hardware and timing scope. If
+required hardware is unavailable, state what remains unvalidated; passing CPU
+tests does not establish GPU performance. Ordinary edits do not require a
+benchmark run.
+
 Before starting a command likely to take more than two minutes, report the
 selected scope and why narrower validation is insufficient. Honor explicit user
 instructions to skip or narrow tests.
