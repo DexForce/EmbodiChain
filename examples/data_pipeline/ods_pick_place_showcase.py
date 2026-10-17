@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Train a recurrent PickPlace policy from live ODS expert demonstrations.
+"""Train and compare lightweight PickPlace BC with live ODS or offline data.
 
 Run from the repository root:
     python examples/data_pipeline/ods_pick_place_showcase.py --sim-device cuda:0
@@ -42,6 +42,20 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+if __package__ in {None, ""}:
+    # Direct file execution must resolve this checkout and its bundled tasks,
+    # even when an editable installation points at another worktree.
+    _repository = Path(__file__).resolve().parents[2]
+    sys.path[:0] = [
+        str(path)
+        for path in (
+            _repository,
+            _repository / "extensions",
+            _repository / "extensions" / "embodichain_tasks",
+        )
+        if str(path) not in sys.path
+    ]
+
 from embodichain.data_pipeline.engine.data import (
     OnlineDataEngine,
     OnlineDataEngineCfg,
@@ -54,8 +68,37 @@ TASK_CONFIG = (
 )
 
 
-def policy_observations(obs: Any) -> torch.Tensor:
+def policy_observations(obs: Any, mode: str = "physical") -> torch.Tensor:
     """Pack current measured state only; never read demonstration annotations."""
+    if mode == "geometry":
+        from embodichain.utils.math import matrix_from_quat
+
+        tcp = obs["tcp_pose"]
+        cube = obs["cube_pose"]
+        quaternion = F.normalize(cube[..., 3:], dim=-1)
+        identity = torch.zeros_like(quaternion)
+        identity[..., 3] = 1
+        # History padding has a zero payload, including its quaternion. Convert
+        # that neutral payload to a finite rotation before masking it downstream.
+        quaternion = torch.where(
+            quaternion.norm(dim=-1, keepdim=True) == 0, identity, quaternion
+        )
+        rotation = matrix_from_quat(quaternion)
+        return torch.cat(
+            (
+                obs["robot"]["qpos"],
+                obs["robot"]["qvel"],
+                tcp[..., :3, 3],
+                tcp[..., :3, :2].transpose(-1, -2).flatten(-2),
+                cube[..., :3],
+                rotation[..., :3, :2].transpose(-1, -2).flatten(-2),
+                obs["goal_position"],
+                cube[..., :3] - tcp[..., :3, 3],
+                obs["goal_position"] - cube[..., :3],
+                obs["cube_velocity"],
+            ),
+            dim=-1,
+        ).float()
     return torch.cat(
         (
             obs["robot"]["qpos"],
@@ -91,6 +134,166 @@ def _observation_statistics(values: torch.Tensor) -> tuple[torch.Tensor, torch.T
     # Unit quaternions already have a physical scale and need no centering.
     mean[21:25], std[21:25] = 0, 1
     return mean, std
+
+
+def _geometry_statistics(values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    floors = values.new_tensor(
+        [0.1] * 7
+        + [0.02] * 2
+        + [0.5] * 7
+        + [0.02] * 2
+        + [0.05] * 3
+        + [1.0] * 6
+        + [0.05] * 3
+        + [1.0] * 6
+        + [0.1] * 3
+        + [0.05] * 6
+        + [0.1] * 3
+        + [0.5] * 3
+    )
+    mean, std = values.mean(0), values.std(0, correction=0).clamp_min(floors)
+    mean[21:27], std[21:27] = 0, 1
+    mean[30:36], std[30:36] = 0, 1
+    return mean, std
+
+
+class MLPBC(nn.Module):
+    """Two-layer state BC in normalized pose-request or joint-residual space."""
+
+    observation_mode = "geometry"
+
+    def __init__(
+        self,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        low: torch.Tensor,
+        high: torch.Tensor,
+        *,
+        arm_command_mode: str = "pose",
+    ) -> None:
+        super().__init__()
+        width = 7 if arm_command_mode == "pose" else 8
+        if arm_command_mode not in {"pose", "residual"}:
+            raise ValueError("MLP actions must be pose requests or joint residuals")
+        if (
+            mean.shape != (51,)
+            or std.shape != (51,)
+            or low.shape != (width,)
+            or high.shape != low.shape
+        ):
+            raise ValueError(
+                "MLP requires 51 measured features and matching action bounds"
+            )
+        if (
+            not all(torch.isfinite(v).all() for v in (mean, std, low, high))
+            or (std <= 0).any()
+            or (high <= low).any()
+        ):
+            raise ValueError("Invalid MLP normalization or action bounds")
+        self.arm_command_mode = arm_command_mode
+        for name, value in (("mean", mean), ("std", std), ("low", low), ("high", high)):
+            self.register_buffer(name, value.clone())
+        self.net = nn.Sequential(
+            nn.Linear(51, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, width),
+        )
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(((obs - self.mean) / self.std).clamp(-10, 10))
+
+    def action(
+        self,
+        obs: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, None]:
+        request = self(obs).clamp(-1, 1)
+        if self.arm_command_mode == "pose":
+            return request, None
+        arm = (obs[..., :7] + 0.25 * request[..., :7]).clamp(
+            self.low[:7], self.high[:7]
+        )
+        finger = self.low[7:] + (request[..., 7:] + 1) * 0.5 * (
+            self.high[7:] - self.low[7:]
+        )
+        return torch.cat((arm, finger), dim=-1), None
+
+    def loss(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        *,
+        loss_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        target = actions
+        if self.arm_command_mode == "residual":
+            target = torch.cat(
+                (
+                    (actions[..., :7] - obs[..., :7]) / 0.25,
+                    2
+                    * (actions[..., 7:] - self.low[7:])
+                    / (self.high[7:] - self.low[7:])
+                    - 1,
+                ),
+                dim=-1,
+            )
+        error = (self(obs) - target).square()
+        if loss_mask is not None:
+            error = error[loss_mask]
+        return error[..., :-1].mean(), error[..., -1].mean()
+
+
+class GeometryRecurrentBC(MLPBC):
+    """Causal measured-geometry fallback with normalized pose-request MSE."""
+
+    def __init__(
+        self,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        low: torch.Tensor,
+        high: torch.Tensor,
+    ) -> None:
+        super().__init__(mean, std, low, high, arm_command_mode="pose")
+        del self.net
+        self.gru = nn.GRU(51, 128, batch_first=True)
+        self.head = nn.Sequential(nn.Linear(128, 128), nn.ReLU(), nn.Linear(128, 7))
+
+    def forward(
+        self, obs: torch.Tensor, hidden: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Predict unclamped requests from full causal measured-state sequences."""
+        normalized = ((obs - self.mean) / self.std).clamp(-10, 10)
+        features, hidden = self.gru(normalized, hidden)
+        return self.head(features), hidden
+
+    def action(
+        self, obs: torch.Tensor, hidden: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Advance one measured-state step and carry its recurrent state."""
+        requests, hidden = self(obs[:, None], hidden)
+        return requests[:, 0].clamp(-1, 1), hidden
+
+    def loss(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        *,
+        loss_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Supervise valid requests while backpropagating through their prefixes."""
+        if loss_mask is not None and (
+            loss_mask.shape != obs.shape[:2]
+            or loss_mask.dtype != torch.bool
+            or not loss_mask.any()
+        ):
+            raise ValueError("loss_mask must select supervised sequence steps")
+        predictions, _ = self(obs)
+        error = (predictions - actions).square()
+        if loss_mask is not None:
+            error = error[loss_mask]
+        return error[..., :6].mean(), error[..., 6].mean()
 
 
 class RecurrentBC(nn.Module):
@@ -192,7 +395,9 @@ class RecurrentBC(nn.Module):
         return error[..., :7].mean(), error[..., 7:].mean()
 
 
-def load_task_config(device: str) -> dict[str, Any]:
+def load_task_config(
+    device: str, action_mode: str = "joint", pose_ik: str = "solver"
+) -> dict[str, Any]:
     from embodichain.utils.utility import load_config
     from embodichain.lab.gym.utils._component_composition import _resolve_gym_components
 
@@ -207,12 +412,34 @@ def load_task_config(device: str) -> dict[str, Any]:
         enable_sensor=False,
         num_envs=1,
     )
+    if action_mode == "pose":
+        config["env"].setdefault("extensions", {})["pick_place_action_mode"] = "pose"
+        config["env"]["actions"] = {
+            "arm": {
+                "contract": "eef_pose.relative@1",
+                "params": {
+                    "part_name": "arm",
+                    "translation_scale": 0.02,
+                    "rotation_scale": 0.1,
+                    "ik_method": pose_ik,
+                },
+            },
+            "eef": {
+                "contract": "gripper.parallel@1",
+                "params": {
+                    "part_name": "eef",
+                    "command_mode": "continuous",
+                    "lower_command": {".*": 0.0},
+                    "upper_command": {".*": 0.04},
+                },
+            },
+        }
     return config
 
 
 def save_checkpoint(
     path: Path,
-    model: RecurrentBC,
+    model: RecurrentBC | MLPBC | GeometryRecurrentBC,
     optimizer: torch.optim.Optimizer,
     step: int,
     args: argparse.Namespace,
@@ -223,8 +450,14 @@ def save_checkpoint(
     state = {
         "model": model.state_dict(),
         "policy_config": {
+            "type": (
+                "gru_pose"
+                if isinstance(model, GeometryRecurrentBC)
+                else "mlp" if isinstance(model, MLPBC) else "gru"
+            ),
             "observation_mode": model.observation_mode,
             "arm_command_mode": model.arm_command_mode,
+            "schema": getattr(model, "schema", None),
         },
         "optimizer": optimizer.state_dict(),
         "step": step,
@@ -234,7 +467,10 @@ def save_checkpoint(
         "numpy_rng": np.random.get_state(),
         "python_rng": random.getstate(),
         "cuda_rng": (
-            torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            {"train": torch.cuda.get_rng_state(args.train_device)}
+            if torch.cuda.is_initialized()
+            and str(getattr(args, "train_device", "cpu")).startswith("cuda:")
+            else None
         ),
     }
     temporary = path.with_suffix(".tmp")
@@ -242,9 +478,39 @@ def save_checkpoint(
     temporary.replace(path)
 
 
-def load_policy(path: str, device: str) -> tuple[RecurrentBC, dict[str, Any]]:
+def load_policy(
+    path: str, device: str
+) -> tuple[RecurrentBC | MLPBC | GeometryRecurrentBC, dict[str, Any]]:
     state = torch.load(path, map_location="cpu", weights_only=False)
     weights = state["model"]
+    policy_config = state.get("policy_config", {})
+    if policy_config.get("type") == "gru_pose":
+        if (
+            policy_config.get("observation_mode") != "geometry"
+            or policy_config.get("arm_command_mode") != "pose"
+        ):
+            raise ValueError(
+                "gru_pose requires geometry observations and pose requests"
+            )
+        model = GeometryRecurrentBC(
+            weights["mean"], weights["std"], weights["low"], weights["high"]
+        ).to(device)
+        model.load_state_dict(weights)
+        model.schema = policy_config.get("schema")
+        model.eval()
+        return model, state
+    if policy_config.get("type") == "mlp":
+        model = MLPBC(
+            weights["mean"],
+            weights["std"],
+            weights["low"],
+            weights["high"],
+            arm_command_mode=policy_config["arm_command_mode"],
+        ).to(device)
+        model.load_state_dict(weights)
+        model.schema = policy_config.get("schema")
+        model.eval()
+        return model, state
     model = RecurrentBC(
         weights["mean"],
         weights["std"],
@@ -305,6 +571,11 @@ def _evaluate_worker(
                 "low": raw.single_action_space.low.tolist(),
                 "high": raw.single_action_space.high.tolist(),
                 "joints": list(raw.expert_action_spec.joint_names),
+                "action_terms": (
+                    [d.to_dict() for d in raw.action_manager.descriptors]
+                    if raw.action_manager is not None
+                    else []
+                ),
             }
         )
         while True:
@@ -318,6 +589,20 @@ def _evaluate_worker(
                 model, checkpoint_state = load_policy(
                     request["checkpoint"], config["device"]
                 )
+                schema = getattr(model, "schema", None)
+                if schema is not None:
+                    actual = (
+                        [d.to_dict() for d in raw.action_manager.descriptors]
+                        if raw.action_manager is not None
+                        else []
+                    )
+                    if (
+                        schema["action"]["terms"] != actual
+                        or schema["observation"]["version"] != "pick_place.geometry@2"
+                    ):
+                        raise ValueError(
+                            "Checkpoint observation/controller schema does not match evaluation environment"
+                        )
                 model_step = str(checkpoint_state["step"])
             if viewer:
                 raw.sim.stop_visualization()
@@ -327,7 +612,12 @@ def _evaluate_worker(
                 raw.sim.start_visualization()
             records = []
             for ordinal, seed in enumerate(request["seeds"]):
-                obs, _ = env.reset(seed=seed, options={"save_data": False})
+                reset_options = {"save_data": False}
+                if "initial_positions" in request:
+                    reset_options["cube_xy"] = [
+                        request["initial_positions"][ordinal][:2]
+                    ]
+                obs, _ = env.reset(seed=seed, options=reset_options)
                 if kind == "qualify":
                     result = execute_demo_episode(env)
                     success = bool(result.completed and result.all_success)
@@ -336,6 +626,7 @@ def _evaluate_worker(
                 else:
                     hidden = None
                     initial_delta = None
+                    trace = []
                     writer = None
                     if video and ordinal < 3 and request.get("record", False):
                         import imageio.v2 as imageio
@@ -348,15 +639,33 @@ def _evaluate_worker(
                         for length in range(1, 601):
                             with torch.inference_mode():
                                 action, hidden = model.action(
-                                    policy_observations(obs), hidden
+                                    policy_observations(obs, model.observation_mode),
+                                    hidden,
                                 )
-                            if initial_delta is None:
+                            if request.get("trace", False):
+                                trace.append(
+                                    {
+                                        "observations": policy_observations(
+                                            obs, model.observation_mode
+                                        ).cpu(),
+                                        "actions": action.cpu(),
+                                        "qpos": obs["robot"]["qpos"].cpu(),
+                                        "cube_pose": obs["cube_pose"].cpu(),
+                                        "tcp_pose": obs["tcp_pose"].cpu(),
+                                    }
+                                )
+                            if (
+                                initial_delta is None
+                                and model.arm_command_mode != "pose"
+                            ):
                                 initial_delta = float(
                                     (action[:, :7] - obs["robot"]["qpos"][:, :7])
                                     .abs()
                                     .max()
                                 )
                             obs, _, terminated, truncated, info = env.step(action)
+                            if initial_delta is None:
+                                initial_delta = float(action[:, :6].abs().max())
                             if writer is not None:
                                 frame = (
                                     obs["sensor"]["cam_high"]["color"][0, ..., :3]
@@ -370,6 +679,15 @@ def _evaluate_worker(
                             ):
                                 break
                         success = bool(info["success"][0])
+                        if trace:
+                            torch.save(
+                                {
+                                    key: torch.cat([frame[key] for frame in trace])
+                                    for key in trace[0]
+                                },
+                                Path(output)
+                                / f'{request["name"]}_seed_{seed}_trace.pt',
+                            )
                     finally:
                         if writer is not None:
                             writer.close()
@@ -465,7 +783,44 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--sim-device", default="cuda:0")
     p.add_argument("--train-device", default="cuda:0")
     p.add_argument("--output", type=Path, default=Path("/tmp/ods-pick-place-showcase"))
-    p.add_argument("--mode", choices=("online", "frozen"), default="online")
+    p.add_argument(
+        "--mode",
+        choices=(
+            "online",
+            "frozen",
+            "offline-32",
+            "offline-full",
+            "offline-matched",
+            "serial",
+        ),
+        default="online",
+    )
+    p.add_argument(
+        "--policy",
+        choices=("mlp-pose", "mlp-joint", "gru-pose", "gru"),
+        default="mlp-pose",
+    )
+    p.add_argument("--pose-ik", choices=("solver", "dls"), default="solver")
+    p.add_argument(
+        "--stage",
+        choices=("showcase", "overfit-one", "overfit-four"),
+        default="showcase",
+    )
+    p.add_argument("--offline-data", type=Path)
+    p.add_argument("--export-data", type=Path)
+    p.add_argument("--record-batches", action="store_true")
+    p.add_argument("--batch-manifest", type=Path)
+    p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--qualification-scenes", type=int, default=40)
+    p.add_argument(
+        "--qualification-report",
+        type=Path,
+        help="Reuse a matching 40-scene qualification with source/config checks",
+    )
+    p.add_argument("--dev-scenes", type=int, default=20)
+    p.add_argument("--final-test-scenes", type=int, default=100)
+    p.add_argument("--wall-time-budget", type=float, default=None)
+    p.add_argument("--learning-rate", type=float, default=3e-4)
     p.add_argument(
         "--arm-command-mode",
         choices=("absolute", "residual"),
@@ -475,7 +830,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--rounds", type=int, default=5)
     p.add_argument("--updates-per-round", type=int, default=1000)
     p.add_argument("--buffer-size", type=int, default=32)
-    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--resume", type=Path)
     p.add_argument("--viser-port", type=int, default=8080)
@@ -485,6 +840,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--qualification-only", action="store_true")
     args = p.parse_args()
+    if args.batch_size is None:
+        args.batch_size = 64 if args.policy.startswith("gru") else 256
     if args.smoke:
         args.rounds, args.updates_per_round, args.buffer_size, args.batch_size = (
             2,
@@ -492,6 +849,31 @@ def _parse_args() -> argparse.Namespace:
             2,
             4,
         )
+        args.qualification_scenes, args.dev_scenes, args.final_test_scenes = 2, 2, 2
+    if args.stage != "showcase":
+        args.mode = "frozen"
+        args.buffer_size = 1 if args.stage == "overfit-one" else 4
+        args.rounds = 1
+        args.final_test_scenes = 0
+    if args.policy == "gru" and (
+        args.stage != "showcase" or args.mode not in {"online", "frozen"}
+    ):
+        p.error(
+            "Legacy GRU supports online/frozen showcase runs; use an MLP for new diagnostic/benchmark modes"
+        )
+    if (
+        args.eval_every < 1
+        or args.qualification_scenes < 1
+        or args.dev_scenes < 1
+        or args.final_test_scenes < 0
+    ):
+        p.error("Evaluation counts must be positive (final test may be disabled)")
+    if args.wall_time_budget is not None and (
+        not np.isfinite(args.wall_time_budget) or args.wall_time_budget <= 0
+    ):
+        p.error("Wall-time budget must be finite and positive")
+    if not np.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        p.error("Learning rate must be finite and positive")
     if min(args.rounds, args.updates_per_round, args.buffer_size, args.batch_size) < 1:
         p.error("Training counts must be positive")
     return args
@@ -499,6 +881,11 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if args.policy != "gru":
+        from examples.data_pipeline._ods_pick_place_training import run
+
+        run(args)
+        return
     # Let worker teardown drain resources and publish errors before process exit.
     os.environ["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
     if args.output.exists() and any(args.output.iterdir()):
@@ -626,8 +1013,19 @@ def main() -> None:
             torch.set_rng_state(state["torch_rng"])
             np.random.set_state(state["numpy_rng"])
             random.setstate(state["python_rng"])
-            if state["cuda_rng"] is not None and torch.cuda.is_available():
-                torch.cuda.set_rng_state_all(state["cuda_rng"])
+            if state["cuda_rng"] is not None and args.train_device.startswith("cuda:"):
+                if isinstance(state["cuda_rng"], dict):
+                    torch.cuda.set_rng_state(
+                        state["cuda_rng"]["train"], args.train_device
+                    )
+                else:
+                    source_device = state.get("config", {}).get(
+                        "train_device", args.train_device
+                    )
+                    torch.cuda.set_rng_state(
+                        state["cuda_rng"][int(source_device.split(":")[-1])],
+                        args.train_device,
+                    )
             args.arm_command_mode = model.arm_command_mode
             (args.output / "config.json").write_text(
                 json.dumps(vars(args), default=str, indent=2)
@@ -667,7 +1065,14 @@ def main() -> None:
             name: value.detach().cpu().clone()
             for name, value in model.named_parameters()
         }
-        best_key, best_path = (-1.0, -1.0, -float("inf")), baseline
+        best_key, best_path = (
+            (
+                initial_report["success_rate"],
+                initial_report["lift_rate"],
+                -initial_report["goal_error"],
+            ),
+            baseline,
+        )
         consumed: dict[int, int] = {}
         supervised: dict[int, int] = {}
         round_sources = []

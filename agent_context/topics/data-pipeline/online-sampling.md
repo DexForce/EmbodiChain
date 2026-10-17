@@ -41,30 +41,81 @@
 7. Worker exceptions are serialized into a fixed 64 KiB envelope and reconstructed when safely
    picklable; otherwise consumers receive stable `OnlineDataWorkerError`. The error is shared
    so all consumers observe terminal failure.
-8. Stop first signals close and wakes fill, then joins, terminates, and finally kills if
-   needed. A forced shutdown marks durability unconfirmed and ends in FAILED. Concurrent stop
+8. Stop first signals close and wakes fill, then joins for the configured finite,
+   positive `shutdown_timeout` before terminating and finally killing if needed.
+   This controls only the graceful-close wait; forced-shutdown join bounds remain
+   separate. A forced shutdown marks durability unconfirmed and ends in FAILED. Concurrent stop
    cancels a starting engine.
 9. `OnlineDataset` is infinite. Item mode samples one row then removes the leading dimension
    so DataLoader can collate; batch mode re-samples a dynamic chunk per yield. Multi-worker
    readers sample shared memory independently.
 
+## Recorded actions and provenance
+
+`action_dim` separates stored action width from robot-state `state_dim`; omitting
+it preserves the historical width for both. Default
+`action_semantics="expert_controller_command"` records the live
+`ExpertActionSpec`. `action_semantics="policy_request"` requires an explicit
+width and ordered `action_contracts`. After attaching its buffer and before
+executing a demonstration, the worker checks the resolved recording semantics,
+observed proprioception width, ActionManager contracts, contiguous slices and
+controlled-joint order. Matching policy and expert widths does not establish
+matching semantics.
+
+The worker selects `EmbodiedEnvCfg.rollout_action_semantics` from the ODS
+configuration. Explicit policy recording uses the existing raw ActionManager
+route without requiring a DatasetManager; floating layout, finite values and
+action-space bounds are checked before processing. Direct `ControllerAction`
+commands cannot enter a policy-request buffer. The expert schema and policy
+request schema remain independent. Configuration examples live in the
+[public online-data guide](../../../docs/source/features/online_data.md).
+
+`include_provenance` adds engine-local run, accepted-episode and generation IDs,
+`ods_frame_index` and `ods_accepted_at_ns`. Frame indices are zero-based positions
+within the stored episode. The timestamp is Unix nanoseconds at successful
+acceptance/publication, stamped while holding the publication lock before the
+row window becomes readable. It is not a monotonic or simulation timestamp.
+Samplers clone provenance with observations/actions under that same lock.
+Invalid frames, including history padding, retain `-1` in every provenance field.
+`get_stats()` returns detached counters and excludes the active write window
+from valid-frame counts. These IDs do not provide shared-buffer checkpoint
+recovery or portable offline content identity.
+
+## PickPlace experiment integration
+
+`examples/data_pipeline/ods_pick_place_showcase.py` owns the entry point, policy
+models, measured-state features and separate student evaluator. The private
+`_ods_pick_place_training.py` orchestrates geometry MLP and geometry GRU runs;
+`_ods_pick_place_benchmark.py` owns validated numeric corpora, batch-identity
+replay and efficiency accounting. The geometry feature contract uses measured
+proprioception, TCP/cube transforms, goal-relative positions and cube velocity.
+Normalization is frozen from initial training data. Policies do not consume
+expert segment annotations during inference.
+
+MLPs supervise individual frames using pose requests or joint residuals. The
+geometry GRU uses pose requests, complete causal prefixes and masked supervised
+windows; its recurrent state advances from episode reset during evaluation.
+The older joint-command GRU remains a separate compatibility route with its
+original observation/checkpoint contracts.
+
+The runner supports live overlap, frozen initial data, offline full-corpus and
+serial-refresh modes. Offline matched delivery replays an explicit MLP frame
+manifest against the same validated corpus; recurrent exact-manifest replay is
+not supported. Serial refresh is labeled an unmatched schedule and cannot
+isolate overlap under identical supervision. Corpus manifests validate the
+observation/action schema and tensor content; content identity is independent
+of engine run IDs. Learner resume restores model/optimizer/RNG state, with a
+fresh ODS source for live runs rather than a restored replay cache.
+
+Small-data gates, expert physical qualification and student learning assessment
+are separate. Smoke success and low training loss do not establish physical
+student success or an efficiency advantage. See the task-owned
+[experiment protocol](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/BENCHMARK.md)
+for comparable acquisition-inclusive/data-ready budgets and
+[task guidance](../../../extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md)
+for commands and measured results.
+
 ## Sampling failure boundary
-
-`action_dim` optionally separates stored expert command width from robot-state
-width; omitted values preserve `state_dim` for both. Explicit widths are checked
-against the live expert action spec and observed proprioception before generation.
-`include_provenance` adds numeric run/episode/generation IDs while rows remain
-excluded from readers. `get_stats()` returns detached production/consumption
-counters and excludes the active write window from valid-frame counts. These
-IDs identify live data; they do not provide shared-buffer checkpoint recovery.
-
-`examples/data_pipeline/ods_pick_place_showcase.py` composes manual ODS refill
-with a small recurrent BC learner and a separate student-only evaluator. Its
-learner uses complete causal prefixes, canonical quaternion inputs and frozen
-physical observation scales. Each online round reserves updates after complete
-refill publication, and logs supervised exposure separately from recurrent
-history. Checkpoint resume starts a new data source rather than restoring replay;
-legacy observation contracts remain loadable for inference/comparison only.
 
 `sample_batch()` checks the shared worker error, READY state and worker liveness
 before selecting a window. Invalid arguments raise `ValueError`. If no unlocked
@@ -92,8 +143,11 @@ a bounded shared UTF-8 buffer. No manager server or simulation object is needed
 by a consumer. Registry and row locks retain independent responsibilities.
 
 `engine.resolve_language(batch)` and `OnlineDataset.resolve_language(batch)`
-return nested strings matching sampled dimensions. Tokenization belongs to the
-training transform; shared TensorDicts retain numeric IDs. IDs are engine-local,
+return nested strings matching sampled dimensions. History padding keeps
+`task_index` and `subtask_index` at `-1`; the resolver deliberately rejects these
+invalid IDs. Select `valid` frames (or supervised `loss_mask` frames) before
+decoding padded histories. Tokenization belongs to the training transform;
+shared TensorDicts retain numeric IDs. IDs are engine-local,
 not portable offline dataset indices. They remain valid across refill/shutdown
 while the engine/registry object is retained. Exhausting `language_buffer_bytes`
 fails generation through the existing worker-error channel before publishing an

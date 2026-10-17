@@ -1,98 +1,139 @@
-# Franka online PickPlace showcase
+# Franka ODS PickPlace showcase
 
-See [revised experiments](EXPERIMENTS.md) for the causal-history fixes, controlled
-comparisons and current unmet task-learning target. The [earlier validation](VALIDATION.md)
-retains the original engineering checks and learning shortfall.
+The entry point trains a small state policy from scratch, with a live expert
+producer, an independent student evaluator, optional Viser/TensorBoard, and
+explicit offline-data controls. See [implementation evidence](IMPLEMENTATION.md),
+[design](REDESIGN.md), [review](REVIEW.md), and [efficiency protocol](BENCHMARK.md).
+Engineering smoke and training-reset qualification are separate from the final
+80% success target; inspect each run's `summary.json`.
 
-This task physically grasps a 5 cm cube, lifts it, places it at the marked goal,
-opens the gripper and withdraws. The expert and student use the same measured
-success predicate: at least 5 cm of lift, goal error at most 3 cm, ground-height
-agreement, open fingers, a withdrawn TCP and 0.3 seconds of low-speed stability.
-The cube is not attached or teleported during execution.
+## Physical task and policy
 
-From the repository root, with a working DexSim installation and robot assets:
+The unchanged task physically grasps a 5 cm cube, lifts it at least 5 cm, places
+it within 3 cm of the fixed goal at table height, opens the fingers, withdraws
+the TCP by 10 cm, and remains stable for 0.3 seconds. Initial cube XY varies by
+±4 cm. Physics/control frequencies are 240/30 Hz, with a 600-step horizon.
+There is no execution-time object attachment, teleport or student expert takeover.
 
-```bash
-python examples/data_pipeline/ods_pick_place_showcase.py \
-  --sim-device cuda:0 --train-device cuda:0 \
-  --output /tmp/pick-place-online
-```
+Measured geometry policies use 51 current features: qpos/qvel, TCP/cube poses,
+goal, relative vectors and cube velocities. Rotation features use two matrix
+columns. Normalization is frozen from initial training data. Seven normalized
+requests control arena-frame TCP translation/rotation increments plus the active
+finger; mimic handling belongs to the robot.
 
-The runner first qualifies the expert on 40 independent seeds and requires at
-least 38 successes. It then starts a CPU shared ODS buffer, a recurrent PyTorch
-BC learner, an independent evaluation process, Viser at
-http://127.0.0.1:8080 and TensorBoard at http://127.0.0.1:6006. Browser commands
-cannot control the evaluation robot. Training observations are robot qpos/qvel,
-cube pose and goal position; cameras are used only for visualization and videos.
+`--policy mlp-pose` selects a two-layer MLP-256. `--policy gru-pose` selects the
+small geometry GRU-128 fallback with full causal-prefix training and 24 supervised
+steps per sequence. Hidden state resets only at episode reset. No expert stage,
+clock or success flag is an input. `--policy mlp-joint` retains the geometric
+joint-residual diagnostic; `--policy gru` retains the older 28-feature learner.
 
-The default is five rounds of 1,000 updates, with 32 episode slots and a manual
-refill per subsequent round. The first 250 updates may overlap production;
-the next 750 wait for complete fresh publication and train on the new generation.
-`summary.json` records each round's supervised generation exposure separately
-from the repeated input frames used to reconstruct recurrent history.
+`--pose-ik solver` uses the robot's configured IK. `--pose-ik dls` selects a local
+Jacobian step with damping 0.05, maximum joint increment 0.10, joint-limit clipping
+and exact solver-root frame conversion. Its finite-step flag does not certify
+pose convergence; complete physical task acceptance remains authoritative. The
+expert executes through the same selected controller and records actual requests.
 
-Each sequence contains its complete causal prefix and 24 supervised steps.
-Prefixes and windows are copied under one ODS lock, with right padding masked.
-A 25% episode-start sampling probability includes initial actions in the loss;
-the GRU state during training is reconstructed from the same origin as student
-inference. Gradients propagate through the prefix. Equivalent quaternion signs
-are canonicalized, quaternion components retain unit scale, and other input
-statistics use physical lower bounds and bounded normalized values. Normalization
-is calculated on initial training data and then frozen.
+## Run the qualification gates
 
-The learner never reads expert segment labels or calls a
-planner during evaluation. Eight active joint targets control the seven arm
-joints and one active finger; the robot handles the mimic finger.
-
-`--arm-command-mode residual` additionally learns a bounded controller lead of
-up to 0.25 rad from measured arm positions. It keeps the same GRU/head, action
-joint order and absolute target interface. The gripper remains an absolute
-position target. The default `absolute` mode predicts arm targets directly;
-checkpoints record the selected parameterization for correct inference/resume.
-
-Useful variants:
+From the repository root, with compatible DexSim runtime and robot assets:
 
 ```bash
-# Engineering smoke only: two qualification scenes and ten training updates.
+# Data/control/process smoke, with two generations and ten updates.
 python examples/data_pipeline/ods_pick_place_showcase.py --smoke \
-  --no-viewer --no-video --output /tmp/pick-place-smoke
+  --pose-ik dls --no-viewer --no-video --output /tmp/pick-place-smoke
 
-# Full expert qualification without training.
-python examples/data_pipeline/ods_pick_place_showcase.py --qualification-only \
-  --no-viewer --no-video --output /tmp/pick-place-expert
+# Qualify the selected physical teacher on 40 independent scenes.
+python examples/data_pipeline/ods_pick_place_showcase.py --pose-ik dls \
+  --qualification-only --output /tmp/pick-place-qualified
 
-# Fixed initial data, same model seed and update budget as the online run.
-python examples/data_pipeline/ods_pick_place_showcase.py --mode frozen \
-  --output /tmp/pick-place-frozen
+# One training reset, then ten independent student rollouts of that reset.
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --stage overfit-one --updates-per-round 2000 --eval-every 250 \
+  --qualification-report /tmp/pick-place-qualified/expert_qualification.json \
+  --no-viewer --no-video --output /tmp/pick-place-one
 
-# Continue optimization into a new run with freshly generated ODS data.
-python examples/data_pipeline/ods_pick_place_showcase.py \
-  --resume /tmp/pick-place-online/round_1_step_1000.pt \
-  --output /tmp/pick-place-resumed
+# Four training resets, then five student rollouts per reset.
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --stage overfit-four --updates-per-round 3000 --eval-every 500 \
+  --qualification-report /tmp/pick-place-qualified/expert_qualification.json \
+  --no-viewer --no-video --output /tmp/pick-place-four
 ```
 
-Use a fresh output directory for each invocation. Checkpoints are immutable.
-The run saves resolved experiment arguments, the data-source identity and joint
-order, normalization and RNG/optimizer state, per-seed evaluation JSON,
-TensorBoard events and initial/final comparison videos. The first three fixed
-evaluation seeds are recorded, including failures. Choose unused browser ports
-with `--viser-port` and `--tensorboard-port` when running multiple experiments.
+The one/four gates require at least 9/10 and 18/20 complete successes. Periodic
+checks evaluate each training reset once; the dev-selected checkpoint receives
+the complete repeatability panel at the end. These are training-reset diagnostics,
+not held-out generalization results. Reusing a qualification checks task/controller
+source hashes, physical configuration and at least 40 independent measured scenes.
+The common qualification cost is explicitly excluded when reusing it.
 
-Training, development and final-test seeds are separate. Twenty fixed
-development scenes select a checkpoint; 100 untouched final-test scenes assess
-that selected checkpoint and the initial model. A final success rate of 80%
-is an experimental target, not a guaranteed property. Inspect `summary.json`
-for the measured result and consumed ODS generations. A smoke run is never
-reported as meeting the learning target. Online data need not outperform the
-frozen control on every run.
+After these gates, qualify frozen generalization on 32 episodes before online
+training. Default development evaluation uses 20 fixed scenes. Final evaluation
+uses reserved seeds 50000–50099; smoke uses a separate engineering seed range.
+Stop and diagnose a failed gate rather than silently raising budgets or changing
+the physical success predicate.
 
-Selection first maximizes complete development success, then measured lift
-rate, then minimizes final goal error. The report also records the first arm
-target's deviation from the reset joint positions. These diagnostic metrics do
-not relax the task success predicate.
+## Online, offline and matched delivery
 
-This is online expert-data BC. It does not implement DAgger, feedback-directed
-collection or exact replay resume. Resume restores the learner and starts a new
-ODS run; its new source identity is recorded explicitly.
-Legacy checkpoints can still be loaded for comparison with their original
-observation contract; the corrected learner requires a new training run.
+```bash
+# Live ODS; omit no-viewer/no-video for Viser and TensorBoard.
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --mode online --sim-device cuda:0 --train-device cuda:0 \
+  --qualification-report /tmp/pick-place-qualified/expert_qualification.json \
+  --output /tmp/pick-place-online
+
+# Strong cold offline baseline: collect/save all five groups, then train.
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --mode offline-full --no-viewer --no-video \
+  --export-data /tmp/pick-place-offline/corpus.pt \
+  --output /tmp/pick-place-offline
+
+# Small offline baseline: save G1 and train on it for the full update budget.
+python examples/data_pipeline/ods_pick_place_showcase.py --policy gru-pose \
+  --pose-ik dls --mode offline-32 --no-viewer --no-video \
+  --output /tmp/pick-place-offline32
+```
+
+`--mode frozen` keeps live G1 without refill; `offline-32` additionally saves,
+closes the producer, loads G1 and trains. `--offline-data PATH` explicitly measures
+a data-ready scenario. It must not be presented as an acquisition-inclusive run.
+Offline format uses numeric CPU tensors, restricted loading, schema/content hashes
+and episode/frame identity. The loader may retain the small state corpus in RAM.
+
+For exact **MLP** batch replay, run online with `--export-data PATH
+--record-batches`, then use `--mode offline-matched --offline-data PATH
+--batch-manifest RUN/batch_ids.pt` with matching update/batch budgets. Archival
+memory/I/O belongs to that diagnostic variant. Recurrent offline-full/frozen
+causal sampling is supported; exact recurrent batch-manifest replay is rejected.
+`--mode serial` is an explicitly unmatched refresh diagnostic and cannot isolate
+causal overlap speedup.
+
+Use the same policy, data/target budgets and fixed hardware for a comparison.
+Predeclare `--wall-time-budget SECONDS` from pilot timings. A timed-out run records
+right censoring and cannot select post-deadline checkpoints. Cleanup and final
+reserved verification time are reported separately. Never omit failed runs.
+
+```bash
+python examples/data_pipeline/ods_pick_place_compare.py \
+  /tmp/pick-place-online /tmp/pick-place-offline /tmp/pick-place-offline32 \
+  --output /tmp/pick-place-comparison
+```
+
+The command writes JSON/Markdown and quality/time, GPU-hour and measured resource
+figures. It withholds unsupported speedup claims when attainment, panel sizes,
+resource budgets or pairing are incomplete. See BENCHMARK.md for amortized reuse
+and the distinction between delivery speed and learning efficiency.
+
+## Artifacts and recovery
+
+Use a fresh output directory. Each run saves configuration/source hashes, split
+manifest, immutable checkpoints, per-scene reports, provenance, TensorBoard events,
+efficiency/timeline records and cleanup status. Training-reset stages additionally
+save complete student state/action traces. Missing device-wide peaks/actual kernel
+overlap and other unsupported measurements remain null.
+
+`--resume CHECKPOINT` restores the model, normalization, optimizer and random
+states while starting a fresh ODS source; it does not restore shared cache contents.
+Checkpoint evaluation validates the controller/observation schema. Viser defaults
+to port 8080 and TensorBoard to 6006; select unused ports for concurrent runs.
+Cameras remain display-only. No DAgger, feedback-driven collection, pretrained
+model, aggregate replay framework or RLInf integration is included.

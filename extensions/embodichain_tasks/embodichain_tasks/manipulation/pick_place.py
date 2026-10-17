@@ -74,6 +74,21 @@ class PickPlaceEnv(EmbodiedEnv):
         pose = cube.get_local_pose().clone()
         pose[ids, :3] = torch.tensor(START, device=self.device)
         pose[ids, :2] += (torch.rand(len(ids), 2, device=self.device) - 0.5) * 0.08
+        if "cube_xy" in kwargs:
+            xy = torch.as_tensor(
+                kwargs["cube_xy"], device=self.device, dtype=pose.dtype
+            )
+            if (
+                xy.shape != (len(ids), 2)
+                or not torch.isfinite(xy).all()
+                or (
+                    (xy - torch.tensor(START[:2], device=self.device)).abs() > 0.040001
+                ).any()
+            ):
+                raise ValueError(
+                    "cube_xy must select finite initial states inside the training reset bounds"
+                )
+            pose[ids, :2] = xy
         pose[ids, 3:] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
         cube.clear_dynamics(env_ids=ids)
         cube.set_local_pose(pose[ids], env_ids=ids)
@@ -188,10 +203,31 @@ class PickPlaceEnv(EmbodiedEnv):
     ) -> Iterable[torch.Tensor]:
         if trajectory.shape[1] == 0:
             raise RuntimeError("Expert planning returned an empty trajectory")
-        for action in trajectory.unbind(1):
-            yield action[:, self.active_joint_ids]
-        for _ in range(dwell):
-            yield trajectory[:, -1, self.active_joint_ids]
+        pose_commands = getattr(self, "pick_place_action_mode", "joint") == "pose"
+        for index in range(trajectory.shape[1] + dwell):
+            action = trajectory[:, min(index, trajectory.shape[1] - 1)]
+            if not pose_commands:
+                yield action[:, self.active_joint_ids]
+                continue
+            # Commands are calculated lazily after each ordinary env.step().
+            # Planned FK is a reference, never a measured-motion action label.
+            from embodichain.utils.math import axis_angle_from_quat, quat_from_matrix
+
+            arm_ids = self.robot.get_joint_ids("arm")
+            reference = self.robot.compute_fk(
+                qpos=action[:, arm_ids], name="arm", to_matrix=True
+            )
+            measured = self.robot.compute_fk(
+                qpos=self.robot.get_qpos()[:, arm_ids], name="arm", to_matrix=True
+            )
+            rotation_error = reference[:, :3, :3] @ measured[:, :3, :3].transpose(
+                -1, -2
+            )
+            translation = (reference[:, :3, 3] - measured[:, :3, 3]) / 0.02
+            rotation = axis_angle_from_quat(quat_from_matrix(rotation_error)) / 0.1
+            hand_ids = self.robot.get_joint_ids("eef", remove_mimic=True)
+            gripper = action[:, hand_ids[:1]] / 0.02 - 1
+            yield torch.cat((translation, rotation, gripper), dim=-1).clamp(-1, 1)
 
     def create_demo_segments(self, **kwargs: Any) -> Iterable[DemoSegment]:
         """Lazily plan physical grasp/lift, then placement from the measured scene.

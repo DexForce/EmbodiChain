@@ -286,6 +286,7 @@ def test_new_config_options_preserve_legacy_positional_arguments() -> None:
     cfg = OnlineDataEngineCfg(16, 300, 9, "cpu")
     assert cfg.state_dim == 9 and cfg.buffer_device == "cpu"
     assert cfg.action_dim is None and cfg.refill_policy == "sample_threshold"
+    assert cfg.shutdown_timeout == 5.0
 
 
 def test_worker_width_validation_uses_observation_selection_and_expert_layout() -> None:
@@ -293,6 +294,7 @@ def test_worker_width_validation_uses_observation_selection_and_expert_layout() 
 
     attrs = {
         "expert_action_spec": SimpleNamespace(width=8),
+        "rollout_action_semantics": "expert_controller_command",
         "single_observation_space": {"robot": {"qpos": SimpleNamespace(shape=(7,))}},
     }
     env = SimpleNamespace(get_wrapper_attr=lambda name: attrs[name])
@@ -304,6 +306,142 @@ def test_worker_width_validation_uses_observation_selection_and_expert_layout() 
     cfg.action_dim, cfg.state_dim = 8, 9
     with pytest.raises(ValueError, match="widths disagree"):
         engine_module._validate_worker_dimensions(env, cfg)
+
+
+def _policy_recording_environment() -> SimpleNamespace:
+    """A seven-dimensional policy schema beside an eight-joint expert schema."""
+    joint_names = tuple(f"joint_{index}" for index in range(8))
+    terms = {
+        "arm": SimpleNamespace(
+            command_type="qpos", controlled_joint_ids=tuple(range(6))
+        ),
+        "grip": SimpleNamespace(command_type="qpos", controlled_joint_ids=(6, 7)),
+    }
+    descriptors = (
+        SimpleNamespace(
+            name="arm",
+            start=0,
+            stop=6,
+            term=SimpleNamespace(
+                contract="relative_pose/v1", action_dim=6, joint_names=joint_names[:6]
+            ),
+        ),
+        SimpleNamespace(
+            name="grip",
+            start=6,
+            stop=7,
+            term=SimpleNamespace(
+                contract="parallel_gripper/v1",
+                action_dim=1,
+                joint_names=joint_names[6:],
+            ),
+        ),
+    )
+    attrs = {
+        "rollout_action_semantics": "policy_request",
+        "expert_action_spec": SimpleNamespace(width=8),
+        "single_observation_space": {"robot": {"qpos": SimpleNamespace(shape=(9,))}},
+        "action_manager": SimpleNamespace(
+            descriptors=descriptors, total_action_dim=7, get_term=terms.__getitem__
+        ),
+        "robot": SimpleNamespace(joint_names=joint_names),
+    }
+    return SimpleNamespace(get_wrapper_attr=attrs.__getitem__, attrs=attrs)
+
+
+def test_policy_recording_validates_live_schema_independently_of_expert_width() -> None:
+    env = _policy_recording_environment()
+    cfg = OnlineDataEngineCfg(
+        state_dim=9,
+        action_dim=7,
+        action_semantics="policy_request",
+        action_contracts=("relative_pose/v1", "parallel_gripper/v1"),
+    )
+    engine_module._validate_worker_dimensions(env, cfg)
+    assert env.attrs["expert_action_spec"].width == 8
+
+
+@pytest.mark.parametrize(
+    "mismatch", ["semantics", "contracts", "slices", "joints", "width"]
+)
+def test_policy_recording_rejects_live_schema_mismatch(mismatch: str) -> None:
+    env = _policy_recording_environment()
+    cfg = OnlineDataEngineCfg(
+        state_dim=9,
+        action_dim=7,
+        action_semantics="policy_request",
+        action_contracts=("relative_pose/v1", "parallel_gripper/v1"),
+    )
+    manager = env.attrs["action_manager"]
+    if mismatch == "semantics":
+        env.attrs["rollout_action_semantics"] = "expert_controller_command"
+    elif mismatch == "contracts":
+        cfg.action_contracts = tuple(reversed(cfg.action_contracts))
+    elif mismatch == "slices":
+        manager.descriptors[1].start = 5
+    elif mismatch == "joints":
+        manager.descriptors[1].term.joint_names = ("joint_7", "joint_6")
+    else:
+        cfg.action_dim = 8
+    with pytest.raises(ValueError):
+        engine_module._validate_worker_dimensions(env, cfg)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"action_semantics": "unknown"},
+        {"action_semantics": "policy_request", "action_dim": 7},
+        {
+            "action_semantics": "policy_request",
+            "action_contracts": ("relative_pose/v1",),
+        },
+        {"action_contracts": ("relative_pose/v1",)},
+    ],
+)
+def test_recording_contract_requires_explicit_compatible_configuration(
+    options: dict,
+) -> None:
+    with pytest.raises(ValueError):
+        engine_module._validate_recording_config(OnlineDataEngineCfg(**options))
+
+
+def test_provenance_stamps_only_valid_frames_and_keeps_episode_frame_indices() -> None:
+    shape = (2, 4)
+    buffer = TensorDict(
+        {
+            "valid": torch.tensor(
+                [[True, True, False, False], [True, True, True, False]]
+            ),
+            **{
+                key: torch.full(shape, 999, dtype=torch.int64)
+                for key in (
+                    "ods_run_id",
+                    "ods_episode_id",
+                    "ods_generation",
+                    "ods_frame_index",
+                    "ods_accepted_at_ns",
+                )
+            },
+        },
+        batch_size=shape,
+    )
+    engine_module._populate_provenance(
+        buffer,
+        run_id=17,
+        generation=2,
+        episode_start=5,
+        accepted_at_ns=123456789,
+    )
+    valid = buffer["valid"]
+    for key in buffer.keys():
+        if key != "valid":
+            assert (buffer[key][~valid] == -1).all()
+    assert buffer["ods_frame_index"].tolist() == [[0, 1, -1, -1], [0, 1, 2, -1]]
+    assert buffer["ods_episode_id"].tolist() == [[5, 5, -1, -1], [6, 6, 6, -1]]
+    assert (buffer["ods_accepted_at_ns"][valid] == 123456789).all()
+    assert (buffer["ods_run_id"][valid] == 17).all()
+    assert (buffer["ods_generation"][valid] == 2).all()
 
 
 def _install_fake_starting_worker(
@@ -381,6 +519,35 @@ class TestOnlineDataEngine:
             assert row["obs"][length:].count_nonzero() == 0
         sample["obs"].fill_(-999)
         assert engine.shared_buffer["obs"][..., 0].min() == 0
+
+    def test_history_padding_retains_invalid_language_and_provenance_ids(self) -> None:
+        engine = self.engine
+        for key in (
+            "ods_run_id",
+            "ods_episode_id",
+            "ods_generation",
+            "ods_frame_index",
+            "ods_accepted_at_ns",
+        ):
+            engine.shared_buffer[key] = torch.full(
+                engine.shared_buffer.batch_size, 17, dtype=torch.int64
+            )
+        sample = engine.sample_batch_with_history(64, 3)
+        padded = ~sample["valid"]
+        assert padded.any()
+        for key in (
+            "task_index",
+            "subtask_index",
+            "ods_run_id",
+            "ods_episode_id",
+            "ods_generation",
+            "ods_frame_index",
+            "ods_accepted_at_ns",
+        ):
+            assert (sample[key][padded] == -1).all()
+        assert (sample["task_index"][~padded] == 0).all()
+        with pytest.raises(ValueError, match="index"):
+            engine.resolve_language(sample)
 
     @pytest.mark.parametrize("boundary", ["continuity", "validity"])
     def test_history_sampling_stops_at_causal_boundaries(self, boundary: str) -> None:
@@ -568,7 +735,23 @@ class TestOnlineDataEngine:
             },
             batch_size=[1, 3],
         )
+        for key in (
+            "ods_run_id",
+            "ods_episode_id",
+            "ods_generation",
+            "ods_frame_index",
+            "ods_accepted_at_ns",
+        ):
+            buffer[key] = torch.full(buffer.batch_size, -1, dtype=torch.int64)
         lock = context.Array("i", [0, 1])
+        original_populate = engine_module._populate_provenance
+
+        def stamp_while_locked(*args: object, **kwargs: object) -> None:
+            assert lock.get_lock()._semlock._is_mine()
+            original_populate(*args, **kwargs)
+
+        monkeypatch.setattr(engine_module, "_populate_provenance", stamp_while_locked)
+        monkeypatch.setattr(engine_module.time, "time_ns", lambda: 123456789)
         fill, close = context.Event(), context.Event()
         fill.set()
         initialized = MagicMock()
@@ -590,7 +773,9 @@ class TestOnlineDataEngine:
 
         monkeypatch.setattr(registry, "intern", register_while_locked)
         engine_module._run_sim_worker(
-            OnlineDataEngineCfg(gym_config={"id": "Fake-v1", "num_envs": 1}),
+            OnlineDataEngineCfg(
+                gym_config={"id": "Fake-v1", "num_envs": 1}, include_provenance=True
+            ),
             buffer,
             lock,
             fill,
@@ -607,6 +792,8 @@ class TestOnlineDataEngine:
         )
         assert published == [[["Pick", "Place", "Place"]]]
         assert registry.resolve(buffer["task_index"]) == [["Overall"] * 3]
+        assert buffer["ods_frame_index"].tolist() == [[0, 1, 2]]
+        assert buffer["ods_accepted_at_ns"].tolist() == [[123456789] * 3]
         env.close.assert_called_once_with()
 
     def test_start_transitions_through_starting_to_ready(self) -> None:
@@ -708,6 +895,34 @@ class TestOnlineDataEngine:
 
         with pytest.raises(ValueError, match="must be finite"):
             OnlineDataEngine(cfg)
+
+    @pytest.mark.parametrize(
+        "timeout", [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
+    )
+    def test_shutdown_timeout_rejects_nonpositive_or_nonfinite_values(
+        self, timeout: float
+    ) -> None:
+        """The graceful-close bound must be finite and allow forward progress."""
+        with pytest.raises(ValueError, match="shutdown_timeout must be finite"):
+            OnlineDataEngine(OnlineDataEngineCfg(shutdown_timeout=timeout))
+
+    @pytest.mark.parametrize("timeout", [None, 30.0])
+    def test_stop_uses_default_or_configured_graceful_shutdown_timeout(
+        self, timeout: float | None
+    ) -> None:
+        """A longer graceful close does not require forced termination."""
+        process = self.engine._sim_process
+        if timeout is not None:
+            self.engine.cfg.shutdown_timeout = timeout
+
+        self.engine.stop()
+
+        process.join.assert_called_once_with(
+            timeout=5.0 if timeout is None else timeout
+        )
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+        assert self.engine.state is OnlineDataEngineState.STOPPED
 
     def test_sampling_reraises_original_runtime_worker_exception(self) -> None:
         """A refill failure is surfaced before any stale batch is returned."""
@@ -926,8 +1141,10 @@ class TestOnlineDataEngine:
         assert self.engine._worker_failed_signal.is_set()
         assert self.engine._cleanup_complete
 
-    def test_forced_termination_fails_durability_contract(self) -> None:
+    @pytest.mark.parametrize("timeout", [5.0, 30.0])
+    def test_forced_termination_fails_durability_contract(self, timeout: float) -> None:
         """Needing terminate means graceful recorder durability is unconfirmed."""
+        self.engine.cfg.shutdown_timeout = timeout
         process = self.engine._sim_process
         process.join.side_effect = None
         process.is_alive.return_value = True
@@ -944,6 +1161,11 @@ class TestOnlineDataEngine:
 
         assert self.engine.state is OnlineDataEngineState.FAILED
         assert self.engine._cleanup_complete
+        assert [call.kwargs["timeout"] for call in process.join.call_args_list] == [
+            timeout,
+            3.0,
+        ]
+        process.kill.assert_not_called()
 
     def test_stop_surfaces_worker_failure_during_shutdown(self) -> None:
         """A recorder failure during worker close cannot be published as stopped."""

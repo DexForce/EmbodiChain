@@ -12,22 +12,84 @@ These components live under `embodichain/data_pipeline/` and are designed to wor
 
 ## OnlineDataEngine
 
-For an end-to-end online BC example, run
+For an end-to-end BC experiment, run
 `python examples/data_pipeline/ods_pick_place_showcase.py` from an installed
-checkout. The single-cycle Franka task qualifies a physical expert, trains a
-small recurrent student from live ODS data, and evaluates the student in a
-separate process. Viser and TensorBoard expose execution and learning metrics.
-Use `--smoke --no-viewer --no-video` for an engineering check or `--mode frozen`
-for a fixed-initial-data control. Detailed commands and acceptance criteria are
-in `extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/README.md`.
+checkout. The Franka task qualifies a physical expert, trains a geometry MLP
+by default, and evaluates immutable student checkpoints in a separate process.
+`--policy gru-pose` selects a GRU with the same measured geometry and pose-request
+contract; `--policy mlp-joint` selects joint residuals. The older `--policy gru`
+route retains its original observation and joint-command contracts. Cameras
+are display-only; policy geometry comes from measured robot/object state.
 
-The example uses `refill_policy="manual"`: `request_refill()` returns a target
-generation and coalesces an outstanding request; `wait_for_generation()` waits
-for complete publication with a timeout. `get_stats()` reports production and
-consumption counters. With `include_provenance=True`, each copied sample carries
-numeric `ods_run_id`, `ods_episode_id`, and `ods_generation` fields. An optional
-`action_dim` separates expert-command width from the robot-state `state_dim`.
-Omitting these settings preserves the original threshold-refill behavior.
+The runner supports live ODS, frozen initial data, offline full-corpus training,
+exact offline MLP minibatch replay and serial refresh. Exact replay requires
+`--mode offline-matched`, a validated `--offline-data` corpus and a matching
+`--batch-manifest`; it is not available for the geometry GRU. Serial refresh
+uses an unmatched supervision schedule, so its timings alone do not isolate
+the effect of overlap. Use `--stage overfit-one` or `--stage overfit-four` for
+small-data diagnostics and `--smoke --no-viewer --no-video` for an engineering
+check. These checks do not establish physical student success or a learning
+advantage. Commands, results and the comparison protocol live under
+`extensions/embodichain_tasks/configs/tasks/manipulation/pick_place/`.
+
+### Configuration and recorded-action meaning
+
+The engine preserves expert-controller recording by default. Policy requests
+have a separate schema and may have a different width from both robot state
+and expert commands.
+
+| Setting | Meaning |
+| --- | --- |
+| `state_dim` | Stored robot proprioception width. |
+| `action_dim` | Optional stored action width; omitted values preserve the historical `state_dim` width. |
+| `action_semantics` | `"expert_controller_command"` by default, or explicit `"policy_request"`. |
+| `action_contracts` | Ordered ActionManager contract IDs; required with an explicit `action_dim` for policy-request recording. |
+| `refill_policy` | `"sample_threshold"` by default, or owner-requested `"manual"` refill. |
+| `include_provenance` | Add numeric frame identity and publication timestamps to sampled tensors. |
+| `shutdown_timeout` | Finite, positive graceful-close wait in seconds; defaults to `5.0`. |
+
+For an environment with six relative EEF dimensions followed by one normalized
+parallel-gripper dimension, select the request schema explicitly:
+
+```python
+from embodichain.data_pipeline.engine import OnlineDataEngineCfg
+
+cfg = OnlineDataEngineCfg(
+    gym_config=your_gym_cfg,
+    state_dim=9,
+    action_dim=7,
+    action_semantics="policy_request",
+    action_contracts=("eef_pose.relative@1", "gripper.parallel@1"),
+    refill_policy="manual",
+    include_provenance=True,
+)
+```
+
+Before generating transitions, the worker checks the live rollout semantics,
+proprioception/action widths, ordered contracts, contiguous term slices and
+controlled-joint order. It selects the environment's
+`rollout_action_semantics` accordingly. Explicit policy recording preserves raw
+requests through ActionManager processing, requires finite floating values
+within the action-space bounds, and works without a DatasetManager. A direct
+`ControllerAction` cannot be stored as a policy request. Expert-controller
+recording continues to use `ExpertActionSpec`.
+
+With manual refill, `request_refill()` returns a target generation and coalesces
+an outstanding request; `wait_for_generation()` waits for complete publication
+with a timeout. `get_stats()` reports production/consumption counters and excludes
+the active write window from readable-frame counts.
+
+With `include_provenance=True`, each sample carries `ods_run_id`,
+`ods_episode_id`, `ods_generation`, `ods_frame_index` and `ods_accepted_at_ns`.
+Frame indices are zero-based positions in the stored episode. The timestamp
+uses Unix nanoseconds when a successful episode is accepted for publication;
+it is not simulation time or a monotonic duration. The worker stamps provenance
+under the publication lock and samplers copy it with the corresponding payload.
+Invalid frames retain `-1` for every provenance field. Engine-local IDs identify
+live samples; validated offline corpus manifests provide separate content
+identities.
+
+### Causal histories and padding
 
 For recurrent learners, `sample_batch_with_history(batch_size, chunk_size)`
 copies each supervised window and its entire uninterrupted causal prefix under
@@ -37,18 +99,22 @@ frames per row. `start_probability` optionally increases the frequency of
 eligible episode-start windows. Prefix copying includes sensor payloads, so
 account for their memory cost when enabling it for image observations.
 
-The showcase supervises 24 steps per sequence, reconstructs GRU history from
-the causal region's origin, and includes startup actions in its loss. It uses
-canonical unit quaternions and frozen observation scales with physical lower
-bounds. From the second online round, 25% of updates may overlap refill; the
-remaining 75% follow complete publication of that round's new generation.
-Supervised-generation counts are logged separately from history input counts.
+History padding keeps `task_index` and `subtask_index` at `-1`, as it does for
+provenance. `resolve_language()` rejects invalid IDs; select `valid` or
+`loss_mask` frames before decoding a padded history. Real-frame language IDs
+remain immutable across reuse of their shared-buffer rows.
 
-Learner checkpoints in this example resume optimization against a freshly
-created data source. They do not restore the previous shared-memory buffer.
-Checkpoints record their observation contract. Older checkpoints remain usable
-for inference, but corrected training starts a fresh policy rather than silently
-changing the inputs of an older policy.
+The geometry GRU reconstructs state from the causal region's origin and
+supervises 24 steps per sampled sequence. It uses frozen geometry normalization,
+with a bounded normalized input range. MLPs supervise individual frames. From
+the second online round, the first quarter of updates may overlap refill;
+the remaining updates follow complete publication of the new generation.
+Supervision counters exclude recurrent prefix and padded frames.
+
+Live-run checkpoint resume restores model, optimizer and RNG state against a
+fresh ODS source. It does not restore the previous shared-memory buffer.
+Checkpoint policy metadata preserves the model's observation and action
+parameterization; unsupported combinations are rejected during resume.
 
 **Module:** `embodichain/data_pipeline/engine/data.py`
 
@@ -61,7 +127,8 @@ changing the inputs of an older policy.
 Key ideas:
 
 - **Shared buffer**: the simulation producer and training consumers can read/write concurrently.
-- **GPU-friendly**: buffer is designed for efficient sampling and minimal copying.
+- **CPU shared memory**: the supported process-shared buffer uses CPU storage;
+  sampled tensors can then be transferred to the learner's device.
 - **Chunked sampling**: training samples fixed-length or dynamically sized chunks.
 - **Transactional rows**: the current write window is locked until a complete,
   successful episode replaces it. Failed generation attempts never become
@@ -84,7 +151,8 @@ contains:
 
 ```text
 valid, episode_step, segment_id, segment_step,
-segment_start, segment_end, terminated, truncated
+segment_start, segment_end, segment_accepted, segment_attempt_id,
+continuity_id, terminated, truncated, task_index, subtask_index
 ```
 
 Tasks use the same `create_demo_segments()` protocol as `run-env`; legacy
@@ -135,8 +203,8 @@ finally:
     engine.stop()
 ```
 
-`stop()` is idempotent after a successful cleanup. It waits for the producer
-and raises any failure reported while the worker closes its environment or
+`stop()` is idempotent after a successful cleanup. It waits up to
+`shutdown_timeout` seconds for graceful worker close and raises any failure reported while the worker closes its environment or
 flushes committed data. If graceful shutdown times out and the worker requires
 `terminate()` or `kill()`, durability cannot be confirmed: the engine remains
 `FAILED` and `stop()` raises instead of reporting a false `STOPPED` state. When

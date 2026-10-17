@@ -11,7 +11,7 @@ belongs to [data-assets](../data-assets/data-assets.md).
 |---|---|
 | Online worker and sample selection | `embodichain/data_pipeline/engine/data.py`: `OnlineDataEngine` |
 | Infinite PyTorch dataset | `embodichain/data_pipeline/datasets/online_data.py`: `OnlineDataset` |
-| Standalone online BC showcase | `examples/data_pipeline/ods_pick_place_showcase.py`; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
+| PickPlace BC and offline comparisons | `examples/data_pipeline/ods_pick_place_showcase.py`; private training/benchmark helpers alongside it; task-owned physical evidence in `embodichain_tasks.manipulation.pick_place` |
 | Commit/discard/finalization dispatch | `embodichain/lab/gym/envs/managers/dataset_manager.py` |
 | Synchronous LeRobot persistence | `embodichain/lab/gym/envs/managers/datasets.py`: `LeRobotRecorder` |
 | Background persistence | `embodichain/lab/gym/envs/managers/async_datasets.py`: `AsyncLeRobotRecorder` |
@@ -22,7 +22,8 @@ belongs to [data-assets](../data-assets/data-assets.md).
 | Isolated LeRobot 0.6.1 language/depth conversion | `tools/lerobot_export/` (Python >=3.12, independent dependencies) |
 
 Read [online sampling](online-sampling.md) for worker states, refill, shared
-errors, continuity and DataLoader behavior. Read [persistence](persistence.md)
+errors, action schemas, sample provenance, causal histories and example-runner
+boundaries. Read [persistence](persistence.md)
 for fragment transactions, async ownership, depth output and shutdown. Read
 [offline dataset tools](offline-datasets.md) for lineage, quality filtering,
 validation, and conversion across Python/LeRobot versions.
@@ -49,7 +50,10 @@ are replaced with new instances rather than restarted.
 `sample_batch()` is READY-only. Selection excludes the currently written range,
 checks validity/continuity/segment boundaries, and clones the result while
 holding the shared write lock. Moving selection or cloning outside that scope
-can expose partially overwritten rows. Refill requests are threshold-driven.
+can expose partially overwritten rows. Refill follows the configured automatic
+or manual policy. Explicit raw-policy recording validates its ordered live
+action contracts independently of the expert-controller schema; see
+[online sampling](online-sampling.md) before changing stored action meaning.
 
 Distinguish a terminal worker failure from a sampling request with no eligible
 unlocked window. The latter raises `RuntimeError` immediately without itself
@@ -64,9 +68,9 @@ drains committed work; it does not commit a live rollout. Final partial vector
 batches use `commit_env_ids` to select dataset rows while preserving a full
 physical reset. The recorder requires an exactly representable integer FPS.
 
-Expert rollout actions use the environment's `ExpertActionSpec`, independently
-of the policy action space. The default position mode preserves active-joint
-qpos storage and rejects qvel/qf-only controller commands. Position-velocity
+Default expert rollout actions use the environment's `ExpertActionSpec`,
+independently of the policy action space. The default position mode preserves
+active-joint qpos storage and rejects qvel/qf-only controller commands. Position-velocity
 mode stores a flat `[qpos, qvel]` vector;
 LeRobot feature width and ordered names follow that layout, while episode and
 trajectory metadata publish its version, joint names, slices, mode, and

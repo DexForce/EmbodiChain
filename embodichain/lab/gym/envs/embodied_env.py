@@ -40,6 +40,7 @@ from typing import (
     Any,
     Iterable,
     List,
+    Literal,
     Optional,
 )
 from tensordict import TensorDict
@@ -244,6 +245,16 @@ class EmbodiedEnvCfg(EnvCfg):
     Please refer to the :class:`embodichain.lab.gym.envs.managers.ActionManager` class for more details.
     """
 
+    rollout_action_semantics: Literal["expert_controller_command", "policy_request"] = (
+        "expert_controller_command"
+    )
+    """Meaning of episode rollout actions, independently of the expert schema.
+
+    ``policy_request`` stores the flat ActionManager input and requires an
+    ActionManager. It also enables raw-policy recording without a DatasetManager.
+    The default preserves active-joint expert-controller recording.
+    """
+
     objective: OrderedPlacementObjectiveCfg | None = None
     """Optional measured physical objective, independent of task success and persistence."""
 
@@ -414,7 +425,13 @@ class EmbodiedEnv(BaseEnv):
         self.reward_manager: RewardManager | None = None
         self.action_manager: ActionManager | None = None
         self.dataset_manager: DatasetManager | None = None
-        self._record_raw_actions = False
+        if cfg.rollout_action_semantics not in {
+            "expert_controller_command",
+            "policy_request",
+        }:
+            raise ValueError("Unknown rollout_action_semantics.")
+        self._explicit_policy_rollout = cfg.rollout_action_semantics == "policy_request"
+        self._record_raw_actions = self._explicit_policy_rollout
         self._last_action_manager_qpos: torch.Tensor | None = None
         self._last_action_trace: ActionTrace | None = None
         self._expert_controller_qpos_history: list[list[torch.Tensor]] = []
@@ -422,6 +439,10 @@ class EmbodiedEnv(BaseEnv):
         super().__init__(cfg, **kwargs)
 
         try:
+            if self._explicit_policy_rollout and self.action_manager is None:
+                raise ValueError(
+                    "policy_request rollout recording requires an ActionManager."
+                )
             self._initialize_physical_objective()
             self.expert_action_spec = build_expert_action_spec(
                 joint_names=[
@@ -454,7 +475,7 @@ class EmbodiedEnv(BaseEnv):
             if dataset_terms and not self.cfg.filter_dataset_saving:
                 self.dataset_manager = DatasetManager(self.cfg.dataset, self)
                 self.cfg.init_rollout_buffer = True
-                self._record_raw_actions = self.dataset_manager.requires_raw_actions
+                self._record_raw_actions |= self.dataset_manager.requires_raw_actions
 
             self.rollout_buffer: TensorDict | None = None
             self._max_rollout_steps = 0
@@ -2444,11 +2465,15 @@ class EmbodiedEnv(BaseEnv):
         )
         if self.action_manager is not None and not is_controller_action:
             if policy_recording:
-                if self.dataset_manager is None:
+                explicit_policy = getattr(self, "_explicit_policy_rollout", False)
+                if explicit_policy:
+                    self._validate_policy_rollout_action(action)
+                if self.dataset_manager is not None:
+                    self.dataset_manager.validate_policy_action(action)
+                elif not explicit_policy:
                     raise RuntimeError(
                         "Policy action recording requires an initialized DatasetManager."
                     )
-                self.dataset_manager.validate_policy_action(action)
             self.action_manager.process_action(action)
             if getattr(self, "_demo_no_auto_reset", False):
                 self.action_manager.mask_inactive(self._demo_active_mask)
@@ -2508,6 +2533,23 @@ class EmbodiedEnv(BaseEnv):
         if is_controller_action:
             return ControllerAction(value=action, metadata=controller_metadata)
         return action
+
+    def _validate_policy_rollout_action(self, action: EnvAction) -> None:
+        """Validate explicit raw-policy recording before changing term state."""
+        if not isinstance(action, torch.Tensor) or not action.is_floating_point():
+            raise TypeError("Policy rollout actions must be floating tensors.")
+        expected = (self.num_envs, self.action_manager.total_action_dim)
+        if tuple(action.shape) != expected:
+            raise ValueError(f"Policy rollout action must have shape {expected}.")
+        if not bool(torch.isfinite(action).all()):
+            raise ValueError("Policy rollout actions must contain only finite values.")
+        space = self.action_manager.single_action_space
+        low = torch.as_tensor(space.low, dtype=action.dtype, device=action.device)
+        high = torch.as_tensor(space.high, dtype=action.dtype, device=action.device)
+        if bool(((action < low) | (action > high)).any()):
+            raise ValueError(
+                "Policy rollout actions must remain within action-space bounds."
+            )
 
     def _record_raw_action(self, action: EnvAction) -> None:
         """Keep a CPU copy of raw policy actions for explicit dataset contracts."""

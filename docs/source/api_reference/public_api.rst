@@ -375,6 +375,7 @@ embodichain.lab.gym.envs.managers.actions
    JointPositionToLimitsAction
    JointVelocityAction
    ParallelGripperAction
+   RelativeEefPoseAction
    RelativeJointPositionAction
 
 embodichain.lab.gym.envs.managers.action_types

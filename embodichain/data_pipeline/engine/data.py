@@ -250,13 +250,56 @@ class OnlineDataEngineCfg:
     Exhaustion fails the worker explicitly; increase this for many unique tasks."""
 
     action_dim: int | None = None
-    """Stored expert action width; None preserves the historical state_dim width."""
+    """Stored action width; None preserves the historical state_dim width."""
 
     refill_policy: Literal["sample_threshold", "manual"] = "sample_threshold"
     """Automatic sample-count refill or owner-requested refill."""
 
     include_provenance: bool = False
-    """Include numeric ods_run_id, ods_episode_id and ods_generation fields."""
+    """Include numeric run/episode/generation IDs, episode frame indices, and
+    successful-publication Unix timestamps in nanoseconds. Invalid frames use
+    ``-1`` for every provenance field."""
+
+    action_semantics: Literal["expert_controller_command", "policy_request"] = (
+        "expert_controller_command"
+    )
+    """Stored action meaning; the default preserves expert-controller commands."""
+
+    action_contracts: tuple[str, ...] | None = None
+    """Expected ActionManager contract IDs in flat policy order.
+
+    Required with an explicit ``action_dim`` for ``policy_request`` recording.
+    The worker rejects a different live contract sequence, width, or joint order.
+    """
+
+    shutdown_timeout: float = 5.0
+    """Maximum seconds to wait for graceful worker close before forcing shutdown.
+
+    Must be finite and positive. Forced termination still fails the engine's
+    recorder-durability contract, regardless of this timeout.
+    """
+
+
+def _validate_recording_config(cfg: OnlineDataEngineCfg) -> None:
+    """Require an explicit ordered contract when recording policy requests."""
+    if cfg.action_semantics not in {"expert_controller_command", "policy_request"}:
+        raise ValueError("Unknown ODS action_semantics.")
+    if cfg.action_semantics == "policy_request":
+        if cfg.action_dim is None or not cfg.action_contracts:
+            raise ValueError(
+                "policy_request ODS requires action_dim and ordered action_contracts."
+            )
+        if not isinstance(cfg.action_contracts, tuple) or any(
+            not isinstance(contract, str) or not contract.strip()
+            for contract in cfg.action_contracts
+        ):
+            raise ValueError(
+                "action_contracts must be a tuple of nonempty contract IDs."
+            )
+    elif cfg.action_contracts is not None:
+        raise ValueError(
+            "action_contracts are only valid for policy_request recording."
+        )
 
 
 class _ProducerProgress:
@@ -272,15 +315,54 @@ class _ProducerProgress:
 
 
 def _validate_worker_dimensions(env: object, cfg: OnlineDataEngineCfg) -> None:
-    """Check the stored proprioception and expert layout before writing rows."""
+    """Check the live recorded-action schema before generating any transition."""
+    _validate_recording_config(cfg)
     if cfg.action_dim is None:
         return
-    spec = env.get_wrapper_attr("expert_action_spec")
+    semantics = env.get_wrapper_attr("rollout_action_semantics")
+    if semantics != cfg.action_semantics:
+        raise ValueError(
+            f"ODS action semantics {cfg.action_semantics!r} disagree with "
+            f"the live rollout buffer {semantics!r}."
+        )
     space = env.get_wrapper_attr("single_observation_space")
-    if (
-        spec.width != cfg.action_dim
-        or space["robot"]["qpos"].shape[-1] != cfg.state_dim
-    ):
+    if space["robot"]["qpos"].shape[-1] != cfg.state_dim:
+        raise ValueError("ODS state/action widths disagree with the live environment")
+    if semantics == "expert_controller_command":
+        width = env.get_wrapper_attr("expert_action_spec").width
+    else:
+        manager = env.get_wrapper_attr("action_manager")
+        if manager is None:
+            raise ValueError("policy_request ODS requires a live ActionManager.")
+        descriptors = manager.descriptors
+        contracts = tuple(descriptor.term.contract for descriptor in descriptors)
+        if contracts != cfg.action_contracts:
+            raise ValueError(
+                "ODS ordered action contracts disagree with the live ActionManager."
+            )
+        width = 0
+        robot = env.get_wrapper_attr("robot")
+        for descriptor in descriptors:
+            if (
+                descriptor.start != width
+                or descriptor.stop - descriptor.start != descriptor.term.action_dim
+            ):
+                raise ValueError(
+                    "ODS live action slices must be contiguous and ordered."
+                )
+            width = descriptor.stop
+            term = manager.get_term(descriptor.name)
+            if term.command_type in {"qpos", "qvel", "qf"}:
+                joint_names = tuple(
+                    robot.joint_names[index] for index in term.controlled_joint_ids
+                )
+                if tuple(descriptor.term.joint_names) != joint_names:
+                    raise ValueError(
+                        "ODS live action descriptor joint order disagrees."
+                    )
+        if width != manager.total_action_dim:
+            raise ValueError("ODS descriptor and ActionManager widths disagree.")
+    if width != cfg.action_dim:
         raise ValueError("ODS state/action widths disagree with the live environment")
 
 
@@ -344,6 +426,32 @@ def _populate_language_indices(
     if valid is not None:
         task_indices[~valid.bool()] = -1
         subtask_indices[~valid.bool()] = -1
+
+
+def _populate_provenance(
+    buffer: TensorDict,
+    *,
+    run_id: int,
+    generation: int,
+    episode_start: int,
+    accepted_at_ns: int,
+) -> None:
+    """Stamp accepted rows while the producer still owns the publication lock."""
+    valid = buffer["valid"].bool()
+    rows, capacity = buffer.batch_size
+    frame_indices = torch.arange(capacity, device=valid.device).expand(rows, -1)
+    episode_indices = torch.arange(
+        episode_start, episode_start + rows, device=valid.device
+    )[:, None].expand(-1, capacity)
+    for key, value in (
+        ("ods_run_id", run_id),
+        ("ods_generation", generation),
+        ("ods_episode_id", episode_indices),
+        ("ods_frame_index", frame_indices),
+        ("ods_accepted_at_ns", accepted_at_ns),
+    ):
+        buffer[key].fill_(-1)
+        buffer[key][valid] = value[valid] if isinstance(value, torch.Tensor) else value
 
 
 def _apply_worker_simulation_overrides(
@@ -434,6 +542,7 @@ def _run_sim_worker(
     env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg.filter_dataset_saving = True
     env_cfg.init_rollout_buffer = False
+    env_cfg.rollout_action_semantics = cfg.action_semantics
     # The environment must truncate at the exact capacity of the shared row.
     # Otherwise a longer successful plan is silently clipped by the writer and
     # published as if the complete episode had been stored.
@@ -461,8 +570,8 @@ def _run_sim_worker(
     log_info("[Simulation Process] Environment created.", color="cyan")
 
     # --- Main loop: wait for fill signal, then fill the entire buffer -------
+    accepted_episodes = 0
     try:
-        _validate_worker_dimensions(env, cfg)
         while True:
             fill_signal.wait()
             fill_signal.clear()
@@ -505,6 +614,7 @@ def _run_sim_worker(
                     # reuse, so stale tail frames can never become sampleable
                     # after a shorter replacement episode.
                     env.get_wrapper_attr("set_rollout_buffer")(tmp_buffer)
+                    _validate_worker_dimensions(env, cfg)
                     env.reset(options={"save_data": False})
                     result = execute_demo_episode(
                         env,
@@ -539,21 +649,13 @@ def _run_sim_worker(
                 if language_registry is not None:
                     _populate_language_indices(tmp_buffer, result, language_registry)
 
+                episode_start = accepted_episodes
+                accepted_episodes += len(tmp_buffer)
                 if progress is not None:
                     with progress.values.get_lock():
                         episode_start = int(progress.values[2])
                         progress.values[2] += len(tmp_buffer)
                         progress.values[4] += int(tmp_buffer["valid"].sum().item())
-                    if cfg.include_provenance:
-                        for offset in range(len(tmp_buffer)):
-                            mask = tmp_buffer["valid"][offset]
-                            for key, value in (
-                                ("ods_run_id", run_id),
-                                ("ods_generation", generation),
-                                ("ods_episode_id", episode_start + offset),
-                            ):
-                                tmp_buffer[key][offset].fill_(-1)
-                                tmp_buffer[key][offset][mask] = value
 
                 rollout_idx += 1
 
@@ -578,6 +680,14 @@ def _run_sim_worker(
                 # been copied. Publishing the next write window therefore
                 # cannot race a sample that selected rows under the old mask.
                 with lock_index.get_lock():
+                    if cfg.include_provenance:
+                        _populate_provenance(
+                            tmp_buffer,
+                            run_id=run_id,
+                            generation=generation,
+                            episode_start=episode_start,
+                            accepted_at_ns=time.time_ns(),
+                        )
                     lock_index[0] = next_start
                     lock_index[1] = next_end
 
@@ -733,6 +843,7 @@ class OnlineDataEngine:
         self._cleanup_complete = False
         self._forced_shutdown_attempted = False
         self.cfg = cfg
+        _validate_recording_config(cfg)
         if cfg.refill_policy not in {"sample_threshold", "manual"}:
             raise ValueError("refill_policy must be 'sample_threshold' or 'manual'")
         if cfg.action_dim is not None and (
@@ -755,6 +866,12 @@ class OnlineDataEngine:
             raise ValueError(
                 "initialization_timeout must be finite and greater than zero, "
                 f"got {cfg.initialization_timeout}."
+            )
+
+        if not math.isfinite(cfg.shutdown_timeout) or cfg.shutdown_timeout <= 0:
+            raise ValueError(
+                "shutdown_timeout must be finite and greater than zero, "
+                f"got {cfg.shutdown_timeout}."
             )
 
         # Allocate the shared buffer (shape: [buffer_size, max_episode_steps, ...]).
@@ -1104,7 +1221,13 @@ class OnlineDataEngine:
             )
 
         if self.cfg.include_provenance:
-            for key in ("ods_run_id", "ods_episode_id", "ods_generation"):
+            for key in (
+                "ods_run_id",
+                "ods_episode_id",
+                "ods_generation",
+                "ods_frame_index",
+                "ods_accepted_at_ns",
+            ):
                 shared_td[key] = torch.full(
                     shared_td.batch_size, -1, dtype=torch.int64, device=shared_td.device
                 )
@@ -1355,11 +1478,17 @@ class OnlineDataEngine:
                 result = self.shared_buffer[row_indices[:, None], time_indices].clone()
                 valid_history = offsets[None, :] < lengths[:, None]
                 # Remove every padded payload, including stale tail observations.
-                for value in result.values(include_nested=True, leaves_only=True):
+                for key, value in result.items(include_nested=True, leaves_only=True):
                     mask = valid_history.reshape(
                         *valid_history.shape, *((1,) * (value.ndim - 2))
                     )
-                    value.masked_fill_(~mask, 0)
+                    invalid_value = (
+                        -1
+                        if key in {"task_index", "subtask_index"}
+                        or (isinstance(key, str) and key.startswith("ods_"))
+                        else 0
+                    )
+                    value.masked_fill_(~mask, invalid_value)
                 result["valid"] = valid_history
                 result["loss_mask"] = valid_history & (
                     offsets[None, :] >= prefix_lengths[:, None]
@@ -1587,7 +1716,7 @@ class OnlineDataEngine:
             is_alive = False
 
         try:
-            process.join(timeout=5.0 if is_alive else 0)
+            process.join(timeout=self.cfg.shutdown_timeout if is_alive else 0)
         except (AssertionError, ValueError):
             pass
 
@@ -1641,9 +1770,9 @@ class OnlineDataEngine:
     def stop(self) -> None:
         """Terminate the simulation subprocess and release resources.
 
-        Sets the close signal and waits briefly for the subprocess to exit
-        gracefully (it checks the signal between rollout steps).  If the
-        subprocess is still alive after the grace period it is force-terminated.
+        Sets the close signal and waits up to ``cfg.shutdown_timeout`` for the
+        subprocess to exit gracefully (it checks the signal between rollout
+        steps). If it remains alive after that wait, it is force-terminated.
 
         Safe to call multiple times — subsequent calls are no-ops if the
         subprocess has already been terminated.
