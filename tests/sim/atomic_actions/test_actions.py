@@ -134,6 +134,7 @@ ARM_DOF = 6
 HAND_DOF = 2
 ROBOT_DOF = ARM_DOF + HAND_DOF
 CONTROL_DT = 1.0 / 60.0
+TEST_JOINT_VELOCITY_LIMIT = 100.0
 DUAL_ARM_DOF = 2 * ARM_DOF
 DUAL_ROBOT_DOF = DUAL_ARM_DOF + 2 * HAND_DOF
 DOOR_ENTITY_ID = "door"
@@ -428,6 +429,20 @@ def _bind_action(
     control_profiles: dict[str, ControlPartCommandProfile] | None = None,
 ) -> ActionT:
     """Bind one configured action to an engine-owned test backend."""
+    if isinstance(action, CoordinatedPickment):
+        generator.robot.get_qvel_limits.side_effect = (
+            lambda name=None, joint_ids=None: torch.full(
+                (
+                    NUM_ENVS,
+                    len(
+                        generator.robot.get_joint_ids(name)
+                        if joint_ids is None
+                        else joint_ids
+                    ),
+                ),
+                TEST_JOINT_VELOCITY_LIMIT,
+            )
+        )
     profiles = {
         name: ControlPartCommandProfile.joint_positions(
             open=torch.zeros(len(generator.robot.get_joint_ids(name=name))),
@@ -686,16 +701,22 @@ def _dual_motion_generator() -> MotionGenerator:
         pose: torch.Tensor,
         name: str,
         joint_seed: torch.Tensor,
+        continuous: bool = False,
         **_: object,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        results = [
-            robot.compute_ik(
+        results = []
+        current_seed = joint_seed
+        for index in range(pose.shape[1]):
+            sample_seed = current_seed if continuous else joint_seed[:, index]
+            result = robot.compute_ik(
                 pose=pose[:, index],
                 name=name,
-                joint_seed=joint_seed[:, index],
+                joint_seed=sample_seed,
             )
-            for index in range(pose.shape[1])
-        ]
+            results.append(result)
+            if continuous:
+                valid, qpos = result
+                current_seed = torch.where(valid[:, None], qpos, current_seed)
         return (
             torch.stack([valid for valid, _ in results], dim=1),
             torch.stack([qpos for _, qpos in results], dim=1),
@@ -6818,6 +6839,74 @@ def test_coordinated_pick_holds_only_environment_with_ik_failure() -> None:
     assert left_held.semantics is right_held.semantics
     assert left_held.env_mask.tolist() == [True, False]
     assert right_held.env_mask.tolist() == [True, False]
+
+
+def test_coordinated_pick_holds_environment_with_dense_ik_joint_jump() -> None:
+    generator = _dual_motion_generator()
+    generator.robot.get_solver.return_value.supports_continuous_batch_ik = True
+    original_compute_batch_ik = generator.robot.compute_batch_ik.side_effect
+    excessive_joint_step = 2.0
+
+    def inject_dense_joint_jump(
+        pose: torch.Tensor,
+        name: str,
+        joint_seed: torch.Tensor,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        success, qpos = original_compute_batch_ik(
+            pose=pose,
+            name=name,
+            joint_seed=joint_seed,
+            **kwargs,
+        )
+        if name == "left_arm" and pose.shape[1] > 1:
+            qpos = qpos.clone()
+            qpos[1, pose.shape[1] // 2] += excessive_joint_step
+        return success, qpos
+
+    generator.robot.compute_batch_ik.side_effect = inject_dense_joint_jump
+    action = _bind_action(
+        generator,
+        CoordinatedPickment(
+            default_options=CoordinatedPickmentOptions(
+                hand_interp_steps=4,
+                hold_steps=2,
+                object_motion_keyframes=3,
+            ),
+        ),
+    )
+    _stub_dual_arm_grasp_poses(action)
+    invocation = ActionInvocation(
+        skill_id="coordinated_pickment",
+        goal=CoordinatedPickGoal(
+            semantics=ObjectSemantics(
+                affordance=AntipodalAffordance(),
+                geometry={},
+                entity_id="tray",
+                label="tray",
+            ),
+            object_target_pose=torch.eye(4),
+            object_initial_pose=torch.eye(4),
+        ),
+        binding=_dual_binding(action, "left", "right"),
+        motion_policy=MotionPolicy(sample_count=30),
+    )
+    context = _dual_context()
+
+    plan = _plan_action(action, invocation, context)
+
+    assert plan.plan_success.tolist() == [True, False]
+    trajectory = _joint_trajectory(plan)
+    assert not torch.allclose(trajectory.positions[0], context.robot.qpos[0])
+    assert torch.allclose(
+        trajectory.positions[1],
+        context.robot.qpos[1].unsqueeze(0).repeat(30, 1),
+    )
+    assert all(not frame.active_mask[1].item() for frame in plan.commands.frames)
+    assert any(
+        call.kwargs.get("continuous") is True
+        for call in generator.robot.compute_batch_ik.call_args_list
+    )
 
 
 def test_coordinated_pick_fails_when_affordance_has_no_grasp() -> None:
