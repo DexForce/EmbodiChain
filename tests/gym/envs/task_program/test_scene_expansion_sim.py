@@ -45,7 +45,7 @@ def _run_scene_expansion_smoke(output: Path) -> None:
     from embodichain.lab.sim import SimulationManager
     from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
     from embodichain.lab.sim.motion.workspace.cfg import RobotWorkspaceCfg
-    from embodichain.lab.sim.scene_expansion import ScenePoseChange, SceneVariant
+    from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
     from embodichain.lab.task_program.integrations.scene_expansion import (
         execute_scene_variant,
     )
@@ -59,7 +59,7 @@ def _run_scene_expansion_smoke(output: Path) -> None:
 
     path = (
         _REPOSITORY_ROOT
-        / "embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
+        / "extensions/embodichain_tasks/configs/tasks/manipulation/repeated_pick_place/task.ur5.yaml"
     )
     cfg = config_to_cfg(load_config(path), source_path=path)
     cfg.seed = 0
@@ -192,7 +192,9 @@ def test_native_scene_expansion_records_and_restores_measured_task(
     """Qualify the production host and Robot FK/IK on a real rigid scene."""
     report_path = tmp_path / "scene-expansion.json"
     child_env = dict(os.environ)
-    child_env["PYTHONPATH"] = str(_REPOSITORY_ROOT)
+    child_env["PYTHONPATH"] = os.pathsep.join(
+        (str(_REPOSITORY_ROOT), child_env.get("PYTHONPATH", ""))
+    )
     child_env["EMBODICHAIN_SIM_EXIT_PROCESS"] = "0"
     completed = subprocess.run(
         [sys.executable, "-c", _RUN_CHILD, __file__, str(report_path)],

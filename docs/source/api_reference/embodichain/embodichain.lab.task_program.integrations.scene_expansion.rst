@@ -2,7 +2,7 @@ embodichain.lab.task_program.integrations.scene_expansion
 =========================================================
 
 This integration evaluates one
-:class:`~embodichain.lab.sim.scene_expansion.SceneVariant` through the existing
+:class:`~embodichain.lab.sim.scene.expansion.SceneVariant` through the existing
 Task Program and Gym demonstration execution path. An injected host prepares
 the physical scene; a separate validator supplies measured task evidence.
 The API currently requires a single environment row and an explicit or
@@ -88,7 +88,7 @@ not substitute a constant passing check for physical evidence:
 
    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
    from embodichain.lab.sim.motion.expansion import ValidationResult
-   from embodichain.lab.sim.scene_expansion import (
+   from embodichain.lab.sim.scene.expansion import (
        FixedSceneCandidateSource,
        SceneVariant,
    )

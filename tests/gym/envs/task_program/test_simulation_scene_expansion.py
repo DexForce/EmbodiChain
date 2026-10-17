@@ -29,7 +29,7 @@ from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
 from embodichain.lab.sim.motion.expansion import ValidationCheck, ValidationResult
-from embodichain.lab.sim.scene_expansion import ScenePoseChange, SceneVariant
+from embodichain.lab.sim.scene.expansion import ScenePoseChange, SceneVariant
 from embodichain.lab.task_program.integrations.simulation.scene_expansion import (
     SimulationSceneExpansionHost,
 )

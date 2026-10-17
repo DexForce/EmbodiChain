@@ -88,7 +88,7 @@ The application supplies task-specific initial and measured checks:
 
    from embodichain.lab.gym.envs.embodied_env import EmbodiedEnv
    from embodichain.lab.sim.motion.expansion import ValidationResult
-   from embodichain.lab.sim.scene_expansion import SceneVariant
+   from embodichain.lab.sim.scene.expansion import SceneVariant
    from embodichain.lab.task_program.integrations.scene_expansion import (
        SceneVariantEpisodeResult,
        execute_scene_variant,

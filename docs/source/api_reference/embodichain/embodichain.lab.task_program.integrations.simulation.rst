@@ -27,7 +27,7 @@ embodichain.lab.task_program.integrations.simulation
 Scene preparation and workspace
 -------------------------------
 
-Scene proposal contracts remain in ``lab.sim.scene_expansion``. These adapters
+Scene proposal contracts remain in ``lab.sim.scene.expansion``. These adapters
 connect them to the current robot and the Gym reset lifecycle:
 
 .. toctree::

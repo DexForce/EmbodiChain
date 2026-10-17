@@ -68,7 +68,7 @@ The grasp transform is supplied from the application's object affordance:
 
    import torch
 
-   from embodichain.lab.sim.scene_expansion import (
+   from embodichain.lab.sim.scene.expansion import (
        FixedSceneCandidateSource,
        SceneExpansionCfg,
    )

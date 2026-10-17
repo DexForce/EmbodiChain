@@ -25,7 +25,7 @@ import pytest
 import torch
 
 from embodichain.lab.sim.motion.workspace.runtime import WorkspaceSample
-from embodichain.lab.sim.scene_expansion import ScenePoseChange
+from embodichain.lab.sim.scene.expansion import ScenePoseChange
 from embodichain.lab.task_program.integrations.simulation.workspace import (
     RobotSceneWorkspace,
     SceneWorkspaceCandidate,
