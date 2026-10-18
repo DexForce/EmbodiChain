@@ -33,3 +33,14 @@ the complete package into an immutable snapshot. `verify_prepared_asset` is the
 common integrity boundary for any provider's prepared output; its package-root,
 file-inventory and manifest contract is documented in that function. Changing
 source content creates a new identity; changing cached content is an error.
+
+## Task matching
+
+`semantics/asset_matching.py` owns bounded role matching. It resolves explicit
+category aliases, checks hard properties/capabilities and dimensions, and prunes
+upright support/containment assignments as roles are selected. It never builds
+the full Cartesian product. Candidate and search-node budgets are independent;
+exhaustion produces structured rejection evidence rather than a relaxed match.
+`ResolvedAssetSet` freezes selected content and requirement identity with a seed.
+Absolute cache paths are excluded from its identity. Same asset selection does
+not establish reachable grasps, settled state or measured task success.

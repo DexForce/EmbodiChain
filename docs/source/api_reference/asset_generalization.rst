@@ -146,3 +146,28 @@ Directory and explicit providers retain candidate metadata without claiming task
    :members:
 
 .. autofunction:: embodichain.data.asset_catalog.local.verify_prepared_asset
+
+embodichain.lab.task_program.semantics.asset_matching additions
+---------------------------------------------------------------
+
+Bounded deterministic selection applies hard role constraints and upright geometric relations before freezing an asset set. Unknown metadata cannot satisfy required constraints; a resolved set does not certify physical success.
+
+.. currentmodule:: embodichain.lab.task_program.semantics.asset_matching
+
+.. autosummary::
+
+   AssetRejection
+   AssetResolutionError
+   ResolvedAssetSet
+   resolve_asset_set
+
+.. autoclass:: embodichain.lab.task_program.semantics.asset_matching.AssetRejection
+   :members:
+
+.. autoclass:: embodichain.lab.task_program.semantics.asset_matching.AssetResolutionError
+   :members:
+
+.. autoclass:: embodichain.lab.task_program.semantics.asset_matching.ResolvedAssetSet
+   :members:
+
+.. autofunction:: embodichain.lab.task_program.semantics.asset_matching.resolve_asset_set
