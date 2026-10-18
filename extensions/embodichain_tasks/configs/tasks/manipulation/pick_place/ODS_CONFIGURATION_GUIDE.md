@@ -102,6 +102,11 @@ system runs an additional calibration curve: two scalar throughputs cannot
 predict unmeasured B/P behavior. Optimizer/model hyperparameters are outside this
 pipeline configurator's scope.
 
+The long-run g*K supply estimate assumes assigned budgets are actually usable.
+Full-cache replacement may retire unused allowances. Measure this utilization
+and lower the realized supply estimate when necessary; never transfer discarded
+allowances to an already exhausted trajectory to recover utilization.
+
 ## 3. Enforce the bound at sampling time
 
 The enforced invariant for every immutable (run_id, episode_id) is:
@@ -161,6 +166,9 @@ decisions use remaining unlocked quota and observed latency, not a fixed number
 of updates. If demand reduction is needed for latency protection, pacing must
 bound short-window consumption too; an average sleep after an unlimited burst
 does not protect the available quota during refill.
+The implemented consumer spaces full-batch service starts and permits one
+immediate initial batch; short-window accounting therefore includes a one-batch
+burst allowance. Per-trajectory count caps remain strict without this allowance.
 
 | Control | How to choose and verify it |
 | --- | --- |
@@ -267,3 +275,22 @@ intervals. `timeline.json` records the common monotonic origin; source hashes
 record the configurator and reporter too. These are observed paced-workload
 rates, not a claim of simultaneous saturation. Recalibrate after changing the
 profile or runtime placement. No built-in profile is claimed universally safe.
+
+## 8. Implementation validation
+
+At implementation revision `8748aa22`, 429 focused runtime tests and 49 context/
+documentation tests passed. API coverage is2614/2614. A real P2/C4/B64 run with
+provisional budget/hard limit64 produced8 accepted trajectories across2 generations
+and performed6 parameter updates. All384 delivered chunks were consumed; every
+trajectory stayed at or below64 selections. The last four trajectories consumed
+their full budgets;128 unused initial-generation credits were retired on
+replacement. The final step6 checkpoint was saved and evaluated despite a1000-step
+periodic evaluation interval. Budget depletion and normal cleanup both passed.
+
+The measured service-start spacing respected the configured12.047 chunks/s cap
+with the one-batch burst allowance. The tiny budget intentionally tests plumbing
+and termination, not learning success. CPU sampler measurements at C32 and B64/
+256/1024 showed p50 quota overhead of4.29%/0.92%/1.17%; these include selection,
+lock and clone, but are not end-to-end training overhead claims. Full Sphinx
+validation remains blocked by the environment's missing `open3d.cpu` dependency.
+Detailed evidence and limitations: [validation record](ODS_CONFIGURATION_VALIDATION.json).

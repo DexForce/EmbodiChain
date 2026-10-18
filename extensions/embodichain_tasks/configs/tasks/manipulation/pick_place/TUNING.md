@@ -12,8 +12,9 @@ diagnostic evidence; selecting a best tuple is no longer the study's objective.
 The configurator takes generation and learner throughput as its two explicit
 inputs, reads runtime metadata automatically, and derives pipeline settings.
 Per-trajectory chunk selections have a profile-recommended range and a protected
-hard cap. Implement sampler-side quotas before claiming that cap is enforced;
-the current global anchor credits do not provide it.
+hard cap. Sampler-side quotas are implemented in the explicit auto-config path;
+the compatibility global anchor-credit mode does not provide them. See
+[implementation validation](ODS_CONFIGURATION_VALIDATION.json).
 
 ## What is controlled
 
