@@ -32,11 +32,7 @@ from .neural_ik_solver import NeuralIKSolverCfg, NeuralIKSolver
 from .ur_solver import URSolverCfg, URSolver
 from .fep_solver import FEPSolverCfg, FEPSolver
 
-from .differentiable_ik_solver import DifferentiableIKSolver, DifferentiableIKSolverCfg
-
 __all__ = [
-    "DifferentiableIKSolver",
-    "DifferentiableIKSolverCfg",
     "SolverCfg",
     "BaseSolver",
     "PytorchSolverCfg",

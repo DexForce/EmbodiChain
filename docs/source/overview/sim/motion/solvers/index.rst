@@ -17,8 +17,6 @@ Choose a solver
      - Use it for
    * - :doc:`pytorch_solver`
      - Numerical IK with batched PyTorch computation and multiple seeds.
-   * - :doc:`differentiable_ik_solver`
-     - Fixed-step DLS with target and seed gradients for learning.
    * - :doc:`differential_solver`
      - Jacobian-based joint updates for differential pose control.
    * - :doc:`pink_solver`
@@ -36,6 +34,8 @@ Choose a solver
 
 Analytical solvers require matching robot geometry. Numerical solvers support
 more general chains but depend on seed quality and convergence settings.
+For differentiable training and task-parameter optimization, use the standalone
+:doc:`Torch IK layer </overview/learning/differentiable_ik>`.
 
 .. _motion-solver-conventions:
 
@@ -72,7 +72,6 @@ For full signatures and configuration fields, see the
 
    pytorch_solver
    differential_solver
-   differentiable_ik_solver
    pink_solver
    pinocchio_solver
    opw_solver

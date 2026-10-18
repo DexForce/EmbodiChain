@@ -1534,7 +1534,7 @@
         "learning-layers"
       ],
       "summary": "Shared numerical kinematics and manipulability algorithms.",
-      "details": "This package owns reusable numerical routines and private Warp kernels. Differentiable fixed-step IK, SE(3) residuals, and serial-chain FK/Jacobians are shared by training layers and runtime solver adapters. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
+      "details": "This package owns reusable numerical routines and private Warp kernels. Differentiable fixed-step IK, SE(3) residuals, and serial-chain FK/Jacobians provide simulation-independent computation for Torch learning layers. Stateful robot solving remains in motion.solvers, while workspace analysis consumes shared metrics and kinematic computation.",
       "boundaries": [
         "Numerical kernels do not own live robot or environment state."
       ],
@@ -1544,7 +1544,7 @@
           "symbol": "<module>",
           "start_line": 17,
           "end_line": 24,
-          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\nDifferentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians\nare shared by training layers and the runtime solver adapter.\"\"\""
+          "excerpt": "\"\"\"Kinematics computations and scalar motion profiles.\n\nPrivate Warp kernels implement FEP, OPW, SRS, UR, and trapezoidal/Double-S profiles.\nStateful solver interfaces and robot configuration remain in\n``embodichain.lab.sim.motion.solvers``.\nPure batched manipulability helpers live in :mod:`.manipulability`.\nDifferentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians\nprovide simulation-independent computation for Torch learning layers.\"\"\""
         }
       ],
       "documentation": [

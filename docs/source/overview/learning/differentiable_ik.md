@@ -1,8 +1,8 @@
 # Differentiable IK
 
-Use the Torch layer for training and the Solver adapter for a Robot control part.
-Both call the same fixed-step DLS implementation in `embodichain.compute.kinematics`.
-The existing `DifferentialSolver` retains its control-oriented interface and behavior.
+Use `DifferentiableIKLayer` for training, task-parameter optimization and
+forward-only inference. It calls the fixed-step DLS implementation in
+`embodichain.compute.kinematics` without importing the simulation runtime.
 
 ## Training without simulation
 
@@ -38,27 +38,19 @@ buffers. Checkpoints contain numerical settings, TCP, limits and a geometry
 fingerprint. Reconstruct the same chain before loading. Geometry and TCP are fixed
 configuration, not learned parameters. `eval()` does not disable gradients.
 
-## Robot adapter
+## Forward-only inference and frame ownership
 
 ```python
-from embodichain.lab.sim.motion.solvers import DifferentiableIKSolverCfg
-
-cfg = DifferentiableIKSolverCfg(
-    urdf_path=get_data_path("Franka/Panda/PandaWithHand.urdf"),
-    root_link_name="base", end_link_name="fr3_hand_tcp",
-    ik=DifferentiableIKCfg(max_iterations=16), dtype="float32",
-)
-solver = cfg.init_solver(device="cuda")
-success, joints = solver.get_ik(target, seed)  # (N,), (N, dof)
-valid, candidates = solver.get_ik(target, seed, return_all_solutions=True)
-# (N, 1), (N, 1, dof): one candidate, no random multi-start search.
+with torch.no_grad():
+    result = ik.solve(target, seed)
+    success, joints = result.success, result.qpos
 ```
 
-The adapter supports live `set_tcp`, `set_qpos_limits`, and Robot limit intersections.
-`get_fk` includes TCP; `get_jacobian` defaults to the same TCP. Optional `locations`
-specifies a shared or per-sample flange-frame translation. Use layer/solver direct
-calls for float64 validation; Robot's arena conversion currently uses float32.
-Continuous candidate-path selection is not supported.
+The layer takes one seed per target and does not run a multi-start search. It is
+an `nn.Module`, not a registered Robot solver. Callers own world-to-root frame
+conversion and must configure TCP and physical joint limits explicitly when
+constructing `KinematicsLayer`. Existing simulation solvers and robot defaults
+remain unchanged.
 
 ## Numerical and gradient contract
 

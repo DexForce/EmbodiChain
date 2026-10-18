@@ -13,10 +13,11 @@ module interfaces. `learning/models/` owns the shared MLP; historical
 registries remain in `learning/rl/models`. Learning roots load exports on demand
 so standalone layers and lightweight APG do not load simulation.
 
-The runtime `lab/sim/motion/solvers/differentiable_ik_solver.py` adapter calls
-the same compute function; it does not wrap or import the training layer.
-Robot TCP/limit synchronization belongs to this adapter. See
-[IK solvers](../ik-solvers/ik-solvers.md) for runtime binding and arena frames.
+Training, task-parameter optimization and the differentiable benchmark call
+`DifferentiableIKLayer` directly. Use `torch.no_grad()` for forward-only inference.
+There is no registered Robot solver adapter: callers provide root-frame targets
+and explicitly configure the layer's TCP and limits. Existing Robot solver binding
+and arena conversion remain in [IK solvers](../ik-solvers/ik-solvers.md).
 
 ## Gradient and state boundaries
 
@@ -45,9 +46,8 @@ Frozen parameters must not imply a no-grad forward: gradients still propagate
 through model inputs. Formal task deployments belong to the task extension.
 See [RL learning](../rl-learning/rl-learning.md) for trainer/collector lifecycle.
 
-Tests live under `tests/compute/kinematics/`, `tests/learning/layers/`, and the
-matching simulation solver test. Validate FK, dJ/dq, full IK and recurrent-state
-gradients separately; include nonzero TCP offsets, repeated solves, checkpoint
-migration and import boundaries. GPU validation runs serially with `--run-gpu`.
+Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
+Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include
+nonzero TCP offsets, repeated solves, checkpoint migration and import boundaries. GPU validation runs serially with `--run-gpu`.
 The unified kinematic benchmark's `differentiable` mode measures training and
 forward-only baselines, including FK/Jacobian and DLS component costs.

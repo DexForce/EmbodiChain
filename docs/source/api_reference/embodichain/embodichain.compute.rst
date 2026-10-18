@@ -141,8 +141,8 @@ Differentiable inverse kinematics
 
 The fixed-step DLS implementation preserves target and seed gradients through
 both FK and the geometric Jacobian. ``SerialChainKinematics`` adapts a copied
-PK chain without loading simulation. ``DifferentiableIKCfg`` is shared by the
-training layer and robot solver adapter; failed solves retain their last iterate.
+PK chain without loading simulation. ``DifferentiableIKCfg`` configures the
+compute function and Torch layer; failed solves retain their last iterate.
 
 .. currentmodule:: embodichain.compute.kinematics
 

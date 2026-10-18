@@ -4,11 +4,14 @@ Learning Infrastructure
 Embodied learning trains agents to act through a robot's observations and
 actions. This section covers policy training and evaluation in EmbodiChain;
 the built-in training framework currently focuses on reinforcement learning.
+Standalone differentiable kinematics layers also support task-parameter
+optimization and training without a simulation environment.
 
 .. toctree::
    :maxdepth: 1
 
    /overview/rl/index
+   differentiable_ik
 
 Related Workflows
 -----------------

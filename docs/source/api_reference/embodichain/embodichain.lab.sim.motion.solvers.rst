@@ -255,20 +255,3 @@ Seed Selection
 .. autoclass:: QposSeedSelSampler
     :members:
     :show-inheritance:
-
-Differentiable IK Solver
------------------------
-
-This runtime adapter shares ``compute.kinematics.solve_dls_ik`` with the training
-layer. It owns Robot binding, live TCP and limits; it does not depend on learning.
-Use ``learning.layers.DifferentiableIKLayer`` when no simulation is needed.
-
-.. currentmodule:: embodichain.lab.sim.motion.solvers
-
-.. autosummary::
-
-   DifferentiableIKSolverCfg
-   DifferentiableIKSolver
-
-.. automodule:: embodichain.lab.sim.motion.solvers.differentiable_ik_solver
-   :members:

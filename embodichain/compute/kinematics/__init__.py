@@ -21,7 +21,7 @@ Stateful solver interfaces and robot configuration remain in
 ``embodichain.lab.sim.motion.solvers``.
 Pure batched manipulability helpers live in :mod:`.manipulability`.
 Differentiable fixed-step IK, SE(3) residuals and serial-chain FK/Jacobians
-are shared by training layers and the runtime solver adapter."""
+provide simulation-independent computation for Torch learning layers."""
 
 from __future__ import annotations
 

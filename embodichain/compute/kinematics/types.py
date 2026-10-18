@@ -30,7 +30,7 @@ __all__ = ["DifferentiableIKCfg", "DifferentiableIKResult"]
 
 @configclass
 class DifferentiableIKCfg:
-    """Fixed-step DLS options shared by training and robot adapters.
+    """Fixed-step DLS options shared by the compute API and Torch layers.
 
     Damping is strictly positive. Hard limit projection is piecewise
     differentiable and has zero gradients outside the projected interval.
