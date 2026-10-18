@@ -8,11 +8,12 @@ These modules do not import learning or simulation. `SerialChainKinematics`
 returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 
 `learning/layers/` owns `KinematicsLayer` and `DifferentiableIKLayer` Torch
-module interfaces. `learning/models/` owns MLP, policy interfaces, actor-critic
-models, normalization, and policy registration/builders. The registry is
-`learning/models/registry.py`; callers import models from `embodichain.learning.models`.
-Model exports load on demand so standalone MLP/layers do not load RL, TensorDict
-or simulation. RL algorithms and trainers consume these models.
+module interfaces. `learning/models/` owns general MLPs, feature normalization
+and configuration-driven MLP construction. These components do not import RL,
+TensorDict or simulation. RL policy interfaces, actor-critic composition and
+policy registration/builders belong to `learning/rl/models/`; RL code consumes
+the shared networks and normalizer. See [RL learning](../rl-learning/rl-learning.md)
+for those contracts.
 
 Training, task-parameter optimization and the differentiable benchmark call
 `DifferentiableIKLayer` directly. Use `torch.no_grad()` for forward-only inference.

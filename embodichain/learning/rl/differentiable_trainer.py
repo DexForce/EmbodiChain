@@ -38,7 +38,7 @@ from embodichain.learning.rl.env import (
     ScheduledDifferentiableVecEnv,
 )
 from embodichain.learning.rl.evaluation import evaluate_episodes
-from embodichain.learning.models import Policy
+from embodichain.learning.rl.models import Policy
 from embodichain.learning.rl.normalization import RunningObservationNormalizer
 from embodichain.learning.rl.utils import LRSchedulerCfg, build_lr_scheduler
 from embodichain.utils import configclass

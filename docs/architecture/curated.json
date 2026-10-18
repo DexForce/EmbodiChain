@@ -1764,7 +1764,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/policy.py",
+          "path": "embodichain/learning/rl/models/policy.py",
           "symbol": "Policy",
           "start_line": 35,
           "end_line": 35,
@@ -2882,7 +2882,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_critic.py",
+          "path": "embodichain/learning/rl/models/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -2891,7 +2891,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
           "label": "ActorCritic documentation"
         }
       ]
@@ -2910,7 +2910,7 @@
       ],
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_only.py",
+          "path": "embodichain/learning/rl/models/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,
@@ -2919,7 +2919,7 @@
       ],
       "documentation": [
         {
-          "docname": "api_reference/embodichain/embodichain.learning.models",
+          "docname": "api_reference/embodichain/embodichain.learning.rl.models",
           "label": "ActorOnly documentation"
         }
       ]
@@ -5133,7 +5133,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_critic.py",
+          "path": "embodichain/learning/rl/models/actor_critic.py",
           "symbol": "ActorCritic",
           "start_line": 34,
           "end_line": 34,
@@ -5151,7 +5151,7 @@
       "scope": "Direct Python inheritance; not an algorithm-to-model compatibility matrix.",
       "evidence": [
         {
-          "path": "embodichain/learning/models/actor_only.py",
+          "path": "embodichain/learning/rl/models/actor_only.py",
           "symbol": "ActorOnly",
           "start_line": 31,
           "end_line": 31,

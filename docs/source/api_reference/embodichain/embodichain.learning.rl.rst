@@ -117,7 +117,12 @@ Policy Models
 -------------
 
 Policy implementations and registration live in
-:doc:`embodichain.learning.models`.
+:doc:`embodichain.learning.rl.models`.
+
+.. toctree::
+   :maxdepth: 1
+
+   embodichain.learning.rl.models
 
 Runtime Reconstruction
 ----------------------

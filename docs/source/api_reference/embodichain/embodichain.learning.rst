@@ -55,10 +55,10 @@ state, optimizers, and detach boundaries.
 Shared trainable models
 -----------------------
 
-``learning.models`` owns MLP, policy interfaces, actor-critic networks,
-observation normalization and the policy registry/builders. Import these APIs
-from ``embodichain.learning.models``. Exports load on demand: using MLP or the
-standalone IK layers does not import RL trainers, simulation or TensorDict.
+``learning.models`` owns general MLPs, feature normalization and MLP configuration
+builders. RL-specific ``Policy``, ``ActorCritic``, ``ActorOnly`` and policy
+registration/builders remain in ``learning.rl.models``. Shared components and
+standalone IK layers do not import RL, simulation or TensorDict.
 
 .. toctree::
    :maxdepth: 1

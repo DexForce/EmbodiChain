@@ -52,7 +52,11 @@ class Block(importlib.abc.MetaPathFinder):
             raise AssertionError(fullname)
 sys.meta_path.insert(0, Block())
 from embodichain.learning.layers import KinematicsLayer, DifferentiableIKLayer
-from embodichain.learning.models import MLP
+from embodichain.learning.models import MLP, EmpiricalNormalizer, build_mlp_from_cfg
+network = build_mlp_from_cfg({"type": "mlp", "network_cfg": {"hidden_sizes": [4]}}, 3, 2)
+assert isinstance(network, MLP)
+assert network.__class__.__module__ == "embodichain.learning.models.mlp"
+assert not hasattr(__import__("embodichain.learning.models", fromlist=["Policy"]), "Policy")
 """
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True
@@ -196,8 +200,9 @@ class Block(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Block())
 from embodichain.learning.rl import DifferentiableTrainer, DifferentiableTrainerCfg
 from embodichain.learning.rl.algo import APG
-from embodichain.learning.models import ActorOnly, ActorCritic, MLP, get_policy_class
-from embodichain.learning.models.registry import get_policy_class as registry_lookup
+from embodichain.learning.models import MLP
+from embodichain.learning.rl.models import ActorOnly, ActorCritic, get_policy_class
+from embodichain.learning.rl.models.registry import get_policy_class as registry_lookup
 assert get_policy_class is registry_lookup
 assert get_policy_class("actor_only") is ActorOnly
 assert get_policy_class("actor_critic") is ActorCritic

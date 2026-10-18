@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Running observation normalization for reinforcement-learning policies."""
+"""Running feature normalization shared by learning models."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ __all__ = ["EmpiricalNormalizer"]
 class EmpiricalNormalizer(nn.Module):
     """Normalize observations with online mean and variance estimates.
 
-    Statistics are stored as module buffers so policy checkpoints preserve the
+    Statistics are stored as module buffers so checkpoints preserve the
     exact transformation used during training and evaluation.
 
     Args:

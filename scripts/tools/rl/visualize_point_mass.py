@@ -33,7 +33,8 @@ import torch
 from matplotlib.patches import Circle
 from tensordict import TensorDict
 
-from embodichain.learning.models import Policy, build_mlp_from_cfg, build_policy
+from embodichain.learning.rl.models import Policy, build_policy
+from embodichain.learning.models import build_mlp_from_cfg
 from embodichain.utils.logger import log_info
 from embodichain.utils.utility import load_config
 from embodichain_tasks.classic_control.point_mass import PointMassEnv

@@ -27,6 +27,7 @@ from typing import Any
 # Keep lightweight APG imports independent of the simulator-backed Trainer.
 _LAZY_EXPORTS = {
     "algo": ("algo", None),
+    "models": ("models", None),
     "buffer": ("buffer", None),
     "utils": ("utils", None),
     "DifferentiableTrainer": ("differentiable_trainer", "DifferentiableTrainer"),
@@ -76,6 +77,7 @@ __all__ = [
     "register_learning_env",
     "stratified_rollout_value",
     "algo",
+    "models",
     "buffer",
     "utils",
 ]

@@ -19,12 +19,13 @@
 from __future__ import annotations
 
 from functools import reduce
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import torch
 import torch.nn as nn
 
-__all__ = ["MLP"]
+__all__ = ["MLP", "build_mlp_from_cfg"]
 
 ActivationName = str | None
 
@@ -122,3 +123,34 @@ class MLP(nn.Sequential):
                 nn.init.orthogonal_(m.weight, gain=get_scale(lin_idx))
                 nn.init.zeros_(m.bias)
                 lin_idx += 1
+
+
+def build_mlp_from_cfg(module_cfg: Mapping[str, Any], in_dim: int, out_dim: int) -> MLP:
+    """Construct an MLP from a model configuration.
+
+    Args:
+        module_cfg: Mapping with ``type="mlp"`` and ``network_cfg`` containing
+            ``hidden_sizes`` plus optional activation, normalization, dropout
+            and orthogonal-initialization settings.
+        in_dim: Number of input features.
+        out_dim: Number of output features.
+
+    Returns:
+        Configured MLP module.
+    """
+    if module_cfg.get("type", "").lower() != "mlp":
+        raise ValueError("Only 'mlp' type is supported by this network builder.")
+
+    network_cfg = module_cfg["network_cfg"]
+    model = MLP(
+        in_dim,
+        out_dim,
+        network_cfg["hidden_sizes"],
+        network_cfg.get("activation", "elu"),
+        last_activation=network_cfg.get("last_activation"),
+        use_layernorm=bool(network_cfg.get("use_layernorm", False)),
+        dropout_p=float(network_cfg.get("dropout_p", 0.0)),
+    )
+    if "orthogonal_init" in network_cfg:
+        model.init_orthogonal(network_cfg["orthogonal_init"])
+    return model

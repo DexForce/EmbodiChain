@@ -30,7 +30,7 @@ from embodichain.learning.rl.env import (
     DifferentiableVecEnv,
     build_learning_env,
 )
-from embodichain.learning.models import ActorCritic
+from embodichain.learning.rl.models import ActorCritic
 from embodichain.learning.rl.policy_evaluation.manifest import RunManifest
 from embodichain.learning.rl.train import _build_learning_policy, train_from_config
 from embodichain.learning.rl.utils import OptimizerCfg

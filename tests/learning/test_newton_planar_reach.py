@@ -37,7 +37,7 @@ from embodichain.learning.rl.experimental.newton.train_planar_reach import (
     _evaluate,
     train_planar_reach,
 )
-from embodichain.learning.models import ActorOnly
+from embodichain.learning.rl.models import ActorOnly
 from embodichain.learning.rl.utils import OptimizerCfg
 
 

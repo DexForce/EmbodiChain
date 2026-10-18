@@ -24,8 +24,7 @@ import torch.nn as nn
 from torch.distributions.normal import Normal
 from tensordict import TensorDict
 
-from .mlp import MLP
-from .normalizer import EmpiricalNormalizer
+from embodichain.learning.models import EmpiricalNormalizer
 from .policy import Policy
 
 __all__ = ["ActorCritic"]

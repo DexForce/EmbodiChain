@@ -14,39 +14,19 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""Learning models and policy construction, loaded on demand."""
+"""General neural networks, normalization and network construction."""
 
 from __future__ import annotations
 
 from importlib import import_module
 from typing import Any
 
-__all__ = [
-    "ActorCritic",
-    "ActorOnly",
-    "register_policy",
-    "get_registered_policy_names",
-    "build_policy",
-    "build_mlp_from_cfg",
-    "get_policy_class",
-    "resolve_policy_obs_groups",
-    "Policy",
-    "MLP",
-    "EmpiricalNormalizer",
-]
+__all__ = ["MLP", "EmpiricalNormalizer", "build_mlp_from_cfg"]
 
 _EXPORT_MODULES = {
-    "ActorCritic": "actor_critic",
-    "ActorOnly": "actor_only",
-    "Policy": "policy",
     "MLP": "mlp",
     "EmpiricalNormalizer": "normalizer",
-    "register_policy": "registry",
-    "get_registered_policy_names": "registry",
-    "build_policy": "registry",
-    "build_mlp_from_cfg": "registry",
-    "get_policy_class": "registry",
-    "resolve_policy_obs_groups": "registry",
+    "build_mlp_from_cfg": "mlp",
 }
 
 
