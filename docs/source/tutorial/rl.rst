@@ -376,7 +376,7 @@ To add a new policy:
 
 .. code-block:: python
 
-   from embodichain.learning.rl.models import register_policy, Policy
+   from embodichain.learning.rl.policies import register_policy, Policy
    
    @register_policy("my_policy")
    class MyPolicy(Policy):

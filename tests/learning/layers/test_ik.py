@@ -190,7 +190,7 @@ def test_cuda_parity_and_no_device_synchronization(dtype):
         torch.testing.assert_close(a, b.cpu(), atol=2e-5, rtol=2e-4)
 
 
-def test_apg_import_boundary_and_model_registry():
+def test_apg_import_boundary_and_policy_registry():
     script = """
 import importlib.abc, sys
 class Block(importlib.abc.MetaPathFinder):
@@ -201,11 +201,17 @@ sys.meta_path.insert(0, Block())
 from embodichain.learning.rl import DifferentiableTrainer, DifferentiableTrainerCfg
 from embodichain.learning.rl.algo import APG
 from embodichain.learning.models import MLP
-from embodichain.learning.rl.models import ActorOnly, ActorCritic, get_policy_class
-from embodichain.learning.rl.models.registry import get_policy_class as registry_lookup
+from embodichain.learning.rl.policies import ActorOnly, ActorCritic, get_policy_class
+from embodichain.learning.rl.policies.registry import get_policy_class as registry_lookup
 assert get_policy_class is registry_lookup
 assert get_policy_class("actor_only") is ActorOnly
 assert get_policy_class("actor_critic") is ActorCritic
+import importlib.util
+import embodichain.learning.rl as rl
+assert "policies" in rl.__all__ and "models" not in rl.__all__
+assert rl.policies.Policy.__module__ == "embodichain.learning.rl.policies.policy"
+assert ActorCritic.__module__ == "embodichain.learning.rl.policies.actor_critic"
+assert importlib.util.find_spec("embodichain.learning.rl.models") is None
 """
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True

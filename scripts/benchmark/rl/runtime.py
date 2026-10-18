@@ -35,7 +35,7 @@ from embodichain.learning.rl.differentiable_trainer import (
 from embodichain.learning.rl.env import build_learning_env
 from embodichain.learning.rl.evaluation import evaluate_episodes
 from embodichain.learning.models import build_mlp_from_cfg
-from embodichain.learning.rl.models import build_policy
+from embodichain.learning.rl.policies import build_policy
 from embodichain.learning.rl.routing import get_trainer_class
 from embodichain.learning.rl.utils import dict_to_tensordict, flatten_dict_observation
 from embodichain.learning.rl.utils.trainer import Trainer

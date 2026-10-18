@@ -11,7 +11,7 @@ returns TCP poses and geometric Jacobians from one FK pass, retaining dJ/dq.
 module interfaces. `learning/models/` owns general MLPs, feature normalization
 and configuration-driven MLP construction. These components do not import RL,
 TensorDict or simulation. RL policy interfaces, actor-critic composition and
-policy registration/builders belong to `learning/rl/models/`; RL code consumes
+policy registration/builders belong to `learning/rl/policies/`; RL code consumes
 the shared networks and normalizer. See [RL learning](../rl-learning/rl-learning.md)
 for those contracts.
 

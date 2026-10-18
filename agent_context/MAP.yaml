@@ -283,7 +283,7 @@ topics:
   - embodichain/learning/rl/normalization.py
   - embodichain/learning/rl/utils/config.py
   - embodichain/learning/rl/algo/
-  - embodichain/learning/rl/models/
+  - embodichain/learning/rl/policies/
   - embodichain/learning/models/
   - extensions/embodichain_tasks/configs/tasks/
   watch_paths: [embodichain/learning/rl/, embodichain/learning/models/, extensions/embodichain_tasks/configs/tasks/, tests/learning/]

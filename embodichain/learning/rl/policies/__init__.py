@@ -14,7 +14,7 @@
 # limitations under the License.
 # ----------------------------------------------------------------------------
 
-"""RL policy models and registration, loaded on demand."""
+"""RL policies and registration, loaded on demand."""
 
 from __future__ import annotations
 

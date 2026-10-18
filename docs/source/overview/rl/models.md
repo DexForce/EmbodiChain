@@ -1,7 +1,7 @@
 # Policy Models
 
 RL policy interfaces, actor-critic models and policy registration live under
-`embodichain.learning.rl.models`. Generic `MLP`, `EmpiricalNormalizer` and
+`embodichain.learning.rl.policies`. Generic `MLP`, `EmpiricalNormalizer` and
 `build_mlp_from_cfg` live under `embodichain.learning.models`, independent of
 RL rollout and value-function contracts.
 
@@ -39,7 +39,7 @@ RL rollout and value-function contracts.
 ## Usage Example
 ```python
 from embodichain.learning.models import build_mlp_from_cfg
-from embodichain.learning.rl.models import build_policy
+from embodichain.learning.rl.policies import build_policy
 
 actor = build_mlp_from_cfg(actor_cfg, obs_dim, action_dim)
 critic = build_mlp_from_cfg(critic_cfg, obs_dim, 1)

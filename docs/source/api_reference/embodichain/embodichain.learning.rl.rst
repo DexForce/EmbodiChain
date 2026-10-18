@@ -17,7 +17,7 @@ collection logic, policy/model builders, and training entry points.
       algo
       buffer
       collector
-      models
+      policies
       policy_evaluation
       train
       utils
@@ -113,16 +113,16 @@ Collectors
    :undoc-members:
    :show-inheritance:
 
-Policy Models
--------------
+Policies
+--------
 
 Policy implementations and registration live in
-:doc:`embodichain.learning.rl.models`.
+:doc:`embodichain.learning.rl.policies`.
 
 .. toctree::
    :maxdepth: 1
 
-   embodichain.learning.rl.models
+   embodichain.learning.rl.policies
 
 Runtime Reconstruction
 ----------------------

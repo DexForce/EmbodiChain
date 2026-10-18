@@ -2013,28 +2013,28 @@ Row-wise action-adjoint clipping and its rollout-level diagnostics.
    BatchedGradientNormStats
    clip_batched_gradient_norm
 
-embodichain.learning.rl.models.actor_critic
-----------------------------------------------
+embodichain.learning.rl.policies.actor_critic
+---------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_critic
+.. currentmodule:: embodichain.learning.rl.policies.actor_critic
 
 .. autosummary::
 
    ActorCritic
 
-embodichain.learning.rl.models.actor_only
---------------------------------------------
+embodichain.learning.rl.policies.actor_only
+-------------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.actor_only
+.. currentmodule:: embodichain.learning.rl.policies.actor_only
 
 .. autosummary::
 
    ActorOnly
 
-embodichain.learning.rl.models.policy
-----------------------------------------
+embodichain.learning.rl.policies.policy
+---------------------------------------
 
-.. currentmodule:: embodichain.learning.rl.models.policy
+.. currentmodule:: embodichain.learning.rl.policies.policy
 
 .. autosummary::
 

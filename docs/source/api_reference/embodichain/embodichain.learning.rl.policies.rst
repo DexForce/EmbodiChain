@@ -1,7 +1,7 @@
-embodichain.learning.rl.models
-==============================
+embodichain.learning.rl.policies
+================================
 
-.. currentmodule:: embodichain.learning.rl.models
+.. currentmodule:: embodichain.learning.rl.policies
 
 RL policy interfaces and construction
 -------------------------------------
@@ -24,7 +24,7 @@ General MLP construction and feature normalization are provided separately by
    build_policy
    resolve_policy_obs_groups
 
-.. automodule:: embodichain.learning.rl.models
+.. automodule:: embodichain.learning.rl.policies
    :members:
    :undoc-members:
    :show-inheritance:
@@ -32,7 +32,7 @@ General MLP construction and feature normalization are provided separately by
 Policy registry
 ---------------
 
-.. automodule:: embodichain.learning.rl.models.registry
+.. automodule:: embodichain.learning.rl.policies.registry
    :members:
 
 Observation normalization
