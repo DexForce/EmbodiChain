@@ -97,5 +97,117 @@
   "final_profile": "/tmp/ods-offline-accounting-audit/consumer-selected-backends/results.json",
   "integration_focused_tests_passed": 133,
   "pilot_source_revision": "3cd6379a092f8106f08ea6073f13bec9a4bd6f63",
-  "integration_review": "independent_read_only_no_actionable_findings"
+  "integration_review": "independent_read_only_no_actionable_findings",
+  "integration_smokes": {
+    "source_revision": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+    "scope": "single update integration only; no learning/performance estimate",
+    "checks": {
+      "full": {
+        "completed": true,
+        "source_unchanged": true,
+        "backend": true,
+        "one_update": true,
+        "chunks": true,
+        "no_survivors": true,
+        "gpu_isolation": true,
+        "no_forced_cleanup": true,
+        "accounted_all_sources": true
+      },
+      "g1": {
+        "completed": true,
+        "source_unchanged": true,
+        "backend": true,
+        "one_update": true,
+        "chunks": true,
+        "no_survivors": true,
+        "gpu_isolation": true,
+        "no_forced_cleanup": true,
+        "accounted_all_sources": true,
+        "only_g1_consumed": true
+      }
+    },
+    "arms": {
+      "full": {
+        "backend": "blocked",
+        "status": {
+          "state": "complete",
+          "returncode": 0,
+          "source_unchanged": true,
+          "watchdog": {
+            "triggered": false,
+            "finished": false,
+            "forced_cleanup": false
+          },
+          "source_revision_before": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "source_revision_after": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "process_start_monotonic_seconds": 1512382.175784921,
+          "process_end_monotonic_seconds": 1512475.069580585,
+          "process_seconds": 92.89379566395655,
+          "observed_owned_pids": [
+            252539,
+            252578,
+            252580,
+            252925,
+            253054
+          ],
+          "surviving_owned_pids": [],
+          "monitor_samples": 38,
+          "monitor_errors": [],
+          "wrong_gpu_allocation_observations": 0,
+          "external_gpu_allocation_samples": 0
+        },
+        "source_rows": 256,
+        "consumed_generations": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      "g1": {
+        "backend": "dict",
+        "status": {
+          "state": "complete",
+          "returncode": 0,
+          "source_unchanged": true,
+          "watchdog": {
+            "triggered": false,
+            "finished": false,
+            "forced_cleanup": false
+          },
+          "source_revision_before": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "source_revision_after": "f8efc06a36cb10018da8e7fcb9bb583da42a4c2b",
+          "process_start_monotonic_seconds": 1512480.333737856,
+          "process_end_monotonic_seconds": 1512570.932380652,
+          "process_seconds": 90.59864279604517,
+          "observed_owned_pids": [
+            253469,
+            253522,
+            253524,
+            253870,
+            253988
+          ],
+          "surviving_owned_pids": [],
+          "monitor_samples": 37,
+          "monitor_errors": [],
+          "wrong_gpu_allocation_observations": 0,
+          "external_gpu_allocation_samples": 0
+        },
+        "source_rows": 256,
+        "consumed_generations": [
+          1
+        ]
+      }
+    },
+    "passed": true,
+    "harness_failure_preserved": {
+      "path": "/tmp/ods-offline-accounting-audit/integration-smokes",
+      "cause": "launcher expected ods-input.json metadata file for offline arm; failed before subprocess launch",
+      "replacement": "explicit unused packet metadata; fresh v2 directory"
+    }
+  }
 }

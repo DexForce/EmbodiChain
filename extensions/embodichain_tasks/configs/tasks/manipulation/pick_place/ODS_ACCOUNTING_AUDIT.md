@@ -72,3 +72,13 @@ Validation after integration: 133 focused tests passed, Black 26.3.1 passed,
 and public API coverage remained 2614/2614. No public API changed. The context
 review selected no update: the owning online-sampling guidance remains accurate
 and these private counter storage choices do not alter its contracts.
+
+Two additional real-runtime single-update checks on GPU5 passed 19 audit
+conditions. Loading the complete 256-trajectory SDK corpus selects `blocked`;
+loading that same corpus in G1-only mode selects `dict` and consumes only G1.
+Both retain 256 source records, complete exactly one update/256 chunks, keep
+the frozen source unchanged, use only the selected GPU and exit all observed
+children. They validate runner integration, not learning quality or throughput.
+Raw evidence: `/tmp/ods-offline-accounting-audit/integration-smokes-v2/AUDIT.json`.
+The first harness attempt failed before child launch because an unused packet
+metadata file was missing; its artifacts remain in `integration-smokes/`.
