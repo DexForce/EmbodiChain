@@ -782,7 +782,7 @@ def _transport_preview_fixture(monkeypatch):
         ),
         diagnostics=PlannerDiagnostics(
             backend="test",
-            metadata={"gen_sim_held_path": {"original": {"valid": True}}},
+            metadata={},
         ),
     )
     data.transport_request = SimpleNamespace(
@@ -824,6 +824,7 @@ def test_transport_prediction_projects_emitted_state_before_exact_place(
         )
     assert result["valid"] and result["physical_evidence"] is False
     assert result["transport_preview"]["invocation_id"] == "p/transport:0"
+    assert result["transport_preview"]["path_qualification"] == "not_checked"
     assert cost.snapshot()["counters"] == {"place_preview": 1, "transport_preview": 1}
     predicted = data.compiler.ground.call_args_list[2].args[2]
     assert predicted.task is data.transported_task
@@ -854,8 +855,6 @@ def test_transport_prediction_projects_emitted_state_before_exact_place(
         ("coordinated", "unavailable"),
         ("articulation", "unavailable"),
         ("hand", "unavailable"),
-        ("path", "unavailable"),
-        ("unknown_failed_path", "unavailable"),
         ("identity", "unavailable"),
     ],
 )
@@ -895,20 +894,6 @@ def test_transport_prediction_fails_closed_before_place(
         effects.articulation_joint_updates = {"drawer": 1.0}
     elif damage == "hand":
         data.moved.joint_trajectory.positions[:, -1, 2] = 1.0
-    elif damage == "path":
-        data.moved.diagnostics = PlannerDiagnostics(
-            backend="test", metadata={"gen_sim_held_path": {"not_migrated": True}}
-        )
-    elif damage == "unknown_failed_path":
-        data.moved.plan_success[:] = False
-        data.moved.diagnostics = PlannerDiagnostics(
-            backend="test",
-            metadata={
-                "gen_sim_held_path": {
-                    "original": {"unavailable": "missing_scene_geometry"}
-                }
-            },
-        )
     else:
         data.moved.invocation_id = "other"
     result = gate.preview_place(

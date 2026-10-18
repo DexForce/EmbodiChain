@@ -59,11 +59,14 @@ def test_factory_selects_runtime_without_shadowing_drawer_engine(
     constructor = Mock(return_value=drawer)
     monkeypatch.setattr(assembly, "GenSimActionEngine", parent)
     monkeypatch.setattr(drawer_runtime, "DrawerPlacementEngine", constructor)
-    registration = SimpleNamespace(validate_engine=Mock())
+    registration = SimpleNamespace(
+        validate_engine=Mock(), scene_binding=SimpleNamespace(rigid_objects=())
+    )
     factory = object.__new__(_TaskFactory)
     factory._drawers = (object(),) if has_drawers else ()
     factory._pour_receivers = {}
     factory._pour_return_calls = ()
+    factory._pour_continuations = ()
     factory._held_command_sources = ()
     factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = False

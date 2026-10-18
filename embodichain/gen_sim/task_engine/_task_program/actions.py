@@ -19,10 +19,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
-from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any, Literal
 
 import torch
@@ -113,6 +112,9 @@ class _PickSelection:
     pour_preview: Any = None
     ik_audit: dict[str, Any] = field(default_factory=dict)
     active_ik_audit: dict[str, Any] | None = None
+    depth_recovery_attempts: int = 0
+    depth_trace: list[dict[str, Any]] = field(default_factory=list)
+    closing_scene_checks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _pick_ik_tensor(value: Any) -> dict[str, Any]:
@@ -124,6 +126,19 @@ def _pick_ik_tensor(value: Any) -> dict[str, Any]:
     if tensor.is_complex() or not bool(torch.isfinite(tensor).all()):
         return {**record, "available": False, "reason": "nonfinite_or_complex"}
     return {**record, "available": True, "values": tensor.tolist()}
+
+
+@contextmanager
+def _pick_depth_random_scope(checkpoint: _RandomState | None):
+    if checkpoint is None:
+        yield
+        return
+    saved = _RandomState.capture(set(checkpoint.cuda))
+    checkpoint.restore()
+    try:
+        yield
+    finally:
+        saved.restore()
 
 
 _PICK_SELECTION: ContextVar[_PickSelection | None] = ContextVar(
@@ -305,11 +320,25 @@ class GenSimPickUp(PickUp):
             )
         )
         valid = bool(screen.mask(poses, object_pose).all())
-        return {
+        acceptance = {
             "valid": valid,
             "emitted_close_samples": poses.shape[1],
             **screen.report(),
         }
+        if (
+            valid
+            and screen.revision == 8
+            and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+        ):
+            scene = self._inspect_closing_scene(
+                request,
+                context,
+                plan.joint_trajectory.positions[0, close.start : close.stop],
+                screen,
+            )
+            acceptance["closing_scene"] = scene
+            acceptance["valid"] &= bool(scene["valid"])
+        return acceptance
 
     def _qualify_closing_plan(self, request: Any, context: Any, plan: Any) -> Any:
         selection = _PICK_SELECTION.get()
@@ -321,6 +350,26 @@ class GenSimPickUp(PickUp):
             if plan.plan_success.any()
             else {"valid": False, **screen.report()}
         )
+        if "closing_scene" in acceptance:
+            selection.closing_scene_checks.append(
+                {"stage": "emitted", **acceptance["closing_scene"]}
+            )
+        if (
+            acceptance["valid"]
+            and screen.revision in (7, 8)
+            and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+            and "closing_scene" not in acceptance
+        ):
+            close = next(s for s in plan.segments if s.name == "close")
+            scene = self._inspect_closing_scene(
+                request,
+                context,
+                plan.joint_trajectory.positions[0, close.start : close.stop],
+                screen,
+            )
+            acceptance["closing_scene"] = scene
+            acceptance["valid"] &= bool(scene["valid"])
+            selection.closing_scene_checks.append({"stage": "emitted", **scene})
         metadata = {
             **plan.diagnostics.metadata,
             "gen_sim_pick_contact_geometry": acceptance,
@@ -476,12 +525,15 @@ class GenSimPickUp(PickUp):
         manipulator: JointPositionTarget,
         options: PickUpOptions,
         approach_direction: torch.Tensor,
+        *,
+        candidate_costs: torch.Tensor | None = None,
+        candidate_limit: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Prefilter grasp columns, leaving IK and roll selection to shared PickUp."""
         selection = _PICK_SELECTION.get()
         if selection is not None:
             selection.object_pose = object_poses
-        if (
+        if candidate_limit is None and (
             options.rotate_upright is not None
             or options.approach_alignment_max_angle is None
         ):
@@ -499,29 +551,68 @@ class GenSimPickUp(PickUp):
         eef_variants = variants @ options.grasp_frame_to_eef.to(
             device=self.device, dtype=grasp_xpos.dtype
         )
-        # Preserve the original IK population and RNG draws; closing geometry
-        # masks final roll variants in the shared selector after its IK calls.
+        # Legacy callers retain their IK population and random draws. Native
+        # proposals qualify both final TCP rolls before spending candidate slots.
         aligned = super()._approach_alignment_mask(
             eef_variants, options, approach_direction
         )
         # Keep the full environment axis and both roll variants of a retained
         # candidate. Only columns rejected by every row can be removed safely.
         keep = aligned.any(dim=(0, 2))
+        indices = torch.nonzero(keep, as_tuple=False).flatten()
+        if candidate_limit is not None:
+            if (
+                grasp_xpos.shape[0] != 1
+                or candidate_costs is None
+                or candidate_costs.shape != grasp_xpos.shape[:2]
+            ):
+                raise ValueError(
+                    "Native candidate ranking requires B1 and aligned costs."
+                )
+            eligible = indices[torch.isfinite(candidate_costs[0, indices])]
+            order = torch.argsort(candidate_costs[0, eligible], stable=True)
+            ranked = eligible[order]
+            retained, count, checked = [], 0, 0
+            while checked < len(ranked) and count < candidate_limit:
+                stop = min(len(ranked), checked + candidate_limit - count)
+                chunk = ranked[checked:stop]
+                qualified = self._approach_alignment_mask(
+                    eef_variants[:, chunk], options, approach_direction
+                ).any(dim=(0, 2))
+                accepted = chunk[qualified]
+                retained.append(accepted)
+                count += len(accepted)
+                checked = stop
+            indices = torch.cat(retained) if retained else ranked[:0]
+            if selection is not None:
+                selection.closing_scene_checks.append(
+                    {
+                        "stage": "native_candidate_limit",
+                        "raw_candidates": grasp_xpos.shape[1],
+                        "qualified_before_limit": len(indices),
+                        "qualification_exhaustive": checked == len(ranked),
+                        "native_candidates_queried": checked,
+                        "direction_eligible_candidates": len(ranked),
+                        "retained": len(indices),
+                        "limit": candidate_limit,
+                        "physical_evidence": False,
+                    }
+                )
         selected = eef_variants[:, :, 0].clone()
         success = torch.zeros(
             grasp_xpos.shape[:2], dtype=torch.bool, device=self.device
         )
-        if keep.any():
+        if len(indices):
             poses, valid = self._shared_grasp_variants(
-                grasp_xpos[:, keep],
+                grasp_xpos[:, indices],
                 start_qpos,
                 object_poses,
                 manipulator,
                 options,
                 approach_direction,
             )
-            selected[:, keep] = poses
-            success[:, keep] = valid
+            selected[:, indices] = poses
+            success[:, indices] = valid
         return selected, success
 
     def _plan(self, request, context):
@@ -565,6 +656,35 @@ class GenSimPickUp(PickUp):
 
         def finish(plan):
             plan = self._qualify_closing_plan(request, context, plan)
+            if selection.closing_scene_checks:
+                plan = replace(
+                    plan,
+                    diagnostics=replace(
+                        plan.diagnostics,
+                        metadata={
+                            **plan.diagnostics.metadata,
+                            "gen_sim_pick_closing_scene_search": deepcopy(
+                                selection.closing_scene_checks
+                            ),
+                        },
+                    ),
+                )
+            if selection.depth_trace:
+                plan = replace(
+                    plan,
+                    diagnostics=replace(
+                        plan.diagnostics,
+                        metadata={
+                            **plan.diagnostics.metadata,
+                            "gen_sim_pick_native_depth_search": {
+                                "attempts": deepcopy(selection.depth_trace),
+                                "extra_full_paths": selection.depth_recovery_attempts,
+                                "shared_recovery_budget": 4,
+                                "physical_evidence": False,
+                            },
+                        },
+                    ),
+                )
             if selection.ik_audit and not plan.plan_success.any():
                 plan = replace(
                     plan,
@@ -752,7 +872,9 @@ class GenSimPickUp(PickUp):
         from embodichain.utils.math import quat_error_magnitude, quat_from_matrix
 
         previous = first.diagnostics.metadata.get("gen_sim_pick_candidate_retry", {})
-        budget = max(0, 4 - len(previous.get("attempts", ())))
+        budget = max(
+            0, 4 - len(previous.get("attempts", ())) - selection.depth_recovery_attempts
+        )
         if first.plan_success.any() or budget == 0:
             return first
         state = _RandomState.capture(_cuda_devices(self.device, self.robot.device))
@@ -895,7 +1017,8 @@ class GenSimPickUp(PickUp):
         self, request: Any, context: Any, first: Any, selection: _PickSelection
     ) -> Any:
         """Replan at most four already-filtered grasps with their own approach."""
-        if first.plan_success.any() or not selection.candidate_routes:
+        budget = max(0, 4 - selection.depth_recovery_attempts)
+        if first.plan_success.any() or not selection.candidate_routes or not budget:
             return first
         from .pick_path import rebuild
         from .pick_continuation import preview_place
@@ -957,7 +1080,7 @@ class GenSimPickUp(PickUp):
 
         try:
             for strategy, index, pose, direction in candidates():
-                if len(attempts) >= 4:
+                if len(attempts) >= budget:
                     break
                 state.restore()
                 selected = replace(
@@ -1285,6 +1408,14 @@ class GenSimPickUp(PickUp):
                 qpos=start_qpos, name=manipulator.control_part, to_matrix=True
             )
             generator = self.planning_services.grasp_pose_generator(grasp_target_id)
+            if (
+                selection.closing_geometry is not None
+                and selection.closing_geometry.revision in (5, 6, 7, 8)
+            ):
+                from .grasp_filter import TaskGraspPoseGenerator
+
+                if isinstance(generator, TaskGraspPoseGenerator):
+                    generator = generator.for_native_closing(selection.closing_geometry)
             choices = grasp_strategies(
                 axis,
                 object_pose,
@@ -1369,6 +1500,101 @@ class GenSimPickUp(PickUp):
             reference_poses=object_pose,
         )
 
+    def _native_pick_endpoint_clear(
+        self, request: Any, context: Any, path: torch.Tensor, lengths: dict[str, int]
+    ) -> bool:
+        """Reject an impossible open-hand endpoint before planning more prefixes."""
+        from .articulation_collision import check_free_motion
+
+        arm = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        stop = lengths["approach"]
+        opening = check_free_motion(
+            self.robot, self.path_simulation, path[0, stop - 1 : stop], arm.control_part
+        )
+        opened = opening["valid"]
+        selection = _PICK_SELECTION.get()
+        screen = None if selection is None else selection.closing_geometry
+        if screen is not None and screen.revision in (7, 8):
+            selection.closing_scene_checks.append({"stage": "open_endpoint", **opening})
+        if not opened or screen is None or screen.revision not in (7, 8):
+            return bool(opened)
+        scene = self._inspect_closing_scene(
+            request, context, path[0, stop : stop + lengths["close"]], screen
+        )
+        selection.closing_scene_checks.append({"stage": "candidate", **scene})
+        return bool(scene["valid"])
+
+    def _inspect_closing_scene(
+        self, request: Any, context: Any, positions: torch.Tensor, screen: Any
+    ) -> dict[str, Any]:
+        from .pick_closing_scene import check_closing_scene
+        from embodichain.lab.sim.atomic_actions.goals import (
+            _resolve_object_pose,
+            resolve_pose_goal,
+        )
+        from embodichain.lab.sim.atomic_actions.trajectory_ops import (
+            resolve_pose_target,
+        )
+
+        if context.batch_size != 1 or context.env_ids.tolist() != [0]:
+            raise ValueError("Pick closing scene revision 7 requires native B1/env0.")
+        arm = request.binding.endpoint("primary", "motion").require_target(
+            JointPositionTarget
+        )
+        tcp = self.robot.compute_batch_fk(
+            qpos=positions[None, :1, list(arm.joint_ids)],
+            name=arm.control_part,
+            to_matrix=True,
+        )[0, 0]
+        goal = request.goal
+        object_pose = (
+            _resolve_object_pose(goal.semantics, context, name="pickup_object_pose")
+            if goal.object_pose is None
+            else resolve_pose_target(
+                resolve_pose_goal(goal.object_pose, context, name="object_pose"),
+                num_envs=context.batch_size,
+                device=positions.device,
+            )
+        )
+        contact = screen.inspect(
+            (pose_inv(object_pose)[0] @ tcp).detach().cpu().double().numpy()
+        )
+        if not contact["valid"]:
+            return {"valid": False, "source_closing": contact}
+        result = check_closing_scene(
+            self.robot,
+            self.path_simulation,
+            positions,
+            arm.control_part,
+            arm.joint_ids,
+            screen.identity["simulation_uid"],
+            contact_fraction=contact["nominal_closing_fraction"],
+            grid_samples=screen.steps,
+        )
+        if result["valid"] and screen.revision == 8:
+            from .pick_native_scene import build_native_rigid_scene
+
+            if screen.rigid_scene_screen is None:
+                screen.rigid_scene_screen = build_native_rigid_scene(
+                    self.path_simulation, screen
+                )
+            certificate = screen.rigid_scene_screen.inspect(
+                tcp.detach().cpu().double().numpy(), contact["checked_samples"]
+            )
+            result = {
+                **result,
+                "valid": bool(certificate["valid"]),
+                "native_rigid_pair_rest": certificate,
+            }
+        return {
+            **result,
+            "nominal_closing_fraction": contact["nominal_closing_fraction"],
+            "nominal_grid_samples": screen.steps,
+            "post_contact_commands_screened": False,
+        }
+
     def _select_adaptive_pick(
         self,
         affordance,
@@ -1403,7 +1629,31 @@ class GenSimPickUp(PickUp):
         candidate_ids = torch.full_like(strategies, -1)
         full, lengths = None, None
         attempts = []
-        for index, choice in enumerate(choices):
+        depth_enabled = (
+            selection.closing_geometry is not None
+            and selection.closing_geometry.revision in (6, 7, 8)
+            and context.batch_size == 1
+            and not selection.constrained
+            and axis_region_policy == "mesh_extent"
+            and request.invocation_id not in self.path_excluded_invocations
+        )
+        depths = selection.closing_geometry.depth_offsets() if depth_enabled else (0.0,)
+        alternatives = ((choice, depth) for depth in depths for choice in choices)
+        original_pools: dict[int, AffordancePoseCandidates] = {}
+        original_rng: dict[int, _RandomState] = {}
+        selected_depth = object_pose.new_zeros(context.batch_size)
+        for index, (choice, depth) in enumerate(alternatives):
+            choice_index = index % len(choices)
+            if depth and selection.depth_recovery_attempts >= 4:
+                break
+            effective = options
+            canonical_shift = None
+            pool_costs = None
+            if depth:
+                transform = options.grasp_frame_to_eef.clone()
+                transform[:3, 3] -= depth * transform[:3, 2]
+                effective = replace(options, grasp_frame_to_eef=transform)
+                canonical_shift = transform @ pose_inv(options.grasp_frame_to_eef)
 
             def observe_pool(pool: AffordancePoseCandidates) -> None:
                 selection.candidates = pool
@@ -1413,58 +1663,116 @@ class GenSimPickUp(PickUp):
                     )
 
             def observe_raw_pool(pool: AffordancePoseCandidates) -> None:
+                nonlocal pool_costs
+                pool_costs = pool.costs
+                if depth_enabled and not depth:
+                    original_pools[choice_index] = pool
+                    original_rng[choice_index] = _RandomState.capture(
+                        _cuda_devices(object_pose.device)
+                    )
+                if canonical_shift is not None:
+                    pool = replace(
+                        pool, poses=pool.poses @ canonical_shift.to(pool.poses)
+                    )
                 selection.raw_candidate_routes.append(
                     (index, pool, choice.direction.clone())
                 )
 
-            sample, direction = select_grasp(
-                affordance,
-                generator,
-                object_pose,
-                (choice,),
-                context,
-                f"{sample_key}:strategy_{index}",
-                feasible=lambda values, approach: self._select_feasible_grasp_variants(
+            def feasible(values, approach):
+                limit = (
+                    getattr(generator, "native_proposal_limit", None)
+                    if choice.axis is None
+                    else None
+                )
+                return self._select_feasible_grasp_variants(
                     values,
                     start_qpos,
                     object_pose,
                     manipulator,
-                    options,
+                    effective,
                     approach[:, None, None, :],
-                ),
-                candidate_observer=observe_pool,
-                raw_candidate_observer=observe_raw_pool,
-                **(
-                    {"axis_region_policy": axis_region_policy}
-                    if axis_region_policy != "mesh_extent"
-                    else {}
-                ),
-            )
+                    **(
+                        {"candidate_costs": pool_costs, "candidate_limit": limit}
+                        if limit is not None
+                        else {}
+                    ),
+                )
+
+            with _pick_depth_random_scope(
+                original_rng[choice_index] if depth else None
+            ):
+                sample, direction = select_grasp(
+                    affordance,
+                    generator,
+                    object_pose,
+                    (choice,),
+                    context,
+                    f"{sample_key}:strategy_{choice_index}",
+                    feasible=feasible,
+                    candidate_observer=observe_pool,
+                    raw_candidate_observer=observe_raw_pool,
+                    **(
+                        {"candidate_pool": original_pools[choice_index]}
+                        if depth
+                        else {}
+                    ),
+                    **(
+                        {"axis_region_policy": axis_region_policy}
+                        if axis_region_policy != "mesh_extent"
+                        else {}
+                    ),
+                )
+                path_rng = (
+                    _RandomState.capture(_cuda_devices(object_pose.device))
+                    if depth
+                    else None
+                )
             viable = sample.success & ~success
             attempt = {"strategy": index, "grasp_feasible": sample.success.tolist()}
+            if depth_enabled:
+                attempt["retreat_m"] = depth
+                selection.depth_trace.append(attempt)
             attempts.append(attempt)
             if not viable.any():
                 continue
+            if depth:
+                selection.depth_recovery_attempts += 1
             # Screen the exact trajectory once, then return that same path to
             # PickUp's effect builder rather than planning it again from new seeds.
-            (
-                path_ok,
-                candidate_path,
-                candidate_lengths,
-            ) = super()._get_full_pickup_trajectory(
-                sample.poses,
-                start_qpos,
-                context.last_qpos,
-                request.motion_policy,
-                options,
-                direction,
-                manipulator,
-                hand,
-                *commands,
-                context.require_control_dt(),
-            )
+            with _pick_depth_random_scope(path_rng):
+                (
+                    path_ok,
+                    candidate_path,
+                    candidate_lengths,
+                ) = super()._get_full_pickup_trajectory(
+                    sample.poses,
+                    start_qpos,
+                    context.last_qpos,
+                    request.motion_policy,
+                    effective,
+                    direction,
+                    manipulator,
+                    hand,
+                    *commands,
+                    context.require_control_dt(),
+                )
             accepted = viable & path_ok
             attempt["path_feasible"] = path_ok.tolist()
+            if (
+                depth_enabled
+                and bool(accepted.any())
+                and (self.pick_purposes or {}).get(request.invocation_id) == "ordinary"
+            ):
+                clear = self._native_pick_endpoint_clear(
+                    request, context, candidate_path, candidate_lengths
+                )
+                key = (
+                    "open_and_precontact_scene_valid"
+                    if selection.closing_geometry.revision in (7, 8)
+                    else "open_endpoint_scene_valid"
+                )
+                attempt[key] = bool(clear)
+                accepted &= bool(clear)
             if full is None:
                 full = context.last_qpos[:, None].expand_as(candidate_path).clone()
                 lengths = candidate_lengths
@@ -1480,6 +1788,11 @@ class GenSimPickUp(PickUp):
                 candidate_ids,
             )
             success |= accepted
+            selected_depth = torch.where(
+                accepted,
+                selected_depth.new_full(selected_depth.shape, depth),
+                selected_depth,
+            )
             if success.all():
                 break
         if full is not None:
@@ -1493,6 +1806,11 @@ class GenSimPickUp(PickUp):
                 "candidate_ids": candidate_ids.tolist(),
                 "selected_poses": poses.detach().cpu().tolist(),
                 "adaptive_grasp": {
+                    **(
+                        {"selected_retreat_m": selected_depth.tolist()}
+                        if depth_enabled
+                        else {}
+                    ),
                     **(
                         {"axis_region_policy": axis_region_policy}
                         if axis_region_policy != "mesh_extent"
@@ -1886,27 +2204,18 @@ class GenSimMoveHeldObject(MoveHeldObject):
     GoalType = MoveHeldObject.GoalType
     OptionsType = MoveHeldObject.OptionsType
     binding_contract = MoveHeldObject.binding_contract
-    held_path_scene_vertices: dict[str, torch.Tensor] | None = None
 
     def __init__(
         self,
         *,
         staging_contract: StagingContract | None = None,
-        held_command_sources: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         super().__init__()
         self.staging_contract = staging_contract or StagingContract.empty()
-        self.held_command_sources = MappingProxyType(
-            {
-                identity: MappingProxyType(dict(source))
-                for identity, source in (held_command_sources or {}).items()
-            }
-        )
 
     def _plan(self, request, context):
         if getattr(self.motion_generator, "direct_transport_planning", False) is True:
             return super()._plan(request, context)
-        source_request = request
         goal = request.goal
         target = goal.object_target_pose
         if isinstance(target, torch.Tensor) and target.ndim == 3:
@@ -2001,10 +2310,6 @@ class GenSimMoveHeldObject(MoveHeldObject):
                 request.invocation_id
             ),
         )
-        if self.held_path_scene_vertices is not None:
-            from .held_path import qualify_or_recover
-
-            plan = qualify_or_recover(self, source_request, context, plan)
         handoff = GenSimStateHandoff.from_request(
             request, context, participant="GenSim transport"
         )

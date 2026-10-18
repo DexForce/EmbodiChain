@@ -84,6 +84,149 @@ def test_positive_stops_at_pad_contact_not_hypothetical_command_end() -> None:
     assert result["nominal_closing_fraction"] == 0.5
 
 
+def test_revision_eight_preserves_revision_seven_native_closing_gates() -> None:
+    legacy = _screen([0.1, 0.1, 0.014], revision=7)
+    native = _screen([0.1, 0.1, 0.014], revision=8)
+    for x in (0.0, 0.01, 0.1):
+        pose = np.eye(4)
+        pose[0, 3] = x
+        assert native.inspect(pose) == legacy.inspect(pose)
+    assert native.report()["proposal_source_proxy_deferred"] is False
+    assert native.report()["deferred_source_proposal_calls"] == 0
+    assert "proposal_source_proxy_deferred" not in legacy.report()
+
+
+def test_far_closing_parts_skip_exact_distances_without_changing_the_result() -> None:
+    screen = _screen([0.1] * 3, revision=7)
+    calls = []
+    for manager in screen.managers:
+        manager.min_distance_other = Mock(wraps=manager.min_distance_other)
+        calls.append(manager.min_distance_other)
+    pose = np.eye(4)
+    pose[0, 3] = 1.0
+    result = screen.inspect(pose)
+    assert result["reason"] == "bilateral_pad_rest_not_reached"
+    assert result["checked_samples"] == 3
+    assert sum(call.call_count for call in calls) == 0
+    assert screen.inspect(pose) == result
+
+
+@pytest.mark.parametrize("revision", range(1, 9))
+def test_closing_broad_phase_matches_exact_mesh_queries(revision, monkeypatch) -> None:
+    base = _screen([0.02, 0.018, 0.014], revision=revision)
+    extra = trimesh.creation.box((0.01, 0.03, 0.02))
+    extra.apply_translation((0.04, 0.02, 0.025))
+    meshes = (trimesh.creation.box((0.02, 0.02, 0.02)), extra)
+    kwargs = {"revision": revision}
+    if revision >= 2:
+        kwargs["target_contact_offset"] = 0.003
+    fast = ClosingContactScreen(base.parts, meshes, 0.001, **kwargs)
+    exact = ClosingContactScreen(base.parts, meshes, 0.001, **kwargs)
+    monkeypatch.setattr(
+        exact,
+        "_separated_parts",
+        lambda pose: np.zeros((exact.steps, len(exact.parts)), dtype=bool),
+        raising=False,
+    )
+    rng = np.random.default_rng(102018)
+    poses = [np.eye(4)]
+    for _ in range(64):
+        pose = trimesh.transformations.rotation_matrix(
+            rng.uniform(-np.pi, np.pi), rng.normal(size=3)
+        )
+        pose[:3, 3] = rng.uniform(-0.06, 0.06, 3)
+        poses.append(pose)
+    for pose in poses:
+        assert fast.inspect(pose) == exact.inspect(pose)
+
+
+def test_closing_broad_phase_preserves_native_halo_distances() -> None:
+    screen = _screen([0.02] * 3, revision=2)
+    body = screen.managers[0]
+    body.min_distance_other = Mock(wraps=body.min_distance_other)
+    result = screen.inspect(np.eye(4))
+    assert body.min_distance_other.call_count == 1
+    assert result["reason"] == "nonpad_contact_envelope_before_bilateral_pad_rest"
+    assert result["minimum_distance_m"] == pytest.approx(0.005)
+
+
+def test_closing_broad_phase_keeps_exact_queries_near_rest_boundary() -> None:
+    screen = _screen([0.0170001] * 3)
+    body = screen.managers[0]
+    body.min_distance_other = Mock(wraps=body.min_distance_other)
+    assert screen.inspect(np.eye(4))["valid"] is True
+    assert body.min_distance_other.call_count == 2
+
+
+def test_native_opening_allows_local_grasp_without_enclosing_remote_geometry() -> None:
+    from embodichain.gen_sim.task_engine._task_program.grasp_filter import (
+        opening_envelope_mask,
+    )
+
+    base = _screen([0.1] * 3, revision=4)
+    remote = trimesh.creation.box((0.02, 0.02, 0.02))
+    remote.apply_translation((0.20, 0.20, 0.0))
+    target = (trimesh.creation.box((0.02, 0.02, 0.02)), remote)
+    screen = ClosingContactScreen(
+        base.parts, target, 0.001, revision=5, target_contact_offset=0.003
+    )
+    vertices = torch.tensor(np.concatenate([m.vertices for m in target]))
+    assert not opening_envelope_mask(
+        vertices, torch.eye(4)[None], torch.eye(4), 0.04
+    ).any()
+    assert screen.inspect(np.eye(4))["valid"] is True
+    assert screen.report()["native_opening_rest_screen"] is True
+
+
+def test_native_opening_rejects_pad_rest_overlap_before_closing() -> None:
+    base = _screen([0.1] * 3, revision=4)
+    target = (trimesh.creation.box((0.044, 0.02, 0.02)),)
+    old = ClosingContactScreen(
+        base.parts, target, 0.001, revision=4, target_contact_offset=0.003
+    )
+    assert old.inspect(np.eye(4))["valid"] is True
+    screen = ClosingContactScreen(
+        base.parts, target, 0.001, revision=5, target_contact_offset=0.003
+    )
+    result = screen.inspect(np.eye(4))
+    assert result["valid"] is False
+    assert result["reason"] == "pad_rest_at_opening"
+    assert result["checked_samples"] == 1
+
+
+def test_native_depth_offsets_are_measured_from_pad_span_and_pair_rest() -> None:
+    base = _screen([0.1] * 3, revision=5)
+    parts = tuple(
+        ContactPart(
+            p.name,
+            (trimesh.creation.box((0.004, 0.02, 0.065)),) if p.pad else p.meshes,
+            p.tcp_poses,
+            p.rest_offset,
+            p.pad,
+            p.contact_offset,
+        )
+        for p in base.parts
+    )
+    legacy = ClosingContactScreen(
+        parts,
+        (trimesh.creation.box((0.02, 0.02, 0.02)),),
+        0.001,
+        revision=5,
+        target_contact_offset=0.003,
+    )
+    assert legacy.depth_offsets() == (0.0,)
+    screen = ClosingContactScreen(
+        parts,
+        (trimesh.creation.box((0.02, 0.02, 0.02)),),
+        0.001,
+        revision=6,
+        target_contact_offset=0.003,
+    )
+    assert screen.depth_offsets() == pytest.approx(
+        (0.0, 0.01525, 0.0305, 0.04575, 0.061)
+    )
+
+
 def test_nonpenetrating_body_inside_native_rest_envelope_is_rejected() -> None:
     screen = _screen([0.01696] * 3)
     result = screen.inspect(np.eye(4))
@@ -243,6 +386,21 @@ def test_cache_is_call_local_and_does_not_modify_inputs_or_rng() -> None:
     assert _screen([0.1, 0.1, 0.014]).report()["unique_tcp_queries"] == 0
 
 
+def test_declared_upright_quality_rejects_up_down_closing_not_only_approach():
+    from scipy.spatial.transform import Rotation
+
+    screen = _screen([0.1] * 3)
+    screen.closure_quality = SimpleNamespace(
+        max_tilt_degrees=30.0, up_world=(0.0, 0.0, 1.0)
+    )
+    pose = torch.eye(4, dtype=torch.float64)
+    pose[:3, :3] = torch.from_numpy(
+        Rotation.from_euler("y", 59.5, degrees=True).as_matrix()
+    )
+    # Identical object/TCP rotation preserves contact geometry, not world quality.
+    assert screen.mask(pose[None, None], pose[None]).tolist() == [[False]]
+
+
 @pytest.mark.parametrize("value", [-0.001, float("nan"), float("inf")])
 def test_invalid_native_offsets_are_not_defaulted(value: float) -> None:
     with pytest.raises(ValueError, match="offsets"):
@@ -328,8 +486,10 @@ def test_closing_mask_preserves_original_ik_population_and_rng(monkeypatch) -> N
 
 
 @pytest.mark.parametrize("changed_hand", [False, True])
+@pytest.mark.parametrize("bad_quality", [False, True])
+@pytest.mark.parametrize("native_scene", [False, True])
 def test_emitted_close_checks_actual_hand_commands_before_nominal_geometry(
-    monkeypatch, changed_hand
+    monkeypatch, changed_hand, bad_quality, native_scene
 ) -> None:
     from unittest.mock import Mock
     from embodichain.gen_sim.task_engine._task_program.actions import GenSimPickUp
@@ -351,6 +511,7 @@ def test_emitted_close_checks_actual_hand_commands_before_nominal_geometry(
         ),
     )
     request = SimpleNamespace(
+        invocation_id="pick",
         goal=SimpleNamespace(object_pose=None, semantics=object()),
         skill_options=options,
         binding=SimpleNamespace(
@@ -367,20 +528,48 @@ def test_emitted_close_checks_actual_hand_commands_before_nominal_geometry(
     )
     fk = Mock(return_value=torch.eye(4).repeat(1, 3, 1, 1))
     action = GenSimPickUp()
+    action.pick_purposes = {"pick": "ordinary"}
+    scene = Mock(return_value={"valid": False, "kind": "native_rigid_pair_rest"})
+    action._inspect_closing_scene = scene
     action._planning_services = SimpleNamespace(
         robot=SimpleNamespace(compute_batch_fk=fk)
     )
     screen = SimpleNamespace(
+        revision=8 if native_scene else 1,
         mask=Mock(return_value=torch.ones(1, 3, dtype=torch.bool)),
         report=lambda: {"revision": 1},
     )
+    object_pose = torch.eye(4)[None]
+    if bad_quality:
+        from scipy.spatial.transform import Rotation
+        from embodichain.gen_sim.task_engine._task_program.pick_closure_quality import (
+            UprightClosurePolicy,
+        )
+
+        native = _screen([0.1] * 3)
+        native.closure_quality = UprightClosurePolicy(30)
+        object_pose[:, :3, :3] = torch.tensor(
+            Rotation.from_euler("y", 59.5, degrees=True).as_matrix(),
+            dtype=torch.float32,
+        )
+        fk.return_value = object_pose[:, None].expand(1, 3, 4, 4).clone()
+        screen.mask.side_effect = native.mask
+        screen.report = native.report
     monkeypatch.setattr(
-        goals, "_resolve_object_pose", lambda *args, **kwargs: torch.eye(4)[None]
+        goals, "_resolve_object_pose", lambda *args, **kwargs: object_pose
     )
     result = action.inspect_closing_plan(
         request, SimpleNamespace(batch_size=1), plan, screen=screen
     )
-    assert result["valid"] is not changed_hand
+    assert result["valid"] is (
+        not changed_hand and not bad_quality and not native_scene
+    )
+    if native_scene and not changed_hand and not bad_quality:
+        scene.assert_called_once()
+        assert result["closing_scene"] is scene.return_value
+        assert scene.call_args.args[3] is screen
+    else:
+        scene.assert_not_called()
     if changed_hand:
         assert result["reason"] == "emitted_hand_closing_commands_changed"
         screen.mask.assert_not_called()
@@ -622,6 +811,7 @@ def test_engine_factory_passes_live_opening_context_only_for_revisions_three_fou
         "_clearance_routes",
         "_alignment_continuation_routes",
         "_pick_continuations",
+        "_pour_continuations",
     ):
         setattr(factory, name, ())
     factory._grasp_pose_generators = factory._pour_receivers = {}
@@ -630,6 +820,7 @@ def test_engine_factory_passes_live_opening_context_only_for_revisions_three_fou
     factory._staging_contract = StagingContract.empty()
     factory._pick_contact_revision = revision
     factory._pick_purposes = (("pick", "ordinary"),)
+    factory._upright_container_picks = {}
     engine, screen = Mock(), object()
     monkeypatch.setattr(assembly, "GenSimActionEngine", Mock(return_value=engine))
     monkeypatch.setattr(place_recovery, "scene_vertices", lambda *args: ())

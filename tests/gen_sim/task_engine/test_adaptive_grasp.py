@@ -48,18 +48,18 @@ def test_horizontal_grasp_tracks_the_arm_not_axis_sign(axis):
     )
 
 
-def test_vertical_grasp_approaches_from_each_arm_and_has_downward_alternative():
+def test_vertical_pour_prefers_down_with_arm_relative_diagonal_fallback():
     pose = torch.eye(4).repeat(2, 1, 1)
     tcp = pose.clone()
     tcp[:, 1, 3] = torch.tensor([-1.0, 1.0])
     choices = grasp_strategies(
         torch.tensor([[0.0, 0.0, 1.0]]).repeat(2, 1), pose, tcp, ends=False
     )
-    assert choices[0].direction[:, 1].sign().tolist() == [1.0, -1.0]
-    assert (choices[0].direction[:, 2] < 0).all()
     torch.testing.assert_close(
-        choices[1].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
+        choices[0].direction, torch.tensor([[0.0, 0.0, -1.0]]).repeat(2, 1)
     )
+    assert choices[1].direction[:, 1].sign().tolist() == [1.0, -1.0]
+    assert (choices[1].direction[:, 2] == -0.5).all()
     assert choices[0].axis is None
 
 
@@ -113,6 +113,9 @@ def test_candidate_fallback_keeps_successful_rows_and_reports_selected_direction
     assert sample.metadata["adaptive_grasp"]["strategy_indices"] == [0, 1]
     torch.testing.assert_close(direction[0], choices[0].direction[0])
     torch.testing.assert_close(direction[1], choices[1].direction[1])
+    torch.testing.assert_close(direction[0], torch.tensor([0.0, 0.0, -1.0]))
+    assert direction[1, 2].item() == -0.5
+    assert affordance.get_grasp_candidates.call_count == 2
 
 
 def test_pick_uses_selected_direction_for_execution_and_restores_scope(monkeypatch):
@@ -131,12 +134,13 @@ def test_pick_uses_selected_direction_for_execution_and_restores_scope(monkeypat
     monkeypatch.setattr(PickUp, "_plan", plan)
     parent = Mock(side_effect=lambda *args: args[5])
     monkeypatch.setattr(PickUp, "_get_full_pickup_trajectory", parent)
-    result = GenSimPickUp()._plan(object(), object())
+    request = SimpleNamespace(invocation_id="probe")
+    result = GenSimPickUp()._plan(request, object())
     torch.testing.assert_close(result, direction)
     assert _PICK_SELECTION.get() is None
     monkeypatch.setattr(PickUp, "_plan", Mock(side_effect=ValueError("probe")))
     with pytest.raises(ValueError, match="probe"):
-        GenSimPickUp()._plan(object(), object())
+        GenSimPickUp()._plan(request, object())
     assert _PICK_SELECTION.get() is None
 
 
@@ -290,6 +294,7 @@ def test_builtin_pick_keeps_downstream_contract_and_explicit_grasp(
     class Request:
         goal: object
         skill_options: object
+        invocation_id: str = "probe"
 
     semantics = ObjectSemantics(
         affordance=AntipodalAffordance(), geometry={}, entity_id="cup"
@@ -313,12 +318,13 @@ def test_builtin_pick_keeps_downstream_contract_and_explicit_grasp(
 
 
 @pytest.mark.parametrize("axis", [(0.0, 0.0, 1.0), (1.0, 0.0, 0.0)])
-def test_ordinary_pick_prefers_down_before_diagonal(axis):
+@pytest.mark.parametrize("purpose", ["ordinary", "pour"])
+def test_pick_prefers_down_before_diagonal(axis, purpose):
     pose = torch.eye(4)[None]
     tcp = pose.clone()
     tcp[:, :3, 3] = torch.tensor([[-1.0, 0.0, 1.0]])
     choices = grasp_strategies(
-        torch.tensor([axis]), pose, tcp, ends=False, purpose="ordinary"
+        torch.tensor([axis]), pose, tcp, ends=False, purpose=purpose
     )
     torch.testing.assert_close(choices[0].direction, torch.tensor([[0.0, 0.0, -1.0]]))
     assert choices[1].direction[0, 2].item() == -0.5
@@ -358,9 +364,8 @@ def test_handover_source_exhausts_near_end_before_crossing(axis):
         assert (choices[index + 1].direction[:, 2] == -0.5).all()
 
 
-@pytest.mark.parametrize("purpose", ["pour", "handover_receive"])
 @pytest.mark.parametrize("vertical", [True, False])
-def test_pour_and_receiver_keep_orientation_dependent_order(purpose, vertical):
+def test_receiver_keeps_orientation_dependent_order(vertical):
     pose = torch.eye(4)[None]
     tcp = pose.clone()
     tcp[:, 0, 3] = 1
@@ -368,9 +373,9 @@ def test_pour_and_receiver_keep_orientation_dependent_order(purpose, vertical):
         torch.tensor([[0.0, 0.0, 1.0] if vertical else [1.0, 0.0, 0.0]]),
         pose,
         tcp,
-        ends=purpose == "handover_receive",
+        ends=True,
         positive=torch.tensor([False]),
-        purpose=purpose,
+        purpose="handover_receive",
     )
     assert choices[0].direction[0, 2].item() == (-0.5 if vertical else -1.0)
     assert choices[1].direction[0, 2].item() == (-1.0 if vertical else -0.5)

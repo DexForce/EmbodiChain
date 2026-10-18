@@ -61,7 +61,7 @@ from .invocation_policy import (
     bind_articulation_calls,
 )
 
-ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v8"
+ADAPTER_CONTRACT = "gen_sim.task_program/2620929c/v13"
 
 
 def _press_scene_identity(base_dir: str | Path) -> dict[str, Any]:
@@ -104,6 +104,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         drawer_routes: tuple = (),
         adaptive_pick: bool = False,
         pick_purposes: tuple[tuple[str, str], ...] = (),
+        upright_container_picks: tuple = (),
         coordinated_motion: bool = False,
         handover_scene_clearance: bool = False,
         motion_samples: tuple[tuple[str, int], ...] = (),
@@ -113,7 +114,6 @@ class _TaskFactory(SimulationTaskProgramFactory):
         clearance_routes: tuple = (),
         alignment_continuation_routes: tuple = (),
         staging_contract: StagingContract | None = None,
-        held_command_sources: tuple = (),
         runtime_preset: str | None = None,
         press_routes: tuple = (),
         pick_continuations: tuple = (),
@@ -126,6 +126,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._pour_receivers = dict(pour_receivers or {})
         self._adaptive_pick = adaptive_pick
         self._pick_purposes = pick_purposes
+        self._upright_container_picks = dict(upright_container_picks)
         self._coordinated_motion = coordinated_motion
         self._handover_scene_clearance = handover_scene_clearance
         self._motion_samples = motion_samples
@@ -135,7 +136,6 @@ class _TaskFactory(SimulationTaskProgramFactory):
         self._clearance_routes = clearance_routes
         self._alignment_continuation_routes = alignment_continuation_routes
         self._staging_contract = staging_contract or StagingContract.empty()
-        self._held_command_sources = held_command_sources
         self._runtime_preset = runtime_preset
         self._press_routes = press_routes
         self._pick_continuations = pick_continuations
@@ -254,12 +254,12 @@ class _TaskFactory(SimulationTaskProgramFactory):
         pick.pick_purposes = dict(self._pick_purposes)
         pick.path_simulation = getattr(self, "_simulation", None)
         pick.path_excluded_invocations = frozenset(self._cartesian_calls)
-        if self._pick_contact_revision in (1, 2, 3, 4):
+        if self._pick_contact_revision in (1, 2, 3, 4, 5, 6, 7, 8):
             from .pick_contact import build_closing_contact_screen
 
             def closing_geometry(request: Any, context: Any) -> Any:
                 opening = {}
-                if self._pick_contact_revision in (3, 4):
+                if self._pick_contact_revision in (3, 4, 5, 6, 7, 8):
                     opening = {
                         "context": context,
                         "preview": (pick.continuation_previews or {}).get(
@@ -269,7 +269,7 @@ class _TaskFactory(SimulationTaskProgramFactory):
                             request.invocation_id
                         ),
                     }
-                return build_closing_contact_screen(
+                screen = build_closing_contact_screen(
                     self._robot,
                     self._simulation,
                     self.task_program_registration.scene_binding,
@@ -277,6 +277,14 @@ class _TaskFactory(SimulationTaskProgramFactory):
                     revision=self._pick_contact_revision,
                     **opening,
                 )
+                quality = self._upright_container_picks.get(request.invocation_id)
+                if quality is not None:
+                    if screen is None:
+                        raise ValueError(
+                            "Upright quality requires native pad closing geometry."
+                        )
+                    screen.closure_quality = quality
+                return screen
 
             pick.closing_geometry_factory = closing_geometry
         engine.register(pick, replace=True)
@@ -297,11 +305,10 @@ class _TaskFactory(SimulationTaskProgramFactory):
         engine.register(handover, replace=True)
         transport = GenSimMoveHeldObject(
             staging_contract=self._staging_contract,
-            held_command_sources=dict(getattr(self, "_held_command_sources", ())),
         )
         from .place_recovery import scene_vertices
 
-        transport.held_path_scene_vertices = scene_vertices(
+        meshes = scene_vertices(
             getattr(self, "_simulation", None),
             getattr(self.task_program_registration, "scene_binding", None),
         )
@@ -311,14 +318,14 @@ class _TaskFactory(SimulationTaskProgramFactory):
 
             gravity = gravity_from_simulation(self._simulation)
             pick.pour_continuations = {r.pick_id: r for r in self._pour_continuations}
-            pick.pour_scene_vertices = transport.held_path_scene_vertices
+            pick.pour_scene_vertices = meshes
             pick.pour_gravity_world = gravity
             pour.continuations = {r.pour_id: r for r in self._pour_continuations}
-            pour.scene_vertices = transport.held_path_scene_vertices
+            pour.scene_vertices = meshes
             pour.gravity_world = gravity
         engine.register(transport, replace=True)
         place = GenSimPlace()
-        place.recovery_scene_vertices = transport.held_path_scene_vertices
+        place.recovery_scene_vertices = meshes
         from .place_branch import bind_on_invocations
 
         place.ordinary_on_invocations = bind_on_invocations(
@@ -494,6 +501,7 @@ class TaskAdapterFactory:
     pick_contact_revision: int | None = None
     pour_return_calls: tuple[str, ...] = ()
     held_command_sources: tuple = ()
+    upright_container_picks: tuple = ()
 
     def create_adapter(self, environment: Any) -> TaskProgramEnvironmentAdapter:
         """Bind task-owned planning scopes without overriding Session or Bridge."""
@@ -712,6 +720,7 @@ class TaskAdapterFactory:
             drawer_routes=self.drawer_routes,
             adaptive_pick=self.adaptive_pick,
             pick_purposes=self.pick_purposes,
+            upright_container_picks=self.upright_container_picks,
             coordinated_motion=self.coordinated_grasp,
             handover_scene_clearance=self.handover_scene_clearance,
             motion_samples=self.motion_samples,
@@ -721,7 +730,6 @@ class TaskAdapterFactory:
             clearance_routes=self.clearance_routes,
             alignment_continuation_routes=self.alignment_continuation_routes,
             staging_contract=self.staging_contract,
-            held_command_sources=self.held_command_sources,
             runtime_preset=self.runtime_preset,
             press_routes=self.press_routes,
             pick_continuations=pick_continuations,
@@ -781,6 +789,7 @@ def load_deployment(
             "drawers",
             "adaptive_pick",
             "pick_purposes",
+            "upright_container_picks",
             "motion_samples",
             "cartesian_calls",
             "pour_receivers",
@@ -802,7 +811,7 @@ def load_deployment(
     pick_contact_revision = payload.get("pick_contact_revision")
     if pick_contact_revision is not None and (
         type(pick_contact_revision) is not int
-        or pick_contact_revision not in (1, 2, 3, 4)
+        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_revision is not None and (
@@ -996,6 +1005,24 @@ def load_deployment(
         )
     )
     pick_purposes = bind_pick_purposes(payload.get("pick_purposes", {}), compiled)
+    from .pick_closure_quality import bind_policies
+
+    upright_container_picks = bind_policies(
+        payload.get("upright_container_picks", {}), compiled, dict(pick_purposes)
+    )
+    if upright_container_picks and payload.get("pick_contact_revision") not in (
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ):
+        raise ValueError(
+            "Upright quality requires an explicit native Pick contact revision."
+        )
     motion_samples = bind_motion_samples(payload["motion_samples"], compiled)
     cartesian_calls = bind_cartesian_calls(payload["cartesian_calls"], compiled)
     pour_return_calls = bind_pour_return_calls(
@@ -1194,6 +1221,7 @@ def load_deployment(
         drawer_routes=drawers,
         adaptive_pick=adaptive_pick,
         pick_purposes=pick_purposes,
+        upright_container_picks=upright_container_picks,
         coordinated_grasp=coordinated,
         handover_scene_clearance=handover_scene_clearance,
         motion_samples=motion_samples,

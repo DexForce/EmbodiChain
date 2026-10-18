@@ -294,13 +294,6 @@ def _preview_place(
         original_transform = held.object_to_eef.clone()
         with measure_search("transport_preview"):
             moved = engine.plan(transported.invocation, future)
-        path = moved.diagnostics.metadata.get("gen_sim_held_path", {})
-        if path.get("not_migrated") or "unavailable" in path.get("original", {}):
-            return {
-                "valid": False,
-                "status": "unavailable",
-                "reason": "transport_path_qualification_unavailable",
-            }
         if not moved.plan_success.all():
             return {
                 "valid": False,
@@ -348,9 +341,7 @@ def _preview_place(
             "valid": True,
             "invocation_id": preview.route.transport_id,
             "scope": "canonical_transport_prediction_not_measured_retention",
-            "path_qualification": (
-                "canonical_planner_contract" if path else "unavailable"
-            ),
+            "path_qualification": "not_checked",
         }
         future = _project_held(action, transport_request, future, moved, retained)
     grounded = preview.compiler.ground(preview.place_workflow, 0, future)

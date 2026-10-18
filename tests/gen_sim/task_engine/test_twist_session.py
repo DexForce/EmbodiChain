@@ -818,6 +818,7 @@ def test_reassembling_engine_allocates_fresh_feedback_state(monkeypatch: Any) ->
     factory._pick_contact_revision = None
     factory._pick_purposes = ()
     factory._pour_receivers = {}
+    factory._pour_continuations = ()
     from embodichain.gen_sim.task_engine._task_program.state_handoff import (
         StagingContract,
     )

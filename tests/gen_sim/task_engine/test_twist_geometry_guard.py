@@ -206,6 +206,7 @@ def test_factory_borrows_existing_e8_sensor_without_changing_other_registration(
     factory._drawers = factory._press_routes = ()
     factory._twist_routes = (route,)
     factory._pour_receivers = {}
+    factory._pour_continuations = ()
     factory._staging_contract = assembly.StagingContract.empty()
     factory._adaptive_pick = factory._coordinated_motion = False
     factory._handover_scene_clearance = False
@@ -220,7 +221,9 @@ def test_factory_borrows_existing_e8_sensor_without_changing_other_registration(
     factory._task_post_port = NS(sensor=sensor)
     factory._robot_profile_binding = NS(profile_id="profile")
     factory._grasp_pose_generators = {}
-    factory._registration = NS(validate_engine=Mock())
+    factory._registration = NS(
+        validate_engine=Mock(), scene_binding=NS(rigid_objects=())
+    )
     factory._create_motion_generator = Mock(return_value=NS(robot=factory._robot))
     profile = Mock(spec=RobotSkillProfile, profile_id="profile")
     profile.action_control_profiles.return_value = {}

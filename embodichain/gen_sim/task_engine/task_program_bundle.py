@@ -200,6 +200,7 @@ def generate_task_program_bundle(
     verify_pick_phases: bool = False,
     pour_geometry_revision: int | None = None,
     pour_proxy_position_tolerance_m: float | None = None,
+    upright_container_picks: Mapping[str, float] | None = None,
 ) -> tuple[SemanticTaskGraph, TaskProgramBundlePaths]:
     """Write, compose, and provider-free preflight one semantic deployment.
 
@@ -234,6 +235,12 @@ def generate_task_program_bundle(
             rest-order closing with diagnostic-only contact halo and revision 3
             opening screening. Opening screening is not physical release
             verification; all revisions retain native acquisition requirements.
+            5 replaces whole-object aperture approximation with native open-pad
+            rest clearance for local grasps. 6 also searches measured pad-depth
+            alternatives within the existing four recovery-path budget. 7 adds
+            ordinary precontact scene screening. 8 retains these gates and
+            delegates source-proposal qualification to the native screen;
+            shared GraspKit defaults and earlier revisions remain unchanged.
         verify_pick_phases: Explicit registered Pick acquisition/lift contract.
             False preserves legacy lowerer declarations and fingerprints.
         pour_geometry_revision: Explicit candidate-dependent tilt/restore geometry.
@@ -245,6 +252,9 @@ def generate_task_program_bundle(
         pour_proxy_position_tolerance_m: Required positive receiver-relative pivot
             position budget for revision 2, shared with its pose-proxy observer.
             Forbidden for other revisions; no tolerance is invented implicitly.
+        upright_container_picks: Explicit E3 Pick node IDs mapped to maximum pad-axis
+            tilt above the Z-up horizontal plane, in degrees. Omitted preserves
+            legacy behavior. The caller declares these as upright-container Picks.
 
     Returns:
         Final fingerprint-bound graph and all generated paths.
@@ -686,6 +696,7 @@ def generate_task_program_bundle(
         embodiment_payload,
         support_contract_revision=support_contract_revision,
         pick_contact_revision=pick_contact_revision,
+        upright_container_picks=upright_container_picks,
     )
     drawer_targets = {route.affordance for route in drawers}
     drawer_groups = frozenset(
@@ -947,12 +958,13 @@ def _task_stability_payload(
     *,
     support_contract_revision: int | None = None,
     pick_contact_revision: int | None = None,
+    upright_container_picks: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Declare task conditions without adding public validator or runtime types."""
     objects = {str(item["runtime_uid"]): item for item in scene.planner_objects}
     if pick_contact_revision is not None and (
         type(pick_contact_revision) is not int
-        or pick_contact_revision not in (1, 2, 3, 4)
+        or pick_contact_revision not in (1, 2, 3, 4, 5, 6, 7, 8)
     ):
         raise ValueError("Unsupported GenSim Pick contact revision.")
     if support_contract_revision is not None and (
@@ -1259,6 +1271,28 @@ def _task_stability_payload(
         result["support_contract_revision"] = support_contract_revision
     if pick_contact_revision is not None:
         result["pick_contact_revision"] = pick_contact_revision
+    if upright_container_picks is not None:
+        from ._task_program.pick_closure_quality import declarations
+
+        if not isinstance(upright_container_picks, Mapping):
+            raise ValueError("upright_container_picks must be an explicit mapping.")
+        quality = declarations(dict(upright_container_picks))
+        nodes = {n["id"]: n for n in graph["nodes"]}
+        if quality and pick_contact_revision is None:
+            raise ValueError(
+                "Upright quality requires an explicit native Pick contact revision."
+            )
+        if any(
+            name not in nodes
+            or nodes[name]["call"]["kind"] != "pick"
+            or nodes[name]["task_type"] != "E3"
+            for name in quality
+        ):
+            raise ValueError("Upright quality must name explicit E3 Pick nodes.")
+        if quality:
+            result["upright_container_picks"] = {
+                name: policy.max_tilt_degrees for name, policy in quality.items()
+            }
     return result
 
 

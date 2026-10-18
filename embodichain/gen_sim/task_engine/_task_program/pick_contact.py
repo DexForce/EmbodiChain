@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 import math
 import time
 import xml.etree.ElementTree as ET
@@ -30,6 +31,19 @@ import trimesh
 from embodichain.utils.math import pose_inv
 
 __all__: list[str] = []
+
+
+def _mesh_box(meshes: tuple[Any, ...]) -> np.ndarray:
+    vertices = np.concatenate([np.asarray(mesh.vertices) for mesh in meshes])
+    if (
+        vertices.ndim != 2
+        or vertices.shape[1] != 3
+        or not len(vertices)
+        or not np.isfinite(vertices).all()
+    ):
+        raise ValueError("Native closing bounds require finite nonempty vertices")
+    bounds = np.stack((vertices.min(0), vertices.max(0)))
+    return np.asarray(list(product(*bounds.T)), dtype=np.float64)
 
 
 @dataclass(frozen=True, eq=False)
@@ -62,7 +76,7 @@ class ClosingContactScreen:
         revision: int = 1,
         target_contact_offset: float | None = None,
     ) -> None:
-        if type(revision) is not int or revision not in (1, 2, 3, 4):
+        if type(revision) is not int or revision not in (1, 2, 3, 4, 5, 6, 7, 8):
             raise ValueError("Unsupported Pick closing revision")
         if not parts or sum(part.pad for part in parts) != 2 or not target_meshes:
             raise ValueError("Closing screen requires a complete hand and target")
@@ -91,7 +105,32 @@ class ClosingContactScreen:
         self.target_rest_offset = target_rest_offset
         self.target_contact_offset = target_contact_offset
         self.revision = revision
+        self.deferred_source_proposal_calls: int = 0
+        self.rigid_scene_screen: Any = None
         self.steps = min(counts)
+        target_box = _mesh_box(target_meshes)
+        self._target_bounds = np.stack((target_box.min(0), target_box.max(0)))
+        boxes = []
+        for part in parts:
+            box = _mesh_box(part.meshes)
+            boxes.append(
+                box[None] @ part.tcp_poses[:, :3, :3].transpose(0, 2, 1)
+                + part.tcp_poses[:, None, :3, 3]
+            )
+        self._part_tcp_boxes = np.stack(boxes, axis=1)
+        self._distance_thresholds = np.array(
+            [
+                max(
+                    part.rest_offset + target_rest_offset,
+                    (
+                        part.contact_offset + target_contact_offset
+                        if revision >= 2 and not part.pad
+                        else 0.0
+                    ),
+                )
+                for part in parts
+            ]
+        )
         self.target = trimesh.collision.CollisionManager()
         for index, mesh in enumerate(target_meshes):
             self.target.add_object(str(index), mesh)
@@ -106,6 +145,26 @@ class ClosingContactScreen:
         self.identity: dict[str, Any] = {}
         self.build_seconds = 0.0
         self.opening_screen = None
+        self.closure_quality = None
+        self._pad_closing_axes = None
+        self._last_closure_quality = None
+
+    def _separated_parts(self, pose: np.ndarray) -> np.ndarray:
+        """Cull only parts whose enclosing boxes exceed every applicable offset."""
+        boxes = self._part_tcp_boxes @ pose[:3, :3].T + pose[:3, 3]
+        if not np.isfinite(boxes).all():
+            raise ValueError("Native closing bounds are nonfinite")
+        lower, upper = boxes.min(2), boxes.max(2)
+        gap = np.maximum(
+            0.0,
+            np.maximum(self._target_bounds[0] - upper, lower - self._target_bounds[1]),
+        )
+        distance = np.linalg.norm(gap, axis=-1)
+        if not np.isfinite(distance).all():
+            raise ValueError("Native closing bound distance is unavailable")
+        # Query exact FCL near a boundary; this reserve never relaxes its offsets.
+        rounding = 1e-6 * np.maximum(1.0, np.abs(boxes).max(axis=(2, 3)))
+        return distance > self._distance_thresholds[None] + rounding
 
     def inspect(self, tcp_in_object: np.ndarray) -> dict[str, Any]:
         pose = np.asarray(tcp_in_object, dtype=np.float64)
@@ -119,6 +178,7 @@ class ClosingContactScreen:
         if key in self.cache:
             return dict(self.cache[key])
         started = time.monotonic()
+        separated = self._separated_parts(pose)
         outcome: dict[str, Any] = {
             "valid": False,
             "reason": "bilateral_pad_rest_not_reached",
@@ -128,7 +188,11 @@ class ClosingContactScreen:
             pad_contact = 0
             rejected = None
             halo = None
-            for part, manager in zip(self.parts, self.managers, strict=True):
+            for part_index, (part, manager) in enumerate(
+                zip(self.parts, self.managers, strict=True)
+            ):
+                if separated[step, part_index]:
+                    continue
                 for index in range(len(part.meshes)):
                     manager.set_transform(str(index), pose @ part.tcp_poses[step])
                 distance = float(manager.min_distance_other(self.target))
@@ -138,6 +202,18 @@ class ClosingContactScreen:
                 if distance <= rest:
                     if part.pad:
                         pad_contact += 1
+                        if (
+                            self.revision in (5, 6, 7, 8)
+                            and step == 0
+                            and rejected is None
+                        ):
+                            rejected = {
+                                "valid": False,
+                                "reason": "pad_rest_at_opening",
+                                "link": part.name,
+                                "minimum_distance_m": distance,
+                                "native_pair_rest_offset_m": rest,
+                            }
                     elif rejected is None:
                         rejected = {
                             "valid": False,
@@ -156,7 +232,11 @@ class ClosingContactScreen:
                             "minimum_distance_m": distance,
                             "native_pair_contact_offset_m": contact,
                         }
-            if self.revision == 4 and halo is not None and first_halo is None:
+            if (
+                self.revision in (4, 5, 6, 7, 8)
+                and halo is not None
+                and first_halo is None
+            ):
                 first_halo = {
                     "first_nonpad_contact_halo_link": halo["link"],
                     "first_nonpad_contact_halo_minimum_distance_m": halo[
@@ -168,7 +248,7 @@ class ClosingContactScreen:
                     ],
                 }
             if rejected is not None:
-                if pad_contact == 2:
+                if pad_contact == 2 and rejected["reason"] != "pad_rest_at_opening":
                     rejected["reason"] = "nonpad_and_pad_order_unresolved_at_sample"
                 outcome = rejected
                 break
@@ -180,7 +260,7 @@ class ClosingContactScreen:
                         halo is not None
                     )
                 break
-            if halo is not None and self.revision != 4:
+            if halo is not None and self.revision not in (4, 5, 6, 7, 8):
                 outcome = halo
                 break
         if first_halo is not None:
@@ -204,16 +284,73 @@ class ClosingContactScreen:
             raise ValueError("Closing screen requires finite B1 TCP/object poses")
         relative = np.linalg.inv(object_poses[0].detach().cpu().double().numpy())
         output = []
+        quality = []
+        if self.closure_quality is not None and self._pad_closing_axes is None:
+            from .pick_closure_quality import pad_closing_axes
+
+            self._pad_closing_axes = pad_closing_axes(self.parts)
         for pose in tcp_poses.detach().cpu().double().reshape(-1, 4, 4).numpy():
             grasp = relative @ pose
             source = self.inspect(grasp)
             valid = source["valid"]
-            if valid and self.revision in (3, 4) and self.opening_screen is not None:
+            if self.closure_quality is not None:
+                from .pick_closure_quality import inspect_tilt
+
+                record = inspect_tilt(
+                    pose,
+                    self._pad_closing_axes[: source["checked_samples"]],
+                    self.closure_quality,
+                )
+                quality.append(record)
+                valid = valid and record["valid"]
+            if (
+                valid
+                and self.revision in (3, 4, 5, 6, 7, 8)
+                and self.opening_screen is not None
+            ):
                 valid = self.opening_screen.inspect(grasp, source)["valid"]
             output.append(valid)
+        if self.closure_quality is not None:
+            if not quality:
+                raise ValueError("Closure quality requires a nonempty pose query.")
+            self._last_closure_quality = {
+                "revision": 1,
+                "scope": "declared_upright_container_nominal_precontact_pad_axis",
+                "max_tilt_degrees": self.closure_quality.max_tilt_degrees,
+                "up_world": list(self.closure_quality.up_world),
+                "pad_links": [p.name for p in self.parts if p.pad],
+                "valid": all(q["valid"] for q in quality),
+                "reason": (
+                    "closure_tilt_within_limit"
+                    if all(q["valid"] for q in quality)
+                    else "closure_axis_too_vertical"
+                ),
+                "rejected_poses": sum(not q["valid"] for q in quality),
+                "maximum_closure_tilt_degrees": max(
+                    q["maximum_closure_tilt_degrees"] for q in quality
+                ),
+            }
         return torch.tensor(output, dtype=torch.bool, device=tcp_poses.device).reshape(
             tcp_poses.shape[:-2]
         )
+
+    def depth_offsets(self) -> tuple[float, ...]:
+        """Bound contact-depth alternatives by the actual pads, not object names."""
+        if self.revision not in (6, 7, 8):
+            return (0.0,)
+        spans = []
+        rest = []
+        for part in self.parts:
+            if not part.pad:
+                continue
+            vertices = np.concatenate([np.asarray(m.vertices) for m in part.meshes])
+            projected = vertices @ part.tcp_poses[:, 2, :3].T
+            spans.append(float(np.ptp(projected, axis=0).min()))
+            rest.append(part.rest_offset + self.target_rest_offset)
+        usable = min(spans) - 2 * max(rest)
+        if not math.isfinite(usable) or usable <= 0:
+            return (0.0,)
+        return tuple(float(value) for value in np.linspace(0, usable, 5))
 
     def report(self) -> dict[str, Any]:
         result = {
@@ -233,15 +370,29 @@ class ClosingContactScreen:
             "accepted_queries": sum(item["valid"] for item in self.cache.values()),
             "reasons": [dict(item) for item in self.cache.values()],
         }
-        if self.revision == 4:
+        if self.revision in (4, 5, 6, 7, 8):
             result["scope"] = (
                 "discrete_nominal_rest_order_with_contact_halo_diagnostics"
                 "_not_physical_acquisition"
             )
             result["nonpad_contact_halo_is_veto"] = False
-        if self.revision in (3, 4):
+        if self.revision in (5, 6, 7, 8):
+            result["native_opening_rest_screen"] = True
+            result["whole_object_opening_envelope"] = False
+        if self.revision in (6, 7, 8):
+            result["native_depth_offsets_m"] = list(self.depth_offsets())
+        if self.revision in (3, 4, 5, 6, 7, 8):
             result["opening"] = (
                 None if self.opening_screen is None else self.opening_screen.report()
+            )
+        if self.closure_quality is not None:
+            result["grasp_quality"] = self._last_closure_quality
+        if self.revision == 8:
+            result["proposal_source_proxy_deferred"] = (
+                self.deferred_source_proposal_calls > 0
+            )
+            result["deferred_source_proposal_calls"] = (
+                self.deferred_source_proposal_calls
             )
         return result
 
@@ -315,8 +466,12 @@ def build_closing_contact_screen(
         request: Resolved Pick with explicit motion and complete hand commands.
         revision: Rest-order (1), native contact halo (2), qualified on-placement
             opening clearance added to revision 2 (3), or revision 1 rest-order
-            with diagnostic-only contact halo and revision 3 opening (4).
-        context: Current invocation context, required for owned revisions 3/4.
+            with diagnostic-only contact halo and revision 3 opening (4), or
+            revision 4 plus source open-pad rest clearance for local grasps (5),
+            or the same geometry with measured pad-depth proposals (6). Revision
+            7 adds ordinary precontact scene checks; 8 retains them and owns
+            external source-proposal qualification through this native screen.
+        context: Current invocation context, required for owned revisions 3-8.
         preview: Exact bound Pick/Place continuation, or None for standalone Pick.
         purpose: Bound call-local Pick purpose; only ordinary on-placement opens.
 
@@ -462,7 +617,7 @@ def build_closing_contact_screen(
         "native_target_shapes": len(target_meshes),
     }
     screen.build_seconds = time.monotonic() - started
-    if revision in (3, 4):
+    if revision in (3, 4, 5, 6, 7, 8):
         from .release_contact import build_opening_screen
 
         screen.opening_screen = build_opening_screen(

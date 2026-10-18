@@ -76,6 +76,103 @@ def test_unconstrained_pick_still_checks_opening_envelope() -> None:
     assert torch.isinf(rows[0][1]).all()
 
 
+def test_native_closing_view_keeps_local_proposals_without_mutating_default() -> None:
+    from embodichain.gen_sim.task_engine._task_program.pick_contact import (
+        ClosingContactScreen,
+    )
+
+    generator = TaskGraspPoseGenerator(CandidateGenerator(((0.1,),)), ())
+    screen = object.__new__(ClosingContactScreen)
+    screen.revision = 5
+    view = generator.for_native_closing(screen)
+    kwargs = dict(
+        mesh_vertices=torch.tensor([[-0.08, 0.0, 0.0], [0.08, 0.0, 0.0]]),
+        mesh_triangles=torch.empty(0, 3, dtype=torch.long),
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    assert torch.isfinite(view.get_valid_grasp_poses(**kwargs)[0][1]).all()
+    assert torch.isinf(generator.get_valid_grasp_poses(**kwargs)[0][1]).all()
+    assert view is not generator
+    screen.revision = 4
+    with pytest.raises(ValueError, match="revision 5"):
+        generator.for_native_closing(screen)
+
+
+def test_revision_eight_owns_proposals_without_changing_the_shared_provider(
+    monkeypatch,
+) -> None:
+    from embodichain.gen_sim.task_engine._task_program.pick_contact import (
+        ClosingContactScreen,
+    )
+    from embodichain.toolkits.graspkit.pg_grasp import AntipodalGraspPoseGenerator
+    from embodichain.gen_sim.task_engine._task_program import pick_proposals
+
+    delegate = AntipodalGraspPoseGenerator(
+        ParallelJawGripperModelCfg(
+            model_id="test_native",
+            min_opening_width=0.002,
+            max_opening_width=0.128,
+            finger_length=0.13,
+            finger_width=0.03,
+            finger_thickness=0.01,
+            palm_depth=0.08,
+        )
+    )
+    delegate.get_valid_grasp_poses = Mock(
+        return_value=[(torch.eye(4)[None], torch.ones(1))]
+    )
+    native = Mock(return_value=[(torch.eye(4)[None], torch.ones(1))])
+    monkeypatch.setattr(pick_proposals, "native_center_proposals", native)
+    generator = TaskGraspPoseGenerator(delegate, ())
+    screen = object.__new__(ClosingContactScreen)
+    screen.revision = 8
+    screen.deferred_source_proposal_calls = 0
+    view = generator.for_native_closing(screen)
+    kwargs = dict(
+        mesh_vertices=VERTICES,
+        mesh_triangles=TRIANGLES,
+        obj_poses=torch.eye(4)[None],
+        approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+    )
+    view.get_valid_grasp_poses(**kwargs)
+    native.assert_called_once_with(delegate, **kwargs)
+    delegate.get_valid_grasp_poses.assert_not_called()
+    assert screen.deferred_source_proposal_calls == 1
+    generator.get_valid_grasp_poses(**kwargs)
+    assert (
+        "defer_source_collision" not in delegate.get_valid_grasp_poses.call_args.kwargs
+    )
+    view.get_valid_grasp_poses(**kwargs, obj_longest_axis=torch.tensor([0.0, 0.0, 1.0]))
+    assert (
+        "defer_source_collision" not in delegate.get_valid_grasp_poses.call_args.kwargs
+    )
+    screen.revision = 7
+    generator.for_native_closing(screen).get_valid_grasp_poses(**kwargs)
+    assert (
+        "defer_source_collision" not in delegate.get_valid_grasp_poses.call_args.kwargs
+    )
+
+
+def test_revision_eight_requires_a_compatible_proposal_provider() -> None:
+    from embodichain.gen_sim.task_engine._task_program.pick_contact import (
+        ClosingContactScreen,
+    )
+
+    screen = object.__new__(ClosingContactScreen)
+    screen.revision = 8
+    provider = TaskGraspPoseGenerator(
+        CandidateGenerator(((0.1,),)), ()
+    ).for_native_closing(screen)
+    with pytest.raises(ValueError, match="Antipodal"):
+        provider.get_valid_grasp_poses(
+            mesh_vertices=VERTICES,
+            mesh_triangles=TRIANGLES,
+            obj_poses=torch.eye(4)[None],
+            approach_direction=torch.tensor([0.0, 0.0, -1.0]),
+        )
+
+
 def test_e6_clearance_shifts_only_within_pad_workspace() -> None:
     from embodichain.gen_sim.task_engine._task_program.e6_clearance import HandClearance
 

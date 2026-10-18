@@ -165,6 +165,24 @@ def _generate(tmp_path, scene, graph, candidate, **kwargs):
     )
 
 
+@pytest.mark.parametrize("revision", [6, 7, 8])
+def test_upright_quality_native_revision_survives_strict_bundle_preflight(
+    tmp_path, revision
+):
+    scene, graph, candidate = _case(tmp_path)
+    _, bundle = _generate(
+        tmp_path / f"native{revision}",
+        scene,
+        graph,
+        candidate,
+        pick_contact_revision=revision,
+        upright_container_picks={"call_0": 30.0},
+    )
+    constraints = load_config(bundle.integration.parent / "constraints.json")
+    assert constraints["pick_contact_revision"] == revision
+    assert constraints["upright_container_picks"] == {"call_0": 30.0}
+
+
 def test_region_pour_is_explicit_and_preserves_program_options_constraints_and_v1(
     tmp_path,
 ):

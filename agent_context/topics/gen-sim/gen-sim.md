@@ -147,6 +147,66 @@ missing bilateral pad rest and all measured acquisition/release/support gates
 still reject. Revisions 1/2/3 and the normal workflow's selection are unchanged.
 Non-E1 and legacy bundles without TaskSpec retain their prior gates.
 
+Explicit `upright_container_picks` maps selected E3 Pick node IDs to a maximum
+pad-closing-axis tilt above the Z-up horizontal plane. It requires native Pick
+closing geometry and is absent by default. Named cooked-pad geometry and nominal
+FK define the axis; no universal TCP-X convention is assumed. The same mask runs
+on candidates and emitted close FK, including after plan transforms. This grasp
+quality rule is separate from native contact/rest safety and never replaces
+acquisition or retention evidence. Undeclared Picks and shared GraspKit defaults
+remain unchanged; regenerate consumers to opt in.
+
+Explicit Pick contact revision 5 retains revision 4 and requires the native open
+pads to be outside the target rest envelope. A call-owned proposal view may then
+replace whole-object aperture fit with exact native open/close geometry, allowing
+local rim or handle grasps without changing the shared generator. Revision 6 also
+tries bounded grasp depths measured from the named pad span and pair rest offsets.
+Original strategies remain first, accepted commands are cached unchanged, and
+additional complete paths share the existing four-recovery budget. Extra depths
+reuse the original geometric pools, branch keys and IK random states rather than
+regenerating approach proposals or advancing unrelated random streams. Ordinary
+Pick checks its already-required open-hand endpoint scene clearance before accepting a
+depth; this introduces no new scene gate for Pour. Constraints, explicit grasps,
+handover end regions and owned Cartesian routes retain their original depth.
+These opt-ins do not replace native acquisition, retention or final path checks.
+Revision 7 also screens the fixed-arm nominal pre-contact closure against the scene
+for ordinary native B1/env0 Picks, both during candidate choice and on emitted
+plans. The read-only scene view permits intended source contact only in that
+interval up to the first nominal bilateral rest sample; the open endpoint still includes the source and the native closing
+screen owns every hand/source pair. Other objects, articulations, self/other-arm
+checks, depth budgets and physical collisions remain unchanged. Post-contact
+command FK is not a physical-penetration forecast: an acquired object can stop
+actual closure before its command endpoint. Pour retains
+revision 6 behavior. This option does not certify dynamic obstacle prediction.
+
+Explicit Pick contact revision 8 retains revision 7's native geometry and runtime
+gates, but its call-owned center-proposal view delegates the approximate source
+proxy veto to the existing native cooked-hand/source qualification.
+`pick_proposals.py` consumes GraspKit's cached `prepare_mesh()` contact pairs;
+GenSim owns the resulting pose proposals, costs and truncation. Shared GraspKit
+interfaces and defaults remain unchanged. These unqualified proposals cannot
+bypass ground or end-region policies, and transformed candidates and emitted
+closing commands must still pass the native screen. Non-native views and
+revisions 1--7 retain their original proposal behavior. The screen records actual
+proposal calls so configuration alone is not mistaken for an activated route.
+Native center proposals retain their raw costs until the owning Pick applies
+the current TCP transform and both roll variants. Native source/quality
+qualification precedes the provider's configured candidate cap and shared IK;
+unqualified proposals cannot consume every retained slot. Each existing depth
+uses the same raw pool with its own transform. This does not add full-path
+retries or change ground/end-region policies or the four-path recovery budget.
+The unchanged inexpensive direction mask short-circuits native geometry queries
+for already-incompatible columns; it adds no new acceptance condition.
+Qualification follows the original stable cost order and stops when the
+configured number of valid candidates is filled. This is the same qualified
+top-k set as an exhaustive screen, without checking a provably higher-cost tail.
+Revision 8 also checks the same native cooked hand against other rigid bodies'
+actual pair rest offsets over the original precontact grid. Source contact
+remains separately owned; the existing robot/articulation/proxy checks remain.
+The scene snapshot is invocation-local and read-only. Emitted and transformed
+closing plans repeat this qualification; it does not predict post-contact
+dynamics or certify a physical grip. Revisions 1--7 retain their existing checks.
+
 `generate_task_program_bundle(verify_pick_phases=True)` explicitly enables
 registered Pick acquisition/lift verification through its fingerprinted lowerer
 declaration. The default preserves legacy factory identity; closing geometry,
@@ -207,19 +267,14 @@ The shared builder still owns commands, tracking and effects; phase composition
 retains every mandatory pose and the original timing. Emitted FK, joint/velocity,
 robot-mesh, payload-envelope and release-resource checks reject unsafe results
 without another retry. This is not continuous collision or physical certification.
-Ordinary held transport in `held_path.py` first measures exact required endpoints.
-Only qualified free-space endpoints own its discrete carried-mesh sweep and
-bounded continuous-path recovery; external transforms recheck final samples.
-`held_command.py` binds unchanged hand-command authority to adjacent compiled
-same-object/resource Pick, Align or ordinary MoveHeld predecessors with verified
-effect monitors. Explicit revision 2 requires complete native target/command
-continuity and fresh finite state readback even when the strict boundary passes;
-instantaneous hand velocity remains diagnostic, not a standalone veto. Command
-and trajectory limits remain strict. Missing revision selects legacy revision 1
-without changing its behavior or fingerprint. This authority does not grant E2
-staging recovery; Pour, release and handover do not qualify as predecessors.
-Support-contact endpoints, missing geometry and direct-transport routes remain
-unmigrated. Bound-rigid envelopes are not full-world or continuous-contact proof.
+Ordinary held transport retains shared IK/interpolation, the existing target
+construction, state handoff, general joint/velocity limits and effect monitors.
+It has no additional carried-mesh sweep, robot-mesh path qualification, bounded
+held-path recovery or post-transform collision recheck. Its completed motion
+does not certify intermediate table, payload-scene or other-arm clearance.
+`held_command.py` retains compiled same-object/resource source declarations;
+these declarations alone are not runtime trajectory qualification. E2 alignment,
+Pick, Place and handover keep their own checks.
 Explicit `pour_geometry_revision=1` uses `pour_services.py` and
 `pour_continuation.py` to bind ordinary orientation/axis/direction-free E3 to its
 exact Pick, staging, Pour and absolute return calls. Staging preserves current
@@ -229,7 +284,9 @@ the command-planning reference, not a native pose witness. Direction-free tilt
 uses the ordered pad axis; receiver-bearing drift is diagnostic, not permission
 to reverse the qualified arc. The new Pour lowerer
 declares existing acquisition/retention verification, with no new executor or
-path fallback. Old consumer declarations remain unchanged. The independent
+path fallback. Adapter v13 requires regenerated consumers after the current
+Pick qualification changes; historical bundles and receipts remain unchanged.
+The independent
 recipe does not own already-held E3 continuations; normal preparation
 keeps those compositions on their legacy declaration rather than opting them
 into a five-call contract they do not have. The Default/B1
@@ -591,9 +648,9 @@ source from the held state or nearest scene side and the other arm as receiver,
 while preserving explicitly named arms. GenSim declares `pick_purposes` per
 generated Pick segment, bound to the compiled runtime invocation identity;
 missing or stale declarations reject loading. Built-in Pick identity and
-compiler-owned downstream reachability remain unchanged. Ordinary pickup tries
-top-down before arm-relative diagonal approaches. Pour pickup retains its
-axis-dependent ordering. E4 source lowerers try the arm-near end top-down and
+compiler-owned downstream reachability remain unchanged. Ordinary and pour pickup
+try top-down before arm-relative diagonal approaches; an infeasible top-down
+strategy retains the diagonal fallback. E4 source lowerers try the arm-near end top-down and
 diagonally before considering the far end, leaving the other end for reception.
 The wrapper marks only an owned goal
 snapshot; upright and stack constraints take precedence over ordinary policy.

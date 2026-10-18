@@ -31,7 +31,7 @@ from embodichain.lab.sim.atomic_actions.affordance_sampling import (
 __all__: list[str] = []
 
 ADAPTIVE_GRASP = "gen_sim.adaptive_grasp"
-ADAPTIVE_GRASP_REVISION = 3
+ADAPTIVE_GRASP_REVISION = 4
 HANDOVER_END_REGION_REVISION = 1
 
 
@@ -134,7 +134,7 @@ def grasp_strategies(
     vertical = axis[:, 2:3].abs() >= math.sqrt(0.5)
     directions = (
         (down, diagonal)
-        if purpose in {"ordinary", "handover_source"}
+        if purpose in {"ordinary", "pour", "handover_source"}
         else (
             torch.where(vertical, diagonal, down),
             torch.where(vertical, down, diagonal),
@@ -173,10 +173,13 @@ def select_grasp(
     candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
     raw_candidate_observer: Callable[[AffordancePoseCandidates], None] | None = None,
     axis_region_policy: Literal["mesh_extent", "supported_end"] = "mesh_extent",
+    candidate_pool: AffordancePoseCandidates | None = None,
 ) -> tuple[Any, torch.Tensor]:
     """Keep the first feasible strategy per row and the normal branch sampler."""
     if axis_region_policy not in ("mesh_extent", "supported_end"):
         raise ValueError("Unknown axis_region_policy.")
+    if candidate_pool is not None and len(choices) != 1:
+        raise ValueError("A cached candidate pool belongs to exactly one strategy.")
     policy = (
         {"axis_region_policy": axis_region_policy}
         if axis_region_policy != "mesh_extent"
@@ -185,14 +188,16 @@ def select_grasp(
     covered = torch.zeros(pose.shape[0], dtype=torch.bool, device=pose.device)
     pools, directions, strategies, counts = [], [], [], []
     for index, choice in enumerate(choices):
-        candidates = affordance.get_grasp_candidates(
-            generator,
-            pose,
-            choice.direction,
-            obj_longest_axis=choice.axis,
-            is_positive_part=choice.positive,
-            **policy,
-        )
+        candidates = candidate_pool
+        if candidates is None:
+            candidates = affordance.get_grasp_candidates(
+                generator,
+                pose,
+                choice.direction,
+                obj_longest_axis=choice.axis,
+                is_positive_part=choice.positive,
+                **policy,
+            )
         if raw_candidate_observer is not None:
             raw_candidate_observer(candidates)
         poses, valid = (

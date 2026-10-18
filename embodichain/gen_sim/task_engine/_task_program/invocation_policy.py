@@ -505,9 +505,8 @@ class GenSimActionEngine(AtomicActionEngine):
         )
         pick_transform = False
         closing_transform = False
-        held_transform = False
         if plan_transform is not None:
-            from .actions import GenSimMoveHeldObject, GenSimPickUp
+            from .actions import GenSimPickUp
             from .pick_safety import _owns_constrained_pick
 
             transformed_action = getattr(self, "_actions", {}).get(request.skill_id)
@@ -518,18 +517,10 @@ class GenSimActionEngine(AtomicActionEngine):
             pick_transform = isinstance(
                 transformed_action, GenSimPickUp
             ) and _owns_constrained_pick(request, context, self.motion_generator)
-            held_transform = (
-                isinstance(transformed_action, GenSimMoveHeldObject)
-                and transformed_action.held_path_scene_vertices is not None
-                and not getattr(
-                    self.motion_generator, "direct_transport_planning", False
-                )
-            )
         if context is None and (
             alignment
             or pick_transform
             or closing_transform
-            or held_transform
             or request.invocation_id in getattr(self, "_clearance_requests", {})
             or request.invocation_id in getattr(self, "_clearance_parks", ())
         ):
@@ -952,47 +943,6 @@ class GenSimActionEngine(AtomicActionEngine):
                     ),
                     before_original=before_continuation,
                     planned_request=selected_request,
-                )
-            if held_transform and plan.plan_success.any():
-                from .held_path import inspect, phase_scope
-                from embodichain.lab.sim.atomic_actions.plans import PlanningFailure
-
-                # Transform consumers must qualify the actual emitted samples,
-                # not reuse the pre-transform carried-mesh certificate.
-                scope = phase_scope(transformed_action, selected_request, context)
-                acceptance = (
-                    inspect(transformed_action, selected_request, context, plan)
-                    if scope["owned"]
-                    else None
-                )
-                rejected = acceptance is not None and not acceptance["valid"]
-                plan = replace(
-                    plan,
-                    plan_success=(
-                        torch.zeros_like(plan.plan_success)
-                        if rejected
-                        else plan.plan_success
-                    ),
-                    diagnostics=replace(
-                        plan.diagnostics,
-                        metadata={
-                            **plan.diagnostics.metadata,
-                            "gen_sim_held_path": {
-                                **plan.diagnostics.metadata.get(
-                                    "gen_sim_held_path", {}
-                                ),
-                                "phase": scope,
-                                "post_transform_check": acceptance,
-                            },
-                        },
-                        failure=(
-                            PlanningFailure(
-                                "held_transport_path_unqualified", retryable=False
-                            )
-                            if rejected
-                            else plan.diagnostics.failure
-                        ),
-                    ),
                 )
             return (
                 plan
