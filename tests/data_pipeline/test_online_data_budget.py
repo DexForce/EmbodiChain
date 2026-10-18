@@ -442,6 +442,32 @@ def test_nonbinding_quota_preserves_episode_uniform_sampling_seed() -> None:
     assert budgeted.get_sampling_budget_snapshot()["total_delivered_chunks"] == 16
 
 
+@pytest.mark.parametrize("budget,depletes", [(8, False), (1, True)])
+def test_cpu_quota_sampling_ignores_non_cpu_default_device(
+    budget: int, depletes: bool
+) -> None:
+    engine = _engine(rows=2, budget=budget, hard=budget)
+    default_device = torch.get_default_device()
+    with torch.random.fork_rng(devices=[]):
+        # Seed 1 proposes the same episode twice. With budget=1, selection must
+        # reject the duplicate and draw again from the remaining episode.
+        torch.manual_seed(1)
+        try:
+            torch.set_default_device("meta")
+            with patch.object(torch, "randint", wraps=torch.randint) as draw:
+                batch = engine.sample_batch_with_context(2, 2, 3)
+            assert (draw.call_count > 1) is depletes
+            assert batch.device == torch.device("cpu")
+            assert len(batch) == 2
+            if depletes:
+                assert sorted(_sources(batch)) == [0, 1]
+            snapshot = engine.get_sampling_budget_snapshot()
+            assert snapshot["total_delivered_chunks"] == 2
+            assert all(row["delivered"] <= budget for row in snapshot["rows"])
+        finally:
+            torch.set_default_device(default_device)
+
+
 def test_lifetime_counter_overflow_fails_without_partial_quota_spend() -> None:
     engine = _engine(rows=1, budget=3, hard=3)
     engine._sampling_budget.meta[1] = (1 << 63) - 2

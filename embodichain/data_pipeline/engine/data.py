@@ -412,7 +412,9 @@ class _EpisodeSamplingBudget:
         self.meta[0] = episode_start + count - 1
 
     def remaining(self, row_indices: torch.Tensor) -> torch.Tensor:
-        values = torch.tensor(self.rows[:], dtype=torch.int64).reshape(-1, 4)
+        values = torch.tensor(self.rows[:], dtype=torch.int64, device="cpu").reshape(
+            -1, 4
+        )
         return (values[:, 2] - values[:, 3])[row_indices]
 
     def debit(self, row_indices: torch.Tensor) -> None:
@@ -448,8 +450,12 @@ def _draw_budgeted_rows(
     active = [index for index, count in enumerate(available) if count > 0]
     selected: list[int] = []
     while len(selected) < batch_size:
-        proposals = torch.randint(len(active), (batch_size - len(selected),))
-        active_tensor = torch.tensor(active, dtype=torch.long)
+        proposals = torch.randint(
+            len(active), (batch_size - len(selected),), device=candidate_rows.device
+        )
+        active_tensor = torch.tensor(
+            active, dtype=torch.long, device=candidate_rows.device
+        )
         indices = active_tensor[proposals]
         counts = torch.bincount(indices, minlength=len(available))
         if not selected and bool((counts <= remaining).all()):
@@ -459,7 +465,9 @@ def _draw_budgeted_rows(
                 selected.append(index)
                 available[index] -= 1
         active = [index for index, count in enumerate(available) if count > 0]
-    return candidate_rows[torch.tensor(selected, dtype=torch.long)]
+    return candidate_rows[
+        torch.tensor(selected, dtype=torch.long, device=candidate_rows.device)
+    ]
 
 
 class _LifecycleEvents:
