@@ -2370,3 +2370,12 @@ Gym uses its environment-wide sensor switch, which defaults to enabled.
 
 .. autoclass:: RobotPresetCfg
    :noindex:
+
+
+Asset generalization contracts
+------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asset_generalization

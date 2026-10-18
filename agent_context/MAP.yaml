@@ -441,3 +441,15 @@ topics:
     embodichain/cli/workspace_cache.py, tests/sim/motion/workspace/]
   related_topics: [robot-system, ik-solvers, randomization, motion-planning]
   status: active
+
+- id: asset-generalization
+  title: Asset Generalization
+  aliases: [asset generalization, asset provider, 资产泛化, 资产语义匹配]
+  keywords: [AssetDescriptor, PreparedAsset, AssetProvider, AssetRequirements, AssetRoleRequirement]
+  paths: [topics/asset-generalization/asset-generalization.md]
+  source_of_truth:
+  - embodichain/data/asset_catalog/
+  - embodichain/lab/task_program/semantics/asset_requirements.py
+  watch_paths: [embodichain/data/asset_catalog/, tests/data/asset_catalog/, embodichain/lab/task_program/semantics/asset_requirements.py, tests/lab/task_program/semantics/test_asset_requirements.py]
+  related_topics: [data-assets, task-programs, gen-sim, scene-services]
+  status: active
