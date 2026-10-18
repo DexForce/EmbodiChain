@@ -14,6 +14,11 @@ round-trip checks, offline learning results and the frozen-data comparison.
 
 The [production/reuse tuning study](TUNING.md) describes the optional usage-budget
 scheduler, throughput diagnostics and stability validation before formal comparison.
+Use the [throughput configuration guide](ODS_CONFIGURATION_GUIDE.md) for protected
+per-trajectory budgets. The [direct LeRobot pilot](OFFLINE_PILOT.md) defines the
+current four-arm integration comparison; it is separate from the older v2 design.
+Its [executed pilot results](OFFLINE_PILOT_RESULTS.md) include the strong
+32-episode offline baseline and the limitations on timing and quality claims.
 
 ## Run the working recipe
 
@@ -144,6 +149,46 @@ closes the producer, loads G1 and trains. `--offline-data PATH` explicitly measu
 a data-ready scenario. It must not be presented as an acquisition-inclusive run.
 Offline format uses numeric CPU tensors, restricted loading, schema/content hashes
 and episode/frame identity. The loader may retain the small state corpus in RAM.
+
+### Collect directly into LeRobot
+
+Cold SDK collection does not require the `.pt` conversion utility below:
+
+```bash
+python examples/data_pipeline/ods_pick_place_showcase.py \
+  --policy chunk-pose --pose-ik dls --mode offline-full \
+  --offline-storage lerobot --offline-episodes 256 \
+  --buffer-size 32 --producer-envs 8 --batch-size 256 \
+  --rounds 1 --updates-per-round 2500 --eval-every 500 \
+  --seed 19001 --producer-seed 1019001 --sampling-seed 29001 \
+  --defer-evaluation --deferred-evaluation-schedule updates \
+  --dev-scenes 20 --dev-seed-base 810000 --final-test-scenes 0 \
+  --sim-device cuda:0 --train-device cuda:0 --no-viewer --no-video \
+  --usage-statistics \
+  --output /tmp/pick-place-cold-lerobot256
+```
+
+The output contains `lerobot_dataset/`, its audited SDK cache, checkpoints,
+timelines and data-source statistics. A bounded writer overlaps persistence with
+collection; training waits for finalization and one SDK readback. The explicit
+episode count is independent of training rounds and must be a cache-size multiple.
+Omitting `--offline-storage` retains the legacy `.pt` format.
+
+For the strong small-data control, change to `--mode offline-32
+--offline-episodes 32` and a fresh output directory; keep the update budget and
+evaluation panels unchanged. For the equal-quota 256-episode control, add
+`--offline-sample-budget 2660 --offline-sample-hard-limit 2660`. This is the
+pilot's provisional reference quota, not a recommendation for other workloads.
+Insufficient quota ends training cleanly before a partial batch. Restoring
+protected offline sampling from a checkpoint is rejected until quota-state
+restoration is implemented.
+
+For a measured comparison, also freeze hardware placement, qualification,
+runtime dependencies and the throughput packet as specified in
+[the pilot protocol](OFFLINE_PILOT.md). The command above is a reproduction
+entry point; by itself it does not counterbalance run order or monitor shared
+host interference. Existing-data timing uses `--offline-data` and must remain
+separate from this acquisition-inclusive experiment.
 
 An exported numeric corpus can also be persisted and loaded through the official
 LeRobot SDK (validated with the installed LeRobot 0.4.4):

@@ -310,3 +310,40 @@ a validated learning budget for every profile. Set the task's explicit productio
 budget (divisible by derived cache size), then inspect actual delivered chunks
 and optimizer updates. Never raise source caps merely to compensate for a
 shortfall discovered after data generation stops.
+
+## 10. Interpret efficiency against an offline baseline
+
+Rate matching and bounded reuse do not establish a learning-efficiency advantage.
+Compare the protected online run with both a small fixed corpus and a larger
+acquisition-inclusive corpus. Give the offline learner the same initial model,
+normalization procedure, update budget and evaluation scenes. Preserve an
+unrestricted offline baseline as well as an equal-quota control: they answer
+different questions, and the quota may never bind in a large resident corpus.
+Report per-source minimum/mean/maximum selections and the number reaching the cap.
+
+For C initial episodes, K selections per episode and batch B, the initial cache
+can fund at most `floor(C*K/B)` updates. If a scheduled checkpoint exceeds that
+budget, online training must await new sources even when a fixed offline corpus
+could reuse its data immediately. This is the cost of the chosen protection
+policy, not evidence that the learner is malfunctioning. A faster first update
+does not imply an earlier useful checkpoint or shorter total experiment time.
+
+Predeclare sufficiently early checkpoint panels for the desired latency question.
+Deferred evaluation identifies the availability of the first **evaluated**
+qualifying checkpoint retrospectively; it does not measure the true threshold
+crossing between saved checkpoints or the time an online evaluator certifies
+success. Include failed checkpoints and report final quality, regressions, active
+training, intentional throttling, acquisition/persistence, evaluation and cleanup.
+
+Measure accounting overhead at both online-cache and offline-resident sizes.
+Identical logging flags can have different costs when source cardinality differs.
+Include quota checks and resource sampling in a complete-consumer measurement;
+a faster counter microbenchmark alone cannot qualify the whole training path.
+Do not subtract an isolated percentage from measured wall time. Likewise, a
+bounded source cache does not guarantee lower total PSS or native GPU memory:
+simulation and concurrently live workers can dominate a small state-only dataset.
+
+The [four-arm pilot protocol](OFFLINE_PILOT.md) applies these controls.
+The [accounting audit](ODS_ACCOUNTING_AUDIT.md) retains both correctness evidence
+and the incomplete performance gate. Use these as measurement guidance, not a
+universal K recommendation or an assumption that online training must win.

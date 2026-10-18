@@ -1,6 +1,9 @@
 # ODS and LeRobot offline comparison: integration pilot v1
 
-Status: prospective pilot protocol, 2026-10-19 (Asia/Shanghai). Freeze the
+Status: executed at `3cd6379a092f8106f08ea6073f13bec9a4bd6f63`,
+2026-10-19 (Asia/Shanghai). See [results and limitations](OFFLINE_PILOT_RESULTS.md).
+The subsequent [counter optimization](ODS_ACCOUNTING_AUDIT.md) was tested
+separately and was not applied to these four runs. Freeze the
 execution commit, CLI, GPU UUID, CPU affinity and measurement packet before the
 first timed run. This is a four-run development pilot, not the five-seed formal
 experiment in [BENCHMARK.md](BENCHMARK.md). That historical v2 design and
@@ -111,7 +114,11 @@ Distinguish these time origins and outcomes:
 
 1. The launcher records process start and complete process wall duration. The
    application records its monotonic origin before per-run simulator/producer
-   startup. Report their difference as application import/startup time.
+   startup. Align application timestamps to the measured process origin. The
+   runner reconstructs its origin from the process creation time; their offset
+   is an alignment quantity and can be negative. It is not measured import
+   latency. This corrects the prospective protocol's original interpretation;
+   the execution revision and raw timestamps are preserved in the results.
 2. Cold first-update latency includes worker startup, generation and, for offline
    arms, writing/finalization/loading, normalization and model initialization.
 3. Checkpoint readiness is its actual save-completion timestamp. A checkpoint
