@@ -225,6 +225,19 @@ class AssetDescriptor(_Record):
                 raise ValueError("support_region must be a horizontal rectangle.")
         if self.normalized and self.bounds_m is None:
             raise ValueError("Normalized geometry requires bounds_m.")
+        if self.bounds_m is not None:
+            for name in ("support_region", "container_region"):
+                region = getattr(self, name)
+                if region is not None and any(
+                    lo < outer_lo - 1e-9 or hi > outer_hi + 1e-9
+                    for lo, hi, outer_lo, outer_hi in zip(
+                        region.lower,
+                        region.upper,
+                        self.bounds_m.lower,
+                        self.bounds_m.upper,
+                    )
+                ):
+                    raise ValueError(f"{name} must lie within bounds_m.")
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> AssetDescriptor:
@@ -276,8 +289,14 @@ class PreparedAsset(_Record):
         visual_path: Absolute local visual model path.
         collision_path: Absolute local collision model path.
         content_sha256: SHA-256 over descriptor and all model dependencies.
-        provenance: Preparation/source evidence. Not a task acceptance result.
+        provenance: Preparation/source evidence. ``package_root`` names an
+            absolute prepared directory; ``files`` maps all package-relative
+            filenames to SHA-256 digests. Neither is a task acceptance result.
 
+    Providers return the common package snapshot consumed by
+    :func:`embodichain.data.asset_catalog.verify_prepared_asset`: an
+    ``asset.catalog.json`` plus all local geometry dependencies. Content identity
+    hashes the canonical JSON descriptor and sorted package file-digest mapping.
     File existence and dependency hashing belong to the preparing provider.
     The record validates format and snapshots metadata without doing I/O.
     """

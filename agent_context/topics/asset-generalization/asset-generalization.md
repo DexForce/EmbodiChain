@@ -18,3 +18,18 @@ instantiate a simulator. Online generation is a separate deferred adapter.
 
 Focused validation: `tests/data/asset_catalog/` and
 `tests/lab/task_program/semantics/test_asset_requirements.py`.
+
+## Local sources
+
+`ExplicitAssetProvider` and `DirectoryAssetProvider` read `asset.catalog.json`
+packages. A package declares normalized geometry and usable regions; existing
+SimReady `asset.json` can supply category/source evidence through an explicit
+adapter field, but does not establish task capabilities or units. Unknown raw
+files require annotations before preparation. The example manifest lives in
+`examples/data/asset_catalog/README.md`.
+
+Preparation checks real mesh bounds and file dependencies, then hashes and copies
+the complete package into an immutable snapshot. `verify_prepared_asset` is the
+common integrity boundary for any provider's prepared output; its package-root,
+file-inventory and manifest contract is documented in that function. Changing
+source content creates a new identity; changing cached content is an error.

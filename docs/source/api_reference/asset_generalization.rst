@@ -103,3 +103,46 @@ Task-owned role requirements and explicit category aliases. Geometric relations 
 .. autoclass:: embodichain.lab.task_program.semantics.asset_requirements.AssetRequirements
    :members:
 
+
+embodichain.data.asset_catalog additions
+----------------------------------------
+
+Public source adapters and content verification for normalized local asset snapshots.
+
+.. currentmodule:: embodichain.data.asset_catalog
+
+.. autosummary::
+
+   verify_prepared_asset
+   DirectoryAssetProvider
+   ExplicitAssetProvider
+
+.. autofunction:: embodichain.data.asset_catalog.verify_prepared_asset
+
+.. autoclass:: embodichain.data.asset_catalog.DirectoryAssetProvider
+   :members:
+
+.. autoclass:: embodichain.data.asset_catalog.ExplicitAssetProvider
+   :members:
+
+
+embodichain.data.asset_catalog.local additions
+----------------------------------------------
+
+Directory and explicit providers retain candidate metadata without claiming task compatibility. Materialization verifies real mesh bounds, local resource dependencies and the content-addressed snapshot. Other providers can emit the same verifiable package inventory.
+
+.. currentmodule:: embodichain.data.asset_catalog.local
+
+.. autosummary::
+
+   DirectoryAssetProvider
+   ExplicitAssetProvider
+   verify_prepared_asset
+
+.. autoclass:: embodichain.data.asset_catalog.local.DirectoryAssetProvider
+   :members:
+
+.. autoclass:: embodichain.data.asset_catalog.local.ExplicitAssetProvider
+   :members:
+
+.. autofunction:: embodichain.data.asset_catalog.local.verify_prepared_asset

@@ -28,7 +28,16 @@ from .contracts import (
     PreparedAsset,
 )
 
+from .local import (
+    DirectoryAssetProvider,
+    ExplicitAssetProvider,
+    verify_prepared_asset,
+)
+
 __all__ = [
+    "verify_prepared_asset",
+    "DirectoryAssetProvider",
+    "ExplicitAssetProvider",
     "AssetCandidate",
     "AssetDescriptor",
     "AssetProvider",

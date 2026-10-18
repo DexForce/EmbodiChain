@@ -115,3 +115,10 @@ def test_query_and_context_are_strict_serializable_records():
 def test_geometry_rejects_overflowing_extents():
     with pytest.raises(ValueError, match="extents must be finite"):
         Bounds3D((-1e308, 0, 0), (1e308, 1, 1))
+
+
+@pytest.mark.parametrize("name", ["support_region", "container_region"])
+def test_regions_cannot_escape_object_bounds(name):
+    upper = (0.1, 0.1, 5) if name == "container_region" else (0.1, 0.1, 4)
+    with pytest.raises(ValueError, match="within bounds_m"):
+        _descriptor(**{name: Bounds3D((0, 0, 4), upper)})
