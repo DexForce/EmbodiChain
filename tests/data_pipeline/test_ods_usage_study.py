@@ -462,6 +462,27 @@ def test_batch_sensitivity_rejects_invalid_sizes(tmp_path, batch_size) -> None:
         study.build_manifest(_args(tmp_path, batch_size=batch_size))
 
 
+@pytest.mark.parametrize("batch_size", [64, 256, 1024])
+def test_batch_sensitivity_can_use_the_same_generation_panels(
+    tmp_path: Path, batch_size: int
+) -> None:
+    manifest = study.build_manifest(
+        _args(tmp_path, cells=["c32-r8"], batch_size=batch_size, eval_every=50000)
+    )
+    assert manifest["eval_every"] == 50000
+    assert _flag(manifest["jobs"][0]["argv"], "--eval-every") == "50000"
+    default = study.build_manifest(_args(tmp_path, cells=["c32-r8"]))
+    assert _flag(default["jobs"][0]["argv"], "--eval-every") == "5000"
+
+
+@pytest.mark.parametrize("eval_every", [0, -1, True, 1.5])
+def test_study_rejects_invalid_evaluation_intervals(
+    tmp_path: Path, eval_every: object
+) -> None:
+    with pytest.raises(ValueError, match="Evaluation interval"):
+        study.build_manifest(_args(tmp_path, eval_every=eval_every))
+
+
 def test_completed_rejects_resource_sampler_cleanup_failure(tmp_path) -> None:
     job = {"id": "bad-sampler", "output": str(tmp_path)}
     (tmp_path / "cleanup.json").write_text(

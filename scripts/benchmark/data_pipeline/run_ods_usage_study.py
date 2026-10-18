@@ -85,6 +85,9 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
     batch_size = getattr(args, "batch_size", 256)
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("Batch size must be a positive integer")
+    eval_every = getattr(args, "eval_every", 5000)
+    if type(eval_every) is not int or eval_every < 1:
+        raise ValueError("Evaluation interval must be a positive integer")
     if args.producer_envs not in (1, 2, 4, 8):
         raise ValueError("Choose an explicitly qualified P from 1, 2, 4, 8")
     if args.stage == "confirmation" and not args.cells:
@@ -178,7 +181,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
                 "--test-seed-base",
                 "830000",
                 "--eval-every",
-                "5000",
+                str(eval_every),
                 "--usage-statistics",
                 "--defer-evaluation",
                 "--no-viewer",
@@ -240,6 +243,7 @@ def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
         ).strip(),
         "stage": args.stage,
         "batch_size": batch_size,
+        "eval_every": eval_every,
         "cwd": str(_REPO),
         "gpu_uuid": args.gpu_uuid,
         "cpus": cpus,
@@ -949,6 +953,7 @@ def main() -> None:
     parser.add_argument("--cells", nargs="+", choices=list(_CELLS))
     parser.add_argument("--producer-envs", type=int, required=True)
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--eval-every", type=int, default=5000)
     parser.add_argument("--gpu-uuid", required=True)
     parser.add_argument("--cpus", required=True)
     parser.add_argument("--python", default=sys.executable)

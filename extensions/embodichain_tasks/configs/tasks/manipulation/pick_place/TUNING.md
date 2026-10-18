@@ -78,7 +78,10 @@ on the exploratory C32/r8/P8 candidate: B256 control, B64, then B1024, each with
 256 accepted episodes and screen seed13001. Freeze one source revision and use
 the same GPU with local NUMA CPU affinity for all three. This repeats the B256
 control because the original grid used an earlier reporting revision and its
-GPU5 queue used remote NUMA affinity. Fixed r holds the chunk budget nearly
+GPU5 queue used remote NUMA affinity. Use `--eval-every 50000` for all three,
+leaving initial, last-three-generation and latest policy panels; otherwise B64
+would get more intermediate evaluations and model-selection opportunities.
+Fixed r holds the chunk budget nearly
 constant, not the optimizer-update count; report both. This exploratory choice
 does not establish C32/r8 as the confirmed winner.
 
