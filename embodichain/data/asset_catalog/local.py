@@ -170,11 +170,16 @@ def _json_chunk(path: Path) -> Mapping[str, Any]:
     return result
 
 
-def _dependency(root: Path, parent: Path, locator: str) -> Path:
-    parsed = urlparse(locator)
-    if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+def _dependency(root: Path, parent: Path, locator: str, *, uri: bool = True) -> Path:
+    if uri:
+        parsed = urlparse(locator)
+        if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError(f"External asset references are unsupported: {locator}")
+        locator = unquote(locator)
+    elif "://" in locator or locator.startswith("//"):
         raise ValueError(f"External asset references are unsupported: {locator}")
-    target = parent / unquote(locator)
+    # OBJ/MTL names are literal filenames; only glTF resource URIs are decoded.
+    target = parent / locator
     return _relative_file(root, os.path.relpath(target, root))
 
 
@@ -192,7 +197,7 @@ def _check_dependencies(root: Path, model: Path) -> None:
             tokens = shlex.split(line, comments=True)
             if tokens and tokens[0].lower() == "mtllib":
                 for locator in tokens[1:]:
-                    material = _dependency(root, model.parent, locator)
+                    material = _dependency(root, model.parent, locator, uri=False)
                     for material_line in material.read_text(
                         encoding="utf-8"
                     ).splitlines():
@@ -206,7 +211,7 @@ def _check_dependencies(root: Path, model: Path) -> None:
                                 raise ValueError(
                                     f"Missing texture reference in {material}"
                                 )
-                            _dependency(root, material.parent, values[-1])
+                            _dependency(root, material.parent, values[-1], uri=False)
 
 
 def _check_geometry(descriptor: AssetDescriptor, visual: Path, collision: Path) -> None:
@@ -349,7 +354,9 @@ class ExplicitAssetProvider:
                 request.category is not None and request.category == descriptor.category
             )
             score += sum(
-                k in descriptor.attributes and descriptor.attributes[k] == v
+                k in descriptor.attributes
+                and type(descriptor.attributes[k]) is type(v)
+                and descriptor.attributes[k] == v
                 for k, v in request.attributes.items()
             )
             score += len(set(request.capabilities) & set(descriptor.capabilities))

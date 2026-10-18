@@ -203,3 +203,31 @@ def test_prepared_snapshot_reverification_detects_mutation(tmp_path):
     Path(prepared.visual_path).write_text("mutated after preparation")
     with pytest.raises(ValueError, match="files changed"):
         verify_prepared_asset(prepared)
+
+
+def test_limited_ranking_prefers_exact_attribute_type(tmp_path):
+    wrong = _package(tmp_path / "a-integer", asset_id="integer")
+    valid = _package(tmp_path / "z-boolean", asset_id="boolean")
+    for path, value in ((wrong, 1), (valid, True)):
+        data = json.loads(path.read_text())
+        data["descriptor"]["attributes"] = {"enabled": value}
+        path.write_text(json.dumps(data))
+    provider = ExplicitAssetProvider([wrong, valid])
+    selected = provider.candidates(AssetQuery(attributes={"enabled": True}), limit=1)
+    assert selected[0].candidate_id == "boolean"
+
+
+@pytest.mark.parametrize("filename", ["color#1.png", "color%20.png"])
+def test_obj_texture_names_are_literal_local_paths(tmp_path, filename):
+    from PIL import Image
+
+    manifest = _package(tmp_path / "cup")
+    root = manifest.parent
+    (root / "mesh.obj").write_text("mtllib material.mtl\n" + _MESH)
+    (root / "material.mtl").write_text(f'newmtl surface\nmap_Kd "{filename}"\n')
+    Image.new("RGB", (1, 1), "red").save(root / filename)
+    prepared = _prepare(ExplicitAssetProvider([manifest]), tmp_path)
+    assert filename in prepared.provenance["files"]
+    assert (Path(prepared.provenance["package_root"]) / filename).read_bytes() == (
+        root / filename
+    ).read_bytes()
