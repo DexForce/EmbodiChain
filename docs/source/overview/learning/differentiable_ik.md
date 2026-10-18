@@ -84,3 +84,30 @@ The benchmark measures forward, forward+backward, FK/Jacobian and DLS components
 identical local and distant Franka targets. FEP and PytorchSolver are forward-only
 baselines. It reports errors including failed rows, throughput, CPU memory and
 Torch GPU allocations; Warp allocations are not included in that GPU counter.
+
+## Learning grasp orientation
+
+The standalone example trains a conditional yaw predictor through the IK layer.
+It receives current joints and grasp position, predicts a yaw correction, and
+uses joint displacement plus pose residuals to train shared network parameters.
+Frozen checkpoints can predict new goals without per-goal gradient optimization.
+The viewer compares heading, a learned predictor and a numerical reference.
+
+```bash
+conda activate py311
+python -m examples.learning.differentiable_ik.learn_grasp_yaw --device cuda
+python -m examples.learning.differentiable_ik.view_learned_yaw --port 8101
+```
+
+The experiment compares a shared constant, IK-trained and teacher-supervised
+predictors, online optimization and an angular grid. Independent validation
+selects checkpoints; IID, disjoint spatial and initial-state-shift sets measure
+transfer. Training uses 24-step IK and every final result is checked with 64
+steps. Reports include teacher-label cost and complete inference latency.
+
+See `examples/learning/differentiable_ik/README.md` for training and preview commands,
+measured results, gradient checks, dependencies and exact evaluation protocol.
+The first training seed supplies the viewer; frozen inference runs on one CPU
+worker and stale results are discarded after input changes. Numerical angle optimization and grid search are integrated reference baselines
+in the same training/evaluation entry point.
+Collision, contact, dynamics and physical execution are outside this example.

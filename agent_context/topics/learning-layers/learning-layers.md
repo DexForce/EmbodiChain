@@ -47,6 +47,16 @@ Model and layer callers own task losses and optimization. Formal task deployment
 belong to the task extension. See [RL learning](../rl-learning/rl-learning.md)
 for trainer/collector lifecycle.
 
+`examples/learning/differentiable_ik/learn_grasp_yaw.py` trains an example-local
+conditional yaw predictor through fixed-step IK, preserving grasp position and
+downward approach. Validation alone selects checkpoints; independent target
+and current-state holdouts compare constant, learned, teacher-supervised and
+numerical methods. `view_learned_yaw.py` evaluates frozen checkpoints and discards
+stale asynchronous results after target edits. Numerical reference baselines are
+part of the training/evaluation entry point. The demo does not execute physical
+motion; keep task predictors out of production policy registries until a reusable
+contract exists.
+
 Tests live under `tests/compute/kinematics/` and `tests/learning/layers/`.
 Validate FK, dJ/dq, full IK and recurrent-state gradients separately; include
 nonzero TCP offsets, repeated solves, checkpoint migration and import boundaries. GPU validation runs serially with `--run-gpu`.
